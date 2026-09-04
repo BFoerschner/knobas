@@ -4569,13 +4569,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   argument for why there is no `inbox:*` event, applied one layer up. The one addition on that store
   is `answered`, shell state and not a wire shape: it says the stream is a *read* rather than the
   empty list the store was built with, which is what keeps the reader's backlog from arriving as a
-  burst of notifications the moment knobas opens.
+  burst of desktop notifications the moment knobas opens.
 
   **The click is built and, on desktop, unreachable — recorded here because it is a criterion.**
-  A notification carries the item's address in `extra` and the store subscribes to the plugin's own
+  A desktop notification carries the item's address in `extra` and the store subscribes to the plugin's own
   action channel to navigate there. `tauri-plugin-notification` 2.4.0 registers exactly three
   commands on desktop (`is_permission_granted`, `request_permission`, `notify`); `register_listener`,
-  which `onAction` invokes, is mobile-only, and the desktop `notify` hands the notification to
+  which `onAction` invokes, is mobile-only, and the desktop `notify` hands the desktop notification to
   `notify-rust` and returns. So the subscription rejects on macOS, the store swallows that, and the
   navigation is proven against the stub and not against the OS. The alternative was to ship no click
   path at all; this way the door exists the day the plugin reports a click, and the gap is written
@@ -4585,7 +4585,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   this entry describes is the one that event feeds.*
 
   Ratified by the orchestrator as spec #272 and issue #290, whose acceptance criteria specify the
-  plugin with its capability, the setting key with its per-kind toggles, the listener with its two
+  plugin with its capability, the setting key with its per-category toggles, the listener with its two
   gates, the click, the component tests and this entry.
 - **The IPC surface, issue #289 (2026-09-03): five additive commands on the entity module — `standup_protocol`, `publish_standup_protocol`, `standup_publish_target`, `set_standup_publish_target`, `create_action_item_ticket` — four DTOs, and five lines on the Rust append-only barrel.**
 

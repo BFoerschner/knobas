@@ -131,19 +131,20 @@ afterEach(() => {
   cleanup?.();
 });
 
-// -- the kind gate ----------------------------------------------------------
+// -- the category gate ------------------------------------------------------
 
 /**
- * **A kind that is off is silent, and the same item with its kind on is not.**
+ * **A category that is off is silent, and the same item with its category on
+ * is not.**
  *
  * The two halves are one test on purpose. The silence alone would pass against
  * a bench whose `send` port was never wired, against a store that notified for
  * nothing at all, and against a permission this store does not even read —
  * which is the witness question this test exists to answer: nothing in the
  * notify path asks about permission, so the first half's silence can only be
- * the kind.
+ * the category.
  */
-test("an item of a kind nobody switched on says nothing, and the same item of a kind they did speaks", async () => {
+test("an item of a category nobody switched on says nothing, and the same item of a category they did speaks", async () => {
   const off = bench();
   await off.primed(["mention"]);
   off.store.saw([entry("failed_build", "build-9")]);
@@ -156,8 +157,8 @@ test("an item of a kind nobody switched on says nothing, and the same item of a 
   expect(on.calls.sent.map((notification) => notification.title)).toEqual(["Title of build-9"]);
 });
 
-/** Only the kinds that are on, out of a stream carrying several. */
-test("a stream of mixed kinds notifies for the switched-on ones only", async () => {
+/** Only the categories that are on, out of a stream carrying several. */
+test("a stream of mixed categories notifies for the switched-on ones only", async () => {
   const b = bench();
   await b.primed(["mention", "credential_expiry"]);
   b.store.saw([
@@ -440,7 +441,7 @@ test("a click channel that refuses to open costs nothing", async () => {
 // -- the permission ---------------------------------------------------------
 
 /**
- * **Switching the first kind on asks the OS, and stores what it is told**
+ * **Switching the first category on asks the OS, and stores what it is told**
  * (story 72).
  *
  * Both directions, because only one of them is safe by accident: a grant has
@@ -448,7 +449,7 @@ test("a click channel that refuses to open costs nothing", async () => {
  * over a refused permission is a switch that promises something nothing will
  * deliver, and the reader would have no way to tell it from a working one.
  */
-test("switching the first kind on asks the OS and stores the kind once it says yes", async () => {
+test("switching the first category on asks the OS and stores the category once it says yes", async () => {
   const b = bench();
   await b.store.reseed();
   await b.store.choose("mention", true);
@@ -459,7 +460,7 @@ test("switching the first kind on asks the OS and stores the kind once it says y
   expect(b.store.permission).toBe("granted");
 });
 
-test("an OS that refuses stores nothing and leaves the kind off", async () => {
+test("an OS that refuses stores nothing and leaves the category off", async () => {
   const b = bench();
   b.answers("denied");
   await b.store.reseed();
@@ -483,7 +484,7 @@ test("nothing notifies after the permission was refused", async () => {
 });
 
 /**
- * **The first kind asks even where the OS has already said yes**, and that is
+ * **The first category asks even where the OS has already said yes**, and that is
  * not pedantry about the criterion's wording.
  *
  * `tauri-plugin-notification`'s desktop implementation answers
@@ -492,7 +493,7 @@ test("nothing notifies after the permission was refused", async () => {
  * macOS — and with it the line that tells the reader what their operating
  * system said. Story 72 asks for the prompt on the switch, not on a refusal.
  */
-test("switching the first kind on asks even when the OS already says yes", async () => {
+test("switching the first category on asks even when the OS already says yes", async () => {
   const b = bench();
   b.alreadyGranted(true);
   await b.store.reseed();
@@ -504,10 +505,11 @@ test("switching the first kind on asks even when the OS already says yes", async
 });
 
 /**
- * A *second* kind does not ask again — the OS has already said yes, and story
- * 72 asks for the prompt when a kind is switched on, not on every click.
+ * A *second* category does not ask again — the OS has already said yes, and
+ * story 72 asks for the prompt when a category is switched on, not on every
+ * click.
  */
-test("switching a second kind on does not ask the OS again", async () => {
+test("switching a second category on does not ask the OS again", async () => {
   const b = bench();
   await b.store.reseed();
   await b.store.choose("mention", true);
@@ -519,7 +521,7 @@ test("switching a second kind on does not ask the OS again", async () => {
 });
 
 /** Switching one **off** never prompts anybody. */
-test("switching a kind off asks the OS nothing", async () => {
+test("switching a category off asks the OS nothing", async () => {
   const b = bench();
   b.alreadyGranted(true);
   await b.primed(["mention", "failed_build"]);
@@ -541,7 +543,7 @@ test("the stored answer is what the store holds, not the click", async () => {
   expect(b.store.kinds).toEqual(["failed_build", "mention"]);
 });
 
-/** A refused write says why and leaves the kinds where they were. */
+/** A refused write says why and leaves the categories where they were. */
 test("a write that is refused says why and changes nothing", async () => {
   const b = bench({
     setNotificationKinds: () =>
@@ -556,7 +558,7 @@ test("a write that is refused says why and changes nothing", async () => {
 });
 
 /**
- * A read that failed is not "every kind off": *off* is a claim about what is
+ * A read that failed is not "every category off": *off* is a claim about what is
  * stored, and a store that could not ask has not earned it.
  */
 test("a read that failed leaves the setting unread rather than claiming it is empty", async () => {

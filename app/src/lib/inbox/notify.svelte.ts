@@ -3,7 +3,7 @@
  * "Notifications").
  *
  * One store, because two surfaces read the same fact: the settings section
- * draws a checkbox per kind, and the listener below decides whether an item
+ * draws a checkbox per category, and the listener below decides whether an item
  * may interrupt somebody. Two independent reads of one setting is two chances
  * for the switch on screen to disagree with the switch that fires — the
  * argument `health.svelte.ts` and `inbox.svelte.ts` both record for their own
@@ -11,7 +11,7 @@
  *
  * ## The three gates, and the order they are in
  *
- * An item notifies only if it is **new**, its **kind is on**, and the window
+ * An item notifies only if it is **new**, its **category is on**, and the window
  * is **unfocused**. The order matters in one place: an item is marked seen
  * whatever the focus, so something that arrived while the reader was looking
  * at it does not fire a desktop notification the moment they switch away.
@@ -19,18 +19,18 @@
  * that waited for a blur would be exactly that.
  *
  * **Nothing here reads the OS permission.** Asking for it is
- * {@link Notifications.choose}'s, on the click that switches a kind on — so a
- * silence in this path is always attributable to the kind or to the focus, and
- * never to a permission the notifier failed to check.
+ * {@link Notifications.choose}'s, on the click that switches a category on —
+ * so a silence in this path is always attributable to the category or to the
+ * focus, and never to a permission the notifier failed to check.
  *
  * ## Why {@link Notifications.saw} does *not* wait for the setting
  *
  * It looks as though it should: `seen` is a one-way memory, so a stream
- * offered while the stored kinds are still in flight — or while a failed read
- * waits behind the section's *Retry* — marks items the reader can then never
- * be told about. A `loaded` gate was written, and then taken out again,
- * because it changes nothing anybody can observe: while the setting is
- * unknown no kind is on, so those items are silent either way, and the only
+ * offered while the stored categories are still in flight — or while a failed
+ * read waits behind the section's *Retry* — marks items the reader can then
+ * never be told about. A `loaded` gate was written, and then taken out again,
+ * because it changes nothing anybody can observe: while the setting is unknown
+ * no category is on, so those items are silent either way, and the only
  * question is *which* stream gets spent as the backlog below. Gating simply
  * moves that to the next one, and the next one contains the same items plus
  * anything that has since arrived — so if it differs at all, it differs by
@@ -144,7 +144,7 @@ export interface NotifyPorts {
 export type PermissionOutcome = "granted" | "refused";
 
 export interface Notifications {
-  /** The kinds switched on, as the backend stores them. */
+  /** The categories switched on, as the backend stores them. */
   readonly kinds: InboxCategory[];
   /** True once the stored setting has been read — *unknown* is not *off*. */
   readonly loaded: boolean;
@@ -154,12 +154,12 @@ export interface Notifications {
   readonly error: string | null;
   /** True while a write is in flight, so a checkbox cannot be double-fired. */
   readonly busy: boolean;
-  /** Read the stored kinds. The shell's, once the database can answer. */
+  /** Read the stored categories. The shell's, once the database can answer. */
   reseed(): Promise<void>;
   /**
-   * Switch one kind on or off.
+   * Switch one category on or off.
    *
-   * Switching the **first** kind on asks the OS, and a later one asks only if
+   * Switching the **first** category on asks the OS, and a later one asks only if
    * the permission has since gone. Nothing is stored if the answer is no: a
    * checkbox drawn on over a refused permission is a switch that promises
    * something nothing will deliver. Switching one **off** never asks — knobas
@@ -286,14 +286,14 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
     if (state.busy) return;
     state.busy = true;
     try {
-      // **The first kind switched on always asks**, even where the OS says it
+      // **The first category switched on always asks**, even where the OS says it
       // has already said yes. That is the criterion's own wording (spec #272,
       // story 72) and on desktop it is the difference between asking and never
       // asking at all: `tauri-plugin-notification`'s desktop implementation
       // answers `permission_state()` with `Granted` unconditionally, so a
       // guard that only asked when the answer was no would leave
       // `requestPermission` unreached on macOS -- and with it the line that
-      // tells the reader what the OS said. Later kinds ask only if the
+      // tells the reader what the OS said. Later categories ask only if the
       // permission has since gone, which is what keeps knobas from prompting
       // on every click.
       if (on && (state.kinds.length === 0 || !(await io.isPermissionGranted()))) {
@@ -325,7 +325,7 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
       const key = entry.item.key;
       // Marked seen before any gate, and deliberately: the same item can
       // arrive twice in one stream and will arrive again in the next one, and
-      // an item held back by the focus gate or by a kind being off has still
+      // an item held back by the focus gate or by a category being off has still
       // been *seen*.
       if (seen.has(key)) continue;
       seen.add(key);
