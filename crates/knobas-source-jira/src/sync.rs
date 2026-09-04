@@ -375,8 +375,9 @@ mod tests {
         }
 
         /// Rewrite one issue's assignee and **leave `updated` where it is** --
-        /// the shape issue #345 is about. See
-        /// [`a_field_changed_without_moving_updated_is_invisible_to_every_later_run`].
+        /// the shape issue #345 is about, since `/search` renders two changes
+        /// inside one second as one stamp. See
+        /// [`two_changes_inside_one_second_are_two_versions_and_both_are_delivered`].
         fn reassign(&mut self, key: &str, name: &str) {
             self.field_of(key)["assignee"] = serde_json::json!({
                 "name": name, "displayName": name, "active": true

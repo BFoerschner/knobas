@@ -58,6 +58,19 @@
 //!   like-for-like, and a comment added upstream moves `updated` and the
 //!   container's `total` alike.
 //!
+//!   **What that leaves, said plainly, because it is this bug's own shape.**
+//!   The fingerprint covers what the *skip decision* sees, and
+//!   [`crate::sync::SyncRun::complete`] then puts more into what the sink
+//!   receives. So a change confined to a comment or worklog that `/search` did
+//!   not return -- an edit to one that sits beyond the truncated container,
+//!   where the count does not move either -- is invisible to the fingerprint,
+//!   and if it also lands inside the second a previous run recorded, that run
+//!   skips it. This is narrower than the hole it replaces, not a new one: the
+//!   `(key, updated)` identity was blind to the same change *and* to every
+//!   change that needed no such coincidence. Closing it costs the request per
+//!   issue per run that the paragraph above declines, and the live suite's
+//!   repeated idle poll is what would make the opposite mistake loud.
+//!
 //! # Stability is the whole contract
 //!
 //! A field that differs between two reads of an unchanged issue would make
@@ -230,10 +243,13 @@ mod tests {
     /// poll would re-emit the corpus.
     ///
     /// So this asserts the *invariant* rather than the mechanism -- a record
-    /// built by inserting its keys in reverse fingerprints as one built in order --
-    /// and it starts failing on its own the moment the flag makes it capable
-    /// of failing. `an_untouched_source_is_still_quiet_after_many_polls` in the
-    /// live suite is the other end of the same rope.
+    /// built by inserting its keys in reverse fingerprints as one built in order.
+    /// It does not begin *failing* the day the flag flips; it begins being
+    /// **able** to fail, which is the whole ask of a guard: with the flag on
+    /// and the sort deleted the two records feed different bytes and this test
+    /// goes red, where today it cannot.
+    /// `an_untouched_source_is_still_quiet_after_many_polls` in the live suite
+    /// is the other end of the same rope.
     #[test]
     fn key_order_cannot_reach_the_fingerprint_however_the_map_is_built() {
         let mut forwards = serde_json::Map::new();

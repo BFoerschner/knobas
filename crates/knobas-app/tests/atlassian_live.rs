@@ -1757,8 +1757,9 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     // For ever: `updated` never moves again on its own. This fixture reached
     // for `backfill` to get round it, which hid a real bug behind a fixture.
     // Issue #345 fixed it in the cursor -- `seen` recognises a **record**, by
-    // digest, not a timestamp -- so a plain sync is enough again, and asking
-    // for one here is what keeps that fixed.
+    // fingerprint, not a timestamp -- so a plain sync is enough again, and
+    // asking for one here is what keeps that fixed. (*Fingerprint*, never
+    // *digest*: in this file `digest` is the standup's three lists.)
     //
     // Still a convergence loop rather than a single sync, and for the reason it
     // always had: Jira's search index is asynchronous (#325), so the run that
@@ -1792,7 +1793,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
          so the digest cannot attribute it. The write itself landed (its 204 is asserted \
          above) and the search index agreed (the wait above returned), so what did not happen \
          is the delivery: the assignment shares a second with the comment's write, which is \
-         the record #345's cursor digest exists to tell apart."
+         the record #345's cursor fingerprint exists to tell apart."
     );
 
     // -- and what the digest makes of it ------------------------------------

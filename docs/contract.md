@@ -1462,7 +1462,7 @@ stands and this entry carries the new truth.
 `{"v":2,"updated_to":"2026-08-24T09:14:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"…","h":"3f0c1a92be44d7e5"}]}`.
 The JQL is **unchanged** — `updated >= "<watermark − 2 min>" ORDER BY updated ASC`, the two-minute
 overlap still mandatory for the reason the row gives. What changed is the identity inside `seen`:
-an entry is recognised by `(key, h)` where `h` is a 64-bit digest of the raw `/search` record, and
+an entry is recognised by `(key, h)` where `h` is a 64-bit fingerprint of the raw `/search` record, and
 `u` is kept only to bound the set to the overlap window.
 
 **What the old identity got wrong, measured on Jira DC 10.3.24 (2026-09-04).**
@@ -1480,7 +1480,7 @@ after every landed write, so *comment through knobas, then reassign in Jira* is 
 **The Confluence row already said this.** Its `cursor` row sets identity to
 `(content id, version.number)` and not `(id, timestamp)` "because Confluence's version counter
 closes the *edited twice in one second* hole the Jira cursor documents". Jira has no version
-counter; the digest is the same guarantee computed from data already in hand, with no extra
+counter; the fingerprint is the same guarantee computed from data already in hand, with no extra
 request and no change to the query.
 
 **No migration, and none needed.** `JiraCursor::parse` already reads an unrecognised version as
@@ -1492,7 +1492,7 @@ hold rows whose last change this bug dropped, and nothing cheaper finds them.
 **mockd is untouched** (ADR-0013 freezes it): the fix adds no JQL clause and no request, so its
 grammar never comes into it and its Jira suite is green unchanged.
 
-**The direction that is unwitnessed offline, and where it is witnessed.** The digest is over the
+**The direction that is unwitnessed offline, and where it is witnessed.** The fingerprint is over the
 whole `/search` record, so a field that differed between two reads of an *unchanged* issue would
 make every poll re-emit the overlap window — correctness surviving, battery clause 2 not. No fake
 can find that, because a fake answers what it was seeded with. `live_jira_seeded.rs`'s
