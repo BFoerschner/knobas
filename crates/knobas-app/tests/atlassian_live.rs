@@ -60,11 +60,13 @@
 //!
 //! It is the suite that writes: a personal access token, a comment on PAY-231,
 //! one transition of PAY-240 and back, one new ticket in `PAY`, one worklog on
-//! PAY-231, and -- for the Confluence half -- one comment on a seeded page and
-//! one Confluence personal access token.
+//! PAY-231, and -- for the Confluence half -- one comment on a seeded page,
+//! **one edit of a seeded page's body** (#342), one page under the standup
+//! parent, and one Confluence personal access token.
 //! Every one of them is undone when the test ends, passing or panicking alike,
 //! by a `Drop` that checks rather than assumes -- [`Litter`], [`Pat`] (which
-//! guards a token at either product) and [`Mention`]. What a
+//! guards a token at either product), [`Mention`], [`Edited`] and
+//! [`Protocol`]. What a
 //! *killed* run left behind is cleared before the next one takes a baseline:
 //! [`Env::clear_leftovers`] deletes every issue and revokes every token
 //! carrying [`LITTER_LABEL`], [`Wiki::clear_leftovers`] deletes every
@@ -75,10 +77,16 @@
 //! comment or a status this suite left behind -- either suite's leftovers are
 //! the other's to clear, because whichever runs next is the one that can.
 //!
-//! The two things it cannot take away are the `PAY` key counter -- Jira never
-//! rewinds one, so a created ticket costs the project one key for ever -- and
-//! the `updated` stamps of what it touched. Neither is fixture content, and the
-//! environment is torn down at the end of the window regardless.
+//! The three things it cannot take away are the `PAY` key counter -- Jira
+//! never rewinds one, so a created ticket costs the project one key for ever
+//! -- the `updated` stamps of what it touched, and **an edited page's version
+//! history**: Confluence has no undo, so [`Edited`]'s restore is one more
+//! version on top of the edit rather than a removal of it, and the page comes
+//! out of a *successful* run at `version.number + 2` with its `version.when`
+//! on the run's own clock. The bytes are the seed's again; the history is not,
+//! and [`Edited`] says at length what does and does not read it. None of the
+//! three is fixture content, and the environment is torn down at the end of
+//! the window regardless.
 //!
 //! **Never a wrong password.** A real Jira counts failed password logins per
 //! account and answers `403 AUTHENTICATION_DENIED` -- to the *correct* password
@@ -115,6 +123,14 @@ const REQUEST_BUDGET: Duration = Duration::from_secs(30);
 
 /// How long Jira's search index may lag a write made through the REST API --
 /// the create is read back by JQL, which is an index read.
+///
+/// [`the_three_write_ops_go_through_the_queue_and_come_back_from_jira`] waits
+/// on the *mirror* to this budget rather than on the index (#325), which is a
+/// second use and not the same claim: what it needs is a re-mirror that has
+/// finished, and the index is upstream of when a sync run first sees the
+/// transition that starts one. One number for both because the lag it is
+/// waiting through is the same lag, and `knobas-source-jira`'s own live suite
+/// spends the same 60 seconds on it.
 const INDEX_BUDGET: Duration = Duration::from_secs(60);
 
 /// The issue a comment is posted on: the fixture's own story, and the one
@@ -1011,10 +1027,10 @@ async fn mirrored(pool: &sqlx::PgPool) -> Vec<String> {
 
 /// One whole UTC day, as the digest's readers ask for it.
 ///
-/// Free rather than a closure re-declared inside each digest test: the three
-/// of them carried the same ten lines, and two digest tests that disagreed
-/// about where a day begins would both stay green while measuring different
-/// things.
+/// Free rather than a closure re-declared inside each digest test: two of them
+/// carried the same ten lines and this branch's own would have been a third,
+/// and two digest tests that disagreed about where a day begins would both
+/// stay green while measuring different things.
 fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
     knobas_app::time::week::DayWindow {
         day: on,
@@ -2600,13 +2616,18 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 /// the digest for the day after the day one of them last moved has to carry
 /// it, with its content id as the ref.
 ///
-/// **Nothing is written here, and that is deliberate.** A page *edit* through
-/// knobas needs `UpdatePage`, which is #286's growth of the SPI and is not on
-/// this branch; the alternative -- a raw REST edit of a seeded page -- would
-/// put a body-restore path into a live suite for a fact this read already
-/// establishes without touching the server. The day is taken from the page's
-/// own mirrored timestamp rather than assumed to be today, so the assertion
-/// holds however long ago the environment was seeded.
+/// **Nothing is written here, and that stays deliberate.** The claim is about
+/// what the adapter puts in `author` for a page nobody touched, and a write
+/// would only put knobas' own account in the way of it. The other half of
+/// #288's criterion 4 -- *a page edited* -- is
+/// [`a_page_edited_through_knobas_is_on_the_digest_under_yesterday`], which
+/// became expressible when #286 landed `UpdatePage` and carries the
+/// body-restore path ([`Edited`]) this one is written to avoid needing.
+///
+/// It survives that sibling, which runs first and edits this very page: the
+/// day is taken from the page's **own mirrored timestamp** rather than assumed
+/// to be today, so the assertion holds whether the page last moved when the
+/// environment was seeded or a minute ago.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() {
@@ -2700,9 +2721,11 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
 ///
 /// **And why it verifies.** A restore that answered `200` and left something
 /// else behind is the failure this guard exists for: it changes what every
-/// later suite reads off a shared fixture, silently. So the body is read back
-/// and compared, and [`undo`] turns a mismatch into a panic -- the same
-/// contract [`Litter`] and [`Protocol`] have.
+/// later suite reads off a shared fixture, silently. So the record is read
+/// back and compared -- the body, and the title and content type the `PUT`
+/// replaced alongside it, since a check over one of the three would pass a
+/// restore that damaged the other two -- and [`undo`] turns any mismatch into
+/// a panic, the same contract [`Litter`] and [`Protocol`] have.
 ///
 /// Unlike a comment or a created issue, an edit carries no marker a later run
 /// could sweep: a killed run leaves the page edited. `just atlassian-live`
@@ -2795,7 +2818,12 @@ impl Drop for Edited {
                     return Err(format!("PUT restoring page {id} -> {status}: {answered}"));
                 }
 
-                // Verified, not assumed.
+                // Verified, not assumed -- and all three of what the `PUT`
+                // replaced, not only the body. The record travels together, so
+                // a restore that put the bytes back under a changed title, or
+                // wrote a blog post back as a page, is the same silent damage
+                // to a shared fixture that checking the body at all exists to
+                // catch.
                 let (status, after) = call(
                     reqwest::Method::GET,
                     format!("rest/api/content/{id}?expand=body.storage"),
@@ -2812,6 +2840,18 @@ impl Drop for Edited {
                     return Err(format!(
                         "page {id} did not come back to its seeded body: it now holds \
                          {restored:?}, and the seed wrote {body:?}"
+                    ));
+                }
+                if after["title"].as_str() != Some(title.as_str()) {
+                    return Err(format!(
+                        "page {id} came back under the title {:?}, and it was {title:?}",
+                        after["title"]
+                    ));
+                }
+                if after["type"].as_str() != Some(content_type.as_str()) {
+                    return Err(format!(
+                        "page {id} came back as a {:?}, and it was a {content_type:?}",
+                        after["type"]
                     ));
                 }
                 Ok(())
