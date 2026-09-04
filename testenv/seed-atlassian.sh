@@ -211,6 +211,17 @@ wizard_read() {  # wizard_read <url> [poll timeout seconds]
               | head -1 | sed 's/.*value="//; s/"$//')
 }
 
+# What the app said when it refused, for the message at the cap: these bodies
+# are HTML error pages and the sentence worth reading is a few words buried in
+# markup, so tags out, whitespace squeezed, one line, first 200 characters.
+post_refusal() {  # post_refusal <body file>
+  if [ -s "$1" ]; then
+    sed -e 's/<[^>]*>/ /g' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' | cut -c1-200
+  else
+    printf 'nothing -- empty body'
+  fi
+}
+
 # POST the step being shown, then move to whichever step comes next.
 #
 # THE NEXT STEP COMES FROM THE RESPONSE, NOT FROM `GET /`. Confluence does not
@@ -236,24 +247,14 @@ wizard_read() {  # wizard_read <url> [poll timeout seconds]
 # probe still refuse to report success; the cost is a worse message, not a
 # silent half-setup.
 #
-# WHICH IS WHY THE REFUSAL IS QUOTED BACK. The whole content of this wait is a
-# response body nobody sees: the sentence above is known only because someone
-# read one by hand. So the last one is kept and printed on the way out, and the
-# wait itself reports the step, the URL and how far into the cap it is every
-# PROGRESS_EVERY_S -- the same three things wait_for_state prints, for the same
-# reason (#314): an app that is warming and an app that is broken were both
-# printing a dot.
-post_refusal() {  # what the app said in the body of its last refusal
-  if [ -s "$JAR.body" ]; then
-    # Tags out, whitespace squeezed, one line: these bodies are HTML error
-    # pages, and the sentence worth reading is a few words buried in markup.
-    sed -e 's/<[^>]*>/ /g' "$JAR.body" | tr -s '[:space:]' ' ' \
-      | sed -e 's/^ *//' | cut -c1-200
-  else
-    printf 'nothing -- empty body'
-  fi
-}
-
+# WHICH IS WHY THE REFUSAL IS QUOTED BACK (post_refusal, above). The whole
+# content of this wait is a response body nobody sees: the sentence above is
+# known only because someone read one by hand. So the last one is kept and
+# printed on the way out, and the wait itself reports the step, the URL, the
+# code and how far into the cap it is every PROGRESS_EVERY_S -- what
+# wait_for_state prints, for the same reason (#314): an app that is warming and
+# an app that is broken were both printing the same dot.
+#
 # `_p`-prefixed locals because sh has none, and a plain `_t0` here would be the
 # same variable wait_for_state uses.
 wizard_post() {  # wizard_post <url> <curl --data args...>
@@ -271,10 +272,17 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
       5*)
         _pwaited=$(( $(date +%s) - _pt0 ))
         if [ "$_pwaited" -ge "$WIZARD_POST_CAP_S" ]; then
-          # Read out of the body BEFORE the message is built: a `$(...)` inside
-          # a die string is expanded there, and this one has to survive being
-          # the last thing that happens.
-          _pwhy=$(post_refusal)
+          # Both read BEFORE the message is built: a `$(...)` inside a die
+          # string is expanded there, and this message has to survive being the
+          # last thing that happens. The container name is worked out rather
+          # than left as a placeholder, so the last line is a command to run and
+          # not one to hand-edit first (wait_for_state does the same with $2).
+          _pwhy=$(post_refusal "$JAR.body")
+          case "$_url" in
+            "$JIRA_URL"*)       _pwho=jira ;;
+            "$CONFLUENCE_URL"*) _pwho=confluence ;;
+            *)                  _pwho=$(printf '%s' "$_url" | sed 's|^[a-z]*://||; s|[:/].*||') ;;
+          esac
           die "${_was:-the wizard} never accepted a POST (${_pwaited}s of ${WIZARD_POST_CAP_S}s).
   url:           $_url
   last response: $_code
@@ -282,8 +290,8 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
   A 500 here is the product up but not yet able to process the step, which is a
   window both products have and neither reports. One repeated to the cap is not
   a slow start: it is a step this product is refusing outright, or a container
-  that is up and broken. Its name is knobas-<service> (docker-compose.yml), so:
-    docker logs --tail 50 knobas-<service>"
+  that is up and broken:
+    docker logs --tail 50 knobas-$_pwho"
         fi
         if [ "$_pretried" -eq 0 ]; then
           _pretried=1
@@ -292,7 +300,11 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
         sleep "$POLL_S"
         _pwaited=$(( $(date +%s) - _pt0 ))
         if [ "$_pwaited" -ge "$_pnext" ]; then
-          say "  $_url is answering $_code -- ${_pwaited}s of ${WIZARD_POST_CAP_S}s"
+          # The step as well as the URL, and not only because the criteria say
+          # so: they are the same name on every step this script knows, so a
+          # line where they disagree is a POST going somewhere the rendered
+          # form did not point.
+          say "  ${_was:-no step} at $_url is answering $_code -- ${_pwaited}s of ${WIZARD_POST_CAP_S}s"
           _pnext=$(( _pwaited + PROGRESS_EVERY_S ))
         fi ;;
       *) die "$_url answered $_code" ;;
