@@ -93,9 +93,9 @@ variables gate it and where those come from.
 |---|---|---|---|
 | `just gitea-live` | `knobas-source-gitea` / `live_gitea` — the adapter against the shapes interfaces §4.2 fixes | `KNOBAS_GITEA_URL`, `KNOBAS_GITEA_TOKEN` | `./seed-gitea.sh` then `eval "$(./seed --env)"` (the recipe does both) |
 | `just gitea-live-capped` | `live_gitea_capped` — paged walks against a server capped to one record | as above | as above |
-| `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back. Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
+| `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back, and then that pull request on the standup digest (M3.3's digest witness for Gitea). Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
-| `just teamcity-live-seeded` | `live_teamcity_seeded` — the adapter against **our** seeded TeamCity | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
+| `just teamcity-live-seeded` | two suites: `knobas-source-teamcity` / `live_teamcity_seeded` — the adapter against **our** seeded TeamCity — and then `knobas-app` / `teamcity_live`, read-only, which is M3.3's digest witness for this source (a seeded build the mirror attributes to the reader is on the digest for the day it ran) | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
 | `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
 
 **A recipe with nothing to run against fails; it does not pass quietly.** Each

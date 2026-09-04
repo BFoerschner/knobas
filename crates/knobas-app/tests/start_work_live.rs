@@ -54,6 +54,21 @@
 //! single commit added there turns `just gitea-live-capped` red -- in another
 //! crate, on another day, for a reason whose cause is in this file.
 //!
+//! # The digest half (issue #389)
+//!
+//! The last assertion of the round trip is not about start-work at all: it is
+//! M3.3's exit criterion, *"the digest is drawn from a day of real activity
+//! across the seeded Gitea, TeamCity, Jira and Confluence"*. Jira and
+//! Confluence are witnessed in `tests/atlassian_live.rs`; Gitea's route --
+//! `sync.live_item` holding a pull request the source attributes to the
+//! configured account -- had no live witness at all, because this is the only
+//! suite in the tree where a real Gitea pull request is opened *by the account
+//! knobas is configured as*. So the digest read joins the flow here rather
+//! than getting a suite of its own, which could only have re-opened one.
+//!
+//! It adds no writes to Gitea: it reads `/user` once for the account and then
+//! reads knobas' own database. The budget above is untouched.
+//!
 //! That is not a hypothetical: until issue #373 this test merged into the
 //! default branch and left a merged pull request behind on every run, so each
 //! run spent two of that budget and one of the pull listing's for good.
@@ -231,6 +246,26 @@ impl Env {
         .await["default_branch"]
             .as_str()
             .expect("Gitea named the repository's default branch")
+            .to_owned()
+    }
+
+    /// The Gitea account this run's token belongs to, as the server names it.
+    ///
+    /// `GET /api/v1/user`, which is the call the adapter's own
+    /// `test_connection` makes to fill `GiteaConfig::username` in at add time
+    /// -- *"the Gitea account this token belongs to ... what `@me`-style
+    /// filters match `sync.item.author` against"*. Asked of the **server**
+    /// rather than read out of `seed-state.json` or out of the mirror row the
+    /// digest assertion is about: the second would be circular (the identity
+    /// under test taken from the field under test) and the first would pin the
+    /// claim to a seed file instead of to the credential the flow really wrote
+    /// with.
+    async fn account(&self) -> String {
+        let me = self.api(reqwest::Method::GET, "/user", None).await;
+        me["login"]
+            .as_str()
+            .filter(|login| !login.trim().is_empty())
+            .unwrap_or_else(|| panic!("GET /user named no login for this token: {me}"))
             .to_owned()
     }
 
@@ -521,7 +556,15 @@ impl SyncEvents for Quiet {
 
 /// A `SourcesState` over a database of this test's own, with both sources
 /// configured and their credentials in place.
-async fn app(env: &Env, jira_url: &str) -> SourcesState {
+///
+/// `account` is the Gitea login the token belongs to ([`Env::account`]), and
+/// it goes into the Gitea source's `username`. That field is what
+/// `knobas_search::Vocabulary::load` collects into the identity behind `@me`,
+/// which is the `identity` the digest's mirror half matches `sync.live_item`'s
+/// `author` against -- so without it this app knows of nobody, and the digest
+/// assertion at the end of the round trip would be asserting an empty list is
+/// empty. A real source has it filled in from *Test connection* at add time.
+async fn app(env: &Env, jira_url: &str, account: &str) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database("start_work_live").await;
     let pool = connector
         .pool(4)
@@ -553,7 +596,7 @@ async fn app(env: &Env, jira_url: &str) -> SourcesState {
             GITEA,
             "gitea",
             env.url.clone(),
-            json!({ "repos": [env.full_name()] }),
+            json!({ "repos": [env.full_name()], "username": account }),
         ),
         (JIRA, "jira", jira_url.to_owned(), json!({})),
     ] {
@@ -690,6 +733,25 @@ async fn merge_when_ready(env: &Env, number: u64) -> serde_json::Value {
     last
 }
 
+/// One whole UTC day, as the digest's readers ask for it.
+///
+/// The same shape `tests/atlassian_live.rs`'s `day_window` has, and for the
+/// same reason: which day it is where the reader sits is a fact only the
+/// webview holds, so `standup_digest_inner` is handed the windows rather than
+/// working them out (`crate::time::day`).
+fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
+    knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    }
+}
+
 /// Point a step's stored proposal at `value` for one field.
 fn with(payload: &serde_json::Value, field: &str, value: &str) -> serde_json::Value {
     let mut payload = payload.clone();
@@ -703,7 +765,8 @@ fn with(payload: &serde_json::Value, field: &str, value: &str) -> serde_json::Va
 
 // -- the round trip ---------------------------------------------------------
 
-/// **Ticket → branch → pull request → link → In Progress, and back.**
+/// **Ticket → branch → pull request → link → In Progress, and back -- and
+/// then on the standup digest.**
 ///
 /// One test rather than several, deliberately: the subject is the *round
 /// trip*, and a suite that split it would have each half pass over a state the
@@ -715,7 +778,8 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     let env = env();
     let jira = knobas_mockd::spawn_mock_jira().await;
     let jira_url = jira.base_url();
-    let state = app(&env, &jira_url).await;
+    let account = env.account().await;
+    let state = app(&env, &jira_url, &account).await;
 
     // The mirror has to hold the ticket and the repository before a flow can be
     // proposed from them: the branch name comes from the ticket's own title.
@@ -996,6 +1060,84 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
         .expect("the second pass runs"),
         0,
         "the same merge was followed twice"
+    );
+
+    // 10. **And the standup digest lists it** (issue #389).
+    //
+    //     M3.3's exit criterion asks that the digest be drawn from a day of
+    //     real activity across the seeded Gitea, TeamCity, Jira and Confluence.
+    //     `tests/atlassian_live.rs` carries the Jira and Confluence halves;
+    //     this is Gitea's, and it is here rather than in a suite of its own
+    //     because this file is the only place a **real** pull request is opened
+    //     by the account knobas is configured as. Nothing about it is
+    //     synthetic: Gitea decided the number, the flow's own write queue
+    //     opened it, `sync` above mirrored it, and the digest is read through
+    //     the same `standup_digest_inner` seam the other live digest tests use.
+    //
+    //     The mirror row is asserted first, and separately. The digest reaches
+    //     a line by two filters at once -- whose the item is, and whether the
+    //     day is in the window -- so an empty list would otherwise be
+    //     ambiguous between "the adapter attributed the pull request to
+    //     somebody else" and "the window is wrong", and the first of those is
+    //     the finding this ticket exists to make either way.
+    let pr_id = pr.to_string();
+    let (attributed_to, at): (Option<String>, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        "select author, coalesce(item_updated_at, synced_at)
+           from sync.live_item where entity_id = $1",
+    )
+    .bind(&pr_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("the pull request this flow opened is in the mirror");
+    assert_eq!(
+        attributed_to.as_deref(),
+        Some(account.as_str()),
+        "the mirror attributes {pr_id} to {attributed_to:?} and the source is configured as \
+         {account:?}, so the digest's mirror half -- `where i.author = any($1)`, matched \
+         case-sensitively against the configured usernames -- cannot reach it"
+    );
+
+    //     Read for the day the mirror itself dates the pull request on, not
+    //     for `today`: the two are the same on every ordinary run, and taking
+    //     the day from the row is what stops a run that crosses midnight
+    //     between the merge and this read from failing for the calendar rather
+    //     than for the rule.
+    let day = at.date_naive();
+    let digest = knobas_app::commands::entity::standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        chrono::Utc::now(),
+        day_window(day),
+        &[],
+    )
+    .await
+    .expect("the digest reads");
+    let listed: Vec<(Option<&str>, &str, Option<&str>, &str)> = digest
+        .today
+        .iter()
+        .map(|line| {
+            (
+                line.entity_id.as_deref(),
+                line.source.as_str(),
+                line.kind.as_deref(),
+                line.verb.as_str(),
+            )
+        })
+        .collect();
+    assert!(
+        listed.contains(&(Some(pr_id.as_str()), GITEA, Some("pr"), "attributed")),
+        "the pull request this flow opened is not on the digest for {day}, which is the day \
+         the mirror dates it on: {listed:?}"
+    );
+    for line in &digest.today {
+        assert!(
+            !line.reason.trim().is_empty(),
+            "a line whose provenance cannot be shown is not shippable: {line:?}"
+        );
+    }
+    println!(
+        "SEEDED digest for {day}: {} lines under today, including {pr_id}",
+        digest.today.len()
     );
 
     state.scheduler.shutdown().await;
