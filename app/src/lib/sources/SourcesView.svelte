@@ -53,7 +53,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
 
-  import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
+  import { EVENTS, ipcErrorMessage } from "../ipc";
   import {
     deleteSource,
     listSources,
@@ -70,6 +70,7 @@
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import { push } from "../shell/toasts.svelte";
   import AddSource from "./AddSource.svelte";
+  import { failedReport } from "./connection";
   import Diagnostics from "./Diagnostics.svelte";
   import ReenterSecret from "./ReenterSecret.svelte";
   import SourceRow from "./SourceRow.svelte";
@@ -255,18 +256,8 @@
     } catch (cause) {
       // A rejection is a result too -- a saved source whose credential is
       // gone rejects rather than answering `ok: false` -- and the row shows
-      // it the way the dialog would, with the code kept for the branch on it.
-      report = {
-        ok: false,
-        account: null,
-        server_version: null,
-        secret_expires_at: null,
-        error: ipcErrorMessage(cause),
-        code: isIpcError(cause) ? cause.code : null,
-        elapsed_ms: 0,
-        detail: null,
-        discovered: {},
-      };
+      // it the way the dialog would.
+      report = failedReport(cause);
     } finally {
       testing = { ...testing, [source.id]: false };
     }
@@ -380,10 +371,7 @@
           testing={testing[source.id] ?? false}
           onsync={() => void sync(source)}
           ontest={() => void test(source)}
-          onreenter={() => {
-            forget(source.id);
-            fixing = source.id;
-          }}
+          onreenter={() => (fixing = source.id)}
           ondelete={() => {
             forget(source.id);
             purge = false;
@@ -395,7 +383,14 @@
             sourceId={source.id}
             displayName={source.display_name}
             {onhealth}
-            oncancel={() => (fixing = null)}
+            oncancel={() => {
+              // Opening the strip kept the result: it is the reason the
+              // strip is open, and dropping it would flip the row back to
+              // *Sync now* under a password box. Cancelling is the action
+              // that ends it; a saved secret ends it through the re-list.
+              forget(source.id);
+              fixing = null;
+            }}
           />
         {/if}
       {/each}

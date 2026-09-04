@@ -681,6 +681,29 @@ test("a row's failed Test shows the error line, and unauthorized offers Re-enter
   expect(calls.setSecret).toEqual([]);
 });
 
+test("Re-enter after an unauthorized Test keeps the result until the strip is cancelled", async () => {
+  sources = [source()];
+  testReport = okReport({ ok: false, account: null, server_version: null, error: "401", code: "unauthorized" });
+  render();
+  await settle();
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+
+  button("Re-enter", rowFor("jira")!)!.click();
+  flushSync();
+  // The strip is open *because* of the result, so the result stays and the
+  // row does not flip back to Sync now beneath a password box.
+  expect(target.querySelector(".src-fix")).not.toBeNull();
+  expect(rowFor("jira")!.querySelector(".test-res")).not.toBeNull();
+  expect(button("Sync now", rowFor("jira")!)).toBeUndefined();
+
+  button("Cancel", target.querySelector(".src-fix")!)!.click();
+  flushSync();
+  expect(target.querySelector(".src-fix")).toBeNull();
+  expect(rowFor("jira")!.querySelector(".test-res")).toBeNull();
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+});
+
 test("a row's Test that failed for another reason keeps Sync now", async () => {
   sources = [source()];
   testReport = okReport({
@@ -729,12 +752,12 @@ test("Test is disabled while in flight, and the result goes on the row's next ac
   await settle();
 
   const row = rowFor("jira")!;
-  const test = button("Test", row)!;
-  test.click();
+  const testButton = button("Test", row)!;
+  testButton.click();
   flushSync();
-  expect(test.disabled).toBe(true);
+  expect(testButton.disabled).toBe(true);
   // A second click while in flight is not a second test.
-  test.click();
+  testButton.click();
   flushSync();
   expect(calls.testSource.length).toBe(1);
 

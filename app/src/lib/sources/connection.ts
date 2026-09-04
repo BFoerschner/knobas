@@ -6,6 +6,7 @@
  * is what keeps them from drifting: the dialog used to hold this as a
  * `$derived` of its own, and the row would have been a second copy.
  */
+import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { ConnectionReport } from "../ipc/sources";
 
 /**
@@ -35,4 +36,25 @@ export function connectionLine(report: ConnectionReport): string {
  */
 export function connectionNote(report: ConnectionReport): string | null {
   return report.ok && report.detail ? report.detail : null;
+}
+
+/**
+ * A `test_source` that **rejected**, as a report -- so the surface draws it
+ * the way it draws `ok: false`: the message as the line, the code kept for
+ * the one branch on it (`unauthorized` is what offers *Re-enter*). A saved
+ * source whose credential is gone rejects rather than answering, and so does
+ * a bridge that is not there at all.
+ */
+export function failedReport(cause: unknown): ConnectionReport {
+  return {
+    ok: false,
+    account: null,
+    server_version: null,
+    secret_expires_at: null,
+    error: ipcErrorMessage(cause),
+    code: isIpcError(cause) ? cause.code : null,
+    elapsed_ms: 0,
+    detail: null,
+    discovered: {},
+  };
 }

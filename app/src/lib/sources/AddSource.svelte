@@ -34,7 +34,7 @@
   } from "../ipc/sources";
   import Modal from "../shell/Modal.svelte";
   import SchemaForm from "./SchemaForm.svelte";
-  import { connectionLine, connectionNote } from "./connection";
+  import { connectionLine, connectionNote, failedReport } from "./connection";
   import { defaultValues, schemaFields, validate, type SchemaField } from "./schema-form";
 
   let {
@@ -271,17 +271,7 @@
         fillDiscovered(report.discovered);
       }
     } catch (cause) {
-      report = {
-        ok: false,
-        account: null,
-        server_version: null,
-        secret_expires_at: null,
-        error: ipcErrorMessage(cause),
-        code: null,
-        elapsed_ms: 0,
-        detail: null,
-        discovered: {},
-      };
+      report = failedReport(cause);
     } finally {
       testing = false;
     }

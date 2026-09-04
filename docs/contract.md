@@ -4698,7 +4698,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   report already says, shown wherever a *Test connection* result is shown and never stored.
 
   **Ratified by Björn in the 2026-09-04 grilling of #326**, with every decision below his; this
-  entry records them so the surface stays single-writer.
+  entry records them so the surface stays single-writer. **Björn keeps the gate for frozen
+  contracts and this entry is flagged for his review**, as every entry above is.
 
   **Why nothing else on the wire could carry it.** The note reached the screen by exactly one path:
   `crud::set_secret` — the re-enter-a-credential command — wrote it into `source_config.auth_detail`,

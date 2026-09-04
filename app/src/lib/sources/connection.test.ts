@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { ConnectionReport } from "../ipc/sources";
-import { connectionLine, connectionNote } from "./connection";
+import { connectionLine, connectionNote, failedReport } from "./connection";
 
 function report(over: Partial<ConnectionReport> = {}): ConnectionReport {
   return {
@@ -42,4 +42,16 @@ test("the note is shown only for a test that connected and had one", () => {
   expect(connectionNote(report({ detail: null }))).toBeNull();
   expect(connectionNote(report({ detail: "" }))).toBeNull();
   expect(connectionNote(report({ ok: false, error: "refused", detail: "stale" }))).toBeNull();
+});
+
+test("a rejection becomes a failed report carrying the message and the code", () => {
+  const rejected = failedReport({ code: "unauthorized", message: "refused", source_id: "jira" });
+  expect(rejected.ok).toBe(false);
+  expect(connectionLine(rejected)).toBe("refused");
+  expect(rejected.code).toBe("unauthorized");
+  expect(connectionNote(rejected)).toBeNull();
+  // Not an IpcError: the message still reads, and there is no code to branch on.
+  const plain = failedReport(new Error("bridge missing"));
+  expect(connectionLine(plain)).toBe("bridge missing");
+  expect(plain.code).toBeNull();
 });
