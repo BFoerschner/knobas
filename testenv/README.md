@@ -433,8 +433,13 @@ against a set-up instance is a no-op.
 900 s, and at 600 s each: the wait for a product to answer `/status` with a
 state its wizard can be driven from, and — Jira only — the wait for it to
 actually *serve* that wizard, which is a separate question and lands about a
-minute later. All three print the state or the form the product is showing,
-and how far into the cap they are, every 30 s.
+minute later. A fourth sits inside the wizard walk itself, capped at 300 s: a
+product already serving a form can still answer a POST to it with a 500 while
+it finishes warming. That last cap is the one number here nothing has
+measured — no recorded run has made the wait print at all — and the script's
+comment block says so rather than guessing a wider one (issue #332). All four
+print what the product is showing — the state, the form, or the code it is
+answering the POST with — and how far into the cap they are, every 30 s.
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.

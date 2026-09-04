@@ -108,9 +108,29 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # window has ample room for that. A cap that fires here is a report about the
 # machine, not a flake to widen again.
 #
-# All five are seconds of WALL CLOCK, not counts of anything.
+# WIZARD_POST_CAP_S IS THE ONE NUMBER HERE THAT NOTHING HAS MEASURED. It bounds
+# a different question from the two above: not whether a product has reached a
+# state, but whether a product already serving the wizard can yet *process* a
+# POST to it (wizard_post's own comment says why the POST is the only honest
+# test of that). Its loop has printed nothing on any run recorded since #314,
+# the run that certified this line included: on 2026-09-04, from empty volumes,
+# all eight wizard steps across the two products were accepted on the first
+# attempt and the retry printed not one line. So the slowest real value of this
+# wait is not known to be anything above zero, and 300 s is what the script was
+# first written with rather than a measurement of anything.
+#
+# It stays at 300 s for that reason and not by inheritance: widening a cap that
+# nothing has ever reached would be the same guess in a larger size, and the
+# argument that made 900 s reasonable next door -- a measured start that had
+# already overrun -- does not exist here. What will size this one is the first
+# run on which the progress line in wizard_post actually prints; whoever sees
+# it should replace this paragraph with its seconds, the way the paragraph
+# above replaced its own guess.
+#
+# All six are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600
 JIRA_RUNNING_CAP_S=900
+WIZARD_POST_CAP_S=300
 POLL_S=5
 PROGRESS_EVERY_S=30
 POLL_TIMEOUT_S=10
@@ -193,6 +213,17 @@ wizard_read() {  # wizard_read <url> [poll timeout seconds]
               | head -1 | sed 's/.*value="//; s/"$//')
 }
 
+# What the app said when it refused, for the message at the cap: these bodies
+# are HTML error pages and the sentence worth reading is a few words buried in
+# markup, so tags out, whitespace squeezed, one line, first 200 characters.
+post_refusal() {  # post_refusal <body file>
+  if [ -s "$1" ]; then
+    sed -e 's/<[^>]*>/ /g' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' | cut -c1-200
+  else
+    printf 'nothing -- empty body'
+  fi
+}
+
 # POST the step being shown, then move to whichever step comes next.
 #
 # THE NEXT STEP COMES FROM THE RESPONSE, NOT FROM `GET /`. Confluence does not
@@ -217,10 +248,23 @@ wizard_read() {  # wizard_read <url> [poll timeout seconds]
 # that ever stops holding, the step-change check below and the final REST
 # probe still refuse to report success; the cost is a worse message, not a
 # silent half-setup.
+#
+# WHICH IS WHY THE REFUSAL IS QUOTED BACK (post_refusal, above). The whole
+# content of this wait is a response body nobody sees: the sentence above is
+# known only because someone read one by hand. So the last one is kept and
+# printed on the way out, and the wait itself reports the step, the URL, the
+# code and how far into the cap it is every PROGRESS_EVERY_S -- what
+# wait_for_state prints, for the same reason (#314): an app that is warming and
+# an app that is broken were both printing the same dot.
+#
+# `_p`-prefixed locals because sh has none, and a plain `_t0` here would be the
+# same variable wait_for_state uses.
 wizard_post() {  # wizard_post <url> <curl --data args...>
   _url=$1; shift
   _was=$STEP
-  _i=0
+  _pt0=$(date +%s)
+  _pnext=$PROGRESS_EVERY_S
+  _pretried=0
   while :; do
     _out=$(curl -sS -c "$JAR" -b "$JAR" -o "$JAR.body" \
                 -w '%{http_code} %{redirect_url}' -X POST "$_url" "$@")
@@ -228,14 +272,48 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
     case "$_code" in
       2*|3*) break ;;
       5*)
-        _i=$((_i + 1))
-        [ "$_i" -lt 60 ] || { echo; die "$_url still answering $_code after 300s"; }
-        [ "$_i" -eq 1 ] && printf 'seed-atlassian: waiting for the app to accept POSTs '
-        printf '.'; sleep 5 ;;
+        _pwaited=$(( $(date +%s) - _pt0 ))
+        if [ "$_pwaited" -ge "$WIZARD_POST_CAP_S" ]; then
+          # Both read BEFORE the message is built: a `$(...)` inside a die
+          # string is expanded there, and this message has to survive being the
+          # last thing that happens. The container name is worked out rather
+          # than left as a placeholder, so the last line is a command to run and
+          # not one to hand-edit first (wait_for_state does the same with $2).
+          _pwhy=$(post_refusal "$JAR.body")
+          case "$_url" in
+            "$JIRA_URL"*)       _pwho=jira ;;
+            "$CONFLUENCE_URL"*) _pwho=confluence ;;
+            *)                  _pwho=$(printf '%s' "$_url" | sed 's|^[a-z]*://||; s|[:/].*||') ;;
+          esac
+          die "${_was:-the wizard} never accepted a POST (${_pwaited}s of ${WIZARD_POST_CAP_S}s).
+  url:           $_url
+  last response: $_code
+  it said:       $_pwhy
+  A 500 here is the product up but not yet able to process the step, which is a
+  window both products have and neither reports. One repeated to the cap is not
+  a slow start: it is a step this product is refusing outright, or a container
+  that is up and broken:
+    docker logs --tail 50 knobas-$_pwho"
+        fi
+        if [ "$_pretried" -eq 0 ]; then
+          _pretried=1
+          say "waiting for ${_was:-the wizard} to accept a POST (cap ${WIZARD_POST_CAP_S}s)"
+        fi
+        sleep "$POLL_S"
+        _pwaited=$(( $(date +%s) - _pt0 ))
+        if [ "$_pwaited" -ge "$_pnext" ]; then
+          # The step as well as the URL, and not only because the criteria say
+          # so: they are the same name on every step this script knows, so a
+          # line where they disagree is a POST going somewhere the rendered
+          # form did not point.
+          say "  ${_was:-no step} at $_url is answering $_code -- ${_pwaited}s of ${WIZARD_POST_CAP_S}s"
+          _pnext=$(( _pwaited + PROGRESS_EVERY_S ))
+        fi ;;
       *) die "$_url answered $_code" ;;
     esac
   done
-  [ "$_i" -gt 0 ] && echo ' ok'
+  [ "$_pretried" -eq 0 ] \
+    || say "${_was:-the wizard} accepted the POST after $(( $(date +%s) - _pt0 ))s"
 
   if [ -n "$_loc" ]; then
     # Followed by hand rather than with `curl -L`: Jira answers one step with
