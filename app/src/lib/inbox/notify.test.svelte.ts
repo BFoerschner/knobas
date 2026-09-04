@@ -17,9 +17,15 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
+import type {
+  NotificationClicked,
+  NotificationDraft as WireDraft,
+} from "../ipc/entity";
 import {
   addressOf,
+  clickChannel,
   createNotifications,
+  sendThrough,
   type NotificationDraft,
   type NotifyPorts,
 } from "./notify.svelte";
@@ -66,7 +72,8 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
   let granted = false;
   let answer = "granted";
   let stored: InboxCategory[] = [];
-  let action: ((notification: { extra?: Record<string, unknown> }) => void) | null = null;
+  let action:
+    ((notification: { extra?: Record<string, unknown> }) => void) | null = null;
 
   const ports: Partial<NotifyPorts> = {
     notificationKinds: () => Promise.resolve(stored),
@@ -108,7 +115,8 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
       answer = to;
     },
     /** Deliver a click on a notification the OS is showing. */
-    click: (notification: { extra?: Record<string, unknown> }) => action?.(notification),
+    click: (notification: { extra?: Record<string, unknown> }) =>
+      action?.(notification),
     /** Prime the store past the backlog, the way the first read does. */
     async primed(kinds: InboxCategory[] = [], seed: InboxEntry[] = []) {
       stored = kinds;
@@ -145,12 +153,17 @@ test("an item of a kind nobody switched on says nothing, and the same item of a 
   await off.primed(["mention"]);
   off.store.saw([entry("failed_build", "build-9")]);
   expect(off.calls.sent, "failed builds are switched off").toEqual([]);
-  expect(off.calls.checked + off.calls.asked, "the notify path never asks the OS").toBe(0);
+  expect(
+    off.calls.checked + off.calls.asked,
+    "the notify path never asks the OS",
+  ).toBe(0);
 
   const on = bench();
   await on.primed(["failed_build"]);
   on.store.saw([entry("failed_build", "build-9")]);
-  expect(on.calls.sent.map((notification) => notification.title)).toEqual(["Title of build-9"]);
+  expect(on.calls.sent.map((notification) => notification.title)).toEqual([
+    "Title of build-9",
+  ]);
 });
 
 /** Only the kinds that are on, out of a stream carrying several. */
@@ -215,7 +228,9 @@ test("an item seen while focused is not announced by the next signal after a blu
 
   // ...and the window is still working: a genuinely new item speaks.
   b.store.saw([entry("mention", "PAY-231"), entry("mention", "PAY-999")]);
-  expect(b.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-999"]);
+  expect(b.calls.sent.map((notification) => notification.title)).toEqual([
+    "Title of PAY-999",
+  ]);
 });
 
 // -- once per item ----------------------------------------------------------
@@ -277,11 +292,16 @@ test("the first stream primes and says nothing, and the next arrival speaks", as
   await b.store.reseed();
   b.store.saw([]);
   const first = bench();
-  await first.primed(["mention"], [entry("mention", "PAY-1"), entry("mention", "PAY-2")]);
+  await first.primed(
+    ["mention"],
+    [entry("mention", "PAY-1"), entry("mention", "PAY-2")],
+  );
   expect(first.calls.sent, "the backlog is not news").toEqual([]);
 
   first.store.saw([entry("mention", "PAY-3"), entry("mention", "PAY-1")]);
-  expect(first.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-3"]);
+  expect(first.calls.sent.map((notification) => notification.title)).toEqual([
+    "Title of PAY-3",
+  ]);
 });
 
 // -- the click --------------------------------------------------------------
@@ -338,17 +358,101 @@ test("a click after the listener is torn down moves the window nowhere", async (
   expect(b.calls.navigated).toEqual([]);
 });
 
+// -- the real ports (#339) ---------------------------------------------------
+
 /**
- * The desktop plugin has **no click channel**, so the subscription rejects —
- * and the window still works.
+ * **A `notification:clicked` event navigates to the address it carries.**
  *
- * `tauri-plugin-notification` 2.4.0 registers three commands on desktop and
- * `register_listener` is not one of them, so this is the ordinary case on
- * macOS rather than an exotic failure. A store that let it escape would take
- * the shell's `onMount` down with it.
+ * This is the real click channel, with Tauri's `listen` faked: the store
+ * subscribes to `EVENTS.notificationClicked` and the event's `address` reaches
+ * the same navigation the bench's `click` drives above. The event name is
+ * asserted because a listener on the wrong name is a door that never opens
+ * with nothing failing anywhere; the address is asserted because a channel
+ * that handed the store `{ extra: {} }` would pass every other test here.
+ */
+test("a notification:clicked event navigates to the item it carries", async () => {
+  let deliver: ((event: { payload: NotificationClicked }) => void) | null =
+    null;
+  const listened: string[] = [];
+  const listen = (
+    event: string,
+    handler: (event: { payload: NotificationClicked }) => void,
+  ) => {
+    listened.push(event);
+    deliver = handler;
+    return Promise.resolve(() => {
+      deliver = null;
+    });
+  };
+  const b = bench({ onAction: clickChannel(listen) });
+  const stop = b.store.start();
+  await vi.waitFor(() => expect(deliver).not.toBeNull());
+  expect(listened).toEqual(["notification:clicked"]);
+
+  deliver!({ payload: { address: "#/entity/gitea:acme%2Fpayouts%23144" } });
+  expect(b.calls.navigated).toEqual(["#/entity/gitea:acme%2Fpayouts%23144"]);
+
+  // The teardown unlistens, so a late event is not a navigation.
+  stop();
+  expect(deliver, "the teardown reached Tauri's unlisten").toBeNull();
+});
+
+/**
+ * The real `send` hands the `notify` command the draft's title, body and the
+ * address out of `extra` -- the one key the click path is built on.
+ */
+test("a sent notification reaches the notify command with its address", async () => {
+  const sent: WireDraft[] = [];
+  const b = bench({
+    send: sendThrough((draft) => {
+      sent.push(draft);
+      return Promise.resolve();
+    }),
+  });
+  await b.primed(["review_request"]);
+  b.store.saw([entry("review_request", "pr-12")]);
+  expect(sent).toEqual([
+    {
+      title: "Title of pr-12",
+      body: "Why pr-12 is here",
+      address: "#/entity/gitea:acme%2Fpayouts%23144",
+    },
+  ]);
+});
+
+/** A refused send is not a broken window: the next item still goes out. */
+test("a notify command that rejects costs nothing", async () => {
+  let calls = 0;
+  const b = bench({
+    send: sendThrough(() => {
+      calls += 1;
+      return Promise.reject({
+        code: "internal",
+        message: "No bundle identifier found.",
+      });
+    }),
+  });
+  await b.primed(["mention"]);
+  b.store.saw([entry("mention", "PAY-1")]);
+  b.store.saw([entry("mention", "PAY-1"), entry("mention", "PAY-2")]);
+  await vi.waitFor(() => expect(calls).toBe(2));
+});
+
+/**
+ * A click channel that refuses to open costs nothing — and the window still
+ * works.
+ *
+ * Before #339 this was the ordinary case on macOS: the plugin's
+ * `register_listener` is mobile-only, so `onAction` rejected on every desktop
+ * start. The channel is knobas' own event now and opens on desktop, but the
+ * rule stands for the one case left (`listen` before the IPC is up, under
+ * `?fake-ipc`): a store that let the rejection escape would take the shell's
+ * `onMount` down with it.
  */
 test("a click channel that refuses to open costs nothing", async () => {
-  const b = bench({ onAction: () => Promise.reject(new Error("command not found")) });
+  const b = bench({
+    onAction: () => Promise.reject(new Error("command not found")),
+  });
   cleanup = b.store.start();
   await b.primed(["mention"]);
   b.store.saw([entry("mention", "PAY-231")]);
@@ -463,7 +567,10 @@ test("the stored answer is what the store holds, not the click", async () => {
 test("a write that is refused says why and changes nothing", async () => {
   const b = bench({
     setNotificationKinds: () =>
-      Promise.reject({ code: "not_ready", message: "the database is still starting" }),
+      Promise.reject({
+        code: "not_ready",
+        message: "the database is still starting",
+      }),
   });
   b.alreadyGranted(true);
   await b.store.reseed();
@@ -480,7 +587,10 @@ test("a write that is refused says why and changes nothing", async () => {
 test("a read that failed leaves the setting unread rather than claiming it is empty", async () => {
   const b = bench({
     notificationKinds: () =>
-      Promise.reject({ code: "not_ready", message: "the database is still starting" }),
+      Promise.reject({
+        code: "not_ready",
+        message: "the database is still starting",
+      }),
   });
   await b.store.reseed();
 
@@ -499,5 +609,7 @@ test("an entity key with a hash and a slash in it survives the address", () => {
   expect(addressOf(entry("review_request", "pr-12").item)).toBe(
     "#/entity/gitea:acme%2Fpayouts%23144",
   );
-  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/inbox");
+  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe(
+    "#/inbox",
+  );
 });

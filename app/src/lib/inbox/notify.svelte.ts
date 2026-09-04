@@ -56,34 +56,43 @@
  * "once per item" forbids. The memory is a session's: a restart is where a
  * failed build that has failed again gets to speak up.
  *
- * ## The click, and the one thing this cannot witness
+ * ## The click, and where it comes from
  *
- * A notification carries the item's address in `extra`, and
- * {@link Notifications.start} subscribes to the plugin's own action channel to
- * navigate there. **On desktop that channel is never fed today.**
- * `tauri-plugin-notification` 2.4.0 registers exactly three commands
- * (`is_permission_granted`, `request_permission`, `notify`); its desktop
- * `notify` hands the notification to `notify-rust` and returns, and
- * `register_listener` — which `onAction` invokes — exists on mobile only. So
- * the subscription is expected to reject on macOS, is caught, and costs
- * nothing; the navigation itself is real, tested, and waits for a plugin that
- * reports the click. This is written down rather than left out because the
- * alternative is a click path that quietly does not exist.
+ * A notification carries the item's address, and {@link Notifications.start}
+ * subscribes to the click to navigate there. The channel is knobas' own
+ * (#339): `send` invokes the `notify` command, whose Rust shows the
+ * notification through `notify-rust` and waits on the handle off the main
+ * thread, and a body click comes back as the `notification:clicked` event
+ * carrying that address. `@tauri-apps/plugin-notification` is still what asks
+ * the OS about permission, and nothing else -- its desktop `notify` drops the
+ * handle a click arrives on, and its `onAction` (`register_listener`) exists
+ * on mobile only, which is why #290 shipped a door with nothing behind it.
+ *
+ * What has been witnessed is macOS, in the signed bundle
+ * (`testenv/README.md`, "Signed dev build"): a real banner, and its click
+ * bringing knobas to the front on the item's room. **Linux and Windows are
+ * written from `notify-rust`'s sources and not witnessed** -- the same
+ * disclosure the Rust module and `docs/contract.md` §10.8 carry. On macOS a
+ * bare `tauri dev` binary is refused by `UNUserNotificationCenter` (it needs a
+ * bundle); the send rejects, the store swallows it, and the dev terminal says
+ * so at `warn`.
  */
+import { listen as tauriListen } from "@tauri-apps/api/event";
 import {
   isPermissionGranted as realIsPermissionGranted,
-  onAction as realOnAction,
   requestPermission as realRequestPermission,
-  sendNotification as realSendNotification,
 } from "@tauri-apps/plugin-notification";
 
-import { ipcErrorMessage } from "../ipc";
+import { EVENTS, ipcErrorMessage } from "../ipc";
 import {
   notificationKinds as realRead,
+  notify as realNotify,
   setNotificationKinds as realWrite,
   type InboxCategory,
   type InboxEntry,
   type InboxItem,
+  type NotificationClicked,
+  type NotificationDraft as WireDraft,
 } from "../ipc/entity";
 import { DEFAULT_CTX, hashFor, router } from "../shell/router.svelte";
 
@@ -118,10 +127,10 @@ export interface NotifyPorts {
   /** Ask the OS. `"granted"` is the only answer that is a yes. */
   requestPermission: () => Promise<string>;
   send: (notification: NotificationDraft) => void;
-  /** Subscribe to notification clicks; see the module note about desktop. */
-  onAction: (handler: (notification: { extra?: Record<string, unknown> }) => void) => Promise<
-    () => void
-  >;
+  /** Subscribe to notification clicks; see the module note for the channel. */
+  onAction: (
+    handler: (notification: { extra?: Record<string, unknown> }) => void,
+  ) => Promise<() => void>;
   /** Whether the window is focused — `timer.svelte.ts`'s port and its rule. */
   focused: () => boolean;
   navigate: (hash: string) => void;
@@ -184,17 +193,59 @@ export function addressOf(item: InboxItem): string {
   });
 }
 
-export function createNotifications(ports?: Partial<NotifyPorts>): Notifications {
+/** The shape of Tauri's `listen`, narrowed to what the click channel reads. */
+type Listen = (
+  event: string,
+  handler: (event: { payload: NotificationClicked }) => void,
+) => Promise<() => void>;
+
+/**
+ * The real click channel: `notification:clicked`, handed to the store's
+ * handler as `{ extra: { address } }` so the read of {@link ADDRESS} on the
+ * other end is the same one a plugin-reported click would have met.
+ *
+ * `listen` is a parameter so a test can drive it; the window uses Tauri's.
+ */
+export function clickChannel(
+  listen: Listen = tauriListen,
+): NotifyPorts["onAction"] {
+  return (handler) =>
+    listen(EVENTS.notificationClicked, (event) =>
+      handler({ extra: { [ADDRESS]: event.payload.address } }),
+    );
+}
+
+/**
+ * The real `send`: the `notify` command, given the address out of `extra`.
+ *
+ * Fire-and-forget on purpose -- the port is synchronous and a refused send
+ * has no surface to land on. The refusal is not lost: the Rust side logs it
+ * at `warn` with the platform's sentence, which under `tauri dev` on macOS is
+ * *no bundle identifier* (see the module note).
+ */
+export function sendThrough(
+  notify: (draft: WireDraft) => Promise<void> = realNotify,
+): NotifyPorts["send"] {
+  return (notification) => {
+    const address = notification.extra[ADDRESS];
+    void notify({
+      title: notification.title,
+      body: notification.body,
+      address: typeof address === "string" ? address : "",
+    }).catch(() => {});
+  };
+}
+
+export function createNotifications(
+  ports?: Partial<NotifyPorts>,
+): Notifications {
   const io: NotifyPorts = {
     notificationKinds: () => realRead(),
     setNotificationKinds: (kinds) => realWrite(kinds),
     isPermissionGranted: () => realIsPermissionGranted(),
     requestPermission: () => realRequestPermission(),
-    send: (notification) => realSendNotification(notification),
-    onAction: (handler) =>
-      realOnAction((notification) =>
-        handler(notification as { extra?: Record<string, unknown> }),
-      ).then((listener) => () => void listener.unregister()),
+    send: sendThrough(),
+    onAction: clickChannel(),
     focused: () => document.hasFocus(),
     navigate: (hash) => router.go(hash),
     ...ports,
@@ -241,7 +292,10 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
       // tells the reader what the OS said. Later kinds ask only if the
       // permission has since gone, which is what keeps knobas from prompting
       // on every click.
-      if (on && (state.kinds.length === 0 || !(await io.isPermissionGranted()))) {
+      if (
+        on &&
+        (state.kinds.length === 0 || !(await io.isPermissionGranted()))
+      ) {
         const answered = (await io.requestPermission()) === "granted";
         state.permission = answered ? "granted" : "refused";
         if (!answered) {
@@ -332,9 +386,9 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
           else unlisten();
         })
         .catch(() => {
-          // Expected on desktop: the plugin has no click channel there (see
-          // the module note). A failed subscription is not a failed window —
-          // notifications still fire, they simply have no door behind them.
+          // A `listen` before the IPC is up (`?fake-ipc`) rejects. A failed
+          // subscription is not a failed window — notifications still fire,
+          // they simply have no door behind them.
         });
 
       return () => {
