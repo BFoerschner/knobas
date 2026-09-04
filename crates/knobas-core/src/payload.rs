@@ -488,11 +488,25 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 /// or reordered scan tomorrow.
 ///
 /// Order is the entire meaning of a path -- two ancestors joined the other way
-/// round name a different place -- so the clause stays, and it stays *without*
-/// a test that can see it. The same treatment
-/// `crates/knobas-source-jira/src/time.rs` gives `jql_floor`, and for the same
-/// reason: "unobservable today" is a fact about this planner, not about this
-/// statement.
+/// round name a different place -- and one half of that is now witnessed.
+/// Since #396 nested one seeded Confluence page two deep, that page's path has
+/// two segments, so the live test
+/// `the_launcher_finds_the_seeded_page_with_its_ancestor_path` in
+/// `crates/knobas-app/tests/atlassian_live.rs` reads both ancestors off the
+/// real server and asserts the outermost-first join: turning the clause into
+/// `order by a.ordinality desc` fails it (measured in #399, one failure in an
+/// otherwise green `atlassian_live` binary). That witness is contingent
+/// rather than structural: it holds because the two seeded ancestors carry
+/// different titles, and the test guards only that they are different *pages*
+/// (`assert_ne!` on their ids).
+///
+/// *Removing* the clause is still invisible, and removal is the simplification
+/// the heading warns against: a path that comes out in order because the
+/// planner scanned in order reads exactly like one the statement ordered. So
+/// the clause stays on the argument above rather than on a test that can see
+/// it go. The same treatment `crates/knobas-source-jira/src/time.rs` gives
+/// `jql_floor`, and for the same reason: "unobservable today" is a fact about
+/// this planner, not about this statement.
 #[macro_export]
 macro_rules! ancestor_path_read {
     ($payload:literal) => {
