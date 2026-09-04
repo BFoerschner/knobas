@@ -2851,6 +2851,13 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         .unwrap_or_else(|| panic!("{} answered no stored body: {before}", wiki.title))
         .to_owned();
     let content_type = before["type"].as_str().unwrap_or("page").to_owned();
+    // The title the **server** holds, not the one `seed-state.json` recorded:
+    // the content `PUT` replaces the record, so what goes back has to be what
+    // is there now, and a fixture file is a statement about what was seeded.
+    let live_title = before["title"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} answered no title: {before}", wiki.title))
+        .to_owned();
 
     // Owned **before** the write, not after: from the moment the PUT lands the
     // page is changed, so a failing assertion below must still leave the guard
@@ -2860,7 +2867,7 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         user: wiki.user.clone(),
         password: wiki.password.clone(),
         id: wiki.page.clone(),
-        title: wiki.title.clone(),
+        title: live_title,
         content_type,
         body: original.clone(),
     };
