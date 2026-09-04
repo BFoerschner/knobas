@@ -38,7 +38,7 @@
    * Pinned to that list by `knobas_app::inbox`'s
    * `every_inbox_category_has_a_toggle_in_the_interface`: a sixth category
    * added on the Rust side would otherwise be a demand nobody can ever switch
-   * notifications on for, with nothing failing anywhere.
+   * desktop notifications on for, with nothing failing anywhere.
    */
   const KINDS: { id: InboxCategory; label: string }[] = [
     { id: "review_request", label: "Review requests" },
@@ -104,9 +104,9 @@
 
     {#if store.permission === "refused"}
       <p class="fail">
-        Your operating system refused notifications for knobas, so nothing was
-        switched on. Allow them for knobas in the system settings, then try
-        again.
+        Your operating system refused desktop notifications for knobas, so
+        nothing was switched on. Allow them for knobas in the system settings,
+        then try again.
       </p>
     {:else if store.permission === "granted"}
       <p class="sub ok">Your operating system allows knobas to notify you.</p>

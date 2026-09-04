@@ -168,7 +168,7 @@ test("an OS that refuses leaves every switch off and says so", async () => {
   box("Mentions").click();
   await vi.waitFor(() => {
     flushSync();
-    expect(text()).toContain("refused notifications for knobas");
+    expect(text()).toContain("refused desktop notifications for knobas");
   });
   expect(calls.asked).toBe(1);
   expect(calls.stored, "a refused permission wrote a setting").toEqual([]);
