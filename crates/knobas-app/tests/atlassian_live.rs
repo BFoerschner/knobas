@@ -2855,12 +2855,22 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 /// 1. A full sync mirrors the seeded space.
 /// 2. The criterion's own words are searched, through the command the IPC
 ///    calls, and the hit is the seeded page.
-/// 3. Its `path` is `Some`, and it carries every ancestor title Confluence
-///    itself reports for the page -- read back from the server rather than
-///    from the mirror, so the expected value is not a copy of what the read
-///    is being asked to produce. The seed puts every page directly under the
-///    space home, which the adapter's live suite asserts; here it is what
-///    makes the path exactly one segment long, and that segment is printed.
+/// 3. Its `path` is **exactly** the ancestor titles Confluence itself reports
+///    for the page, joined -- read back from the server rather than from the
+///    mirror, so the expected value is not a copy of what the read is being
+///    asked to produce. Equality rather than containment (#388's brief allows
+///    it "unless the seed pins it", and the seed does): a substring check
+///    would pass a path that had appended the page's own title, and it would
+///    say nothing about order or about the join.
+///
+/// What this **cannot** witness is the join itself. The seed puts every page
+/// directly under the space home -- the adapter's live suite asserts that --
+/// so the path here is one segment long and `string_agg` over one row joins
+/// nothing. Separator, ordering and multi-segment aggregation are witnessed
+/// on fixtures instead, by `knobas-search`'s `tests/ancestor_path.rs` and
+/// `knobas-core`'s. The assertion below is written to hold either way, so a
+/// seed that ever nests a page deeper turns this into the stronger test
+/// without being edited.
 ///
 /// Nothing is written, and the search is the plain launcher query with no
 /// filters -- the "under 100 ms" clause of story 46 is not measured here.
@@ -2923,10 +2933,12 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
     assert_eq!(hit.row.title, CRITERION);
 
     // 3. The path, against the server's own answer for the page.
-    let ancestors = wiki.content(&wiki.page, "ancestors").await;
-    let titles: Vec<String> = ancestors["ancestors"]
+    let record = wiki.content(&wiki.page, "ancestors").await;
+    let ancestors = record["ancestors"]
         .as_array()
-        .unwrap_or_else(|| panic!("no ancestors array on the server's record: {ancestors}"))
+        .unwrap_or_else(|| panic!("no ancestors array on the server's record: {record}"))
+        .clone();
+    let titles: Vec<String> = ancestors
         .iter()
         .map(|a| {
             a["title"]
@@ -2939,25 +2951,26 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
         !titles.is_empty(),
         "the seed puts every page under the space home, so the page has an ancestor"
     );
+    assert_eq!(
+        ancestors.last().and_then(|a| a["id"].as_str()),
+        Some(wiki.home_page_id.as_str()),
+        "the innermost ancestor is the space home the seed put the page under"
+    );
     let path = hit.row.path.as_deref().unwrap_or_else(|| {
         panic!(
             "the hit carries no path, and Confluence reports ancestors {titles:?}: {:?}",
             hit.row
         )
     });
-    for title in &titles {
-        assert!(
-            path.contains(title.as_str()),
-            "the path {path:?} does not carry the ancestor {title:?} the server reports"
-        );
-    }
+    // The whole path and nothing else: outermost first, on the one separator.
+    // The separator is `knobas-core`'s constant here rather than a literal --
+    // the literal is pinned once, by `knobas-search`'s fixture test, and what
+    // this run adds is that the mirror's answer is the server's ancestors and
+    // no more.
     assert_eq!(
-        ancestors["ancestors"]
-            .as_array()
-            .and_then(|a| a.last())
-            .and_then(|a| a["id"].as_str()),
-        Some(wiki.home_page_id.as_str()),
-        "the innermost ancestor is the space home the seed put the page under"
+        path,
+        titles.join(knobas_core::payload::ANCESTOR_SEPARATOR),
+        "the path is exactly the ancestors Confluence reports, joined: {titles:?}"
     );
     println!(
         "SEEDED launcher hit for {CRITERION:?}: {} with path {path:?} (Confluence reports \

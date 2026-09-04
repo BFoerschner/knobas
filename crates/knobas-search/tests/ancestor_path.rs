@@ -78,8 +78,16 @@ async fn seed(
     .unwrap();
 }
 
-/// The exit criterion's page, in the exact shape `map.rs` records the adapter
-/// writing: `ancestors` outermost first, each with `id`, `title` and `type`.
+/// The exit criterion's page, in the shape `map.rs`'s golden record has:
+/// `ancestors` outermost first, each with `id`, `title` and `type`, and the
+/// rest of a real page around them.
+///
+/// A transcription of that record rather than a value derived from it -- the
+/// two crates share no fixture, and `knobas-source-confluence` is not a
+/// dependency of this one. What keeps them in step is that the adapter's own
+/// live suite reads `ancestors` off the real server (`the_space_and_the_
+/// ancestors_are_where_their_readers_look`), so a shape that drifted from
+/// Confluence would fail there rather than silently here.
 fn confluence_page(title: &str) -> serde_json::Value {
     serde_json::json!({
         "id": "98307",
@@ -98,10 +106,22 @@ fn confluence_page(title: &str) -> serde_json::Value {
             "when": "2026-08-22T12:40:00.000+02:00",
             "by": { "username": "knobas", "displayName": "knobas" }
         },
+        "history": { "createdBy": { "username": "mara.lindqvist" } },
         "ancestors": [
             { "id": "65537", "title": "Engineering", "type": "page" },
             { "id": "65540", "title": "Payments", "type": "page" }
         ],
+        "children": {
+            "comment": {
+                "results": [{
+                    "id": "98320",
+                    "type": "comment",
+                    "body": { "storage": { "value": "<p>@Mara can you add the SLA?</p>" } }
+                }],
+                "size": 1,
+                "_links": {}
+            }
+        },
         "_links": { "webui": "/display/ENG/SEPA+payout+retry+design" }
     })
 }
