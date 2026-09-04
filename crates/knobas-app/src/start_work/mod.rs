@@ -603,6 +603,15 @@ async fn dispatch(
 /// mirror by the head branch it opened from. A refresh is asked for once, and
 /// only once, before giving up: the step is retryable, and a flow that spun
 /// waiting for a sync would be the stuck step story 11 wants distinguishable.
+///
+/// **One refresh means one run that could have seen the pull request** (#358),
+/// which is not what it used to mean: the sync `create_branch`'s own write
+/// kicked off was often still going when this asked, and being handed *that*
+/// run's ending was how this step failed one flow in five with the pull
+/// request sitting at the forge. That is fixed where the promise is made,
+/// `Scheduler::resync`, and not here -- the shape of this step is unchanged,
+/// and a reader who makes it loop has still made the mistake the paragraph
+/// above is about.
 async fn link_step(
     pool: &PgPool,
     steps: &dyn Steps,
