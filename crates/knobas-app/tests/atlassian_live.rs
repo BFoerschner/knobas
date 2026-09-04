@@ -2264,6 +2264,9 @@ struct Wiki {
     /// The seeded *Standup protocols* page, by content id -- what #289
     /// publishes under.
     standup_parent: String,
+    /// The space's home page, by content id: the one ancestor the seed gives
+    /// every fixture page, and so the whole of its launcher path (#388).
+    home_page_id: String,
 }
 
 fn wiki() -> Wiki {
@@ -2325,6 +2328,10 @@ fn wiki() -> Wiki {
         });
     Wiki {
         standup_parent: standup["id"].as_str().expect("a page id").to_owned(),
+        home_page_id: confluence["home_page_id"]
+            .as_str()
+            .expect("confluence.home_page_id")
+            .to_owned(),
         url: need("KNOBAS_CONFLUENCE_URL")
             .trim_end_matches('/')
             .to_owned(),
@@ -2832,6 +2839,133 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 
     state.scheduler.shutdown().await;
     drop(mention);
+}
+
+/// **M3.2's other exit criterion: the launcher finds "SEPA payout retry
+/// design" with its ancestor path** (#388), through the real Confluence, the
+/// real sync engine and the real search statement.
+///
+/// Every link of this chain had a witness of its own -- the adapter's live
+/// suite reads the seeded page's `ancestors` off the wire, `knobas-core`
+/// joins a bound payload, `knobas-search`'s `tests/ancestor_path.rs` searches
+/// a fixture page -- and none of them was the sentence the criterion makes:
+/// that a search over *this* mirror of *this* server answers with the path
+/// under the row. So:
+///
+/// 1. A full sync mirrors the seeded space.
+/// 2. The criterion's own words are searched, through the command the IPC
+///    calls, and the hit is the seeded page.
+/// 3. Its `path` is `Some`, and it carries every ancestor title Confluence
+///    itself reports for the page -- read back from the server rather than
+///    from the mirror, so the expected value is not a copy of what the read
+///    is being asked to produce. The seed puts every page directly under the
+///    space home, which the adapter's live suite asserts; here it is what
+///    makes the path exactly one segment long, and that segment is printed.
+///
+/// Nothing is written, and the search is the plain launcher query with no
+/// filters -- the "under 100 ms" clause of story 46 is not measured here.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
+    let wiki = wiki();
+    let (state, _events) = wiki_app(
+        "atlassian_live_search_path",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
+
+    // 1. The seeded corpus.
+    sync_source(&state, CONFLUENCE).await;
+    let mirrored = confluence_pages(&state.pool).await;
+    assert!(
+        mirrored
+            .iter()
+            .any(|id| id == &format!("confluence:{}", wiki.page)),
+        "the seeded page is mirrored: {mirrored:?}"
+    );
+
+    // 2. The criterion's words, through the command the launcher calls.
+    const CRITERION: &str = "SEPA payout retry design";
+    assert_eq!(
+        wiki.title, CRITERION,
+        "the seed's `sepa-design` page is the one the roadmap names"
+    );
+    let response = knobas_app::commands::search::search_inner(
+        &state.pool,
+        knobas_search::SearchQuery {
+            raw: CRITERION.to_owned(),
+            limit: 30,
+            filters: knobas_search::SearchFilters::default(),
+        },
+    )
+    .await
+    .expect("the search runs");
+    let hit = response
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter())
+        .find(|h| h.row.entity_id == format!("confluence:{}", wiki.page))
+        .unwrap_or_else(|| {
+            panic!(
+                "{CRITERION:?} did not find the seeded page confluence:{} among {} hits: {:?}",
+                wiki.page,
+                response.total,
+                response
+                    .groups
+                    .iter()
+                    .flat_map(|g| g.hits.iter().map(|h| &h.row.entity_id))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(hit.row.kind, "page");
+    assert_eq!(hit.row.title, CRITERION);
+
+    // 3. The path, against the server's own answer for the page.
+    let ancestors = wiki.content(&wiki.page, "ancestors").await;
+    let titles: Vec<String> = ancestors["ancestors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no ancestors array on the server's record: {ancestors}"))
+        .iter()
+        .map(|a| {
+            a["title"]
+                .as_str()
+                .unwrap_or_else(|| panic!("an ancestor without a title: {a}"))
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        !titles.is_empty(),
+        "the seed puts every page under the space home, so the page has an ancestor"
+    );
+    let path = hit.row.path.as_deref().unwrap_or_else(|| {
+        panic!(
+            "the hit carries no path, and Confluence reports ancestors {titles:?}: {:?}",
+            hit.row
+        )
+    });
+    for title in &titles {
+        assert!(
+            path.contains(title.as_str()),
+            "the path {path:?} does not carry the ancestor {title:?} the server reports"
+        );
+    }
+    assert_eq!(
+        ancestors["ancestors"]
+            .as_array()
+            .and_then(|a| a.last())
+            .and_then(|a| a["id"].as_str()),
+        Some(wiki.home_page_id.as_str()),
+        "the innermost ancestor is the space home the seed put the page under"
+    );
+    println!(
+        "SEEDED launcher hit for {CRITERION:?}: {} with path {path:?} (Confluence reports \
+         ancestors {titles:?}, home page {})",
+        hit.row.entity_id, wiki.home_page_id
+    );
+
+    state.scheduler.shutdown().await;
 }
 
 /// **A page the source says is mine is on the digest, under the day it moved**
