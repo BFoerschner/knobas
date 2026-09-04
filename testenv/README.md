@@ -435,11 +435,26 @@ state its wizard can be driven from, and — Jira only — the wait for it to
 actually *serve* that wizard, which is a separate question and lands about a
 minute later. A fourth sits inside the wizard walk itself, capped at 300 s: a
 product already serving a form can still answer a POST to it with a 500 while
-it finishes warming. That last cap is the one number here nothing has
-measured — no recorded run has made the wait print at all — and the script's
-comment block says so rather than guessing a wider one (issue #332). All four
-print what the product is showing — the state, the form, or the code it is
-answering the POST with — and how far into the cap they are, every 30 s.
+it finishes warming, or take the connection and never answer at all. That last
+cap is the one number here nothing has measured — no recorded run has made the
+wait print at all — and the script's comment block says so rather than guessing
+a wider one (issue #332). All four print what the product is showing — the
+state, the form, the code it is answering the POST with, or that it is not
+answering — and how far into the cap they are, every 30 s.
+
+All four also bound the single request they make, so that one unanswered call
+cannot outlive the cap around it: `POLL_TIMEOUT_S` (10 s) covers three of them
+— a `/status` poll, or a read of the wizard page — and `WIZARD_POST_TIMEOUT_S`
+(240 s) the fourth, a wizard POST, which is the step's actual work and not a
+free GET. The two differ by more than an order of magnitude because a cut poll
+costs a repeat and a cut POST could cost a wizard step applied twice; the
+slowest POST measured is 46 s (issue #367). The timeout is also what sets how
+often a stalled wait can speak, since nothing prints while a request is still
+outstanding: three of the four keep the 30 s cadence above through a hang, and
+the wizard POST manages one line — it is silent for 240 s, prints once, and
+then fails. Bounded and diagnosed beats prompt and wrong here, which is the
+trade that comment block argues.
+
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.
