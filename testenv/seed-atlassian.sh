@@ -112,10 +112,12 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # a different question from the two above: not whether a product has reached a
 # state, but whether a product already serving the wizard can yet *process* a
 # POST to it (wizard_post's own comment says why the POST is the only honest
-# test of that). Its loop has printed nothing on any run recorded since #314 --
-# every wizard step has been accepted on its first attempt -- so the slowest
-# real value of this wait is not known to be anything above zero, and 300 s is
-# what the script was first written with rather than a measurement of anything.
+# test of that). Its loop has printed nothing on any run recorded since #314,
+# the run that certified this line included: on 2026-09-04, from empty volumes,
+# all eight wizard steps across the two products were accepted on the first
+# attempt and the retry printed not one line. So the slowest real value of this
+# wait is not known to be anything above zero, and 300 s is what the script was
+# first written with rather than a measurement of anything.
 #
 # It stays at 300 s for that reason and not by inheritance: widening a cap that
 # nothing has ever reached would be the same guess in a larger size, and the
