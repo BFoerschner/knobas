@@ -433,9 +433,17 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         "the review discussion is what FTS has to find; body_text was {:?}",
         sepa.body_text
     );
+    // ...and the title is still the first thing in it. `body_text.len() >
+    // title.len()` stood here until #347 and could not fail: the assertion
+    // above had already put a 46-character review comment inside a `body_text`
+    // whose title is 35, so the length was greater whether or not the title
+    // was ever folded in. `map::pr_item` builds the text as title, then body,
+    // then every comment, `join`ed -- so a fold that dropped `Some(title)`
+    // passed the length check and fails this one.
     assert!(
-        sepa.body_text.len() > sepa.title.len(),
-        "body_text is the title alone, so nothing was folded in: {:?}",
+        sepa.body_text.starts_with(&sepa.title),
+        "the fold starts with the title: an item whose FTS text does not contain what the item \
+         is called is not findable by its own name: {:?}",
         sepa.body_text
     );
 
@@ -447,8 +455,19 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
             .map(|i| (&i.title, &i.author))
             .collect::<Vec<_>>()
     );
+    // Guarded for the reason the sibling test states at its own commit loop:
+    // `all()` over an empty list is `true`, and nothing above this line puts a
+    // commit in `items` (the narrowing above is over pull requests). Without
+    // the guard, an owner-scoped run that stopped walking commits altogether
+    // certified "every seeded commit has an author" (#347).
+    let commits = of_kind(&items, "commit");
     assert!(
-        of_kind(&items, "commit").iter().all(|i| i.author.is_some()),
+        !commits.is_empty(),
+        "the seed pushes commits, and an empty list would make the assertion below certify the \
+         key form of nothing"
+    );
+    assert!(
+        commits.iter().all(|i| i.author.is_some()),
         "every seeded commit has an author"
     );
 }
@@ -800,9 +819,21 @@ async fn a_revoked_token_is_unauthorized() {
         source.sync(None, &mut sink).await,
         Err(SourceError::Unauthorized { .. })
     ));
+    // What the empty sink measures, stated as what it is (#347). It said "a
+    // revoked token must not sync whatever this instance serves anonymously",
+    // and that is a claim this run cannot present: `Env::source_with` always
+    // sets a secret, so every request carries `Authorization: token
+    // revoked-<pid>` and none of them is anonymous. The anonymous fallback --
+    // this instance really does serve signed-out readers,
+    // `GITEA__service__REQUIRE_SIGNIN_VIEW: "false"` -- is caught by the
+    // assertion above instead: an adapter that dropped the header would get a
+    // 200 and answer `Ok`, not `Unauthorized`. What is left for the sink is
+    // narrower and worth keeping: a refused run commits nothing, not even the
+    // items it had streamed before the listing that failed.
     assert!(
         sink.0.is_empty(),
-        "a revoked token must not sync whatever this instance serves anonymously"
+        "a refused run must emit nothing at all -- this adapter streams into the sink as it \
+         walks, so a run that pushed items before the 401 would leave the engine half a corpus"
     );
 }
 

@@ -1539,9 +1539,15 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
          was logged"
     );
 
-    // 3. ...and the copy names it. (Already used above to find the row -- this
-    //     is the assertion that says so out loud, and that `None` would have
-    //     failed here rather than passing vacuously.)
+    // 3. ...and the copy names it.
+    //
+    //     Cleared by #347's sweep rather than rewritten, and the reason is
+    //     worth writing down: this is a restatement, not a witness. `None`
+    //     here dies at the `unwrap_or_else(|| panic!(...))` above -- the
+    //     lookup that found `at_jira` matched on `logged.remote_id`, and a
+    //     `None` matches no worklog Jira answered with a string id. The line
+    //     stays because the claim is worth saying out loud where the reader
+    //     is; what carries it is the panic above.
     assert!(
         logged.remote_id.is_some(),
         "the settle is the only moment Jira's worklog id exists, and the copy \
@@ -1828,6 +1834,17 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
             "a line whose provenance cannot be shown is not shippable: {line:?}"
         );
     }
+    // Story 63, and **what it does not witness**, named by #347's sweep. A
+    // digest line is reached by two filters at once -- whose the item is, and
+    // whether the day is in the window -- and this negative only fails when
+    // *both* would have let {COMMENTED} through. PAY-231 is `mara`'s, which is
+    // the filter under test; it is also a ticket this suite's other tests
+    // write to, so whether its `updated` falls inside today's window is the
+    // seed's business and not this test's. A mirror read that forgot whose day
+    // this is is therefore caught here only on a run where PAY-231 moved
+    // today. Closing that would mean this test writing to a ticket it exists
+    // to see excluded, which would leave the exclusion resting on the write it
+    // just made rather than on the fixture.
     assert!(
         !listed.iter().any(|(id, _, _)| *id == Some(seeded.as_str())),
         "{COMMENTED} is assigned to somebody else and its work is theirs: {listed:?}"

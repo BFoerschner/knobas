@@ -1123,12 +1123,17 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
         "{:?}",
         it.body_text
     );
+    // The whole watermark claim, by identity -- and a bare `assert_ne!(moved,
+    // cursor)` stood under it until #347. `since_build_id(&cursor)` is pinned
+    // to `baseline` above, `id > baseline` is asserted above that, and this
+    // equality pins `since_build_id(&moved)` to `id`; two cursors whose
+    // watermarks differ are not the same string, so the inequality could not
+    // fail on top of the three assertions that precede it.
     assert_eq!(
         since_build_id(&moved),
         id,
         "a finished build is exactly what moves the watermark"
     );
-    assert_ne!(moved, cursor);
 
     let (idle, still) = sync_from(&*source, Some(moved.clone())).await;
     assert!(

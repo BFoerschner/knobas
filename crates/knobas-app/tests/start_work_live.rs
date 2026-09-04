@@ -486,6 +486,35 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
         .find(|(_, head, _)| head == &branch)
         .expect("the pull request the flow opened is not in Gitea's own listing");
 
+    //    **And it is a draft**, in Gitea's own copy of the title. Story 8 is
+    //    met by `plan::DRAFT_PREFIX` rather than by a `draft` flag, because
+    //    `WriteOp::CreatePullRequest` has no such field and adding one would
+    //    grow the SPI -- so the prefix surviving proposal, repropose, the write
+    //    queue, the adapter and the wire is the whole of the claim, and this is
+    //    the only place it is on a real server.
+    //
+    //    Asserted **here**, before step 7 renames it. The un-drafting below
+    //    used to carry this claim, and could not: it asserted that Gitea's echo
+    //    of a title the test had just PATCHed in did not start with `WIP:`,
+    //    which is true of a string the test composed itself, and stayed true
+    //    with `DRAFT_PREFIX` deleted from `plan.rs` altogether (#347).
+    let opened = env
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{}/pulls/{number}", env.full_name()),
+            None,
+        )
+        .await;
+    assert!(
+        opened["title"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with(start_work::plan::DRAFT_PREFIX.trim()),
+        "the pull request the flow opened does not carry {:?}, so it would summon reviewers the \
+         moment work started: {opened}",
+        start_work::plan::DRAFT_PREFIX
+    );
+
     // 5. The link, in knobas -- and it is a knobas link, never written to
     //    either source, which is what makes it survive whatever they record.
     let pr = EntityRef::new(GITEA, &format!("{}#{number}", env.full_name()));
@@ -530,24 +559,31 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     .await;
 
     //    The un-drafting is not ceremony: Gitea **refuses to merge** a pull
-    //    request whose title carries a work-in-progress prefix, which is the
-    //    live proof that `plan::DRAFT_PREFIX` really does open it as a draft.
-    //    Story 8 is met by that prefix rather than by a `draft` flag, because
-    //    `WriteOp::CreatePullRequest` has no such field and adding one would
-    //    grow the SPI.
+    //    request whose title carries a work-in-progress prefix, and step 4
+    //    asserted that this one's does. So this PATCH is what makes the merge
+    //    below reachable at all, and it is Gitea's refusal -- not this
+    //    assertion -- that certifies the prefix was really read as a draft
+    //    marker by the server.
+    //
+    //    What is asserted is therefore that the rename *took*: the title Gitea
+    //    now holds is the one this call sent. The old assertion here was
+    //    `!undrafted["title"].starts_with("WIP:")` over Gitea's echo of a
+    //    title the test had just composed, which no implementation of
+    //    `plan.rs` could make fail -- and `unwrap_or_default()` meant a PATCH
+    //    that 404'd passed it too (#347).
+    let renamed = format!("knobas i44 {}", std::process::id());
     let undrafted = env
         .api(
             reqwest::Method::PATCH,
             &format!("/repos/{}/pulls/{number}", env.full_name()),
-            Some(json!({ "title": format!("knobas i44 {}", std::process::id()) })),
+            Some(json!({ "title": renamed })),
         )
         .await;
-    assert!(
-        !undrafted["title"]
-            .as_str()
-            .unwrap_or_default()
-            .starts_with(start_work::plan::DRAFT_PREFIX.trim()),
-        "the pull request is still a draft: {undrafted}"
+    assert_eq!(
+        undrafted["title"].as_str(),
+        Some(renamed.as_str()),
+        "the rename that takes the pull request out of draft did not take, so the merge below \
+         would be measuring Gitea's WIP refusal instead of the flow: {undrafted}"
     );
 
     //    Gitea computes mergeability in the background and answers *"Please try

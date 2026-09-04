@@ -881,9 +881,25 @@ async fn a_full_sync_mirrors_every_seeded_issue_across_both_projects() {
         );
     }
 
-    assert!(
-        updated_to(&cursor) <= chrono::Utc::now(),
-        "a full sync's watermark is an issue's own `updated`, never a clock reading"
+    // **The watermark, against the issues this run actually emitted.** This
+    // was `updated_to(&cursor) <= Utc::now()` until #347, which is the one
+    // shape that cannot witness the sentence it carried: a clock reading
+    // satisfies `<= now()` by construction, so an adapter that stamped the
+    // cursor with `now()` -- the exact fault named here, and the one
+    // `CONTEXT.md`'s **Watermark** rule exists for -- passed it. The position a
+    // full sync stores is the newest `updated` among the issues it delivered,
+    // and that value is in hand: every item's `updated_at` was pinned to its
+    // own payload stamp in the loop above.
+    let newest = items
+        .iter()
+        .filter_map(|it| it.updated_at)
+        .max()
+        .expect("every seeded issue carries an `updated`, asserted item by item above");
+    assert_eq!(
+        updated_to(&cursor),
+        newest,
+        "a full sync's watermark is an issue's own `updated` -- the newest one the run emitted \
+         -- and never a clock reading: {cursor}"
     );
     println!("SEEDED cursor after a full sync: {cursor}");
 }
@@ -1126,6 +1142,14 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
         edited.payload["fields"]["labels"]
     );
     let witnessed = edited.updated_at.expect("a real Jira always sets updated");
+    // The whole watermark claim, by identity. A third assertion stood here
+    // until #347 -- `updated_to(&moved) <= Utc::now()`, carrying the sentence
+    // "a watermark after `now()` would mean the run advanced past what it
+    // witnessed" -- and it could not fail on top of this one: the equality
+    // below pins the position to a stamp the run read off an issue it
+    // delivered, so anything that makes the inequality false makes this
+    // `assert_eq!` false first. It measured a wall clock as a stand-in for
+    // "what this run saw"; this measures what this run saw.
     assert_eq!(
         updated_to(&moved),
         witnessed,
@@ -1135,11 +1159,6 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
     assert!(
         witnessed > baseline,
         "the label moved {EDITED}'s own `updated` forward: {witnessed} after {baseline}"
-    );
-    assert!(
-        updated_to(&moved) <= chrono::Utc::now(),
-        "an issue's `updated` is in the past by the time the run reads it; a watermark after \
-         `now()` would mean the run advanced past what it witnessed"
     );
 
     let (idle, still) = sync_from(&*source, Some(moved.clone())).await;

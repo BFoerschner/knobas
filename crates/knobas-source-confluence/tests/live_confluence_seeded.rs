@@ -803,9 +803,30 @@ async fn a_full_sync_mirrors_every_seeded_page_of_the_space() {
         }
     }
 
+    // **The watermark is one of the stamps this run read off a page.** It was
+    // `modified_to(&cursor) <= Utc::now()` until #347, which is the one shape
+    // that cannot witness the sentence it carried: `Utc::now()` is evaluated
+    // after the sync returned, so a watermark *set* from a clock reading
+    // during the walk satisfies it by construction.
+    //
+    // Membership rather than equality with the newest, deliberately, and for
+    // the reason the rename test below sets out at length: the position is
+    // `min(newest emitted, ceiling)`, the ceiling is the newest page the
+    // *probe* saw at run start, and the two are read a fraction of a second
+    // apart through a CQL index that catches up when it likes. Both candidates
+    // are a page's own `version.when` from this same scope, so both are in
+    // this list -- and `now()` is in it under no implementation at all.
+    let page_stamps: Vec<chrono::DateTime<chrono::Utc>> = items
+        .iter()
+        .filter_map(|it| it.payload["version"]["when"].as_str())
+        .filter_map(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&chrono::Utc))
+        .collect();
     assert!(
-        modified_to(&cursor) <= chrono::Utc::now(),
-        "a full sync's watermark is a page's own version time, never a clock reading"
+        page_stamps.contains(&modified_to(&cursor)),
+        "a full sync's watermark is a page's own version time, never a clock reading: {} is not \
+         one of {page_stamps:?}",
+        modified_to(&cursor)
     );
     println!(
         "SEEDED full sync: {} page(s) {:?}; cursor {cursor}",
@@ -963,17 +984,26 @@ async fn the_cursor_records_the_zone_the_server_renders_in() {
         ["tz_offset_secs"]
         .as_i64()
         .expect("the cursor records the zone it queried in");
+    // What makes the equality below a witness, asserted **before** it and on
+    // the server's rendering rather than on the cursor's (#347). The same
+    // `assert_ne!` stood *after* the equality and read `recorded`, where it
+    // could not fail: once `recorded == offset` is pinned, the case it names
+    // -- the probe read no timestamp and took the safe guess -- is already a
+    // failure of the equality. The live hazard is the other one: a server that
+    // really did render UTC-12 would make the equality true of an adapter that
+    // had read nothing at all and fallen back.
+    assert_ne!(
+        i64::from(offset),
+        i64::from(knobas_source_confluence::MIN_UTC_OFFSET_SECS),
+        "this instance renders {stamped:?} in UTC-12, which is exactly the offset the probe \
+         falls back to when it reads no timestamp -- so the equality below could no longer tell \
+         a real read from the fallback"
+    );
     assert_eq!(
         recorded,
         i64::from(offset),
         "the cursor's zone is the one the server rendered {stamped:?} in, so every CQL literal \
          is read back the way it was written"
-    );
-    assert_ne!(
-        recorded,
-        i64::from(knobas_source_confluence::MIN_UTC_OFFSET_SECS),
-        "the probe fell back to the safe guess, which means it read no timestamp at all -- the \
-         corpus is not empty, so that is a defect and not a quiet corner"
     );
     println!("SEEDED zone: version.when {stamped:?} -> tz_offset_secs {recorded}");
 }
@@ -1219,11 +1249,13 @@ async fn a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself() {
         "the position never passes what the run witnessed -- and never reaches `now()`: \
          {moved_to} is after the renamed page's own {witnessed}"
     );
-    assert!(
-        moved_to <= chrono::Utc::now(),
-        "a version time is in the past by the time the run reads it; a watermark after `now()` \
-         would mean the run advanced past what it witnessed"
-    );
+    // A third clause stood here until #347 -- `moved_to <= Utc::now()`,
+    // carrying "a watermark after `now()` would mean the run advanced past
+    // what it witnessed". The clause above says exactly that, against what
+    // this run actually witnessed instead of against the test host's clock,
+    // and it fails first on anything that falsifies the inequality. Its own
+    // message already spells out "and never reaches `now()`", which is the
+    // claim; a wall-clock comparison was a stand-in for it.
     println!(
         "SEEDED watermark after the rename: {moved_to} (the page's own stamp is {witnessed}; \
          equal when the run-start probe already saw the edit, earlier when the index caught up \
