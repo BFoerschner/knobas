@@ -28,6 +28,16 @@ pub(crate) enum Order {
 /// `~?[A-Za-z0-9_.-]+`, and the timestamp is rendered by
 /// [`crate::time::format_cql_time`]. A key that reached this function cannot
 /// contain a quote, a parenthesis or a comma.
+///
+/// **A live suite hand-copies the scoped ascending form of this string.**
+/// `tests/live_confluence_seeded.rs`, `Seeded::index_order`, asks the server
+/// for the corpus in the search index's order before the paged walk starts,
+/// and writes `type = page AND space in ("...") order by lastmodified asc` out
+/// for itself -- a probe that borrowed this function would agree with the walk
+/// by construction and would witness nothing. Nothing catches the two drifting
+/// apart, so a change to this form belongs in that copy too;
+/// `a_space_list_becomes_a_quoted_in_clause` below is where the string is
+/// pinned.
 pub(crate) fn build_cql(
     cfg: &ConfluenceConfig,
     since: Option<DateTime<Utc>>,

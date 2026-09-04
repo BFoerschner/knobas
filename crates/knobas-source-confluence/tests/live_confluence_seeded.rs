@@ -417,8 +417,9 @@ impl Seeded {
         let status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
         assert_eq!(status, 200, "the index-order probe ({cql}): {text}");
-        let body: serde_json::Value =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
+            panic!("the index-order probe ({cql}): unreadable body {text}: {e}")
+        });
         body["results"]
             .as_array()
             .unwrap_or_else(|| panic!("a content search answers `results`: {body}"))
