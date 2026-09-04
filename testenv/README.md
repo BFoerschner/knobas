@@ -838,17 +838,27 @@ rejects with that sentence, the store swallows it, and the dev terminal shows
 it at `warn` (`notification not shown`). The permission prompt and the
 setting still work in dev; the banner and its click are the bundle's.
 
-**The first run of that check shows nothing, and the reason is macOS, not
+**The first run of that check can show nothing, and the reason is macOS, not
 knobas.** Written down here because it cost an afternoon once. A fresh bundle
-identifier has not been authorized to notify, and the legacy
-`NSUserNotification` path the plugin ends up on (`tauri-plugin-notification` ->
-`notify-rust` -> `mac-notification-sys`) does not raise the permission sheet
-itself. macOS raises its own banner-shaped prompt -- *"knobas Notifications:
+identifier has not been authorized to notify, and nothing on knobas' side asks
+for that at send time: the send is knobas' own `notify` command calling
+`notify-rust` on its `UNUserNotificationCenter` backend (since #339), and the
+plugin is asked only `is_permission_granted` / `request_permission`, on the
+click that switches a category on. What was observed on 2026-09-03 (#290),
+while the send still went the plugin's way (`tauri-plugin-notification` ->
+`notify-rust` -> `mac-notification-sys`, the legacy `NSUserNotification` path):
+macOS raised its own banner-shaped prompt -- *"knobas Notifications:
 Notifications may include alerts, sounds, and icon badges"* -- on the app's
-first contact with `usernoted`, and **withdraws it unanswered when the app
-quits**, after which it is not asked again. Until somebody answers it, every
-desktop notification is *delivered and never presented*: it goes into Notification
-Center's store and no banner appears.
+first contact with `usernoted`, and **withdrew it unanswered when the app
+quit**, after which it was not asked again. Until somebody answered it, every
+desktop notification was *delivered and never presented*: it went into
+Notification Center's store and no banner appeared. **Whether a first run
+behaves the same under the UN backend has not been re-observed.** The dev Mac
+has had `dev.knobas.desktop` authorized since that day and there is no cheap
+way to un-authorize it, so every run since #339 has been a later run, and the
+prompt's withdrawal is #290's dated observation of the NS path, not a fact
+about the current send. Read the log below before trusting a silent run
+either way.
 
 Both states are visible in the unified log, and this is the way to tell them
 apart without guessing:
@@ -864,8 +874,8 @@ are info-level and the default level filter hides them.)
 
 * `Delivering <NotificationRecord app:"dev.knobas.desktop" ...> to
   [ .alert .lockScreen .notificationCenter ]` with **no matching `Presenting`
-  line** -- knobas called the plugin and macOS held the desktop notification back.
-  Not authorized.
+  line** -- knobas' `notify` command posted it and macOS held the desktop
+  notification back. Not authorized.
 * `Presenting <NotificationRecord app:"dev.knobas.desktop" ...> as banner` --
   the check passed.
 * `Event was resolved: ... outcome: allowed; reason: disabled` from

@@ -100,7 +100,8 @@ fn no_grant_reaches_further_than_the_app_does() {
     );
 }
 
-/// The two notification commands the frontend actually calls, and no third.
+/// The two commands of the desktop notification plugin the frontend actually
+/// calls, and no third.
 ///
 /// `notification:default` is deliberately *not* used: it bundles sixteen
 /// permissions -- channels, scheduling, cancelling, reading back what is on
@@ -235,7 +236,7 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
     }
 }
 
-/// The notification plugin is registered in `run()`.
+/// The desktop notification plugin is registered in `run()`.
 ///
 /// The same source scan as the opener above, for the same three-way lineup and
 /// with the same worth: dropping the crate is a build error (`tauri-build`
@@ -251,8 +252,8 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// 26.5.2 with the `knobas-dev` self-signed certificate, one `credential_expiry`
 /// item arriving on an unfocused window produced one banner, with
 /// `Presenting ... as banner` for `dev.knobas.desktop` in `usernoted`'s log.
-/// The first attempt showed nothing because the app had no macOS notification
-/// authorization; the README says how to tell that state apart from a knobas
+/// The first attempt showed nothing because the app had no macOS authorization
+/// to show desktop notifications; the README says how to tell that state apart from a knobas
 /// bug, and it is worth reading before trusting a silent run.
 ///
 /// Since #339 the plugin is registered for its two permission commands only;
@@ -263,7 +264,7 @@ fn the_notification_plugin_is_registered() {
     let code = strip_comments(include_str!("../src/lib.rs"));
     assert!(
         code.contains(".plugin(tauri_plugin_notification::init())"),
-        "the notification plugin is not registered in `run()`, so the two \
+        "the desktop notification plugin is not registered in `run()`, so the two \
          `notification:*` grants name commands that do not exist -- and \
          nothing else in the tree fails"
     );
