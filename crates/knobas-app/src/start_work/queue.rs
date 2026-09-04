@@ -126,7 +126,9 @@ impl Steps for Queue<'_> {
         // publish needs the identical thing for the identical reason -- a
         // create answers no address, so the mirror is the only way to name
         // what was made, and reading it before the run has finished is reading
-        // it too early.
+        // it too early. **Or before a run that could have seen it has
+        // finished** -- waiting out the one this flow's own branch write left
+        // in flight is `Scheduler::resync`'s job and was the #358 flake.
         crate::sources::write_queue::resync(self.state, source).await;
     }
 }

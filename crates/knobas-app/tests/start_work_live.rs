@@ -1,15 +1,27 @@
-//! **M2 exit criterion 1, end to end**: ticket → branch → pull request →
-//! link → In Progress, and back again when the pull request is merged
-//! (issue #44).
+//! **The start-work round trip against a real Gitea**: ticket → branch → pull
+//! request → link → In Progress, and back again when the pull request is
+//! merged (issue #44).
 //!
 //! Every other test of this feature stops one side short of the real thing.
 //! `tests/start_work.rs` drives the orchestrator against a fake dispatcher and
 //! proves the *sequence* -- which ops, in what order, and what happens when one
-//! fails -- with nothing at either end of it. This is the other half: a real
-//! Gitea in its container, a real Jira through `knobas-mockd`, the real write
-//! queue, the real adapters, a real database. Nothing here asserts on a step's
-//! outcome alone; **every assertion is against a source's own answer or a
-//! stored row**, because the criterion is the round trip, not the dispatch.
+//! fails -- with nothing at either end of it. This is the other half: the real
+//! write queue, the real adapters, a real database, and a real Gitea in its
+//! container. Nothing here asserts on a step's outcome alone; **every
+//! assertion is against a source's own answer or a stored row**, because the
+//! subject is the round trip, not the dispatch.
+//!
+//! # Half of it is a mock, and this file is not M2's exit certificate
+//!
+//! The **repository** side is the seeded container: the branch, the pull
+//! request, the draft prefix in Gitea's own copy of the title, and the merge
+//! are decided by a server. The **ticket** side is
+//! `knobas_mockd::spawn_mock_jira()`, in process, and ADR-0013 says no mock is
+//! a witness for an acceptance or exit criterion -- so the two Jira
+//! transitions here are asserted against mockd's workflow and witness nothing.
+//! M2 exit criterion 1 is met end to end only once the ticket side is the
+//! seeded Jira `just atlassian-live` stands up, and that is not this file.
+//! `just start-work-live`'s header says the same thing at more length.
 //!
 //! # Why this is `#[ignore]`d and `tests/start_work.rs` is not
 //!
@@ -58,8 +70,7 @@ const LITTER: &str = "knobas-";
 /// Progress*, and Jira does not offer a transition to the status an issue is
 /// already in, so the flow's last step would be refused by name. That refusal
 /// is correct behaviour (the status is resolved against what the source says is
-/// reachable, never assumed) and it is not the round trip this criterion is
-/// about.
+/// reachable, never assumed) and it is not the round trip this file is about.
 const ISSUE: &str = "PAY-240";
 
 const JIRA: &str = "jira";
@@ -341,7 +352,9 @@ impl knobas_sync::progress::ProgressSink for Ending {
 }
 
 /// The issue's status, read from mockd rather than from knobas' own mirror --
-/// the criterion is what the *source* holds.
+/// what the *source* holds is the claim, not knobas' opinion of it. Mockd is
+/// still a mock, so this witnesses the flow's reach and not the criterion
+/// (ADR-0013, and this file's header).
 async fn status_at_jira(base_url: &str) -> String {
     let body: serde_json::Value = reqwest::Client::new()
         .get(format!("{base_url}/rest/api/2/issue/{ISSUE}"))
@@ -403,11 +416,11 @@ fn with(payload: &serde_json::Value, field: &str, value: &str) -> serde_json::Va
     payload
 }
 
-// -- the criterion ----------------------------------------------------------
+// -- the round trip ---------------------------------------------------------
 
 /// **Ticket → branch → pull request → link → In Progress, and back.**
 ///
-/// One test rather than several, deliberately: the criterion is the *round
+/// One test rather than several, deliberately: the subject is the *round
 /// trip*, and a suite that split it would have each half pass over a state the
 /// other half established, with the environment's one repository shared between
 /// them. The assertions are numbered in the order the flow makes them true.
