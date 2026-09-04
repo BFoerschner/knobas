@@ -86,10 +86,17 @@ const ACTOR: &str = "user";
 /// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
 /// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
 /// and how its link step finds a pull request at all. Retrying a
-/// `create_pull_request` step whose write was withdrawn in flight finds the
-/// pull request *by that head*, settles it "already open", and the link step
-/// then draws the edge back to the ticket that asked for it. The artefact is
-/// reclaimable, so a line saying nothing claims it would be false.
+/// `create_pull_request` step whose write was withdrawn in flight reads
+/// *every* pull request the mirror holds from that head, settles the step
+/// "already open" against the one it read as open, and the link step then
+/// draws the edge back to the ticket that asked for it. The Gitea guarantee
+/// above is what makes the head an address at all, and what it promises is
+/// **at most one open** pull request per `head`/`base` pair rather than one
+/// per head. That is why `queue::pick_open` reads a record's state instead of
+/// taking a head's word for it (#359), and why this list's address and that
+/// rule cannot disagree: neither claims more than the forge promises. The
+/// artefact is reclaimable while it is open, which is the state a withdrawal
+/// in flight leaves it in, so a line saying nothing claims it would be false.
 ///
 /// **The reclaiming is start-work's; the address is the op's.** A
 /// `create_pull_request` submitted straight through `submit_write` has no flow
