@@ -111,12 +111,8 @@ impl Fake {
     /// shape, since `Source::write` answers nothing and the number is learned
     /// by reading back.
     fn revealing_on_refresh(self, head: &str) -> Self {
-        *self.on_refresh.lock().unwrap() = Some((
-            REPO.to_owned(),
-            head.to_owned(),
-            PR.to_owned(),
-            Some(false),
-        ));
+        *self.on_refresh.lock().unwrap() =
+            Some((REPO.to_owned(), head.to_owned(), PR.to_owned(), Some(false)));
         self
     }
 
@@ -898,9 +894,10 @@ async fn a_re_used_head_links_the_open_pull_request_and_not_the_merged_one() {
     let pool = corpus("sw_reused_flow").await;
     let flow = planned(&pool).await;
     let head = proposed_branch(&flow);
-    let fake = Fake::new()
-        .holding(&head, PR_MERGED, Some(true))
-        .holding(&head, PR_REOPENED, Some(false));
+    let fake =
+        Fake::new()
+            .holding(&head, PR_MERGED, Some(true))
+            .holding(&head, PR_REOPENED, Some(false));
 
     let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
 
@@ -947,7 +944,10 @@ async fn a_head_whose_only_pull_request_is_merged_gets_a_new_one() {
         vec![(PR.to_owned(), TICKET.to_owned())],
         "the link must go to the pull request this flow made"
     );
-    assert_eq!(outcome(&flow, Step::LinkPullRequest), StepOutcome::Succeeded);
+    assert_eq!(
+        outcome(&flow, Step::LinkPullRequest),
+        StepOutcome::Succeeded
+    );
 }
 
 /// And when nothing new reaches the mirror, the link step **refuses with a
