@@ -217,6 +217,8 @@ pub struct ConnectionReport { pub ok: bool, pub account: Option<String>,
 ```
 `ConnectionReport`'s three optional fields depend on proposal **P4** (`test_connection` enrichment). *Fallback: they are `None` and the Add-source flow shows a bare "Connected".*
 
+> **`ConnectionReport` above is superseded, see §10.8 #297 and #326** (noted 2026-09-04). The shipped struct also carries `discovered: BTreeMap<String, String>` (#297) and `detail: Option<String>`, the connection note (#326). Its `error` is a separate matter, recorded already and not by either of those: #34's entry says the shipped report "deliberately carries a `String` plus an `IpcErrorCode` instead" of the `Option<SourceError>` sketched above, and `crates/knobas-app/src/sources/mod.rs` says so in place. The sketch is left as written, the same treatment §2.3's `SUPERSEDED` block gives a shape the record has moved past.
+
 There is deliberately **no command that reads a secret back.** Ever.
 
 ### 2.3 Sync scheduling, progress, diagnostics — stream F
@@ -643,6 +645,8 @@ Each has a recommendation and a fallback; none may be decided inside a stream.
 **P3 — `sync_now` return value and the progress transport.** M1 syncs are scheduled and network-bound, so a command that blocks until the run finishes makes the UI wait on a source. *Recommend:* `sync_now` returns the `sync_run.id` immediately; **all** runs (scheduled and manual) emit the coarse `sync:state` event; a `tauri::ipc::Channel<SyncProgress>` is attached **only** when the caller wants per-item progress (the first-run wizard). Verify that `Option<Channel<_>>` decodes from an omitted argument; if not, split into two commands. *Fallback:* keep M0's blocking signature for the mock source only. **Ruling changes a frozen surface.**
 
 **P4 — SPI: enrich `test_connection`.** `Result<(), SourceError>` cannot tell the Add-source flow *who* it connected as, which server version answered, or when the PAT expires — all three are on screen in §3 (credential health, PAT expiry countdown). *Recommend:* `async fn test_connection(&self) -> Result<ConnectionInfo, SourceError>` with `ConnectionInfo { account: Option<String>, server_version: Option<String>, secret_expires_at: Option<DateTime<Utc>>, detail: Option<String> }`, all fields optional. Cost: the mock, the battery and the (not yet written) adapters. *Fallback:* `ConnectionReport` reports only ok/error. **Frozen surface.**
+
+> **The `ConnectionInfo` sketch above is superseded, see §10.8 #297** (noted 2026-09-04). The shipped struct also carries `discovered: BTreeMap<String, String>`, the configuration an adapter discovered about its own instance. The sketch is left as written, the same treatment §2.3's `SUPERSEDED` block gives a shape the record has moved past.
 
 **P5 — SPI: `SyncItem.web_url: Option<String>`.** Every detail view needs *Open in browser*, and deriving the URL in the frontend would require exactly the per-adapter table §3a forbids. *Recommend:* add the optional field; adapters that cannot produce one leave it `None` and the button is absent. *Alternative:* a `payload.web_url` convention (no contract change, but an invisible convention that the generic detail view must special-case). **Frozen surface.**
 
@@ -2873,10 +2877,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The start-work transitions widening is recorded here**, as #179's brief says it must be: the
   status select reuses `WriteOp::Transition` — the existing variant, no SPI growth — so the two
   transitions the start-work flow was ratified with become any status a source's corpus shows. It is
-  optimistic by design: knobas has no read of reachable transitions (M3's descriptor growth, per
-  ADR-0007), so the adapter resolves the target at write time and refuses by name, and the refusal
+  optimistic by design: knobas has no read of reachable transitions (~~M3's descriptor growth, per
+  ADR-0007~~), so the adapter resolves the target at write time and refuses by name, and the refusal
   surfaces through the existing pending/held-write UI. **#179 therefore adds no frozen-surface change
-  of its own**, and neither does #178.
+  of its own**, and neither does #178. *The parenthetical is struck 2026-09-04: #277's entry below is
+  that growth and it brought no such read. Spec #272 books the read for a later milestone instead —
+  "No transitions read: the status select stays optimistic and refuses by name as today; a per-ticket
+  transitions read is booked for a later milestone with its own entry" — and `docs/roadmap.md`'s v1.5
+  fast follows now carries the booking. What the sentence records, an optimistic select that resolves
+  at write time, is unchanged.*
 
   Ratified by the orchestrator as issue #177 itself, whose acceptance criteria specify the command,
   its tests and this entry.
@@ -3472,7 +3481,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   the observation passive attribution (#282) turns into passive blocks, and #282 brings the table
   to store it in. It is on the command **now** because the frontend rule that computes it — *open
   detail, else room anchor, else none* — is part of this ticket, and adding the parameter later
-  would be a second §10.8 touch on a command that already exists.
+  would be a second §10.8 touch on a command that already exists. *Revised by #282's entry below
+  (2026-09-04): the table arrived, and the foreground is stored whenever passive attribution is on
+  — `time::passive::observe` reads the setting and writes the observation on every beat. The "not
+  yet" above is this entry's own moment and no longer knobas'; what stays true is that the
+  parameter rode this command first so that storing it later cost no second §10.8 touch.*
 
   **It is not validated, and `timer_heartbeat` never refuses on it.** The value is vetted *after*
   the stamp lands and a refusal is logged, never propagated: the stamp is a statement about

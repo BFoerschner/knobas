@@ -107,7 +107,7 @@ pub struct DayBlock {
 pub struct DayRecord {
     /// The blocks overlapping the day, earliest first.
     pub blocks: Vec<DayBlock>,
-    /// Whether the day reaches back past what retention has swept.
+    /// Whether the day reaches back past the observation horizon.
     ///
     /// The same question [`passive::materialize`](super::passive::materialize)
     /// refuses to reconcile on, asked through the same
@@ -115,9 +115,10 @@ pub struct DayRecord {
     /// is exactly the day the reconciliation left alone.
     ///
     /// **Passive blocks the day was already offered are still drawn**, and
-    /// that is not a contradiction: retention took the *evidence*, not the
-    /// record made from it while the evidence was there. The flag says the
-    /// strip cannot be added to, never that what is on it is untrue.
+    /// that is not a contradiction: the observation sweep took the
+    /// *evidence*, not the record made from it while the evidence was there.
+    /// The flag says the strip cannot be added to, never that what is on it is
+    /// untrue.
     ///
     /// **It does not ask whether passive attribution is switched on**, and
     /// that is deliberate. The stamp it comes from is written only where a

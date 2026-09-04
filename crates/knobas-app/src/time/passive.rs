@@ -31,8 +31,9 @@
 //! * **Adjacent visits to one target merge.** Six observations on one ticket
 //!   are one stretch, not six.
 //! * **The total never exceeds focused time.** See [`derive`] for why this is
-//!   load-bearing rather than theoretical: it is what makes a session's last
-//!   visit end at its last beat instead of one beat window later.
+//!   load-bearing rather than theoretical: it is what makes the last visit in
+//!   a run of observations end at its last beat instead of one beat window
+//!   later.
 //!
 //! # What an observation claims, and why the cap follows from it
 //!
@@ -43,12 +44,13 @@
 //! knobas heard, whatever happened to the process in between.
 //!
 //! Focused time is the same walk read a beat later: the gap between one beat
-//! and the next, clamped to the same window. So a session's claims add up to
-//! its focused time **plus one window** -- the tail the last beat credits
-//! forward and no later beat confirms -- and the cap is what takes that tail
-//! back. It binds on every session, and it binds harder whenever beats arrive
-//! closer together than they are sent (a second window beating, a retry, an
-//! import), which is the case in which claims genuinely overlap.
+//! and the next, clamped to the same window. So the claims in a run of
+//! observations add up to its focused time **plus one window** -- the tail the
+//! last beat credits forward and no later beat confirms -- and the cap is what
+//! takes that tail back. It binds on every run of observations, and it binds
+//! harder whenever beats arrive closer together than they are sent (a second
+//! window beating, a retry, an import), which is the case in which claims
+//! genuinely overlap.
 
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{PgPool, Row};
@@ -116,8 +118,8 @@ pub const RETENTION_DAYS: i64 = 30;
 /// The `knobas.setting` key holding the instant before which observations
 /// have actually been thrown away.
 ///
-/// `knobas.setting` again, so retention needs no migration -- the same
-/// reasoning [`SETTING_KEY`] and `backup::SCHEDULE_KEY` record.
+/// `knobas.setting` again, so the observation horizon needs no migration --
+/// the same reasoning [`SETTING_KEY`] and `backup::SCHEDULE_KEY` record.
 ///
 /// **Stored rather than recomputed from the clock**, and that is the whole of
 /// what makes the guard in [`materialize`] safe. A guard that asked "is this
@@ -542,7 +544,7 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 ///   existed is such a day, and a reconciliation that spoke about one would
 ///   delete passive blocks it has no evidence either way about.
 /// * **The day reaches back past what [`prune`] has swept.** The same rule
-///   one line further out: a day whose observations retention has taken is a
+///   one line further out: a day whose observations are past the horizon is a
 ///   day knobas has no evidence about either, and it reads as **absent**
 ///   rather than as observed-and-empty. Emptiness would delete the blocks the
 ///   day was already offered, which is knobas forgetting an afternoon on the
@@ -725,8 +727,8 @@ where
     Ok(Horizon(pruned_before(db).await?))
 }
 
-/// Throw away the observations retention has aged out, and answer with how
-/// many went (issue #315).
+/// Throw away the observations [`RETENTION_DAYS`] has aged out, and answer
+/// with how many went (issue #315).
 ///
 /// `now` is a parameter and not a clock, so the rule is testable at a
 /// [`sweep_cutoff`] a fixture chooses rather than only at one thirty days
@@ -931,12 +933,12 @@ mod tests {
 
     /// **The cap is spent in order, and the later visit is the one trimmed.**
     ///
-    /// Two dense sessions, each claiming a window past its last beat, and a
-    /// day that can afford one of those tails and not both. The first visit is
-    /// offered whole and the second ends at its last beat -- which is the
-    /// ordering rule stated as an outcome rather than as a comment, and the
-    /// case neither `the_cap_binds_when_heartbeats_overlap` (one visit) nor
-    /// the tail tests (no competition) can reach.
+    /// Two dense runs of observations, each claiming a window past its last
+    /// beat, and a day that can afford one of those tails and not both. The
+    /// first visit is offered whole and the second ends at its last beat --
+    /// which is the ordering rule stated as an outcome rather than as a
+    /// comment, and the case neither `the_cap_binds_when_heartbeats_overlap`
+    /// (one visit) nor the tail tests (no competition) can reach.
     #[test]
     fn the_cap_is_spent_in_order_and_the_later_visit_is_trimmed() {
         let mut observations = beats(Some(on("jira:PAY-231")), 0, 600, 5);
@@ -944,7 +946,11 @@ mod tests {
 
         let spans = derive(&observations);
 
-        assert_eq!(spans.len(), 2, "two sessions, two visits: {spans:?}");
+        assert_eq!(
+            spans.len(),
+            2,
+            "two runs of observations, two visits: {spans:?}"
+        );
         assert_eq!(
             seconds(&spans[0]),
             630,
@@ -1126,8 +1132,8 @@ mod tests {
         );
     }
 
-    /// The cap, in the one case where it takes back more than a session's
-    /// tail: **beats that overlap**.
+    /// The cap, in the one case where it takes back more than the tail of a
+    /// run of observations: **beats that overlap**.
     ///
     /// Two windows beating, or a retry, or an import -- whatever the cause,
     /// the beats arrive six times as often as they are sent, so the claims
@@ -1268,7 +1274,7 @@ mod tests {
         );
     }
 
-    /// The retention window outlasts every surface that reads a past day.
+    /// The observations outlast every surface that reads a past day.
     ///
     /// [`RETENTION_DAYS`]' floor, spelled where lowering it fails rather than
     /// in prose alone. One half is a constant this crate holds
@@ -1285,7 +1291,7 @@ mod tests {
     /// it is outside one is #337's. This is why the failure message names a
     /// span rather than a date.
     #[test]
-    fn the_retention_window_outlasts_the_surfaces_that_read_a_past_day() {
+    fn the_observations_outlast_the_surfaces_that_read_a_past_day() {
         /// The standup digest's *yesterday* reaches back at most this far
         /// (#288: "at most seven days back, so Monday reads Friday").
         const DIGEST_LOOK_BACK_DAYS: i64 = 7;
