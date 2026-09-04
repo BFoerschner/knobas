@@ -245,6 +245,12 @@ impl Harness {
                 WriteOp::CreateTicket { title, .. } | WriteOp::CreatePage { title, .. } => {
                     title.clone()
                 }
+                // Except this one, and the exception is #353's whole argument:
+                // a pull request is *not* found by its title. It is found by
+                // the head branch it was opened from, which is what
+                // `start_work::queue`'s `PULL_REQUEST_BY_HEAD` reads and what
+                // the withdrawn row still carries.
+                WriteOp::CreatePullRequest { head, .. } => head.clone(),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -360,6 +366,25 @@ impl Harness {
                 space: "TIDE".to_owned(),
                 title: title.to_owned(),
                 body: "<p>body</p>".to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Queue a pull request in a repository, from `head` into `main` -- the
+    /// create whose *number* the source assigns and never says, and which is
+    /// nonetheless addressable by what the row carries (#353).
+    async fn create_pull_request(&self, repo: &EntityRef, head: &str) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::CreatePullRequest {
+                entity: repo.to_string(),
+                title: "Retry the SEPA batch".to_owned(),
+                body: "why".to_owned(),
+                head: head.to_owned(),
+                base: "main".to_owned(),
             },
         )
         .await
@@ -1174,9 +1199,13 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // The hour is at Jira and #328 owns that gap; the worklog's own
             // copy, not this line, is where it is answered.
             | WriteOp::LogWork { .. }
-            // Weighed under #333's re-send question and left there: Gitea
-            // refuses the duplicate with a 409. Widening to them is a decision
-            // for the ticket that makes it.
+            // Opened against a ref the caller named -- a `name`, a `head` --
+            // which the withdrawn row still carries, and which is the address
+            // the artefact is found by (`start_work::queue`'s
+            // `BRANCH_BY_NAME` and `PULL_REQUEST_BY_HEAD`). Reclaimable, so
+            // nothing is unclaimed. #353 decided it; `UNCLAIMED_OPS`'s doc
+            // argues it, including why a pull request's server-assigned
+            // number does not make it a `create_ticket`.
             | WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. } => false,
         };
@@ -1231,5 +1260,63 @@ async fn a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed() {
         !h.verbs().contains(&"unclaimed".to_owned()),
         "nothing was left unclaimed, so nothing may say it was: {:?}",
         h.verbs()
+    );
+}
+
+/// Issue #353's ruling, driven rather than read off the list: a pull request
+/// opened after the user withdrew the write leaves **nothing unclaimed**, and
+/// the row is why.
+///
+/// The number Gitea assigns is server-assigned exactly as a Jira key is, which
+/// is what made this op look like `create_ticket`. That is not the property
+/// the list turns on. A pull request is opened from a `head` the caller named,
+/// and the withdrawn row still carries it -- `knobas_core::write_queue::discard`
+/// keeps the row with its payload -- so the artefact the next sync mirrors can
+/// still be matched back to what asked for it. `start_work::queue`'s
+/// `PULL_REQUEST_BY_HEAD` is that read, and the start-work flow already leans
+/// on it: it is how a retried step finds a pull request it may have already
+/// opened, and how the link step names one at all. Nothing is standing at the
+/// source unclaimed, so nothing says it is.
+///
+/// The last assertion is the load-bearing one: the ruling rests on the
+/// discarded row keeping its payload, so a `discard` that stopped keeping it
+/// would take the reason away, and this is where that would be noticed.
+#[tokio::test]
+async fn a_pull_request_opened_after_a_withdrawal_leaves_nothing_unclaimed() {
+    let h = harness().await;
+    // A repository container, unmirrored the way the project above is:
+    // `project` reads `{"live": false}` at both ends, which is equal, so the
+    // write is never held.
+    let repo = EntityRef::new(&h.source, "tidewater/payout-service");
+
+    h.answer(Answer::Unreachable);
+    let write = h.create_pull_request(&repo, "knobas-sepa-retry").await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+
+    h.answer(Answer::Accept);
+    // What Gitea really answers for this op, on the success path as much as
+    // here: `WriteReceipt::none()`. The number is nothing the withdrawal took
+    // away, because knobas never had it.
+    h.receipt(None);
+    h.interrupt(Interrupt::Withdraw(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["knobas-sepa-retry".to_owned()],
+        "the race really happened -- the pull request was opened"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
+    assert!(
+        !h.verbs().contains(&"unclaimed".to_owned()),
+        "a pull request is reclaimable from the head the row still carries, so \
+         nothing may say it is unclaimed: {:?}",
+        h.verbs()
+    );
+    assert_eq!(
+        h.reload(write.id).await.payload["CreatePullRequest"]["head"],
+        "knobas-sepa-retry",
+        "and this is why: the discarded row still holds the head the pull \
+         request was opened from, which is the address it is found by"
     );
 }
