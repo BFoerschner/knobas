@@ -1118,7 +1118,10 @@ impl Scheduler {
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
-        self.inner.trigger(source_id, trigger, progress).await
+        self.inner
+            .trigger(source_id, trigger, progress)
+            .await
+            .map(Triggered::run_id)
     }
 
     /// Re-read one source and **wait for the run to end** (issue #289).
@@ -1135,27 +1138,61 @@ impl Scheduler {
     /// reading it before the run that fetches it has finished is reading it too
     /// early.
     ///
-    /// ADR-0005 guarantees a run id always comes with an ending -- including
-    /// when the id handed back belongs to a run already in flight, which is
-    /// exactly what happens here, since `crate::write_queue::flush` has usually
-    /// triggered one already. So this cannot wait for something that will never
-    /// speak.
+    /// # Why waiting once is not enough (#358)
     ///
-    /// Answers the id of the run it waited on.
+    /// Waiting for *a* run is not waiting for one that could have seen the
+    /// write. [`trigger`](Self::trigger) dedupes against the run in flight --
+    /// which is what makes a double-clicked *Sync now* harmless, and a burst of
+    /// writes cost one run rather than one each -- and the same dedupe hands
+    /// this caller a run that **began before the write did**.
+    ///
+    /// That is not a corner: `crate::write_queue::flush` starts exactly such a
+    /// run after every write that lands, so a flow which writes twice and then
+    /// looks for what it made is the ordinary case. Start-work is one (issue
+    /// #44): a branch, a pull request, then find the pull request. The branch's
+    /// refresh was still going, this joined it, its ending arrived faithfully
+    /// -- and it had nothing to say about a pull request that did not exist
+    /// when it started. The step failed about one run in five (#358).
+    ///
+    /// So a **joined** run is waited out and a second one asked for, and that
+    /// second one cannot be stale in the same way: a source holds at most one
+    /// run at a time ([`Claims::runs`]), so a run in flight when this asks
+    /// again is one that began after the first ended -- which is after this
+    /// call, and therefore after the write.
+    ///
+    /// **Two waits at the most, and no polling.** The caller is still told "the
+    /// mirror is as fresh as one sync can make it" exactly once and then gives
+    /// up, which is what keeps a step that is stuck distinguishable from one
+    /// that is slow (story 11).
+    ///
+    /// ADR-0005 guarantees a run id always comes with an ending -- including
+    /// the id of a run already in flight -- so neither wait can be for
+    /// something that will never speak.
+    ///
+    /// Answers the id of the run it waited on last.
     ///
     /// # Errors
-    /// [`TriggerError`].
+    /// [`TriggerError`], from either trigger.
     pub async fn resync(&self, source_id: &str) -> Result<i64, TriggerError> {
+        match self.trigger_and_wait(source_id).await? {
+            Triggered::Started(run_id) => Ok(run_id),
+            Triggered::Existing(_) => self.trigger_and_wait(source_id).await.map(Triggered::run_id),
+        }
+    }
+
+    /// Ask for a manual sync, wait for its ending, and say whether the run was
+    /// this caller's own or one it was enrolled in.
+    async fn trigger_and_wait(&self, source_id: &str) -> Result<Triggered, TriggerError> {
         let (done, wait) = tokio::sync::oneshot::channel();
         let sink = Arc::new(RunEnded {
             done: std::sync::Mutex::new(Some(done)),
         });
-        let run_id = self
+        let triggered = self
             .inner
             .trigger(source_id, SyncTrigger::Manual, Some(sink))
             .await?;
         let _ = wait.await;
-        Ok(run_id)
+        Ok(triggered)
     }
 
     /// **Backfill** one source: the same run in every respect but one -- the
@@ -1190,6 +1227,7 @@ impl Scheduler {
         self.inner
             .trigger(source_id, SyncTrigger::Backfill, None)
             .await
+            .map(Triggered::run_id)
     }
 
     /// Trigger every enabled source that does not need a human, id order.
@@ -1212,7 +1250,8 @@ impl Scheduler {
             ids.push(
                 self.inner
                     .trigger(&cfg.id, SyncTrigger::Manual, None)
-                    .await?,
+                    .await?
+                    .run_id(),
             );
         }
         Ok(ids)
@@ -1414,6 +1453,31 @@ impl Scheduler {
     }
 }
 
+/// What a trigger did: started the run, or handed the caller one it did not.
+///
+/// The distinction is invisible to nearly every caller -- *Sync now* wants the
+/// mirror re-read and does not care who is doing it -- and load-bearing for
+/// exactly one: [`Scheduler::resync`], whose caller has just written something
+/// and is about to look for it. A run it did not start is a run that may have
+/// begun before that write, and no ending of such a run says anything about it.
+///
+/// `Existing` covers both ways of being handed somebody else's run: enrolled in
+/// one still in flight, and served the record of one already over. Neither
+/// began after the call, which is the only property the distinction is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Triggered {
+    Started(i64),
+    Existing(i64),
+}
+
+impl Triggered {
+    fn run_id(self) -> i64 {
+        match self {
+            Triggered::Started(id) | Triggered::Existing(id) => id,
+        }
+    }
+}
+
 /// A progress sink that resolves when its run ends.
 ///
 /// The `Option` makes a second terminal message -- which ADR-0005 says cannot
@@ -1445,7 +1509,7 @@ impl Inner {
         source_id: &str,
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
-    ) -> Result<i64, TriggerError> {
+    ) -> Result<Triggered, TriggerError> {
         // Derived, never passed alongside: see `impl From<SyncTrigger> for
         // RunMode`. This is what makes "the log says `backfill`" and "the run
         // was forbidden to sweep" the same statement.
@@ -1473,7 +1537,7 @@ impl Inner {
                 // the wizard's *Retry*, which is the same command asking a
                 // second time -- gets work rather than this run again.
                 entry.first_run_claimed |= asks_for_the_first_sync;
-                return Ok(run_id);
+                return Ok(Triggered::Existing(run_id));
             }
             let unclaimed = !entry.first_run_claimed;
             // That run is over, so the entry has no claim on the source any
@@ -1497,7 +1561,7 @@ impl Inner {
                 // ADR-0005 path, which is the last one that should be the
                 // exception.
                 crate::progress::deliver(run_id, sink.as_ref(), ending);
-                return Ok(run_id);
+                return Ok(Triggered::Existing(run_id));
             }
         }
         if config::get(&self.deps.pool, source_id).await?.is_none() {
@@ -1535,7 +1599,7 @@ impl Inner {
         let mut tasks = self.tasks.lock().await;
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
-        Ok(run_id)
+        Ok(Triggered::Started(run_id))
     }
 
     /// One spawned run: take a permit, do the work (or give up when cancelled),

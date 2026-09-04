@@ -1154,6 +1154,96 @@ async fn two_callers_watching_one_run_both_hear_it_end() {
     retire(&pool, &ids).await;
 }
 
+// -- #358: a resync waits for a run that could have seen the write -----------
+
+/// **A resync is not satisfied by a run that was already going.**
+///
+/// The dedupe the test above is about -- a second caller handed the run in
+/// flight -- is right for *Sync now* and wrong for the caller `resync` serves:
+/// one that has just written something and is about to look for it. A run that
+/// began before the write cannot carry it, however faithfully its ending is
+/// delivered. That is the start-work link step's flake (#358): the branch
+/// write's own refresh was still going when the flow, having since opened a
+/// pull request, asked for a sync and looked.
+///
+/// The run this ends up waiting on must therefore have **started after the
+/// stale one finished**, which is the only reading under which it could have
+/// seen a write made before the call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The run `write_queue::flush` leaves behind after every write that lands.
+    // It is going before the caller below writes the thing it will look for.
+    let stale = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    // Well inside the adapter's dwell, so this genuinely joins a live run
+    // rather than racing its ending.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let waited_on = scheduler.resync(&id).await.unwrap();
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        waited_on, stale,
+        "the resync settled for the run that was already going, whose ending \
+         says nothing about a write made after it started"
+    );
+    let stale_row = run_log::get(&pool, stale).await.unwrap().expect("the run");
+    let waited_row = run_log::get(&pool, waited_on)
+        .await
+        .unwrap()
+        .expect("the run");
+    assert!(
+        waited_row.started_at >= stale_row.finished_at.expect("the stale run ended"),
+        "the run the resync waited on overlapped the stale one, so it is not \
+         one that could have seen a write made after the call: {stale_row:?} \
+         then {waited_row:?}"
+    );
+    assert!(
+        waited_row.finished_at.is_some(),
+        "the resync answered before the run it names had ended: {waited_row:?}"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **…and it costs one run when there was nothing to wait out.**
+///
+/// The pair to the test above, and the reason the fix is not "always sync
+/// twice": the ordinary write-then-read is one caller, one run. A resync that
+/// waited twice unconditionally would double the latency of every start-work
+/// link step and every protocol publish (#289) to buy a case that had not
+/// happened.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_resync_with_nothing_in_flight_starts_one_run_and_no_more() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let waited_on = scheduler.resync(&id).await.unwrap();
+    scheduler.shutdown().await;
+
+    let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    assert_eq!(
+        runs.len(),
+        1,
+        "one caller, one sync -- the resync started a second run nobody asked \
+         for: {runs:?}"
+    );
+    assert_eq!(runs[0].id, waited_on, "and it is the one it named");
+    retire(&pool, &ids).await;
+}
+
 /// **The invariant ADR-0005 says a later reader will simplify away: a caller
 /// that attaches to a run which has already finished is served its ending, at
 /// once, from the record.**
