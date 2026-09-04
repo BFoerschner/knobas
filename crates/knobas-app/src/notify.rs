@@ -239,10 +239,16 @@ impl Notifier {
                         return;
                     }
                 };
-                tracing::info!(address = draft.address, "notification shown, waiting on its click");
+                tracing::info!(
+                    address = draft.address,
+                    "notification shown, waiting on its click"
+                );
                 let action = wait();
                 if action == CLOSED {
-                    tracing::debug!(address = draft.address, "notification closed without a click");
+                    tracing::debug!(
+                        address = draft.address,
+                        "notification closed without a click"
+                    );
                 } else {
                     tracing::info!(address = draft.address, action, "notification clicked");
                     events.notification_clicked(draft.address.clone());
@@ -498,7 +504,11 @@ mod tests {
             b.release(&address(n), CLOSED);
         }
         b.settled();
-        assert_eq!(b.started().len(), WAITER_CAP, "sixteen waits ran, not seventeen");
+        assert_eq!(
+            b.started().len(),
+            WAITER_CAP,
+            "sixteen waits ran, not seventeen"
+        );
     }
 
     /// A completed wait frees its slot: after one of sixteen ends, the next
@@ -515,15 +525,30 @@ mod tests {
         b.release(&address(0), "default");
         let deadline = Instant::now() + Duration::from_secs(5);
         while b.notifier.waiting() == WAITER_CAP {
-            assert!(Instant::now() < deadline, "the finished wait never freed its slot");
+            assert!(
+                Instant::now() < deadline,
+                "the finished wait never freed its slot"
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(b.send("#/inbox"), Delivery::Waiting, "the freed slot is taken");
-        assert_eq!(b.send(&address(0)), Delivery::OverCap, "and it was the only one");
+        assert_eq!(
+            b.send("#/inbox"),
+            Delivery::Waiting,
+            "the freed slot is taken"
+        );
+        assert_eq!(
+            b.send(&address(0)),
+            Delivery::OverCap,
+            "and it was the only one"
+        );
 
         b.release("#/inbox", CLOSED);
         b.settled_to(WAITER_CAP - 1);
-        assert_eq!(b.send(&address(0)), Delivery::Waiting, "an ended address can wait again");
+        assert_eq!(
+            b.send(&address(0)),
+            Delivery::Waiting,
+            "an ended address can wait again"
+        );
 
         for n in 1..WAITER_CAP {
             b.release(&address(n), CLOSED);
