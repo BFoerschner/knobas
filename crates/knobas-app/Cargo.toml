@@ -4,6 +4,8 @@ edition.workspace = true
 version.workspace = true
 
 [features]
+# PROTOTYPE: try the UNUserNotificationCenter backend (#339 checklist item 4).
+proto-un = ["notify-rust/preview-macos-un"]
 # Exposes `AppState::over_pool`, the one blessed way to put a command's state
 # into a `tauri::test` mock app -- `tauri::State` cannot be constructed by hand,
 # so without it a command body is unreachable and every IPC test is vacuous.
@@ -70,6 +72,9 @@ tauri-plugin-opener = "=2.5.4"
 # halves speak one protocol and a mismatch fails at run time with "command not
 # found" rather than at build time.
 tauri-plugin-notification = "=2.4.0"
+# PROTOTYPE (#339, branch prototype/notification-click): direct use of the crate
+# the plugin already pulls in, to wait on a notification handle. Throwaway.
+notify-rust = "=4.18.0"
 tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which
 # port the server came up on, whether it reused an existing data directory --

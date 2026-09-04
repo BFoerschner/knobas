@@ -135,6 +135,8 @@ impl AppState {
 ///
 /// Panics if the Tauri context is invalid or the database cannot be started --
 /// neither leaves a usable window to report the failure in.
+pub mod proto_notification_click;
+
 pub fn run() {
     init_tracing();
     install_panic_hook();
@@ -159,6 +161,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
+            // PROTOTYPE #339 — see proto_notification_click.rs. Remove with the branch.
+            crate::proto_notification_click::start(
+                handle.config().identifier.clone(),
+                tauri::is_dev(),
+            );
             handle.manage(profile);
             handle.manage(Lifecycle::new());
 
