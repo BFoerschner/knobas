@@ -840,14 +840,15 @@ setting still work in dev; the banner and its click are the bundle's.
 
 **The first run of that check can show nothing, and the reason is macOS, not
 knobas.** Written down here because it cost an afternoon once. A fresh bundle
-identifier has not been authorized to notify, and nothing on knobas' side asks
-for that at send time: the send is knobas' own `notify` command calling
+identifier has not been authorized to notify, and knobas' own code asks for
+nothing at send time: the send is knobas' own `notify` command calling
 `notify-rust` on its `UNUserNotificationCenter` backend (since #339), and the
 plugin is asked only `is_permission_granted` / `request_permission`, on the
-click that switches a category on. What was observed on 2026-09-03 (#290),
-while the send still went the plugin's way (`tauri-plugin-notification` ->
-`notify-rust` -> `mac-notification-sys`, the legacy `NSUserNotification` path):
-macOS raised its own banner-shaped prompt -- *"knobas Notifications:
+click that switches a category on. What `notify-rust`'s UN backend itself does
+about authorization at that moment is the part nobody has watched. What was
+observed on 2026-09-03 (#290), while the send still went the plugin's way
+(`tauri-plugin-notification` -> `notify-rust` -> `mac-notification-sys`, the
+legacy `NSUserNotification` path): macOS raised its own banner-shaped prompt -- *"knobas Notifications:
 Notifications may include alerts, sounds, and icon badges"* -- on the app's
 first contact with `usernoted`, and **withdrew it unanswered when the app
 quit**, after which it was not asked again. Until somebody answered it, every

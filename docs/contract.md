@@ -4585,7 +4585,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   this entry describes is the one that event feeds.*
 
   Ratified by the orchestrator as spec #272 and issue #290, whose acceptance criteria specify the
-  plugin with its capability, the setting key with its per-kind toggles, the listener with its two
+  plugin with its capability, the setting key with its per-category toggles, the listener with its two
   gates, the click, the component tests and this entry.
 - **The IPC surface, issue #289 (2026-09-03): five additive commands on the entity module — `standup_protocol`, `publish_standup_protocol`, `standup_publish_target`, `set_standup_publish_target`, `create_action_item_ticket` — four DTOs, and five lines on the Rust append-only barrel.**
 
