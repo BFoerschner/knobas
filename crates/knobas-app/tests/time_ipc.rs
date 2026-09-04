@@ -1135,11 +1135,8 @@ async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
 /// Insert `count` observations, `every` apart, starting at `from`.
 ///
 /// `None` is *the reader had nothing in front of them*, which is a legal
-/// observation. Not fixture SQL: the rows go through
-/// `time::passive::record_at`, the insert the heartbeat itself lands in, so
-/// that what these tests seed and what the shell records are one row shape
-/// (#387). A fixture with an insert of its own was a second writer nothing
-/// held to the first.
+/// observation. Through `time::passive::record_at`, for the reason the
+/// section comment above gives.
 async fn beats(
     pool: &PgPool,
     target: Option<&TimerTarget>,
@@ -1340,8 +1337,9 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
 ///
 /// The numbers make the live beat load-bearing, and they are tighter than
 /// they look because the merge and the claim share one window. Ten minutes
-/// ago the reader sat in a room with nothing open: two minutes of focused
-/// time that attributes to nothing and pays into the cap's budget. Ninety
+/// ago the reader sat in a room with nothing open: two and a half minutes
+/// of focused time, the clamped gap after its last beat included, that
+/// attributes to nothing and pays into the cap's budget. Ninety
 /// seconds ago they opened the ticket, and the shell has been beating five
 /// seconds apart since, the last beat five seconds ago: a visit of 115
 /// seconds, under the floor on its own. The beat sent now lands inside that

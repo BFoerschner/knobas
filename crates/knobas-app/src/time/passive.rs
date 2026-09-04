@@ -422,11 +422,10 @@ pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<
 /// # Errors
 /// [`IpcError`] if the write fails.
 async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
-    record_at(pool, Utc::now(), foreground).await
+    write(pool, Utc::now(), foreground).await
 }
 
-/// Insert one observation at `at`: **the one statement that writes what
-/// [`OBSERVATIONS`] reads.**
+/// Insert one observation at `at`. **Tests only.**
 ///
 /// [`record`] is this with the clock; the instant is a parameter so that a
 /// test can build a morning of beats without waiting for one, through the
@@ -437,18 +436,31 @@ async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), I
 /// user nothing. A fixture that goes through here cannot drift from the
 /// production row, because there is no second row shape to drift to.
 ///
-/// Public for that reason and no other -- the way [`set_enabled`] and the
-/// constants are reachable from `tests/`. Nothing in the app calls it but
-/// [`record`]. It does not read the switch: [`observe`] is the gate, and a
-/// fixture that wants a beat kept has already turned the setting on.
+/// **Behind `test-util`**, the convention `docs/contract.md` §10.4 records
+/// for a seam the app must not reach: this one does not read the switch
+/// ([`observe`] is the gate, and a fixture that wants a beat kept has
+/// already turned the setting on), so an app caller would record beats
+/// with passive attribution off. Under the gate that mistake is a compile
+/// error rather than a review catch. The crate's own `tests/` see it through
+/// the self-dev-dependency.
+///
+/// # Errors
+/// [`IpcError`] if the write fails.
+#[cfg(feature = "test-util")]
+pub async fn record_at(
+    pool: &PgPool,
+    at: DateTime<Utc>,
+    foreground: Option<&TimerTarget>,
+) -> Result<(), IpcError> {
+    write(pool, at, foreground).await
+}
+
+/// **The one statement that writes what [`OBSERVATIONS`] reads.**
 ///
 /// `focused` is left to the column's default, which is `true`, because that
 /// is the only value anything writes (see [`Observation::focused`]): the shell
 /// sends no beat from an unfocused window.
-///
-/// # Errors
-/// [`IpcError`] if the write fails.
-pub async fn record_at(
+async fn write(
     pool: &PgPool,
     at: DateTime<Utc>,
     foreground: Option<&TimerTarget>,
