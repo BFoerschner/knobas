@@ -1,6 +1,6 @@
 /**
- * The desktop notification listener: the three gates, the click, and the permission
- * (issue #290, spec #272 story 70–74).
+ * The desktop notification listener: the three gates, the click, and the
+ * permission (issue #290, spec #272 story 70–74).
  *
  * The seam is the store, because that is where the rules live — the settings
  * section draws checkboxes and `App.svelte` hands it the stream, and neither

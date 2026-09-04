@@ -1795,9 +1795,9 @@ pub async fn set_notification_kinds(
 /// A shim over [`crate::notify::Notifier`], where the rules live and are
 /// tested: one wait per address, sixteen at once, a click emitted with the
 /// address and a clear emitted as nothing. Off the async runtime with
-/// `spawn_blocking` because the show blocks until the OS has the desktop notification
-/// -- milliseconds, but the wait behind it is a thread of its own and the
-/// runtime is not where either belongs.
+/// `spawn_blocking` because the show blocks until the OS has the desktop
+/// notification -- milliseconds, but the wait behind it is a thread of its
+/// own and the runtime is not where either belongs.
 ///
 /// Here rather than in a module pair of its own for the reason #290's
 /// setting is: the inbox lives in `entity`, and §10.8's layout is frozen.

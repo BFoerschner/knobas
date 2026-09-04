@@ -14,9 +14,9 @@
  * An item notifies only if it is **new**, its **kind is on**, and the window
  * is **unfocused**. The order matters in one place: an item is marked seen
  * whatever the focus, so something that arrived while the reader was looking
- * at it does not fire a desktop notification the moment they switch away. Spec story
- * 74 is "I am never told what is already on screen", and an item that waited
- * for a blur would be exactly that.
+ * at it does not fire a desktop notification the moment they switch away.
+ * Spec story 74 is "I am never told what is already on screen", and an item
+ * that waited for a blur would be exactly that.
  *
  * **Nothing here reads the OS permission.** Asking for it is
  * {@link Notifications.choose}'s, on the click that switches a kind on — so a
@@ -58,15 +58,16 @@
  *
  * ## The click, and where it comes from
  *
- * A desktop notification carries the item's address, and {@link Notifications.start}
- * subscribes to the click to navigate there. The channel is knobas' own
- * (#339): `send` invokes the `notify` command, whose Rust shows the desktop
- * notification through `notify-rust` and waits on the handle off the main
- * thread, and a body click comes back as the `notification:clicked` event
- * carrying that address. `@tauri-apps/plugin-notification` is still what asks
- * the OS about permission, and nothing else — its desktop `notify` drops the
- * handle a click arrives on, and its `onAction` (`register_listener`) exists
- * on mobile only, which is why #290 shipped a door with nothing behind it.
+ * A desktop notification carries the item's address, and {@link
+ * Notifications.start} subscribes to the click to navigate there. The channel
+ * is knobas' own (#339): `send` invokes the `notify` command, whose Rust shows
+ * the desktop notification through `notify-rust` and waits on the handle off
+ * the main thread, and a body click comes back as the `notification:clicked`
+ * event carrying that address. `@tauri-apps/plugin-notification` is still
+ * what asks the OS about permission, and nothing else — its desktop `notify`
+ * drops the handle a click arrives on, and its `onAction` (`register_listener`)
+ * exists on mobile only, which is why #290 shipped a door with nothing behind
+ * it.
  *
  * What has been witnessed is macOS, in the signed bundle
  * (`testenv/README.md`, "Signed dev build"): a real banner, and its click
@@ -127,7 +128,10 @@ export interface NotifyPorts {
   /** Ask the OS. `"granted"` is the only answer that is a yes. */
   requestPermission: () => Promise<string>;
   send: (notification: NotificationDraft) => void;
-  /** Subscribe to desktop notification clicks; see the module note for the channel. */
+  /**
+   * Subscribe to desktop notification clicks; see the module note for the
+   * channel.
+   */
   onAction: (handler: (notification: { extra?: Record<string, unknown> }) => void) => Promise<
     () => void
   >;

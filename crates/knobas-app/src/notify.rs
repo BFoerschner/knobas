@@ -24,8 +24,8 @@
 //! drops real clicks) nor lets the count grow without bound. Two rules:
 //!
 //! - **One waiter per address.** A second send for an address already waited
-//!   on shows the desktop notification and starts no second wait: the click on either
-//!   banner lands on the one thread, and it goes to the same room.
+//!   on shows the desktop notification and starts no second wait: the click
+//!   on either banner lands on the one thread, and it goes to the same room.
 //! - **At most [`WAITER_CAP`] concurrent waiters.** A send beyond it still
 //!   shows -- the reader is told -- but drops the handle, which on every
 //!   backend sends fire-and-forget, and says so at `debug`. A clicked banner
@@ -60,8 +60,8 @@ use serde::{Deserialize, Serialize};
 /// note.
 pub const WAITER_CAP: usize = 16;
 
-/// The action id `notify-rust` reports when a desktop notification was cleared or
-/// dismissed rather than clicked, on every backend.
+/// The action id `notify-rust` reports when a desktop notification was
+/// cleared or dismissed rather than clicked, on every backend.
 pub const CLOSED: &str = "__closed";
 
 /// What the frontend asks to have shown: the `notify` command's argument,
@@ -90,8 +90,9 @@ pub trait NotificationEvents: Send + Sync + 'static {
     fn notification_clicked(&self, address: String);
 }
 
-/// A shown desktop notification's wait: blocks until the reader acts and answers
-/// with the action id (`"default"` for the body, [`CLOSED`] for a clear).
+/// A shown desktop notification's wait: blocks until the reader acts and
+/// answers with the action id (`"default"` for the body, [`CLOSED`] for a
+/// clear).
 ///
 /// Owns the platform handle; dropping it unwaited is how a desktop
 /// notification beyond the cap is sent fire-and-forget.
@@ -200,8 +201,8 @@ impl Notifier {
     }
 
     /// Show the draft and, when admitted, wait for its click on a thread of
-    /// its own. Returns once the desktop notification is on screen (or refused), not
-    /// when it is clicked.
+    /// its own. Returns once the desktop notification is on screen (or
+    /// refused), not when it is clicked.
     ///
     /// # Errors
     ///
