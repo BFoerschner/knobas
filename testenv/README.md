@@ -448,7 +448,12 @@ cannot outlive the cap around it: `POLL_TIMEOUT_S` (10 s) covers three of them
 (240 s) the fourth, a wizard POST, which is the step's actual work and not a
 free GET. The two differ by more than an order of magnitude because a cut poll
 costs a repeat and a cut POST could cost a wizard step applied twice; the
-slowest POST measured is 46 s (issue #367).
+slowest POST measured is 46 s (issue #367). The timeout is also what sets how
+often a stalled wait can speak, since nothing prints while a request is still
+outstanding: three of the four keep the 30 s cadence above through a hang, and
+the wizard POST manages one line — it is silent for 240 s, prints once, and
+then fails. Bounded and diagnosed beats prompt and wrong here, which is the
+trade that comment block argues.
 
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap

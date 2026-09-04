@@ -144,8 +144,9 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # retry is safe only because a 500 means the step was refused rather than
 # half-applied, and an ABORTED request carries no such promise -- the server may
 # finish it after curl has stopped listening. So this number is not sized to the
-# slowest POST; it is sized so that reaching it means the app is not answering
-# AT ALL.
+# slowest POST; it is sized so that reaching it is evidence the app has stopped
+# answering rather than that it was merely busy. --max-time cannot tell those
+# two apart -- only the margin can, which is what the next paragraph is about.
 #
 # MEASURED, and the measurement is why this is 240 s and not the 60 s it was
 # first written with. On 2026-09-04, from empty volumes, TeamCity stopped, both
@@ -388,6 +389,14 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
       # would stay unseen. Still fatal, but named -- `curl: (7)` alone was the
       # entire message before.
       28)
+        # THE BODY FILE IS CLEARED BY HAND, because curl does not do it: when
+        # --max-time aborts a request that got no response, `-o` leaves the
+        # file exactly as it was (verified against curl 8.7.1, the one this
+        # machine has). So an app that answers 500 and then stops answering
+        # altogether would reach the cap and print the earlier 500's HTML under
+        # a "no reply" line -- one attempt's refusal quoted as another's answer,
+        # which is the one thing post_refusal exists to get right.
+        : > "$JAR.body"
         _plast="no reply in ${WIZARD_POST_TIMEOUT_S}s (curl --max-time)"
         _pdoing="not answering" ;;
       *) die "the POST to $_url failed outright (curl exit $_prc).
