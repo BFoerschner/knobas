@@ -4778,11 +4778,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   backend, Björn's ruling on the prototype's evidence) shows the desktop notification, and the handle's
   `wait_for_action` runs on a thread of its own. The wait is unbounded — the prototype showed it
   returns on a click or on the reader clearing the desktop notification, never on the banner sliding
-  away —
-  so there is a registry: one waiter per address (a second send for an address already waited on
-  shows and starts no second wait) and at most sixteen concurrent waiters (a send beyond the cap
-  shows fire-and-forget and says so at `debug`); a completed wait frees its slot. No timeout is
-  invented: the OS gives none and a made-up one would drop real clicks.
+  away — so there is a registry: one waiter per address (a second send for an address already
+  waited on shows and starts no second wait) and at most sixteen concurrent waiters (a send beyond
+  the cap shows fire-and-forget and says so at `debug`); a completed wait frees its slot. No
+  timeout is invented: the OS gives none and a made-up one would drop real clicks.
 
   **The event.** `notification:clicked`, payload `NotificationClicked = { address }`, appended to
   `knobas_app::events` and `EVENTS` in `app/src/lib/ipc/index.ts`. Emitted through the existing

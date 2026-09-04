@@ -810,8 +810,8 @@ land, since a bundle launched from Finder or `open` has no terminal.)
 `TeamIdentifier=not set` is expected for a self-signed certificate; the
 notarization warning is expected too. The check has two steps:
 
-1. **The banner** (#290): in that bundle, switch one kind on, unfocus the
-   window, and see one desktop notification in Notification Center.
+1. **The banner** (#290): in that bundle, switch one category on, unfocus
+   the window, and see one desktop notification in Notification Center.
 2. **The click** (#339): click the banner's *body* -- there is no button --
    and knobas comes to the front on that item's room (`#/inbox` for a
    credential expiry, which has no entity). stderr carries the two lines to
