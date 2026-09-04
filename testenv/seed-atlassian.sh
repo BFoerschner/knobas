@@ -146,15 +146,42 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # curl has stopped listening. So this number is not sized to the slowest POST;
 # it is sized so that reaching it means the app is not answering AT ALL.
 #
-# Which puts the two constraints in tension, and 60 s is where they sit.
-# ABOVE any POST that has answered: MEASURED-PLACEHOLDER. BELOW the overrun a
-# timeout costs: the cap is checked only after curl has come back, so the last
-# attempt starts just under it and runs a whole timeout past it, and the sleep
-# before that attempt is on the far side of the check too. The worst case is
-# therefore WIZARD_POST_CAP_S + POLL_S + this, 365 s against a 300 s cap --
-# which is a bound worth writing down and is not the unbounded wait it
-# replaces. If a real POST is ever cut, widen this; that would show up as a
-# wizard step applied twice, not as a slow run.
+# MEASURED, and the measurement is why this is 240 s and not the 60 s it was
+# first written with. On 2026-09-04, from empty volumes, TeamCity stopped, both
+# products, all eight steps accepted first try (`just atlassian-live`, 385 s in
+# all), the seed's own step lines timestamped: jira's licence step and its
+# outgoing-mail step each took 46 s, confluence's cluster step 32 s, and the
+# other five between 0 s and 9 s. Those are UPPER bounds -- the gap between two
+# step lines is the POST plus the redirect wizard_post then reads -- so the
+# slowest POST on an idle machine is at most 46 s. A 60 s timeout is 1.3x that,
+# which is not a margin; it is the same number twice.
+#
+# AND THE MARGIN HAS TO COVER A CASE NOBODY HAS MEASURED. Every run on record
+# is one product at a time on a machine with nothing else building, which is
+# what the recipe's sequencing buys. The loaded case is unmeasured here exactly
+# as it is for JIRA_RUNNING_CAP_S next door -- and that is the one wait this
+# file has watched go from 0 s idle to past 300 s with a second JVM beside it.
+# So 240 s is insurance in that line's sense, not a measurement: 5x the slowest
+# POST seen, for a multiplier under load that nothing has bounded.
+#
+# THE ASYMMETRY PICKS THE GENEROUS SIDE. Being generous costs a working run
+# nothing at all -- a POST that answers in 46 s returns in 46 s whatever this
+# says -- and costs a failing run only the time it takes to say so. Being tight
+# costs correctness: a cut POST is retried, and a retried POST that the server
+# went on to apply is the half-applied step the retry's own comment says it is
+# safe from only because a 500 means refused. The step-change check and the
+# final REST probe would most likely catch it loudly, but "most likely" is not
+# the promise a 500 gives.
+#
+# WHAT IT COSTS, STATED. The cap is checked only after curl has come back, and
+# the sleep before that attempt is on the far side of the check too, so the
+# worst case is WIZARD_POST_CAP_S + POLL_S + this: 545 s against a 300 s cap.
+# Bounded, and not the unbounded wait it replaces. It also means the 300 s cap
+# now admits ONE retry rather than a run of them, so a hung app prints the
+# opening line, one progress line, and then the failure -- the failure is the
+# part that carries the diagnosis. Whichever of these two numbers fires first
+# should be re-argued with the other; #332's paragraph above invites exactly
+# that for the cap.
 #
 # All seven are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600
@@ -163,7 +190,7 @@ WIZARD_POST_CAP_S=300
 POLL_S=5
 PROGRESS_EVERY_S=30
 POLL_TIMEOUT_S=10
-WIZARD_POST_TIMEOUT_S=60
+WIZARD_POST_TIMEOUT_S=240
 
 say() { echo "seed-atlassian: $*"; }
 die() { echo "seed-atlassian: $*" >&2; exit 1; }

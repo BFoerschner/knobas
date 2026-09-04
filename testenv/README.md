@@ -445,8 +445,10 @@ answering — and how far into the cap they are, every 30 s.
 All four also bound the single request they make, so that one unanswered call
 cannot outlive the cap around it: `POLL_TIMEOUT_S` (10 s) covers three of them
 — a `/status` poll, or a read of the wizard page — and `WIZARD_POST_TIMEOUT_S`
-(60 s) the fourth, a wizard POST, which is the step's actual work and not a
-free GET (issue #367).
+(240 s) the fourth, a wizard POST, which is the step's actual work and not a
+free GET. The two differ by more than an order of magnitude because a cut poll
+costs a repeat and a cut POST could cost a wizard step applied twice; the
+slowest POST measured is 46 s (issue #367).
 
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
