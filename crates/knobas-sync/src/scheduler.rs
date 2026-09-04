@@ -1165,6 +1165,13 @@ impl Scheduler {
     /// up, which is what keeps a step that is stuck distinguishable from one
     /// that is slow (story 11).
     ///
+    /// **What that costs, honestly.** The second run is paid whenever one was
+    /// in flight -- and for start-work that is the usual case, not the rare
+    /// one, since the flow's own earlier write left it there. So the link step
+    /// now waits out two incremental syncs where it waited out one, and the one
+    /// it used to wait out was the wrong one. An idle source, which is every
+    /// other caller most of the time, still costs a single run.
+    ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for
     /// something that will never speak.

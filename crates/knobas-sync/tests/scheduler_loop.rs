@@ -1207,9 +1207,18 @@ async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
          one that could have seen a write made after the call: {stale_row:?} \
          then {waited_row:?}"
     );
-    assert!(
-        waited_row.finished_at.is_some(),
-        "the resync answered before the run it names had ended: {waited_row:?}"
+    // **Two, and not more.** The bound is the whole of story 11's side of this:
+    // a step that gives up after one effective sync stays distinguishable from
+    // one that spins, and an implementation that looped until it liked what it
+    // saw would pass every assertion above. Asserted as a count rather than as
+    // `finished_at.is_some()` on the run it named, which would witness nothing
+    // -- `shutdown` settles a cancelled run too, so that field is set whether
+    // this waited or not.
+    let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    assert_eq!(
+        runs.len(),
+        2,
+        "one run waited out and one asked for is the whole budget: {runs:?}"
     );
     retire(&pool, &ids).await;
 }

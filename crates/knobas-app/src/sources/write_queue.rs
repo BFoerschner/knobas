@@ -285,7 +285,10 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
 ///
 /// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
 /// that may be behind, which every caller of this already has to handle --
-/// there is no link yet, and the next read draws it.
+/// there is no link yet, and the next read draws it. Logged and dropped
+/// rather than raised, exactly as [`refresh`] does with its own: nothing here
+/// reaches the caller, and a warning is what makes a source that could not be
+/// re-read visible to whoever is reading the log.
 pub(crate) async fn resync(state: &crate::sources::SourcesState, source_id: &str) {
     if let Err(error) = state.scheduler.resync(source_id).await {
         tracing::warn!(
