@@ -267,7 +267,6 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(info.version.as_deref(), Some("9.17.0"));
-        assert_eq!(info.deployment_type.as_deref(), Some("Server"));
         // The zone every JQL literal is rendered in, read off the server's own
         // clock rather than guessed from a timezone database.
         assert_eq!(info.offset_secs(), 7_200);

@@ -206,7 +206,8 @@ pub(crate) struct WorklogPage {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServerInfo {
     pub version: Option<String>,
-    pub deployment_type: Option<String>,
+    // `deploymentType` is no longer read: it prefixed the connection note
+    // until #326 made the note the Epic Link clause alone.
     /// The server's own clock *with its offset* -- how the adapter learns which
     /// zone JQL date literals will be read in, without a timezone database.
     pub server_time: Option<String>,

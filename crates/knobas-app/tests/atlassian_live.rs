@@ -2009,6 +2009,115 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     drop(litter);
 }
 
+/// **The connection note reaches `test_source`, on a draft and on a saved
+/// source (#326).** The draft is the Add-source dialog's call; the draft
+/// naming a saved source with no typed secret is a row's *Test*. Both answer
+/// with the Epic Link clause -- the one thing this Jira says that nothing
+/// else on the report does -- and the id in it is asserted by **containment**
+/// and never by value: it is minted per instance run, and `customfield_10101`
+/// and `customfield_10109` have both been measured from one seed script.
+///
+/// Which arm: [`app`] configures the source with the username alone and no
+/// `epic_link_field`, so both answers are the *found but not configured* arm
+/// -- the case the Add-source dialog closes for a source being *created* and
+/// the one a saved row can still be in, which is what the row's *Test* is
+/// for. The configured arm is `tests/field_discovery.rs`'s and the adapter's
+/// own live suite's; the no-field arm has no real product to witness it.
+///
+/// That the call **writes nothing** is `tests/sources_crud.rs`'s claim over
+/// the mock; it is not re-asserted on the row here, because the scheduler
+/// [`app`] starts may run the source on its own clock and write a verdict of
+/// its own.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_source() {
+    use knobas_app::sources::{SecretInput, SourceDraft, crud};
+
+    let env = env();
+    let pat = env.pat().await;
+    let (state, _events) = app("atlassian_live_note", &env, AuthMethod::Pat, &pat.raw).await;
+
+    // 1. A draft, as the Add-source dialog sends one: nothing saved, the
+    //    typed secret in memory for the length of the call.
+    let draft = crud::test(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        SourceDraft {
+            source_id: None,
+            adapter_kind: "jira".to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: AuthMethod::Pat,
+            config: json!({ "username": env.user }),
+            secret: Some(SecretInput {
+                value: pat.raw.clone(),
+            }),
+        },
+    )
+    .await
+    .expect("test_source on a draft against the seeded Jira");
+    assert!(draft.ok, "{draft:?}");
+    let note = draft.detail.clone().unwrap_or_default();
+    assert!(
+        note.contains("Epic Link customfield_"),
+        "the note names this instance's Epic Link field: {draft:?}"
+    );
+    assert!(
+        note.contains("found but not configured"),
+        "no id is configured, so the note says membership is not mirrored: {draft:?}"
+    );
+    // The note is the clause alone: no `Server 10.3.24 ·` in front of it,
+    // because `server_version` already carries the version.
+    assert!(
+        !note.contains('\u{b7}') && !note.starts_with("Server"),
+        "the note carries nothing the report already says: {note:?}"
+    );
+    let found = draft
+        .discovered
+        .get("epic_link_field")
+        .expect("the same call discovered the id the note names");
+    assert!(
+        note.contains(found.as_str()),
+        "the note and the discovered id agree: {note:?} vs {found:?}"
+    );
+    println!("SEEDED connection note (draft): {note}");
+
+    // 2. A draft naming the **saved** source with no typed secret: the row's
+    //    *Test*. The backend tests the stored row against the stored PAT and
+    //    answers the same note -- same instance, same arm.
+    let saved = crud::test(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        SourceDraft {
+            source_id: Some(JIRA.to_owned()),
+            adapter_kind: "jira".to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: AuthMethod::Pat,
+            config: json!({}),
+            secret: None,
+        },
+    )
+    .await
+    .expect("test_source on the saved source with no typed secret");
+    assert!(saved.ok, "{saved:?}");
+    assert!(
+        saved
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.contains("Epic Link customfield_")),
+        "the saved source's test carries the note too: {saved:?}"
+    );
+    assert_eq!(
+        saved.detail, draft.detail,
+        "one instance, one field, one note, whichever way it was asked"
+    );
+    println!("SEEDED connection note (saved): {:?}", saved.detail);
+
+    state.scheduler.shutdown().await;
+    drop(pat);
+}
+
 // -- the Confluence half: a mention in the inbox (#287) ----------------------
 
 /// The Confluence source id, and the `EntityRef` namespace every mirrored page
