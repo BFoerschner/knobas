@@ -60,11 +60,13 @@
 //!
 //! It is the suite that writes: a personal access token, a comment on PAY-231,
 //! one transition of PAY-240 and back, one new ticket in `PAY`, one worklog on
-//! PAY-231, and -- for the Confluence half -- one comment on a seeded page and
-//! one Confluence personal access token.
+//! PAY-231, and -- for the Confluence half -- one comment on a seeded page,
+//! **one edit of a seeded page's body** (#342), one page under the standup
+//! parent, and one Confluence personal access token.
 //! Every one of them is undone when the test ends, passing or panicking alike,
 //! by a `Drop` that checks rather than assumes -- [`Litter`], [`Pat`] (which
-//! guards a token at either product) and [`Mention`]. What a
+//! guards a token at either product), [`Mention`], [`Edited`] and
+//! [`Protocol`]. What a
 //! *killed* run left behind is cleared before the next one takes a baseline:
 //! [`Env::clear_leftovers`] deletes every issue and revokes every token
 //! carrying [`LITTER_LABEL`], [`Wiki::clear_leftovers`] deletes every
@@ -75,10 +77,16 @@
 //! comment or a status this suite left behind -- either suite's leftovers are
 //! the other's to clear, because whichever runs next is the one that can.
 //!
-//! The two things it cannot take away are the `PAY` key counter -- Jira never
-//! rewinds one, so a created ticket costs the project one key for ever -- and
-//! the `updated` stamps of what it touched. Neither is fixture content, and the
-//! environment is torn down at the end of the window regardless.
+//! The three things it cannot take away are the `PAY` key counter -- Jira
+//! never rewinds one, so a created ticket costs the project one key for ever
+//! -- the `updated` stamps of what it touched, and **an edited page's version
+//! history**: Confluence has no undo, so [`Edited`]'s restore is one more
+//! version on top of the edit rather than a removal of it, and the page comes
+//! out of a *successful* run at `version.number + 2` with its `version.when`
+//! on the run's own clock. The bytes are the seed's again; the history is not,
+//! and [`Edited`] says at length what does and does not read it. None of the
+//! three is fixture content, and the environment is torn down at the end of
+//! the window regardless.
 //!
 //! **Never a wrong password.** A real Jira counts failed password logins per
 //! account and answers `403 AUTHENTICATION_DENIED` -- to the *correct* password
@@ -115,6 +123,14 @@ const REQUEST_BUDGET: Duration = Duration::from_secs(30);
 
 /// How long Jira's search index may lag a write made through the REST API --
 /// the create is read back by JQL, which is an index read.
+///
+/// [`the_three_write_ops_go_through_the_queue_and_come_back_from_jira`] waits
+/// on the *mirror* to this budget rather than on the index (#325), which is a
+/// second use and not the same claim: what it needs is a re-mirror that has
+/// finished, and the index is upstream of when a sync run first sees the
+/// transition that starts one. One number for both because the lag it is
+/// waiting through is the same lag, and `knobas-source-jira`'s own live suite
+/// spends the same 60 seconds on it.
 const INDEX_BUDGET: Duration = Duration::from_secs(60);
 
 /// The issue a comment is posted on: the fixture's own story, and the one
@@ -422,6 +438,23 @@ const CONFLUENCE_TOKENS: TokenStatuses = TokenStatuses {
     created: 201,
     revoked: 204,
 };
+
+/// What this Confluence answers a **second create of a page whose title is
+/// already taken in its space** -- the refusal `knobas_app::protocol`'s
+/// duplicate-title ruling rests on (#289).
+///
+/// A number rather than `>= 400`, on the same rule as [`TokenStatuses`]: a
+/// status is a **measured fact about a server** and every assertion over one
+/// cites where it was measured. A range obeys neither half, and it is not a
+/// harmless looseness here -- the refusals it also accepts are the ones that
+/// would mean this test learned nothing at all (see
+/// [`a_second_page_with_one_title_in_one_space_is_refused`], which spells out
+/// what each other status would be saying).
+///
+/// Measured by #289's live run and again by #355's, against
+/// `atlassian/confluence:9.2.21` -- the image `testenv/pin-images.sh` pins and
+/// the product version [`CONFLUENCE_TOKENS`] cites.
+const DUPLICATE_TITLE_REFUSED: u16 = 400;
 
 /// A personal access token of this suite's own, revoked when the guard drops.
 ///
@@ -992,6 +1025,25 @@ async fn mirrored(pool: &sqlx::PgPool) -> Vec<String> {
     .expect("the mirror is readable")
 }
 
+/// One whole UTC day, as the digest's readers ask for it.
+///
+/// Free rather than a closure re-declared inside each digest test: two of them
+/// carried the same ten lines and this branch's own would have been a third,
+/// and two digest tests that disagreed about where a day begins would both
+/// stay green while measuring different things.
+fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
+    knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    }
+}
+
 /// Queue one write through the app's own submit path -- the same call the
 /// *Comment* button makes -- and answer the row as it settled.
 async fn write(
@@ -1252,6 +1304,94 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         "the board still lies about what is being worked on"
     );
 
+    // -- ...and the mirror caught up with it, before anything else is queued --
+    //
+    // **Issue #325**, whose mechanism is not what the ticket guessed and is
+    // worth writing down where the wait is.
+    //
+    // A queued write is compared against its target twice: `target_snapshot`
+    // is `knobas_core::write_queue::project`'s reading of `sync.live_item`
+    // when the row is inserted, and `knobas_sync::write_queue::attempt`
+    // projects it again immediately before sending -- "hold detection comes
+    // first, so a write over a moved target never reaches the network at all".
+    // If the two differ it calls `knobas_core::write_queue::hold`, whose
+    // statement sets `state = 'held', wait_reason = null, held_snapshot = $2`
+    // and **writes no `detail`** -- unlike `refuse`, which sets `detail = $2`.
+    // So `Held` with `detail: None` is the hold path and can be nothing else,
+    // which is exactly what #297's run saw here.
+    //
+    // What moves the mirror in the middle of a test that syncs once, at the
+    // top? The write queue's own follow-up read.
+    // `knobas_app::sources::write_queue::flush` fires an incremental sync as
+    // soon as a write lands (`refresh`, story 15), and `Scheduler::trigger`
+    // **spawns** that run -- so the transition above returned with a sync of
+    // this source still in flight. It re-reads `PAY-240`, whose `updated`
+    // moved with the transition, and commits a `sync.item` row carrying the
+    // new status. Land that commit between the `queue` and the `flush_source`
+    // inside the next `submit` -- milliseconds, but a real window -- and the
+    // refusal below is held instead of refused, with no detail, and nothing
+    // in the output says why.
+    //
+    // Jira's search index is upstream of *when* that happens rather than the
+    // cause: it decides which run first sees the transition (`Env::indexed`
+    // records the same asynchrony for the raw-REST direction). Waiting on the
+    // index alone would not settle this, because a stale mirror is harmless
+    // -- both projections read it and agree. What has to be true before the
+    // next write is queued is that the mirror has **finished** moving, so the
+    // wait is on the mirrored status itself, to [`INDEX_BUDGET`], the budget
+    // `knobas-source-jira`'s own live suite uses for this index.
+    //
+    // `sync` here is not an extra run in the ordinary case: `trigger` attaches
+    // to the run `refresh` already started and waits for its ending.
+    //
+    // **What this compares, and what it does not.** `project`'s fallback arm
+    // -- the one `"transition"` takes -- compares `title`, `text`,
+    // `item_updated_at` *and the whole payload*, and the poll below reads one
+    // field of one of those. That is enough here and only here: a run writes
+    // the mirrored row in a single upsert, so the status arriving is the whole
+    // row arriving. It is a witness that this ticket's re-mirror has happened,
+    // not a general proof that no projected field can still move.
+    //
+    // **The negative control**, for anyone re-running the mutation check: point
+    // the poll at `was` -- the status the mirror will never hold again -- and
+    // the bounded `assert!` below is what dies, after `INDEX_BUDGET`. A wait
+    // that was not really reading the mirror would sail past it.
+    let transitioned = format!("{JIRA}:{TRANSITIONED}");
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    for round in 1.. {
+        sync(&state).await;
+        // `fields.status.name` is where a Jira status lives, and the mirrored
+        // `payload` is the record verbatim -- the reading
+        // `knobas_core::write_queue::project` records for why `"transition"`
+        // compares the whole record instead of the status.
+        let in_mirror: Option<String> = sqlx::query_scalar(
+            "select payload->'fields'->'status'->>'name' from sync.live_item
+              where entity_id = $1",
+        )
+        .bind(&transitioned)
+        .fetch_one(&state.pool)
+        .await
+        .expect(
+            "the transitioned ticket left the mirror while this test was waiting for it -- \
+             a sync that tombstoned it, not a stale index",
+        );
+        if in_mirror.as_deref() == Some(to.as_str()) {
+            // Printed either way: the run's own output is the only place a
+            // reader can see whether this wait was a formality on the day or
+            // the thing that made the refusal below deterministic.
+            println!("SEEDED mirror holds {TRANSITIONED} as {to:?} after {round} sync(s)");
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{TRANSITIONED} is {to:?} at Jira (asserted above) but the mirror still holds it \
+             as {in_mirror:?} after {INDEX_BUDGET:?}. Until the mirror agrees, the next write's \
+             queue-time snapshot and its flush-time re-read can disagree, and the refusal \
+             below comes back Held with no detail instead (#325)."
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
     // -- 3. One it does not -------------------------------------------------
     assert!(
         !env.statuses.iter().any(|s| s == UNREACHABLE_STATUS),
@@ -1272,8 +1412,14 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     assert_eq!(
         row.state,
         WriteState::Refused,
-        "a status the workflow does not have is refused, not retried for ever: {:?}",
-        row.detail
+        "a status the workflow does not have is refused, not retried for ever. The row came \
+         back {:?} with detail {:?} and held_snapshot {:?}. `Held` here is never Jira's \
+         answer -- it is the mirror moving between this write's snapshot and its flush, which \
+         the wait above exists to rule out (#325); `Pending` is a fault the queue thinks will \
+         pass, and its wait_reason says which.",
+        row.state,
+        row.detail,
+        row.held_snapshot
     );
     let detail = row.detail.clone().unwrap_or_default();
     assert!(
@@ -1797,22 +1943,12 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     );
 
     // -- and what the digest makes of it ------------------------------------
-    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    };
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
         state.registry.as_ref(),
         chrono::Utc::now(),
-        window(day.succ_opt().expect("tomorrow exists")),
-        &[window(day)],
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
     )
     .await
     .expect("the digest reads");
@@ -2480,13 +2616,18 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 /// the digest for the day after the day one of them last moved has to carry
 /// it, with its content id as the ref.
 ///
-/// **Nothing is written here, and that is deliberate.** A page *edit* through
-/// knobas needs `UpdatePage`, which is #286's growth of the SPI and is not on
-/// this branch; the alternative -- a raw REST edit of a seeded page -- would
-/// put a body-restore path into a live suite for a fact this read already
-/// establishes without touching the server. The day is taken from the page's
-/// own mirrored timestamp rather than assumed to be today, so the assertion
-/// holds however long ago the environment was seeded.
+/// **Nothing is written here, and that stays deliberate.** The claim is about
+/// what the adapter puts in `author` for a page nobody touched, and a write
+/// would only put knobas' own account in the way of it. The other half of
+/// #288's criterion 4 -- *a page edited* -- is
+/// [`a_page_edited_through_knobas_is_on_the_digest_under_yesterday`], which
+/// became expressible when #286 landed `UpdatePage` and carries the
+/// body-restore path ([`Edited`]) this one is written to avoid needing.
+///
+/// It survives that sibling, which runs first and edits this very page: the
+/// day is taken from the page's **own mirrored timestamp** rather than assumed
+/// to be today, so the assertion holds whether the page last moved when the
+/// environment was seeded or a minute ago.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() {
@@ -2525,16 +2666,6 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         )
     });
 
-    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    };
     let day = moved.date_naive();
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
@@ -2542,9 +2673,9 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         // A clock outside the day being asked about, so no running timer of
         // this scratch database's own can join the list. There is none, and
         // saying so costs one argument.
-        window(day.succ_opt().expect("tomorrow exists")).to,
-        window(day.succ_opt().expect("tomorrow exists")),
-        &[window(day)],
+        day_window(day.succ_opt().expect("tomorrow exists")).to,
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
     )
     .await
     .expect("the digest reads");
@@ -2573,6 +2704,357 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         line.reason
     );
     println!("SEEDED digest page line: {} ({})", line.title, line.reason);
+
+    state.scheduler.shutdown().await;
+}
+
+/// The seeded page this suite edits, put back to its seeded body when the
+/// guard drops.
+///
+/// **Why a body and not a version number.** Confluence has no undo: every
+/// content `PUT` is the next version, so the restore is one more version on
+/// top of the edit rather than a removal of it. What has to be preserved is
+/// therefore the *bytes* -- the storage format the seed wrote -- and they are
+/// read before the edit and sent back after it, with the title and content
+/// type the `PUT` also replaces (`knobas-source-confluence`'s `write` module
+/// records why all three travel together).
+///
+/// **And why it verifies.** A restore that answered `200` and left something
+/// else behind is the failure this guard exists for: it changes what every
+/// later suite reads off a shared fixture, silently. So the record is read
+/// back and compared -- the body, and the title and content type the `PUT`
+/// replaced alongside it, since a check over one of the three would pass a
+/// restore that damaged the other two -- and [`undo`] turns any mismatch into
+/// a panic, the same contract [`Litter`] and [`Protocol`] have.
+///
+/// Unlike a comment or a created issue, an edit carries no marker a later run
+/// could sweep: a killed run leaves the page edited. `just atlassian-live`
+/// tears the pair down and `seed-atlassian-content.sh` rebuilds it, so the
+/// cost of that is a re-seed rather than lost data.
+///
+/// **What a successful restore still leaves behind**, said here rather than
+/// discovered later. Confluence has no undo, so the page comes out of this
+/// suite at `version.number + 2` with its `version.when` moved to the run's
+/// own clock. The bytes are the seed's again; the *history* is not. Nothing in
+/// the suite reads either today --
+/// [`a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved`]
+/// takes its day from whatever the mirror says rather than from the seed's
+/// date, which is exactly why it survives this -- but a future test that
+/// assumed the seed's timestamp would not, and this is the note that says so.
+/// The CQL index needs no symmetric wait the way [`Protocol`]'s delete does:
+/// this page was in the index before the suite ran and is in it after, and an
+/// edit changes what a later read *says* about it rather than whether it is
+/// there.
+struct Edited {
+    url: String,
+    user: String,
+    password: String,
+    id: String,
+    title: String,
+    content_type: String,
+    /// The storage format the page had before this suite touched it.
+    body: String,
+}
+
+impl Drop for Edited {
+    fn drop(&mut self) {
+        let (url, user, password, id, title, content_type, body) = (
+            self.url.clone(),
+            self.user.clone(),
+            self.password.clone(),
+            self.id.clone(),
+            self.title.clone(),
+            self.content_type.clone(),
+            self.body.clone(),
+        );
+        // The `what` carries the recovery, because [`undo`]'s standing
+        // sentence -- "the next run's leftover clearing removes what carries
+        // the marker" -- is not true of an edit: nothing sweeps one.
+        undo(
+            "the page it edited (an edit carries no marker, so nothing sweeps it -- \
+             re-seed with `testenv/seed-atlassian-content.sh`)",
+            move || async move {
+                let http = client();
+                let call = |method: reqwest::Method,
+                            path: String,
+                            payload: Option<serde_json::Value>| {
+                    let http = http.clone();
+                    let (url, user, password) = (url.clone(), user.clone(), password.clone());
+                    async move { api(&http, &url, &user, &password, method, &path, payload).await }
+                };
+
+                // The version it is at *now*: the edit bumped it, and Confluence
+                // accepts only the next number.
+                let (status, current) = call(
+                    reqwest::Method::GET,
+                    format!("rest/api/content/{id}?expand=version"),
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!(
+                        "reading {id}'s version back -> {status}: {current}"
+                    ));
+                }
+                let Some(number) = current["version"]["number"].as_i64() else {
+                    return Err(format!(
+                        "content {id} answered no version.number: {current}"
+                    ));
+                };
+
+                let (status, answered) = call(
+                    reqwest::Method::PUT,
+                    format!("rest/api/content/{id}"),
+                    Some(json!({
+                        "id": id,
+                        "type": content_type,
+                        "title": title,
+                        "version": { "number": number + 1 },
+                        "body": { "storage": { "value": body, "representation": "storage" } },
+                    })),
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!("PUT restoring page {id} -> {status}: {answered}"));
+                }
+
+                // Verified, not assumed -- and all three of what the `PUT`
+                // replaced, not only the body. The record travels together, so
+                // a restore that put the bytes back under a changed title, or
+                // wrote a blog post back as a page, is the same silent damage
+                // to a shared fixture that checking the body at all exists to
+                // catch.
+                let (status, after) = call(
+                    reqwest::Method::GET,
+                    format!("rest/api/content/{id}?expand=body.storage"),
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!("reading {id}'s body back -> {status}: {after}"));
+                }
+                let restored = after["body"]["storage"]["value"]
+                    .as_str()
+                    .unwrap_or_default();
+                if restored != body {
+                    return Err(format!(
+                        "page {id} did not come back to its seeded body: it now holds \
+                         {restored:?}, and the seed wrote {body:?}"
+                    ));
+                }
+                if after["title"].as_str() != Some(title.as_str()) {
+                    return Err(format!(
+                        "page {id} came back under the title {:?}, and it was {title:?}",
+                        after["title"]
+                    ));
+                }
+                if after["type"].as_str() != Some(content_type.as_str()) {
+                    return Err(format!(
+                        "page {id} came back as a {:?}, and it was a {content_type:?}",
+                        after["type"]
+                    ));
+                }
+                Ok(())
+            },
+        );
+    }
+}
+
+/// **A page edited *through knobas* is on the digest under yesterday**
+/// (issue #342, the half of #288's criterion 4 that merged partial).
+///
+/// [`a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved`]
+/// witnesses the **mirror** producer against a real Confluence and writes
+/// nothing, which is the right shape for the claim it makes. It is not the
+/// claim #288's criterion 4 spells out, though: *"after the seeded day (a
+/// worklog logged, a comment posted, **a page edited**), the digest lists them
+/// under yesterday with their refs"* -- and an edit knobas did not make is not
+/// a page edited through knobas. That line is the **activity** producer with
+/// `op = update_page`, the same producer
+/// [`a_seeded_days_work_is_what_the_digest_lists_under_yesterday`] asserts for
+/// `comment` and `log_work` on the Jira side, and it became expressible when
+/// #286 landed `UpdatePage`.
+///
+/// So: a real edit, through the write queue, against the real product, and
+/// then the digest. Every step is a fact no scratch fixture settles --
+/// `knobas_app::standup`'s `WRITTEN` reads `a.detail->>'op'` off the `queued`
+/// activity line the queue writes, and what puts a value there is
+/// `WriteOp::identifier` travelling through `knobas_sync::write_queue`'s
+/// `announce` against a source that actually took the write.
+///
+/// **Asked for tomorrow, so today is *yesterday*** -- the same device the Jira
+/// digest test uses, and for the same reason: the only day this suite can put
+/// real work on is the day it runs.
+///
+/// The edit itself is read back **from Confluence**, not from the mirror: a
+/// mirror read would only prove knobas agrees with itself.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
+    use knobas_core::write_queue::WriteState;
+
+    let wiki = wiki();
+    // User + password, as the seeded admin: the digest matches "mine" against
+    // `config.username`, which is half of the Basic pair, and the edit has to
+    // be attributed to an account the seed's pages already belong to.
+    let (state, _events) = wiki_app(
+        "atlassian_live_digest_edit",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
+    sync_source(&state, CONFLUENCE).await;
+
+    // The mirror has to hold the page first: the queue snapshots its target
+    // when a write is queued and re-reads it before sending, so an unmirrored
+    // page would hold rather than send.
+    let page = format!("{CONFLUENCE}:{}", wiki.page);
+    let held = confluence_pages(&state.pool).await;
+    assert!(
+        held.contains(&page),
+        "{page} is not in the mirror: {held:?}"
+    );
+
+    // The record as it stands, before anything is written: the version the
+    // edit is made **against**, and the bytes the guard has to put back.
+    //
+    // Read from the product rather than out of the mirrored payload, which is
+    // where the app reads it: the sync above is the only thing between the two
+    // and this is the same `GET` the adapter's own `update_page` makes, so the
+    // number is the server's and not a projection of it.
+    let before = wiki.content(&wiki.page, "version,body.storage").await;
+    let base_version = before["version"]["number"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("{} answered no version.number: {before}", wiki.title));
+    let original = before["body"]["storage"]["value"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} answered no stored body: {before}", wiki.title))
+        .to_owned();
+    // Refused rather than guessed. `knobas-source-confluence`'s `update_page`
+    // falls back to `"page"` because it is writing an edit somebody asked for
+    // and a guess beats a lost edit; a *restore* has no such excuse, and a
+    // wrong `type` here would write a blog post back as a page.
+    let content_type = before["type"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} answered no content type: {before}", wiki.title))
+        .to_owned();
+    // The title the **server** holds, not the one `seed-state.json` recorded:
+    // the content `PUT` replaces the record, so what goes back has to be what
+    // is there now, and a fixture file is a statement about what was seeded.
+    let live_title = before["title"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} answered no title: {before}", wiki.title))
+        .to_owned();
+
+    // Owned **before** the write, not after: from the moment the PUT lands the
+    // page is changed, so a failing assertion below must still leave the guard
+    // something to put back.
+    let _guard = Edited {
+        url: wiki.url.clone(),
+        user: wiki.user.clone(),
+        password: wiki.password.clone(),
+        id: wiki.page.clone(),
+        title: live_title,
+        content_type,
+        body: original.clone(),
+    };
+
+    // Storage format, appended to what the seed wrote -- `UpdatePage` replaces
+    // the **whole** body, so the edit is the old body plus a paragraph and not
+    // the paragraph alone.
+    let edited = format!(
+        "{original}<p>{LITTER_LABEL}: knobas edited this through the write queue (pid {})</p>",
+        std::process::id()
+    );
+    let row = write(
+        &state,
+        json!({
+            "UpdatePage": {
+                "entity": page,
+                "base_version": base_version,
+                "body": edited
+            }
+        }),
+    )
+    .await;
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+
+    // At Confluence, read back from Confluence.
+    let after = wiki.content(&wiki.page, "version,body.storage").await;
+    assert_eq!(
+        after["body"]["storage"]["value"].as_str(),
+        Some(edited.as_str()),
+        "the edit knobas queued is the page's stored body: {after}"
+    );
+    assert_eq!(
+        after["version"]["number"].as_i64(),
+        Some(base_version + 1),
+        "...as the version after the one it was made against, which is the check that stops \
+         a second writer being overwritten: {after}"
+    );
+
+    // -- and what the digest makes of it ------------------------------------
+    let day = chrono::Utc::now().date_naive();
+    let digest = knobas_app::commands::entity::standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        // The real clock, as
+        // `a_seeded_days_work_is_what_the_digest_lists_under_yesterday` passes
+        // it: `now` is what a *running timer* would be measured against, and
+        // this scratch database has none. The sibling above pins a clock
+        // outside the day it asks about because its day may be long past; the
+        // day here is today, so the two devices are the same statement.
+        chrono::Utc::now(),
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
+    )
+    .await
+    .expect("the digest reads");
+
+    assert_eq!(
+        digest.yesterday_day,
+        Some(day),
+        "today is the newest day before tomorrow with any of this account's work"
+    );
+    let listed: Vec<(Option<&str>, &str, &str)> = digest
+        .yesterday
+        .iter()
+        .map(|line| {
+            (
+                line.entity_id.as_deref(),
+                line.source.as_str(),
+                line.verb.as_str(),
+            )
+        })
+        .collect();
+    assert!(
+        listed.contains(&(Some(page.as_str()), CONFLUENCE, "update_page")),
+        "no update_page line for {} under yesterday, so a page edited through knobas is not \
+         on the digest: {listed:?}",
+        wiki.title
+    );
+    let line = digest
+        .yesterday
+        .iter()
+        .find(|line| line.entity_id.as_deref() == Some(page.as_str()) && line.verb == "update_page")
+        .expect("the line the assertion above found");
+    assert!(
+        !line.reason.trim().is_empty(),
+        "a line whose provenance cannot be shown is not shippable: {line:?}"
+    );
+    assert!(
+        line.reason.contains(CONFLUENCE),
+        "the reason names the source the write went to: {:?}",
+        line.reason
+    );
+    println!(
+        "SEEDED digest edit line: {} -- {} (version {} -> {})",
+        line.title,
+        line.reason,
+        base_version,
+        base_version + 1
+    );
 
     state.scheduler.shutdown().await;
 }
@@ -3238,11 +3720,22 @@ async fn a_second_page_with_one_title_in_one_space_is_refused() {
     let (status, body) = wiki
         .api(reqwest::Method::POST, "rest/api/content", Some(create))
         .await;
-    assert!(
-        status >= 400,
-        "a second page with one title in one space must be refused, not made. Confluence \
-         answered {status}: {body}. If this ever starts passing, `knobas_app::protocol`'s \
-         duplicate ruling loses its backstop and needs re-deciding."
+    assert_eq!(
+        status, DUPLICATE_TITLE_REFUSED,
+        "a second page with one title in one space must be refused with \
+         {DUPLICATE_TITLE_REFUSED}, and this Confluence answered {status}: {body}\n\
+         \n\
+         What another answer would mean, since only one of them is about titles:\n\
+         * **2xx** -- the product made the page. `knobas_app::protocol`'s duplicate ruling \
+           has lost its backstop: delivery is at-least-once (ADR-0012), so a re-sent create \
+           now leaves two pages. Re-decide the ruling; do not relax this number.\n\
+         * **401 or 403** -- nothing was learned about titles. The timebomb licence lapsed, \
+           or the seed admin's credential did, and the request never reached the duplicate \
+           check. Re-seed and run again.\n\
+         * **another 4xx** -- Confluence refused this request for a reason of its own. The \
+           create above is byte-for-byte the one it accepted a moment ago, so read its answer \
+           before changing the number here.\n\
+         * **5xx** -- the server, not the rule."
     );
     println!("live suite: the duplicate create was refused with {status}");
 
