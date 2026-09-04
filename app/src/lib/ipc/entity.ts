@@ -1349,3 +1349,40 @@ export function createActionItemTicket(
     body,
   });
 }
+
+/**
+ * What `notify` shows — `knobas_app::notify::NotificationDraft` (#339).
+ *
+ * `address` is where the click goes, the notifier store's own `addressOf`
+ * hash; the backend carries it unread and hands it back on
+ * `EVENTS.notificationClicked`, so both ends of the click path stay the
+ * frontend's.
+ */
+export interface NotificationDraft {
+  title: string;
+  body: string;
+  address: string;
+}
+
+/**
+ * The `notification:clicked` payload — `knobas_app::notify::NotificationClicked`
+ * (#339): the `address` the notification was sent with.
+ */
+export interface NotificationClicked {
+  address: string;
+}
+
+/**
+ * Show a desktop notification whose click comes back as
+ * `EVENTS.notificationClicked` — `notify` (#339).
+ *
+ * knobas's own Rust sends it through `notify-rust` and waits on the handle,
+ * because `@tauri-apps/plugin-notification`'s desktop `notify` drops that
+ * handle and its `onAction` exists on mobile only. Resolves once the OS has
+ * the notification, not when it is clicked. Rejects with `internal` and the
+ * platform's sentence when the OS refused — on macOS a bare `tauri dev`
+ * binary is refused by `UNUserNotificationCenter` (no bundle identifier).
+ */
+export function notify(draft: NotificationDraft): Promise<void> {
+  return invoke<void>("notify", { draft });
+}

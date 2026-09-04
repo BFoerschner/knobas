@@ -92,27 +92,29 @@ fn no_grant_reaches_further_than_the_app_does() {
             "opener:allow-open-url",
             "notification:allow-is-permission-granted",
             "notification:allow-request-permission",
-            "notification:allow-notify",
         ],
         "a permission was added or widened -- every entry here is a door the \
          webview can open, and `opener:default` in particular also grants \
          `reveal-item-in-dir` and `mailto:`/`tel:`, while `notification:default` \
-         grants sixteen permissions where knobas makes three calls"
+         grants sixteen permissions where knobas makes two calls"
     );
 }
 
-/// The three notification commands the frontend actually calls, and no fourth.
+/// The two notification commands the frontend actually calls, and no third.
 ///
 /// `notification:default` is deliberately *not* used: it bundles sixteen
 /// permissions -- channels, scheduling, cancelling, reading back what is on
 /// screen, registering action types -- and `app/src/lib/inbox/notify.svelte.ts`
-/// makes exactly three calls. The shortest way to acquire the other thirteen is
-/// somebody "simplifying" this file into one word.
+/// makes exactly two plugin calls, both about the permission. The send is
+/// knobas' own `notify` command since #339 (the plugin's dropped the handle a
+/// click arrives on), so `allow-notify` left with it: a grant for a command
+/// nobody calls is a door nothing asked for. The shortest way to acquire the
+/// other fourteen is somebody "simplifying" this file into one word.
 ///
 /// Stated as its own test beside the exact-list one above because the exact
-/// list is about *width* and this is about *these three being present*: a
-/// rewrite that dropped `allow-notify` and added something else would still be
-/// a list of five.
+/// list is about *width* and this is about *these two being present*: a
+/// rewrite that dropped `allow-request-permission` and added something else
+/// would still be a list of four.
 #[test]
 fn the_window_may_ask_about_notify_and_nothing_else_about_notifications() {
     let capability = capability();
@@ -132,11 +134,11 @@ fn the_window_may_ask_about_notify_and_nothing_else_about_notifications() {
         vec![
             "notification:allow-is-permission-granted",
             "notification:allow-request-permission",
-            "notification:allow-notify",
         ],
-        "these are the three plugin commands the notifier calls -- a missing \
+        "these are the two plugin commands the notifier calls -- a missing \
          one is denied at run time with no build or test failure anywhere, and \
-         an extra one is a door nothing asked for"
+         an extra one is a door nothing asked for (`allow-notify` left with \
+         #339, whose send is knobas' own command)"
     );
 }
 
@@ -253,15 +255,15 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// authorization; the README says how to tell that state apart from a knobas
 /// bug, and it is worth reading before trusting a silent run.
 ///
-/// What no run in this tree proves is the **click**: the plugin's
-/// `register_listener` is mobile-only, so a notification's click has no
-/// channel to arrive on and the navigation is proven against the stub alone.
+/// Since #339 the plugin is registered for its two permission commands only;
+/// the send and the click are knobas' own (`src/notify.rs`), and the click's
+/// witness is the README's signed-bundle check, which now includes it.
 #[test]
 fn the_notification_plugin_is_registered() {
     let code = strip_comments(include_str!("../src/lib.rs"));
     assert!(
         code.contains(".plugin(tauri_plugin_notification::init())"),
-        "the notification plugin is not registered in `run()`, so the three \
+        "the notification plugin is not registered in `run()`, so the two \
          `notification:*` grants name commands that do not exist -- and \
          nothing else in the tree fails"
     );

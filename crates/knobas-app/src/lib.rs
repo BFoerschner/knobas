@@ -64,6 +64,10 @@ pub mod events {
     /// Payload: `ContextRow` -- the context that was created or promoted
     /// (#47). The switcher re-lists on it rather than splicing.
     pub const CONTEXTS_CHANGED: &str = "contexts:changed";
+    /// Payload: `notify::NotificationClicked` -- a desktop notification's
+    /// body was clicked (#339). The first event added after #290's entry
+    /// said nothing new crosses the bridge; its §10.8 entry says why.
+    pub const NOTIFICATION_CLICKED: &str = "notification:clicked";
 }
 
 use std::sync::{Mutex, PoisonError};
@@ -145,10 +149,11 @@ pub fn run() {
         // `capabilities/default.json`; without that entry the command is
         // registered and every call is denied at run time.
         .plugin(tauri_plugin_opener::init())
-        // Desktop notifications for inbox items (#290). Its three commands are
-        // granted one by one in `capabilities/default.json`; without those
-        // entries the commands are registered and every call is denied at run
-        // time, with nothing failing in the build.
+        // Desktop notifications for inbox items (#290): the two permission
+        // commands, granted one by one in `capabilities/default.json`; without
+        // those entries the commands are registered and every call is denied
+        // at run time, with nothing failing in the build. The send itself is
+        // knobas' own `notify` since #339 (`notify.rs`).
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Both managed synchronously, before anything can call in, and
@@ -162,6 +167,17 @@ pub fn run() {
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
             handle.manage(Lifecycle::new());
+            // The notification sender and its waiter registry (#339), over
+            // the real backend and the real event bridge. Managed here for
+            // the same reason as `Lifecycle`: the command that reaches for
+            // it must never see "state not managed".
+            let identifier = handle.config().identifier.clone();
+            let backend: std::sync::Arc<dyn notify::Backend> =
+                std::sync::Arc::new(move |draft: &notify::NotificationDraft| {
+                    notify::platform::show(&identifier, draft)
+                });
+            let events = std::sync::Arc::new(sources::events::TauriEvents::new(handle.clone()));
+            handle.manage(std::sync::Arc::new(notify::Notifier::new(backend, events)));
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -273,6 +289,7 @@ pub fn run() {
             commands::entity::standup_publish_target,
             commands::entity::set_standup_publish_target,
             commands::entity::create_action_item_ticket,
+            commands::entity::notify,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -577,6 +594,7 @@ mod tests {
             super::events::SOURCE_HEALTH,
             super::events::ACTIVITY_NEW,
             super::events::CONTEXTS_CHANGED,
+            super::events::NOTIFICATION_CLICKED,
         ] {
             assert!(
                 mirror.contains(&format!("\"{name}\"")),
