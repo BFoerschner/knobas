@@ -137,14 +137,15 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 #
 # IT IS NOT POLL_TIMEOUT_S'S TEN SECONDS, and the difference is not caution.
 # A poll is `GET /status`: it costs the product nothing, and redoing one costs
-# us nothing either. A wizard POST is the step's actual work -- Jira's
-# application-properties step is not quick, and this file says so where
-# wizard_read explains why only the poll passes a timeout. Cutting a POST that
-# is being processed is the one thing this loop must not do: the retry is safe
-# only because a 500 means the step was refused rather than half-applied, and
-# an ABORTED request carries no such promise -- the server may finish it after
-# curl has stopped listening. So this number is not sized to the slowest POST;
-# it is sized so that reaching it means the app is not answering AT ALL.
+# us nothing either. A wizard POST is the step's actual work -- Jira's licence
+# and outgoing-mail steps take 46 s each (measured below), which is the reason
+# wizard_read gives for passing a timeout on the poll and nowhere else. Cutting
+# a POST that is being processed is the one thing this loop must not do: the
+# retry is safe only because a 500 means the step was refused rather than
+# half-applied, and an ABORTED request carries no such promise -- the server may
+# finish it after curl has stopped listening. So this number is not sized to the
+# slowest POST; it is sized so that reaching it means the app is not answering
+# AT ALL.
 #
 # MEASURED, and the measurement is why this is 240 s and not the 60 s it was
 # first written with. On 2026-09-04, from empty volumes, TeamCity stopped, both
@@ -252,7 +253,10 @@ wizard_end()   { [ -n "$JAR" ] && rm -f "$JAR" "$JAR.body"; JAR=; }
 #
 # Only the poll passes it. Every other call here reads the answer to a POST the
 # product has already accepted, where a slow response is legitimate -- Jira's
-# application-properties step is not quick -- and a failed one really is fatal.
+# licence and outgoing-mail steps take 46 s each, POST and this read together
+# (#367) -- and a failed one really is fatal. The example was the
+# application-properties step until that measurement put it at 0 s; the rule it
+# supports did not change, only the step that shows it.
 wizard_read() {  # wizard_read <url> [poll timeout seconds]
   if [ -n "${2:-}" ]; then
     # `@@$1` on failure so the fields below come out as "this url, no form",
