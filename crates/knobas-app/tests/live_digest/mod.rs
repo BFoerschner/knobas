@@ -36,6 +36,9 @@
 //! Nor is anything here that only one suite has: `atlassian_live.rs` keeps its
 //! `Events` sink (it collects health events, which is a claim, not scaffolding)
 //! and its `backfill`, and builds its own [`Ending`] for it.
+// Compiled separately into each live test binary, and each uses a different
+// part of it -- so without this, `clippy --all-targets -- -D warnings` fails on
+// whatever one of them happens not to call.
 #![allow(dead_code)]
 
 use std::sync::{Arc, Mutex};
@@ -67,7 +70,25 @@ impl SyncEvents for Quiet {
 
 /// A progress sink that reports one thing: the run reached an end, either one.
 pub struct Ending {
-    pub done: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    done: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+}
+
+impl Ending {
+    /// A sink for one run, and the receiver that fires when that run ends.
+    ///
+    /// The two are handed out together, and the field between them is private,
+    /// because they are one thing: a sink holding another run's sender reports
+    /// the wrong run's ending, and a caller assembling the pair by hand is a
+    /// fifth copy of the wiring this module exists to have one of.
+    pub fn for_run() -> (Arc<Self>, tokio::sync::oneshot::Receiver<()>) {
+        let (done, wait) = tokio::sync::oneshot::channel();
+        (
+            Arc::new(Self {
+                done: Mutex::new(Some(done)),
+            }),
+            wait,
+        )
+    }
 }
 
 impl knobas_sync::progress::ProgressSink for Ending {
@@ -89,10 +110,7 @@ impl knobas_sync::progress::ProgressSink for Ending {
 
 /// Sync one source and wait for the run to end, whichever way it ends.
 pub async fn sync(state: &SourcesState, source: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: Mutex::new(Some(done)),
-    });
+    let (sink, wait) = Ending::for_run();
     state
         .scheduler
         .trigger(source, SyncTrigger::Manual, Some(sink))

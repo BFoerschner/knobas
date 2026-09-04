@@ -958,10 +958,7 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
 /// backfill alike until the CQL index catches up. It takes the source for that
 /// reason.
 async fn backfill(state: &SourcesState, source: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
+    let (sink, wait) = Ending::for_run();
     state
         .scheduler
         .trigger(source, SyncTrigger::Backfill, Some(sink))
