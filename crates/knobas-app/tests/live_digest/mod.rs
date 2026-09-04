@@ -33,9 +33,19 @@
 //! [`on_digest`] is shared, and it carries the subject noun through so its own
 //! message stays each suite's own.
 //!
+//! **`atlassian_live.rs`'s own two digest assertions stay inline**, and they
+//! are the one place the shape [`on_digest`] carries is left standing twice.
+//! They match on three fields where it matches on four: neither of them
+//! constrains `kind` at all, so routing them through [`on_digest`] would newly
+//! assert what their `kind` *is*. That is a change to what a test claims, which
+//! is the one thing a move may not do -- so the duplication is the cheaper of
+//! the two. If either ever grows a `kind`, it belongs here.
+//!
 //! Nor is anything here that only one suite has: `atlassian_live.rs` keeps its
 //! `Events` sink (it collects health events, which is a claim, not scaffolding)
-//! and its `backfill`, and builds its own [`Ending`] for it.
+//! and its `backfill`, which triggers a backfill rather than a manual run and
+//! takes its sink from [`Ending::for_run`] like everything else.
+
 // Compiled separately into each live test binary, and each uses a different
 // part of it -- so without this, `clippy --all-targets -- -D warnings` fails on
 // whatever one of them happens not to call.
