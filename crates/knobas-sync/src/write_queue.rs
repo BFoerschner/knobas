@@ -99,12 +99,17 @@ const ACTOR: &str = "user";
 /// caller that has one, which is the caller this op exists for (#44).
 ///
 /// **The address is not a perfect key, and it does not have to be.**
-/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which knows nothing of open
-/// versus closed, so a repository that re-used a head branch can match more
-/// than one pull request and the statement takes one of them. That ambiguity
-/// belongs to the look-before-write and the withdrawal adds nothing to it.
-/// What the row has to do here is narrower: name one repository's pull
-/// requests from one named branch, which is a set a person can look at.
+/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which holds merged pull
+/// requests as deliberately as open ones, so a repository that re-used a head
+/// branch matches more than one. That ambiguity belongs to the
+/// look-before-write and the withdrawal adds nothing to it -- and since #359
+/// the look-before-write resolves it rather than taking whichever sorted
+/// first: the statement answers every pull request on the head with the merged
+/// flag its own source declares, and only one the source calls unmerged
+/// settles a step "already open". Where it cannot tell, nothing is settled and
+/// the create goes to the source to refuse. Neither reading changes what this
+/// list needs from the row, which is narrower still: name one repository's
+/// pull requests from one named branch, which is a set a person can look at.
 /// `base` narrows it further; a `title` does not narrow to one artefact at
 /// all, since any number of them can carry the same one -- which is exactly
 /// why `create_ticket`, whose row carries a title and no address, needs the
