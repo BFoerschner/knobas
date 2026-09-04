@@ -1154,12 +1154,13 @@ async fn two_callers_watching_one_run_both_hear_it_end() {
     retire(&pool, &ids).await;
 }
 
-// -- #358: a resync waits for a run that could have seen the write -----------
+// -- #358: a sync after a write waits for a run that could have seen it -----
 
-/// **A resync is not satisfied by a run that was already going.**
+/// **A sync after a write is not satisfied by a run that was already going.**
 ///
 /// The dedupe the test above is about -- a second caller handed the run in
-/// flight -- is right for *Sync now* and wrong for the caller `resync` serves:
+/// flight -- is right for *Sync now* and wrong for the caller
+/// `sync_after_write` serves:
 /// one that has just written something and is about to look for it. A run that
 /// began before the write cannot carry it, however faithfully its ending is
 /// delivered. That is the start-work link step's flake (#358): the branch
@@ -1170,7 +1171,7 @@ async fn two_callers_watching_one_run_both_hear_it_end() {
 /// stale one finished**, which is the only reading under which it could have
 /// seen a write made before the call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
+async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
@@ -1188,13 +1189,13 @@ async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
     // rather than racing its ending.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let waited_on = scheduler.resync(&id).await.unwrap();
+    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
     scheduler.shutdown().await;
 
     assert_ne!(
         waited_on, stale,
-        "the resync settled for the run that was already going, whose ending \
-         says nothing about a write made after it started"
+        "it settled for the run that was already going, whose ending says \
+         nothing about a write made after it started"
     );
     let stale_row = run_log::get(&pool, stale).await.unwrap().expect("the run");
     let waited_row = run_log::get(&pool, waited_on)
@@ -1203,8 +1204,8 @@ async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
         .expect("the run");
     assert!(
         waited_row.started_at >= stale_row.finished_at.expect("the stale run ended"),
-        "the run the resync waited on overlapped the stale one, so it is not \
-         one that could have seen a write made after the call: {stale_row:?} \
+        "the run it waited on overlapped the stale one, so it is not one \
+         that could have seen a write made after the call: {stale_row:?} \
          then {waited_row:?}"
     );
     // **Two, and not more.** The bound is the whole of story 11's side of this:
@@ -1226,12 +1227,12 @@ async fn a_resync_waits_for_a_run_that_began_after_it_asked() {
 /// **…and it costs one run when there was nothing to wait out.**
 ///
 /// The pair to the test above, and the reason the fix is not "always sync
-/// twice": the ordinary write-then-read is one caller, one run. A resync that
+/// twice": the ordinary write-then-read is one caller, one run. A call that
 /// waited twice unconditionally would double the latency of every start-work
 /// link step and every protocol publish (#289) to buy a case that had not
 /// happened.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_resync_with_nothing_in_flight_starts_one_run_and_no_more() {
+async fn a_sync_after_a_write_with_nothing_in_flight_starts_one_run_and_no_more() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
@@ -1239,14 +1240,14 @@ async fn a_resync_with_nothing_in_flight_starts_one_run_and_no_more() {
     let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
-    let waited_on = scheduler.resync(&id).await.unwrap();
+    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
     scheduler.shutdown().await;
 
     let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
     assert_eq!(
         runs.len(),
         1,
-        "one caller, one sync -- the resync started a second run nobody asked \
+        "one caller, one sync -- it started a second run nobody asked \
          for: {runs:?}"
     );
     assert_eq!(runs[0].id, waited_on, "and it is the one it named");

@@ -122,14 +122,15 @@ impl Steps for Queue<'_> {
         // Wait for the run, rather than triggering and hoping: the very next
         // thing the caller does is look for the pull request this run is
         // fetching. One implementation of that wait, in
-        // `crate::sources::write_queue::resync`, because #289's protocol
-        // publish needs the identical thing for the identical reason -- a
+        // `crate::sources::write_queue::sync_after_write`, because #289's
+        // protocol publish needs the identical thing for the identical reason -- a
         // create answers no address, so the mirror is the only way to name
         // what was made, and reading it before the run has finished is reading
         // it too early. **Or before a run that could have seen it has
         // finished** -- waiting out the one this flow's own branch write left
-        // in flight is `Scheduler::resync`'s job and was the #358 flake.
-        crate::sources::write_queue::resync(self.state, source).await;
+        // in flight is `Scheduler::sync_after_write`'s job and was the #358
+        // flake.
+        crate::sources::write_queue::sync_after_write(self.state, source).await;
     }
 }
 

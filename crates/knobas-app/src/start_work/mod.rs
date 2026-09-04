@@ -609,9 +609,9 @@ async fn dispatch(
 /// kicked off was often still going when this asked, and being handed *that*
 /// run's ending was how this step failed one flow in five with the pull
 /// request sitting at the forge. That is fixed where the promise is made,
-/// `Scheduler::resync`, and not here -- the shape of this step is unchanged,
-/// and a reader who makes it loop has still made the mistake the paragraph
-/// above is about.
+/// `Scheduler::sync_after_write`, and not here -- the shape of this step is
+/// unchanged, and a reader who makes it loop has still made the mistake the
+/// paragraph above is about.
 async fn link_step(
     pool: &PgPool,
     steps: &dyn Steps,

@@ -1124,7 +1124,7 @@ impl Scheduler {
             .map(Triggered::run_id)
     }
 
-    /// Re-read one source and **wait for a run that could have seen what was
+    /// Sync one source and **wait for a run that could have seen what was
     /// just written** (issues #289, #358).
     ///
     /// [`trigger`](Self::trigger) starts or joins a run and answers straight
@@ -1184,17 +1184,17 @@ impl Scheduler {
     /// the id of a run already in flight -- so neither wait can be for
     /// something that will never speak.
     ///
-    /// **Not a full sync**, whatever the name suggests: every run this asks for
-    /// is an *incremental sync* in `CONTEXT.md`'s sense, from the stored
-    /// cursor, and [`backfill`](Self::backfill) is still the only cursor-less
-    /// run. What `resync` names here is the **wait**, which is the whole of
-    /// what it adds to [`trigger`](Self::trigger).
+    /// Every run this asks for is an *incremental sync* in `CONTEXT.md`'s
+    /// sense, from the stored cursor; [`backfill`](Self::backfill) is still
+    /// the only cursor-less run. What the name has to carry is the **wait**,
+    /// which is the whole of what this adds to [`trigger`](Self::trigger) --
+    /// and *after the write* is the half of it #358 is about (#375).
     ///
     /// Answers the id of the run it waited on last.
     ///
     /// # Errors
     /// [`TriggerError`], from either trigger.
-    pub async fn resync(&self, source_id: &str) -> Result<i64, TriggerError> {
+    pub async fn sync_after_write(&self, source_id: &str) -> Result<i64, TriggerError> {
         match self.trigger_and_wait(source_id).await? {
             Triggered::Started(run_id) => Ok(run_id),
             Triggered::Existing(_) => self
@@ -1481,9 +1481,10 @@ impl Scheduler {
 ///
 /// The distinction is invisible to nearly every caller -- *Sync now* wants the
 /// mirror re-read and does not care who is doing it -- and load-bearing for
-/// exactly one: [`Scheduler::resync`], whose caller has just written something
-/// and is about to look for it. A run it did not start is a run that may have
-/// begun before that write, and no ending of such a run says anything about it.
+/// exactly one: [`Scheduler::sync_after_write`], whose caller has just written
+/// something and is about to look for it. A run it did not start is a run
+/// that may have begun before that write, and no ending of such a run says
+/// anything about it.
 ///
 /// `Existing` covers both ways of being handed somebody else's run: enrolled in
 /// one still in flight, and served the record of one already over. Neither
@@ -1491,12 +1492,12 @@ impl Scheduler {
 ///
 /// **Not a retreat from ADR-0005's "no caller has to know which of those
 /// happened".** That sentence is about the *ending*, and the ending is still
-/// promised identically on all three paths -- which is what lets `resync` wait
-/// on a joined run at all. This says something else, and only inside this
-/// crate: whether the run began before or after the call. A caller asking "did
-/// the mirror get re-read?" still must not ask; the one asking "could a sync
-/// have seen what I just wrote?" has no other way to know, and used to guess
-/// wrong one time in five (#358).
+/// promised identically on all three paths -- which is what lets
+/// `sync_after_write` wait on a joined run at all. This says something else,
+/// and only inside this crate: whether the run began before or after the
+/// call. A caller asking "did the mirror get re-read?" still must not ask;
+/// the one asking "could a sync have seen what I just wrote?" has no other
+/// way to know, and used to guess wrong one time in five (#358).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Triggered {
     Started(i64),

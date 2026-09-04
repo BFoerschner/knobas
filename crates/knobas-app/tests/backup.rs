@@ -142,7 +142,7 @@ async fn seed(pool: &PgPool, tag: &str) -> Seeded {
 /// It never touches `knobas.entity`, `knobas.link` or `knobas.note` -- a sync
 /// writes the mirror, and the point of the test is that everything else came
 /// out of the archive.
-async fn resync(pool: &PgPool, seeded: &Seeded) {
+async fn full_sync(pool: &PgPool, seeded: &Seeded) {
     let ticket_title = format!("Retry failed {} payouts", seeded.token);
     for (id, source, kind, title) in [
         (&seeded.ticket, "jira", "ticket", ticket_title.as_str()),
@@ -185,7 +185,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
     let into = target.pool(2).await.unwrap();
     // ...and only *then* does the source get synced, so every mirror row the
     // assertions below resolve through was written after the archive was.
-    resync(&into, &seeded).await;
+    full_sync(&into, &seeded).await;
 
     // Seam 1: the detail slide-over. The link was made before the dump; the
     // mirror row it resolves through was made after the restore.
