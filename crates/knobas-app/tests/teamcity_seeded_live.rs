@@ -10,6 +10,22 @@
 //! **adapter's** crate and cannot reach `knobas_app::commands::entity`. The
 //! digest is an app-crate read, so the assertion has to be made from here.
 //!
+//! **`_seeded_` is in the name because `just teamcity-live` does not run this
+//! file.** Only `just teamcity-live-seeded` does, against the TeamCity
+//! `./seed --teamcity` filled; the public JetBrains instance the sibling
+//! recipe reads has no build of ours on it and could not satisfy a word of
+//! this. Same distinction, same spelling, as the adapter crate's
+//! `live_teamcity.rs` / `live_teamcity_seeded.rs` pair.
+//!
+//! **What "across" does and does not mean here.** Four sources now have a
+//! live digest witness, but they are four suites over four
+//! `scratch_database`s, each reading the day *its own* server acted on --
+//! there is no single digest read that spans all four, and there cannot be one
+//! while the Atlassian pair lives behind a three-hour timebomb licence and its
+//! own recipe (`testenv/README.md`, "Jira and Confluence, end to end"). The
+//! criterion is met route by route. Whether that is what the exit sentence
+//! asks for is Björn's call at the gate, not this file's.
+//!
 //! # What it asserts, and what it does not
 //!
 //! One thing: a build the seed really ran, on the day the server really ran it

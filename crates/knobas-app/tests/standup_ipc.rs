@@ -648,7 +648,7 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
 /// `ATTRIBUTED_TO_ME` has no `kind` predicate, and this is the fixture that
 /// says so. It exists because the mutant issue #389 asked for -- adding
 /// `and i.kind not in ('pr', 'build')` to that statement -- survived **every
-/// test in this crate**: 182 unit tests and every integration binary,
+/// test in this crate**: its unit tests and every integration binary,
 /// `standup_ipc`'s own fifteen included, all green with the digest silently
 /// refusing to carry a pull request or a build. The reason is this file's
 /// corpus, which was `commit` throughout: the producer test above names its
@@ -657,7 +657,7 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
 /// So the three kinds are here explicitly, and the assertion is on the
 /// `(item, kind)` pair rather than on a count -- a list of the right length
 /// made of the wrong rows is the failure a count cannot see. The live suites
-/// `tests/start_work_live.rs` and `tests/teamcity_live.rs` assert the same
+/// `tests/start_work_live.rs` and `tests/teamcity_seeded_live.rs` assert the same
 /// thing against a real Gitea and a real TeamCity, where the kind and the
 /// attribution are the *server's*; this one is what `just check` runs.
 #[tokio::test]

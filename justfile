@@ -619,9 +619,9 @@ teamcity-live:
 # commands to run. testenv/README.md, "TeamCity, end to end".
 #
 # TWO SUITES, in two crates, and the second is not the adapter's (issue #389).
-# `knobas-app`'s `teamcity_live` is M3.3's exit criterion for this source: a
-# seeded build the mirror attributes to the reader is on the standup digest for
-# the day it ran. The digest is an app-crate read, so `live_teamcity_seeded.rs`
+# `knobas-app`'s `teamcity_seeded_live` is M3.3's exit criterion for this
+# source: a seeded build the mirror attributes to the reader is on the standup
+# digest for the day it ran. The digest is an app-crate read, so `live_teamcity_seeded.rs`
 # -- in the adapter's crate -- cannot make that assertion, and a live suite with
 # no recipe is one nothing runs (testenv/README.md). It is strictly read-only
 # and runs second, so it disturbs neither the exact-set assertions nor the
@@ -644,7 +644,7 @@ teamcity-live-seeded:
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity_seeded \
       -- --ignored --nocapture --test-threads=1
-    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test teamcity_live \
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test teamcity_seeded_live \
       -- --ignored --nocapture --test-threads=1
 
 # The real Jira and Confluence, end to end, inside one licence window: fetch
