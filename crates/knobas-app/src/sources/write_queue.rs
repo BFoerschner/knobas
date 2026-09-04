@@ -273,15 +273,15 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
     Ok(())
 }
 
-/// Re-read a source and **wait for a run that can see what was just written**
+/// Sync a source and **wait for a run that can see what was just written**
 /// (issue #289).
 ///
 /// [`refresh`] triggers and moves on, which is right for the write that has
 /// just landed: nothing is waiting on the mirror, and story 15 only asks that
 /// the app stop disagreeing with itself within the second. A caller that is
 /// about to *look for what its write created* needs the other behaviour, and
-/// [`Scheduler::resync`](knobas_sync::scheduler::Scheduler::resync) is where it
-/// lives -- including the reason one wait is not enough (#358).
+/// [`Scheduler::sync_after_write`](knobas_sync::scheduler::Scheduler::sync_after_write)
+/// is where it lives -- including the reason one wait is not enough (#358).
 ///
 /// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
 /// that may be behind, which every caller of this already has to handle --
@@ -289,8 +289,8 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
 /// rather than raised, exactly as [`refresh`] does with its own: nothing here
 /// reaches the caller, and a warning is what makes a source that could not be
 /// re-read visible to whoever is reading the log.
-pub(crate) async fn resync(state: &crate::sources::SourcesState, source_id: &str) {
-    if let Err(error) = state.scheduler.resync(source_id).await {
+pub(crate) async fn sync_after_write(state: &crate::sources::SourcesState, source_id: &str) {
+    if let Err(error) = state.scheduler.sync_after_write(source_id).await {
         tracing::warn!(
             source = source_id,
             %error,
