@@ -472,6 +472,13 @@ async fn testing_a_draft_writes_nothing_at_all() {
     assert!(report.ok);
     assert!(report.error.is_none());
     assert!(report.elapsed_ms < 60_000);
+    // The adapter's connection note rides on the report (#326): the mock's is
+    // a fixed sentence, so this pins the copy-through and not the mock.
+    assert_eq!(
+        report.detail.as_deref(),
+        Some("compiled-in fixture; nothing was contacted"),
+        "{report:?}"
+    );
     assert!(
         knobas_sync::config::list(&f.pool)
             .await
@@ -960,4 +967,7 @@ async fn a_failed_test_discovers_nothing() {
 
     assert!(!report.ok, "{report:?}");
     assert!(report.discovered.is_empty(), "{report:?}");
+    // And no note: a test that did not connect has nothing to say about the
+    // far end, and `error` already carries what went wrong (#326).
+    assert!(report.detail.is_none(), "{report:?}");
 }
