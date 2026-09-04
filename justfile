@@ -656,7 +656,12 @@ teamcity-live-seeded:
 #     ticket is about: Jira served its wizard 46 s after answering FIRST_RUN --
 #     one progress line, `jira is serving no form yet -- 30s of 600s`, printed
 #     inside that gap -- and the post-wizard wait for RUNNING returned in 0 s
-#     again. Full runs so far sit between 311 s and 392 s.
+#     again. Full runs sat between 311 s and 392 s when this was written.
+#     The floor has since moved DOWN rather than up: 295 s on 2026-09-04,
+#     four suites and 39 tests by then, on a machine with nothing else
+#     building (#332's certification run). These numbers measure the
+#     machine as much as the recipe, and the direction the caps below care
+#     about is the slow one, which nothing has moved.
 #
 # The suites are seconds, not hours, so the three-hour window holds with well
 # over two and a half hours of margin either way; the number to re-measure is
