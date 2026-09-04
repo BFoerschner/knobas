@@ -28,6 +28,7 @@ pub mod backup;
 pub mod commands;
 mod error;
 pub mod inbox;
+pub mod notify;
 mod profile;
 pub mod protocol;
 pub mod sources;
