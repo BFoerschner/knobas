@@ -369,17 +369,26 @@ impl Seeded {
             .as_str()
             .unwrap_or_else(|| panic!("page {id} has no version.when: {record}"))
             .to_owned();
-        raw.parse()
-            .unwrap_or_else(|e| panic!("page {id}: version.when {raw:?}: {e}"))
+        chrono::DateTime::parse_from_rfc3339(&raw)
+            .unwrap_or_else(|e| panic!("page {id}: version.when {raw:?} is not RFC 3339: {e}"))
+            .with_timezone(&chrono::Utc)
     }
 
     /// The corpus **in the search index's order**: the walk's own query, asked
     /// for in one page and read for ids alone.
     ///
-    /// The CQL is the adapter's own `cql::build_cql` full-sync form for a scoped
-    /// source, written out here rather than borrowed, because the point of
-    /// this probe is to ask the server the ordering question directly instead
-    /// of through the thing under test.
+    /// The CQL is the adapter's own `cql::build_cql` full-sync form for a
+    /// scoped source, written out here rather than borrowed: `build_cql` is
+    /// `pub(crate)`, and asking the server the ordering question through the
+    /// thing under test would be no witness anyway. **Nothing catches the two
+    /// drifting apart** -- a clause the adapter changes and this does not
+    /// would settle an order the walk does not use, and settle it green. The
+    /// `cql.rs` unit tests are where that string is pinned; this is a copy of
+    /// it and says so.
+    ///
+    /// Sent through `query` rather than `Seeded::get`'s pre-built path,
+    /// because a CQL string carries spaces, quotes and an `=`, and this is the
+    /// one call in the file that needs them encoded rather than hand-escaped.
     async fn index_order(&self) -> Vec<String> {
         let cql = format!(
             "type = page AND space in (\"{}\") order by lastmodified asc",
