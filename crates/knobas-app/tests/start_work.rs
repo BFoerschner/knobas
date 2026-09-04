@@ -56,6 +56,14 @@ enum Answer {
     Rejected(String),
 }
 
+/// One pull request the fake's mirror holds: `(repo, head, entity id, merged)`.
+///
+/// The merged flag is `Option<bool>` and not `bool` because the real read
+/// resolves it through what the source **declares** (#277): `None` is that
+/// declared read missing, which is a state a fixture has to be able to put the
+/// mirror in -- it is the direction #359 pinned.
+type MirroredPull = (String, String, String, Option<bool>);
+
 #[derive(Default)]
 struct Recorded {
     /// Every op identifier dispatched, in order. The assertion surface.
@@ -74,16 +82,10 @@ struct Fake {
     landings: Mutex<std::collections::HashMap<i64, Landing>>,
     /// The branches the mirror holds, as `(repo, name)`.
     branches: Mutex<Vec<(String, String)>>,
-    /// The pull requests the mirror holds, as `(repo, head, entity id,
-    /// merged)`.
-    ///
-    /// The merged flag is `Option<bool>` and not `bool` because the real read
-    /// resolves it through what the source **declares** (#277): `None` is that
-    /// declared read missing, which is a state a fixture has to be able to put
-    /// the mirror in -- it is the direction #359 pinned.
-    pulls: Mutex<Vec<(String, String, String, Option<bool>)>>,
+    /// The pull requests the mirror holds.
+    pulls: Mutex<Vec<MirroredPull>>,
     /// What a refresh puts into the mirror, if anything.
-    on_refresh: Mutex<Option<(String, String, String, Option<bool>)>>,
+    on_refresh: Mutex<Option<MirroredPull>>,
     log: Mutex<Recorded>,
     next_write_id: Mutex<i64>,
 }
