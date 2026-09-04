@@ -1,11 +1,11 @@
 //! Desktop notifications with a click that arrives (#339, spec #272
 //! "Notifications").
 //!
-//! #290 sent notifications through `tauri-plugin-notification`, whose desktop
-//! `notify` hands the notification to `notify-rust` and drops the handle --
-//! so nothing in the process could learn of a click, and the plugin's
-//! `register_listener` exists on mobile only. This module owns the send
-//! instead: `notify-rust` shows the notification, the handle's
+//! #290 sent them through `tauri-plugin-notification`, whose desktop
+//! `notify` hands the desktop notification to `notify-rust` and drops the
+//! handle -- so nothing in the process could learn of a click, and the
+//! plugin's `register_listener` exists on mobile only. This module owns the
+//! send instead: `notify-rust` shows the desktop notification, the handle's
 //! `wait_for_action` runs on a thread of its own, and a click becomes the
 //! `notification:clicked` event with the item's address, which the store on
 //! the other side already knows how to navigate to. The decision to own the
@@ -17,23 +17,23 @@
 //! ## The wait is unbounded, so there is a registry
 //!
 //! The prototype showed `wait_for_action` returning only on a click or on the
-//! user clearing the notification from Notification Center -- **never** on
+//! user clearing the banner from Notification Center -- **never** on
 //! the banner sliding away. Every wait is therefore a thread blocked for as
 //! long as the reader ignores that banner, which could be the whole session,
 //! and knobas neither invents a timeout (the OS gives none, and a made-up one
 //! drops real clicks) nor lets the count grow without bound. Two rules:
 //!
 //! - **One waiter per address.** A second send for an address already waited
-//!   on shows the notification and starts no second wait: the click on either
-//!   banner lands on the one thread, and it goes to the same room.
+//!   on shows the desktop notification and starts no second wait: the click
+//!   on either banner lands on the one thread, and it goes to the same room.
 //! - **At most [`WAITER_CAP`] concurrent waiters.** A send beyond it still
 //!   shows -- the reader is told -- but drops the handle, which on every
 //!   backend sends fire-and-forget, and says so at `debug`. A clicked banner
 //!   past the cap opens nothing, which is the pre-#339 behaviour for that one
-//!   notification rather than for all of them.
+//!   desktop notification rather than for all of them.
 //!
 //! A completed wait frees its slot, whichever way it completed. The registry
-//! is tested with an injected backend so the tests touch no OS notification;
+//! is tested with an injected backend so the tests show nothing on the OS;
 //! [`platform::show`] is the one real backend and is exercised by the signed
 //! bundle check in `testenv/README.md`.
 //!
@@ -56,11 +56,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
-/// How many notifications may be waited on at once. See the module note.
+/// How many desktop notifications may be waited on at once. See the module
+/// note.
 pub const WAITER_CAP: usize = 16;
 
-/// The action id `notify-rust` reports when a notification was cleared or
-/// dismissed rather than clicked, on every backend.
+/// The action id `notify-rust` reports when a desktop notification was
+/// cleared or dismissed rather than clicked, on every backend.
 pub const CLOSED: &str = "__closed";
 
 /// What the frontend asks to have shown: the `notify` command's argument,
@@ -89,11 +90,12 @@ pub trait NotificationEvents: Send + Sync + 'static {
     fn notification_clicked(&self, address: String);
 }
 
-/// A shown notification's wait: blocks until the reader acts and answers
-/// with the action id (`"default"` for the body, [`CLOSED`] for a clear).
+/// A shown desktop notification's wait: blocks until the reader acts and
+/// answers with the action id (`"default"` for the body, [`CLOSED`] for a
+/// clear).
 ///
-/// Owns the platform handle; dropping it unwaited is how a notification
-/// beyond the cap is sent fire-and-forget.
+/// Owns the platform handle; dropping it unwaited is how a desktop
+/// notification beyond the cap is sent fire-and-forget.
 pub type Wait = Box<dyn FnOnce() -> String>;
 
 /// Show a draft and hand back its wait. The seam the registry is tested at.
@@ -119,8 +121,8 @@ where
 }
 
 /// What became of a send, for the tests -- the command discards it, having
-/// said what it needed to at `debug` on the thread. The notification was shown
-/// in every case; the variants say whether a click can reach anybody.
+/// said what it needed to at `debug` on the thread. The desktop notification
+/// was shown in every case; the variants say whether a click can reach anybody.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delivery {
     /// Shown, and a thread is waiting on its click.
@@ -199,8 +201,8 @@ impl Notifier {
     }
 
     /// Show the draft and, when admitted, wait for its click on a thread of
-    /// its own. Returns once the notification is on screen (or refused), not
-    /// when it is clicked.
+    /// its own. Returns once the desktop notification is on screen (or
+    /// refused), not when it is clicked.
     ///
     /// # Errors
     ///
@@ -267,11 +269,13 @@ impl Notifier {
                 drop(slot);
             });
         if let Err(error) = spawned {
-            return Err(format!("could not start the notification thread: {error}"));
+            return Err(format!(
+                "could not start the desktop notification thread: {error}"
+            ));
         }
         on_screen
             .recv()
-            .map_err(|_| "the notification thread ended before showing".to_owned())??;
+            .map_err(|_| "the desktop notification thread ended before showing".to_owned())??;
         Ok(delivery)
     }
 }
@@ -282,37 +286,22 @@ pub mod platform {
 
     /// Show `draft` with `notify-rust` and hand back its handle's wait.
     ///
-    /// On macOS the application identity is set once before the first send,
-    /// the way `tauri-plugin-notification`'s desktop `notify` does it: the
-    /// bundle identifier, or `com.apple.Terminal` under `tauri::is_dev()`.
-    /// Under `preview-macos-un` `notify-rust` marks that call as having no
-    /// effect -- the `UNUserNotificationCenter` backend takes its identity
-    /// from the running bundle and refuses a bare binary outright -- so the
-    /// call is kept for the rule and not for the effect, and a `tauri dev`
-    /// send is expected to fail with *no bundle identifier* (recorded in
-    /// `testenv/README.md`).
+    /// No application identity is set first. On the `UNUserNotificationCenter`
+    /// backend the identity is the running bundle's, and a bare `tauri dev`
+    /// binary has none: its send fails with *no bundle identifier* (recorded
+    /// in `testenv/README.md`). #339 first carried over
+    /// `tauri-plugin-notification`'s NS-backend rule -- `set_application`
+    /// with the bundle identifier, or `com.apple.Terminal` under
+    /// `tauri::is_dev()` -- and #380 took it out again: under
+    /// `preview-macos-un`, `notify-rust` 4.18.0 exports that function as
+    /// `deprecated(note = "these functions have no effect in this
+    /// configuration")` (`src/macos/mod.rs`). Do not re-add it; it cannot
+    /// make `tauri dev` show anything.
     ///
     /// # Errors
     ///
     /// `notify-rust`'s error, displayed.
-    pub fn show(identifier: &str, draft: &NotificationDraft) -> Result<Wait, String> {
-        #[cfg(target_os = "macos")]
-        {
-            static IDENTITY: std::sync::Once = std::sync::Once::new();
-            IDENTITY.call_once(|| {
-                let application = if tauri::is_dev() {
-                    "com.apple.Terminal"
-                } else {
-                    identifier
-                };
-                #[allow(deprecated)]
-                let outcome = notify_rust::set_application(application);
-                tracing::debug!(application, ?outcome, "notification identity");
-            });
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = identifier;
-
+    pub fn show(draft: &NotificationDraft) -> Result<Wait, String> {
         let mut notification = notify_rust::Notification::new();
         notification.summary(&draft.title).body(&draft.body);
         // The freedesktop spec's body-click action: without it an XDG server
@@ -426,7 +415,7 @@ mod tests {
             let mut gates = self.backend.gates.lock().unwrap();
             let queue = gates
                 .get_mut(address)
-                .expect("a notification was shown for this address");
+                .expect("a desktop notification was shown for this address");
             while !queue.is_empty() {
                 if queue.remove(0).send(action.to_owned()).is_ok() {
                     return;

@@ -810,8 +810,8 @@ land, since a bundle launched from Finder or `open` has no terminal.)
 `TeamIdentifier=not set` is expected for a self-signed certificate; the
 notarization warning is expected too. The check has two steps:
 
-1. **The banner** (#290): in that bundle, switch one notification kind on,
-   unfocus the window, and see one notification in Notification Center.
+1. **The banner** (#290): in that bundle, switch one category on, unfocus
+   the window, and see one desktop notification in Notification Center.
 2. **The click** (#339): click the banner's *body* -- there is no button --
    and knobas comes to the front on that item's room (`#/inbox` for a
    credential expiry, which has no entity). stderr carries the two lines to
@@ -831,7 +831,7 @@ from the registered path while the running one waited on. Launched from the
 registered path (run 4) it stayed single-instance and the click landed. If a
 click ever launches a second knobas, that is this, not the waiter.
 
-Also from the ruling: **`tauri dev` shows no notification on macOS.** The UN
+Also from the ruling: **`tauri dev` shows no desktop notification on macOS.** The UN
 backend refuses a bare binary with *No bundle identifier found.
 UNUserNotificationCenter requires a valid .app bundle.*; the `notify` command
 rejects with that sentence, the store swallows it, and the dev terminal shows
@@ -840,14 +840,14 @@ setting still work in dev; the banner and its click are the bundle's.
 
 **The first run of that check shows nothing, and the reason is macOS, not
 knobas.** Written down here because it cost an afternoon once. A fresh bundle
-identifier has no notification authorization, and the legacy
+identifier has not been authorized to notify, and the legacy
 `NSUserNotification` path the plugin ends up on (`tauri-plugin-notification` ->
 `notify-rust` -> `mac-notification-sys`) does not raise the permission sheet
 itself. macOS raises its own banner-shaped prompt -- *"knobas Notifications:
 Notifications may include alerts, sounds, and icon badges"* -- on the app's
 first contact with `usernoted`, and **withdraws it unanswered when the app
 quits**, after which it is not asked again. Until somebody answers it, every
-notification is *delivered and never presented*: it goes into Notification
+desktop notification is *delivered and never presented*: it goes into Notification
 Center's store and no banner appears.
 
 Both states are visible in the unified log, and this is the way to tell them
@@ -864,7 +864,7 @@ are info-level and the default level filter hides them.)
 
 * `Delivering <NotificationRecord app:"dev.knobas.desktop" ...> to
   [ .alert .lockScreen .notificationCenter ]` with **no matching `Presenting`
-  line** -- knobas called the plugin and macOS held the notification back.
+  line** -- knobas called the plugin and macOS held the desktop notification back.
   Not authorized.
 * `Presenting <NotificationRecord app:"dev.knobas.desktop" ...> as banner` --
   the check passed.
@@ -875,7 +875,7 @@ are info-level and the default level filter hides them.)
 **To answer the prompt after it has been withdrawn:** System Settings ->
 Notifications -> Application Notifications -> **knobas** -> *Allow
 notifications* on. The app is listed there once it has posted at least one
-notification, even though it never appears in
+desktop notification, even though it never appears in
 `~/Library/Preferences/com.apple.ncprefs.plist` while it is refused -- an
 absence from that file is therefore not evidence that the code never ran.
 

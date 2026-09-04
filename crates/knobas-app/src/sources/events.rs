@@ -6,9 +6,9 @@
 //!
 //! The notifier's click (#339) goes through the same adapter under its own
 //! trait, `notify::NotificationEvents`, rather than through `SyncEvents`: the
-//! scheduler's trait is `knobas-sync`'s and a notification is not a sync
-//! fact. What is shared is the bridge, and the reason for a trait at all --
-//! a test observes the emit without Tauri.
+//! scheduler's trait is `knobas-sync`'s and a desktop notification is not a
+//! sync fact. What is shared is the bridge, and the reason for a trait at all
+//! -- a test observes the emit without Tauri.
 
 use knobas_core::activity::ActivityRow;
 use knobas_sync::config::CredentialHealth;
