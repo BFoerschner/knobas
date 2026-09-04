@@ -361,6 +361,171 @@ impl Seeded {
             .unwrap_or_else(|| panic!("seed-state.json records no page {fixture_id}"))
     }
 
+    /// One page's `version.when` **as the record has it**: the database, which
+    /// no index sits in front of.
+    ///
+    /// Parsed as RFC 3339 and not through the adapter's `time::parse_time`,
+    /// which is `pub(crate)`: this file already reads the same field the same
+    /// way twice over, and `src/time.rs` records what this product actually
+    /// sends -- "measured on Confluence 9.2.21, this container renders **UTC
+    /// with a `Z`**". A stamp this cannot read is a product change, which is
+    /// the one thing this suite exists to report.
+    async fn recorded_when(&self, id: &str) -> chrono::DateTime<chrono::Utc> {
+        let record = self.content(id, "version").await;
+        let raw = record["version"]["when"]
+            .as_str()
+            .unwrap_or_else(|| panic!("page {id} has no version.when: {record}"))
+            .to_owned();
+        chrono::DateTime::parse_from_rfc3339(&raw)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "page {id}: version.when {raw:?} is not the RFC 3339 this adapter parses: {e}"
+                )
+            })
+            .with_timezone(&chrono::Utc)
+    }
+
+    /// The corpus **in the search index's order**: the walk's own query, asked
+    /// for in one page and read for ids alone.
+    ///
+    /// The CQL is the adapter's own `cql::build_cql` full-sync form for a
+    /// scoped source, written out here rather than borrowed: `build_cql` is
+    /// `pub(crate)`, and asking the server the ordering question through the
+    /// thing under test would be no witness anyway. **Nothing catches the two
+    /// drifting apart** -- a clause the adapter changes and this does not
+    /// would settle an order the walk does not use, and settle it green. The
+    /// `cql.rs` unit tests are where that string is pinned; this is a copy of
+    /// it and says so.
+    ///
+    /// Sent through `query` rather than `Seeded::get`'s pre-built path,
+    /// because a CQL string carries spaces, quotes and an `=`, and this is the
+    /// one call in the file that needs them encoded rather than hand-escaped.
+    async fn index_order(&self) -> Vec<String> {
+        let cql = format!(
+            "type = page AND space in (\"{}\") order by lastmodified asc",
+            self.seed.space
+        );
+        let response = self
+            .http
+            .get(format!("{}/rest/api/content/search", self.url))
+            .header("Accept", "application/json")
+            .basic_auth(&self.user, Some(&self.password))
+            .query(&[("cql", cql.as_str()), ("limit", "50")])
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("the index-order probe ({cql}): {e}"));
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        assert_eq!(status, 200, "the index-order probe ({cql}): {text}");
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
+            panic!("the index-order probe ({cql}): unreadable body {text}: {e}")
+        });
+        body["results"]
+            .as_array()
+            .unwrap_or_else(|| panic!("a content search answers `results`: {body}"))
+            .iter()
+            .map(|r| {
+                r["id"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("a search result carries an id: {r}"))
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    /// **Wait until the search index orders the corpus the way the records do**,
+    /// and answer that order.
+    ///
+    /// CQL reads a Lucene index Confluence's write path updates
+    /// asynchronously ([`INDEX_BUDGET`]); `GET /rest/api/content/{id}` reads
+    /// the record itself. Asking both is what turns "the index may be behind"
+    /// into a question with an answer: a page whose index entry still carries
+    /// the `lastmodified` it had before an edit sorts *earlier* under `order
+    /// by lastmodified asc` than its own record says it should, and that
+    /// disagreement is what this polls out.
+    ///
+    /// **Why the paged walk needs it and no other read here does.** A walk
+    /// asks the server for offsets, so a page that moves toward the end
+    /// between two of its requests drags the whole tail one place with it: one
+    /// id is served twice and one is never served at all. Every other read in
+    /// this suite takes its corpus in a single request, where a reorder is
+    /// invisible. The adapter says the same thing from its own side --
+    /// `cql::Order::Ascending`'s doc calls a page edited mid-walk "re-visited
+    /// or missed" and names the ceiling clamp as what brings the missed one
+    /// back *next run*, which is no help to a test asserting on this one.
+    ///
+    /// Not a sleep. A sleep long enough to be safe is a guess, and a guess
+    /// that is too short is a race made rarer rather than a race removed. This
+    /// returns only once the index's *order* stops contradicting the records,
+    /// or fails at [`INDEX_BUDGET`] naming the disagreement -- the shape
+    /// [`a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`] polls
+    /// its own read with.
+    ///
+    /// **What it is and is not.** It is agreement about order, not about
+    /// values: an index entry stale in a way that inverts nothing passes, and
+    /// so it should -- a page whose stale entry leaves the order right is a
+    /// page the walk cannot be hurt by. Once it returns, the order can move
+    /// again only if something writes to the space, and nothing in this suite
+    /// writes after it.
+    ///
+    /// **That last sentence needs the suite to be serial, so here it is
+    /// written down.** `just atlassian-live` runs this file with
+    /// `--test-threads=1`, and so does the manual command in this module's
+    /// header. Run in parallel instead, the rename test's edit and its `Drop`
+    /// restore land *while* the walk is walking, and no wait can help: a write
+    /// concurrent with a paged read is not something a reader can settle.
+    async fn settled_index_order(&self) -> Vec<String> {
+        let deadline = std::time::Instant::now() + INDEX_BUDGET;
+        let started = std::time::Instant::now();
+        loop {
+            let order = self.index_order().await;
+            let mut recorded: Vec<(String, chrono::DateTime<chrono::Utc>)> =
+                Vec::with_capacity(order.len());
+            for id in &order {
+                recorded.push((id.clone(), self.recorded_when(id).await));
+            }
+            let absent: Vec<String> = self
+                .seeded_ids()
+                .into_iter()
+                .filter(|id| !order.contains(id))
+                .collect();
+            // Sub-second slack: the ordering the index applies need not carry
+            // the record's millisecond precision, so two pages the seed
+            // created inside one second may come back either way round. A
+            // write this suite would be waiting on is minutes newer than
+            // anything it could tie with, so the slack costs the check
+            // nothing.
+            let inverted = recorded
+                .windows(2)
+                .find(|w| (w[0].1 - w[1].1).num_milliseconds() > 1_000);
+            match (absent.as_slice(), inverted) {
+                ([], None) => {
+                    println!(
+                        "SEEDED index settled after {:?}: {order:?}",
+                        started.elapsed()
+                    );
+                    return order;
+                }
+                (absent, inverted) => {
+                    let disagreement = match inverted {
+                        Some(w) => format!(
+                            "the index puts {} ({}) before {} ({}), which its own records \
+                             contradict",
+                            w[0].0, w[0].1, w[1].0, w[1].1
+                        ),
+                        None => format!("the index does not have the seeded page(s) {absent:?}"),
+                    };
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "Confluence's search index still disagrees with its own records after \
+                         {INDEX_BUDGET:?}: {disagreement}"
+                    );
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }
+
     /// Put every seeded page's title back to what the seed created it with,
     /// and say what had to be put back -- **the recovery path**, since only a
     /// process that unwinds reaches a `Drop` and a run that was *killed*
@@ -1091,20 +1256,55 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
 /// would be paging something subtly different. Without this the adapter would
 /// be certified only on corpora that fit in one page -- which every fixture
 /// does.
+///
+/// # The one precondition a paged walk has, and why it is waited for
+///
+/// The walk's ordering key is the corpus's `lastmodified`, and this suite
+/// moves one page's twice: `a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`
+/// renames `sepa-design` and then puts the title back, each a version bump.
+/// It polls the index out to [`INDEX_BUDGET`] for the *rename*; the restore
+/// happens in [`Renamed`]'s `Drop`, which checks the record but cannot wait
+/// on the index. `clear_leftovers` above is a second such write whenever a
+/// killed run left a title behind.
+///
+/// Confluence indexes those asynchronously, so the reordering they cause can
+/// land at any moment afterwards -- including between two requests of this
+/// walk, which is the one read in this suite that cannot survive it. That
+/// happened once, on #317's live run (issue #341): one id served twice and one
+/// missed, which is arithmetic and not chance. In pages of two over six pages,
+/// a page that moves from second to last between the first and second request
+/// pulls the tail one place left, so the offset that would have returned the
+/// third page returns the fourth, and the moved page comes round again at the
+/// end.
+///
+/// So the walk waits for the index to agree with the records before it starts
+/// ([`Seeded::settled_index_order`]) rather than assuming ten intervening
+/// tests were enough time. Waiting, and not reordering the tests: libtest runs
+/// them alphabetically, which is not a fact this file states anywhere and not
+/// one a rename would preserve, and it would leave `clear_leftovers`' own
+/// write unwaited-for anyway.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn the_walk_follows_the_next_link_and_the_expansions_survive_it() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
+    let settled = seeded.settled_index_order().await;
     let mut config = seeded.scoped();
     config["page_size"] = serde_json::json!(2);
 
     let (paged, _) = full(&*seeded.source(config)).await;
     let (whole, _) = full(&*seeded.source(seeded.scoped())).await;
+    // Read back, for the failure message alone: an order that moved anyway
+    // says the corpus was written to while the walk ran, which is a different
+    // report from the adapter dropping a page.
+    let after = seeded.index_order().await;
     assert_eq!(
         ids(&paged),
         ids(&whole),
-        "a walk in pages of two returns the same corpus as one in pages of fifty"
+        "a walk in pages of two returns the same corpus as one in pages of fifty -- the index \
+         ordered the corpus {settled:?} before the walk and {after:?} after it, so an order \
+         that moved is a write this run did not wait out and an order that did not is the \
+         adapter's own paging"
     );
     assert!(
         paged.len() > 2,
