@@ -435,11 +435,18 @@ state its wizard can be driven from, and — Jira only — the wait for it to
 actually *serve* that wizard, which is a separate question and lands about a
 minute later. A fourth sits inside the wizard walk itself, capped at 300 s: a
 product already serving a form can still answer a POST to it with a 500 while
-it finishes warming. That last cap is the one number here nothing has
-measured — no recorded run has made the wait print at all — and the script's
-comment block says so rather than guessing a wider one (issue #332). All four
-print what the product is showing — the state, the form, or the code it is
-answering the POST with — and how far into the cap they are, every 30 s.
+it finishes warming, or take the connection and never answer at all. That last
+cap is the one number here nothing has measured — no recorded run has made the
+wait print at all — and the script's comment block says so rather than guessing
+a wider one (issue #332). All four print what the product is showing — the
+state, the form, the code it is answering the POST with, or that it is not
+answering — and how far into the cap they are, every 30 s.
+
+Each of the two that read over the network also bounds a single request, so
+that one unanswered call cannot outlive the cap around it: `POLL_TIMEOUT_S`
+(10 s) for a `/status` poll or a wizard page, `WIZARD_POST_TIMEOUT_S` (60 s)
+for a wizard POST, which is the step's actual work and not a free GET
+(issue #367).
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.
