@@ -1146,9 +1146,10 @@ impl Scheduler {
     /// writes cost one run rather than one each -- and the same dedupe hands
     /// this caller a run that **began before the write did**.
     ///
-    /// That is not a corner: `crate::write_queue::flush` starts exactly such a
-    /// run after every write that lands, so a flow which writes twice and then
-    /// looks for what it made is the ordinary case. Start-work is one (issue
+    /// That is not a corner: `knobas-app`'s `sources::write_queue::flush` --
+    /// the crate above this one, so named rather than linked -- starts exactly
+    /// such a run after every write that lands, so a flow which writes twice
+    /// and then looks for what it made is the ordinary case. Start-work is one (issue
     /// #44): a branch, a pull request, then find the pull request. The branch's
     /// refresh was still going, this joined it, its ending arrived faithfully
     /// -- and it had nothing to say about a pull request that did not exist
@@ -1165,12 +1166,18 @@ impl Scheduler {
     /// up, which is what keeps a step that is stuck distinguishable from one
     /// that is slow (story 11).
     ///
-    /// **What that costs, honestly.** The second run is paid whenever one was
-    /// in flight -- and for start-work that is the usual case, not the rare
-    /// one, since the flow's own earlier write left it there. So the link step
-    /// now waits out two incremental syncs where it waited out one, and the one
-    /// it used to wait out was the wrong one. An idle source, which is every
-    /// other caller most of the time, still costs a single run.
+    /// **What that costs, and who pays it.** The second run is paid whenever
+    /// one was in flight, and that is the ordinary case for every caller this
+    /// has -- not just start-work. That same `flush` triggers its refresh the
+    /// moment a write lands, and each caller asks for this immediately after a
+    /// write, so all three now wait out two incremental syncs where they
+    /// waited out one: start-work's link step (issue #44), #289's protocol
+    /// publish, and the ticket an action item is turned into. For start-work
+    /// the run they used to wait out was the wrong one; for the other two it
+    /// usually was not, and this cannot tell those apart, because `flush`
+    /// discards which of the two its own trigger got. A source with nothing in
+    /// flight -- the source refused the write, so nothing landed and nothing
+    /// was triggered -- still costs a single run.
     ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for
