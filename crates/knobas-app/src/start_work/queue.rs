@@ -108,9 +108,10 @@ impl Steps for Queue<'_> {
         // this implementation has and the trait's other implementations --
         // the fake in the seam tests -- have no use for. `merge::follow_merges`
         // takes it as an argument instead because it is one pass over the whole
-        // corpus and the caller already holds it; this is two lookups per flow,
-        // and the listing behind `declared_paths` is the same round trip the
-        // inbox makes per read.
+        // corpus and the caller already holds it; this is two or three lookups
+        // per flow -- the create step's, and `link_step`'s, twice where it
+        // asks for a refresh -- and the listing behind `declared_paths` is the
+        // same round trip the inbox makes per read.
         let declarations =
             crate::sources::paths::declared_paths(&self.state.pool, self.state.registry.as_ref())
                 .await?;
@@ -208,10 +209,18 @@ const PULL_REQUEST_BY_HEAD: &str = concat!(
 /// What a source calls a pull request that is still open.
 ///
 /// The one spelling knobas holds, and the coalesce point ADR-0007's
-/// requirement 2 promises: `knobas_source_gitea` mirrors Gitea's `state`
-/// verbatim and `knobas_source_mock` its own `open | merged`, and both say
-/// this word. A forge that says `OPENED` is one more candidate here and
-/// nothing else anywhere.
+/// requirement 2 promises: a forge that says `OPENED` is a change to this
+/// item and to [`is_open`], and to nothing else anywhere.
+///
+/// **Gitea is the only source this read reaches today**, and it mirrors its
+/// `state` verbatim: `open` or `closed`, exactly the two words, so both
+/// classifications below are literal for it. `knobas_source_mock` spells its
+/// own state `open | merged` but never gets here at all --
+/// [`PULL_REQUEST_BY_HEAD`] finds a record by `payload->'head'->>'ref'` and
+/// the mock's pull request carries `from`/`to` and no `head` object. That is
+/// worth knowing in both directions: it is why the mock is an argument about
+/// *shape* below and not a corpus, and it is why the word
+/// [`is_finished`] picks is right for every record that actually arrives.
 const STATE_OPEN: &str = "open";
 
 /// The repository's id as a `like` prefix, with `like`'s own metacharacters
@@ -354,6 +363,23 @@ fn is_open(row: &OnHead) -> bool {
 /// [`STATE_OPEN`], or a declaration that calls it merged. A record whose state
 /// knobas could not read and whose flag says nothing is neither this nor
 /// [`is_open`]: it is the miss.
+///
+/// # The one thing an unfamiliar spelling costs, said plainly
+///
+/// A state word knobas does not know -- a forge that says `OPENED` -- lands
+/// here rather than on the miss, because what knobas read is a record that
+/// says something and does not say [`STATE_OPEN`]. That is the safe half:
+/// both this and the miss refuse to link and both let the create step
+/// dispatch, so an unfamiliar spelling can cost a refusal and can never cost a
+/// wrong link. What it can be wrong about is the **word** the refusal uses --
+/// [`super::link_step`] says "closed" wherever the declaration does not say
+/// merged, and a forge whose `OPENED` means open would be called closed.
+///
+/// Left as it is on purpose: the alternative is to carry the record's own
+/// state word into [`PullRequestOnHead::Closed`] so the refusal can quote it,
+/// which is a wider type for a case no source in this repo can reach --
+/// [`STATE_OPEN`] says why -- and the classification, which is what gates the
+/// permanent act, is right either way.
 fn is_finished(row: &OnHead) -> bool {
     row.merged == Some(true) || (row.state.is_some() && !is_open(row))
 }
@@ -477,9 +503,11 @@ mod tests {
     }
 
     /// A source that declares no merged flag still resolves through `state`,
-    /// which is the concrete reason the deciding fact is the record's own:
-    /// `knobas-source-mock` declares none (its merge is a timestamp), and its
-    /// pull requests still have to be linkable.
+    /// which is the concrete reason the deciding fact is the record's own: a
+    /// source may decline that declaration -- `knobas-source-mock` does, its
+    /// merge being a timestamp -- and its pull requests still have to be
+    /// linkable. The ids say `mock` for that shape and not because the mock
+    /// reaches this read; [`STATE_OPEN`] records that it does not.
     #[test]
     fn a_source_that_declares_no_merged_flag_still_reads_its_state() {
         assert_eq!(

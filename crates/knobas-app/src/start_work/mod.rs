@@ -140,9 +140,15 @@ pub enum Linked {
 /// The declared flag is not discarded: it is the one reading a **source** owns
 /// rather than knobas, so it can veto -- anything the declaration calls merged
 /// is not open, whatever its state says -- and it is what words the refusal.
-/// Gitea declares it; `knobas-source-mock` deliberately does not (its merge is
-/// a timestamp), and its pull requests still resolve through `state`, which is
-/// the concrete reason the deciding fact is this one and not the declaration.
+///
+/// It cannot be the *deciding* fact, and `knobas-source-mock` is the shape of
+/// why: it declares no merged flag at all, deliberately, because its merge is
+/// a timestamp rather than a boolean. A source may decline that declaration
+/// and still have pull requests knobas must be able to link, and `state` is
+/// what answers for one. (The mock is an argument about shape and not a
+/// corpus: its pull requests carry `from`/`to` and no `head` object, so
+/// `queue::PULL_REQUEST_BY_HEAD` never reaches them either way. Gitea is the
+/// only source this read reaches today.)
 ///
 /// The **declared** route for open-ness would be `status_name` on the `pr`
 /// kind, and it was left alone on purpose: `status_name` is what the mini

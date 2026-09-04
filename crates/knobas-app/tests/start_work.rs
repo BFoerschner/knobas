@@ -935,9 +935,14 @@ async fn a_pull_request_whose_state_cannot_be_read_is_not_an_open_one() {
 }
 
 /// A source that declares no merged flag still resolves through the record's
-/// own state, which is why the deciding fact is that one:
-/// `knobas_source_mock` declares none -- its merge is a timestamp -- and its
-/// pull requests still have to be linkable.
+/// own state, which is why the deciding fact is that one: a source may decline
+/// that declaration -- `knobas_source_mock` does, its merge being a timestamp
+/// -- and its pull requests still have to be linkable. The empty
+/// [`Declarations`] is that source's shape, not that source's corpus; the
+/// mock's own pull requests carry no `head` object and never reach this
+/// statement.
+///
+/// [`Declarations`]: knobas_core::payload::Declarations
 #[tokio::test]
 async fn a_source_that_declares_no_merged_flag_still_reads_the_state() {
     let pool = corpus("sw_head_undeclared").await;
@@ -1051,6 +1056,36 @@ async fn a_link_step_refuses_a_merged_pull_request_and_names_it() {
         "the refusal must name what it found: {detail}"
     );
     assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Pending);
+}
+
+/// And the **other word**: a pull request somebody closed without merging is
+/// refused as *closed*, not as merged. The declared flag is what chooses
+/// between the two words, so the branch that reads it as `false` is a
+/// user-facing string nothing else here would notice getting wrong -- the
+/// classification is the same either way, and only the sentence differs.
+#[tokio::test]
+async fn a_link_step_refuses_a_closed_pull_request_as_closed_and_not_as_merged() {
+    let pool = corpus("sw_closed_head_no_new").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new().holding(&head, on_head(PR_MERGED, Some(false), Some("closed")));
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::LinkPullRequest), StepOutcome::Failed);
+    assert!(
+        fake.links().is_empty(),
+        "the ticket was linked to a closed one"
+    );
+    let detail = step_of(&flow, Step::LinkPullRequest)
+        .detail
+        .clone()
+        .expect("the step has to carry why");
+    assert!(
+        detail.contains(PR_MERGED) && detail.contains("closed") && !detail.contains("merged"),
+        "nothing knobas read says this one was merged, and the refusal must not \
+         say so either: {detail}"
+    );
 }
 
 // -- the reverse direction -------------------------------------------------
