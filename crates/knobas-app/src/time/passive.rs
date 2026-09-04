@@ -419,6 +419,17 @@ pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<
 /// the window was still focused, so the observation is a real one -- what it
 /// cannot say is what was open.
 ///
+/// **The instant is this process's clock, bound, and not the column's
+/// `default now()`.** Migration `0015` made `at` default server-side so the
+/// instant would be "the server's and not a webview clock that disagrees
+/// with it by fractions of a second"; that default is now unused by any
+/// production writer (`write` binds `at` so the fixtures can write a past
+/// through it, #387), and the guard still holds, because `Utc::now()` here
+/// is the app process's clock, on the host the embedded server runs on, and
+/// never the webview's. `knobas.timer.last_heartbeat` keeps its server-side
+/// `now()` (`BEAT` in `time/mod.rs`); the two stamps of one beat are one
+/// host's clock read microseconds apart, against thirty-second windows.
+///
 /// # Errors
 /// [`IpcError`] if the write fails.
 async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
