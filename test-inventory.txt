@@ -76,6 +76,11 @@ knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_int
 knobas-app	lib/knobas_app	inbox::tests::every_inbox_category_has_a_toggle_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
 knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
+knobas-app	lib/knobas_app	notify::tests::a_click_reaches_the_events_with_its_address_and_a_clear_does_not
+knobas-app	lib/knobas_app	notify::tests::a_completed_wait_frees_its_slot_for_the_next_send
+knobas-app	lib/knobas_app	notify::tests::a_refused_show_is_an_error_and_holds_no_slot
+knobas-app	lib/knobas_app	notify::tests::a_second_send_for_an_address_already_waiting_shows_but_starts_no_second_wait
+knobas-app	lib/knobas_app	notify::tests::the_seventeenth_concurrent_waiter_shows_but_does_not_wait
 knobas-app	lib/knobas_app	profile::tests::a_blank_database_url_counts_as_unset
 knobas-app	lib/knobas_app	profile::tests::a_demo_profile_ignores_an_externally_managed_database
 knobas-app	lib/knobas_app	profile::tests::demo_is_a_separate_directory_database_and_keychain
@@ -286,6 +291,8 @@ knobas-app	test/entity_mirror	the_mini_board_shapes_match_their_typescript_mirro
 knobas-app	test/entity_mirror	the_note_detail_shape_matches_its_typescript_mirror
 knobas-app	test/entity_mirror	the_note_ref_shape_matches_its_typescript_mirror
 knobas-app	test/entity_mirror	the_note_row_shape_matches_its_typescript_mirror
+knobas-app	test/entity_mirror	the_notification_clicked_shape_matches_its_typescript_mirror
+knobas-app	test/entity_mirror	the_notification_draft_shape_matches_its_typescript_mirror
 knobas-app	test/entity_mirror	the_project_shape_matches_its_typescript_mirror
 knobas-app	test/entity_mirror	the_source_ref_shape_matches_its_typescript_mirror
 knobas-app	test/entity_mirror	the_standup_digest_shape_matches_its_typescript_mirror
