@@ -359,9 +359,28 @@ impl Harness {
 
     /// The activity line the write queue writes when a person queues a write.
     async fn queued(&self, entity_id: &str, op: &str, at: DateTime<Utc>) {
+        self.write_line("queued", entity_id, op, at).await;
+    }
+
+    /// The line the queue writes for the *same* write when it is delivered.
+    ///
+    /// Carries the same `op` as its `queued` line, and that is the point:
+    /// `knobas_sync::write_queue::announce_with` builds one detail object for
+    /// every verb it announces and puts `"op": write.op` in all of them. So
+    /// the digest cannot tell one write's narration apart by op, and the verb
+    /// is the only thing that can pick the person's act out of the queue's
+    /// story about it.
+    async fn sent(&self, entity_id: &str, op: &str, at: DateTime<Utc>) {
+        self.write_line("sent", entity_id, op, at).await;
+    }
+
+    /// One of the write queue's own lines, in the shape `announce_with`
+    /// writes: the verb says which state change, and the detail names the
+    /// write, its op and its source whichever change it was.
+    async fn write_line(&self, verb: &str, entity_id: &str, op: &str, at: DateTime<Utc>) {
         self.activity(
             "user",
-            "queued",
+            verb,
             entity_id,
             at,
             serde_json::json!({ "op": op, "source_id": TRACKER, "write_id": 7 }),
@@ -675,6 +694,70 @@ async fn a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well() {
         vec![(Some(ticket.as_str()), TRACKER, "log_work")],
         "the local copy is the worklog's one line; its queue line is the same \
          fact a second time"
+    );
+}
+
+/// **A write belongs to the day it was queued, not the day it was sent** (the
+/// `queued`-only rule, from its unwitnessed side).
+///
+/// The queue narrates a write's whole life -- `queued` when the person acted,
+/// then `waiting`, `held`, `refused`, `sent` as it gets there -- and
+/// `knobas_sync::write_queue::announce_with` puts the same `"op"`, entity and
+/// source on every one of those lines. So `WRITTEN` cannot pick the person's
+/// act out by op; it picks the **verb**, and the verb it picks is `queued`
+/// because that is the moment the person acted.
+///
+/// `a_write_is_one_line_however_many_states_the_queue_narrates` already holds
+/// the *count* half of that rule, and holds it well: three verbs at one
+/// instant, one line. What it cannot see is **which** verb, because all three
+/// of its lines are on the same day, so a read matching any single one of them
+/// answers the same. This fixture is that missing direction: a comment queued
+/// yesterday at eleven and delivered this morning at nine, which is an
+/// ordinary overnight flush of a laptop that was shut.
+///
+/// The reader stood up and said "I commented on PAY-231" **yesterday**. A
+/// digest keyed on `sent` puts it on today's list, where it is a thing the
+/// reader did not do today, and takes it off yesterday's, where it is a thing
+/// they did. So both lists are asserted, and by count: the write is on
+/// yesterday's and absent from today's.
+///
+/// # What each mutant does to this, so a survivor is not read as a gap
+///
+/// * `a.verb = 'sent'` -- dies here, on both halves. It also dies in
+///   `yesterdays_line_per_producer_names_its_item_its_source_and_its_verb`,
+///   whose comment has no `sent` line at all, but that fixture is about the
+///   three producers and would kill this mutant by accident. #361's live
+///   window read that swap as an *equivalent* mutant and #362 was filed on
+///   the reading; it is not one, and this is the fixture that says so on
+///   purpose.
+/// * `a.verb in ('queued','sent')`, or the clause dropped -- dies here on
+///   today's half, which gains a line for a write the reader made yesterday,
+///   and dies in `a_write_is_one_line_...` as a duplicate.
+#[tokio::test]
+async fn a_write_is_on_the_day_it_was_queued_and_not_the_day_it_was_sent() {
+    let h = harness("standup-queued-day").await;
+    let commented = h.ticket("PAY-231", ME, "In Progress").await;
+    h.queued(&commented, "comment", days_before(1, 11, 0)).await;
+    h.sent(&commented, "comment", days_before(0, 9, 0)).await;
+
+    let digest = h.digest().await;
+
+    assert_eq!(
+        digest.yesterday_day,
+        Some(today() - Duration::days(1)),
+        "yesterday is the day the comment was queued on"
+    );
+    assert_eq!(
+        traces(&digest.yesterday),
+        vec![(Some(commented.as_str()), TRACKER, "comment")],
+        "one line, on the day the person acted"
+    );
+    assert_eq!(
+        digest.today.len(),
+        0,
+        "the queue getting round to it overnight is not something the reader \
+         did today: {:?}",
+        traces(&digest.today)
     );
 }
 
