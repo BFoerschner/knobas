@@ -479,7 +479,7 @@ pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // 
 | test_connection | `GET /rest/api/2/myself`, version from `/rest/api/2/serverInfo`, **`GET /rest/api/2/field`** for the Epic Link custom field id (#297 — reported as `ConnectionInfo.discovered["epic_link_field"]`; a 404 — and a 501, which is what mockd answers for a path it declares and does not serve — reads as "no field table" and does not fail the connection, while a 401 there is still a refused credential) | `GET /api/v1/user`, version `/api/v1/version` | `GET /app/rest/server` |
 | read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=`, `/repos/{o}/{r}/issues/{index}/comments` (fifth read, M2 ruling B1, config-gated; **not a paged listing** — `since`/`before` only, read whole in one request; see the #131 amendment) | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}` — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
 | write endpoints | `POST /rest/api/2/issue/{key}/comment`, `GET`+`POST /rest/api/2/issue/{key}/transitions`, `POST /rest/api/2/issue` (M2, #43); `POST /rest/api/2/issue/{key}/worklog` — `started` in `yyyy-MM-dd'T'HH:mm:ss.SSSZ` (milliseconds and a numeric offset both mandatory), `timeSpentSeconds`, `comment`, **no `adjustEstimate`** so Jira's own `auto` applies (M3.1, #280) | `POST /repos/{o}/{r}/branches`, `POST /repos/{o}/{r}/pulls`, `POST /repos/{o}/{r}/issues/{index}/comments`, `POST /repos/{o}/{r}/pulls/{index}/reviews` (M2, #43) | `POST /app/rest/buildQueue` for both trigger and re-run (M2, #43) |
-| cursor | `{"v":1,"updated_to":"2026-08-24T09:14:00Z"}`; JQL `updated >= "<watermark − 2 min>" ORDER BY updated ASC`. The 2-minute overlap is mandatory: **JQL time resolution is one minute**, so an exact-boundary watermark drops items. Re-delivery is free — upserts are idempotent. | `{"v":1,"repos_listed_at":"…","repos":{"owner/repo":{"pulls_updated_to":"…","commits_since":"…","branches_hash":"…"}}}` — per-repo watermarks; a repo added upstream is picked up by the repo-list re-listing each run. ETags/`If-None-Match` are an **optimization to verify against the real container**, not a contract. | `{"v":1,"since_build_id":12345}`; finished builds via `locator=sinceBuild:(id:<n>),state:finished` (ids are monotonic), **plus an unconditional `state:running,state:queued` poll** each run — a running build mutates without a new id. |
+| cursor | `{"v":1,"updated_to":"2026-08-24T09:14:00Z"}`; JQL `updated >= "<watermark − 2 min>" ORDER BY updated ASC`. The 2-minute overlap is mandatory: **JQL time resolution is one minute**, so an exact-boundary watermark drops items. Re-delivery is free — upserts are idempotent. **Superseded in part by the #345 amendment below** (2026-09-04): the version is `2` and `seen` recognises a record by fingerprint rather than by its timestamp. The JQL and the overlap are unchanged | `{"v":1,"repos_listed_at":"…","repos":{"owner/repo":{"pulls_updated_to":"…","commits_since":"…","branches_hash":"…"}}}` — per-repo watermarks; a repo added upstream is picked up by the repo-list re-listing each run. ETags/`If-None-Match` are an **optimization to verify against the real container**, not a contract. | `{"v":1,"since_build_id":12345}`; finished builds via `locator=sinceBuild:(id:<n>),state:finished` (ids are monotonic), **plus an unconditional `state:running,state:queued` poll** each run — a running build mutates without a new id. |
 | config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `epic_link_field` (per-instance id — **filled by *Test connection*** since #297, never an example to copy) | `owners[]`/`repos[]` allowlist, `username` | `project_ids[]`, `build_type_ids[]`, `builds_per_config`, `username` (identity — filled by *Test connection*, used for `@me`/My items) |
 | contract source | `testenv/specs/jira-dc-rest.wadl` + `knobas-mockd` | the **real** pinned Gitea container (roadmap §3) | TeamCity swagger extracted per `testenv/specs/fetch.sh` + `knobas-mockd` |
 | client | hand-rolled reqwest (~5 endpoints) | hand-rolled reqwest; codegen from `/swagger.v1.json` is permitted by roadmap §4 but is stream B's internal call | hand-rolled reqwest |
@@ -499,7 +499,7 @@ Added after the M1 table above rather than as a fifth column, because the table'
 | write endpoints (#286) | `POST /rest/api/content` for a page (`type: page`, `space.key`, `ancestors[0].id`, `body.storage`) and for a comment (`type: comment`, `container.{id,type}`, `body.storage`); `GET /rest/api/content/{id}` then `PUT` the same for an edit. **The content `PUT` replaces the record**, so the title and the content type are read back and sent again — a request that omitted the title would blank it — and `version.number` is sent as `base_version + 1`, which is how Confluence is asked to abort with a 409 when somebody else got there first |
 | `expand=` | `body.storage,ancestors,space,version,history,children.comment.body.storage,children.comment.version,children.comment.history` — the storage format kept verbatim in `payload`, the space as ADR-0010's project, the ancestors as the launcher's path, `version.number`/`version.when` as the cursor's identity and (since #286) as what a section edit is made against, and the discussion **with its dates and its authors** in one request instead of one per page. Two tickets asked for the comment expansions and both reasons are kept: the dates are what let a comment date the page it is on (#287, below), and `version.by`/`history.createdBy` are the byline the detail's comment section renders (#286). They are the same expansions the completion path already asked for |
 | paging | **`_links.next`, followed verbatim**, and there is no `total`: a content search reports `size` (this page) and a next link. `limit` is capped at **50** by the server once a body is expanded, so `page_size` is refused above it rather than silently clamped. A continuation link that is not a path rooted at the instance is refused — a walk that stopped early must never be reported as a completed one, because the kind is exhaustive |
-| cursor | `{"v":1,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"…"}]}`; CQL `type = page [AND space in (…)] AND lastmodified >= "<watermark − 2 min>" order by lastmodified asc`. The 2-minute overlap is mandatory for the same reason as Jira's: **a CQL date literal is `"yyyy-MM-dd HH:mm"` and therefore minute-resolution**, so an exact-boundary watermark drops items. Identity in `seen` is `(content id, version.number)` and not `(id, timestamp)` — Confluence's version counter closes the "edited twice in one second" hole the Jira cursor documents |
+| cursor | `{"v":1,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"…"}]}`; CQL `type = page [AND space in (…)] AND lastmodified >= "<watermark − 2 min>" order by lastmodified asc`. The 2-minute overlap is mandatory for the same reason as Jira's: **a CQL date literal is `"yyyy-MM-dd HH:mm"` and therefore minute-resolution**, so an exact-boundary watermark drops items. Identity in `seen` is `(content id, version.number)` and not `(id, timestamp)` — Confluence's version counter closes the "edited twice in one second" hole the Jira cursor documented (Jira closed it too in the #345 amendment below, with a record fingerprint; this row is the precedent that one cites) |
 | zone | CQL literals carry **no zone** and are read in the instance's own. It is learned from a timestamp the server itself rendered (`version.when` on the run-start probe), never from a timezone database and never from an admin endpoint. Unknown falls back to UTC−12, not UTC: guessing the offset *high* moves the query's lower bound forward and skips edits permanently, guessing it low only re-reads them |
 | ceiling | the run-start probe is the **same scope**, `order by lastmodified desc`, `limit=1`, `expand=version`. Its `version.when` is the ceiling the watermark may not pass (`CONTEXT.md`, *Watermark*), so a page edited *during* a run cannot carry the position past run start and hide every other edit made while it ran. Witnessed, not clocked — `now()` is guaranteed too high the moment the two clocks disagree. **The never-backwards rule outranks the clamp**: where the previous watermark is already *above* the ceiling — the page that set it was deleted, or moved out of the configured spaces — the position stays where it was rather than being dragged back to a ceiling now older than it. The clamp does not bind on that one run, which costs a re-walk; accepting it would cost a source that re-delivers its recent history on every poll and never settles |
 | call order | **`/rest/api/user/current` is the first call of every run**, before the probe and before the walk. A content search is a read a server may allow anonymously, and where it does an unresolvable credential answers 200 with an empty result set — which on an exhaustive kind is the engine's licence to tombstone the mirror. The identity call has no anonymous answer. This is the Confluence spelling of the `/serverInfo`-first ordering issue #276 measured on Jira |
@@ -1448,6 +1448,56 @@ and a form assertion cannot say that a build which *should* be on a page is miss
   dimension of the `/app/rest/builds` locator §4.2 already lists — the live server enumerates it in
   its own 400 message — so this is a value change inside a parameter the contract already defines,
   exactly as #105's was. No migration, no IPC change.
+
+---
+
+### Amendments from the Jira cursor-identity fix (2026-09-04, binding) — issue #345
+
+Approved by the orchestrator on #345 after the measurement below; the fix is in
+`crates/knobas-source-jira/**`, which §10.8 does not freeze, so **no §10.8 entry is owed**. The
+§4.2 Jira `cursor` row is *superseded*, not wrong, so under #112's convention above the old text
+stands and this entry carries the new truth.
+
+**§4.2 Jira `cursor` reads, from this commit:**
+`{"v":2,"updated_to":"2026-08-24T09:14:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"…","h":"3f0c1a92be44d7e5"}]}`.
+The JQL is **unchanged** — `updated >= "<watermark − 2 min>" ORDER BY updated ASC`, the two-minute
+overlap still mandatory for the reason the row gives. What changed is the identity inside `seen`:
+an entry is recognised by `(key, h)` where `h` is a 64-bit fingerprint of the raw `/search` record, and
+`u` is kept only to bound the set to the overlap window.
+
+**What the old identity got wrong, measured on Jira DC 10.3.24 (2026-09-04).**
+`GET /rest/api/2/issue/{key}` reports `updated` to the millisecond; `GET /rest/api/2/search` —
+the only one a sync run reads — reports the same instant truncated to the second
+(`22:54:59.036` and `22:54:59.124` both arrive as `22:54:59`). So `(key, updated)` could not tell
+two changes inside one second apart, and a run between them recognised the second as already
+delivered and dropped it before the sink. **Permanently**: `updated` does not move again on its
+own, so no later incremental run reached it and only a backfill recovered it. The everyday
+sequence that hits it is not rare — `knobas_app::sources::write_queue`'s `refresh` fires a sync
+after every landed write, so *comment through knobas, then reassign in Jira* is exactly it, and
+`author` is what the standup digest's mirror half, the inbox's author matching (#82) and every
+`@me` filter key on.
+
+**The Confluence row already said this.** Its `cursor` row sets identity to
+`(content id, version.number)` and not `(id, timestamp)` "because Confluence's version counter
+closes the *edited twice in one second* hole the Jira cursor documents". Jira has no version
+counter; the fingerprint is the same guarantee computed from data already in hand, with no extra
+request and no change to the query.
+
+**No migration, and none needed.** `JiraCursor::parse` already reads an unrecognised version as
+"no cursor", which is a full sync — so every stored version-1 cursor stops parsing on the first
+run of this build, each affected source re-reads once, and comes back with a version-2 cursor.
+That full sync is also the right recovery on its own terms: a mirror that ran on version 1 may
+hold rows whose last change this bug dropped, and nothing cheaper finds them.
+
+**mockd is untouched** (ADR-0013 freezes it): the fix adds no JQL clause and no request, so its
+grammar never comes into it and its Jira suite is green unchanged.
+
+**The direction that is unwitnessed offline, and where it is witnessed.** The fingerprint is over the
+whole `/search` record, so a field that differed between two reads of an *unchanged* issue would
+make every poll re-emit the overlap window — correctness surviving, battery clause 2 not. No fake
+can find that, because a fake answers what it was seeded with. `live_jira_seeded.rs`'s
+`an_untouched_source_is_still_quiet_after_many_polls` is the witness, and it fails on the first
+poll that emits.
 
 ---
 
