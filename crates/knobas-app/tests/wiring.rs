@@ -253,8 +253,8 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// item arriving on an unfocused window produced one banner, with
 /// `Presenting ... as banner` for `dev.knobas.desktop` in `usernoted`'s log.
 /// The first attempt showed nothing because the app had no macOS authorization
-/// to show desktop notifications; the README says how to tell that state apart from a knobas
-/// bug, and it is worth reading before trusting a silent run.
+/// to show desktop notifications; the README says how to tell that state apart
+/// from a knobas bug, and it is worth reading before trusting a silent run.
 ///
 /// Since #339 the plugin is registered for its two permission commands only;
 /// the send and the click are knobas' own (`src/notify.rs`), and the click's

@@ -26,11 +26,11 @@
  * ## Why {@link Notifications.saw} does *not* wait for the setting
  *
  * It looks as though it should: `seen` is a one-way memory, so a stream
- * offered while the stored categories are still in flight — or while a failed read
- * waits behind the section's *Retry* — marks items the reader can then never
- * be told about. A `loaded` gate was written, and then taken out again,
- * because it changes nothing anybody can observe: while the setting is
- * unknown no category is on, so those items are silent either way, and the only
+ * offered while the stored categories are still in flight — or while a failed
+ * read waits behind the section's *Retry* — marks items the reader can then
+ * never be told about. A `loaded` gate was written, and then taken out again,
+ * because it changes nothing anybody can observe: while the setting is unknown
+ * no category is on, so those items are silent either way, and the only
  * question is *which* stream gets spent as the backlog below. Gating simply
  * moves that to the next one, and the next one contains the same items plus
  * anything that has since arrived — so if it differs at all, it differs by
