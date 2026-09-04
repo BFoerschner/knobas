@@ -91,6 +91,24 @@ const ACTOR: &str = "user";
 /// then draws the edge back to the ticket that asked for it. The artefact is
 /// reclaimable, so a line saying nothing claims it would be false.
 ///
+/// **The reclaiming is start-work's; the address is the op's.** A
+/// `create_pull_request` submitted straight through `submit_write` has no flow
+/// to retry it, so nothing walks that path on its own. What is true of the op
+/// either way is the part this list turns on -- the row still names where to
+/// look, and the read that looks is already written -- and start-work is the
+/// caller that has one, which is the caller this op exists for (#44).
+///
+/// **The address is not a perfect key, and it does not have to be.**
+/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which knows nothing of open
+/// versus closed, so a repository that re-used a head branch can match more
+/// than one pull request and the statement takes one of them. That ambiguity
+/// belongs to the look-before-write and the withdrawal adds nothing to it.
+/// What the row has to do here is narrower: name one repository's pull
+/// requests from one named branch, which is a set a person can look at.
+/// `base` narrows it further; `title` narrows it not at all, since two
+/// artefacts can carry the same one -- which is exactly why `create_ticket`,
+/// whose row carries a title and no address, needs the line.
+///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
 /// pull request's server-assigned number is nothing the withdrawal took away
