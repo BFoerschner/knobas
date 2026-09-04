@@ -193,8 +193,9 @@ export interface WithdrawnWorklog {
  *
  * No other op has that shape, and `discard`'s own statement is the reason: it
  * deletes from `knobas.worklog` and from nothing else, so `log_work` is the
- * only op holding a local copy a withdrawal can give back. That is the one
- * question each bullet answers; the rest it leaves alone.
+ * only op holding a local copy a withdrawal can give back. That is the
+ * question each bullet answers, and the only one: where the other question
+ * touches a bullet, the bullet points instead of arguing.
  *
  * * `comment`, `approve`, `transition`, `trigger_build`, `rerun_build` —
  *   withdrawing one in flight leaves the reply posted or the status moved,
@@ -207,16 +208,17 @@ export interface WithdrawnWorklog {
  * * `create_branch`, `create_pull_request` — a withdrawal releases nothing
  *   here either. What one can leave standing at the source is the other
  *   question, and so is start-work's retry of the step that made it.
- * * `create_page`, `update_page` — the same, and an `update_page` makes no
- *   artefact at all: it changes a page the mirror already holds.
+ * * `create_page`, `update_page` — the same, and which of the two can leave
+ *   something standing is that other question too.
  *
  * That other question — did the source make something knobas cannot name,
  * `CONTEXT.md`'s **unclaimed write** — is asked and answered in
  * `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment. Issue #353 settled
  * it there, and settled it against the answer that used to sit on the
- * `create_branch` line, that a 409 stops the duplicate: that one is about
- * whether a *re-send* makes a second artefact, which is neither question and
- * does not belong on these lines again.
+ * `create_branch` line, that a 409 stops the duplicate: that one asks whether
+ * a *re-send* makes a second artefact, which is neither question. It is the
+ * 409 *answer* that does not return to these lines — `create_ticket`'s bullet
+ * names re-sending only to say a discard is not what causes it.
  *
  * Those bullets and `log_work` itself are the whole of `WriteOp` as ADR-0006's
  * set currently stands, and they are enumerated here **without a guard**.
