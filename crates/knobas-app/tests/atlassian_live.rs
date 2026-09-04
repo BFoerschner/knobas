@@ -2024,9 +2024,11 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
 /// for. The *configured* arm -- the one every source created through the
 /// dialog ends up in, because the dialog fills the field from `discovered` --
 /// is [`test_source_answers_the_configured_arm_once_the_saved_source_names_the_field`]'s
-/// (#381), on the same kind of row once its config names the field. So two
-/// of the three arms reach `test_source` in a test here; the no-field arm has
-/// no real product to witness it, and is the adapter's unit test's alone.
+/// (#381), on the same kind of row once its config names the field; at the
+/// adapter it was already `tests/field_discovery.rs`'s and the adapter's own
+/// live suite's. So two of the three arms reach `test_source` in a test here;
+/// the no-field arm has no real product to witness it, and is the adapter's
+/// unit test's alone.
 ///
 /// That the call **writes nothing** is `tests/sources_crud.rs`'s claim over
 /// the mock; it is not re-asserted on the row here, because the scheduler
@@ -2129,9 +2131,11 @@ async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_sour
 /// at the adapter only, never through the app's `ConnectionReport`.
 ///
 /// The id has to come from **this run's** discovery, not from a constant: it
-/// is minted per instance run (`customfield_10101`, `10109` and `10102` have
-/// all been measured), so a typed one would read the wrong field rather than
-/// fail. So: a draft's test reads `discovered["epic_link_field"]`, the saved
+/// is minted per instance run -- `customfield_10101` and `customfield_10109`
+/// have both been measured from one seed script, and on one seed
+/// `customfield_10102` was *Epic Status* (`knobas-source-jira/src/discover.rs`)
+/// -- so a typed one would read the wrong field rather than fail. So: a
+/// draft's test reads `discovered["epic_link_field"]`, the saved
 /// row is edited to name it -- the whole config, the way the edit form sends
 /// one, since `config::patch` replaces the column -- and the row's *Test*
 /// answers `Epic Link customfield_…` with **no** *found but not configured*
@@ -2228,10 +2232,6 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
     assert!(
         note.contains(found.as_str()),
         "the note names the id the row was configured with: {note:?} vs {found:?}"
-    );
-    assert_ne!(
-        saved.detail, draft.detail,
-        "configuring the field moved the row out of the draft's arm"
     );
     println!("SEEDED connection note (configured): {note}");
 
