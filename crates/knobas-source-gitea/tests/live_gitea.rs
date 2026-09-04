@@ -447,6 +447,54 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         sepa.body_text
     );
 
+    // **What the start-work look-before-write reads, against the server that
+    // decides it** (#277 for the declared flag, #359 for the rule over it).
+    //
+    // Since #359, `knobas_app::start_work::queue` calls a pull request open
+    // only where the record's own `state` says `open` and the declared merged
+    // flag does not say otherwise. Both halves therefore gate the ordinary
+    // flow: a record missing either one settles no step and links no ticket.
+    // Nothing docker-free can see that -- the wiremock fixture writes
+    // `"state"` and `"merged": false` by construction, which is this test's
+    // whole premise about a fake being confidently wrong.
+    //
+    // The contract battery does not cover the flag either, and the direction
+    // it misses is exactly the one that matters here: its clause 3 is
+    // satisfied as soon as *some* item of the kind resolves the path, and the
+    // fixture's one merged pull request does that alone.
+    let merged_path = [knobas_source::PayloadPath::of(["merged"])];
+    let read: Vec<(&str, Option<bool>, Option<&str>)> = prs
+        .iter()
+        .map(|i| {
+            (
+                i.title.as_str(),
+                knobas_core::payload::resolve_flag(&i.payload, &merged_path),
+                i.payload.get("state").and_then(serde_json::Value::as_str),
+            )
+        })
+        .collect();
+    assert!(
+        read.iter()
+            .all(|(_, merged, state)| merged.is_some() && state.is_some()),
+        "every mirrored pull request must carry both facts the look-before-write reads; \
+         one missing either settles no step and links no ticket: {read:?}"
+    );
+    assert_eq!(
+        read.iter()
+            .find(|(title, ..)| title.contains("Fix ledger drift"))
+            .map(|(_, merged, state)| (*merged, *state)),
+        Some((Some(true), Some("closed"))),
+        "the fixture's merged pull request has to read as merged and closed: {read:?}"
+    );
+    assert_eq!(
+        read.iter()
+            .find(|(title, ..)| title.contains("SEPA retry"))
+            .map(|(_, merged, state)| (*merged, *state)),
+        Some((Some(false), Some("open"))),
+        "an open pull request has to read as `open` and `false`, not as absent keys -- \
+         the difference between the start-work flow linking it and refusing to: {read:?}"
+    );
+
     // The author is the source's word for who did it, not knobas's.
     assert!(
         prs.iter().all(|i| i.author.is_some()),

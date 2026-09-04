@@ -103,6 +103,98 @@ pub enum Linked {
     Already,
 }
 
+/// What the mirror holds from one head branch, as far as knobas can tell
+/// (issue #359).
+///
+/// **A head branch is re-usable, so "the pull request from this head" is not a
+/// single thing.** The mirror deliberately holds closed and merged pull
+/// requests -- `knobas_source_gitea::client::Client::pulls` asks for
+/// `state=all` and says why -- so a branch used twice leaves two records
+/// behind, and a read that answered with one of them arbitrarily settled the
+/// pull-request step "already open" against a pull request that was merged
+/// months ago, and then linked the ticket to it.
+///
+/// Three answers rather than an `Option`, because the two ways of having
+/// nothing to offer are different facts to the caller: a pull request somebody
+/// already finished is a reason the user can act on, and no record at all is a
+/// mirror that has not caught up.
+///
+/// # Which fact decides, and why it is not the declared one
+///
+/// Open-ness lives only in the verbatim `payload`, so this is an **ADR-0007
+/// payload read outside an adapter** either way. There are two readings
+/// available and they answer different questions:
+///
+/// * the **declared** merged flag (#277) answers *"was this merged"*, and
+/// * the record's own `state` answers *"is this open"*.
+///
+/// The flow asks the second, and #359's criterion says so in as many words --
+/// "distinguishes an open pull request from a merged **or closed** one". A
+/// pull request closed without merging carries `merged: false`, so a rule
+/// built on the declared flag alone calls it open and commits the whole bug
+/// one state over. So `state` decides, read at
+/// [`queue::PULL_REQUEST_BY_HEAD`](crate::start_work::queue), inside the one
+/// named statement that already reads this record's head branch the same
+/// interim way.
+///
+/// The declared flag is not discarded: it is the one reading a **source** owns
+/// rather than knobas, so it can veto -- anything the declaration calls merged
+/// is not open, whatever its state says -- and it is what words the refusal.
+///
+/// It cannot be the *deciding* fact, and `knobas-source-mock` is the shape of
+/// why: it declares no merged flag at all, deliberately, because its merge is
+/// a timestamp rather than a boolean. A source may decline that declaration
+/// and still have pull requests knobas must be able to link, and `state` is
+/// what answers for one. (The mock is an argument about shape and not a
+/// corpus: its pull requests carry `from`/`to` and no `head` object, so
+/// `queue::PULL_REQUEST_BY_HEAD` never reaches them either way. Gitea is the
+/// only source this read reaches today.)
+///
+/// The **declared** route for open-ness would be `status_name` on the `pr`
+/// kind, and it was left alone on purpose: `status_name` is what the mini
+/// board, the room statements and the census render, so pointing it at a
+/// forge's `state` changes what every one of those shows for a pull request.
+/// That is a product decision, not this ticket's, and when it is made this
+/// read expires into it -- which is what ADR-0007 says every interim read
+/// does.
+///
+/// # The failure direction, pinned toward absence
+///
+/// ADR-0007's requirement 1 decides which way this fails, in as many words:
+/// such a read is confined to derivations *"whose tolerable failure is an
+/// absent result -- never to a decision where a miss becomes a wrong action"*.
+/// This read feeds a decision, so the miss lands on
+/// [`Unknown`](Self::Unknown): a record is [`Open`](Self::Open) only where
+/// knobas positively read it as open.
+///
+/// What that costs, on **both** paths it gates, stated rather than left to be
+/// discovered:
+///
+/// * the **create** step can no longer settle from the mirror, so it
+///   dispatches and the source refuses a duplicate in its own words -- rule 3
+///   of this module's header, already the documented answer for a mirror that
+///   cannot settle the question;
+/// * the **link** step has nothing to link and settles *failed*, saying so.
+///   That is a step the user can retry, and it is the direction that matters:
+///   a link is permanent, `merge::follow_merges` reads exactly such links, and
+///   a wrong one turns into an automatic transition off somebody else's merge.
+///
+/// The direction pinned the other way costs the bug it was reported as.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PullRequestOnHead {
+    /// A pull request from this head that knobas read as open, and that
+    /// nothing it read calls merged.
+    Open(String),
+    /// The mirror holds pull requests from this head and knobas can tell that
+    /// none of them is open. Names one, and says whether it was merged, so the
+    /// step that refuses can say which word.
+    Closed { id: String, merged: bool },
+    /// Nothing from this head has reached the mirror, or nothing whose state
+    /// knobas could read -- one answer on purpose: in both, knobas has no open
+    /// pull request it can name, and it may not act as though it has.
+    Unknown,
+}
+
 /// Everything the orchestrator can do to the world.
 ///
 /// Narrow on purpose, and every method is a capability rather than a
@@ -126,9 +218,17 @@ pub trait Steps: Send + Sync {
     /// The branch `name` of `repo`, as an entity id, if the mirror holds it.
     async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError>;
 
-    /// The pull request opened from `head` in `repo`, as an entity id, if the
-    /// mirror holds it.
-    async fn pull_request(&self, repo: &EntityRef, head: &str) -> Result<Option<String>, IpcError>;
+    /// What the mirror holds from head branch `head` in `repo`, and whether
+    /// any of it is a pull request that is still open.
+    ///
+    /// Not "the pull request from this head": a head branch can be re-used, so
+    /// there may be several, and which of them is open is the whole question.
+    /// See [`PullRequestOnHead`].
+    async fn pull_request(
+        &self,
+        repo: &EntityRef,
+        head: &str,
+    ) -> Result<PullRequestOnHead, IpcError>;
 
     /// Re-read a source now, and wait for that run to end.
     ///
@@ -417,10 +517,32 @@ async fn perform(
         }
         Step::CreatePullRequest => {
             let (repo, head) = pull_request_of(step)?;
-            if let Some(existing) = steps.pull_request(&repo, &head).await? {
-                return settle_ok(pool, step, &format!("{existing} is already open")).await;
+            match steps.pull_request(&repo, &head).await? {
+                // Rule 2 again, and it asks the *right* question now (#359): a
+                // pull request that is open from this head is this step's
+                // effect, whoever made it.
+                PullRequestOnHead::Open(existing) => {
+                    settle_ok(pool, step, &format!("{existing} is already open")).await
+                }
+                // **A finished pull request on this head opens a new one.**
+                // The alternative -- refusing, and telling the user to pick
+                // another branch name -- would make knobas the one saying no,
+                // on the strength of a payload read, about the ordinary case: a
+                // head re-used for the next piece of work on the same ticket. A
+                // forge does not refuse a pull request from a head whose last
+                // one was merged or closed, because there is nothing wrong with
+                // it; the new commits on that head are exactly what wants
+                // reviewing. If the forge disagrees it refuses in its own
+                // words, which is rule 3 and is a fact the user can act on.
+                //
+                // `Unknown` takes the same road for the reason
+                // `PullRequestOnHead` states: an unsettled read dispatches and
+                // lets the source refuse a duplicate, rather than knobas
+                // guessing that the thing it cannot see is there.
+                PullRequestOnHead::Closed { .. } | PullRequestOnHead::Unknown => {
+                    dispatch(pool, steps, step, &step.payload).await
+                }
             }
-            dispatch(pool, steps, step, &step.payload).await
         }
         Step::LinkPullRequest => link_step(pool, steps, flow, step).await,
         // A transition has no adapter-independent read (#43 left that seam
@@ -501,17 +623,43 @@ async fn link_step(
     let (repo, head) = pull_request_of(pr_step)?;
 
     let mut found = steps.pull_request(&repo, &head).await?;
-    if found.is_none() {
+    // Anything but an open one is a reason to look again, not only nothing at
+    // all (#359): where the head was re-used, the merged pull request is
+    // precisely what the mirror already holds, and the one this flow just made
+    // is the one the refresh fetches.
+    if !matches!(found, PullRequestOnHead::Open(_)) {
         steps.refresh(&repo.namespace).await;
         found = steps.pull_request(&repo, &head).await?;
     }
-    let Some(pr) = found else {
-        return settle_failed(
-            pool,
-            step,
-            &format!("no pull request from {head} has reached the mirror yet"),
-        )
-        .await;
+    let pr = match found {
+        PullRequestOnHead::Open(pr) => pr,
+        // **The bug this step must not commit.** Drawing the ticket's link to
+        // a merged pull request would record, permanently and in the panel the
+        // user trusts, that this flow's work is that pull request's -- and the
+        // reverse direction reads exactly such links, so it would then move the
+        // ticket to In Review off a merge that happened before the flow began.
+        // A failed step is recoverable and says what it saw; a wrong link is
+        // neither.
+        PullRequestOnHead::Closed { id, merged } => {
+            let word = if merged { "merged" } else { "closed" };
+            return settle_failed(
+                pool,
+                step,
+                &format!(
+                    "no pull request from {head} is open -- {id} is {word}, and linking to it \
+                     would claim work this flow did not do"
+                ),
+            )
+            .await;
+        }
+        PullRequestOnHead::Unknown => {
+            return settle_failed(
+                pool,
+                step,
+                &format!("no open pull request from {head} has reached the mirror yet"),
+            )
+            .await;
+        }
     };
 
     let relation = step
