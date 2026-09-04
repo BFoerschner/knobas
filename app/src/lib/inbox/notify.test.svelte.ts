@@ -17,10 +17,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
-import type {
-  NotificationClicked,
-  NotificationDraft as WireDraft,
-} from "../ipc/entity";
+import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
 import {
   addressOf,
   clickChannel,
@@ -72,8 +69,7 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
   let granted = false;
   let answer = "granted";
   let stored: InboxCategory[] = [];
-  let action:
-    ((notification: { extra?: Record<string, unknown> }) => void) | null = null;
+  let action: ((notification: { extra?: Record<string, unknown> }) => void) | null = null;
 
   const ports: Partial<NotifyPorts> = {
     notificationKinds: () => Promise.resolve(stored),
@@ -115,8 +111,7 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
       answer = to;
     },
     /** Deliver a click on a notification the OS is showing. */
-    click: (notification: { extra?: Record<string, unknown> }) =>
-      action?.(notification),
+    click: (notification: { extra?: Record<string, unknown> }) => action?.(notification),
     /** Prime the store past the backlog, the way the first read does. */
     async primed(kinds: InboxCategory[] = [], seed: InboxEntry[] = []) {
       stored = kinds;
@@ -153,17 +148,12 @@ test("an item of a kind nobody switched on says nothing, and the same item of a 
   await off.primed(["mention"]);
   off.store.saw([entry("failed_build", "build-9")]);
   expect(off.calls.sent, "failed builds are switched off").toEqual([]);
-  expect(
-    off.calls.checked + off.calls.asked,
-    "the notify path never asks the OS",
-  ).toBe(0);
+  expect(off.calls.checked + off.calls.asked, "the notify path never asks the OS").toBe(0);
 
   const on = bench();
   await on.primed(["failed_build"]);
   on.store.saw([entry("failed_build", "build-9")]);
-  expect(on.calls.sent.map((notification) => notification.title)).toEqual([
-    "Title of build-9",
-  ]);
+  expect(on.calls.sent.map((notification) => notification.title)).toEqual(["Title of build-9"]);
 });
 
 /** Only the kinds that are on, out of a stream carrying several. */
@@ -228,9 +218,7 @@ test("an item seen while focused is not announced by the next signal after a blu
 
   // ...and the window is still working: a genuinely new item speaks.
   b.store.saw([entry("mention", "PAY-231"), entry("mention", "PAY-999")]);
-  expect(b.calls.sent.map((notification) => notification.title)).toEqual([
-    "Title of PAY-999",
-  ]);
+  expect(b.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-999"]);
 });
 
 // -- once per item ----------------------------------------------------------
@@ -292,16 +280,11 @@ test("the first stream primes and says nothing, and the next arrival speaks", as
   await b.store.reseed();
   b.store.saw([]);
   const first = bench();
-  await first.primed(
-    ["mention"],
-    [entry("mention", "PAY-1"), entry("mention", "PAY-2")],
-  );
+  await first.primed(["mention"], [entry("mention", "PAY-1"), entry("mention", "PAY-2")]);
   expect(first.calls.sent, "the backlog is not news").toEqual([]);
 
   first.store.saw([entry("mention", "PAY-3"), entry("mention", "PAY-1")]);
-  expect(first.calls.sent.map((notification) => notification.title)).toEqual([
-    "Title of PAY-3",
-  ]);
+  expect(first.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-3"]);
 });
 
 // -- the click --------------------------------------------------------------
@@ -371,13 +354,9 @@ test("a click after the listener is torn down moves the window nowhere", async (
  * that handed the store `{ extra: {} }` would pass every other test here.
  */
 test("a notification:clicked event navigates to the item it carries", async () => {
-  let deliver: ((event: { payload: NotificationClicked }) => void) | null =
-    null;
+  let deliver: ((event: { payload: NotificationClicked }) => void) | null = null;
   const listened: string[] = [];
-  const listen = (
-    event: string,
-    handler: (event: { payload: NotificationClicked }) => void,
-  ) => {
+  const listen = (event: string, handler: (event: { payload: NotificationClicked }) => void) => {
     listened.push(event);
     deliver = handler;
     return Promise.resolve(() => {
@@ -399,16 +378,17 @@ test("a notification:clicked event navigates to the item it carries", async () =
 
 /**
  * The real `send` hands the `notify` command the draft's title, body and the
- * address out of `extra` -- the one key the click path is built on.
+ * address out of `extra` — the one key the click path is built on. A draft
+ * without one is not sent: a waiter keyed to nothing is a click that opens
+ * nowhere.
  */
 test("a sent notification reaches the notify command with its address", async () => {
   const sent: WireDraft[] = [];
-  const b = bench({
-    send: sendThrough((draft) => {
-      sent.push(draft);
-      return Promise.resolve();
-    }),
+  const send = sendThrough((draft) => {
+    sent.push(draft);
+    return Promise.resolve();
   });
+  const b = bench({ send });
   await b.primed(["review_request"]);
   b.store.saw([entry("review_request", "pr-12")]);
   expect(sent).toEqual([
@@ -418,6 +398,9 @@ test("a sent notification reaches the notify command with its address", async ()
       address: "#/entity/gitea:acme%2Fpayouts%23144",
     },
   ]);
+
+  send({ title: "no door", body: "", extra: {} });
+  expect(sent, "a draft with no address is not sent").toHaveLength(1);
 });
 
 /** A refused send is not a broken window: the next item still goes out. */
@@ -426,10 +409,7 @@ test("a notify command that rejects costs nothing", async () => {
   const b = bench({
     send: sendThrough(() => {
       calls += 1;
-      return Promise.reject({
-        code: "internal",
-        message: "No bundle identifier found.",
-      });
+      return Promise.reject({ code: "internal", message: "No bundle identifier found." });
     }),
   });
   await b.primed(["mention"]);
@@ -450,9 +430,7 @@ test("a notify command that rejects costs nothing", async () => {
  * `onMount` down with it.
  */
 test("a click channel that refuses to open costs nothing", async () => {
-  const b = bench({
-    onAction: () => Promise.reject(new Error("command not found")),
-  });
+  const b = bench({ onAction: () => Promise.reject(new Error("command not found")) });
   cleanup = b.store.start();
   await b.primed(["mention"]);
   b.store.saw([entry("mention", "PAY-231")]);
@@ -567,10 +545,7 @@ test("the stored answer is what the store holds, not the click", async () => {
 test("a write that is refused says why and changes nothing", async () => {
   const b = bench({
     setNotificationKinds: () =>
-      Promise.reject({
-        code: "not_ready",
-        message: "the database is still starting",
-      }),
+      Promise.reject({ code: "not_ready", message: "the database is still starting" }),
   });
   b.alreadyGranted(true);
   await b.store.reseed();
@@ -587,10 +562,7 @@ test("a write that is refused says why and changes nothing", async () => {
 test("a read that failed leaves the setting unread rather than claiming it is empty", async () => {
   const b = bench({
     notificationKinds: () =>
-      Promise.reject({
-        code: "not_ready",
-        message: "the database is still starting",
-      }),
+      Promise.reject({ code: "not_ready", message: "the database is still starting" }),
   });
   await b.store.reseed();
 
@@ -609,7 +581,5 @@ test("an entity key with a hash and a slash in it survives the address", () => {
   expect(addressOf(entry("review_request", "pr-12").item)).toBe(
     "#/entity/gitea:acme%2Fpayouts%23144",
   );
-  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe(
-    "#/inbox",
-  );
+  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/inbox");
 });

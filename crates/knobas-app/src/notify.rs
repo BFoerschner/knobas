@@ -43,10 +43,12 @@
 //! (`preview-macos-un`, Björn's ruling on the prototype's evidence: current
 //! API, a clean banner, and a body click reported without a button). Linux
 //! gets the freedesktop `default` action, which is what makes a body click
-//! reportable at all there; Windows uses the handle API as it stands. Both
-//! are written from `notify-rust` 4.18.0's sources and **neither has been
-//! witnessed** -- the same disclosure `testenv/README.md` and the §10.8 entry
-//! carry.
+//! reportable at all there; Windows uses the handle API as it stands, with
+//! one thing worth knowing: its `wait_for_action` answers [`CLOSED`] for a
+//! failed activation as well as for a dismiss (`windows.rs`, `Err(_) =>
+//! "__closed"`), so a broken click there reads as a clear. Both are written
+//! from `notify-rust` 4.18.0's sources and **neither has been witnessed** --
+//! the same disclosure `testenv/README.md` and the §10.8 entry carry.
 
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -137,6 +139,12 @@ pub struct Notifier {
     events: Arc<dyn NotificationEvents>,
 }
 
+/// What [`Notifier::admit`] decided: a slot to wait in, or why there is none.
+enum Admission {
+    Wait(Slot),
+    Refused(Delivery),
+}
+
 /// A reserved place in the registry, given back on drop -- so a wait that
 /// ends any way at all, a show that fails included, frees it.
 struct Slot {
@@ -174,16 +182,16 @@ impl Notifier {
 
     /// Reserve a slot for `address`, or say why not. One lock, so two sends
     /// racing for the last slot cannot both take it.
-    fn admit(&self, address: &str) -> Result<Slot, Delivery> {
+    fn admit(&self, address: &str) -> Admission {
         let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
         if waiting.contains(address) {
-            return Err(Delivery::AlreadyWaiting);
+            return Admission::Refused(Delivery::AlreadyWaiting);
         }
         if waiting.len() >= self.cap {
-            return Err(Delivery::OverCap);
+            return Admission::Refused(Delivery::OverCap);
         }
         waiting.insert(address.to_owned());
-        Ok(Slot {
+        Admission::Wait(Slot {
             waiting: Arc::clone(&self.waiting),
             address: address.to_owned(),
         })
@@ -201,8 +209,8 @@ impl Notifier {
     pub fn notify(&self, draft: NotificationDraft) -> Result<Delivery, String> {
         let admitted = self.admit(&draft.address);
         let delivery = match &admitted {
-            Ok(_) => Delivery::Waiting,
-            Err(refused) => *refused,
+            Admission::Wait(_) => Delivery::Waiting,
+            Admission::Refused(why) => *why,
         };
         let backend = Arc::clone(&self.backend);
         let events = Arc::clone(&self.events);
@@ -220,8 +228,8 @@ impl Notifier {
                 };
                 let _ = shown.send(Ok(()));
                 let slot = match admitted {
-                    Ok(slot) => slot,
-                    Err(Delivery::AlreadyWaiting) => {
+                    Admission::Wait(slot) => slot,
+                    Admission::Refused(Delivery::AlreadyWaiting) => {
                         tracing::debug!(
                             address = draft.address,
                             "shown without a wait: one is already waiting on this address"
@@ -229,7 +237,7 @@ impl Notifier {
                         drop(wait);
                         return;
                     }
-                    Err(_) => {
+                    Admission::Refused(_) => {
                         tracing::debug!(
                             address = draft.address,
                             cap = WAITER_CAP,
@@ -420,8 +428,13 @@ mod tests {
 
         /// Block until no wait is running -- every emit has happened by then.
         fn settled(&self) {
+            self.settled_to(0);
+        }
+
+        /// Block until exactly `count` waits are running.
+        fn settled_to(&self, count: usize) {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while self.notifier.waiting() != 0 {
+            while self.notifier.waiting() != count {
                 assert!(Instant::now() < deadline, "a wait never ended");
                 std::thread::sleep(Duration::from_millis(1));
             }
@@ -555,16 +568,6 @@ mod tests {
         }
         b.release(&address(0), CLOSED);
         b.settled();
-    }
-
-    impl Bench {
-        fn settled_to(&self, count: usize) {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while self.notifier.waiting() != count {
-                assert!(Instant::now() < deadline, "a wait never ended");
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
     }
 
     /// A platform that refuses is reported, and holds no slot: the next send

@@ -116,7 +116,7 @@ fn no_grant_reaches_further_than_the_app_does() {
 /// rewrite that dropped `allow-request-permission` and added something else
 /// would still be a list of four.
 #[test]
-fn the_window_may_ask_about_notify_and_nothing_else_about_notifications() {
+fn the_window_may_ask_about_permission_and_nothing_else_about_notifications() {
     let capability = capability();
     let granted: Vec<String> = capability["permissions"]
         .as_array()

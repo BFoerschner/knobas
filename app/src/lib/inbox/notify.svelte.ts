@@ -64,14 +64,14 @@
  * notification through `notify-rust` and waits on the handle off the main
  * thread, and a body click comes back as the `notification:clicked` event
  * carrying that address. `@tauri-apps/plugin-notification` is still what asks
- * the OS about permission, and nothing else -- its desktop `notify` drops the
+ * the OS about permission, and nothing else — its desktop `notify` drops the
  * handle a click arrives on, and its `onAction` (`register_listener`) exists
  * on mobile only, which is why #290 shipped a door with nothing behind it.
  *
  * What has been witnessed is macOS, in the signed bundle
  * (`testenv/README.md`, "Signed dev build"): a real banner, and its click
  * bringing knobas to the front on the item's room. **Linux and Windows are
- * written from `notify-rust`'s sources and not witnessed** -- the same
+ * written from `notify-rust`'s sources and not witnessed** — the same
  * disclosure the Rust module and `docs/contract.md` §10.8 carry. On macOS a
  * bare `tauri dev` binary is refused by `UNUserNotificationCenter` (it needs a
  * bundle); the send rejects, the store swallows it, and the dev terminal says
@@ -128,9 +128,9 @@ export interface NotifyPorts {
   requestPermission: () => Promise<string>;
   send: (notification: NotificationDraft) => void;
   /** Subscribe to notification clicks; see the module note for the channel. */
-  onAction: (
-    handler: (notification: { extra?: Record<string, unknown> }) => void,
-  ) => Promise<() => void>;
+  onAction: (handler: (notification: { extra?: Record<string, unknown> }) => void) => Promise<
+    () => void
+  >;
   /** Whether the window is focused — `timer.svelte.ts`'s port and its rule. */
   focused: () => boolean;
   navigate: (hash: string) => void;
@@ -206,9 +206,7 @@ type Listen = (
  *
  * `listen` is a parameter so a test can drive it; the window uses Tauri's.
  */
-export function clickChannel(
-  listen: Listen = tauriListen,
-): NotifyPorts["onAction"] {
+export function clickChannel(listen: Listen = tauriListen): NotifyPorts["onAction"] {
   return (handler) =>
     listen(EVENTS.notificationClicked, (event) =>
       handler({ extra: { [ADDRESS]: event.payload.address } }),
@@ -218,7 +216,11 @@ export function clickChannel(
 /**
  * The real `send`: the `notify` command, given the address out of `extra`.
  *
- * Fire-and-forget on purpose -- the port is synchronous and a refused send
+ * A draft with no string address is not sent at all — the backend would key
+ * a waiter to it and its click would open nowhere; every draft this store
+ * writes has one, so the guard is the type's, not a path anything reaches.
+ *
+ * Fire-and-forget on purpose — the port is synchronous and a refused send
  * has no surface to land on. The refusal is not lost: the Rust side logs it
  * at `warn` with the platform's sentence, which under `tauri dev` on macOS is
  * *no bundle identifier* (see the module note).
@@ -228,17 +230,14 @@ export function sendThrough(
 ): NotifyPorts["send"] {
   return (notification) => {
     const address = notification.extra[ADDRESS];
-    void notify({
-      title: notification.title,
-      body: notification.body,
-      address: typeof address === "string" ? address : "",
-    }).catch(() => {});
+    if (typeof address !== "string") return;
+    void notify({ title: notification.title, body: notification.body, address }).catch(
+      () => {},
+    );
   };
 }
 
-export function createNotifications(
-  ports?: Partial<NotifyPorts>,
-): Notifications {
+export function createNotifications(ports?: Partial<NotifyPorts>): Notifications {
   const io: NotifyPorts = {
     notificationKinds: () => realRead(),
     setNotificationKinds: (kinds) => realWrite(kinds),
@@ -292,10 +291,7 @@ export function createNotifications(
       // tells the reader what the OS said. Later kinds ask only if the
       // permission has since gone, which is what keeps knobas from prompting
       // on every click.
-      if (
-        on &&
-        (state.kinds.length === 0 || !(await io.isPermissionGranted()))
-      ) {
+      if (on && (state.kinds.length === 0 || !(await io.isPermissionGranted()))) {
         const answered = (await io.requestPermission()) === "granted";
         state.permission = answered ? "granted" : "refused";
         if (!answered) {
