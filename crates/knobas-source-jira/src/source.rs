@@ -109,7 +109,8 @@ impl JiraSource {
     }
 }
 
-/// What the connection detail says about epic membership, in one clause.
+/// The **connection note** (`CONTEXT.md`): what this connection says about
+/// epic membership, in one clause, and nothing the report already says.
 ///
 /// Three states, and **two of them are the gap**: a classic Data Center
 /// project keeps epic membership *only* in this field (#276), so a source with
@@ -121,34 +122,31 @@ impl JiraSource {
 /// had. That is the shape this says out loud, in the one line a connection
 /// gets.
 ///
-/// **How far that line reaches today, exactly.** It is `ConnectionInfo::detail`,
-/// and `ConnectionReport` deliberately does not carry that field (`knobas-app`'s
-/// `sources::ConnectionReport`), so the Add-source dialog never shows it. Where
-/// it does surface is `source_config.auth_detail`, which only `crud::set_secret`
-/// writes -- the re-enter-a-credential path -- and which the next successful sync
-/// clears (`scheduler::apply_health_and_backoff`, `SyncOutcome::Ok` writes a
-/// `None` detail). So a saved source states this gap beside its credential
-/// health from a credential re-entry until its next good run, and nowhere else.
-/// That is the same reach every other clause of this detail has had since M1,
-/// and widening it is an IPC change nobody has ratified; said here so the next
-/// reader does not take the line for a permanent banner.
+/// **How far that line reaches.** It is `ConnectionInfo::detail`, which
+/// `knobas-app`'s `ConnectionReport` carries as its `detail` since #326, so it
+/// shows beneath the *Test connection* result -- in the Add-source dialog on a
+/// draft, and on a saved source's row from its *Test* action -- and is stored
+/// nowhere. It is *not* credential health: the re-enter-a-credential path
+/// records a good check with no detail (`crud::set_secret`), so a saved
+/// source's credential column never carries this clause. Nothing on the
+/// report says it twice, which is why the deployment type and version that
+/// used to prefix it are gone: `server_version` already says them.
 ///
 /// A saved source reaches the second arm whenever the reader never filled the
 /// field in: the Add-source dialog fills it for a source being *created*, and
 /// discovering it for one already saved is a later ticket (#297's *Out of
-/// scope*). Until then this line is what tells them.
+/// scope*). Until then this line, on the row's *Test*, is what tells them.
 fn epic_link_note(configured: Option<&str>, discovered: Option<&str>) -> String {
     match (configured, discovered) {
         // Already named. Whether the discovery agreed is not this line's
         // business: an id typed by hand is the reader's decision, and the
         // dialog does not overwrite it.
-        (Some(field), _) => format!(" \u{b7} Epic Link {field}"),
-        (None, Some(field)) => format!(
-            " \u{b7} Epic Link {field} found but not configured: epic membership is not mirrored"
-        ),
+        (Some(field), _) => format!("Epic Link {field}"),
+        (None, Some(field)) => {
+            format!("Epic Link {field} found but not configured: epic membership is not mirrored")
+        }
         (None, None) => {
-            " \u{b7} no Epic Link field: a classic project's epic membership is not mirrored"
-                .to_owned()
+            "no Epic Link field: a classic project's epic membership is not mirrored".to_owned()
         }
     }
 }
@@ -206,7 +204,6 @@ impl Source for JiraSource {
         // as".
         let me = self.http.myself().await?;
         let server = self.http.server_info().await?;
-        let version = server.version.clone();
         let epic_link = self.discover_epic_link_field().await?;
         let mut discovered = std::collections::BTreeMap::new();
         if let Some(id) = &epic_link {
@@ -214,17 +211,19 @@ impl Source for JiraSource {
         }
         Ok(ConnectionInfo {
             account: me.name.or(me.display_name),
-            server_version: version.clone(),
+            server_version: server.version,
             // Jira DC does publish PAT expiry, but only through
             // /rest/pat/latest/tokens, which is outside M1's endpoint set (it
             // is not in mockd's Jira subset). The credential-health strip shows
             // the countdown as soon as that endpoint is added.
             secret_expires_at: None,
-            detail: Some(format!(
-                "{} {}{}",
-                server.deployment_type.unwrap_or_else(|| "Jira".to_owned()),
-                version.unwrap_or_else(|| "(unknown version)".to_owned()),
-                epic_link_note(self.cfg.epic_link_field.as_deref(), epic_link.as_deref())
+            // The connection note: only what nothing else on the report says.
+            // The deployment type and version used to prefix this;
+            // `server_version` carries the version and the report shows it
+            // once (#326).
+            detail: Some(epic_link_note(
+                self.cfg.epic_link_field.as_deref(),
+                epic_link.as_deref(),
             )),
             discovered,
         })
@@ -602,6 +601,27 @@ mod tests {
         assert!(
             matches!(synced, Err(SourceError::Unreachable(_))),
             "{synced:?}"
+        );
+    }
+
+    /// The connection note is the Epic Link clause and **only** that, in its
+    /// three arms, with no separator in front (#326): it is a line of its own
+    /// beneath the test result now, not a suffix on a `{deployment}
+    /// {version}` line the report already carries as `server_version`.
+    #[test]
+    fn the_connection_note_is_the_epic_link_clause_in_three_arms() {
+        assert_eq!(
+            epic_link_note(Some("customfield_10008"), Some("customfield_10101")),
+            "Epic Link customfield_10008",
+            "configured: the id the sync will use, whatever was discovered"
+        );
+        assert_eq!(
+            epic_link_note(None, Some("customfield_10101")),
+            "Epic Link customfield_10101 found but not configured: epic membership is not mirrored"
+        );
+        assert_eq!(
+            epic_link_note(None, None),
+            "no Epic Link field: a classic project's epic membership is not mirrored"
         );
     }
 }

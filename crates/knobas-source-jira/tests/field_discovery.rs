@@ -129,13 +129,15 @@ async fn a_field_table_puts_the_epic_link_id_on_the_connection_report() {
         "the discovered id must reach the report under the config property it fills: {info:?}"
     );
     // Not Epic Status, which sits one id along and would mirror a workflow
-    // state as though it were the epic. And the detail is honest about what
-    // *finding* it does and does not do: nothing is mirrored until the id is
-    // in the configuration, which for a saved source is a later ticket.
+    // state as though it were the epic. And the connection note is honest
+    // about what *finding* it does and does not do: nothing is mirrored until
+    // the id is in the configuration, which for a saved source is a later
+    // ticket. The note is that clause alone -- the deployment and version are
+    // `server_version`'s to say, and the report shows them once (#326).
     assert_eq!(
         info.detail.as_deref(),
         Some(
-            "Server 10.3.24 \u{b7} Epic Link customfield_10101 found but not configured: \
+            "Epic Link customfield_10101 found but not configured: \
              epic membership is not mirrored"
         ),
         "{info:?}"
@@ -170,11 +172,10 @@ async fn a_configured_id_is_reported_even_when_the_instance_names_another() {
         Some("customfield_10101"),
         "the report still says what the instance has: {info:?}"
     );
-    assert!(
-        info.detail
-            .as_deref()
-            .is_some_and(|d| d.ends_with("Epic Link customfield_10008")),
-        "the detail names the configured id, which is the one the sync will use: {info:?}"
+    assert_eq!(
+        info.detail.as_deref(),
+        Some("Epic Link customfield_10008"),
+        "the note names the configured id, which is the one the sync will use: {info:?}"
     );
 }
 
@@ -196,10 +197,9 @@ async fn a_404_on_the_field_table_is_a_connection_that_worked() {
     assert!(info.discovered.is_empty(), "{info:?}");
     // Said out loud rather than left to be found weeks later in an empty
     // Contexts view: this source mirrors no epic membership.
-    assert!(
-        info.detail
-            .as_deref()
-            .is_some_and(|d| d.contains("no Epic Link field")),
+    assert_eq!(
+        info.detail.as_deref(),
+        Some("no Epic Link field: a classic project's epic membership is not mirrored"),
         "{info:?}"
     );
 }
