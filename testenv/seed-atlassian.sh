@@ -127,13 +127,41 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # it should replace this paragraph with its seconds, the way the paragraph
 # above replaced its own guess.
 #
-# All six are seconds of WALL CLOCK, not counts of anything.
+# WIZARD_POST_TIMEOUT_S BOUNDS ONE POST, the way POLL_TIMEOUT_S bounds one
+# poll, and for the reason that line gives: a single unanswered request must
+# not outlive the cap that exists to bound the wait it sits in. Without it the
+# retry above is a cap on an app that ANSWERS 500 and nothing at all on an app
+# that accepts the connection and never answers -- which is the shape that hung
+# the /status poll before #314 gave it a timeout, arriving through the one door
+# that family of changes did not cover (#367).
+#
+# IT IS NOT POLL_TIMEOUT_S'S TEN SECONDS, and the difference is not caution.
+# A poll is `GET /status`: it costs the product nothing, and redoing one costs
+# us nothing either. A wizard POST is the step's actual work -- Jira's
+# application-properties step is not quick, and this file says so where
+# wizard_read explains why only the poll passes a timeout. Cutting a POST that
+# is being processed is the one thing this loop must not do: the retry is safe
+# only because a 500 means the step was refused rather than half-applied, and
+# an ABORTED request carries no such promise -- the server may finish it after
+# curl has stopped listening. So this number is not sized to the slowest POST;
+# it is sized so that reaching it means the app is not answering AT ALL.
+#
+# Which puts the two constraints in tension, and 60 s is where they sit.
+# ABOVE any POST that has answered: MEASURED-PLACEHOLDER. BELOW the overrun a
+# timeout costs: it is discovered by the cap check only after curl has spent
+# it, so WIZARD_POST_CAP_S can be overshot by at most one of these -- 300 s
+# becomes at worst 360 s, which is a bound worth stating and is not the
+# unbounded wait it replaces. If a real POST is ever cut, widen this; that
+# would show up as a wizard step applied twice, not as a slow run.
+#
+# All seven are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600
 JIRA_RUNNING_CAP_S=900
 WIZARD_POST_CAP_S=300
 POLL_S=5
 PROGRESS_EVERY_S=30
 POLL_TIMEOUT_S=10
+WIZARD_POST_TIMEOUT_S=60
 
 say() { echo "seed-atlassian: $*"; }
 die() { echo "seed-atlassian: $*" >&2; exit 1; }
@@ -249,11 +277,21 @@ post_refusal() {  # post_refusal <body file>
 # probe still refuse to report success; the cost is a worse message, not a
 # silent half-setup.
 #
+# AND A 500 IS NOT THE ONLY WAY THAT WINDOW ANSWERS. An app can take the
+# connection and never reply, which is a refusal that says nothing at all --
+# the shape that hung the /status poll until #314 bounded it, and that the cap
+# and the progress line here could not see for as long as the POST below
+# carried no --max-time: no code came back, so no iteration happened, so
+# nothing printed and nothing counted (#367). WIZARD_POST_TIMEOUT_S is what
+# turns it back into an iteration, and its comment carries why it is not
+# POLL_TIMEOUT_S.
+#
 # WHICH IS WHY THE REFUSAL IS QUOTED BACK (post_refusal, above). The whole
 # content of this wait is a response body nobody sees: the sentence above is
 # known only because someone read one by hand. So the last one is kept and
-# printed on the way out, and the wait itself reports the step, the URL, the
-# code and how far into the cap it is every PROGRESS_EVERY_S -- what
+# printed on the way out, and the wait itself reports the step, the URL, what
+# the app is doing -- a code, or nothing -- and how far into the cap it is
+# every PROGRESS_EVERY_S -- what
 # wait_for_state prints, for the same reason (#314): an app that is warming and
 # an app that is broken were both printing the same dot.
 #
@@ -262,55 +300,94 @@ post_refusal() {  # post_refusal <body file>
 wizard_post() {  # wizard_post <url> <curl --data args...>
   _url=$1; shift
   _was=$STEP
+  # Which container this URL is, worked out ONCE and up front: both failures
+  # below end on a `docker logs` line, and a last line that is a command to run
+  # beats one to hand-edit first (wait_for_state does the same with $2). Up
+  # front and not inside the failure because the lookup can itself fail, and a
+  # `$(...)` in a die string runs in a subshell where a `die` of its own would
+  # exit nothing.
+  case "$_url" in
+    "$JIRA_URL"*)       _pwho=jira ;;
+    "$CONFLUENCE_URL"*) _pwho=confluence ;;
+    # Not reachable from this file -- all eight call sites are one of those two
+    # prefixes -- and a `die` rather than a deletion because the arm has to
+    # exist for `set -u`: with none, a third product added later would reach an
+    # unset `$_pwho` and get an unbound-variable error in place of a diagnosis.
+    # What it used to do was worse than either: print `knobas-127.0.0.1`.
+    *) die "wizard_post: $_url is under neither \$JIRA_URL nor \$CONFLUENCE_URL,
+  so there is no container to name if it fails. Add the product to this case
+  along with the rest of its walk." ;;
+  esac
   _pt0=$(date +%s)
   _pnext=$PROGRESS_EVERY_S
   _pretried=0
   while :; do
-    _out=$(curl -sS -c "$JAR" -b "$JAR" -o "$JAR.body" \
-                -w '%{http_code} %{redirect_url}' -X POST "$_url" "$@")
-    _code=${_out%% *}; _loc=${_out#* }
+    # `|| _prc=$?` rather than a bare assignment, because --max-time gives this
+    # curl a way to fail on purpose: under `set -eu` an unguarded
+    # `_out=$(curl ...)` ends the whole seed on a bare `curl: (28)` with none
+    # of the diagnosis below -- the same trade wizard_read's optional timeout
+    # describes one function up. curl's own stderr goes with the guard, so the
+    # exit code is named instead of quoted.
+    _prc=0
+    _out=$(curl -sS --max-time "$WIZARD_POST_TIMEOUT_S" -c "$JAR" -b "$JAR" \
+                -o "$JAR.body" -w '%{http_code} %{redirect_url}' \
+                -X POST "$_url" "$@" 2>/dev/null) || _prc=$?
+    case "$_prc" in
+      0)  _code=${_out%% *}; _loc=${_out#* } ;;
+      28) _code=timeout; _loc= ;;
+      # ONLY 28 IS RETRIED, because only 28 is "no answer yet". A refused
+      # connection, a reset, an empty reply: none of those has been seen at
+      # this point in the walk, and folding them into the retry is how they
+      # would stay unseen. Still fatal, but named -- `curl: (7)` alone was the
+      # entire message before.
+      *)  die "the POST to $_url failed outright (curl exit $_prc).
+  step: ${_was:-none}
+  This is not the warming window the retry exists for; that window answers.
+  A connection refused or reset mid-walk is the container going away:
+    docker logs --tail 50 knobas-$_pwho" ;;
+    esac
+    # What the app just did, in the two voices the messages below need:
+    # `_plast` fills the failure's "last response:" column, `_pdoing` is the
+    # progress line's verb. A timeout has to read as a sentence in both, which
+    # is why it is not simply carried as the string "timeout".
     case "$_code" in
       2*|3*) break ;;
-      5*)
-        _pwaited=$(( $(date +%s) - _pt0 ))
-        if [ "$_pwaited" -ge "$WIZARD_POST_CAP_S" ]; then
-          # Both read BEFORE the message is built: a `$(...)` inside a die
-          # string is expanded there, and this message has to survive being the
-          # last thing that happens. The container name is worked out rather
-          # than left as a placeholder, so the last line is a command to run and
-          # not one to hand-edit first (wait_for_state does the same with $2).
-          _pwhy=$(post_refusal "$JAR.body")
-          case "$_url" in
-            "$JIRA_URL"*)       _pwho=jira ;;
-            "$CONFLUENCE_URL"*) _pwho=confluence ;;
-            *)                  _pwho=$(printf '%s' "$_url" | sed 's|^[a-z]*://||; s|[:/].*||') ;;
-          esac
-          die "${_was:-the wizard} never accepted a POST (${_pwaited}s of ${WIZARD_POST_CAP_S}s).
-  url:           $_url
-  last response: $_code
-  it said:       $_pwhy
-  A 500 here is the product up but not yet able to process the step, which is a
-  window both products have and neither reports. One repeated to the cap is not
-  a slow start: it is a step this product is refusing outright, or a container
-  that is up and broken:
-    docker logs --tail 50 knobas-$_pwho"
-        fi
-        if [ "$_pretried" -eq 0 ]; then
-          _pretried=1
-          say "waiting for ${_was:-the wizard} to accept a POST (cap ${WIZARD_POST_CAP_S}s)"
-        fi
-        sleep "$POLL_S"
-        _pwaited=$(( $(date +%s) - _pt0 ))
-        if [ "$_pwaited" -ge "$_pnext" ]; then
-          # The step as well as the URL, and not only because the criteria say
-          # so: they are the same name on every step this script knows, so a
-          # line where they disagree is a POST going somewhere the rendered
-          # form did not point.
-          say "  ${_was:-no step} at $_url is answering $_code -- ${_pwaited}s of ${WIZARD_POST_CAP_S}s"
-          _pnext=$(( _pwaited + PROGRESS_EVERY_S ))
-        fi ;;
+      5*)      _plast=$_code
+               _pdoing="answering $_code" ;;
+      timeout) _plast="no reply in ${WIZARD_POST_TIMEOUT_S}s (curl --max-time)"
+               _pdoing="not answering" ;;
       *) die "$_url answered $_code" ;;
     esac
+    _pwaited=$(( $(date +%s) - _pt0 ))
+    if [ "$_pwaited" -ge "$WIZARD_POST_CAP_S" ]; then
+      # Read BEFORE the message is built: a `$(...)` inside a die string is
+      # expanded there, and this message has to survive being the last thing
+      # that happens.
+      _pwhy=$(post_refusal "$JAR.body")
+      die "${_was:-the wizard} never accepted a POST (${_pwaited}s of ${WIZARD_POST_CAP_S}s).
+  url:           $_url
+  last response: $_plast
+  it said:       $_pwhy
+  A 500 here is the product up but not yet able to process the step, and no
+  reply at all is that same window with the request never handed back. Both
+  are windows both products have and neither reports. Either one repeated to
+  the cap is not a slow start: it is a step this product is refusing outright,
+  or a container that is up and broken:
+    docker logs --tail 50 knobas-$_pwho"
+    fi
+    if [ "$_pretried" -eq 0 ]; then
+      _pretried=1
+      say "waiting for ${_was:-the wizard} to accept a POST (cap ${WIZARD_POST_CAP_S}s)"
+    fi
+    sleep "$POLL_S"
+    _pwaited=$(( $(date +%s) - _pt0 ))
+    if [ "$_pwaited" -ge "$_pnext" ]; then
+      # The step as well as the URL, and not only because the criteria say so:
+      # they are the same name on every step this script knows, so a line where
+      # they disagree is a POST going somewhere the rendered form did not point.
+      say "  ${_was:-no step} at $_url is $_pdoing -- ${_pwaited}s of ${WIZARD_POST_CAP_S}s"
+      _pnext=$(( _pwaited + PROGRESS_EVERY_S ))
+    fi
   done
   [ "$_pretried" -eq 0 ] \
     || say "${_was:-the wizard} accepted the POST after $(( $(date +%s) - _pt0 ))s"
