@@ -92,9 +92,10 @@ const LITTER: &str = "knobas-";
 /// **A bound on each request is the whole bound here**, where `live_env` also
 /// carries a `CLEANUP_BUDGET` over the sequence. It can be: this guard makes a
 /// fixed, small number of requests -- one pull listing, one delete per pull
-/// request found, two branch deletes, and three re-reads -- so bounding each
-/// one bounds the `Drop`. `live_env::Litter` sweeps an unknown number of
-/// leftovers, which is why the sequence there needs a budget of its own.
+/// request found, two branch deletes, and three re-reads, each listing costing
+/// a page or two ([`Env::listing`]) -- so bounding each one bounds the `Drop`.
+/// `live_env::Litter` sweeps an unknown number of leftovers, which is why the
+/// sequence there needs a budget of its own.
 const REQUEST_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The mockd issue this flow starts from.
@@ -161,44 +162,59 @@ impl Env {
         response.json().await.unwrap_or(json!(null))
     }
 
+    /// Every page of one listing, as raw records.
+    ///
+    /// Paged to the end rather than asked for with one big `limit`, because a
+    /// server is free to answer fewer records than it was asked for -- the
+    /// property `live_gitea_capped.rs` exists for, and the one
+    /// [`Litter::opened`] refuses to assume away on the collecting side. A
+    /// single page would put that blind spot straight back into the *checking*
+    /// side: the deletes would go out and their confirmation would read a page
+    /// that never held the residue, so the guard would pass over exactly what
+    /// it exists to catch. Stops on an **empty** page rather than a short one,
+    /// since a short page is what a capped server answers. Matches
+    /// `live_env::listing`, for the reason its own comment gives.
+    async fn listing(&self, path: &str, query: &[(&str, &str)]) -> Vec<serde_json::Value> {
+        let mut all = Vec::new();
+        for page in 1..=64 {
+            let mut url = format!("{path}?limit=50&page={page}");
+            for (key, value) in query {
+                url.push_str(&format!("&{key}={value}"));
+            }
+            let rows = self.api(reqwest::Method::GET, &url, None).await;
+            match rows.as_array() {
+                Some(rows) if !rows.is_empty() => all.extend(rows.iter().cloned()),
+                _ => return all,
+            }
+        }
+        panic!("GET {path}: 64 pages and still not empty -- is `page` being honoured?");
+    }
+
     /// Every branch of the mutated repository, by name.
     async fn branches(&self) -> Vec<String> {
-        self.api(
-            reqwest::Method::GET,
-            &format!("/repos/{}/branches?limit=50", self.full_name()),
-            None,
-        )
-        .await
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| row["name"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+        self.listing(&format!("/repos/{}/branches", self.full_name()), &[])
+            .await
+            .iter()
+            .filter_map(|row| row["name"].as_str().map(str::to_owned))
+            .collect()
     }
 
     /// Every pull request, as `(number, head branch, merged)`.
     async fn pulls(&self) -> Vec<(u64, String, bool)> {
-        self.api(
-            reqwest::Method::GET,
-            &format!("/repos/{}/pulls?state=all&limit=50", self.full_name()),
-            None,
+        self.listing(
+            &format!("/repos/{}/pulls", self.full_name()),
+            &[("state", "all")],
         )
         .await
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    Some((
-                        row["number"].as_u64()?,
-                        row["head"]["ref"].as_str()?.to_owned(),
-                        row["merged"].as_bool().unwrap_or(false),
-                    ))
-                })
-                .collect()
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row["number"].as_u64()?,
+                row["head"]["ref"].as_str()?.to_owned(),
+                row["merged"].as_bool().unwrap_or(false),
+            ))
         })
-        .unwrap_or_default()
+        .collect()
     }
 
     /// The repository's default branch, as Gitea's own record names it.
@@ -769,6 +785,31 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
          on nothing this run controls: {cut}",
         litter.default_branch,
     );
+    //    What the **proposal** said the base was, asserted before it is edited
+    //    away. `plan::subject` reads it from the mirrored repository payload's
+    //    `default_branch`, and until this file reproposed the base that value
+    //    went to Gitea on every run -- so the chain from Gitea's repository
+    //    record through the adapter's stored payload to `subject`'s read was
+    //    witnessed here, incidentally, by the branch creation succeeding.
+    //    Reproposing the base ends that, and this is what takes its place:
+    //    stated rather than incidental, and against Gitea's own name for the
+    //    default branch rather than this file's guess at it.
+    for step in &flow {
+        let proposed = match step.step {
+            Step::CreateBranch => &step.payload["CreateBranch"]["from_ref"],
+            Step::CreatePullRequest => &step.payload["CreatePullRequest"]["base"],
+            _ => continue,
+        };
+        assert_eq!(
+            proposed.as_str(),
+            Some(litter.default_branch.as_str()),
+            "the {} step was proposed against {proposed}, not {:?}, which is what Gitea calls \
+             this repository's default branch -- so what plan::subject read out of the mirror \
+             is not the branch the server would have taken",
+            step.step,
+            litter.default_branch
+        );
+    }
     for step in &flow {
         let payload = match step.step {
             Step::CreateBranch => with(&with(&step.payload, "name", &branch), "from_ref", &base),
