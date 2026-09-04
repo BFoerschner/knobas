@@ -279,25 +279,34 @@ dependabot 161, one other contributor — a single maintainer.
 
 ## Recommendation
 
-**Pick A — Choochmeque `tauri-plugin-notifications` with its default `notify-rust`
-backend** — as the thing to try, gated on one live check. It is the only
-candidate whose surface is the plugin's surface: `isPermissionGranted`,
-`requestPermission`, `sendNotification({ title, body, extra })` and a click
-listener that hands back `extra` as `data`, over the plugin's own channel
-mechanism. On the knobas side that is the two imports in `notify.svelte.ts`,
-`onAction` → `onNotificationClicked` with `notification.data` in place of
-`notification.extra` (the `NotifyPorts.onAction` port and its tests stay), three
-capability strings, the Cargo/npm pin pair and the `tests/wiring.rs` check, and
-one §10.8 entry recording the plugin swap — no knobas command or event. The
-`"Open"` button macOS grows when the listener is armed is the visible price of
-the `NSUserNotificationCenter` backend; the invisible price is a single
-maintainer shipping release candidates, so pin exactly (as the repo already does
-for `opener` and the official plugin) and treat an upgrade as a reviewed change.
-The gate before adopting it: the same signed dev-bundle check `testenv/README.md:747-808`
-describes, extended by one click — nobody has yet witnessed the NS-backend wait
-firing inside a Tauri process, neither upstream nor here. If that check fails,
-fall to B (notify-rust direct), which is the same mechanism minus the plugin
-and costs a ratified command plus event.
+**Pick B — keep the official plugin, call `notify-rust` directly from knobas's
+own Rust for the click.** Björn's ruling on 2026-09-04, on one criterion: no
+library that one person can abandon. Every candidate on the table sits on
+`notify-rust` for all three desktop OSes — the official plugin included — so
+`notify-rust` is the load-bearing dependency whichever wrapper is chosen, and it
+is already in `Cargo.lock` through Tauri's own plugin. B adds **no new
+dependency**. `notify-rust` 4.18.0 (2026-06-16) has `NotificationHandle::wait_for_action`
+on macOS (NS backend), Linux (XDG `default` action) and Windows; the code knobas
+owns is one command that sends a notification and waits on the handle off the
+main thread, and one event carrying the item address back to the frontend — a
+§10.8 entry on knobas's own surface, which nobody outside the repo can orphan.
+The official plugin stays for `isPermissionGranted` / `requestPermission` and
+for the bundle-identity and AppUserModelID handling it already does. If the
+official plugin ever ships click support, the owned code is deleted and
+`onAction` comes back; the same code is the shape of a PR for #2150.
+
+The gate is unchanged: the signed dev-bundle check `testenv/README.md:747-808`
+describes, extended by one click, because nobody — upstream or here — has yet
+witnessed the NS-backend wait firing inside a Tauri process. The visible price
+on macOS is the `"Open"` button the NS backend grows while a click is armed.
+
+**Superseded: A — Choochmeque `tauri-plugin-notifications`.** It was the first
+recommendation because it is the only candidate whose surface is the plugin's
+surface (`sendNotification({ extra })` plus a click listener over the plugin's
+own channel, no knobas command or event). It is the same `notify-rust`
+mechanism as B behind a second wrapper — one maintainer shipping release
+candidates — so on the stability criterion it adds a maintainer without
+removing one. Ruled out for that reason, not for what it does.
 
 **Rule out C — `user-notify`.** It is the best-engineered macOS path
 (`UNUserNotificationCenter`, real permission, no button), but three things stack
@@ -305,9 +314,9 @@ against it for knobas: it goes silent in `cargo tauri dev` (mock when the bundle
 id is missing) so the daily loop cannot see notifications at all; it is
 LGPL-3.0 in a repo where everything else is MIT/Apache, which is a licensing
 decision nobody has asked for; and it is a one-contributor 0.4.x crate that would
-still need the same new command and event as B. G (Web Notifications) is not an
-option at all — the plugin replaces `window.Notification` with a shim that has no
-click.
+still need the same new command and event as B. D–F are three per-OS stacks for
+one feature. G (Web Notifications) is not an option at all — the plugin replaces
+`window.Notification` with a shim that has no click.
 
 ## Sources
 
