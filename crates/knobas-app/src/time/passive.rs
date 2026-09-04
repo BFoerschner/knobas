@@ -413,17 +413,72 @@ pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<
     record(pool, foreground).await
 }
 
-/// Insert one observation.
+/// Insert one observation, now.
 ///
 /// A malformed foreground arrives here as `None`: the beat still happened and
 /// the window was still focused, so the observation is a real one -- what it
 /// cannot say is what was open.
 ///
+/// **The instant is this process's clock, bound, and not the column's
+/// `default now()`.** Migration `0015` made `at` default server-side so the
+/// instant would be "the server's and not a webview clock that disagrees
+/// with it by fractions of a second"; that default is now unused by any
+/// production writer (`write` binds `at` so the fixtures can write a past
+/// through it, #387), and the guard still holds, because `Utc::now()` here
+/// is the app process's clock, on the host the embedded server runs on, and
+/// never the webview's. `knobas.timer.last_heartbeat` keeps its server-side
+/// `now()` (`BEAT` in `time/mod.rs`); the two stamps of one beat are one
+/// host's clock read microseconds apart, against thirty-second windows.
+///
 /// # Errors
 /// [`IpcError`] if the write fails.
 async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
+    write(pool, Utc::now(), foreground).await
+}
+
+/// Insert one observation at `at`. **Tests only.**
+///
+/// [`record`] is this with the clock; the instant is a parameter so that a
+/// test can build a morning of beats without waiting for one, through the
+/// same insert the shell's heartbeat lands in. Before #387 the fixtures
+/// wrote `knobas.heartbeat` with SQL of their own, and the two writers were
+/// held to each other by nothing: a `record` that wrote `focused = false`
+/// left every passive-block test green while the day review offered a real
+/// user nothing. A fixture that goes through here cannot drift from the
+/// production row, because there is no second row shape to drift to.
+///
+/// **Behind `test-util`**, the convention `docs/contract.md` §10.4 records
+/// for a seam the app must not reach: this one does not read the switch
+/// ([`observe`] is the gate, and a fixture that wants a beat kept has
+/// already turned the setting on), so an app caller would record beats
+/// with passive attribution off. Under the gate that mistake is a compile
+/// error rather than a review catch. The crate's own `tests/` see it through
+/// the self-dev-dependency.
+///
+/// # Errors
+/// [`IpcError`] if the write fails.
+#[cfg(feature = "test-util")]
+pub async fn record_at(
+    pool: &PgPool,
+    at: DateTime<Utc>,
+    foreground: Option<&TimerTarget>,
+) -> Result<(), IpcError> {
+    write(pool, at, foreground).await
+}
+
+/// **The one statement that writes what [`OBSERVATIONS`] reads.**
+///
+/// `focused` is left to the column's default, which is `true`, because that
+/// is the only value anything writes (see [`Observation::focused`]): the shell
+/// sends no beat from an unfocused window.
+async fn write(
+    pool: &PgPool,
+    at: DateTime<Utc>,
+    foreground: Option<&TimerTarget>,
+) -> Result<(), IpcError> {
     let (entity_id, label) = foreground.map_or((None, None), TimerTarget::columns);
-    sqlx::query("insert into knobas.heartbeat (entity_id, label) values ($1, $2)")
+    sqlx::query("insert into knobas.heartbeat (at, entity_id, label) values ($1, $2, $3)")
+        .bind(at)
         .bind(entity_id)
         .bind(label)
         .execute(pool)

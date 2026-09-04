@@ -314,11 +314,15 @@ async fn a_tick_sweeps_the_observations_retention_has_aged_out() {
         now - retention - chrono::Duration::days(1),
         now - chrono::Duration::days(1),
     ] {
-        sqlx::query("insert into knobas.heartbeat (at, entity_id) values ($1, 'jira:PAY-231')")
-            .bind(at)
-            .execute(&service.pool)
-            .await
-            .expect("an observation in the past");
+        knobas_app::time::passive::record_at(
+            &service.pool,
+            at,
+            Some(&knobas_app::time::TimerTarget::Entity {
+                entity_id: "jira:PAY-231".to_owned(),
+            }),
+        )
+        .await
+        .expect("an observation in the past");
     }
 
     backup::tick(&service).await;

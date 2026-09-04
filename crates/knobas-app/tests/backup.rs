@@ -451,12 +451,15 @@ async fn a_restored_backup_brings_back_the_timer_its_blocks_and_its_worklogs() {
     knobas_app::time::passive::set_enabled(&from, true)
         .await
         .expect("passive attribution is switched on");
-    sqlx::query("insert into knobas.heartbeat (at, entity_id, focused) values ($1, $2, true)")
-        .bind(day(16, 0))
-        .bind(&ticket)
-        .execute(&from)
-        .await
-        .unwrap();
+    knobas_app::time::passive::record_at(
+        &from,
+        day(16, 0),
+        Some(&knobas_app::time::TimerTarget::Entity {
+            entity_id: ticket.clone(),
+        }),
+    )
+    .await
+    .expect("an observation in the past");
 
     let dir = tempfile::tempdir().unwrap();
     let archive = dir.path().join("a-day-of-work.knobas");
