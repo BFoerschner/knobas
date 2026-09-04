@@ -93,7 +93,7 @@ variables gate it and where those come from.
 |---|---|---|---|
 | `just gitea-live` | `knobas-source-gitea` / `live_gitea` — the adapter against the shapes interfaces §4.2 fixes | `KNOBAS_GITEA_URL`, `KNOBAS_GITEA_TOKEN` | `./seed-gitea.sh` then `eval "$(./seed --env)"` (the recipe does both) |
 | `just gitea-live-capped` | `live_gitea_capped` — paged walks against a server capped to one record | as above | as above |
-| `just start-work-live` | `knobas-app` / `start_work_live` — M2 exit criterion 1, ticket → branch → PR → link → status and back | as above | as above |
+| `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back. Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
 | `just teamcity-live-seeded` | `live_teamcity_seeded` — the adapter against **our** seeded TeamCity | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
 | `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
@@ -108,6 +108,11 @@ which libtest counts as a **pass**, so there is no skip total in cargo's output
 to notice (issue #351). The guard checks the variables rather than the skips for
 exactly that reason. It says nothing about an individual test: a suite whose
 variables are all present may still skip one for a reason of its own and pass.
+
+**What the guard does not claim: a variable that is set is not a server that
+answers.** It closes the silent hole — the unset variable nothing complains
+about — and nothing more. A wrong URL or a dead token still fails inside the
+suite, loudly, as a connection error or a 401, which is where it belongs.
 
 `just teamcity-live` reads the **repo-root `.env`** and points at a server that
 is not ours; a green from it is not a statement about the container in this
@@ -140,8 +145,11 @@ it at the same time will break each other. Three ways:
   server that answers one record per page. A concurrent `just gitea-live` fails
   on missing records, which reads as an adapter defect and is not one.
 
-So: **claim the environment before running `./seed`, `just gitea-live` or
-`just gitea-live-capped`, and say when you release it.** The failure mode is a
+So: **claim the environment before running `./seed`, `just gitea-live`,
+`just gitea-live-capped` or `just start-work-live`, and say when you release
+it.** `start-work-live` seeds too, and its branches carry the same `knobas-`
+prefix `live_gitea.rs` sweeps, so a concurrent `just gitea-live` deletes the
+branch out from under it. The failure mode is a
 mid-run 401 or a vanished branch, neither of which reads as "somebody else is
 in here". Nothing in the tooling enforces this, and closing it properly would
 mean a lock the tooling does not have.

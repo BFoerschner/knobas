@@ -317,9 +317,18 @@ gitea_live_env := "testenv/, which is what the lines above this one do:
 # after the recipe has sourced its variables and while they are exported -- this
 # runs as a child process, so an unexported shell variable is invisible to it.
 # The first argument is printed verbatim and is what the person who hits this
-# actually needs; it may span lines. **Pass it in single quotes**: it is
-# interpolated into a single-quoted shell word, so double quotes and `$` inside
-# it are safe and a single quote in it is not.
+# actually needs; it may span lines.
+#
+# It is `{{quote(SOURCE)}}` below rather than `'{{SOURCE}}'`, and the difference
+# is not cosmetic: with the plain interpolation, an apostrophe in the text --
+# `the recipe's .env` -- closes the shell word early and this script dies of a
+# syntax error **on the error path only**. A run with all its variables set
+# returns at the line above and never reaches it, so the tree would stay green
+# and only the diagnostic this whole recipe exists to print would be gone. Same
+# reason for `printf` over `echo`, which would eat a leading `-n`. Callers that
+# interpolate a just variable use `{{quote(...)}}` too; a hand-written literal
+# in a recipe body is the caller's own shell quoting and fails on every run,
+# which is the loud direction.
 _require-live-env SOURCE +NAMES:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -334,7 +343,7 @@ _require-live-env SOURCE +NAMES:
     echo "  instead of reporting a success it has not earned (issue #351)." >&2
     echo >&2
     echo "  Where they come from:" >&2
-    echo '{{SOURCE}}' | sed 's/^/    /' >&2
+    printf '%s\n' {{ quote(SOURCE) }} | sed 's/^/    /' >&2
     exit 1
 
 # The Gitea adapter against the REAL pinned container in `testenv/`.
@@ -400,7 +409,7 @@ gitea-live:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
-    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
@@ -452,7 +461,7 @@ gitea-live-capped:
     eval "$(./seed --env)"
     # Before the overlay, not after: a run refused for a missing variable must
     # not be one that left the shared container capped on its way out.
-    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
     trap 'uncap' EXIT
     trap 'trap - EXIT INT; uncap; kill -INT $$' INT
@@ -486,11 +495,17 @@ gitea-live-capped:
 # the seeded Jira `atlassian-live` stands up, and that is not this recipe.
 #
 # WHAT IT WRITES TO GITEA AND WHAT IT TAKES BACK. It opens one branch named
-# `knobas-i44-<pid>`, commits one file on it, opens a draft pull request,
-# renames it out of draft and **merges** it -- the reverse direction is about a
-# pull request somebody actually finished, and Gitea refuses to merge one whose
-# title still carries the WIP prefix, which is what makes that prefix's claim a
-# real one. `Litter`'s `Drop` deletes the branch when the test ends, passing or
+# `knobas-i44-<pid>` and a draft pull request from it; the draft prefix is read
+# back off Gitea's own copy of the title there, which is where story 8's claim
+# is witnessed. Then it commits one file on the branch -- a pull request with no
+# diff is not one Gitea will merge -- renames it out of draft, and **merges**
+# it, because the reverse direction is about a pull request somebody actually
+# finished. (The rename is also what makes the merge reachable at all: Gitea
+# will not merge a title still carrying the WIP prefix. That refusal is never
+# exercised here, since the rename comes first, so it is a reason for the step
+# and not a thing this run certifies.)
+#
+# `Litter`'s `Drop` deletes the branch when the test ends, passing or
 # panicking, under the `knobas-` prefix `litter_guard.rs` pins nothing in the
 # seed shares. It asks Gitea to close the pull request first, which matters on
 # a run that *failed* before the merge -- Gitea will not delete a branch an open
@@ -501,8 +516,9 @@ gitea-live-capped:
 # **The merge commit is not taken back**, and cannot be: it is on
 # `payout-service`'s default branch, where deleting it would mean rewriting the
 # seeded history. So this recipe is repeatable but not perfectly
-# residue-free -- each run leaves one commit and one `knobas-i44-<pid>.txt` on
-# the default branch. Nothing downstream reads that file or counts those
+# residue-free -- each run leaves two commits (the work commit and the merge
+# commit, since the merge is a `"Do": "merge"`) and one `knobas-i44-<pid>.txt`
+# on the default branch. Nothing downstream reads that file or counts those
 # commits; `testenv/reset` is the remedy if it ever matters, the same
 # deliberate-not-routine one `gitea-live` names.
 #
@@ -517,7 +533,7 @@ start-work-live:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
-    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1
