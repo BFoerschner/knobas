@@ -126,7 +126,7 @@ test("a profile nobody has opted in on draws every switch off", async () => {
   }
 });
 
-test("the switches draw the stored kinds", async () => {
+test("the switches draw the stored categories", async () => {
   render({ stored: ["mention", "failed_build"] });
   await vi.waitFor(() => expect(boxes()).toHaveLength(5));
 

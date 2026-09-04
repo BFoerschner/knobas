@@ -6,7 +6,7 @@
 
   Every other section here takes its bridge as a prop, because every other
   section is the only reader of the setting it draws. This one is not: the
-  listener in `inbox/notify.svelte.ts` reads the same kinds to decide whether
+  listener in `inbox/notify.svelte.ts` reads the same categories to decide whether
   an item may interrupt somebody, and two independent reads of one setting is
   two chances for the switch on screen to disagree with the switch that fires.
   So the store is the seam, and the prop exists for the test that drives it.
