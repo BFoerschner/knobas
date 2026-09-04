@@ -273,12 +273,12 @@ async fn label_block(
 }
 
 /// Beats every thirty seconds, focused, with nothing in the foreground -- what
-/// the shell sends from a room with no detail open.
+/// the shell sends from a room with no detail open. Written through the
+/// heartbeat's own insert (`time::passive::record_at`, #387), not fixture SQL.
 async fn beats(pool: &PgPool, day: u32, hour: u32, minute: u32, count: i64) {
     for step in 0..count {
-        sqlx::query("insert into knobas.heartbeat (at, focused) values ($1, true)")
-            .bind(at(day, hour, minute) + chrono::Duration::seconds(step * 30))
-            .execute(pool)
+        let at = at(day, hour, minute) + chrono::Duration::seconds(step * 30);
+        time::passive::record_at(pool, at, None)
             .await
             .expect("a beat is recorded");
     }

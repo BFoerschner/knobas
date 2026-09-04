@@ -1118,19 +1118,28 @@ async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
 // -- passive attribution ----------------------------------------------------
 //
 // The seam is the same one the rest of this file uses: beats in through the
-// store, blocks out through `time::day::list`, and the only SQL is fixture SQL
-// that writes a **past** -- the heartbeat command can only ever record `now()`,
-// and a day with a morning of beats in it cannot be built by waiting.
+// store, blocks out through `time::day::list`. A past is built through
+// `time::passive::record_at`, the heartbeat's own insert with the instant as
+// a parameter -- the heartbeat command can only ever record now, and a day
+// with a morning of beats in it cannot be built by waiting. No fixture here
+// writes `knobas.heartbeat` itself (#387): a second insert was a second row
+// shape, and nothing held it to the one the shell's beat lands in.
 //
 // The arithmetic these tests assert on is `time::passive::derive`'s, which has
 // its own unit tests without a database. What is witnessed here is that the
 // derivation is reached at all, that the setting gates it, and that what comes
-// out of it is a row the day review can draw and a person can assign.
+// out of it is a row the day review can draw and a person can assign -- and,
+// once, that a beat sent through `time::heartbeat` is one of the beats it
+// draws from.
 
 /// Insert `count` observations, `every` apart, starting at `from`.
 ///
 /// `None` is *the reader had nothing in front of them*, which is a legal
-/// observation. Fixture SQL, like `age` and `block_at` above.
+/// observation. Not fixture SQL: the rows go through
+/// `time::passive::record_at`, the insert the heartbeat itself lands in, so
+/// that what these tests seed and what the shell records are one row shape
+/// (#387). A fixture with an insert of its own was a second writer nothing
+/// held to the first.
 async fn beats(
     pool: &PgPool,
     target: Option<&TimerTarget>,
@@ -1138,17 +1147,9 @@ async fn beats(
     count: i64,
     every: Duration,
 ) {
-    let (entity_id, label) = match target {
-        Some(TimerTarget::Entity { entity_id }) => (Some(entity_id.as_str()), None),
-        Some(TimerTarget::Label { label }) => (None, Some(label.as_str())),
-        None => (None, None),
-    };
     for step in 0..count {
-        sqlx::query("insert into knobas.heartbeat (at, entity_id, label) values ($1, $2, $3)")
-            .bind(from + every * i32::try_from(step).expect("a test fixture is small"))
-            .bind(entity_id)
-            .bind(label)
-            .execute(pool)
+        let at = from + every * i32::try_from(step).expect("a test fixture is small");
+        time::passive::record_at(pool, at, target)
             .await
             .expect("an observation in the past");
     }
@@ -1328,6 +1329,69 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
     assert_eq!(
         first, again,
         "a second read rewrote the day's passive blocks"
+    );
+}
+
+/// **The wire, end to end: a beat the shell sends is a beat the day read
+/// draws from.** Every other passive test seeds its beats through the seam;
+/// this one sends the last of them through `time::heartbeat` itself, and is
+/// the test that holds `record` to what the derivation reads (#387). Before
+/// it, a `record` that wrote `focused = false` left this file green.
+///
+/// The numbers make the live beat load-bearing, and they are tighter than
+/// they look because the merge and the claim share one window. Ten minutes
+/// ago the reader sat in a room with nothing open: two minutes of focused
+/// time that attributes to nothing and pays into the cap's budget. Ninety
+/// seconds ago they opened the ticket, and the shell has been beating five
+/// seconds apart since, the last beat five seconds ago: a visit of 115
+/// seconds, under the floor on its own. The beat sent now lands inside that
+/// last window, merges, and claims one more window forward -- and the visit
+/// clears the floor **only** if the heartbeat wrote a focused observation on
+/// the ticket. Unfocused, on the wrong target, or not written at all, and
+/// the day offers nothing. The slack is the 25 seconds between the last
+/// seeded beat's window closing and the floor, which no scheduling jitter
+/// between the two `now`s below reaches.
+#[tokio::test]
+async fn a_beat_the_shell_sends_reaches_the_day_read_as_a_passive_block() {
+    let pool = scratch("time-passive-wire").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let now = Utc::now();
+    let window = Duration::seconds(time::passive::BEAT_WINDOW_SECONDS);
+
+    // Budget for the cap to spend: focused, with nothing in the foreground.
+    beats(&pool, None, now - Duration::minutes(10), 5, window).await;
+    // The visit so far, and it is not yet one: 18 beats, 5 s apart, the last
+    // of them 5 s ago.
+    let opened = now - Duration::seconds(90);
+    beats(&pool, Some(&on(TICKET)), opened, 18, Duration::seconds(5)).await;
+
+    time::heartbeat(&pool, Some(on(TICKET)))
+        .await
+        .expect("the beat lands whether or not a timer is running");
+    let after = Utc::now();
+
+    let offered = time::day::list(&pool, now - Duration::hours(1), now + Duration::hours(1))
+        .await
+        .expect("the day is readable")
+        .blocks;
+    let [offered] = offered.as_slice() else {
+        panic!(
+            "one passive block was offered, not {}: the heartbeat's beat did \
+             not reach the derivation as a focused observation on the ticket",
+            offered.len()
+        )
+    };
+    assert_eq!(offered.block.kind, BlockKind::Passive);
+    assert_eq!(offered.block.target, on(TICKET));
+    assert_eq!(
+        offered.block.started_at, opened,
+        "the visit starts at the first seeded beat on the ticket"
+    );
+    assert!(
+        (now + window..=after + window).contains(&offered.block.ended_at),
+        "the visit ends one window after the beat that is keeping it alive, \
+         not at {} (the beat landed between {now} and {after})",
+        offered.block.ended_at
     );
 }
 

@@ -413,7 +413,7 @@ pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<
     record(pool, foreground).await
 }
 
-/// Insert one observation.
+/// Insert one observation, now.
 ///
 /// A malformed foreground arrives here as `None`: the beat still happened and
 /// the window was still focused, so the observation is a real one -- what it
@@ -422,8 +422,40 @@ pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<
 /// # Errors
 /// [`IpcError`] if the write fails.
 async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
+    record_at(pool, Utc::now(), foreground).await
+}
+
+/// Insert one observation at `at`: **the one statement that writes what
+/// [`OBSERVATIONS`] reads.**
+///
+/// [`record`] is this with the clock; the instant is a parameter so that a
+/// test can build a morning of beats without waiting for one, through the
+/// same insert the shell's heartbeat lands in. Before #387 the fixtures
+/// wrote `knobas.heartbeat` with SQL of their own, and the two writers were
+/// held to each other by nothing: a `record` that wrote `focused = false`
+/// left every passive-block test green while the day review offered a real
+/// user nothing. A fixture that goes through here cannot drift from the
+/// production row, because there is no second row shape to drift to.
+///
+/// Public for that reason and no other -- the way [`set_enabled`] and the
+/// constants are reachable from `tests/`. Nothing in the app calls it but
+/// [`record`]. It does not read the switch: [`observe`] is the gate, and a
+/// fixture that wants a beat kept has already turned the setting on.
+///
+/// `focused` is left to the column's default, which is `true`, because that
+/// is the only value anything writes (see [`Observation::focused`]): the shell
+/// sends no beat from an unfocused window.
+///
+/// # Errors
+/// [`IpcError`] if the write fails.
+pub async fn record_at(
+    pool: &PgPool,
+    at: DateTime<Utc>,
+    foreground: Option<&TimerTarget>,
+) -> Result<(), IpcError> {
     let (entity_id, label) = foreground.map_or((None, None), TimerTarget::columns);
-    sqlx::query("insert into knobas.heartbeat (entity_id, label) values ($1, $2)")
+    sqlx::query("insert into knobas.heartbeat (at, entity_id, label) values ($1, $2, $3)")
+        .bind(at)
         .bind(entity_id)
         .bind(label)
         .execute(pool)
