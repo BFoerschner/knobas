@@ -14,7 +14,7 @@
   ## Why the permission is asked for here and not on the way in
 
   Story 72: knobas asks for nothing it is not about to use. The prompt belongs
-  to the click that switches the first kind on, and never to the settings view
+  to the click that switches the first category on, and never to the settings view
   opening — a person browsing their settings has not asked to be interrupted.
   A refusal leaves every box off, which is the store's rule and is stated here
   as well, because a checkbox that sprang back is otherwise indistinguishable
@@ -75,13 +75,14 @@
 <div class="sec-b">
   <p>
     When an inbox item arrives while this window is <em>not</em> focused, knobas can
-    hand it to the operating system as a notification. Clicking one opens the item.
+    hand it to the operating system as a desktop notification. Clicking one opens the
+    item.
   </p>
   <p class="sub">
     Nothing is sent while the window is focused — you are never told about
     something already on screen — and nothing is sent for an item you have
-    already been told about. Every kind is off until you switch it on, and the
-    first one you switch on is when your operating system is asked whether
+    already been told about. Every category is off until you switch it on, and
+    the first one you switch on is when your operating system is asked whether
     knobas may notify you at all.
   </p>
 
