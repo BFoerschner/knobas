@@ -7,35 +7,80 @@
 # Windows machine in front of `tauri build`, because this one is a Mac and
 # cross-compiling a Tauri app to Windows is a port, not a build step.
 #
-# **Tags only, on purpose.** On a private repository GitHub bills macOS minutes
-# at 10x and Windows at 2x, so a single cold run of the matrix below costs a few
-# hundred minutes of the account's monthly allowance. A `push:` or
-# `pull_request:` trigger here would spend that on every commit. Re-running a
-# failed release is the "Re-run jobs" button on the run, which needs no new tag.
+# **Minutes are the design constraint.** On a private repository GitHub bills
+# macOS minutes at 10x and Windows at 2x, so one cold run of both legs costs a
+# few hundred minutes of the account's monthly allowance. Hence: a `v*` tag is
+# the only automatic trigger, and the manual one can name a single platform, so
+# that iterating on the Windows port -- which is where the failures will be for
+# a while -- does not re-buy a macOS bundle that already exists.
 name: release
 
 on:
   push:
     tags: ['v*']
+  # For re-running a leg against a tag that already exists: a Windows fix does
+  # not need a new version, and re-running from the Actions UI would rebuild
+  # both legs off the *old* workflow file (a re-run always replays the ref the
+  # run was for).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The existing tag to build from and upload into, e.g. v0.1.0
+        required: true
+        type: string
+      platforms:
+        description: Which bundles to build
+        required: true
+        default: both
+        type: choice
+        options: [both, macos, windows]
 
 # The bundle jobs upload assets to the release the `draft` job creates, which
 # `contents: read` cannot do. Nothing else here writes.
 permissions:
   contents: write
 
-# Two pushes of the same tag are the same release; the later one wins.
+# Two runs for the same tag are the same release; the later one wins.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  # One job creates the release, then both bundlers upload into it. Letting the
-  # matrix jobs each create-or-reuse it instead is a race: they start together,
-  # both see no release, and both create one.
+  # One job resolves what is being built and creates the release, then the
+  # bundle legs upload into it. Letting the legs create-or-reuse the release
+  # themselves is a race: they start together, both see no release, and both
+  # create one.
   draft:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
+      # A tag push carries the tag in `github.ref_name`; a manual run carries a
+      # branch there and the tag in `inputs.tag`. Everything downstream reads
+      # this output rather than picking between them again.
+      - id: plan
+        name: Resolve the tag and the platforms
+        run: |
+          tag='${{ inputs.tag || github.ref_name }}'
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::'$tag' is not a v-prefixed release tag."; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          case '${{ inputs.platforms || 'both' }}' in
+            macos)   os='["macos-latest"]' ;;
+            windows) os='["windows-latest"]' ;;
+            *)       os='["macos-latest", "windows-latest"]' ;;
+          esac
+          echo "matrix={\"os\": $os}" >> "$GITHUB_OUTPUT"
+
+      # The tag, not the default branch: a manual re-run must build the code the
+      # release is of, not whatever `main` has drifted to since.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.plan.outputs.tag }}
 
       # `tauri.conf.json`'s `version` is what ends up in the bundle filenames
       # and in the installed app's About box, and the tag is what a person
@@ -43,12 +88,14 @@ jobs:
       # support question forever, so disagree here instead -- before anything
       # has been built, and before any minutes are spent.
       - name: The tag and the manifest must agree
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          want="${TAG#v}"
           conf=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' crates/knobas-app/tauri.conf.json)
           test -n "$conf"
-          if [ "$tag" != "$conf" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} is version '$tag', but crates/knobas-app/tauri.conf.json says '$conf'. Bump the manifest (and the workspace Cargo.toml) or move the tag."
+          if [ "$want" != "$conf" ]; then
+            echo "::error::tag $TAG is version '$want', but crates/knobas-app/tauri.conf.json says '$conf'. Bump the manifest (and the workspace Cargo.toml) or move the tag."
             exit 1
           fi
 
@@ -62,15 +109,16 @@ jobs:
       - name: Draft the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "release $GITHUB_REF_NAME already exists; the bundle jobs will upload into it"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; the bundle jobs will upload into it"
             exit 0
           fi
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
             --draft \
             --verify-tag \
-            --title "knobas $GITHUB_REF_NAME" \
+            --title "knobas $TAG" \
             --notes "$(cat <<'NOTES'
           Built by `.github/workflows/release.yml` from the tag.
 
@@ -93,27 +141,12 @@ jobs:
     needs: draft
     strategy:
       # A Windows compile failure must not take the macOS dmg down with it.
-      # This is the first time knobas has ever been built for Windows -- the
-      # keyring store, the notifier and the embedded-Postgres downloader all
-      # have Windows paths that no machine has yet compiled -- so the asymmetric
+      # This is the first time knobas has been built for Windows at all -- the
+      # keyring store, the notifier and the embedded-Postgres downloader each
+      # have a Windows path no machine has yet compiled -- so the asymmetric
       # outcome is the expected one for a while.
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            # macos-latest is Apple Silicon, which is what knobas is developed
-            # on. A universal binary would also cover Intel Macs, at the cost of
-            # a second full compile per run; add `--target
-            # universal-apple-darwin` (and the x86_64 rustup target) if one ever
-            # needs to run it.
-            artifacts: target/release/bundle/dmg/*.dmg
-          - os: windows-latest
-            # `"targets": "all"` in tauri.conf.json means both installers get
-            # built: NSIS (`-setup.exe`) and WiX (`.msi`). The Tauri CLI
-            # downloads both toolchains itself; neither is on the runner image.
-            artifacts: |
-              target/release/bundle/nsis/*.exe
-              target/release/bundle/msi/*.msi
+      matrix: ${{ fromJSON(needs.draft.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     # A cold macOS run compiles the workspace and downloads two bundler
     # toolchains. What this bounds is the run that is stuck rather than slow,
@@ -121,6 +154,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.draft.outputs.tag }}
 
       # Same reasoning as `check.yml`: `rust-toolchain.toml` is the single
       # toolchain knob, read rather than restated, so a release can never be
@@ -155,45 +190,55 @@ jobs:
 
       # `tauri build` runs `npm run build` itself (tauri.conf.json's
       # `beforeBuildCommand`), but nothing installs the modules that command and
-      # the Tauri CLI both live in. `just deps` is what does this locally; it is
-      # spelled out here instead because the justfile's recipes build a PATH
-      # with `:` and assume a POSIX shell, neither of which survives a Windows
-      # runner.
+      # the Tauri CLI both live in. `just deps` is what does this locally.
       - name: Install the frontend's dependencies
         shell: bash
         run: cd app && npm ci
 
       # The Tauri CLI is a devDependency of `app/` and has to run from the crate
-      # that owns `tauri.conf.json` -- the same split `just dev` works around,
-      # and the same way it does it. `shell: bash` is what makes one line serve
-      # both runners: npm writes a POSIX wrapper next to the `.cmd` one, and
-      # Git Bash is on the Windows image.
+      # that owns `tauri.conf.json`. `just dev` bridges that by putting
+      # `app/node_modules/.bin` on PATH; **do not copy that here.** This
+      # workflow's first run died on it:
+      #
+      #   Error: Cannot find module
+      #   'A:\knobas\knobas\app\node_modules\@tauri-apps\cli\tauri.js'
+      #
+      # `$GITHUB_WORKSPACE` on a Windows runner is `D:\a\knobas\knobas`, and a
+      # Windows path put through a bash string loses its backslashes -- `D:\a`
+      # arrived as `A:`. `:` is not the PATH separator there either. Calling the
+      # CLI's entry point on a *relative* path has neither a drive letter nor a
+      # separator in it, so the one line serves both runners.
       - name: tauri build
         shell: bash
         run: |
           cd crates/knobas-app
-          PATH="$GITHUB_WORKSPACE/app/node_modules/.bin:$PATH" tauri build
+          node ../../app/node_modules/@tauri-apps/cli/tauri.js build
 
       # A `gh release upload` given a glob that matched nothing succeeds,
       # silently, and the release is short an installer nobody notices until
       # they go looking for it. Resolve the globs first and refuse an empty
       # match -- the same guard `check.yml` puts on its cache key, for the same
       # reason: the failure mode is a green run that did not do the work.
+      #
+      # `"targets": "all"` in tauri.conf.json is what decides this list: dmg on
+      # macOS, and both installers on Windows -- NSIS (`-setup.exe`) and WiX
+      # (`.msi`), whose toolchains the Tauri CLI downloads itself.
       - name: Upload the bundles
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.draft.outputs.tag }}
         run: |
           shopt -s nullglob
-          files=()
-          while read -r pattern; do
-            [ -n "$pattern" ] || continue
-            files+=($pattern)
-          done <<< "${{ matrix.artifacts }}"
+          case "$RUNNER_OS" in
+            macOS)   files=(target/release/bundle/dmg/*.dmg) ;;
+            Windows) files=(target/release/bundle/nsis/*.exe target/release/bundle/msi/*.msi) ;;
+            *)       echo "::error::no artifact patterns for $RUNNER_OS"; exit 1 ;;
+          esac
           if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::tauri build produced no bundle matching the patterns for ${{ matrix.os }}. What it did produce:"
+            echo "::error::tauri build produced no bundle matching the patterns for $RUNNER_OS. What it did produce:"
             find target/release/bundle -maxdepth 2 -type f 2>/dev/null || echo "  (no target/release/bundle at all)"
             exit 1
           fi
           printf 'uploading %s\n' "${files[@]}"
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          gh release upload "$TAG" "${files[@]}" --clobber
