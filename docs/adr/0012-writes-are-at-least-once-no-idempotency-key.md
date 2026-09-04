@@ -20,6 +20,7 @@ The canonical sentence, quotable verbatim by any user-facing surface (issue #224
 
 ## Consequences
 
+- **What cannot be prevented is disclosed instead.** The same window that duplicates a write can leave one *unclaimed* (`CONTEXT.md`): a `create_ticket` or a `create_page` withdrawn while it was in flight stands at the source with nothing in knobas claiming it. Nothing at the withdrawal end can know that — the queue cannot tell a write in flight from one never tried — so the record is written where the fact exists, one activity line in `knobas_sync::write_queue::unclaimed` (#336). It is a disclosure and not a repair, for this ADR's own reason: no key rides on the call, so there is nothing to reconcile the artefact against.
 - **The reconsideration trigger is an adapter, not a report.** The day an adapter lands whose source offers server-side idempotency on a write endpoint the queue uses, the §10.8 exception is paid for that adapter, starting from the design recorded above. Field reports of post-crash duplicates do not reopen this: with no honouring source, a key could not have prevented them.
 - No §10.8 entry now — the frozen surface is untouched, which is the point.
 - The flush loop's `source.write` call site signposts this ADR, so the next reader of that seam finds the ruling where the gap lives.

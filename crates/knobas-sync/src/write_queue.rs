@@ -40,8 +40,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use knobas_core::activity;
 use knobas_core::entity::EntityRef;
-use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason};
-use knobas_source::{Source, SourceError, WriteOp};
+use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
+use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
 
 use crate::config;
 use crate::scheduler::{RunFailure, SchedulerDeps};
@@ -53,6 +53,32 @@ use crate::scheduler::{RunFailure, SchedulerDeps};
 /// (`emit_latest_activity`), so borrowing that actor would have a flushed
 /// comment impersonate the source's last sync.
 const ACTOR: &str = "user";
+
+/// The ops a withdrawal can leave an **unclaimed write** behind at the source
+/// (`CONTEXT.md`, issue #336).
+///
+/// The question each op has to answer is not "did the write land after the
+/// user withdrew it" -- that is true of any op, and the branch in [`attempt`]
+/// knows it without asking. It is narrower: *did the source make something new
+/// that knobas cannot name?* A `comment` and an `update_page` change a thing
+/// the mirror already holds, a `transition` and an `approve` change a field, a
+/// build is not an artefact -- for all of those the write simply arrived,
+/// which is what the user asked for. These two make something that exists only
+/// at the source until the next sync, with nothing linking it to what asked
+/// for it, and ADR-0012 singles out the first as the op a duplicate files
+/// twice.
+///
+/// **`create_branch` and `create_pull_request` are deliberately not here.**
+/// They were weighed under this question in #333's table and left with the
+/// re-send answer they had -- Gitea refuses the duplicate with a 409 -- and
+/// widening to them is a decision for the ticket that makes it, not a side
+/// effect of this one.
+///
+/// Stated as a list for [`PROJECTED_OPS`](store::PROJECTED_OPS)'s reason, and
+/// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
+/// matches on `WriteOp` with no wildcard arm, so growing the enum stops that
+/// test compiling until somebody writes down the answer for the new variant.
+pub const UNCLAIMED_OPS: &[&str] = &["create_ticket", "create_page"];
 
 /// Why a flush could not even begin.
 ///
@@ -478,9 +504,11 @@ async fn attempt(
                 announce(deps, "sent", &sent).await;
                 return Ok(true);
             }
-            // The row settled under us -- the user discarded it while it was
-            // in flight. The write landed; there is nothing left to record
-            // against a row that no longer expects it.
+            // The row settled under us -- the user withdrew it while it was
+            // in flight. The write landed anyway, and this is the only moment
+            // knobas can know that, so it says so rather than returning
+            // quietly (issue #336).
+            unclaimed(deps, write, &receipt).await;
             Ok(false)
         }
         Err(error) => {
@@ -536,11 +564,30 @@ async fn build(
 /// losing the narration must not turn a delivered write into a failed one --
 /// the same treatment `run_inner` gives a run's activity line.
 async fn announce(deps: &SchedulerDeps, verb: &str, write: &QueuedWrite) {
+    announce_with(deps, verb, write, None).await;
+}
+
+/// [`announce`], plus the id the source gave what it made.
+///
+/// One named key rather than a bag the caller fills: the six fields below are
+/// what every line this module writes answers, so a reader does not have to
+/// know which verb they are looking at to find the write, and a merge wide
+/// enough to add a seventh is wide enough to overwrite one of the six.
+///
+/// `None` writes no key at all rather than a `null` -- the distinction
+/// [`unclaimed`] rests on, since a source that named nothing and a source
+/// that named nothing *knowable* are the same silence.
+async fn announce_with(
+    deps: &SchedulerDeps,
+    verb: &str,
+    write: &QueuedWrite,
+    remote_id: Option<&str>,
+) {
     let entity = match EntityRef::parse(&write.entity_id) {
         Ok(entity) => entity,
         Err(_) => return,
     };
-    let detail = serde_json::json!({
+    let mut detail = serde_json::json!({
         "write_id": write.id,
         "source_id": write.source_id,
         "op": write.op,
@@ -548,6 +595,9 @@ async fn announce(deps: &SchedulerDeps, verb: &str, write: &QueuedWrite) {
         "reason": write.wait_reason.map(|r| r.as_str()),
         "detail": write.detail,
     });
+    if let (Some(remote_id), Some(object)) = (remote_id, detail.as_object_mut()) {
+        object.insert("remote_id".to_owned(), remote_id.into());
+    }
     match activity::record(&deps.pool, ACTOR, verb, Some(&entity), detail).await {
         Ok(row) => deps.events.activity_new(row),
         Err(error) => tracing::warn!(%error, verb, "the write queue's activity line failed"),
@@ -574,6 +624,83 @@ async fn waited(
         }
     }
     Ok(())
+}
+
+/// The write landed after the user withdrew it, and what it made is still at
+/// the source with nothing in knobas claiming it (issue #336).
+///
+/// # Why here and nowhere else
+///
+/// This is the only moment the fact exists. **At discard time knobas cannot
+/// know it**: `knobas_core::write_queue::discard` says so in its own doc
+/// comment -- the flush loop's per-source lock does not hold a discard back,
+/// and every writer of `attempts` bumps it *after* the call, so a write in
+/// flight is indistinguishable from one that was never tried. A dialog at that
+/// end could only have offered a coin flip. Here the receipt is in hand and
+/// [`store::sent`] has just come back empty, which together mean one thing and
+/// not two: the source took the write, and the row it belonged to is no longer
+/// open.
+///
+/// # What it may claim
+///
+/// The state is **read off the row** rather than inferred from the empty
+/// settle. Withdrawal is the only transition a person can land in that window
+/// today -- the loop is the only writer of `held` and `refused` and it holds
+/// the source lock across the call -- but "the settle matched nothing" and
+/// "the user withdrew it" are different statements, and only the second is
+/// what this line says.
+///
+/// # Which ops
+///
+/// [`UNCLAIMED_OPS`], and its doc comment is where that choice is argued. The
+/// op is checked before the row is re-read, so an ordinary write that landed
+/// under a withdrawal costs nothing and says nothing: it arrived, which is
+/// what was asked for.
+///
+/// `remote_id` rides along **only when the source named what it made**. That
+/// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
+/// Confluence's `create_page` answers an id, so the line can point at the
+/// page; Jira's `create_ticket` answers `WriteReceipt::none()` on purpose --
+/// a created ticket is addressed by reading the mirror back -- so the line
+/// says a ticket was made and withdrawn and says nothing about which.
+/// Inventing an id here would be knobas naming an artefact it never saw.
+///
+/// **The line does not copy the payload**, for the reason `discard` gives for
+/// keeping the row: the withdrawn write is still there, with what was asked
+/// for in it, and `write_id` is what points at it. A create's payload is the
+/// whole body of a page, and the activity log is not where a second copy of it
+/// belongs.
+///
+/// **This is a disclosure, not a repair.** Nothing reconciles the artefact:
+/// knobas has no key on it, the next sync cannot tell a ticket it made from
+/// one a colleague made, and `create_page`'s id names a page that is not in
+/// the mirror until that sync. What the user gets is the record that it
+/// happened, on the container it happened under, which is where a person
+/// looking for it would look.
+///
+/// **Infallible, like the line it writes.** Both the re-read and the record
+/// are logged and dropped on failure rather than raised, which is
+/// [`announce`]'s own rule taken one step back: the write has already been
+/// delivered by the time this runs, and a database that will not answer must
+/// not turn a delivered write into a failed flush. Nothing downstream branches
+/// on it -- [`attempt`] returns `Ok(false)` either way, because the queue did
+/// not move.
+async fn unclaimed(deps: &SchedulerDeps, write: &QueuedWrite, receipt: &WriteReceipt) {
+    if !UNCLAIMED_OPS.contains(&write.op.as_str()) {
+        return;
+    }
+    let settled = match store::get(&deps.pool, write.id).await {
+        Ok(Some(settled)) => settled,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, write = write.id, "the withdrawn write could not be re-read");
+            return;
+        }
+    };
+    if settled.state != WriteState::Discarded {
+        return;
+    }
+    announce_with(deps, "unclaimed", &settled, receipt.remote_id.as_deref()).await;
 }
 
 /// The source refused the write. It stops being offered.

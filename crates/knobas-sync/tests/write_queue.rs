@@ -35,6 +35,21 @@ enum Answer {
     Refuse,
 }
 
+/// What settles a queue row while the write it belongs to is still in flight.
+///
+/// The window is one HTTP round trip wide and only these can open it, so the
+/// fake opens it from inside its own `write` rather than racing a timer.
+#[derive(Clone, Copy, Debug)]
+enum Interrupt {
+    /// The user withdrew it -- the only one a person can actually cause today.
+    Withdraw(i64),
+    /// The row left `pending` some other way. Nothing produces this
+    /// concurrently: the flush loop is the only writer of `held` and it holds
+    /// the source lock. It is here so the disclosure below is pinned to the
+    /// row's own state rather than to an empty settle.
+    Hold(i64),
+}
+
 /// A `Source` that records every write it is handed and answers to order.
 struct Fake {
     id: String,
@@ -44,6 +59,22 @@ struct Fake {
     /// test, which needs the window between reading the queue and settling it
     /// to be wide enough that a second flusher would fall into it.
     dwell: Arc<Mutex<std::time::Duration>>,
+    /// What the source says it made. `None` is `WriteReceipt::none()`, which
+    /// is what every op but `create_page` and `log_work` really answers; a
+    /// test that needs an id sets one.
+    receipt: Arc<Mutex<Option<String>>>,
+    /// What settles the row from *inside* the write, once.
+    ///
+    /// [`Interrupt::Withdraw`] is the race `knobas_core::write_queue::discard`
+    /// names in its own doc comment -- the flush loop's per-source lock does
+    /// not hold a discard back -- with the timing taken out of it: it lands
+    /// while the call is outstanding by construction rather than by luck, so
+    /// the settle that follows finds no open row every time this test runs.
+    interrupt: Arc<Mutex<Option<Interrupt>>>,
+    /// The pool the withdrawal above goes through. The fake reaches the store
+    /// directly rather than the flusher, which would need the `SchedulerDeps`
+    /// that holds this fake.
+    pool: sqlx::PgPool,
 }
 
 #[async_trait::async_trait]
@@ -96,8 +127,24 @@ impl Source for Fake {
             tokio::time::sleep(dwell).await;
         }
         if answer == Answer::Accept {
+            let interrupt = self.interrupt.lock().unwrap().take();
+            match interrupt {
+                Some(Interrupt::Withdraw(id)) => {
+                    store::discard(&self.pool, id).await.unwrap();
+                }
+                Some(Interrupt::Hold(id)) => {
+                    store::hold(&self.pool, id, serde_json::json!({"moved": true}))
+                        .await
+                        .unwrap();
+                }
+                None => {}
+            }
             self.written.lock().unwrap().push(op);
-            return Ok(knobas_source::WriteReceipt::none());
+            let receipt = self.receipt.lock().unwrap().clone();
+            return Ok(match receipt {
+                Some(id) => knobas_source::WriteReceipt::id(id),
+                None => knobas_source::WriteReceipt::none(),
+            });
         }
         Err(match answer {
             Answer::Unreachable => SourceError::Unreachable("connection timed out".to_owned()),
@@ -114,6 +161,9 @@ struct FakeRegistry {
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
     dwell: Arc<Mutex<std::time::Duration>>,
+    receipt: Arc<Mutex<Option<String>>>,
+    interrupt: Arc<Mutex<Option<Interrupt>>>,
+    pool: sqlx::PgPool,
 }
 
 impl AdapterRegistry for FakeRegistry {
@@ -127,6 +177,9 @@ impl AdapterRegistry for FakeRegistry {
             answer: Arc::clone(&self.answer),
             written: Arc::clone(&self.written),
             dwell: Arc::clone(&self.dwell),
+            receipt: Arc::clone(&self.receipt),
+            interrupt: Arc::clone(&self.interrupt),
+            pool: self.pool.clone(),
         }))
     }
 }
@@ -161,6 +214,8 @@ struct Harness {
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
     dwell: Arc<Mutex<std::time::Duration>>,
+    receipt: Arc<Mutex<Option<String>>>,
+    interrupt: Arc<Mutex<Option<Interrupt>>>,
     source: String,
 }
 
@@ -185,7 +240,12 @@ impl Harness {
                 // reading back: it is the *whole* re-assembled page, and a
                 // queue that sent a fragment would show it here (#286).
                 WriteOp::UpdatePage { body, .. } => body.clone(),
-                other => panic!("this harness queues comments and page edits, got {other:?}"),
+                // A create is read back by its title: that is what a person
+                // would look for at the source to find what knobas made.
+                WriteOp::CreateTicket { title, .. } | WriteOp::CreatePage { title, .. } => {
+                    title.clone()
+                }
+                other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
     }
@@ -232,6 +292,74 @@ impl Harness {
             WriteOp::Comment {
                 entity: entity.to_string(),
                 body: body.to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// The activity line for one verb. Panics if there is not exactly one:
+    /// story 20 is one line per state change, and two would be as wrong as
+    /// none.
+    fn line(&self, verb: &str) -> knobas_core::activity::ActivityRow {
+        // Collected out of the lock before anything is asserted: the failure
+        // message reads `verbs()`, which takes the same mutex.
+        let found: Vec<_> = self
+            .events
+            .activity
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|row| row.verb == verb)
+            .cloned()
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "expected exactly one {verb:?} line, got {:?}",
+            self.verbs()
+        );
+        found.into_iter().next().unwrap()
+    }
+
+    /// What the fake answers with next: `None` is `WriteReceipt::none()`.
+    fn receipt(&self, remote_id: Option<&str>) {
+        *self.receipt.lock().unwrap() = remote_id.map(str::to_owned);
+    }
+
+    /// Settle this row from inside the next write the fake accepts.
+    fn interrupt(&self, interrupt: Interrupt) {
+        *self.interrupt.lock().unwrap() = Some(interrupt);
+    }
+
+    /// Queue a ticket under a project container -- the op ADR-0012 singles out
+    /// as not naturally idempotent, and whose adapter names nothing back.
+    async fn create_ticket(&self, project: &EntityRef, title: &str) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::CreateTicket {
+                entity: project.to_string(),
+                title: title.to_owned(),
+                body: "why".to_owned(),
+                ticket_type: "Task".to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Queue a page under a parent -- the create whose adapter *does* name what
+    /// it made (`WriteReceipt::id`), which is the other half of #336.
+    async fn create_page(&self, parent: &EntityRef, title: &str) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::CreatePage {
+                parent: parent.to_string(),
+                space: "TIDE".to_owned(),
+                title: title.to_owned(),
+                body: "<p>body</p>".to_owned(),
             },
         )
         .await
@@ -335,15 +463,20 @@ async fn harness() -> Harness {
     let answer = Arc::new(Mutex::new(Answer::Accept));
     let written = Arc::new(Mutex::new(Vec::new()));
     let dwell = Arc::new(Mutex::new(std::time::Duration::ZERO));
+    let receipt = Arc::new(Mutex::new(None));
+    let interrupt = Arc::new(Mutex::new(None));
     let events = Arc::new(Recorder::default());
     Harness {
         deps: SchedulerDeps {
-            pool,
+            pool: pool.clone(),
             connections: Arc::new(TestConnections(connector)),
             registry: Arc::new(FakeRegistry {
                 answer: Arc::clone(&answer),
                 written: Arc::clone(&written),
                 dwell: Arc::clone(&dwell),
+                receipt: Arc::clone(&receipt),
+                interrupt: Arc::clone(&interrupt),
+                pool,
             }),
             secrets: Arc::new(secrets),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
@@ -352,6 +485,8 @@ async fn harness() -> Harness {
         answer,
         written,
         dwell,
+        receipt,
+        interrupt,
         source,
     }
 }
@@ -709,16 +844,15 @@ async fn a_source_with_no_credential_keeps_the_write() {
     assert!(h.delivered().is_empty());
 }
 
-/// The forcing function ADR-0006 relies on, applied to hold detection: a new
-/// `WriteOp` variant that reaches the queue without a stated definition of
-/// "changed" must fail a test rather than fall back quietly.
+/// One probe value per `WriteOp` variant, shared by the two tests below that
+/// each ask the enum a question of its own.
 ///
-/// The match has no wildcard arm for the same reason `WriteOp::identifier`
-/// has none, so a new variant stops this test compiling until it is given a
-/// probe value -- and then this assertion until it is given a projection.
-#[test]
-fn every_write_op_has_a_stated_projection() {
-    let probes = [
+/// The list itself forces nothing -- a `vec!` does not go non-exhaustive when
+/// an enum grows. The no-wildcard `match` in each test is the forcing
+/// function, and the length assertion beside it is what catches a variant
+/// given an arm there but never a probe here.
+fn write_op_probes() -> Vec<WriteOp> {
+    vec![
         WriteOp::Comment {
             entity: "jira:PAY-231".to_owned(),
             body: "probe".to_owned(),
@@ -774,7 +908,19 @@ fn every_write_op_has_a_stated_projection() {
             base_version: 3,
             body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
         },
-    ];
+    ]
+}
+
+/// The forcing function ADR-0006 relies on, applied to hold detection: a new
+/// `WriteOp` variant that reaches the queue without a stated definition of
+/// "changed" must fail a test rather than fall back quietly.
+///
+/// The match has no wildcard arm for the same reason `WriteOp::identifier`
+/// has none, so a new variant stops this test compiling until it is given a
+/// probe value -- and then this assertion until it is given a projection.
+#[test]
+fn every_write_op_has_a_stated_projection() {
+    let probes = write_op_probes();
     for op in &probes {
         let identifier = match op {
             WriteOp::Comment { .. }
@@ -879,4 +1025,211 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
         "the second flusher must not repost what the first was already sending"
     );
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// Issue #336: a create that landed after the user withdrew it is recorded,
+/// and the record carries what the source called what it made.
+///
+/// This is the one moment knobas can know any of it. At discard time the queue
+/// cannot tell a write in flight from one never tried -- `discard`'s own doc
+/// comment says so, and `attempts` is bumped after the call, never before --
+/// so nothing at that end could have said this truthfully. Here the receipt is
+/// in hand and the settle has just come back empty, which together mean
+/// exactly one thing: the write landed, and the row it belonged to is gone.
+///
+/// `create_page` is the half where the source names what it made, so the line
+/// can point at the page: Confluence answers `WriteReceipt::id`.
+#[tokio::test]
+async fn a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id() {
+    let h = harness().await;
+    let parent = h.mirror_page("HOME", "the space home", 4).await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.create_page(&parent, "Payout runbook").await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+
+    h.answer(Answer::Accept);
+    h.receipt(Some("9007"));
+    h.interrupt(Interrupt::Withdraw(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["Payout runbook".to_owned()],
+        "the withdrawal must not have stopped the write -- there is no residue \
+         to record unless the page was really made"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
+
+    let line = h.line("unclaimed");
+    assert_eq!(line.detail["write_id"], write.id);
+    assert_eq!(line.detail["op"], "create_page");
+    assert_eq!(line.detail["state"], "discarded");
+    assert_eq!(
+        line.detail["remote_id"], "9007",
+        "the page Confluence made is the one thing knobas can still point at"
+    );
+    assert_eq!(line.entity_id.as_deref(), Some(parent.to_string().as_str()));
+}
+
+/// The other half, and the one the copy must not overclaim: Jira's
+/// `create_ticket` answers `WriteReceipt::none()` -- the adapter drops the key
+/// on purpose, because a created ticket is found by reading the mirror back.
+///
+/// So the line still says a ticket was made and withdrawn, and says **nothing**
+/// about which ticket, because knobas does not know. A `remote_id` invented
+/// here would be knobas naming an artefact it never saw.
+#[tokio::test]
+async fn a_ticket_created_after_the_user_withdrew_it_is_recorded_without_one() {
+    let h = harness().await;
+    // A project container is not mirrored -- `project` reads `{"live": false}`
+    // at both ends, which is equal, so the write is never held.
+    let project = EntityRef::new(&h.source, "PAY");
+
+    h.answer(Answer::Unreachable);
+    let write = h.create_ticket(&project, "Reconcile the SEPA batch").await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+
+    h.answer(Answer::Accept);
+    h.receipt(None);
+    h.interrupt(Interrupt::Withdraw(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.delivered(), vec!["Reconcile the SEPA batch".to_owned()]);
+    assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
+
+    let line = h.line("unclaimed");
+    assert_eq!(line.detail["op"], "create_ticket");
+    assert_eq!(
+        line.detail.get("remote_id"),
+        None,
+        "the source named nothing, so the record names nothing"
+    );
+    assert_eq!(
+        line.detail["write_id"], write.id,
+        "with no id from the source, the withdrawn row is the only handle on \
+         what was asked for"
+    );
+    assert_eq!(
+        h.reload(write.id).await.payload["CreateTicket"]["title"],
+        "Reconcile the SEPA batch",
+        "and that row still carries it -- the line points, it does not copy"
+    );
+}
+
+/// The disclosure is read off the row, not inferred from an empty settle.
+///
+/// A row that left `pending` some way other than a withdrawal must not be
+/// announced as one. Nothing produces that concurrently today -- the flush
+/// loop is the only writer of `held` and `refused`, and it holds the source
+/// lock across the call -- so this drives the store directly and says so.
+/// What it pins is the shape of the claim: the line says *withdrawn* because
+/// the row says `discarded`, and the day another transition can land in that
+/// window it will not be mislabelled.
+#[tokio::test]
+async fn a_row_that_settled_some_other_way_is_not_called_withdrawn() {
+    let h = harness().await;
+    let parent = h.mirror_page("HOME2", "the space home", 4).await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.create_page(&parent, "Payout runbook").await;
+
+    h.answer(Answer::Accept);
+    h.receipt(Some("9008"));
+    h.interrupt(Interrupt::Hold(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+    assert!(
+        !h.verbs().contains(&"unclaimed".to_owned()),
+        "the row was not withdrawn, so nothing may say it was: {:?}",
+        h.verbs()
+    );
+}
+
+/// The forcing function ADR-0006 relies on, applied to the residue a
+/// withdrawal can leave: a new `WriteOp` variant must say whether withdrawing
+/// it in flight can leave something at the source that knobas cannot name.
+///
+/// The match has no wildcard arm, so a new variant stops this test compiling
+/// until somebody answers -- and the answer is written here, next to the op,
+/// rather than inferred from a list that would grow by omission.
+#[test]
+fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
+    let probes = write_op_probes();
+    for op in &probes {
+        let leaves_one = match op {
+            // Both make something new that lives only at the source until the
+            // next sync, with nothing linking it to what asked for it.
+            WriteOp::CreateTicket { .. } | WriteOp::CreatePage { .. } => true,
+            // Changes to something the mirror already holds: the write simply
+            // arrived, which is what the user asked for.
+            WriteOp::Comment { .. }
+            | WriteOp::Transition { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::UpdatePage { .. }
+            // A build is not an artefact, and knobas never claimed one.
+            | WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. }
+            // The hour is at Jira and #328 owns that gap; the worklog's own
+            // copy, not this line, is where it is answered.
+            | WriteOp::LogWork { .. }
+            // Weighed under #333's re-send question and left there: Gitea
+            // refuses the duplicate with a 409. Widening to them is a decision
+            // for the ticket that makes it.
+            | WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. } => false,
+        };
+        assert_eq!(
+            flusher::UNCLAIMED_OPS.contains(&op.identifier()),
+            leaves_one,
+            "{:?} and UNCLAIMED_OPS disagree about what a withdrawal leaves",
+            op.identifier()
+        );
+    }
+    // `PROJECTED_OPS` is one entry per variant -- the test above is what makes
+    // that true -- so it is the variant count, and using it here rather than a
+    // literal means neither of these tests has a number to hand-bump.
+    assert_eq!(
+        probes.len(),
+        store::PROJECTED_OPS.len(),
+        "a `WriteOp` variant has no probe in `write_op_probes`"
+    );
+    // And the other direction, which iterating the probes cannot reach: an
+    // entry in `UNCLAIMED_OPS` that names no variant at all would never be
+    // compared against one, so it would sit there inert and unfalsifiable.
+    for op in flusher::UNCLAIMED_OPS {
+        assert!(
+            probes.iter().any(|probe| probe.identifier() == *op),
+            "UNCLAIMED_OPS names {op:?}, which is not a `WriteOp`"
+        );
+    }
+}
+
+/// The op is what the line is about, not the race. A `comment` that landed
+/// after the user withdrew it left nothing unclaimed: the reply is on a ticket
+/// the mirror names, and it is the write that was asked for.
+#[tokio::test]
+async fn a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-337", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "on it").await;
+
+    h.answer(Answer::Accept);
+    h.interrupt(Interrupt::Withdraw(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["on it".to_owned()],
+        "the race really happened -- the comment went"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
+    assert!(
+        !h.verbs().contains(&"unclaimed".to_owned()),
+        "nothing was left unclaimed, so nothing may say it was: {:?}",
+        h.verbs()
+    );
 }

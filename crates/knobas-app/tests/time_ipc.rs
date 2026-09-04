@@ -2224,7 +2224,8 @@ async fn a_passive_block_is_not_drafted() {
 ///   the narrowing rather than the day;
 /// * their own activity line is offered, but the timer's own `stopped` is not:
 ///   a worklog comment that says "stopped the timer" is knobas talking about
-///   itself.
+///   itself -- and neither is the write queue's `unclaimed` (#336), which is
+///   knobas talking about a write it withdrew.
 #[tokio::test]
 async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     let pool = scratch("worklog-candidates").await;
@@ -2258,6 +2259,7 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
 
     line(&pool, "linked", at(9, 30)).await;
     line(&pool, "stopped", at(9, 40)).await;
+    line(&pool, "unclaimed", at(9, 45)).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
     let ids: Vec<&str> = draft.candidates.iter().map(|c| c.id.as_str()).collect();
@@ -2287,6 +2289,14 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
             .iter()
             .any(|c| c.bullet.contains("stopped")),
         "the timer's own bookkeeping is not work: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("unclaimed")),
+        "the write queue's bookkeeping is not work either: {:?}",
         draft.candidates
     );
 

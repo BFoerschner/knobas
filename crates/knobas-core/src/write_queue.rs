@@ -839,13 +839,22 @@ pub async fn sent(
 /// arrived and whose settle never landed is a `pending` row with no id
 /// anywhere, and nothing here can tell it from one that never left. **That is
 /// not only a crash.** `knobas_sync::write_queue::attempt` names the ordinary
-/// case in place -- "the row settled under us -- the user discarded it while
+/// case in place -- "the row settled under us -- the user withdrew it while
 /// it was in flight" -- and the flush loop's per-source lock does not hold a
 /// discard back. So the window is one HTTP round-trip wide, and inside it this
 /// statement gives back blocks whose hour is at Jira, which *Log all* will
 /// then offer again. `attempts` cannot narrow it either: every writer of that
 /// column bumps it *after* the call, never before, so a write in flight is
 /// indistinguishable from one that has not been tried.
+///
+/// **Nothing at this end can be made to know**, which is why the disclosure
+/// is not here. The same window leaves a `create_ticket` or a `create_page`
+/// standing at the source with nothing in knobas claiming it -- an *unclaimed
+/// write*, `CONTEXT.md`'s word for it (issue #336). The moment that fact
+/// exists is one step further on, in `knobas_sync::write_queue::unclaimed`:
+/// there the receipt is in hand and [`sent`] has just come back empty, and
+/// only together do those two say the write landed against a row that is
+/// gone. This statement is only ever handed an id.
 ///
 /// What that buys is the alternative #328 weighed and rejected -- a copy no
 /// surface can release, reading as *held* for good. The queue row is kept,

@@ -145,6 +145,12 @@ Which surface takes which: the write-queue **list** and its `pending_writes` com
 **Held write**:
 A queued write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204) In the state machine it has *left* `pending`; in this glossary's wider sense it is still a pending write. See the two senses above.
 
+**Unclaimed write**:
+Something a source made because knobas asked, that knobas has no record of. It happens in one window: a [pending write](#pending-write) withdrawn while it was in flight — one HTTP round trip wide — where the source takes the write and the row that would have recorded the delivery has already settled as withdrawn. It matters for the two ops that make something new and are not naturally idempotent, `create_ticket` and `create_page`: the ticket or the page is at the source, not in knobas' mirror until the next sync, and nothing links it to what asked for it. Withdrawing the write is not what created it and re-syncing does not adopt it — knobas has no key on it and cannot tell it from anything a colleague made.
+
+**knobas cannot warn you before the fact and does not pretend to.** At the moment you withdraw a write, nothing in the queue distinguishes one that is in flight from one that was never tried. What knobas does instead is say so afterwards, at the one moment it knows: an *unclaimed* line in the activity log, against the container the write was made under. Where that container is mirrored — a parent page — its history panel is where the line reads; a Jira project is not mirrored, so there the line is reached through the activity stream itself. It carries the source's own id for what it made when the source named one (a Confluence page does; a Jira ticket does not, by design) — otherwise it names the withdrawn write, which still holds what was asked for. Deleting the artefact is a person's job at the source. (#336, ADR-0012)
+_Avoid_: orphan, leaked write, ghost ticket
+
 **Inbox**:
 The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.
 _Avoid_: notifications, feed

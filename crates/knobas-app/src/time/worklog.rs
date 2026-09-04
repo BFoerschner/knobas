@@ -75,10 +75,10 @@ const ACTOR: &str = "user";
 /// worklog comment.
 ///
 /// A list, because an activity line carries no flag saying whether it is work:
-/// the timer's own two verbs (`super`) and the write queue's eight
-/// (`knobas_sync::write_queue`'s `announce` call sites) are all written with
-/// actor `user`, because a person did press the button -- but "queued a write"
-/// is not something to tell Jira about the afternoon.
+/// the timer's own two verbs (`super`) and the write queue's nine
+/// (`knobas_sync::write_queue`'s `announce` and `announce_with` call sites) are
+/// all written with actor `user`, because a person did press the button -- but
+/// "queued a write" is not something to tell Jira about the afternoon.
 ///
 /// **The failure direction is deliberate.** A verb that ought to be here and
 /// is not shows up as one extra checkbox the reader unchecks; nothing is ever
@@ -89,7 +89,8 @@ const NOT_WORK: &[&str] = &[
     // The timer's own (`super::start`, `super::stop`).
     "started",
     "stopped",
-    // The write queue's (`knobas_sync::write_queue::announce`).
+    // The write queue's (`knobas_sync::write_queue`'s `announce` and
+    // `announce_with`).
     "queued",
     "released",
     "amended",
@@ -98,6 +99,7 @@ const NOT_WORK: &[&str] = &[
     "sent",
     "refused",
     "waiting",
+    "unclaimed",
 ];
 
 /// One thing knobas saw the reader do inside a draft's interval.
