@@ -1106,7 +1106,14 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
         state.registry.as_ref(),
-        chrono::Utc::now(),
+        // A clock **outside** the day being asked about, so no running timer of
+        // this scratch database's own can join the list -- the precaution
+        // `tests/atlassian_live.rs` states in as many words. The window is
+        // half-open, so its own `to` is already outside it. There is no timer
+        // here and nothing in this file starts one; the argument costs one
+        // expression and the alternative is a list whose length depends on
+        // something the fixture never wrote.
+        day_window(day).to,
         day_window(day),
         &[],
     )
