@@ -290,10 +290,10 @@ post_refusal() {  # post_refusal <body file>
 # content of this wait is a response body nobody sees: the sentence above is
 # known only because someone read one by hand. So the last one is kept and
 # printed on the way out, and the wait itself reports the step, the URL, what
-# the app is doing -- a code, or nothing -- and how far into the cap it is
-# every PROGRESS_EVERY_S -- what
-# wait_for_state prints, for the same reason (#314): an app that is warming and
-# an app that is broken were both printing the same dot.
+# the app is doing -- answering a code, or not answering -- and how far into
+# the cap it is every PROGRESS_EVERY_S: what wait_for_state prints, for the
+# same reason (#314): an app that is warming and an app that is broken were
+# both printing the same dot.
 #
 # `_p`-prefixed locals because sh has none, and a plain `_t0` here would be the
 # same variable wait_for_state uses.
