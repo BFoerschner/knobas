@@ -1124,7 +1124,8 @@ impl Scheduler {
             .map(Triggered::run_id)
     }
 
-    /// Re-read one source and **wait for the run to end** (issue #289).
+    /// Re-read one source and **wait for a run that could have seen what was
+    /// just written** (issues #289, #358).
     ///
     /// [`trigger`](Self::trigger) starts or joins a run and answers straight
     /// away, which is right for a write that has just landed: nothing is
@@ -1176,8 +1177,8 @@ impl Scheduler {
     /// the run they used to wait out was the wrong one; for the other two it
     /// usually was not, and this cannot tell those apart, because `flush`
     /// discards which of the two its own trigger got. A source with nothing in
-    /// flight -- the source refused the write, so nothing landed and nothing
-    /// was triggered -- still costs a single run.
+    /// flight still costs a single run: `flush`'s run finished before this
+    /// asked, or there was none because the source refused the write.
     ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for
