@@ -32,8 +32,10 @@
 //!
 //! * **The seeded corpus by content**: every fixture page of the ENG space, at
 //!   the ids Confluence assigned, with the comments the seed posted, the
-//!   storage format the seed built, and the space key and name at the paths
-//!   ADR-0010's census reads them from.
+//!   storage format the seed built, the space key and name at the paths
+//!   ADR-0010's census reads them from, and the tree the seed built -- each
+//!   page under the parent `seed-state.json` records for it, one of them
+//!   nested a level deeper so an ancestor path is more than one segment.
 //! * **Battery clause 2 against a real search index**: an incremental run
 //!   after nothing changed emits nothing and hands back the byte-identical
 //!   cursor. Nothing else in the repo can measure that for this adapter.
@@ -147,8 +149,9 @@ const LITTER_SUFFIX: &str = " [knobas-live-suite]";
 struct Seed {
     /// The space key the seed created (`ENG`).
     space: String,
-    /// The space's home page, which every seeded page sits under because the
-    /// fixture names no ancestors of its own.
+    /// The space's home page: the outermost ancestor of every seeded page,
+    /// since the seed builds the tree under it (the fixture names no
+    /// ancestors of its own).
     home_page_id: String,
     /// The admin account every comment is authored by.
     author: String,
@@ -162,6 +165,12 @@ struct SeededPage {
     fixture_id: String,
     title: String,
     id: String,
+    /// The content id this page was seeded **under** -- the space home for
+    /// every page but the one the seed nests deeper, and read back off the
+    /// server for a page an earlier run had already created. Recorded per
+    /// page rather than assumed, which is what lets the ancestor assertion
+    /// below be an equality against the seed's own tree.
+    parent_id: String,
     comments: Vec<SeededComment>,
 }
 
@@ -225,8 +234,9 @@ fn seeded() -> Seeded {
     let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
     let seed: Seed = serde_json::from_value(whole["confluence"].clone()).unwrap_or_else(|e| {
         panic!(
-            "{}: no `confluence` block with `space`, `home_page_id`, `author` and `pages` -- \
-             run `./seed-atlassian-content.sh`: {e}",
+            "{}: no `confluence` block with `space`, `home_page_id`, `author` and `pages` \
+             (each page carrying the `parent_id` the seed put it under) -- run \
+             `./seed-atlassian-content.sh`: {e}",
             state.display()
         )
     });
@@ -1193,6 +1203,7 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
     let (items, _) = full(&*seeded.source(seeded.scoped())).await;
 
     let mut spaces: BTreeMap<String, String> = BTreeMap::new();
+    let mut depths: BTreeMap<String, usize> = BTreeMap::new();
     for page in &seeded.seed.pages {
         let it = item(&items, &page.id);
         // Read through the **declaration**, not through a literal path, so
@@ -1222,30 +1233,66 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
         spaces.insert(key.to_owned(), name.to_owned());
 
         // The launcher's path: ancestor **titles**, outermost first. The seed
-        // puts every fixture page directly under the space home, so the path
-        // is exactly one deep and its last element is that home page.
+        // builds the tree under the space home, so the *outermost* ancestor is
+        // that home page for every page; the *innermost* is whatever the seed
+        // put this page under, which is the home page for all but the one page
+        // it nests deeper (#396). Both ends are asserted, against
+        // `seed-state.json`'s own record of where each page went, so a tree
+        // that flattened or re-rooted itself fails here rather than quietly
+        // shortening every path.
         let ancestors = it.payload["ancestors"].as_array().unwrap_or_else(|| {
             panic!(
                 "{}: no ancestors array: {}",
                 page.id, it.payload["ancestors"]
             )
         });
-        let last = ancestors
-            .last()
+        let first = ancestors
+            .first()
             .unwrap_or_else(|| panic!("{} ({}): no ancestors at all", page.id, page.title));
         assert_eq!(
-            last["id"].as_str(),
+            first["id"].as_str(),
             Some(seeded.seed.home_page_id.as_str()),
-            "{}: the seed puts every page under the space home",
+            "{}: the space home is the outermost ancestor of every seeded page",
             page.id
         );
-        assert!(
-            last["title"].as_str().is_some_and(|t| !t.trim().is_empty()),
-            "{}: an ancestor with no title is a path segment the launcher cannot draw: {last}",
+        assert_eq!(
+            ancestors.last().and_then(|a| a["id"].as_str()),
+            Some(page.parent_id.as_str()),
+            "{}: the innermost ancestor is the page the seed put it under",
             page.id
         );
+        for a in ancestors {
+            assert!(
+                a["title"].as_str().is_some_and(|t| !t.trim().is_empty()),
+                "{}: an ancestor with no title is a path segment the launcher cannot draw: {a}",
+                page.id
+            );
+        }
+        depths.insert(page.fixture_id.clone(), ancestors.len());
     }
+    // The seed nests one page and hangs the other four straight off the space
+    // home, and the whole corpus is in hand here, so the *shape* is asserted
+    // rather than any one page's place. It has to be, twice over. A corpus that
+    // lost the nesting would leave every path assertion in this repo true and
+    // one segment long -- including the launcher's, which asserts equality
+    // against whatever the server says. And a corpus that gained a nesting
+    // cannot be caught by the per-page equality above: on the find-by-title
+    // path `parent_id` is the server's own answer, so a page an earlier run had
+    // moved under a sibling records that sibling and matches itself.
+    let deeper: Vec<_> = depths.iter().filter(|&(_, &d)| d != 1).collect();
+    assert_eq!(
+        deeper.len(),
+        1,
+        "the seed nests exactly one page and puts the rest directly under the space home. None \
+         deeper, and nothing here or in the launcher's live test can witness a joined ancestor \
+         path; more than one, and a page is somewhere the seed did not put it: {depths:?}"
+    );
+    assert_eq!(
+        deeper[0].1, &2,
+        "the nested page sits two deep -- the space home and the one page below it: {depths:?}"
+    );
     println!("SEEDED spaces, as ADR-0010's census reads them: {spaces:?}");
+    println!("SEEDED ancestor depths, by fixture id: {depths:?}");
 }
 
 /// **The `_links.next` walk, for real.**

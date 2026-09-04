@@ -6,9 +6,11 @@
 # Confluence.
 #
 #   ./seed-atlassian-content.sh            seed both products
-#   ./seed-atlassian-content.sh --verify   read PAY-231 and one page back, and
-#                                          fail if either is missing (the
-#                                          proof step of `just atlassian-live`)
+#   ./seed-atlassian-content.sh --verify   read PAY-231, one page and the
+#                                          nested page's ancestors back, and
+#                                          fail if any is missing or misplaced
+#                                          (the proof step of
+#                                          `just atlassian-live`)
 #
 # The fixture is READ-ONLY here, as it is for seed-gitea.sh: this script is
 # driven from the same file crates/knobas-source-mock compiles in, so there is
@@ -87,9 +89,22 @@
 # `/rest/api/content/{id}/child/comment` are what the container named in
 # seed-atlassian.sh's VERIFIED_CONFLUENCE_IMAGE answers, read off it on
 # 2026-09-03. The fixture gives the ENG space no name, so it is "Engineering",
-# and no page an ancestor, so every page sits under the space's home page and
-# "Standup protocols" -- the fixture's "parent of daily protocol pages" -- is
-# the empty page the standup flow publishes under.
+# and "Standup protocols" -- the fixture's "parent of daily protocol pages" --
+# is the empty page the standup flow publishes under.
+#
+# THE PAGE TREE IS THIS SCRIPT'S DECISION. The fixture names no ancestors, so
+# where a page sits is chosen here, and a space whose every page hangs off the
+# home page cannot witness what a launcher hit's ancestor path is for: one
+# segment joins nothing, so the separator and the outermost-first ordering go
+# unmeasured against a real server (#388's merge report, #396). So one page is
+# nested a level deeper: "SEPA payout retry design", the page M3.2's exit
+# criterion names, is created under "Payments architecture overview" instead
+# of under the home page, which makes its path two segments long. No page is
+# invented for it -- the parent is one the fixture already has, and a design
+# under the architecture overview it belongs to is the fixture's own reading.
+# The nested page is created last so its parent exists whatever order
+# work.json lists them in, and where each page ended up is recorded per page
+# as `parent_id` in seed-state.json.
 set -eu
 cd "$(dirname "$0")"
 
@@ -100,6 +115,11 @@ PLACEHOLDER_LABEL=knobas-placeholder
 PEOPLE_PASS=tidewater-dev
 SPACE_KEY=ENG
 SPACE_NAME=Engineering
+# The one nested page and the fixture page it goes under, by fixture id (see
+# "THE PAGE TREE IS THIS SCRIPT'S DECISION" above). Every other page sits
+# directly under the space home.
+NESTED_PAGE=sepa-design
+NESTED_UNDER=payments-architecture-overview
 
 say() { echo "seed-atlassian-content: $*"; }
 die() { echo "seed-atlassian-content: $*" >&2; exit 1; }
@@ -165,11 +185,12 @@ record() {  # record <jq filter with $v bound> <json>
 }
 
 # ==========================================================================
-# --verify: the proof step. Reads PAY-231 with its worklogs and the SEPA
-# design page with its body back over the same REST APIs the seed wrote
-# through, prints what it found, and fails if either is missing. Deliberately
-# by fixture key and title, not by recorded id: this is the claim "the
-# fixture is in there", so it must not need the seed's own notes to pass.
+# --verify: the proof step. Reads PAY-231 with its worklogs, the SEPA design
+# page with its body, and the nested page's ancestors back over the same REST
+# APIs the seed wrote through, prints what it found, and fails if any is
+# missing or somewhere else. Deliberately by fixture key and title, not by
+# recorded id: this is the claim "the fixture is in there", so it must not
+# need the seed's own notes to pass.
 # ==========================================================================
 verify() {
   _fail=0
@@ -202,9 +223,44 @@ verify() {
     printf '%s' "$API_BODY" | jq -e --arg h "<h2>$_heading</h2>" '.results[0].body.storage.value | contains($h)' >/dev/null \
       || { echo "  page body does not contain \"<h2>$_heading</h2>\"" >&2; _fail=1; }
   fi
+
+  # The tree, not just the content: the nested page is what makes a launcher
+  # hit's ancestor path two segments long, and a seed that put it back under
+  # the home page would leave every live path assertion true and pointless.
+  # By fixture title, like the read above, and against the titles the server
+  # reports. A second GET of what is today the same page, because the two are
+  # different claims: the read above asks for "the first page with a body",
+  # this one for "the page the seed nests", and a fixture that ever gave
+  # another page a body would silently stop checking the nesting if they
+  # shared a request.
+  _nested=$(jq -r --arg n "$NESTED_PAGE" '.pages[] | select(.id == $n) | .title' "$FIXTURE")
+  _under=$(jq -r --arg u "$NESTED_UNDER" '.pages[] | select(.id == $u) | .title' "$FIXTURE")
+  say "verify: ancestors of \"$_nested\""
+  conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&title=$(urlenc "$_nested")&expand=ancestors"
+  if [ "$API_STATUS" != "200" ] || [ "$(printf '%s' "$API_BODY" | jq '.size // 0')" -lt 1 ]; then
+    echo "  page \"$_nested\": HTTP $API_STATUS -- missing" >&2; _fail=1
+  else
+    _path=$(printf '%s' "$API_BODY" | jq -r '[.results[0].ancestors[].title] | join(" > ")')
+    echo "  \"$_nested\" sits at: $_path"
+    printf '%s' "$API_BODY" | jq -e --arg u "$_under" \
+      '[.results[0].ancestors[].title] | (length == 2) and (.[-1] == $u)' >/dev/null \
+      || { echo "  \"$_nested\" is not two deep under \"$_under\" -- its ancestors are $_path" >&2; _fail=1; }
+  fi
   [ "$_fail" -eq 0 ] || die "verify FAILED"
-  say "verify ok: PAY-231 with its worklogs, and \"$_title\" with its body"
+  say "verify ok: PAY-231 with its worklogs, \"$_title\" with its body, and \"$_nested\" under \"$_under\""
 }
+
+# The nesting is a claim about the fixture, so it is checked against the
+# fixture before anything reads or writes a page: a work.json that renamed
+# either id would otherwise seed a flat space and take the launcher path's
+# live witness with it, quietly. Ahead of the --verify dispatch, so the proof
+# step names the fixture as the cause rather than reporting a page it looked
+# for under an empty title.
+jq -e --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" --arg u "$NESTED_UNDER" \
+  '[.pages[] | select(.space == $k) | .id] | (index($n) != null) and (index($u) != null)' \
+  "$FIXTURE" >/dev/null \
+  || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" --
+  they are the nesting the launcher's ancestor path is witnessed by."
 
 if [ "${1:-}" = "--verify" ]; then verify; exit 0; fi
 [ $# -eq 0 ] || die "unknown argument '$1'; usage: ./seed-atlassian-content.sh [--verify]"
@@ -520,23 +576,45 @@ page_storage() {  # page_storage <fixture body or empty>
 }
 
 PAGE_IDS='[]'
-for row in $(jq -r --arg k "$SPACE_KEY" '.pages[] | select(.space == $k) | @base64' "$FIXTURE"); do
+# The nested page comes last: it is created under a page this same loop
+# creates, so the fixture's own order cannot be relied on to put the parent
+# first.
+for row in $(jq -r --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" \
+    '[.pages[] | select(.space == $k)]
+     | map(select(.id != $n)) + map(select(.id == $n)) | .[] | @base64' "$FIXTURE"); do
   d=$(printf '%s' "$row" | base64 -d)
   title=$(printf '%s' "$d" | jq -r .title)
   fid=$(printf '%s' "$d" | jq -r .id)
-  conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&title=$(urlenc "$title")"
+  conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&title=$(urlenc "$title")&expand=ancestors"
   expect "find page \"$title\"" 200
   pid=$(printf '%s' "$API_BODY" | jq -r '.results[0].id // empty')
   if [ -n "$pid" ]; then
-    skip "page \"$title\" (id $pid)"
+    # The parent the SERVER reports, not the one a create would have sent: a
+    # page that is already there was put where it is by an earlier run, and
+    # seed-state.json describes the instance rather than the intention.
+    parent=$(printf '%s' "$API_BODY" | jq -r '.results[0].ancestors[-1].id // empty')
+    # Named here rather than left to record an empty parent_id: a page with no
+    # ancestors at all is not one this script created, and the suites that read
+    # parent_id would otherwise fail three layers away on a blank id.
+    [ -n "$parent" ] || die "page \"$title\" (id $pid) is already in $SPACE_KEY with no
+  ancestors at all, so it is not a page this script created. \`docker compose --profile
+  real-atlassian down -v jira jira-db confluence confluence-db\` and seed again."
+    skip "page \"$title\" (id $pid, under $parent)"
   else
+    if [ "$fid" = "$NESTED_PAGE" ]; then
+      parent=$(printf '%s' "$PAGE_IDS" | jq -r --arg f "$NESTED_UNDER" \
+        'map(select(.fixture_id == $f)) | .[0].id // empty')
+      [ -n "$parent" ] || die "no \"$NESTED_UNDER\" page to nest \"$title\" under"
+    else
+      parent=$HOME_ID
+    fi
     storage=$(page_storage "$(printf '%s' "$d" | jq -r '.body // ""')")
-    conf POST /rest/api/content "$(jq -n --arg t "$title" --arg k "$SPACE_KEY" --arg h "$HOME_ID" --arg s "$storage" \
+    conf POST /rest/api/content "$(jq -n --arg t "$title" --arg k "$SPACE_KEY" --arg h "$parent" --arg s "$storage" \
         '{type: "page", title: $t, space: {key: $k}, ancestors: [{id: $h}],
           body: {storage: {value: $s, representation: "storage"}}}')"
     expect "create page \"$title\"" 200
     pid=$(printf '%s' "$API_BODY" | jq -r .id)
-    created "page \"$title\" (id $pid)$(printf '%s' "$d" | jq -r 'if .note then " -- \(.note)" else "" end')"
+    created "page \"$title\" (id $pid, under $parent)$(printf '%s' "$d" | jq -r 'if .note then " -- \(.note)" else "" end')"
   fi
 
   conf GET "/rest/api/content/$pid/child/comment?expand=body.storage&limit=100"
@@ -559,15 +637,15 @@ for row in $(jq -r --arg k "$SPACE_KEY" '.pages[] | select(.space == $k) | @base
     fi
     comment_ids=$(printf '%s' "$comment_ids" | jq --arg i "$cid" --arg t "$text" '. + [{id: $i, text: $t}]')
   done
-  PAGE_IDS=$(printf '%s' "$PAGE_IDS" | jq --arg f "$fid" --arg t "$title" --arg i "$pid" --argjson c "$comment_ids" \
-    '. + [{fixture_id: $f, title: $t, id: $i, comments: $c}]')
+  PAGE_IDS=$(printf '%s' "$PAGE_IDS" | jq --arg f "$fid" --arg t "$title" --arg i "$pid" --arg p "$parent" --argjson c "$comment_ids" \
+    '. + [{fixture_id: $f, title: $t, id: $i, parent_id: $p, comments: $c}]')
 done
 
 # The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
 # shellcheck disable=SC2016
 record '.confluence += {
   space: $v.space, home_page_id: $v.home, author: $v.author, pages: $v.pages,
-  _comment: "Seeded by testenv/seed-atlassian-content.sh. Confluence assigns content ids; pages are found by title in the space, and every page sits under the space home page because the fixture names no ancestors. Comments are authored by `author`."
+  _comment: "Seeded by testenv/seed-atlassian-content.sh. Confluence assigns content ids; pages are found by title in the space. The fixture names no ancestors, so the seed decides the tree: every page sits under the space home page (`home_page_id`) except `sepa-design`, which is nested under `payments-architecture-overview` so that a launcher hit for it has a two-segment ancestor path. Each page records the content id it sits under as `parent_id` -- read back from the server for a page an earlier run had already created. Comments are authored by `author`."
 }' "$(jq -n --arg k "$SPACE_KEY" --arg h "$HOME_ID" --arg a "$ADMIN_USER" --argjson p "$PAGE_IDS" \
         '{space: $k, home: $h, author: $a, pages: $p}')"
 

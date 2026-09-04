@@ -559,14 +559,20 @@ is fixed in the script), every fixture issue **at its fixture key** with its
 type, priority, assignee, estimate, description, status, Epic Name and Epic
 Link, its comments and worklogs, and `blocked_by` as a *Blocks* link. In
 Confluence, the `ENG` space (named *Engineering*; the fixture names only the
-key), its five pages under the space home page with the fixture's `##`
-sections as `<h2>`/`<p>` storage format, their comments, and *Standup
-protocols* as the empty page the standup flow will publish under. Only
-*SEPA payout retry design* has a body and a comment in the fixture — the other
-four are titles under the space home, which is what makes them the test that
-an empty page is still a page. The ids Confluence assigns are recorded as
-`confluence.pages[]`, with `confluence.space`, `confluence.home_page_id` and
-`confluence.author` beside them; the Confluence live suite reads all four. The
+key), its five pages with the fixture's `##` sections as `<h2>`/`<p>` storage
+format, their comments, and *Standup protocols* as the empty page the standup
+flow will publish under. Only *SEPA payout retry design* has a body and a
+comment in the fixture — the other four are titles, which is what makes them
+the test that an empty page is still a page. **The tree is the seed's
+decision**: the fixture names no ancestors, so four pages sit directly under
+the space home page and *SEPA payout retry design* is nested one level deeper,
+under *Payments architecture overview*. That nesting is not decoration — a
+launcher hit's ancestor path over a flat space is a single segment, so the
+separator and the outermost-first ordering would be witnessed on fixtures only
+(#396). The ids Confluence assigns are recorded as `confluence.pages[]`, each
+with the `parent_id` it was put under, with `confluence.space`,
+`confluence.home_page_id` and `confluence.author` beside them; the Confluence
+live suite reads all four. The
 template's workflow is *Software Simplified Workflow for Project `<KEY>`*:
 **To Do, In Progress, In Review, Done**, every transition available from
 every status — exactly the fixture's four statuses, and the names the live
