@@ -70,6 +70,16 @@ tauri-plugin-opener = "=2.5.4"
 # halves speak one protocol and a mismatch fails at run time with "command not
 # found" rather than at build time.
 tauri-plugin-notification = "=2.4.0"
+# The click (#339). The plugin's desktop `notify` drops the `notify-rust` handle,
+# so knobas sends through the crate itself and waits on the handle (`notify.rs`).
+# Pinned exactly to the version `Cargo.lock` already carried for the plugin, so
+# there is one copy. `preview-macos-un` is the `UNUserNotificationCenter`
+# backend, Björn's ruling on the prototype's evidence; its dependency
+# (`mac-usernotifications`) is target-gated to macOS in notify-rust's own
+# manifest, so Linux and Windows builds do not see it. Features unify: the
+# plugin's copy of the crate is on the UN backend too, which changes nothing
+# knobas still calls (its permission calls never reach notify-rust).
+notify-rust = { version = "=4.18.0", features = ["preview-macos-un"] }
 tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which
 # port the server came up on, whether it reused an existing data directory --

@@ -1188,3 +1188,28 @@ fn the_action_item_ticket_shape_matches_its_typescript_mirror() {
     };
     assert!(serde_json::to_value(&queued).unwrap()["ticket_entity_id"].is_null());
 }
+
+/// The `notify` command's argument (#339). Three strings and no nullable
+/// field; the test earns its place by being the one thing that notices a
+/// field renamed on one side.
+#[test]
+fn the_notification_draft_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_app::notify::NotificationDraft {
+        title: "Tidewater (mock)".to_owned(),
+        body: "the credential expires on Sunday".to_owned(),
+        address: "#/inbox".to_owned(),
+    })
+    .unwrap();
+    assert_shape("NotificationDraft", &wire, &["address", "body", "title"]);
+}
+
+/// The `notification:clicked` payload (#339): the address the notification
+/// was sent with, and nothing else -- the store reads exactly that key.
+#[test]
+fn the_notification_clicked_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_app::notify::NotificationClicked {
+        address: "#/entity/gitea:acme%2Fpayouts%23144".to_owned(),
+    })
+    .unwrap();
+    assert_shape("NotificationClicked", &wire, &["address"]);
+}

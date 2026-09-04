@@ -1789,6 +1789,44 @@ pub async fn set_notification_kinds(
     crate::inbox::set_notification_kinds(&pool, &kinds).await
 }
 
+/// Show a desktop notification whose click comes back as
+/// `notification:clicked` (#339).
+///
+/// A shim over [`crate::notify::Notifier`], where the rules live and are
+/// tested: one wait per address, sixteen at once, a click emitted with the
+/// address and a clear emitted as nothing. Off the async runtime with
+/// `spawn_blocking` because the show blocks until the OS has the notification
+/// -- milliseconds, but the wait behind it is a thread of its own and the
+/// runtime is not where either belongs.
+///
+/// Here rather than in a module pair of its own for the reason #290's
+/// setting is: the inbox lives in `entity`, and §10.8's layout is frozen.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) with the
+/// platform's refusal. On macOS the one to expect is `UNUserNotificationCenter`'s
+/// *no bundle identifier* from a bare `tauri dev` binary, logged at `warn` so
+/// a dev terminal says why nothing appeared.
+#[tauri::command]
+pub async fn notify(
+    notifier: State<'_, std::sync::Arc<crate::notify::Notifier>>,
+    draft: crate::notify::NotificationDraft,
+) -> Result<(), IpcError> {
+    let notifier = std::sync::Arc::clone(&notifier);
+    let address = draft.address.clone();
+    let shown = tauri::async_runtime::spawn_blocking(move || notifier.notify(draft))
+        .await
+        .map_err(|error| IpcError::internal(format!("the notification task ended: {error}")))?;
+    match shown {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::warn!(address, %error, "notification not shown");
+            Err(IpcError::internal(error))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

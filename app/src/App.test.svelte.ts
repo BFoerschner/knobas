@@ -49,6 +49,7 @@ import type {
   EntityRow,
   InboxCategory,
   InboxEntry,
+  NotificationDraft,
   Project,
 } from "./lib/ipc/entity";
 import type { CredentialHealth, SourceSummary } from "./lib/ipc/sources";
@@ -195,28 +196,26 @@ vi.mock("./lib/ipc/entity", () => ({
   // Which kinds may raise a desktop notification (#290).
   notificationKinds: () => Promise.resolve(notifyKinds),
   setNotificationKinds: () => Promise.reject(new Error("no settings write in this test")),
+  // The send itself (#339): knobas' own command, not the plugin's.
+  notify: (draft: NotificationDraft) => {
+    notified.push(draft);
+    return Promise.resolve();
+  },
 }));
 
 /** The stream `inbox_items` answers. Mutable: an item arrives mid-session. */
 let inboxRows: InboxEntry[] = [];
 /** Which kinds `notification_kinds` says are switched on (#290). */
 let notifyKinds: InboxCategory[] = [];
-/** Every notification the plugin was handed, in order (#290). */
-let notified: { title: string; body: string; extra: Record<string, unknown> }[] = [];
+/** Every draft the `notify` command was handed, in order (#290, #339). */
+let notified: NotificationDraft[] = [];
 
+// The plugin is the permission's only (#339): the send is the `notify`
+// command above and the click is the `notification:clicked` event, which
+// the `listen` fixture below carries like every other event.
 vi.mock("@tauri-apps/plugin-notification", () => ({
-  sendNotification: (notification: {
-    title: string;
-    body: string;
-    extra: Record<string, unknown>;
-  }) => notified.push(notification),
   isPermissionGranted: () => Promise.resolve(true),
   requestPermission: () => Promise.resolve("granted"),
-  // What the desktop plugin really does with a click subscription: there is no
-  // `register_listener` command outside mobile, so the invoke behind `onAction`
-  // rejects. The shell has to survive that, which is why the fixture reproduces
-  // it rather than resolving.
-  onAction: () => Promise.reject(new Error("command plugin:notification|register_listener not found")),
 }));
 
 /**
@@ -1809,9 +1808,13 @@ function inboxEntry(
  * file with no other seam, which is the class this whole file was written for
  * (#238). The fixture is the real one: the inbox re-reads on `activity:new`,
  * so the arrival is delivered as that event and the notification is read off
- * the stubbed plugin.
+ * the stubbed `notify` command.
+ *
+ * And the way back (#339): a `notification:clicked` event carrying that
+ * address moves the window there. The store's tests prove the channel with a
+ * faked `listen`; this is the one place that proves the shell *started* it.
  */
-test("an inbox item arriving while the window is unfocused reaches the notification plugin", async () => {
+test("an inbox item arriving while the window is unfocused reaches the notify command, and its click comes back", async () => {
   dbReady = true;
   notifyKinds = ["failed_build"];
   const unfocused = vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -1829,10 +1832,15 @@ test("an inbox item arriving while the window is unfocused reaches the notificat
     expect(notified).toHaveLength(1);
     expect(notified[0]!.title).toBe("Title of tidewater-payouts-42");
     expect(notified[0]!.body).toBe("Why tidewater-payouts-42 is here");
-    expect(
-      notified[0]!.extra["address"],
-      "the notification's click has nowhere to go",
-    ).toBe("#/entity/gitea:acme%2Fpayouts%23144");
+    expect(notified[0]!.address, "the notification's click has nowhere to go").toBe(
+      "#/entity/gitea:acme%2Fpayouts%23144",
+    );
+
+    emit(EVENTS.notificationClicked, { address: notified[0]!.address });
+    await until(
+      () => window.location.hash === "#/entity/gitea:acme%2Fpayouts%23144",
+      "the click never reached the router",
+    );
   } finally {
     unfocused.mockRestore();
   }

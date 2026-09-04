@@ -795,18 +795,48 @@ env -u RUSTUP_TOOLCHAIN PATH="$PWD/../../app/node_modules/.bin:$PATH" \
   tauri build --debug --bundles app
 ```
 
-Verify, then launch the bundle rather than the bare binary:
+Verify, then launch the bundle rather than the bare binary -- **and launch it
+from where it was built**, not from a copy:
 
 ```sh
 codesign -dv --verbose=2 target/debug/bundle/macos/knobas.app   # Authority=knobas-dev
 codesign --verify --deep --strict target/debug/bundle/macos/knobas.app
-open target/debug/bundle/macos/knobas.app
+open --stdout /tmp/knobas.out --stderr /tmp/knobas.err target/debug/bundle/macos/knobas.app
 ```
 
+(`--stdout`/`--stderr` are optional; they are where the `tracing` lines below
+land, since a bundle launched from Finder or `open` has no terminal.)
+
 `TeamIdentifier=not set` is expected for a self-signed certificate; the
-notarization warning is expected too. The #290 manual check is: in that
-bundle, switch one notification kind on, unfocus the window, and see one
-notification in Notification Center.
+notarization warning is expected too. The check has two steps:
+
+1. **The banner** (#290): in that bundle, switch one notification kind on,
+   unfocus the window, and see one notification in Notification Center.
+2. **The click** (#339): click the banner's *body* -- there is no button --
+   and knobas comes to the front on that item's room (`#/inbox` for a
+   credential expiry, which has no entity). stderr carries the two lines to
+   look for, `notification shown, waiting on its click` with the `address`,
+   and then `notification clicked`; a clear from Notification Center logs
+   `notification closed without a click` at `debug` instead
+   (`RUST_LOG=knobas_app=debug` to see it).
+
+**The Launch Services caveat, and why the path matters.** knobas sends
+through `notify-rust`'s `UNUserNotificationCenter` backend, and a click on
+one of its banners activates *the bundle Launch Services has registered for
+`dev.knobas.desktop`* -- which is the one `tauri build` wrote at
+`target/debug/bundle/macos/knobas.app`, because that is the copy LS saw
+first. Run 3 of the prototype (`prototype/notification-click`, its log)
+launched a copy from elsewhere, and the click started a **second instance**
+from the registered path while the running one waited on. Launched from the
+registered path (run 4) it stayed single-instance and the click landed. If a
+click ever launches a second knobas, that is this, not the waiter.
+
+Also from the ruling: **`tauri dev` shows no notification on macOS.** The UN
+backend refuses a bare binary with *No bundle identifier found.
+UNUserNotificationCenter requires a valid .app bundle.*; the `notify` command
+rejects with that sentence, the store swallows it, and the dev terminal shows
+it at `warn` (`notification not shown`). The permission prompt and the
+setting still work in dev; the banner and its click are the bundle's.
 
 **The first run of that check shows nothing, and the reason is macOS, not
 knobas.** Written down here because it cost an afternoon once. A fresh bundle
@@ -824,9 +854,13 @@ Both states are visible in the unified log, and this is the way to tell them
 apart without guessing:
 
 ```sh
-log show --last 5m --predicate 'process == "usernoted"' --style compact \
+/usr/bin/log show --last 5m --info --predicate 'process == "usernoted"' --style compact \
   | grep -E 'knobas.desktop|askpermissions'
 ```
+
+(`/usr/bin/log` by path, because zsh has a builtin named `log` that answers
+"too many arguments" and shows nothing; `--info`, because both lines below
+are info-level and the default level filter hides them.)
 
 * `Delivering <NotificationRecord app:"dev.knobas.desktop" ...> to
   [ .alert .lockScreen .notificationCenter ]` with **no matching `Presenting`
@@ -852,14 +886,18 @@ Tidewater (mock) credential expires on Sunday 06 Sep 2026"*, with
 `Presenting ... as banner` in the log. A self-signed certificate with
 `TeamIdentifier=not set` is sufficient; no Apple identity is needed.
 
-**What the check still cannot prove is the click.**
-`tauri-plugin-notification` 2.4.0's desktop `notify` hands the notification to
-`notify-rust` and discards the result (`let _ = notification.show()` inside a
-spawned task), and its `register_listener` -- the command behind `onAction` --
-is mobile-only. So a notification's click has no channel to arrive on, and
-`app/src/lib/inbox/notify.svelte.ts`'s navigation is proven against the stub
-only. That is a gap in the plugin, recorded in the module header and in
-`docs/contract.md` §10.8.
+**The click, since #339.** Until then the check could not prove it:
+`tauri-plugin-notification` 2.4.0's desktop `notify` discards the
+`notify-rust` handle a click arrives on, and its `register_listener` -- the
+command behind `onAction` -- is mobile-only. knobas now sends through
+`notify-rust` itself (`crates/knobas-app/src/notify.rs`), waits on the handle
+off the main thread, and emits `notification:clicked` with the item's
+address; step 2 above is its witness, and the prototype's verdict table on
+#339 is the evidence the ruling was made on. **What no run proves is Linux or
+Windows**: the freedesktop `default` action and the Windows handle API are
+written from `notify-rust` 4.18.0's sources and have not been clicked on
+either platform -- disclosed here, in `notify.rs`'s and
+`notify.svelte.ts`'s module headers, and in `docs/contract.md` §10.8.
 
 ## Scripts
 

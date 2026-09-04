@@ -38,6 +38,8 @@ export const EVENTS = {
   activityNew: "activity:new",
   /** `ContextRow` — a context was created or promoted (#47). */
   contextsChanged: "contexts:changed",
+  /** `NotificationClicked` — a desktop notification's body was clicked (#339). */
+  notificationClicked: "notification:clicked",
 } as const;
 
 /** Why a command failed — `knobas_app::IpcErrorCode`. */

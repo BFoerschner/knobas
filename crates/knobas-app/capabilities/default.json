@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is Tauri's own core API surface at its default, plus the two plugins the app registers. `opener:allow-open-url` is granted rather than `opener:default`, which would also carry `allow-reveal-item-in-dir` (a file-manager call knobas never makes) and `allow-default-urls` (which adds `mailto:` and `tel:`). The scope is the second wall behind `openExternal`'s own scheme check: `web_url` is data an adapter mirrored from a remote system, and `file://` or `vscode://` reaching the OS opener would be a remote-code path that starts in somebody's backlog. The notification plugin is granted the same way, one command at a time: `notification:default` bundles sixteen permissions -- channels, scheduling, cancelling, reading back what is on screen -- and knobas makes exactly three calls, so the three are named here and the other thirteen are doors nothing asked for.",
+  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is Tauri's own core API surface at its default, plus the two plugins the app registers. `opener:allow-open-url` is granted rather than `opener:default`, which would also carry `allow-reveal-item-in-dir` (a file-manager call knobas never makes) and `allow-default-urls` (which adds `mailto:` and `tel:`). The scope is the second wall behind `openExternal`'s own scheme check: `web_url` is data an adapter mirrored from a remote system, and `file://` or `vscode://` reaching the OS opener would be a remote-code path that starts in somebody's backlog. The notification plugin is granted the same way, one command at a time: `notification:default` bundles sixteen permissions -- channels, scheduling, cancelling, reading back what is on screen -- and knobas makes exactly two calls (the permission question and the permission request), so the two are named here and the other fourteen are doors nothing asked for. The send itself is knobas' own `notify` command (#339), which needs no grant: the plugin's `notify` dropped the handle a click arrives on.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,7 +10,6 @@
       "allow": [{ "url": "http://*" }, { "url": "https://*" }]
     },
     "notification:allow-is-permission-granted",
-    "notification:allow-request-permission",
-    "notification:allow-notify"
+    "notification:allow-request-permission"
   ]
 }

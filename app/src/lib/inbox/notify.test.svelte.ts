@@ -17,9 +17,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
+import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
 import {
   addressOf,
+  clickChannel,
   createNotifications,
+  sendThrough,
   type NotificationDraft,
   type NotifyPorts,
 } from "./notify.svelte";
@@ -338,14 +341,93 @@ test("a click after the listener is torn down moves the window nowhere", async (
   expect(b.calls.navigated).toEqual([]);
 });
 
+// -- the real ports (#339) ---------------------------------------------------
+
 /**
- * The desktop plugin has **no click channel**, so the subscription rejects —
- * and the window still works.
+ * **A `notification:clicked` event navigates to the address it carries.**
  *
- * `tauri-plugin-notification` 2.4.0 registers three commands on desktop and
- * `register_listener` is not one of them, so this is the ordinary case on
- * macOS rather than an exotic failure. A store that let it escape would take
- * the shell's `onMount` down with it.
+ * This is the real click channel, with Tauri's `listen` faked: the store
+ * subscribes to `EVENTS.notificationClicked` and the event's `address` reaches
+ * the same navigation the bench's `click` drives above. The event name is
+ * asserted because a listener on the wrong name is a door that never opens
+ * with nothing failing anywhere; the address is asserted because a channel
+ * that handed the store `{ extra: {} }` would pass every other test here.
+ */
+test("a notification:clicked event navigates to the item it carries", async () => {
+  let deliver: ((event: { payload: NotificationClicked }) => void) | null = null;
+  const listened: string[] = [];
+  const listen = (event: string, handler: (event: { payload: NotificationClicked }) => void) => {
+    listened.push(event);
+    deliver = handler;
+    return Promise.resolve(() => {
+      deliver = null;
+    });
+  };
+  const b = bench({ onAction: clickChannel(listen) });
+  const stop = b.store.start();
+  await vi.waitFor(() => expect(deliver).not.toBeNull());
+  expect(listened).toEqual(["notification:clicked"]);
+
+  deliver!({ payload: { address: "#/entity/gitea:acme%2Fpayouts%23144" } });
+  expect(b.calls.navigated).toEqual(["#/entity/gitea:acme%2Fpayouts%23144"]);
+
+  // The teardown unlistens, so a late event is not a navigation.
+  stop();
+  expect(deliver, "the teardown reached Tauri's unlisten").toBeNull();
+});
+
+/**
+ * The real `send` hands the `notify` command the draft's title, body and the
+ * address out of `extra` — the one key the click path is built on. A draft
+ * without one is not sent: a waiter keyed to nothing is a click that opens
+ * nowhere.
+ */
+test("a sent notification reaches the notify command with its address", async () => {
+  const sent: WireDraft[] = [];
+  const send = sendThrough((draft) => {
+    sent.push(draft);
+    return Promise.resolve();
+  });
+  const b = bench({ send });
+  await b.primed(["review_request"]);
+  b.store.saw([entry("review_request", "pr-12")]);
+  expect(sent).toEqual([
+    {
+      title: "Title of pr-12",
+      body: "Why pr-12 is here",
+      address: "#/entity/gitea:acme%2Fpayouts%23144",
+    },
+  ]);
+
+  send({ title: "no door", body: "", extra: {} });
+  expect(sent, "a draft with no address is not sent").toHaveLength(1);
+});
+
+/** A refused send is not a broken window: the next item still goes out. */
+test("a notify command that rejects costs nothing", async () => {
+  let calls = 0;
+  const b = bench({
+    send: sendThrough(() => {
+      calls += 1;
+      return Promise.reject({ code: "internal", message: "No bundle identifier found." });
+    }),
+  });
+  await b.primed(["mention"]);
+  b.store.saw([entry("mention", "PAY-1")]);
+  b.store.saw([entry("mention", "PAY-1"), entry("mention", "PAY-2")]);
+  await vi.waitFor(() => expect(calls).toBe(2));
+});
+
+/**
+ * A click channel that refuses to open costs nothing — and the window still
+ * works.
+ *
+ * Before #339 this was the ordinary case on macOS: the plugin's
+ * `register_listener` is mobile-only, so `onAction` rejected on every desktop
+ * start. The channel is knobas' own event now and opens on desktop, but the
+ * rule stands for the one case left (`listen` before the IPC is up, under
+ * `?fake-ipc`): a store that let the rejection escape would take the shell's
+ * `onMount` down with it.
  */
 test("a click channel that refuses to open costs nothing", async () => {
   const b = bench({ onAction: () => Promise.reject(new Error("command not found")) });

@@ -501,13 +501,12 @@
       // Nothing is waiting on the tick: the first `refresh` comes from the
       // `lifecycle.ready` effect below, which fires long after this.
       stopTimer = timer.begin();
-      // The notification listener's click channel (#290). Behind the same
-      // await as everything above it, and for the same reason: it is an
-      // `invoke` under a `listen`-shaped API, and under `?fake-ipc` an
-      // invocation issued before the fixture is one into nothing. It is
-      // *expected* to fail on desktop -- `tauri-plugin-notification` has no
-      // click channel there, which `notify.svelte.ts` records -- and the store
-      // swallows that: notifications still fire, they simply have no door.
+      // The notification listener's click channel (#290, fed since #339 by
+      // knobas' own `notification:clicked` event). Behind the same await as
+      // everything above it, and for the same reason: `listen` is an
+      // `invoke`, and under `?fake-ipc` one issued before the fixture is one
+      // into nothing. A rejected subscription is swallowed by the store:
+      // notifications still fire, they simply have no door.
       stopNotify = notifications.start();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
