@@ -1009,6 +1009,25 @@ async fn mirrored(pool: &sqlx::PgPool) -> Vec<String> {
     .expect("the mirror is readable")
 }
 
+/// One whole UTC day, as the digest's readers ask for it.
+///
+/// Free rather than a closure re-declared inside each digest test: the three
+/// of them carried the same ten lines, and two digest tests that disagreed
+/// about where a day begins would both stay green while measuring different
+/// things.
+fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
+    knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    }
+}
+
 /// Queue one write through the app's own submit path -- the same call the
 /// *Comment* button makes -- and answer the row as it settled.
 async fn write(
@@ -1308,6 +1327,19 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     //
     // `sync` here is not an extra run in the ordinary case: `trigger` attaches
     // to the run `refresh` already started and waits for its ending.
+    //
+    // **What this compares, and what it does not.** `project`'s fallback arm
+    // -- the one `"transition"` takes -- compares `title`, `text`,
+    // `item_updated_at` *and the whole payload*, and the poll below reads one
+    // field of one of those. That is enough here and only here: a run writes
+    // the mirrored row in a single upsert, so the status arriving is the whole
+    // row arriving. It is a witness that this ticket's re-mirror has happened,
+    // not a general proof that no projected field can still move.
+    //
+    // **The negative control**, for anyone re-running the mutation check: point
+    // the poll at `was` -- the status the mirror will never hold again -- and
+    // the bounded `assert!` below is what dies, after `INDEX_BUDGET`. A wait
+    // that was not really reading the mirror would sail past it.
     let transitioned = format!("{JIRA}:{TRANSITIONED}");
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
@@ -1323,7 +1355,10 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         .bind(&transitioned)
         .fetch_one(&state.pool)
         .await
-        .expect("the transitioned ticket is mirrored");
+        .expect(
+            "the transitioned ticket left the mirror while this test was waiting for it -- \
+             a sync that tombstoned it, not a stale index",
+        );
         if in_mirror.as_deref() == Some(to.as_str()) {
             break;
         }
@@ -1888,22 +1923,12 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     );
 
     // -- and what the digest makes of it ------------------------------------
-    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    };
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
         state.registry.as_ref(),
         chrono::Utc::now(),
-        window(day.succ_opt().expect("tomorrow exists")),
-        &[window(day)],
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
     )
     .await
     .expect("the digest reads");
@@ -2616,16 +2641,6 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         )
     });
 
-    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    };
     let day = moved.date_naive();
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
@@ -2633,9 +2648,9 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         // A clock outside the day being asked about, so no running timer of
         // this scratch database's own can join the list. There is none, and
         // saying so costs one argument.
-        window(day.succ_opt().expect("tomorrow exists")).to,
-        window(day.succ_opt().expect("tomorrow exists")),
-        &[window(day)],
+        day_window(day.succ_opt().expect("tomorrow exists")).to,
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
     )
     .await
     .expect("the digest reads");
@@ -2689,6 +2704,20 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
 /// could sweep: a killed run leaves the page edited. `just atlassian-live`
 /// tears the pair down and `seed-atlassian-content.sh` rebuilds it, so the
 /// cost of that is a re-seed rather than lost data.
+///
+/// **What a successful restore still leaves behind**, said here rather than
+/// discovered later. Confluence has no undo, so the page comes out of this
+/// suite at `version.number + 2` with its `version.when` moved to the run's
+/// own clock. The bytes are the seed's again; the *history* is not. Nothing in
+/// the suite reads either today --
+/// [`a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved`]
+/// takes its day from whatever the mirror says rather than from the seed's
+/// date, which is exactly why it survives this -- but a future test that
+/// assumed the seed's timestamp would not, and this is the note that says so.
+/// The CQL index needs no symmetric wait the way [`Protocol`]'s delete does:
+/// this page was in the index before the suite ran and is in it after, and an
+/// edit changes what a later read *says* about it rather than whether it is
+/// there.
 struct Edited {
     url: String,
     user: String,
@@ -2711,71 +2740,79 @@ impl Drop for Edited {
             self.content_type.clone(),
             self.body.clone(),
         );
-        undo("the page it edited", move || async move {
-            let http = client();
-            let call =
-                |method: reqwest::Method, path: String, payload: Option<serde_json::Value>| {
+        // The `what` carries the recovery, because [`undo`]'s standing
+        // sentence -- "the next run's leftover clearing removes what carries
+        // the marker" -- is not true of an edit: nothing sweeps one.
+        undo(
+            "the page it edited (an edit carries no marker, so nothing sweeps it -- \
+             re-seed with `testenv/seed-atlassian-content.sh`)",
+            move || async move {
+                let http = client();
+                let call = |method: reqwest::Method,
+                            path: String,
+                            payload: Option<serde_json::Value>| {
                     let http = http.clone();
                     let (url, user, password) = (url.clone(), user.clone(), password.clone());
                     async move { api(&http, &url, &user, &password, method, &path, payload).await }
                 };
 
-            // The version it is at *now*: the edit bumped it, and Confluence
-            // accepts only the next number.
-            let (status, current) = call(
-                reqwest::Method::GET,
-                format!("rest/api/content/{id}?expand=version"),
-                None,
-            )
-            .await;
-            if status != 200 {
-                return Err(format!(
-                    "reading {id}'s version back -> {status}: {current}"
-                ));
-            }
-            let Some(number) = current["version"]["number"].as_i64() else {
-                return Err(format!(
-                    "content {id} answered no version.number: {current}"
-                ));
-            };
+                // The version it is at *now*: the edit bumped it, and Confluence
+                // accepts only the next number.
+                let (status, current) = call(
+                    reqwest::Method::GET,
+                    format!("rest/api/content/{id}?expand=version"),
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!(
+                        "reading {id}'s version back -> {status}: {current}"
+                    ));
+                }
+                let Some(number) = current["version"]["number"].as_i64() else {
+                    return Err(format!(
+                        "content {id} answered no version.number: {current}"
+                    ));
+                };
 
-            let (status, answered) = call(
-                reqwest::Method::PUT,
-                format!("rest/api/content/{id}"),
-                Some(json!({
-                    "id": id,
-                    "type": content_type,
-                    "title": title,
-                    "version": { "number": number + 1 },
-                    "body": { "storage": { "value": body, "representation": "storage" } },
-                })),
-            )
-            .await;
-            if status != 200 {
-                return Err(format!("PUT restoring page {id} -> {status}: {answered}"));
-            }
+                let (status, answered) = call(
+                    reqwest::Method::PUT,
+                    format!("rest/api/content/{id}"),
+                    Some(json!({
+                        "id": id,
+                        "type": content_type,
+                        "title": title,
+                        "version": { "number": number + 1 },
+                        "body": { "storage": { "value": body, "representation": "storage" } },
+                    })),
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!("PUT restoring page {id} -> {status}: {answered}"));
+                }
 
-            // Verified, not assumed.
-            let (status, after) = call(
-                reqwest::Method::GET,
-                format!("rest/api/content/{id}?expand=body.storage"),
-                None,
-            )
-            .await;
-            if status != 200 {
-                return Err(format!("reading {id}'s body back -> {status}: {after}"));
-            }
-            let restored = after["body"]["storage"]["value"]
-                .as_str()
-                .unwrap_or_default();
-            if restored != body {
-                return Err(format!(
-                    "page {id} did not come back to its seeded body: it now holds \
-                     {restored:?}, and the seed wrote {body:?}"
-                ));
-            }
-            Ok(())
-        });
+                // Verified, not assumed.
+                let (status, after) = call(
+                    reqwest::Method::GET,
+                    format!("rest/api/content/{id}?expand=body.storage"),
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!("reading {id}'s body back -> {status}: {after}"));
+                }
+                let restored = after["body"]["storage"]["value"]
+                    .as_str()
+                    .unwrap_or_default();
+                if restored != body {
+                    return Err(format!(
+                        "page {id} did not come back to its seeded body: it now holds \
+                         {restored:?}, and the seed wrote {body:?}"
+                    ));
+                }
+                Ok(())
+            },
+        );
     }
 }
 
@@ -2850,7 +2887,14 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         .as_str()
         .unwrap_or_else(|| panic!("{} answered no stored body: {before}", wiki.title))
         .to_owned();
-    let content_type = before["type"].as_str().unwrap_or("page").to_owned();
+    // Refused rather than guessed. `knobas-source-confluence`'s `update_page`
+    // falls back to `"page"` because it is writing an edit somebody asked for
+    // and a guess beats a lost edit; a *restore* has no such excuse, and a
+    // wrong `type` here would write a blog post back as a page.
+    let content_type = before["type"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} answered no content type: {before}", wiki.title))
+        .to_owned();
     // The title the **server** holds, not the one `seed-state.json` recorded:
     // the content `PUT` replaces the record, so what goes back has to be what
     // is there now, and a fixture file is a statement about what was seeded.
@@ -2907,23 +2951,19 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
     );
 
     // -- and what the digest makes of it ------------------------------------
-    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    };
     let day = chrono::Utc::now().date_naive();
     let digest = knobas_app::commands::entity::standup_digest_inner(
         &state.pool,
         state.registry.as_ref(),
+        // The real clock, as
+        // `a_seeded_days_work_is_what_the_digest_lists_under_yesterday` passes
+        // it: `now` is what a *running timer* would be measured against, and
+        // this scratch database has none. The sibling above pins a clock
+        // outside the day it asks about because its day may be long past; the
+        // day here is today, so the two devices are the same statement.
         chrono::Utc::now(),
-        window(day.succ_opt().expect("tomorrow exists")),
-        &[window(day)],
+        day_window(day.succ_opt().expect("tomorrow exists")),
+        &[day_window(day)],
     )
     .await
     .expect("the digest reads");
