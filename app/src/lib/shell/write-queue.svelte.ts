@@ -216,8 +216,9 @@ export interface WithdrawnWorklog {
  *   holds, and a withdrawn `create_page` leaves `create_ticket`'s residue: an
  *   unclaimed page, which is why `UNCLAIMED_OPS` names it too.
  *
- * That list is the whole of `WriteOp` as of ADR-0006's current set, and it is
- * enumerated here **without a guard**. `knobas-sync`'s
+ * Those bullets and `log_work` itself are the whole of `WriteOp` as ADR-0006's
+ * set currently stands, and they are enumerated here **without a guard**.
+ * `knobas-sync`'s
  * `every_write_op_says_whether_a_withdrawal_can_leave_one` matches on the enum
  * with no wildcard arm, so a new variant stops that test compiling; nothing
  * does the same for these bullets, which is why they point at that doc rather
