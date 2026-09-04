@@ -801,7 +801,7 @@ atlassian-live:
     docker compose --profile real-atlassian up -d --wait confluence-db confluence
     ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
     ./seed-atlassian-content.sh           # the Tidewater content
-    ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body
+    ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body, the nested page under its parent
     eval "$(./seed --env)"
     # `./seed --env` prints the Atlassian block only once seed-state.json has a
     # `jira`/`confluence` entry, so an unseeded state file yields four suites

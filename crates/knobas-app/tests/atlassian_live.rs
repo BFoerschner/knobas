@@ -2264,9 +2264,15 @@ struct Wiki {
     /// The seeded *Standup protocols* page, by content id -- what #289
     /// publishes under.
     standup_parent: String,
-    /// The space's home page, by content id: the one ancestor the seed gives
-    /// every fixture page, and so the whole of its launcher path (#388).
+    /// The space's home page, by content id: the outermost ancestor of every
+    /// seeded page, and so the first segment of any launcher path (#388).
     home_page_id: String,
+    /// The content id the seed put [`Wiki::page`] **under**, as
+    /// `seed-state.json` records it. The seed nests that page a level deeper
+    /// than its siblings (#396), so this is the *innermost* ancestor and the
+    /// second segment of its launcher path -- which is what makes the path a
+    /// join of two titles rather than a single one.
+    parent_page_id: String,
 }
 
 fn wiki() -> Wiki {
@@ -2328,6 +2334,16 @@ fn wiki() -> Wiki {
         });
     Wiki {
         standup_parent: standup["id"].as_str().expect("a page id").to_owned(),
+        parent_page_id: page["parent_id"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: the `sepa-design` entry records no `parent_id` -- re-run \
+                     `./seed-atlassian-content.sh`, which writes where it put each page",
+                    state.display()
+                )
+            })
+            .to_owned(),
         home_page_id: confluence["home_page_id"]
             .as_str()
             .expect("confluence.home_page_id")
@@ -2863,14 +2879,15 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 ///    would pass a path that had appended the page's own title, and it would
 ///    say nothing about order or about the join.
 ///
-/// What this **cannot** witness is the join itself. The seed puts every page
-/// directly under the space home -- the adapter's live suite asserts that --
-/// so the path here is one segment long and `string_agg` over one row joins
-/// nothing. Separator, ordering and multi-segment aggregation are witnessed
-/// on fixtures instead, by `knobas-search`'s `tests/ancestor_path.rs` and
-/// `knobas-core`'s. The assertion below is written to hold either way, so a
-/// seed that ever nests a page deeper turns this into the stronger test
-/// without being edited.
+/// The **join** is witnessed here too, since #396: the seed nests this page
+/// under *Payments architecture overview* rather than directly under the
+/// space home, so the path is two segments and `string_agg` really aggregates
+/// -- the separator and the outermost-first ordering are read off a real
+/// server rather than off a fixture. The equality below did not have to move
+/// for that (#388 wrote it against whatever the server reports); what moved is
+/// the check on *which* ancestors those are, which now names both ends of the
+/// tree the seed built. `knobas-search`'s `tests/ancestor_path.rs` and
+/// `knobas-core`'s still pin the separator literal itself.
 ///
 /// Nothing is written, and the search is the plain launcher query with no
 /// filters -- the "under 100 ms" clause of story 46 is not measured here.
@@ -2947,14 +2964,26 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
                 .to_owned()
         })
         .collect();
-    assert!(
-        !titles.is_empty(),
-        "the seed puts every page under the space home, so the page has an ancestor"
+    // Both ends of the tree the seed built, so the equality below is against
+    // the seeded ancestors and not against whatever the page has drifted to.
+    // Two ids rather than one: the outermost is the space home every page
+    // hangs off, and the innermost is the page the seed nests *this* one under
+    // -- and since the seed makes those two different pages, asserting them is
+    // asserting that the path being compared has a join in it at all (#396).
+    assert_eq!(
+        ancestors.first().and_then(|a| a["id"].as_str()),
+        Some(wiki.home_page_id.as_str()),
+        "the outermost ancestor is the space home the seeded tree hangs off"
     );
     assert_eq!(
         ancestors.last().and_then(|a| a["id"].as_str()),
-        Some(wiki.home_page_id.as_str()),
-        "the innermost ancestor is the space home the seed put the page under"
+        Some(wiki.parent_page_id.as_str()),
+        "the innermost ancestor is the page `seed-state.json` says the seed put this one under"
+    );
+    assert_ne!(
+        wiki.parent_page_id, wiki.home_page_id,
+        "the seed nests this page below the space home; flat, the path is one segment and this \
+         test witnesses no join at all"
     );
     let path = hit.row.path.as_deref().unwrap_or_else(|| {
         panic!(
@@ -2973,9 +3002,12 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
         "the path is exactly the ancestors Confluence reports, joined: {titles:?}"
     );
     println!(
-        "SEEDED launcher hit for {CRITERION:?}: {} with path {path:?} (Confluence reports \
-         ancestors {titles:?}, home page {})",
-        hit.row.entity_id, wiki.home_page_id
+        "SEEDED launcher hit for {CRITERION:?}: {} with path {path:?} in {} segment(s) \
+         (Confluence reports ancestors {titles:?}, home page {}, parent {})",
+        hit.row.entity_id,
+        titles.len(),
+        wiki.home_page_id,
+        wiki.parent_page_id
     );
 
     state.scheduler.shutdown().await;
@@ -3538,8 +3570,8 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     assert!(
         synced.len() >= 5,
         "`fixtures/tidewater/work.json` names five pages, and `seed-atlassian-content.sh` creates \
-         each of them under the space home page it reads off the space -- so a walk of the space \
-         in fact answers six. The bound is the fixture's five and not the six, because the sixth \
+         each of them under the space home page it reads off the space, or under one of its \
+         siblings there -- so a walk of the space in fact answers six. The bound is the fixture's five and not the six, because the sixth \
          is the seed's own scaffolding and this assertion is about the corpus arriving under a \
          personal access token; the exact set is pinned at step 4 instead: {synced:?}"
     );
