@@ -447,49 +447,52 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         sepa.body_text
     );
 
-    // **The declared merged flag, in both directions** (#277, and #359 made the
-    // `false` direction load-bearing). `descriptor_template`'s `pr` kind
-    // declares `merged` at `["merged"]`, and `start_work`'s look-before-write
-    // now treats a pull request as open only where that path resolves to a
-    // JSON `false` -- a miss is `Unknown`, dispatches a create and refuses to
-    // link. So an open pull request whose record simply lacked the key would
-    // stop the flow's link step dead, and nothing docker-free could see it: the
-    // wiremock fixture writes `"merged": false` by construction, which is this
-    // test's whole premise about a fake being confidently wrong.
+    // **What the start-work look-before-write reads, against the server that
+    // decides it** (#277 for the declared flag, #359 for the rule over it).
     //
-    // The contract battery does not cover this either, and the direction it
-    // misses is exactly this one: its clause 3 is satisfied as soon as *some*
-    // item of the kind resolves the path, and the fixture's merged pull request
-    // does that on its own.
+    // Since #359, `knobas_app::start_work::queue` calls a pull request open
+    // only where the record's own `state` says `open` and the declared merged
+    // flag does not say otherwise. Both halves therefore gate the ordinary
+    // flow: a record missing either one settles no step and links no ticket.
+    // Nothing docker-free can see that -- the wiremock fixture writes
+    // `"state"` and `"merged": false` by construction, which is this test's
+    // whole premise about a fake being confidently wrong.
+    //
+    // The contract battery does not cover the flag either, and the direction
+    // it misses is exactly the one that matters here: its clause 3 is
+    // satisfied as soon as *some* item of the kind resolves the path, and the
+    // fixture's one merged pull request does that alone.
     let merged_path = [knobas_source::PayloadPath::of(["merged"])];
-    let flags: Vec<(&str, Option<bool>)> = prs
+    let read: Vec<(&str, Option<bool>, Option<&str>)> = prs
         .iter()
         .map(|i| {
             (
                 i.title.as_str(),
                 knobas_core::payload::resolve_flag(&i.payload, &merged_path),
+                i.payload.get("state").and_then(serde_json::Value::as_str),
             )
         })
         .collect();
     assert!(
-        flags.iter().all(|(_, merged)| merged.is_some()),
-        "every mirrored pull request must resolve the declared merged flag; one that misses is          one the start-work flow can neither settle nor link: {flags:?}"
+        read.iter()
+            .all(|(_, merged, state)| merged.is_some() && state.is_some()),
+        "every mirrored pull request must carry both facts the look-before-write reads; \
+         one missing either settles no step and links no ticket: {read:?}"
     );
     assert_eq!(
-        flags
-            .iter()
-            .find(|(title, _)| title.contains("Fix ledger drift"))
-            .map(|(_, merged)| *merged),
-        Some(Some(true)),
-        "the fixture's merged pull request has to read as merged: {flags:?}"
+        read.iter()
+            .find(|(title, ..)| title.contains("Fix ledger drift"))
+            .map(|(_, merged, state)| (*merged, *state)),
+        Some((Some(true), Some("closed"))),
+        "the fixture's merged pull request has to read as merged and closed: {read:?}"
     );
     assert_eq!(
-        flags
-            .iter()
-            .find(|(title, _)| title.contains("SEPA retry"))
-            .map(|(_, merged)| *merged),
-        Some(Some(false)),
-        "an open pull request has to read as `false` and not as an absent key -- the difference          between the start-work flow linking it and refusing to: {flags:?}"
+        read.iter()
+            .find(|(title, ..)| title.contains("SEPA retry"))
+            .map(|(_, merged, state)| (*merged, *state)),
+        Some((Some(false), Some("open"))),
+        "an open pull request has to read as `open` and `false`, not as absent keys -- \
+         the difference between the start-work flow linking it and refusing to: {read:?}"
     );
 
     // The author is the source's word for who did it, not knobas's.

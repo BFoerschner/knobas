@@ -142,20 +142,21 @@ const BRANCH_BY_NAME: &str = "select entity_id from sync.live_item
       order by entity_id limit 1";
 
 /// Every pull request of a repository opened from head branch `$3`, each with
-/// what its own source says about whether it is merged.
+/// what its own record says about whether it is still open.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
 /// no other way.** `Source::write` answers nothing, so the pull request knobas
 /// has just created is found by reading it back; §4.1 guarantees `title`,
-/// `body_text`, `updated_at` and a verbatim `payload`, and the head branch
-/// lives only in the last of those. That is the same seam #43 recorded for a
-/// ticket's status, met here in the read direction. It is confined to this one
-/// statement deliberately: a source that spells its pull requests differently
-/// needs one more `coalesce` here and nothing else anywhere.
+/// `body_text`, `updated_at` and a verbatim `payload`, and neither the head
+/// branch nor the state lives anywhere but the last of those. That is the same
+/// seam #43 recorded for a ticket's status, met here in the read direction. It
+/// is confined to this one statement deliberately: a source that spells its
+/// pull requests differently needs one more `coalesce` here and nothing else
+/// anywhere.
 ///
 /// # Why it is a list and no longer `limit 1` (#359)
 ///
-/// A head branch is re-usable, and the mirror deliberately holds merged pull
+/// A head branch is re-usable, and the mirror deliberately holds finished pull
 /// requests -- `state=all`, with the reason written at
 /// `knobas_source_gitea::client::Client::pulls`. So `order by entity_id limit
 /// 1` picked **lexicographically among every pull request that head ever
@@ -163,29 +164,55 @@ const BRANCH_BY_NAME: &str = "select entity_id from sync.live_item
 /// (merged) and `#8` (open) it answers `#7`, which settled the create step
 /// "already open" against a merge and then drew the ticket's link to it.
 ///
-/// The merged flag is read at the path the source **declares** (#277,
-/// `$4`), not at a spelling written here: Gitea says its pull requests carry a
-/// boolean `merged` and the reverse direction in `super::merge` already follows
-/// that same declaration, so the two halves of the pull-request story cannot
-/// disagree about what merged means. A source that declares no flag resolves
-/// to `null` for every row, which
-/// [`PullRequestOnHead`](super::PullRequestOnHead) turns into `Unknown` --
-/// the miss ADR-0007 requires, pinned there and by
-/// `a_source_that_declares_no_merged_flag_yields_no_open_pull_request`.
+/// # The two facts, and which of them decides
+///
+/// `state` is the one the flow asks about and the one [`pick_open`] decides
+/// on; the declared merged flag can only veto. [`super::PullRequestOnHead`]
+/// argues that at length -- the short of it is that a pull request closed
+/// *without* merging carries `merged: false`, so a rule built on the
+/// declaration alone calls it open and commits the same bug one state over.
+///
+/// `state` is read at a literal path because no [`KindPaths`] slot answers
+/// "is this open" and pointing `status_name` at it would change what every
+/// reader of a status renders for a pull request. The **`open` spelling is
+/// [`STATE_OPEN`]**, the coalesce point ADR-0007's requirement 2 promises;
+/// both adapters that mirror pull requests today spell it that way.
+///
+/// The `jsonb_typeof(...) = 'string'` guard is the same triple refusal
+/// `declared_string!` makes: a payload is a verbatim source record, and `->>`
+/// on an object would answer that object's JSON text, which is neither `open`
+/// nor a miss. It has to be a string, and trimming it has to leave something.
+///
+/// The merged flag is read at the path the source **declares** (#277, `$4`),
+/// which is the same declaration `super::merge` follows, so the two halves of
+/// the pull-request story cannot disagree about what merged means.
 ///
 /// `order by i.entity_id` survives as the tie-break among rows the caller
 /// cannot otherwise tell apart, so a head that somehow carries two open pull
 /// requests -- two bases, which a forge does allow -- answers the same one on
 /// every call rather than whichever the planner reached first.
+///
+/// [`KindPaths`]: knobas_core::payload::KindPaths
 const PULL_REQUEST_BY_HEAD: &str = concat!(
     "select i.entity_id, ",
     knobas_core::declared_flag!("$4", "merged"),
-    " as merged
+    " as merged,
+        case when jsonb_typeof(i.payload->'state') = 'string'
+             then nullif(btrim(i.payload->>'state'), '') end as state
        from sync.live_item i
       where i.entity_id like $1 and i.kind = $2
         and i.payload->'head'->>'ref' = $3
       order by i.entity_id"
 );
+
+/// What a source calls a pull request that is still open.
+///
+/// The one spelling knobas holds, and the coalesce point ADR-0007's
+/// requirement 2 promises: `knobas_source_gitea` mirrors Gitea's `state`
+/// verbatim and `knobas_source_mock` its own `open | merged`, and both say
+/// this word. A forge that says `OPENED` is one more candidate here and
+/// nothing else anywhere.
+const STATE_OPEN: &str = "open";
 
 /// The repository's id as a `like` prefix, with `like`'s own metacharacters
 /// escaped.
@@ -244,6 +271,21 @@ async fn found(
         .map_err(IpcError::internal)
 }
 
+/// One pull request on a head, as the mirror and its source's declaration
+/// leave it.
+///
+/// `merged` is `Option<bool>` and `state` `Option<String>` because both reads
+/// **miss** rather than guess: an undeclared flag, a flag that is not a JSON
+/// boolean, an absent or non-string `state`. Which of those it was is not a
+/// distinction any caller may act on -- ADR-0007's requirement 1 -- so both
+/// arrive as "or nothing".
+#[derive(Clone, Debug, PartialEq, Eq, sqlx::FromRow)]
+pub struct OnHead {
+    pub entity_id: String,
+    pub merged: Option<bool>,
+    pub state: Option<String>,
+}
+
 /// What the mirror holds from one head branch, resolved through the
 /// declarations `declarations` carries.
 ///
@@ -262,7 +304,7 @@ pub async fn pull_request_on_head(
     repo: &EntityRef,
     head: &str,
 ) -> Result<PullRequestOnHead, IpcError> {
-    let rows: Vec<(String, Option<bool>)> = sqlx::query_as(PULL_REQUEST_BY_HEAD)
+    let rows: Vec<OnHead> = sqlx::query_as(PULL_REQUEST_BY_HEAD)
         .bind(like_prefix(repo))
         .bind(KIND_PR)
         .bind(head)
@@ -273,28 +315,47 @@ pub async fn pull_request_on_head(
     Ok(pick_open(&rows))
 }
 
-/// Which of a head's pull requests the flow may act on, given each one's
-/// declared merged flag.
+/// Which of a head's pull requests the flow may act on.
 ///
 /// **The rule, written once**, because it has two callers: this module, over
 /// what [`PULL_REQUEST_BY_HEAD`] answered, and the [`Steps`] fake in
 /// `tests/start_work.rs`, over the mirror a test dictated. A fake that
 /// classified for itself would be a second opinion about what "open" means,
 /// and the seam tests would then pass against a rule the real read does not
-/// have.
+/// have. That is the whole reason this and [`pull_request_on_head`] are public
+/// -- `queue` is the flow's IO half, not its policy, and nothing here widens
+/// what the *orchestrator* next door touches.
 ///
-/// `None` is the declared read missing -- an undeclared source, a flag that is
-/// not a JSON boolean -- and it never becomes [`PullRequestOnHead::Open`]. See
-/// that type for why that direction and not the other.
+/// Open is a thing knobas has to have **read**, not a thing it failed to
+/// disprove: the record's own state has to say [`STATE_OPEN`], and the merged
+/// flag the source declares must not say otherwise. Either read missing leaves
+/// [`PullRequestOnHead::Unknown`]; see that type for why that direction.
 #[must_use]
-pub fn pick_open(rows: &[(String, Option<bool>)]) -> PullRequestOnHead {
-    if let Some((id, _)) = rows.iter().find(|(_, merged)| *merged == Some(false)) {
-        return PullRequestOnHead::Open(id.clone());
+pub fn pick_open(rows: &[OnHead]) -> PullRequestOnHead {
+    if let Some(row) = rows.iter().find(|row| is_open(row)) {
+        return PullRequestOnHead::Open(row.entity_id.clone());
     }
-    if let Some((id, _)) = rows.iter().find(|(_, merged)| *merged == Some(true)) {
-        return PullRequestOnHead::OnlyMerged(id.clone());
+    if let Some(row) = rows.iter().find(|row| is_finished(row)) {
+        return PullRequestOnHead::Closed {
+            id: row.entity_id.clone(),
+            merged: row.merged == Some(true),
+        };
     }
     PullRequestOnHead::Unknown
+}
+
+/// knobas read this record as open: its state says so and nothing knobas read
+/// calls it merged.
+fn is_open(row: &OnHead) -> bool {
+    row.state.as_deref() == Some(STATE_OPEN) && row.merged != Some(true)
+}
+
+/// knobas read this record as **not** open -- a state that is not
+/// [`STATE_OPEN`], or a declaration that calls it merged. A record whose state
+/// knobas could not read and whose flag says nothing is neither this nor
+/// [`is_open`]: it is the miss.
+fn is_finished(row: &OnHead) -> bool {
+    row.merged == Some(true) || (row.state.is_some() && !is_open(row))
 }
 
 #[cfg(test)]
@@ -316,34 +377,47 @@ mod tests {
         assert_eq!(escape_like("odd%"), "odd\\%");
     }
 
+    /// One mirrored pull request, spelled the way the statement answers it.
+    fn row(id: &str, merged: Option<bool>, state: Option<&str>) -> OnHead {
+        OnHead {
+            entity_id: id.to_owned(),
+            merged,
+            state: state.map(str::to_owned),
+        }
+    }
+
     /// The pinned failure direction (ADR-0007 requirement 3, and #359's whole
-    /// question): a pull request whose merged-ness the source declares no path
-    /// for is **not** offered as open. It is `Unknown`, so the flow dispatches
-    /// and lets the source refuse a duplicate, rather than settling a step
-    /// against a record it cannot read.
+    /// question): open is a thing knobas has to have **read**. A record whose
+    /// state it could not read is `Unknown` however loudly the rest of the
+    /// payload hints, so the flow dispatches and lets the source refuse a
+    /// duplicate rather than settling a step against a record it cannot read.
     #[test]
-    fn a_pull_request_of_unreadable_merged_ness_is_never_the_open_one() {
-        let unreadable = [("gitea:acme/api#7".to_owned(), None)];
-        assert_eq!(pick_open(&unreadable), PullRequestOnHead::Unknown);
+    fn a_pull_request_of_unreadable_state_is_never_the_open_one() {
+        assert_eq!(
+            pick_open(&[row("gitea:acme/api#7", Some(false), None)]),
+            PullRequestOnHead::Unknown,
+            "a declaration saying `not merged` is not a record saying `open`"
+        );
         assert_eq!(pick_open(&[]), PullRequestOnHead::Unknown);
     }
 
-    /// The bug: lexicographic order over a re-used head puts the *merged* `#7`
-    /// ahead of the open `#8`, so picking the first row is picking a merge.
-    /// The open one is chosen however the rows are ordered.
+    /// **The bug the ticket names.** Lexicographic order over a re-used head
+    /// puts the *merged* `#7` ahead of the open `#8`, so picking the first row
+    /// is picking a merge. The open one is chosen however the rows are
+    /// ordered.
     #[test]
     fn an_open_pull_request_wins_over_a_merged_one_from_the_same_head() {
         let merged_first = [
-            ("gitea:acme/api#7".to_owned(), Some(true)),
-            ("gitea:acme/api#8".to_owned(), Some(false)),
+            row("gitea:acme/api#7", Some(true), Some("closed")),
+            row("gitea:acme/api#8", Some(false), Some("open")),
         ];
         assert_eq!(
             pick_open(&merged_first),
             PullRequestOnHead::Open("gitea:acme/api#8".to_owned())
         );
         let merged_last = [
-            ("gitea:acme/api#8".to_owned(), Some(false)),
-            ("gitea:acme/api#7".to_owned(), Some(true)),
+            row("gitea:acme/api#8", Some(false), Some("open")),
+            row("gitea:acme/api#7", Some(true), Some("closed")),
         ];
         assert_eq!(
             pick_open(&merged_last),
@@ -351,18 +425,74 @@ mod tests {
         );
     }
 
-    /// A head whose every pull request is merged names one, so the step that
-    /// refuses can say which -- rather than answering the same "nothing here"
-    /// an empty mirror does.
+    /// **The bug one state over**, and the reason `state` decides rather than
+    /// the declared flag: a pull request closed *without* merging carries
+    /// `merged: false`, which a rule built on the declaration alone reads as
+    /// open. It is not open, and knobas must not settle a step or draw a link
+    /// against it.
     #[test]
-    fn a_head_whose_pull_requests_are_all_merged_names_one() {
+    fn a_pull_request_closed_without_merging_is_not_open_either() {
+        let closed = [row("gitea:acme/api#7", Some(false), Some("closed"))];
+        assert_eq!(
+            pick_open(&closed),
+            PullRequestOnHead::Closed {
+                id: "gitea:acme/api#7".to_owned(),
+                merged: false,
+            },
+            "`merged: false` is not `state: open` -- somebody closed this one"
+        );
+    }
+
+    /// A head whose every pull request is finished names one, and says which
+    /// word the refusal should use, rather than answering the same "nothing
+    /// here" an empty mirror does.
+    #[test]
+    fn a_head_whose_pull_requests_are_all_finished_names_one_and_says_which() {
         let merged = [
-            ("gitea:acme/api#7".to_owned(), Some(true)),
-            ("gitea:acme/api#8".to_owned(), Some(true)),
+            row("gitea:acme/api#7", Some(true), Some("closed")),
+            row("gitea:acme/api#8", Some(true), Some("closed")),
         ];
         assert_eq!(
             pick_open(&merged),
-            PullRequestOnHead::OnlyMerged("gitea:acme/api#7".to_owned())
+            PullRequestOnHead::Closed {
+                id: "gitea:acme/api#7".to_owned(),
+                merged: true,
+            }
+        );
+    }
+
+    /// **The declaration vetoes.** A source that says a record is merged
+    /// settles it, whatever its own `state` string happens to say -- the
+    /// declared flag is the one reading the source owns rather than knobas.
+    #[test]
+    fn a_declaration_that_says_merged_beats_a_state_that_says_open() {
+        let contradictory = [row("gitea:acme/api#7", Some(true), Some("open"))];
+        assert_eq!(
+            pick_open(&contradictory),
+            PullRequestOnHead::Closed {
+                id: "gitea:acme/api#7".to_owned(),
+                merged: true,
+            }
+        );
+    }
+
+    /// A source that declares no merged flag still resolves through `state`,
+    /// which is the concrete reason the deciding fact is the record's own:
+    /// `knobas-source-mock` declares none (its merge is a timestamp), and its
+    /// pull requests still have to be linkable.
+    #[test]
+    fn a_source_that_declares_no_merged_flag_still_reads_its_state() {
+        assert_eq!(
+            pick_open(&[row("mock:acme/api#8", None, Some("open"))]),
+            PullRequestOnHead::Open("mock:acme/api#8".to_owned())
+        );
+        assert_eq!(
+            pick_open(&[row("mock:acme/api#7", None, Some("merged"))]),
+            PullRequestOnHead::Closed {
+                id: "mock:acme/api#7".to_owned(),
+                merged: false,
+            },
+            "the word is `closed`: nothing knobas can read says this was merged"
         );
     }
 }
