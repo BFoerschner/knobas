@@ -79,17 +79,18 @@
 //! added here that writes to Gitea should ask the same question first: what
 //! listing does it grow, and who takes it back?
 
+mod live_digest;
+
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_app::start_work;
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{Step, StepOutcome};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
-use knobas_sync::SyncTrigger;
-use knobas_sync::scheduler::{RunConnections, Scheduler, SchedulerDeps, SyncEvents};
+use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use live_digest::{Connections, Quiet, day_window, on_digest, sync};
 use serde_json::json;
 
 /// The prefix `live_gitea`'s `Litter` reserves, and `litter_guard.rs` pins.
@@ -535,25 +536,6 @@ impl Drop for Litter {
 
 // -- the app, wired the way the app wires it --------------------------------
 
-/// Connections a run gets: the scratch database's own, not the shared one's.
-struct Connections(knobas_db::embedded::Connector);
-
-#[async_trait]
-impl RunConnections for Connections {
-    async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
-        self.0.connect().await
-    }
-}
-
-/// Events nobody is listening for. The scheduler reports; there is no window.
-struct Quiet;
-
-impl SyncEvents for Quiet {
-    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
-    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
-    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
-}
-
 /// A `SourcesState` over a database of this test's own, with both sources
 /// configured and their credentials in place.
 ///
@@ -644,41 +626,6 @@ async fn declared_paths(state: &SourcesState) -> knobas_core::payload::Declarati
         .expect("what the configured sources declare")
 }
 
-/// Sync one source and wait for the run to end.
-async fn sync(state: &SourcesState, source: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
-    state
-        .scheduler
-        .trigger(source, SyncTrigger::Manual, Some(sink))
-        .await
-        .expect("the run starts");
-    wait.await.expect("the run reports its ending");
-}
-
-struct Ending {
-    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl knobas_sync::progress::ProgressSink for Ending {
-    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-        use knobas_sync::progress::SyncPhase;
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        if let Some(sender) = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            let _ = sender.send(());
-        }
-    }
-}
-
 /// The issue's status, read from mockd rather than from knobas' own mirror --
 /// what the *source* holds is the claim, not knobas' opinion of it. Mockd is
 /// still a mock, so this witnesses the flow's reach and not the criterion
@@ -731,25 +678,6 @@ async fn merge_when_ready(env: &Env, number: u64) -> serde_json::Value {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
     last
-}
-
-/// One whole UTC day, as the digest's readers ask for it.
-///
-/// The same shape `tests/atlassian_live.rs`'s `day_window` has, and for the
-/// same reason: which day it is where the reader sits is a fact only the
-/// webview holds, so `standup_digest_inner` is handed the windows rather than
-/// working them out (`crate::time::day`).
-fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
-    knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    }
 }
 
 /// Point a step's stored proposal at `value` for one field.
@@ -1119,22 +1047,14 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     )
     .await
     .expect("the digest reads");
-    let listed: Vec<(Option<&str>, &str, Option<&str>, &str)> = digest
-        .today
-        .iter()
-        .map(|line| {
-            (
-                line.entity_id.as_deref(),
-                line.source.as_str(),
-                line.kind.as_deref(),
-                line.verb.as_str(),
-            )
-        })
-        .collect();
-    assert!(
-        listed.contains(&(Some(pr_id.as_str()), GITEA, Some("pr"), "attributed")),
-        "the pull request this flow opened is not on the digest for {day}, which is the day \
-         the mirror dates it on: {listed:?}"
+    on_digest(
+        &digest.today,
+        "the pull request this flow opened",
+        day,
+        &pr_id,
+        GITEA,
+        "pr",
+        "attributed",
     );
     for line in &digest.today {
         assert!(

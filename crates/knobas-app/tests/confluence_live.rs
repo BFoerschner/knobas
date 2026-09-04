@@ -51,17 +51,18 @@
 //!
 //! When knobas and the server disagree, **knobas** is wrong.
 
+mod live_digest;
+
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_core::write_queue::WriteState;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
-use knobas_sync::SyncTrigger;
-use knobas_sync::scheduler::{RunConnections, Scheduler, SchedulerDeps, SyncEvents};
+use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use live_digest::{Connections, Quiet, sync};
 use serde_json::json;
 
 /// The source id, which is also the `EntityRef` namespace every mirrored page
@@ -424,24 +425,6 @@ where
 
 // -- the app, wired the way the app wires it --------------------------------
 
-struct Connections(knobas_db::embedded::Connector);
-
-#[async_trait]
-impl RunConnections for Connections {
-    async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
-        self.0.connect().await
-    }
-}
-
-#[derive(Default)]
-struct Silent;
-
-impl SyncEvents for Silent {
-    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
-    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
-    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
-}
-
 /// A `SourcesState` over a database of this test's own, with the seeded
 /// Confluence configured and its credential in the (in-memory) keychain.
 ///
@@ -488,7 +471,7 @@ async fn app(name: &str, env: &Env) -> SourcesState {
         connections: Arc::new(Connections(connector)),
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
-        events: Arc::new(Silent),
+        events: Arc::new(Quiet),
     })
     .await
     .expect("a scheduler over the scratch database");
@@ -498,41 +481,6 @@ async fn app(name: &str, env: &Env) -> SourcesState {
         scheduler,
         secrets,
         registry: Arc::new(Registry::builtin()),
-    }
-}
-
-/// Sync the source and wait for the run to end, whichever way it ends.
-async fn sync(state: &SourcesState) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: Mutex::new(Some(done)),
-    });
-    state
-        .scheduler
-        .trigger(CONFLUENCE, SyncTrigger::Manual, Some(sink))
-        .await
-        .expect("the run starts");
-    wait.await.expect("the run reports its ending");
-}
-
-struct Ending {
-    done: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl knobas_sync::progress::ProgressSink for Ending {
-    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-        use knobas_sync::progress::SyncPhase;
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        if let Some(sender) = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            let _ = sender.send(());
-        }
     }
 }
 
@@ -574,7 +522,7 @@ async fn sync_until(
 ) -> serde_json::Value {
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
-        sync(state).await;
+        sync(state, CONFLUENCE).await;
         if let Some(payload) = mirrored(&state.pool, id).await
             && wanted(&payload)
         {
@@ -611,7 +559,7 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
     litter.body = Some((edited.id.clone(), edited.title.clone(), before.clone()));
 
     let state = app("confluence_live_writes", &env).await;
-    sync(&state).await;
+    sync(&state, CONFLUENCE).await;
 
     // -- a section edit ------------------------------------------------------
     //
