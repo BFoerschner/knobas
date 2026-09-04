@@ -1176,7 +1176,10 @@ impl Scheduler {
     pub async fn resync(&self, source_id: &str) -> Result<i64, TriggerError> {
         match self.trigger_and_wait(source_id).await? {
             Triggered::Started(run_id) => Ok(run_id),
-            Triggered::Existing(_) => self.trigger_and_wait(source_id).await.map(Triggered::run_id),
+            Triggered::Existing(_) => self
+                .trigger_and_wait(source_id)
+                .await
+                .map(Triggered::run_id),
         }
     }
 
