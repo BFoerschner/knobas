@@ -642,6 +642,68 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
     }
 }
 
+/// **The mirror half filters on whose the item is and on the day, and on
+/// nothing else -- the kind rides through** (issue #389).
+///
+/// `ATTRIBUTED_TO_ME` has no `kind` predicate, and this is the fixture that
+/// says so. It exists because the mutant issue #389 asked for -- adding
+/// `and i.kind not in ('pr', 'build')` to that statement -- survived **every
+/// test in this crate**: 182 unit tests and every integration binary,
+/// `standup_ipc`'s own fifteen included, all green with the digest silently
+/// refusing to carry a pull request or a build. The reason is this file's
+/// corpus, which was `commit` throughout: the producer test above names its
+/// variable `pr` and mirrors a row of kind `commit`.
+///
+/// So the three kinds are here explicitly, and the assertion is on the
+/// `(item, kind)` pair rather than on a count -- a list of the right length
+/// made of the wrong rows is the failure a count cannot see. The live suites
+/// `tests/start_work_live.rs` and `tests/teamcity_live.rs` assert the same
+/// thing against a real Gitea and a real TeamCity, where the kind and the
+/// attribution are the *server's*; this one is what `just check` runs.
+#[tokio::test]
+async fn the_mirror_half_carries_whatever_kind_the_source_gave_it() {
+    let h = harness("standup-kinds").await;
+    let mut mirrored = Vec::new();
+    for (kind, key) in [
+        ("commit", "c0ffee"),
+        ("pr", "tidewater/payout-service#128"),
+        ("build", "build:1"),
+    ] {
+        mirrored.push((
+            h.item(
+                FORGE,
+                kind,
+                key,
+                ME,
+                days_before(1, 9, 0),
+                serde_json::json!({}),
+            )
+            .await,
+            kind,
+        ));
+    }
+
+    let digest = h.digest().await;
+
+    let mut listed: Vec<(Option<&str>, Option<&str>)> = digest
+        .yesterday
+        .iter()
+        .map(|line| (line.entity_id.as_deref(), line.kind.as_deref()))
+        .collect();
+    listed.sort_unstable();
+    let mut expected: Vec<(Option<&str>, Option<&str>)> = mirrored
+        .iter()
+        .map(|(id, kind)| (Some(id.as_str()), Some(*kind)))
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(
+        listed, expected,
+        "the mirror half dropped a kind: it filters on `author` and on the \
+         window, and a source that calls its records something else is not a \
+         source whose day the digest may leave out"
+    );
+}
+
 /// The `log_work` op **as the SPI spells it**, for the fixture below.
 ///
 /// Spelled from the enum rather than typed as the word, because that word is
