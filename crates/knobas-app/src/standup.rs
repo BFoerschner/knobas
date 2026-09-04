@@ -421,6 +421,22 @@ struct WriteRow {
 /// once out of `knobas.worklog`, which is the richer copy and the one that
 /// survives a pruned queue.
 ///
+/// Both halves are pinned in `tests/standup_ipc.rs`, and the verb takes two
+/// fixtures because it carries two rules:
+/// `a_write_is_one_line_however_many_states_the_queue_narrates` says a write is
+/// **one** line however often the queue speaks, and
+/// `a_write_is_on_the_day_it_was_queued_and_not_the_day_it_was_sent` says
+/// **which** line, for a write queued one evening and delivered the next
+/// morning. The op skip has a pin of its own in the same file,
+/// `a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well`.
+///
+/// The second exists because those two rules are not the same mutant, which
+/// is easy to miss: #361 read swapping this `queued` for `sent` as an
+/// equivalent mutant and #362 was filed on that reading. It is not one. The
+/// working-out is in that fixture's own doc, mutant by mutant, and is not
+/// repeated here -- an argument kept in two places is one that drifts, which
+/// is #353's finding and applies to this constant as much as to any other.
+///
 /// The join is a **left** join on `knobas.entity` rather than on
 /// `sync.live_item`: a write is a fact about something the person did, and it
 /// stays a fact after the source it was addressed to has been removed and its
