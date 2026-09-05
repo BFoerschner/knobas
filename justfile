@@ -92,20 +92,23 @@ check:
     # errors` as a rule, the machine-format `COMPLETED N FILES` line when
     # svelte-check sees CLAUDECODE=1 in the environment (4.7.6 chooses its
     # output by that variable, not by whether stdout is a terminal) -- then
-    # vitest's totals and the vite build; for the cargo chain: its
-    # `test result:` lines added up. A failing half is its whole log, so
-    # nothing has to be re-run to see why.
+    # vitest's totals and the vite build; for the cargo chain: `test`'s
+    # per-binary lines (`test: ok <package> <target> N passed; N failed; N
+    # ignored; ...`, one per test binary and one per doc-test crate) added
+    # up here, independently of the total `test` prints itself, so the two
+    # can be compared. A failing half is its whole log, so nothing has to be
+    # re-run to see why.
     report() {
         local name=$1 log=$2 status=$3
         if [ "$status" -eq 0 ]; then
             echo "check: $(tail -n 1 "$log")"
             case $name in
                 front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
-                cargo) awk '/^test result:/ { n++; for (i = 1; i < NF; i++) {
+                cargo) awk '/^test: (ok|FAILED) / { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
                              if ($(i+1) == "ignored;") g += $i } }
-                           END { printf "  %d test result lines: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
+                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
@@ -525,9 +528,19 @@ test:
     export KNOBAS_TEST_DB_URL="$url"
     export KNOBAS_GATE_DIR="$gate"
 
-    # Measured 2026-09-05 (12 cores, warm tree, idle, this recipe): the
-    # numbers are in the PR for #415 and reproduced here once chosen.
-    jobs=${KNOBAS_TEST_JOBS:-12}
+    # N = 6. Measured 2026-09-05 on the 12-core machine, warm tree, nothing
+    # else running, this recipe (the recipe's own clock, which excludes the
+    # server's ~10 s teardown of a 4 GB data directory afterwards):
+    #   N=12: 43 s, 42 s   N=8: 36 s, 38 s   N=6: 38 s, 34 s, 37 s   N=4: 36 s
+    # From 12 down to 8 the run gets 5 s shorter and below 8 it stops moving.
+    # The pool is CPU-bound, not queue-bound: every binary's libtest runs one
+    # test thread per core, so 6 binaries already offer 72 runnable threads
+    # to 12 cores, and the sum of libtest's own times inflates from 82 s
+    # (serial) to 128/180/245/380 s at N=4/6/8/12 -- pure contention. 6 is
+    # the middle of the flat region: half the cores, the 1-minute load
+    # average near 12 rather than the 18 N=12 reaches, and a connection peak
+    # of 82 client backends against the server's 400 (N=12 peaked at 143).
+    jobs=${KNOBAS_TEST_JOBS:-6}
     cores=$(getconf _NPROCESSORS_ONLN)
     [ "$jobs" -le "$cores" ] || jobs=$cores
 
