@@ -772,10 +772,12 @@ knobas-db	lib/knobas_db	embedded::tests::only_sub_protocol_failures_count_as_a_s
 knobas-db	lib/knobas_db	embedded::tests::process_liveness_tells_a_running_process_from_a_reaped_one
 knobas-db	lib/knobas_db	embedded::tests::the_bring_up_lock_is_exclusive_and_released_with_its_guard
 knobas-db	lib/knobas_db	embedded::tests::the_recorded_password_is_adopted_under_the_lock_not_before_it
+knobas-db	lib/knobas_db	test_util::tests::a_child_spawned_holding_a_lock_keeps_it_until_it_exits
 knobas-db	lib/knobas_db	test_util::tests::a_claim_discards_what_a_recycled_pid_left_behind
 knobas-db	lib/knobas_db	test_util::tests::a_claim_leaves_this_runs_own_directory_alone
 knobas-db	lib/knobas_db	test_util::tests::a_contended_lock_is_waited_out_rather_than_fatal
 knobas-db	lib/knobas_db	test_util::tests::a_directory_a_live_owner_holds_is_not_claimable
+knobas-db	lib/knobas_db	test_util::tests::a_removed_root_takes_its_lock_with_it
 knobas-db	lib/knobas_db	test_util::tests::a_sweep_removes_the_abandoned_and_spares_the_owned
 knobas-db	lib/knobas_db	test_util::tests::the_nonce_identifies_this_run_and_nothing_else
 knobas-db	lib/knobas_db	test_util::tests::the_reaper_holds_the_lock_it_took_until_the_directory_is_gone
@@ -800,6 +802,7 @@ knobas-db	test/embedded	test_pool_survives_an_earlier_runtimes_death
 knobas-db	test/embedded	the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_own
 knobas-db	test/embedded	the_shared_connector_never_lands_on_the_maintenance_database
 knobas-db	test/embedded	the_test_server_serves_until_its_stdin_closes_and_then_stops
+knobas-db	test/embedded	the_test_server_takes_its_root_with_it
 knobas-db	test/embedded	two_concurrent_first_launches_serialise_instead_of_racing
 knobas-db	test/schema	a_note_row_needs_its_entity_and_lives_in_the_note_namespace
 knobas-db	test/schema	active_links_are_unique_per_relation_and_tombstones_do_not_block

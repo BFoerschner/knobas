@@ -36,6 +36,18 @@ pub(crate) const MAINTENANCE_DATABASE: &str = "postgres";
 /// Loopback host. Never a Unix socket -- see the module docs.
 const HOST: &str = "127.0.0.1";
 
+/// Binary name of `pg_ctl` on this platform.
+///
+/// Read only below `test-util`, by the immediate-stop builder the two
+/// disposable-server stops share; the shipped build reaches `pg_ctl` through
+/// `postgresql_embedded` alone.
+#[cfg(feature = "test-util")]
+pub(crate) const PG_CTL: &str = if cfg!(windows) {
+    "pg_ctl.exe"
+} else {
+    "pg_ctl"
+};
+
 /// Pool size. The desktop app is a single user with a handful of concurrent
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
@@ -502,15 +514,7 @@ impl EmbeddedDb {
     ///
     /// Returns [`DbError::Embedded`] if `pg_ctl stop` fails.
     pub async fn stop(self) -> Result<(), DbError> {
-        if tokio::time::timeout(POOL_CLOSE_TIMEOUT, self.pool.close())
-            .await
-            .is_err()
-        {
-            tracing::warn!(
-                "connections were still busy after {}s: stopping the server anyway",
-                POOL_CLOSE_TIMEOUT.as_secs()
-            );
-        }
+        close_pool_bounded(&self.pool).await;
         if self.owner_lock.is_none() {
             tracing::info!("not this process's server to stop");
             return Ok(());
@@ -530,6 +534,126 @@ impl EmbeddedDb {
         }
         Ok(())
     }
+
+    /// Stop the server without the shutdown checkpoint, for a data directory
+    /// that is about to be deleted.
+    ///
+    /// [`stop`](Self::stop) is `pg_ctl stop -m fast`, which checkpoints
+    /// before the postmaster exits: every buffer is written and every file
+    /// touched since the last checkpoint is fsynced, so that the data
+    /// directory opens cleanly next time. The gate server `just test` runs
+    /// has no next time -- its root is removed the moment it stops -- and by
+    /// then it holds one database per test binary, several hundred `create
+    /// database`s' worth of files for that checkpoint to sync: 0.84 s of
+    /// fast stop against 0.11 s of immediate, measured on 355 databases
+    /// (#421). This is `-m immediate`: the
+    /// backends are told to quit and the postmaster exits, leaving the
+    /// directory in the state a crash would.
+    ///
+    /// The SysV shared-memory segment the postmaster holds is released
+    /// either way. It goes when the postmaster process exits, not with the
+    /// checkpoint; only a `SIGKILL`ed postmaster leaves one behind, which is
+    /// the case the scratch-root reaper exists for.
+    ///
+    /// `test-util` only, and only for a server this process owns: a shipped
+    /// quit stays on [`stop`](Self::stop), because a data directory the user
+    /// keeps must never be left to crash recovery on purpose. A server this
+    /// process does not own is left alone, as `stop` leaves it.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::Io`] if `pg_ctl` cannot be found or reports a failure --
+    /// `Io` rather than `Embedded`, because the command is run here and not
+    /// through the crate's handle. On either error the handle still drops,
+    /// and for a server started here that runs `PostgreSQL`'s own `Drop`, a
+    /// fast stop if `postmaster.pid` is still there: a second attempt, which
+    /// is the right fallback for a failed first one. An adopted server
+    /// (`postgresql` is `None`) has no such fallback and stays up; the gate
+    /// server never adopts, its root being fresh at every start.
+    #[cfg(feature = "test-util")]
+    pub async fn discard(self) -> Result<(), DbError> {
+        close_pool_bounded(&self.pool).await;
+        if self.owner_lock.is_none() {
+            tracing::info!("not this process's server to stop");
+            return Ok(());
+        }
+        // An owned server was either started here or adopted, so one of the
+        // two holds its settings; the `else` is for the type, not for a case.
+        let data_dir = self
+            .postgresql
+            .as_ref()
+            .map(|postgresql| &postgresql.settings().data_dir)
+            .or(self
+                .stop_settings
+                .as_ref()
+                .map(|settings| &settings.data_dir));
+        let Some(data_dir) = data_dir.cloned() else {
+            return Ok(());
+        };
+        let Some(pg_ctl) = pg_ctl_stop_immediate(&data_dir) else {
+            return Err(DbError::io(
+                installation_dir(),
+                io::Error::new(io::ErrorKind::NotFound, format!("no {PG_CTL} under it")),
+            ));
+        };
+        let output = tokio::process::Command::from(pg_ctl)
+            .output()
+            .await
+            .map_err(|source| DbError::io(&data_dir, source))?;
+        if !output.status.success() {
+            return Err(DbError::io(
+                &data_dir,
+                io::Error::other(format!(
+                    "pg_ctl stop -m immediate exited with {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )),
+            ));
+        }
+        // `-w` returned, so `postmaster.pid` is gone and the handle's own
+        // `Drop` -- `pg_ctl stop -m fast` whenever that file exists -- has
+        // nothing to do.
+        Ok(())
+    }
+}
+
+/// Close `pool`, but not for longer than [`POOL_CLOSE_TIMEOUT`].
+///
+/// `PgPool::close` waits for every borrowed connection to come back, and one
+/// parked on a remote system is how Cmd-Q during a sync turns into a
+/// thirty-second hang (M0 carry-over). Past the timeout the pool is left to
+/// the server's stop, which terminates the backends anyway.
+async fn close_pool_bounded(pool: &PgPool) {
+    if tokio::time::timeout(POOL_CLOSE_TIMEOUT, pool.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "connections were still busy after {}s: stopping the server anyway",
+            POOL_CLOSE_TIMEOUT.as_secs()
+        );
+    }
+}
+
+/// `pg_ctl stop -m immediate -w` against `data_dir`, or `None` when the
+/// binaries are not where [`installation_dir`] says.
+///
+/// One builder for the two places a disposable server is stopped: the
+/// scratch-root reaper in `test_util`, which finds a postmaster a dead test
+/// binary left behind, and [`EmbeddedDb::discard`]. Both are stopping a
+/// server whose files are about to be removed, so neither wants the
+/// checkpoint a fast stop pays for. `-w` waits until `postmaster.pid` is
+/// gone, which is the moment the directory can be removed under it.
+#[cfg(feature = "test-util")]
+pub(crate) fn pg_ctl_stop_immediate(data_dir: &Path) -> Option<std::process::Command> {
+    let pg_ctl = find_tool(&installation_dir(), PG_CTL)?;
+    let mut command = std::process::Command::new(pg_ctl);
+    command
+        .arg("stop")
+        .arg("-D")
+        .arg(data_dir)
+        .args(["-m", "immediate", "-w"]);
+    Some(command)
 }
 
 /// Bring a managed server up from `settings`, recovering once from a lock

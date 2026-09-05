@@ -917,6 +917,63 @@ async fn the_test_server_serves_until_its_stdin_closes_and_then_stops() {
     );
 }
 
+/// The server's scratch root goes with it. It is removed by a child the
+/// server leaves behind rather than before the server exits (#421: unlinking
+/// a gate's 355 databases took 10 s of every `just test`, after the last test
+/// had reported), so "gone" here means gone shortly after the exit status --
+/// directory and lock both, so a clean run leaves the next run's reaper
+/// nothing.
+///
+/// The root's name is the connector's convention, `$TMPDIR/knobas-test-<pid>`
+/// with `knobas-test-<pid>.lock` beside it (`test_util`'s module docs; the
+/// `test` recipe's comment names the prefix). The test spells it out rather
+/// than importing it because the path is the contract a shell could check.
+#[test]
+fn the_test_server_takes_its_root_with_it() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_knobas-test-server"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn the test server");
+    let stdout = child.stdout.take().unwrap();
+    let mut url = String::new();
+    std::io::BufReader::new(stdout)
+        .read_line(&mut url)
+        .expect("the test server's first line");
+    assert!(url.starts_with("postgresql://"), "not a URL: {url:?}");
+
+    let root = std::env::temp_dir().join(format!("knobas-test-{}", child.id()));
+    let lock = root.with_file_name(format!("knobas-test-{}.lock", child.id()));
+    assert!(
+        root.join("data").is_dir() && lock.is_file(),
+        "while it serves, the server's root and lock are {} and {}",
+        root.display(),
+        lock.display()
+    );
+
+    drop(child.stdin.take());
+    let status = child.wait().expect("wait for the test server");
+    assert!(status.success(), "the test server exited with {status}");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while (root.exists() || lock.exists()) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        !root.exists(),
+        "the server's root is still there after it exited: {}",
+        root.display()
+    );
+    assert!(
+        !lock.exists(),
+        "the server's lock is still there after it exited: {}",
+        lock.display()
+    );
+}
+
 /// Where this binary's shared connector landed, in a form the test below can
 /// read out of a child process: `landed=<port> <system_identifier> <database>
 /// <migrated>`.

@@ -68,6 +68,8 @@
 use std::fs::{File, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -91,18 +93,14 @@ const NONCE_FILE: &str = ".run";
 
 /// How long a claimant waits for a lock somebody else holds before giving up.
 /// Contention is a reaper's sweep, which is a handful of `stat`s and at most
-/// one `pg_ctl stop`; anything past this is not contention but a bug.
+/// one `pg_ctl stop`, or -- for a pid recycled within seconds of a gate's
+/// exit -- the `rm` still unlinking that gate's root under its lock (see
+/// [`remove_root`]: about 10 s for 4 GB); anything past this is not contention
+/// but a bug.
 const CLAIM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Longest pause between attempts while waiting for a contended lock.
 const CLAIM_BACKOFF_CAP: Duration = Duration::from_millis(100);
-
-/// Binary name of `pg_ctl` on this platform.
-const PG_CTL: &str = if cfg!(windows) {
-    "pg_ctl.exe"
-} else {
-    "pg_ctl"
-};
 
 /// A pool onto this test binary's shared database, starting the server on
 /// first use.
@@ -319,10 +317,13 @@ fn scratch_root() -> PathBuf {
 ///
 /// The protocol is the smallest one a shell can drive: the maintenance
 /// database's URL on `output`, one line, then nothing; end-of-file on `input`
-/// (or `SIGINT`/`SIGTERM`) is the signal to stop. The server is stopped
-/// through the same `stop()` a clean quit of the app uses, and the scratch
-/// root goes with it, so a gate that ends normally leaves nothing for the next
-/// run's reaper. A gate killed with `SIGKILL` does leave the postmaster
+/// (or `SIGINT`/`SIGTERM`) is the signal to stop. The server is then
+/// [discarded](EmbeddedDb::discard) rather than stopped the way a clean quit
+/// of the app stops one -- its data directory is about to go -- and the
+/// scratch root is removed by a child process that outlives this one (see
+/// [`remove_root`]), so the recipe gets its exit status as soon as the
+/// postmaster is gone and a gate that ends normally leaves nothing for the
+/// next run's reaper. A gate killed with `SIGKILL` does leave the postmaster
 /// behind, and that is what the reaper is for.
 ///
 /// `input` is read on a plain thread rather than `spawn_blocking`: a runtime
@@ -338,7 +339,7 @@ pub async fn serve_until_closed(
     mut output: impl Write,
 ) -> Result<(), crate::DbError> {
     let root_dir = scratch_root();
-    claim(&root_dir);
+    let lock = claim(&root_dir);
     reap_abandoned(&root_dir);
     let db = EmbeddedDb::start_with_max_connections(root_dir.clone(), GATE_MAX_CONNECTIONS).await?;
 
@@ -350,7 +351,8 @@ pub async fn serve_until_closed(
     if let Err(source) = announce {
         // Nobody is listening, so nobody will close the pipe: stop now
         // rather than serve for ever.
-        db.stop().await?;
+        db.discard().await?;
+        remove_root(&root_dir, lock);
         return Err(crate::DbError::Io {
             path: PathBuf::from("<stdout>"),
             source,
@@ -368,10 +370,83 @@ pub async fn serve_until_closed(
         () = terminated() => {}
     }
 
-    db.stop().await?;
-    let _ = std::fs::remove_dir_all(&root_dir);
-    let _ = std::fs::remove_file(lock_path(&root_dir));
+    db.discard().await?;
+    remove_root(&root_dir, lock);
     Ok(())
+}
+
+/// Remove a scratch root and the lock beside it -- in the background, where
+/// a child process can do it.
+///
+/// After a full `just test` the gate server's root holds one database per
+/// test binary plus every `scratch_database`: 355 databases, 4 GB, and about
+/// 10 s of unlinking, a fifth of the whole run spent after the last test has
+/// reported (#421). Nothing reads the files again, so on Unix the unlinking
+/// is handed to an `rm -rf` and this process exits at once.
+///
+/// The child keeps the root's ownership lock while it works: `lock` is the
+/// held lock file, handed to it as its stdin, and a `flock` lock belongs to
+/// the open file description, which a child inherits and keeps for as long as
+/// it lives -- however the parent goes. That is what keeps the claim/reap
+/// invariants standing over a root that is half gone. A reaper sweeping in
+/// the meantime finds it owned and skips it; without the lock it would take
+/// the root as abandoned and unlink the same tree itself, harmlessly, but
+/// synchronously, so the next server's start would wait for it. A claimant
+/// handed the same pid waits on the lock instead of taking over a directory
+/// `rm` is still inside; its wait is bounded by [`CLAIM_TIMEOUT`] (30 s),
+/// against an unlinking that took 10 s for 4 GB on an idle machine. Should
+/// the child be killed, the lock dies with it and the next sweep finishes the
+/// job, as for any abandoned root.
+///
+/// Where no child can be spawned the removal happens here, as it used to.
+fn remove_root(root: &Path, lock: &File) {
+    if remove_root_in_background(root, lock).is_err() {
+        remove_root_in_place(root);
+    }
+}
+
+/// Remove a scratch root and the lock beside it, here and now.
+fn remove_root_in_place(root: &Path) {
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_file(lock_path(root));
+}
+
+/// `rm -rf <root> <root>.lock`, holding `lock` until both are gone.
+///
+/// The lock file is `rm`'s own stdin and its last argument: the tree goes
+/// first, then the lock, and the descriptor closes with the process -- so the
+/// lock is released only once there is nothing left to protect. The
+/// ownership lock the reaper checks is this same file, so anything that
+/// looks at the root while `rm` runs sees an owner.
+#[cfg(unix)]
+fn remove_root_in_background(root: &Path, lock: &File) -> std::io::Result<()> {
+    let mut rm = Command::new("rm");
+    rm.arg("-rf").arg(root).arg(lock_path(root));
+    // The child is not waited for: it is meant to outlive this process.
+    spawn_holding(rm, lock).map(drop)
+}
+
+/// No `rm`, and `CreateProcess` does not carry a `flock`: remove in place.
+#[cfg(not(unix))]
+fn remove_root_in_background(_root: &Path, _lock: &File) -> std::io::Result<()> {
+    Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+}
+
+/// Spawn `command` holding `lock` for as long as it runs.
+///
+/// The child's stdin is a duplicate of the lock file, so the open file
+/// description -- and the `flock` on it -- stays open until the child exits,
+/// whatever happens to this process's own handle. Its stdout and stderr go
+/// nowhere: a child that outlives this process must not keep the pipes this
+/// process was given open, or whoever reads them waits for the child too.
+#[cfg(unix)]
+fn spawn_holding(mut command: Command, lock: &File) -> std::io::Result<Child> {
+    let held = lock.try_clone()?;
+    command
+        .stdin(Stdio::from(held))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
 }
 
 /// Resolves when `SIGTERM` arrives; never, where there is no such signal.
@@ -424,11 +499,13 @@ fn is_ours(root: &Path) -> bool {
 ///
 /// The file handle is parked in a `static` on purpose: it is never closed, so
 /// the lock is only ever released by the kernel reaping the process --
-/// including on panic, `SIGKILL`, or a test-harness timeout.
+/// including on panic, `SIGKILL`, or a test-harness timeout. It is returned
+/// as well, for the one caller that hands the lock on rather than letting it
+/// lapse: [`remove_root`].
 ///
 /// Taken *before* the scratch directory exists, so no reaper can ever observe
 /// that directory without an owner.
-fn claim(root_dir: &Path) {
+fn claim(root_dir: &Path) -> &'static File {
     static HELD: OnceLock<File> = OnceLock::new();
 
     let path = lock_path(root_dir);
@@ -441,8 +518,9 @@ fn claim(root_dir: &Path) {
         // A reaper unlinked the file between `create` and `try_lock`; the lock
         // we hold protects an inode nobody can see. Start over.
     };
-    let _ = HELD.set(file);
+    let held = HELD.get_or_init(move || file);
     take_over(root_dir);
+    held
 }
 
 /// Take the OS lock on `file`, waiting for whoever holds it.
@@ -450,9 +528,11 @@ fn claim(root_dir: &Path) {
 /// Contention here is legitimate and short: a reaper -- in another test binary
 /// cargo is running in parallel, or in this one -- opens and locks every
 /// candidate lock file it sweeps, and a directory being claimed right now is a
-/// candidate until its lock is taken. Treating the first `WouldBlock` as fatal,
-/// which is what this used to do, turns somebody else's routine sweep into a
-/// failed test run.
+/// candidate until its lock is taken. The one longer holder is the `rm` a gate
+/// left unlinking its root ([`remove_root`]), met only by a claimant whose pid
+/// is that gate's, recycled within seconds. Treating the first `WouldBlock` as
+/// fatal, which is what this used to do, turns somebody else's routine sweep
+/// into a failed test run.
 ///
 /// # Panics
 ///
@@ -548,8 +628,7 @@ fn reap_abandoned(own_root: &Path) {
             continue;
         };
         stop_server(&path);
-        let _ = std::fs::remove_dir_all(&path);
-        let _ = std::fs::remove_file(lock_path(&path));
+        remove_root_in_place(&path);
     }
 
     sweep_orphan_locks(parent, own_root);
@@ -637,21 +716,15 @@ fn claim_abandoned(root: &Path) -> Option<File> {
 /// Ask an abandoned server to shut down before its files are removed.
 ///
 /// The binaries live in the shared installation directory, not under the
-/// scratch directory being reaped.
+/// scratch directory being reaped; `pg_ctl_stop_immediate` knows where.
 fn stop_server(root: &Path) {
-    if !root.join("data").join("postmaster.pid").exists() {
+    let data_dir = root.join("data");
+    if !data_dir.join("postmaster.pid").exists() {
         return;
     }
-    let Some(pg_ctl) = crate::embedded::find_tool(&crate::embedded::installation_dir(), PG_CTL)
-    else {
-        return;
-    };
-    let _ = std::process::Command::new(pg_ctl)
-        .arg("stop")
-        .arg("-D")
-        .arg(root.join("data"))
-        .args(["-m", "immediate", "-w"])
-        .output();
+    if let Some(mut pg_ctl) = crate::embedded::pg_ctl_stop_immediate(&data_dir) {
+        let _ = pg_ctl.output();
+    }
 }
 
 #[cfg(test)]
@@ -784,6 +857,78 @@ mod tests {
         assert!(
             data.exists(),
             "take_over must not wipe its own live directory"
+        );
+    }
+
+    /// A child spawned holding a lock keeps it for exactly as long as it
+    /// lives, with the parent's own handle already gone -- the property the
+    /// background removal rests on. While the child is up the root is owned,
+    /// so a reaper's claim fails; once it is gone the lock is free again.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_spawned_holding_a_lock_keeps_it_until_it_exits() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = scratch(dir.path(), "handed-on", Some("4242-1"));
+        let lock = hold_lock(&root);
+
+        let mut sleeper = Command::new("sleep");
+        sleeper.arg("30");
+        let mut child = spawn_holding(sleeper, &lock).expect("spawn a child holding the lock");
+        drop(lock);
+
+        // Held for as long as the child lives -- asked repeatedly rather
+        // than once, because a single failed attempt right after a `close`
+        // proves nothing on macOS (see the reaper test below), while a lock
+        // nobody holds is free within microseconds of the close: half a
+        // second of refusals is the child's doing.
+        let until = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < until {
+            assert!(
+                claim_abandoned(&root).is_none(),
+                "the child holds the lock, so the root must not read as abandoned"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        // Free again once the child is gone; waited for rather than asserted
+        // outright, for the same macOS release lag
+        // `the_reaper_holds_the_lock_it_took_until_the_directory_is_gone`
+        // absorbs.
+        let contender = File::open(lock_path(&root)).unwrap();
+        lock_with_backoff(&contender, &lock_path(&root));
+    }
+
+    /// Removing a root leaves neither the directory nor the lock beside it --
+    /// eventually, since the removal runs in the background. The lock file
+    /// matters: one left behind with no directory is exactly what
+    /// `sweep_orphan_locks` exists to clean up, and a clean exit should not
+    /// be making work for it.
+    #[test]
+    fn a_removed_root_takes_its_lock_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = scratch(dir.path(), "removed", Some("4242-1"));
+        // A tree rather than an empty directory, so the removal has to recurse.
+        std::fs::create_dir_all(root.join("data").join("base")).unwrap();
+        let lock = hold_lock(&root);
+
+        remove_root(&root, &lock);
+        drop(lock);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while (root.exists() || lock_path(&root).exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !root.exists(),
+            "the root is still there: {}",
+            root.display()
+        );
+        assert!(
+            !lock_path(&root).exists(),
+            "the lock outlived its root: {}",
+            lock_path(&root).display()
         );
     }
 
