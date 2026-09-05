@@ -1,11 +1,11 @@
-# The release build: a macOS `.dmg` and a Windows `.exe`/`.msi` for one tag.
+# The release build: for one tag, a macOS `.dmg`, a Windows `.exe`/`.msi`, and
+# a Linux `.deb`/`.rpm`/`.AppImage`.
 #
-# This is the only workflow that runs while `check` and `testenv` stay
-# `disabled_manually` (the 2026-08-29 billing decision, `working-model.md`
-# review-economics rule 4). It does not gate anything and it is not a backstop:
-# the gate is still a local `just check`. Its whole job is to put a macOS and a
-# Windows machine in front of `tauri build`, because this one is a Mac and
-# cross-compiling a Tauri app to Windows is a port, not a build step.
+# It does not gate anything and it is not a backstop: the gate is still a local
+# `just check` (`working-model.md` review-economics rule 4). Its whole job is to
+# put each target's own machine in front of `tauri build`, because this one is a
+# Mac and a Tauri bundle cannot be cross-compiled from it -- not to Windows, and
+# not to Linux, where the binary links webkit2gtk through wry.
 #
 # **Minutes are the design constraint.** On a private repository GitHub bills
 # macOS minutes at 10x and Windows at 2x, so one cold run of both legs costs a
@@ -18,10 +18,12 @@
 # 10x-billed minutes. Tag first, then dispatch the tag by name:
 #
 #     git tag -a v0.2.0 -m ... && git push origin v0.2.0
-#     gh workflow run release.yml --ref main -f tag=v0.2.0 -f platforms=both
+#     gh workflow run release.yml --ref main -f tag=v0.2.0 -f platforms=all
 #
 # `platforms` is what makes iterating affordable: a Windows fix re-runs the
 # Windows leg alone rather than re-buying a macOS bundle that already exists.
+# Linux and Windows are cheap next to macOS -- 1x and 2x against its 10x -- so
+# when only one leg is in question, name it.
 name: release
 
 on:
@@ -34,9 +36,9 @@ on:
       platforms:
         description: Which bundles to build
         required: true
-        default: both
+        default: all
         type: choice
-        options: [both, macos, windows]
+        options: [all, macos, windows, linux]
 
 # The bundle jobs upload assets to the release the `draft` job creates, which
 # `contents: read` cannot do. Nothing else here writes.
@@ -75,7 +77,8 @@ jobs:
           case '${{ inputs.platforms }}' in
             macos)   os='["macos-latest"]' ;;
             windows) os='["windows-latest"]' ;;
-            *)       os='["macos-latest", "windows-latest"]' ;;
+            linux)   os='["ubuntu-latest"]' ;;
+            *)       os='["macos-latest", "windows-latest", "ubuntu-latest"]' ;;
           esac
           echo "matrix={\"os\": $os}" >> "$GITHUB_OUTPUT"
 
@@ -136,7 +139,14 @@ jobs:
           - **Windows** — SmartScreen shows "Windows protected your PC".
             *More info* → *Run anyway*.
 
-          The macOS bundle is **arm64 only** (Apple Silicon).
+          Linux is unsigned too, but nothing there refuses it on that basis.
+          Three artifacts, all x86_64: a `.deb`, an `.rpm`, and an `.AppImage`
+          that needs no install. All three are built on `ubuntu-latest`, so they
+          carry its glibc floor — a distribution older than the runner's Ubuntu
+          will refuse to run them, the AppImage included.
+
+          The macOS bundle is **arm64 only** (Apple Silicon); the Windows and
+          Linux ones are x86_64.
           NOTES
           )"
 
@@ -191,6 +201,24 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
+      # Tauri's Linux prerequisites, and this is the *bundling* set, which is
+      # strictly larger than the one `check.yml` installs -- that file says so
+      # in as many words ("The bundling-only ones (librsvg2-dev and friends) are
+      # left out: `tauri build` never runs here"). It does now, so they are here:
+      # `librsvg2-dev` renders the icon, and `patchelf` is what the AppImage
+      # bundler rewrites the interpreter path with. The `-dev` webkit and
+      # appindicator packages are what wry and the tray link against.
+      - name: Install Tauri's Linux bundling dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf
+
       # `tauri build` runs `npm run build` itself (tauri.conf.json's
       # `beforeBuildCommand`), but nothing installs the modules that command and
       # the Tauri CLI both live in. `just deps` is what does this locally.
@@ -213,6 +241,13 @@ jobs:
       # separator in it, so the one line serves both runners.
       - name: tauri build
         shell: bash
+        env:
+          # The AppImage bundler downloads `linuxdeploy` as an AppImage and runs
+          # it, which normally means mounting it through FUSE -- and a GitHub
+          # runner has no FUSE. This tells every AppImage in the chain to unpack
+          # itself into a temp directory and exec from there instead. It is read
+          # only by AppImage runtimes, so it is inert on the other two runners.
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
           cd crates/knobas-app
           node ../../app/node_modules/@tauri-apps/cli/tauri.js build
@@ -224,8 +259,9 @@ jobs:
       # reason: the failure mode is a green run that did not do the work.
       #
       # `"targets": "all"` in tauri.conf.json is what decides this list: dmg on
-      # macOS, and both installers on Windows -- NSIS (`-setup.exe`) and WiX
-      # (`.msi`), whose toolchains the Tauri CLI downloads itself.
+      # macOS; both installers on Windows -- NSIS (`-setup.exe`) and WiX
+      # (`.msi`), whose toolchains the Tauri CLI downloads itself; and all three
+      # Linux formats, the AppImage being the one that needs no package manager.
       - name: Upload the bundles
         shell: bash
         env:
@@ -236,6 +272,7 @@ jobs:
           case "$RUNNER_OS" in
             macOS)   files=(target/release/bundle/dmg/*.dmg) ;;
             Windows) files=(target/release/bundle/nsis/*.exe target/release/bundle/msi/*.msi) ;;
+            Linux)   files=(target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm target/release/bundle/appimage/*.AppImage) ;;
             *)       echo "::error::no artifact patterns for $RUNNER_OS"; exit 1 ;;
           esac
           if [ ${#files[@]} -eq 0 ]; then
