@@ -37,6 +37,10 @@ pub(crate) const MAINTENANCE_DATABASE: &str = "postgres";
 const HOST: &str = "127.0.0.1";
 
 /// Binary name of `pg_ctl` on this platform.
+///
+/// Read only by the two disposable-server stops below `test-util`; the
+/// shipped build reaches `pg_ctl` through `postgresql_embedded` alone.
+#[cfg(feature = "test-util")]
 pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl.exe"
 } else {
@@ -625,6 +629,7 @@ async fn close_pool_bounded(pool: &PgPool) {
 /// server whose files are about to be removed, so neither wants the
 /// checkpoint a fast stop pays for. `-w` waits until `postmaster.pid` is
 /// gone, which is the moment the directory can be removed under it.
+#[cfg(feature = "test-util")]
 pub(crate) fn pg_ctl_stop_immediate(data_dir: &Path) -> Option<std::process::Command> {
     let pg_ctl = find_tool(&installation_dir(), PG_CTL)?;
     let mut command = std::process::Command::new(pg_ctl);
