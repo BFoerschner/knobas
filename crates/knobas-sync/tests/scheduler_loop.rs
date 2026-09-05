@@ -140,9 +140,15 @@ impl RunConnections for TestConnections {
 /// ticker waits tens of milliseconds rather than the 2 s startup delay and 5 s
 /// tick a user gets. Real time, not tokio's paused clock: with every task
 /// blocked on database I/O tokio auto-advances a paused clock, which fires
-/// pool-acquire timeouts these tests are not about. Two ticks of this is the window
-/// [`the_ticker_runs_a_due_source_by_itself`] holds open; the adapter dwells
-/// there are chosen against it.
+/// pool-acquire timeouts these tests are not about. The startup delay plus two
+/// ticks of this is the window [`the_ticker_runs_a_due_source_by_itself`]
+/// holds open (150 ms), and its adapter dwell is chosen to outlast it.
+///
+/// Tests that still seed *on* the schedule live with the ticker joining their
+/// runs 50 ms in: each of them asserts something a join does not change (a
+/// peak, a row count, one id handed to two callers, a cancelled row). A test
+/// that asserts *who started* the run, or what its own sink heard first,
+/// seeds with [`seed_quiet`] instead.
 const FAST: SchedulerTiming = SchedulerTiming {
     startup_delay: Duration::from_millis(50),
     tick: Duration::from_millis(50),
