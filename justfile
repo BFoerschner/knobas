@@ -27,10 +27,14 @@
 # The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
 # left of both halves and remove the scratch files before re-raising, so a
 # cancelled gate leaves no cargo or vitest running under nobody and nothing in
-# `$TMPDIR`. Ctrl-C at a terminal reaches the halves through the process group
-# anyway; the explicit kill is for a `TERM` aimed at this shell alone, which
-# would otherwise orphan them. Descendants are killed deepest first so a
-# `just` in the chain cannot start its next recipe after its current one dies.
+# `$TMPDIR`. The explicit kill is not a backup for Ctrl-C; it is the only way
+# a signal reaches the halves at all. Without job control, bash starts a `&`
+# job with `SIGINT` ignored, that disposition survives `exec` into `just`,
+# cargo and node, and so Ctrl-C at the terminal ends this shell and nothing
+# below it (checked on bash 3.2: a background subshell survived an `INT` and
+# died of a `TERM`, which is why the kill sends `TERM`). Descendants are
+# killed deepest first so a `just` in the chain cannot start its next recipe
+# after its current one dies.
 #
 # `front` is *not* a build dependency of the cargo recipes --
 # `tauri::generate_context!` only reads `frontendDist` when the
@@ -41,10 +45,8 @@
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    front_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-front.XXXXXX")
-    cargo_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-cargo.XXXXXX")
-    front_pid=
-    cargo_pid=
+    front_log= cargo_log= front_pid= cargo_pid=
+    cargo_recipes=(fmt shell clippy clippy-libs inventory test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -57,31 +59,42 @@ check:
         wait
     }
     cleanup() { rm -f "$front_log" "$cargo_log"; }
+    # Traps first, so a second `mktemp` failing cannot leave the first behind.
     trap 'cleanup' EXIT
     trap 'stop_halves; cleanup; trap - INT; kill -INT $$' INT
     trap 'stop_halves; cleanup; trap - TERM; kill -TERM $$' TERM
+    front_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-front.XXXXXX")
+    cargo_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-cargo.XXXXXX")
 
-    echo "check: running 'front' beside 'fmt shell clippy clippy-libs inventory test';"
+    # Starts `just RECIPE...` in the background with everything it prints in
+    # LOG, ending with the half's own exit status and wall time; the caller
+    # takes the pid from `$!`.
+    run_half() {
+        local name=$1 log=$2
+        shift 2
+        ( SECONDS=0; status=0; just "$@" || status=$?
+          echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
+    }
+
+    echo "check: running 'front' beside '${cargo_recipes[*]}';"
     echo "check: each half's output is captured and reported when it finishes."
-    ( SECONDS=0; status=0; just front || status=$?
-      echo "front: exit $status after ${SECONDS} s"; exit "$status" ) >"$front_log" 2>&1 &
-    front_pid=$!
-    ( SECONDS=0; status=0; just fmt shell clippy clippy-libs inventory test || status=$?
-      echo "cargo: exit $status after ${SECONDS} s"; exit "$status" ) >"$cargo_log" 2>&1 &
-    cargo_pid=$!
+    run_half front "$front_log" front; front_pid=$!
+    run_half cargo "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
 
     # A passing half is one line of status plus the lines a reader would look
-    # for anyway. For `front`: svelte-check's count (its machine-format line,
-    # which is what it prints when stdout is not a terminal), vitest's totals
-    # and the vite build; for the cargo chain: its `test result:` lines added
-    # up. A failing half is its whole log, so nothing has to be re-run to see
-    # why.
+    # for anyway. For `front`: svelte-check's count -- `svelte-check found N
+    # errors` as a rule, the machine-format `COMPLETED N FILES` line when
+    # svelte-check sees CLAUDECODE=1 in the environment (4.7.6 chooses its
+    # output by that variable, not by whether stdout is a terminal) -- then
+    # vitest's totals and the vite build; for the cargo chain: its
+    # `test result:` lines added up. A failing half is its whole log, so
+    # nothing has to be re-run to see why.
     report() {
         local name=$1 log=$2 status=$3
         if [ "$status" -eq 0 ]; then
             echo "check: $(tail -n 1 "$log")"
             case $name in
-                front) grep -E 'COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
+                front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
                 cargo) awk '/^test result:/ { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
@@ -96,9 +109,13 @@ check:
         fi
     }
 
+    # A reaped pid is cleared at once: a signal after that must not aim
+    # `stop_halves` at whatever process has since been given the number.
     front_status=0; wait "$front_pid" || front_status=$?
+    front_pid=
     report front "$front_log" "$front_status"
     cargo_status=0; wait "$cargo_pid" || cargo_status=$?
+    cargo_pid=
     report cargo "$cargo_log" "$cargo_status"
 
     if [ "$front_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
