@@ -1811,6 +1811,7 @@ knobas-sync	lib/knobas_sync	run_log::tests::the_wire_spellings_are_the_stored_sp
 knobas-sync	lib/knobas_sync	scheduler::tests::a_failed_existence_check_purges_rather_than_skipping
 knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source
 knobas-sync	lib/knobas_sync	scheduler::tests::the_concurrency_cap_leaves_the_bookkeeper_a_connection
+knobas-sync	lib/knobas_sync	scheduler::tests::the_default_timing_is_the_production_timing
 knobas-sync	lib/knobas_sync	scheduler::tests::the_states_with_no_next_run_are_spelled_the_way_the_enum_spells_them
 knobas-sync	lib/knobas_sync	scheduler::tests::the_tick_is_far_shorter_than_the_shortest_configurable_interval
 knobas-sync	lib/knobas_sync	tests::a_full_batch_is_written_while_the_adapter_is_still_running
