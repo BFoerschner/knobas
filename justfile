@@ -474,7 +474,7 @@ clippy-libs:
 # recipe takes one of `KNOBAS_GATE_SLOTS` (default 2) slots before it does
 # anything else, and with none free prints one line naming the holders' pids
 # and polls, up to `KNOBAS_GATE_SLOT_WAIT` seconds (default 900), then exits
-# 1 with the same line. The slot is held from the recipe's start to after
+# 1 naming the same holders. The slot is held from the recipe's start to after
 # the server has stopped, and released by the same EXIT, INT and TERM traps
 # that close the pipe. For a bare `just test` on a cold tree that start is
 # before the build, so a waiting gate's compile does not share the cores the
@@ -498,13 +498,21 @@ clippy-libs:
 # unlinked is exactly the dead link that was read. A taker that finds the
 # lock held counts the slot as held for this pass and looks again a second
 # later; a lock older than a minute (`find -mmin +1`, BSD and GNU) is a
-# reclaimer that died inside its few milliseconds, and is removed. What the
+# reclaimer that died inside its few milliseconds, and is removed. An
+# interrupted reclaimer removes its own lock from the traps, so what the
+# sweep catches is a SIGKILLed one -- or one paused past the minute (a
+# stopped process, a laptop asleep), whose lock is then removed while it is
+# live, and a second sweeper between the first's `find` and `rmdir` removes a
+# lock a fresh reclaimer has just taken. Those two windows are the residue:
+# each needs a reclaim already in flight, and the worst case is one gate too
+# many, which #422 saw three of run green. The root directory is recreated on
+# every pass, so one removed by hand while a gate waits comes back. What the
 # scheme cannot see: a dead holder's pid recycled onto some unrelated process
 # (the slot then waits for that process; `rm` the link), and another user's
 # gate, whose pid `kill -0` cannot signal and so reads as dead -- this is a
-# one-user machine. Not
-# `knobas-test-*`, whose prefix the connector's reaper sweeps, and not
-# `knobas-gate.*`, so a count of those still counts gate directories. The
+# one-user machine. The directory is not named `knobas-test-*`, whose prefix
+# the connector's reaper sweeps, nor `knobas-gate.*`, so a count of those
+# still counts gate directories. The
 # waiting line is `test: ...` without the two spaces the per-binary lines
 # carry, so `check`'s sum cannot count it. `check.yml` runs one gate on its
 # runner and takes the first slot without waiting; a `cargo test` by hand is
@@ -523,7 +531,7 @@ test:
     # interrupt between `mktemp` and the server's start leaks nothing.
     gate= server_pid= pool_pid= doc_pid= closed=
     slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
-    slot= held=
+    slot= held= reclaim_lock=
     # One pass over the slots: takes a free one (or one whose holder is
     # dead) and returns 0 with `slot` set; else returns 1 with `held` naming
     # the pids that hold them. A dead holder's link is unlinked under the
@@ -531,6 +539,7 @@ test:
     take_slot() {
         local i name holder lock=$slot_root/reclaim
         held=
+        mkdir -p "$slot_root"
         for ((i = 1; i <= slots; i++)); do
             name=$slot_root/slot-$i
             if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
@@ -539,11 +548,13 @@ test:
                 held="$held $holder"; continue
             fi
             if mkdir "$lock" 2>/dev/null; then
+                reclaim_lock=$lock
                 holder=$(readlink "$name" 2>/dev/null || true)
                 if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
                     rm -f "$name"
                 fi
                 rmdir "$lock" 2>/dev/null || true
+                reclaim_lock=
             elif [ -n "$(find "$slot_root" -maxdepth 1 -name reclaim -mmin +1 2>/dev/null)" ]; then
                 rmdir "$lock" 2>/dev/null || true
             fi
@@ -555,6 +566,11 @@ test:
         return 1
     }
     release_slot() {
+        # A reclaim lock this shell still holds is an interrupt that landed
+        # inside the reclaim's few milliseconds; the sweep must not be what
+        # removes it.
+        [ -z "$reclaim_lock" ] || rmdir "$reclaim_lock" 2>/dev/null || true
+        reclaim_lock=
         [ -n "$slot" ] || return 0
         # Only a link that still names this shell: a reclaimer removes a
         # slot only when its holder is dead, so this is belt and braces.
@@ -601,7 +617,6 @@ test:
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOT_WAIT must be a whole number of seconds, not '$slot_wait'" >&2; exit 1 ;;
     esac
     slot_wait=$((10#$slot_wait))
-    mkdir -p "$slot_root"
     wait_from=$SECONDS announced=
     until take_slot; do
         waited=$((SECONDS - wait_from))
