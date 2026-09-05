@@ -474,10 +474,12 @@ clippy-libs:
 # recipe takes one of `KNOBAS_GATE_SLOTS` (default 2) slots before it does
 # anything else, and with none free prints one line naming the holders' pids
 # and polls, up to `KNOBAS_GATE_SLOT_WAIT` seconds (default 900), then exits
-# 1 with the same line. The slot is held from before the build to after the
-# server has stopped -- a waiting gate's compile would otherwise share the
-# cores the two running gates are already saturating -- and released by the
-# same EXIT, INT and TERM traps that close the pipe.
+# 1 with the same line. The slot is held from the recipe's start to after
+# the server has stopped, and released by the same EXIT, INT and TERM traps
+# that close the pipe. For a bare `just test` on a cold tree that start is
+# before the build, so a waiting gate's compile does not share the cores the
+# two running gates are already saturating; under `check` the build has
+# happened in `inventory` by then, and what waits is the run.
 #
 # A slot is a symlink, `$TMPDIR/knobas-gate-slots/slot-<n>`, whose target is
 # the holder's pid. `ln -s` is the atomic primitive: it fails on an existing
@@ -485,15 +487,22 @@ clippy-libs:
 # directory with a pid file inside it, the link carries its pid from the
 # instant it exists, so no taker can ever see a slot that is held by nobody.
 # A slot whose pid is dead (`kill -0` fails) is a gate that was SIGKILLed or
-# lost its machine, and the next taker reclaims it: it renames the link
-# aside -- one rename wins if two takers try, and the loser sees no link and
-# simply takes the slot -- checks that what it moved still names the dead
-# pid, and only then unlinks it and takes the slot; a live claim that slipped
-# in between is put back. That is why a dead slot is removed and re-taken
-# rather than adopted where it lies. What the scheme cannot see: a dead
-# holder's pid recycled onto some unrelated process (the slot then waits for
-# that process; `rm` the link), and another user's gate, whose pid `kill -0`
-# cannot signal and so reads as dead -- this is a one-user machine. Not
+# lost its machine, and the next taker reclaims it: unlinks the dead link and
+# takes the slot with a fresh `ln -s`, never adopting it where it lies. The
+# unlink happens under a lock, `mkdir "$slot_root/reclaim"`, because two
+# takers can read the same dead pid, and without the lock the slower one
+# would unlink whatever the faster one had just put there -- a live claim --
+# and a third taker could then join the two already running. Under the lock
+# the re-read cannot go stale: the holder is dead so it cannot release, no
+# other reclaim runs, and a take needs the link to be absent, so what is
+# unlinked is exactly the dead link that was read. A taker that finds the
+# lock held counts the slot as held for this pass and looks again a second
+# later; a lock older than a minute (`find -mmin +1`, BSD and GNU) is a
+# reclaimer that died inside its few milliseconds, and is removed. What the
+# scheme cannot see: a dead holder's pid recycled onto some unrelated process
+# (the slot then waits for that process; `rm` the link), and another user's
+# gate, whose pid `kill -0` cannot signal and so reads as dead -- this is a
+# one-user machine. Not
 # `knobas-test-*`, whose prefix the connector's reaper sweeps, and not
 # `knobas-gate.*`, so a count of those still counts gate directories. The
 # waiting line is `test: ...` without the two spaces the per-binary lines
@@ -502,7 +511,7 @@ clippy-libs:
 # not a gate and takes none.
 #
 # Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
-# pgrep, getconf, `ln -s`, `readlink` and `mv`. `check.yml` on
+# pgrep, getconf, `ln -s`, `readlink` and `find -mmin`. `check.yml` on
 # `ubuntu-latest` runs the same recipe.
 test:
     #!/usr/bin/env bash
@@ -517,10 +526,10 @@ test:
     slot= held=
     # One pass over the slots: takes a free one (or one whose holder is
     # dead) and returns 0 with `slot` set; else returns 1 with `held` naming
-    # the pids that hold them. The reclaim is rename, check, unlink, take --
-    # see GATE SLOTS above for why not `rm` and take.
+    # the pids that hold them. A dead holder's link is unlinked under the
+    # reclaim lock and the slot taken afresh -- see GATE SLOTS above.
     take_slot() {
-        local i name holder reap=$slot_root/reap-$$
+        local i name holder lock=$slot_root/reclaim
         held=
         for ((i = 1; i <= slots; i++)); do
             name=$slot_root/slot-$i
@@ -529,14 +538,14 @@ test:
             if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
                 held="$held $holder"; continue
             fi
-            if mv "$name" "$reap" 2>/dev/null; then
-                holder=$(readlink "$reap" 2>/dev/null || true)
-                if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-                    ln -s "$holder" "$name" 2>/dev/null || true
-                    rm -f "$reap"
-                    held="$held $holder"; continue
+            if mkdir "$lock" 2>/dev/null; then
+                holder=$(readlink "$name" 2>/dev/null || true)
+                if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+                    rm -f "$name"
                 fi
-                rm -f "$reap"
+                rmdir "$lock" 2>/dev/null || true
+            elif [ -n "$(find "$slot_root" -maxdepth 1 -name reclaim -mmin +1 2>/dev/null)" ]; then
+                rmdir "$lock" 2>/dev/null || true
             fi
             if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
             holder=$(readlink "$name" 2>/dev/null || true)
@@ -601,7 +610,7 @@ test:
             echo "test: all $slots gate slots are held (pids $held); waiting up to $slot_wait s for one to free"
         fi
         if [ "$waited" -ge "$slot_wait" ]; then
-            echo "error: all $slots gate slots are still held (pids $held) after $waited s; giving up" >&2
+            echo "error: all $slots gate slots are held (pids $held); waited $waited s for one to free, giving up" >&2
             exit 1
         fi
         sleep 1
