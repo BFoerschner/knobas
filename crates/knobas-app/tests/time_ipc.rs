@@ -1359,7 +1359,10 @@ async fn a_beat_the_shell_sends_reaches_the_day_read_as_a_passive_block() {
     let pool = scratch("time-passive-wire").await;
     time::passive::set_enabled(&pool, true).await.unwrap();
     // Microseconds, as above: `opened` below is seeded through `timestamptz`
-    // and compared with what comes back.
+    // and compared with what comes back, and `now` is also the floor of the
+    // window `ended_at` is asserted inside. A beat landing in the same
+    // microsecond as `now` comes back with that microsecond's nanoseconds
+    // stripped, and would sit just under a floor that kept them.
     let now = Utc::now().trunc_subsecs(6);
     let window = Duration::seconds(time::passive::BEAT_WINDOW_SECONDS);
 
