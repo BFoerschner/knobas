@@ -600,7 +600,7 @@ test:
         failed=$((failed + 1))
         echo "test: $pkg $target FAILED (exit $status); its full output follows" >&2
         echo "----- $pkg $target -----" >&2
-        cat "$gate/out/$n.log" 2>/dev/null >&2 || true
+        [ ! -f "$gate/out/$n.log" ] || cat "$gate/out/$n.log" >&2
         echo "----- end of $pkg $target -----" >&2
     done < "$gate/tests"
 
@@ -610,7 +610,12 @@ test:
                  if ($(i+1) == "failed;") f += $i
                  if ($(i+1) == "ignored;") g += $i } }
                END { printf "%d passed, %d failed, %d ignored", p, f, g }')
-    if [ "$failed" -ne 0 ] || [ "$doc_status" -ne 0 ] || [ "$pool_status" -ne 0 ]; then
+    # Red on any binary's status, on the doc-test run's, on xargs's own, and
+    # on libtest's failed count added up over every log: the last is the
+    # harness's word rather than the runner's and is the one signal a broken
+    # status file could not fake.
+    if [ "$failed" -ne 0 ] || [ "$doc_status" -ne 0 ] || [ "$pool_status" -ne 0 ] \
+       || [ "${totals#*passed, }" != "0 failed${totals#*failed}" ]; then
         echo "test: FAILED ($failed of $count binaries, doc-tests exit $doc_status, pool exit $pool_status): $totals; in ${SECONDS} s" >&2
         exit 1
     fi
