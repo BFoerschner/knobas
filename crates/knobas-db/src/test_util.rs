@@ -58,6 +58,11 @@ use crate::{DbConfig, EmbeddedDb};
 /// Prefix for this crate's scratch directories under the system temp dir.
 const DIR_PREFIX: &str = "knobas-test-";
 
+/// The environment variable naming a server every test binary of a run
+/// shares, which `just test` exports from the server it starts. Unset, each
+/// binary starts a server of its own.
+pub const GATE_URL_VAR: &str = "KNOBAS_TEST_DB_URL";
+
 /// Suffix turning a scratch directory path into its ownership lock path.
 const LOCK_SUFFIX: &str = ".lock";
 
@@ -105,22 +110,80 @@ pub async fn test_pool() -> PgPool {
 ///
 /// Panics if the database cannot be started.
 pub async fn test_connector() -> crate::embedded::Connector {
-    static DB: tokio::sync::OnceCell<EmbeddedDb> = tokio::sync::OnceCell::const_new();
+    static SHARED: tokio::sync::OnceCell<Shared> = tokio::sync::OnceCell::const_new();
 
-    let db = DB
+    SHARED
         .get_or_init(|| async {
-            let root_dir = std::env::temp_dir().join(format!("{DIR_PREFIX}{}", std::process::id()));
-            claim(&root_dir);
-            reap_abandoned(&root_dir);
-            EmbeddedDb::start(DbConfig {
-                root_dir,
-                existing_url: None,
-            })
-            .await
-            .expect("start embedded postgres for tests")
+            match std::env::var(GATE_URL_VAR) {
+                Ok(url) => Shared::on_the_gate_server(&url).await,
+                Err(_) => Shared::on_a_server_of_its_own().await,
+            }
         })
-        .await;
-    db.connector()
+        .await
+        .connector
+        .clone()
+}
+
+/// This binary's shared database, decided once per process.
+struct Shared {
+    /// Reaches the shared database.
+    connector: crate::embedded::Connector,
+    /// The server this binary started, kept here so its `Drop` -- which would
+    /// stop the server -- never runs; statics are never dropped. `None` when
+    /// the server is the gate's, which is nobody's to keep alive from here.
+    _own_server: Option<EmbeddedDb>,
+}
+
+impl Shared {
+    /// The zero-config path: a server of this binary's own in its scratch
+    /// root, and the `knobas` database on it.
+    async fn on_a_server_of_its_own() -> Shared {
+        let root_dir = scratch_root();
+        claim(&root_dir);
+        reap_abandoned(&root_dir);
+        let db = EmbeddedDb::start(DbConfig {
+            root_dir,
+            existing_url: None,
+        })
+        .await
+        .expect("start embedded postgres for tests");
+        Shared {
+            connector: db.connector(),
+            _own_server: Some(db),
+        }
+    }
+
+    /// The gate path: the server `url` names is somebody else's -- reached
+    /// through `existing_url`, so it is never owned and never stopped from
+    /// here -- and this binary gets a database of its own on it, named the
+    /// way [`scratch_database`] names its databases and migrated.
+    ///
+    /// No claim and no sweep: this binary has no scratch root, and the gate's
+    /// server did the sweeping when it started.
+    async fn on_the_gate_server(url: &str) -> Shared {
+        let gate = EmbeddedDb::start(DbConfig {
+            // Ignored on the `existing_url` branch; there is no root to name.
+            root_dir: PathBuf::new(),
+            existing_url: Some(url.to_owned()),
+        })
+        .await
+        .unwrap_or_else(|error| panic!("connect to the gate's server at {GATE_URL_VAR}: {error}"));
+        let server = gate.connector();
+        // The handle's own pool is the only thing `stop` closes for a server
+        // it does not own, and nothing here uses that pool.
+        gate.stop()
+            .await
+            .expect("close the handle on the gate's server");
+
+        let name = format!(
+            "knobas_test_{}",
+            run_nonce().replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+        );
+        Shared {
+            connector: create_migrated_database(&server, &name).await,
+            _own_server: None,
+        }
+    }
 }
 
 /// A database of its own on this binary's shared server, migrated and empty.
@@ -154,21 +217,36 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     );
 
     let server = test_connector().await;
+    create_migrated_database(&server, &name).await
+}
+
+/// `create database` on `server`'s server, then the schema, then a connector
+/// onto it.
+///
+/// `name` is built by the two callers from an alphanumeric slug, a pid and a
+/// counter or a nonce, so there is no caller-supplied text in it -- `create
+/// database` takes no parameter.
+///
+/// # Panics
+///
+/// Panics if the database cannot be created, connected to, or migrated.
+async fn create_migrated_database(
+    server: &crate::embedded::Connector,
+    name: &str,
+) -> crate::embedded::Connector {
     let mut admin = server
         .with_database(crate::embedded::MAINTENANCE_DATABASE)
         .connect()
         .await
         .expect("connect to the maintenance database");
-    // Built here from an alphanumeric slug, a pid and a counter, so there is
-    // no caller-supplied text in it -- `create database` takes no parameter.
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("create database {name}")))
         .execute(&mut admin)
         .await
         .expect("create a scratch database");
     let _ = admin.close().await;
 
-    let scratch = server.with_database(&name);
-    let pool = scratch
+    let created = server.with_database(name);
+    let pool = created
         .pool(2)
         .await
         .expect("connect to the scratch database");
@@ -176,7 +254,7 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
         .await
         .expect("migrate the scratch database");
     pool.close().await;
-    scratch
+    created
 }
 
 /// Connections a test pool gets. The same five the application pool has, so a

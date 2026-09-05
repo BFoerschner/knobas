@@ -913,3 +913,105 @@ async fn the_test_server_serves_until_its_stdin_closes_and_then_stops() {
         "closing stdin must stop the server, not just the process"
     );
 }
+
+/// Where this binary's shared connector landed, in a form the test below can
+/// read out of a child process: `landed=<port> <system_identifier> <database>
+/// <migrated>`.
+///
+/// It stands on its own too: whichever server the connector reached -- its
+/// own or the one `KNOBAS_TEST_DB_URL` names -- it is never on the maintenance
+/// database, which is where a URL naming `postgres` would leave a connector
+/// that forgot to move off it.
+#[tokio::test]
+async fn the_shared_connector_never_lands_on_the_maintenance_database() {
+    use sqlx::Connection;
+
+    let mut conn = knobas_db::test_util::test_connector()
+        .await
+        .connect()
+        .await
+        .unwrap();
+    let (port, identifier, database, migrated): (i32, String, String, bool) = sqlx::query_as(
+        "select inet_server_port(),
+                (select system_identifier::text from pg_control_system()),
+                current_database(),
+                to_regclass('knobas.entity') is not null",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+
+    println!("landed={port} {identifier} {database} {migrated}");
+    assert_ne!(database, "postgres");
+}
+
+/// What a child process of this binary reports through the test above, with
+/// `KNOBAS_TEST_DB_URL` set to `url`.
+///
+/// A child rather than `set_var` in this process: the shared connector is
+/// decided once per process, and the other tests here have already decided it.
+fn landing_of_a_child_with(url: &str) -> (i32, String, String, bool) {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "the_shared_connector_never_lands_on_the_maintenance_database",
+            "--nocapture",
+        ])
+        .env("KNOBAS_TEST_DB_URL", url)
+        .output()
+        .expect("re-run this binary as a child");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "the child failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let landed = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("landed="))
+        .unwrap_or_else(|| panic!("no landed= line in:\n{stdout}"));
+    let mut fields = landed.split(' ');
+    (
+        fields.next().unwrap().parse().unwrap(),
+        fields.next().unwrap().to_owned(),
+        fields.next().unwrap().to_owned(),
+        fields.next().unwrap().parse().unwrap(),
+    )
+}
+
+/// With `KNOBAS_TEST_DB_URL` set, the shared connector reaches *that* server
+/// -- on a migrated database of the binary's own, not the maintenance database
+/// the URL names -- and two binaries on the same server get two databases.
+///
+/// The server is this test's own, so a child that ignored the variable and
+/// started a server of its own (the mutant: delete the environment read) shows
+/// up as a different `system_identifier` on a different port. Two children are
+/// two processes, which is what "two test binaries" comes down to for the
+/// database name: it is built from the pid and a nonce.
+#[tokio::test]
+async fn the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let ours = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let url = maintenance_url(dir.path());
+
+    let (port, identifier, first, migrated) = landing_of_a_child_with(&url);
+    assert_eq!(
+        (port, identifier),
+        server_identity(ours.pool()).await,
+        "the child's shared connector is not on this test's server"
+    );
+    assert_ne!(first, "postgres", "the maintenance database is not a test's");
+    assert_ne!(first, "knobas", "nor is the app's");
+    assert!(migrated, "the binary's database must arrive migrated");
+
+    let (_, _, second, _) = landing_of_a_child_with(&url);
+    assert_ne!(first, second, "two binaries must not share a database");
+
+    ours.stop().await.unwrap();
+}
