@@ -2,15 +2,133 @@
 # decides the toolchain. An inherited RUSTUP_TOOLCHAIN would silently
 # override the pin and let the gate pass on an unpinned compiler.
 
-# `front` runs before the cargo recipes because it is the fast half: a
-# svelte-check error or a broken `vite build` is reported in seconds instead of
-# after a full workspace compile. It is *not* a build dependency of the cargo
-# recipes -- `tauri::generate_context!` only reads `frontendDist` when the
+# `front` runs *beside* the cargo chain, not before it. Neither writes what
+# the other reads: svelte-check, vitest and `vite build` never touch
+# `target/`, and what `front` produces (`app/node_modules`, `app/dist`) no
+# cargo recipe reads -- the mirror tests `include_str!` files under `app/src`,
+# which `front` only reads too. `just` runs a recipe's dependencies one after
+# another, so as a dependency `front` sat in front of the compile and its 24 s
+# were paid in full on every gate (measured 2026-09-05, warm, idle: `front`
+# 24 s, the cargo chain 178 s, `just check` 202 s). Started together, `front`
+# is finished long before `test` is, and the gate is the cargo half's length.
+# `just` has a `[parallel]` attribute that would start the dependencies at
+# once, but it interleaves their output line by line and reports nothing per
+# half; the point of capturing each half to its own file is that a red still
+# reads as one recipe's output.
+#
+# Each half writes to a per-invocation `mktemp` file (the inventory recipe
+# below says why a shared path is not an option on a machine with several
+# worktrees on it). A half that passes is reported as its summary; a half
+# that fails is reported as its captured output in full, and both are when
+# both fail -- running them together must not cost a signal the serial run
+# had. Neither half is cut short by the other failing, for the same reason,
+# and the exit status is non-zero if either half's was. `front` still goes
+# through `deps`: a missing `app/node_modules` is installed, and if that
+# cannot happen the frontend half is a red, not a skip.
+#
+# The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
+# left of both halves and remove the scratch files before re-raising, so a
+# cancelled gate leaves no cargo or vitest running under nobody and nothing in
+# `$TMPDIR`. The kill is explicit because the halves cannot be relied on to
+# get the signal themselves. Without job control, bash starts a `&` job with
+# `SIGINT` ignored, so the two subshells below survive a Ctrl-C; and a signal
+# aimed at this shell alone (a tool's timeout, a `kill` by pid) reaches
+# nothing below it. `just` does not pass the ignore on -- its children start
+# with `INT` at the default -- so a terminal Ctrl-C does end the cargo and
+# node processes under it; the trap is what covers the subshells and the
+# single-pid case. (Checked on bash 3.2 and just 1.58: a background subshell
+# survived an `INT` and died of a `TERM`, which is why the kill sends `TERM`;
+# a `sleep` under a background `just` died of an `INT`.) Descendants are
+# killed deepest first so a `just` in the chain cannot start its next recipe
+# after its current one dies.
+#
+# `front` is *not* a build dependency of the cargo recipes --
+# `tauri::generate_context!` only reads `frontendDist` when the
 # `custom-protocol` feature is on (production, i.e. `tauri build`); a dev build
 # with `devUrl` set takes the empty default asset set and never looks at
 # `app/dist`. Nothing here may create that directory either: a missing one is
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
-check: fmt front shell clippy clippy-libs inventory test
+check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    front_log= cargo_log= front_pid= cargo_pid=
+    cargo_recipes=(fmt shell clippy clippy-libs inventory test)
+    descendants() {
+        local p
+        for p in $(pgrep -P "$1" || true); do descendants "$p"; done
+        echo "$1"
+    }
+    stop_halves() {
+        local p pids=
+        for p in $front_pid $cargo_pid; do pids="$pids $(descendants "$p")"; done
+        [ -z "${pids// /}" ] || kill -TERM $pids 2>/dev/null || true
+        wait
+    }
+    cleanup() { rm -f "$front_log" "$cargo_log"; }
+    # Traps first, so a second `mktemp` failing cannot leave the first behind.
+    trap 'cleanup' EXIT
+    trap 'stop_halves; cleanup; trap - INT; kill -INT $$' INT
+    trap 'stop_halves; cleanup; trap - TERM; kill -TERM $$' TERM
+    front_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-front.XXXXXX")
+    cargo_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-cargo.XXXXXX")
+
+    # Starts `just RECIPE...` in the background with everything it prints in
+    # LOG, ending with the half's own exit status and wall time; the caller
+    # takes the pid from `$!`.
+    run_half() {
+        local name=$1 log=$2
+        shift 2
+        ( SECONDS=0; status=0; just "$@" || status=$?
+          echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
+    }
+
+    echo "check: running 'front' beside '${cargo_recipes[*]}';"
+    echo "check: each half's output is captured and reported when it finishes."
+    run_half front "$front_log" front; front_pid=$!
+    run_half cargo "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
+
+    # A passing half is one line of status plus the lines a reader would look
+    # for anyway. For `front`: svelte-check's count -- `svelte-check found N
+    # errors` as a rule, the machine-format `COMPLETED N FILES` line when
+    # svelte-check sees CLAUDECODE=1 in the environment (4.7.6 chooses its
+    # output by that variable, not by whether stdout is a terminal) -- then
+    # vitest's totals and the vite build; for the cargo chain: its
+    # `test result:` lines added up. A failing half is its whole log, so
+    # nothing has to be re-run to see why.
+    report() {
+        local name=$1 log=$2 status=$3
+        if [ "$status" -eq 0 ]; then
+            echo "check: $(tail -n 1 "$log")"
+            case $name in
+                front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
+                cargo) awk '/^test result:/ { n++; for (i = 1; i < NF; i++) {
+                             if ($(i+1) == "passed;") p += $i
+                             if ($(i+1) == "failed;") f += $i
+                             if ($(i+1) == "ignored;") g += $i } }
+                           END { printf "  %d test result lines: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
+            esac
+        else
+            echo "check: $name FAILED; its full output follows" >&2
+            echo "----- $name -----" >&2
+            cat "$log" >&2
+            echo "----- end of $name -----" >&2
+        fi
+    }
+
+    # A reaped pid is cleared at once: a signal after that must not aim
+    # `stop_halves` at whatever process has since been given the number.
+    front_status=0; wait "$front_pid" || front_status=$?
+    front_pid=
+    report front "$front_log" "$front_status"
+    cargo_status=0; wait "$cargo_pid" || cargo_status=$?
+    cargo_pid=
+    report cargo "$cargo_log" "$cargo_status"
+
+    if [ "$front_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
+        echo "check: FAILED (front exit $front_status, cargo exit $cargo_status)" >&2
+        exit 1
+    fi
+    echo "check: ok in ${SECONDS} s"
 
 # The test inventory: every test this workspace defines, by name, committed.
 #
