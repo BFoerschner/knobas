@@ -93,7 +93,10 @@ const NONCE_FILE: &str = ".run";
 
 /// How long a claimant waits for a lock somebody else holds before giving up.
 /// Contention is a reaper's sweep, which is a handful of `stat`s and at most
-/// one `pg_ctl stop`; anything past this is not contention but a bug.
+/// one `pg_ctl stop`, or -- for a pid recycled within seconds of a gate's
+/// exit -- the `rm` still unlinking that gate's root under its lock (see
+/// [`remove_root`]: about 10 s for 4 GB); anything past this is not contention
+/// but a bug.
 const CLAIM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Longest pause between attempts while waiting for a contended lock.
@@ -525,9 +528,11 @@ fn claim(root_dir: &Path) -> &'static File {
 /// Contention here is legitimate and short: a reaper -- in another test binary
 /// cargo is running in parallel, or in this one -- opens and locks every
 /// candidate lock file it sweeps, and a directory being claimed right now is a
-/// candidate until its lock is taken. Treating the first `WouldBlock` as fatal,
-/// which is what this used to do, turns somebody else's routine sweep into a
-/// failed test run.
+/// candidate until its lock is taken. The one longer holder is the `rm` a gate
+/// left unlinking its root ([`remove_root`]), met only by a claimant whose pid
+/// is that gate's, recycled within seconds. Treating the first `WouldBlock` as
+/// fatal, which is what this used to do, turns somebody else's routine sweep
+/// into a failed test run.
 ///
 /// # Panics
 ///

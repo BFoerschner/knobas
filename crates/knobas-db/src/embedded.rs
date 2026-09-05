@@ -38,8 +38,9 @@ const HOST: &str = "127.0.0.1";
 
 /// Binary name of `pg_ctl` on this platform.
 ///
-/// Read only by the two disposable-server stops below `test-util`; the
-/// shipped build reaches `pg_ctl` through `postgresql_embedded` alone.
+/// Read only below `test-util`, by the immediate-stop builder the two
+/// disposable-server stops share; the shipped build reaches `pg_ctl` through
+/// `postgresql_embedded` alone.
 #[cfg(feature = "test-util")]
 pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl.exe"
@@ -564,8 +565,11 @@ impl EmbeddedDb {
     /// [`DbError::Io`] if `pg_ctl` cannot be found or reports a failure --
     /// `Io` rather than `Embedded`, because the command is run here and not
     /// through the crate's handle. On either error the handle still drops,
-    /// and its `Drop` tries a fast stop if `postmaster.pid` is still there:
-    /// a second attempt, which is the right fallback for a failed first one.
+    /// and for a server started here that runs `PostgreSQL`'s own `Drop`, a
+    /// fast stop if `postmaster.pid` is still there: a second attempt, which
+    /// is the right fallback for a failed first one. An adopted server
+    /// (`postgresql` is `None`) has no such fallback and stays up; the gate
+    /// server never adopts, its root being fresh at every start.
     #[cfg(feature = "test-util")]
     pub async fn discard(self) -> Result<(), DbError> {
         close_pool_bounded(&self.pool).await;
