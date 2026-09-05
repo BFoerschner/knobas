@@ -11,6 +11,30 @@ import { afterAll, afterEach, expect } from "vitest";
 
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
 
+/**
+ * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact
+ * rather than an intention.
+ *
+ * `test.env` is Vitest setting `process.env.TZ` in each worker and Node
+ * re-reading it — two mechanisms, either of which can change under an upgrade
+ * without anybody noticing. The failure mode if it does is not a red suite: it
+ * is a suite that quietly goes back to testing whichever zone the machine is
+ * in, which is the condition #406 lived in for as long as no runner ran.
+ * Refusing to start says so in one line instead.
+ *
+ * Here rather than in a test file because a test can be filtered out of a run
+ * and a setup file cannot: this is checked once per file, in every worker,
+ * whatever `-t` was passed.
+ */
+const PINNED_ZONE = "Europe/Berlin";
+const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+if (zone !== PINNED_ZONE) {
+  throw new Error(
+    `the suite is pinned to ${PINNED_ZONE} but is running in ${zone}: ` +
+      "`test.env.TZ` in vite.config.ts has stopped taking effect",
+  );
+}
+
 // jsdom has no `matchMedia`, and the shell asks it about reduced motion the
 // moment a `Flap` mounts. Without this a component test fails inside Svelte's
 // own effect runner, which reports it as an unrelated mount error.
