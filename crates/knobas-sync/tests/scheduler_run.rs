@@ -206,6 +206,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
             registry: registry.clone(),
             secrets: Arc::new(store),
             events: events.clone(),
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
         },
         events,
         registry,

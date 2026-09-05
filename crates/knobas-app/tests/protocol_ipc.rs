@@ -368,6 +368,7 @@ impl Harness {
             registry: registry.clone(),
             secrets: secrets.clone(),
             events: Arc::new(Quiet),
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
         })
         .await
         .expect("a scheduler");

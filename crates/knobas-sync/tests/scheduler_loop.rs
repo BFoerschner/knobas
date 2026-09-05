@@ -20,7 +20,7 @@ use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
 use knobas_sync::run_log::{self, SyncTrigger};
 use knobas_sync::scheduler::{
     AdapterRegistry, Purge, RunConnections, SYNC_CONCURRENCY, Scheduler, SchedulerDeps,
-    SourceSyncStatus, SyncEvents,
+    SchedulerTiming, SourceSyncStatus, SyncEvents,
 };
 use sqlx::PgPool;
 
@@ -133,6 +133,26 @@ impl RunConnections for TestConnections {
         self.0.connect().await
     }
 }
+
+/// The clock every scheduler in this binary ticks on (#412).
+///
+/// Milliseconds where production has seconds, so a test that waits for the
+/// ticker waits tens of milliseconds rather than the 2 s startup delay and 5 s
+/// tick a user gets. Real time, not tokio's paused clock: with every task
+/// blocked on database I/O tokio auto-advances a paused clock, which fires
+/// pool-acquire timeouts these tests are not about. The startup delay plus two
+/// ticks of this is the window [`the_ticker_runs_a_due_source_by_itself`]
+/// holds open (150 ms), and its adapter dwell is chosen to outlast it.
+///
+/// Tests that still seed *on* the schedule live with the ticker joining their
+/// runs 50 ms in: each of them asserts something a join does not change (a
+/// peak, a row count, one id handed to two callers, a cancelled row). A test
+/// that asserts *who started* the run, or what its own sink heard first,
+/// seeds with [`seed_quiet`] instead.
+const FAST: SchedulerTiming = SchedulerTiming {
+    startup_delay: Duration::from_millis(50),
+    tick: Duration::from_millis(50),
+};
 
 /// Serialises the tests in this binary.
 ///
@@ -331,6 +351,7 @@ async fn slow_deps(
             }),
             secrets: Arc::new(MemoryStore::new()),
             events: Arc::new(Silent),
+            timing: FAST,
         },
         peak,
         inside,
@@ -354,8 +375,11 @@ async fn concurrent_runs_never_exceed_the_cap() {
             .await
             .unwrap();
     }
-    // Long enough for every triggered run to have finished.
-    tokio::time::sleep(Duration::from_secs(6)).await;
+    // Every triggered run has finished: a condition, not a span (#307). The
+    // peak is only final once the last of them has left the adapter.
+    for id in &ids {
+        await_source_idle(&pool, id).await;
+    }
     scheduler.shutdown().await;
 
     // **Equality, not `<=`.** Three sources more than the cap are triggered at
@@ -405,7 +429,7 @@ async fn a_second_trigger_joins_the_run_already_in_flight() {
         "the caller is handed the run that is already going"
     );
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    await_source_idle(&pool, &id).await;
     scheduler.shutdown().await;
     assert_eq!(
         run_log::list(&pool, Some(&id), 10).await.unwrap().len(),
@@ -443,13 +467,32 @@ async fn the_ticker_runs_a_due_source_by_itself() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(50)).await;
+    // A dwell longer than the window below, so the run the first tick starts
+    // is still open when the second tick looks. `config::due` lists a source
+    // with an open run -- it only knows about finished ones -- so the second
+    // tick sees the same source due again, and the only thing between it and
+    // a second row is the scheduler's own "already has an open run" guard.
+    // A dwell shorter than the window would have the run finished, and the
+    // source not due, before that guard was ever asked.
+    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
-    // A never-run source is due immediately; the first tick is one STARTUP_DELAY
-    // away, and the second one TICK after that -- so this window covers both and
-    // would catch a ticker that started the same source twice.
-    tokio::time::sleep(Duration::from_secs(9)).await;
+    // A never-run source is due immediately; the first tick is one startup
+    // delay away, and the second one tick after that -- so this span covers
+    // both looks. It is a **window, not a wait**: "the ticker looked twice"
+    // is not a condition anything outside the scheduler can observe, so the
+    // spec keeps it as two injected ticks (#412). It is not what makes the
+    // second look observable, though: that is the dwell above outlasting the
+    // tick, plus the wait below -- the ticker keeps looking every tick until
+    // the run finishes, and each look through the 400 ms dwell meets the
+    // guard again. Cut to 10 ms, this span leaves the test green and the
+    // guard mutant still failing with eight rows, not two. The 50-100 ms
+    // sleeps elsewhere in this file are margins against a test's own dwell,
+    // not the scheduler's clock.
+    tokio::time::sleep(FAST.startup_delay + 2 * FAST.tick).await;
+    // Then the run finishing is a condition (#307), and it has to have
+    // finished for the interval to run from anywhere.
+    await_source_idle(&pool, &id).await;
     scheduler.shutdown().await;
 
     let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
@@ -474,15 +517,18 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    // Far longer than the shutdown grace period.
-    let (deps, _) = deps(sched_pool, Duration::from_secs(30)).await;
+    // Far longer than the shutdown grace period. Never waited out: the
+    // assertion below is that shutdown does not wait for it.
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_secs(30)).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     scheduler
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The run is inside its transaction, holding the connection the stall was
+    // about -- a condition rather than a 200 ms guess (#307).
+    await_inside(&inside).await;
 
     let started = std::time::Instant::now();
     scheduler.shutdown().await;
@@ -696,7 +742,9 @@ async fn trigger_all_skips_the_disabled_and_the_ones_needing_a_human() {
     let (deps, _) = deps(sched_pool, Duration::from_millis(20)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
     let started = scheduler.trigger_all().await.unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    for run_id in &started {
+        await_finish(&pool, *run_id).await;
+    }
     scheduler.shutdown().await;
 
     // Other tests' sources may be in the same database, so the assertion is
@@ -725,7 +773,10 @@ async fn trigger_all_skips_the_disabled_and_the_ones_needing_a_human() {
 async fn a_trigger_says_running_before_it_returns() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
-    let ids = seed(&pool, 1).await;
+    // Off the schedule: the `running` this reads must be *this* trigger's. A
+    // ticker that started the run first would emit one that satisfies every
+    // assertion below and witnesses nothing about the caller's path.
+    let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
 
     #[derive(Default)]
@@ -751,6 +802,7 @@ async fn a_trigger_says_running_before_it_returns() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -816,6 +868,7 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -942,7 +995,9 @@ async fn every_declared_phase_is_actually_emitted() {
 /// retire afterwards.
 async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<String>) {
     let (pool, sched_pool) = pools().await;
-    let ids = seed(&pool, 1).await;
+    // Off the schedule: this sink has to hear the run *start*, and a ticker
+    // that started the run first would hand it a join instead.
+    let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
     let connector = knobas_db::test_util::test_connector().await;
     let scheduler = Scheduler::start(SchedulerDeps {
@@ -958,6 +1013,7 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -1032,7 +1088,9 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
 async fn a_backfill_is_logged_under_its_own_trigger() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
-    let ids = seed(&pool, 2).await;
+    // Off the schedule: the assertion is on the spelling of *this* caller's
+    // trigger, and a ticker that got there first would have logged `first_run`.
+    let ids = seed_quiet(&pool, 2).await;
     let (synced, backfilled) = (ids[0].clone(), ids[1].clone());
     let (deps, _) = deps(sched_pool, Duration::from_millis(10)).await;
 
@@ -1072,6 +1130,24 @@ async fn a_backfill_is_logged_under_its_own_trigger() {
     retire(&pool, &ids).await;
 }
 
+/// Wait until a source has run at least once and none of its runs is open.
+///
+/// The wait the scheduler tests used to spell as "long enough for every run
+/// to have finished" (#307, #412): by source rather than by run id, because
+/// the runs the ticker starts on its own are the ones a caller never got an
+/// id for. Five seconds is the deadline every other wait in this file
+/// allows, for the same reason -- a loaded machine, not a measurement.
+async fn await_source_idle(pool: &PgPool, source_id: &str) {
+    for _ in 0..200 {
+        let runs = run_log::list(pool, Some(source_id), 10).await.unwrap();
+        if !runs.is_empty() && runs.iter().all(|r| r.finished_at.is_some()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("{source_id} still has a run open after five seconds");
+}
+
 /// Wait for one run's log row to be finished. Polls rather than sleeping a
 /// fixed span: the row is written by the spawned task, and a fixed sleep is
 /// either a flake or slow. Note what this does *not* promise -- see the two
@@ -1105,7 +1181,9 @@ async fn await_finish(pool: &PgPool, run_id: i64) {
 async fn two_callers_watching_one_run_both_hear_it_end() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
-    let ids = seed(&pool, 1).await;
+    // Off the schedule: the starter must be the one that started the run, or
+    // "still hears it start" is about the ticker's run and not its own.
+    let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
     let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -1388,6 +1466,7 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -1500,6 +1579,7 @@ async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -1558,6 +1638,7 @@ async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
+        timing: FAST,
     })
     .await
     .unwrap();
@@ -1750,6 +1831,7 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
+        timing: FAST,
     })
     .await
     .unwrap();

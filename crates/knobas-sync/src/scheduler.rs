@@ -107,6 +107,34 @@ pub struct SchedulerDeps {
     pub registry: Arc<dyn AdapterRegistry>,
     pub secrets: Arc<dyn SecretStore>,
     pub events: Arc<dyn SyncEvents>,
+    /// When the ticker looks. [`SchedulerTiming::default()`] everywhere a
+    /// user runs this; the scheduler-loop suite hands in milliseconds so it
+    /// does not wait out the production clock (#412).
+    pub timing: SchedulerTiming,
+}
+
+/// The ticker's clock: how long it waits before its first look for due
+/// sources, and how long between looks after that.
+///
+/// A value on [`SchedulerDeps`] rather than two constants read directly, so a
+/// test can drive the loop at millisecond ticks. The defaults are the
+/// production numbers ([`STARTUP_DELAY`], [`TICK`]) and nothing in the shipped
+/// binary constructs anything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedulerTiming {
+    /// Before the first look. See [`STARTUP_DELAY`] for the two jobs it does.
+    pub startup_delay: Duration,
+    /// Between looks. See [`TICK`] for why it is fixed rather than computed.
+    pub tick: Duration,
+}
+
+impl Default for SchedulerTiming {
+    fn default() -> Self {
+        SchedulerTiming {
+            startup_delay: STARTUP_DELAY,
+            tick: TICK,
+        }
+    }
 }
 
 /// The status of every configured source, id order.
@@ -857,12 +885,14 @@ pub const SYNC_POOL_SIZE: u32 = 4;
 /// bookkeeping pool untouched by design rather than by arithmetic.
 pub const SYNC_CONCURRENCY: usize = 3;
 
-/// How often the ticker looks for due sources. One indexed query; a fixed
-/// interval is cheaper to reason about than a computed sleep, and five seconds
-/// is well inside the smallest interval a user can configure (60 s).
+/// How often the ticker looks for due sources, unless [`SchedulerTiming`]
+/// says otherwise. One indexed query; a fixed interval is cheaper to reason
+/// about than a computed sleep, and five seconds is well inside the smallest
+/// interval a user can configure (60 s).
 const TICK: Duration = Duration::from_secs(5);
 
-/// How long the ticker waits before its first look.
+/// How long the ticker waits before its first look, unless
+/// [`SchedulerTiming`] says otherwise.
 ///
 /// Two jobs: it keeps the first `sync:state` from racing the webview's
 /// listeners (roadmap §4 gotcha 9 -- `sync_status()` on mount is the
@@ -1785,11 +1815,16 @@ fn cancelled_result() -> RunResult {
     }
 }
 
-/// Look for due sources every [`TICK`], or whenever something pokes `wake`.
+/// Look for due sources every [`SchedulerTiming::tick`], or whenever something
+/// pokes `wake`.
 async fn tick_loop(inner: Arc<Inner>) {
+    let SchedulerTiming {
+        startup_delay,
+        tick,
+    } = inner.deps.timing;
     tokio::select! {
         () = inner.cancel.cancelled() => return,
-        () = tokio::time::sleep(STARTUP_DELAY) => {}
+        () = tokio::time::sleep(startup_delay) => {}
     }
 
     loop {
@@ -1834,7 +1869,7 @@ async fn tick_loop(inner: Arc<Inner>) {
             biased;
             () = inner.cancel.cancelled() => return,
             () = inner.wake.notified() => {}
-            () = tokio::time::sleep(TICK) => {}
+            () = tokio::time::sleep(tick) => {}
         }
     }
 }
@@ -1993,14 +2028,32 @@ mod tests {
     }
 
     /// The ticker's period has to be well inside the shortest schedule a user
-    /// can configure, or a source is late by up to one tick every time.
+    /// can configure, or a source is late by up to one tick every time. Read
+    /// off the default, because the default is what production ticks at.
     #[test]
     fn the_tick_is_far_shorter_than_the_shortest_configurable_interval() {
+        let tick = SchedulerTiming::default().tick;
         assert!(
-            TICK.as_secs() * 4 <= u64::from(config::MIN_SYNC_INTERVAL_SECS),
+            tick.as_secs() * 4 <= u64::from(config::MIN_SYNC_INTERVAL_SECS),
             "a {}s tick against a {}s floor",
-            TICK.as_secs(),
+            tick.as_secs(),
             config::MIN_SYNC_INTERVAL_SECS
+        );
+    }
+
+    /// The timing a production [`SchedulerDeps`] gets when nobody chooses one
+    /// is the timing the app shipped with before it became a choice: a two
+    /// second startup delay and a five second tick (#412). The literals here
+    /// are the spec's numbers, not the constants -- a test that compared the
+    /// default to `TICK` would pass through any edit to `TICK`.
+    #[test]
+    fn the_default_timing_is_the_production_timing() {
+        assert_eq!(
+            SchedulerTiming::default(),
+            SchedulerTiming {
+                startup_delay: Duration::from_secs(2),
+                tick: Duration::from_secs(5),
+            }
         );
     }
 }

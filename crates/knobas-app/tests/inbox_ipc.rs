@@ -331,6 +331,7 @@ async fn harness() -> Harness {
             registry: Arc::clone(&registry) as Arc<dyn AdapterRegistry>,
             secrets: Arc::new(secrets),
             events: Arc::new(Silent) as Arc<dyn SyncEvents>,
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
         },
         registry,
         ops,

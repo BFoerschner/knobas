@@ -504,6 +504,7 @@ async fn harness() -> Harness {
             }),
             secrets: Arc::new(secrets),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
         },
         events,
         answer,
@@ -995,6 +996,7 @@ async fn the_scheduler_drains_the_queue_on_its_own() {
         registry: Arc::clone(&h.deps.registry),
         secrets: Arc::clone(&h.deps.secrets),
         events: Arc::clone(&h.deps.events),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
     })
     .await
     .unwrap();
