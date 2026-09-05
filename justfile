@@ -2,9 +2,11 @@
 # decides the toolchain. An inherited RUSTUP_TOOLCHAIN would silently
 # override the pin and let the gate pass on an unpinned compiler.
 
-# `front` runs *beside* the cargo chain, not before it. The two share nothing:
-# svelte-check, vitest and `vite build` never touch `target/`, and none of the
-# cargo recipes reads `app/`. `just` runs a recipe's dependencies one after
+# `front` runs *beside* the cargo chain, not before it. Neither writes what
+# the other reads: svelte-check, vitest and `vite build` never touch
+# `target/`, and what `front` produces (`app/node_modules`, `app/dist`) no
+# cargo recipe reads -- the mirror tests `include_str!` files under `app/src`,
+# which `front` only reads too. `just` runs a recipe's dependencies one after
 # another, so as a dependency `front` sat in front of the compile and its 24 s
 # were paid in full on every gate (measured 2026-09-05, warm, idle: `front`
 # 24 s, the cargo chain 178 s, `just check` 202 s). Started together, `front`
@@ -27,12 +29,16 @@
 # The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
 # left of both halves and remove the scratch files before re-raising, so a
 # cancelled gate leaves no cargo or vitest running under nobody and nothing in
-# `$TMPDIR`. The explicit kill is not a backup for Ctrl-C; it is the only way
-# a signal reaches the halves at all. Without job control, bash starts a `&`
-# job with `SIGINT` ignored, that disposition survives `exec` into `just`,
-# cargo and node, and so Ctrl-C at the terminal ends this shell and nothing
-# below it (checked on bash 3.2: a background subshell survived an `INT` and
-# died of a `TERM`, which is why the kill sends `TERM`). Descendants are
+# `$TMPDIR`. The kill is explicit because the halves cannot be relied on to
+# get the signal themselves. Without job control, bash starts a `&` job with
+# `SIGINT` ignored, so the two subshells below survive a Ctrl-C; and a signal
+# aimed at this shell alone (a tool's timeout, a `kill` by pid) reaches
+# nothing below it. `just` does not pass the ignore on -- its children start
+# with `INT` at the default -- so a terminal Ctrl-C does end the cargo and
+# node processes under it; the trap is what covers the subshells and the
+# single-pid case. (Checked on bash 3.2 and just 1.58: a background subshell
+# survived an `INT` and died of a `TERM`, which is why the kill sends `TERM`;
+# a `sleep` under a background `just` died of an `INT`.) Descendants are
 # killed deepest first so a `just` in the chain cannot start its next recipe
 # after its current one dies.
 #
