@@ -478,14 +478,17 @@ async fn the_ticker_runs_a_due_source_by_itself() {
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     // A never-run source is due immediately; the first tick is one startup
-    // delay away, and the second one tick after that -- so this window covers
-    // both, and it is a **window, not a wait**: the one span in this file
-    // that is deliberately clock, because "the ticker looked twice" is not a
-    // condition anything outside the scheduler can observe. It is the least
-    // the test stays out of the way, not the whole of what it observes: the
-    // ticker keeps looking every tick until the run finishes, and each look
-    // through the 400 ms dwell meets the guard again -- eight rows when the
-    // guard was mutated away (#412), not two.
+    // delay away, and the second one tick after that -- so this span covers
+    // both looks. It is a **window, not a wait**: "the ticker looked twice"
+    // is not a condition anything outside the scheduler can observe, so the
+    // spec keeps it as two injected ticks (#412). It is not what makes the
+    // second look observable, though: that is the dwell above outlasting the
+    // tick, plus the wait below -- the ticker keeps looking every tick until
+    // the run finishes, and each look through the 400 ms dwell meets the
+    // guard again. Cut to 10 ms, this span leaves the test green and the
+    // guard mutant still failing with eight rows, not two. The 50-100 ms
+    // sleeps elsewhere in this file are margins against a test's own dwell,
+    // not the scheduler's clock.
     tokio::time::sleep(FAST.startup_delay + 2 * FAST.tick).await;
     // Then the run finishing is a condition (#307), and it has to have
     // finished for the interval to run from anywhere.
