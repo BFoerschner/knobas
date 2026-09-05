@@ -12,20 +12,17 @@
 # are ~13 GB and are deliberately never pulled anywhere, CI included.
 name: testenv
 
+# **Manual only** (Björn, 2026-09-05), the same rule as check.yml and for the
+# same reason. This one used to fire on any `testenv/**` change; dispatch it by
+# hand after touching a compose file or a seed script. It is the cheap half of
+# the pair -- no containers, no images -- but it is still a billed runner, and
+# "manual only" is now the rule for every workflow in this directory rather than
+# a judgement call per file.
+#
+# The `concurrency:` block went with the triggers: it made a PR's later push
+# supersede its earlier one, and a hand-started run has nothing to supersede.
 on:
-  pull_request:
-    paths: ['testenv/**', '.github/workflows/testenv.yml']
-  push:
-    branches: [main]
-    paths: ['testenv/**', '.github/workflows/testenv.yml']
-
-# Same rule as check.yml, and for the same reason: a push to a PR branch makes
-# the previous push's run irrelevant, so those share a group and supersede each
-# other -- while every commit on `main` is a distinct answer to "is main green"
-# and gets a group of its own (keyed on run_id) so nothing can displace it.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -5,30 +5,19 @@
 # one command.
 name: check
 
-on:
-  pull_request:
-    # Docs-only commits cannot change the build. Skipping them saves a full
-    # ~2.5 min Rust run per commit (measured: the architecture-diagram commit
-    # burned one compiling code it could not have touched).
-    paths-ignore: ['docs/**', '**/*.md', 'mockups/**']
-  push:
-    branches: [main]
-    paths-ignore: ['docs/**', '**/*.md', 'mockups/**']
-
-# A push to a PR branch makes the run for the previous push irrelevant; keeping
-# it alive only queues work behind itself, so PR runs share one group per ref
-# and supersede each other.
+# **Manual only** (Björn, 2026-09-05). This ran on every pull request and every
+# push to `main` until then, which is a full Rust + Svelte build on a billed
+# runner per commit; the automatic triggers were the whole cost. Nothing about
+# the gate itself changed -- it is still the same `just check`, and
+# `working-model.md` review-economics rule 4 still says a person runs it
+# locally. Dispatch this when a *Linux* opinion is specifically wanted, which is
+# the one thing a local run on a Mac cannot give (that rule's "Platform" point).
 #
-# Every commit on `main`, by contrast, is a distinct answer to "is main green",
-# and a lost answer is lost for good. `cancel-in-progress: false` alone is not
-# enough to protect them: within a shared group GitHub keeps only *one* pending
-# run, so a third push silently discards the second one's run while the first
-# still holds the group. Keying `main` on `github.run_id` gives every commit a
-# group of its own, where there is nothing to queue behind and nothing to
-# replace.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# There is no `concurrency:` block any more either: it existed so a PR's later
+# push would supersede its earlier one, and a run somebody started by hand has
+# nothing to supersede.
+on:
+  workflow_dispatch:
 
 # Read-only: the gate builds and tests, it never writes to the repository. The
 # GITHUB_TOKEN handed to the `just check` step below inherits this, so the

@@ -26,7 +26,7 @@ Prerequisites:
 ```bash
 just deps     # npm ci in app/, on a fresh clone and whenever the lockfile moved
 just check    # fmt + svelte-check + vite build + clippy -D warnings + tests
-              # (also what CI runs on every PR)
+              # (also what check.yml runs, when dispatched by hand)
 just dev      # the desktop app against its own embedded Postgres
 just demo     # the same app in the demo profile (own directory, database,
               # keychain) — the only profile Load demo data works in
@@ -50,19 +50,24 @@ nothing ships. The `--lib` pass drops the dev-dependencies, and with them the
 feature, so each library is also checked the way something that merely depends
 on it will build it.
 
-GitHub Actions runs this same `just check` on every pull request and on every
-push to `main` (`.github/workflows/check.yml`). CI deliberately does not
-restate the gate — it only provides a Linux machine to run it on, so the two
+`.github/workflows/check.yml` runs this same `just check`. CI deliberately does
+not restate the gate — it only provides a Linux machine to run it on, so the two
 cannot drift apart.
 
-**Both workflows are disabled right now**, so nothing runs that gate but you.
-`gh workflow list --all` shows `check` and `testenv` as `disabled_manually`.
-A branch pushed since then gets no run at all, so `gh pr checks` answers `no
-checks reported`. Where it does still show a run, that run predates the
-disable. It is a leftover of the billing outage, not a verdict on any tree.
-`gh workflow enable check` and `gh workflow enable testenv`
-turn them back on; until then, `docs/agents/working-model.md` (review economics
-rule 4) says who runs the gate and when.
+**Nothing runs that gate but you.** Every workflow in `.github/workflows/` is
+`workflow_dispatch` only (Björn, 2026-09-05); none of them fires on a push, a
+pull request, a merge or a tag, so `gh pr checks` answers `no checks reported`
+on every branch and always will. Where it does still show a run, that run
+predates the change — a leftover, not a verdict on any tree.
+`docs/agents/working-model.md` (review economics rule 4) says who runs the gate
+and when.
+
+Run one by hand when you want it:
+
+```bash
+gh workflow run check.yml --ref <branch>    # the Linux opinion a Mac cannot give
+gh workflow run testenv.yml --ref <branch>  # after touching testenv/
+```
 
 Setting `KNOBAS_DB_URL` points **the app** at a Postgres you manage instead of
 starting an embedded one — for developing against a server with real data in
