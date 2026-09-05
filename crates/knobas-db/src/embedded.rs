@@ -561,7 +561,11 @@ impl EmbeddedDb {
     ///
     /// # Errors
     ///
-    /// [`DbError::Io`] if `pg_ctl` cannot be found or reports a failure.
+    /// [`DbError::Io`] if `pg_ctl` cannot be found or reports a failure --
+    /// `Io` rather than `Embedded`, because the command is run here and not
+    /// through the crate's handle. On either error the handle still drops,
+    /// and its `Drop` tries a fast stop if `postmaster.pid` is still there:
+    /// a second attempt, which is the right fallback for a failed first one.
     #[cfg(feature = "test-util")]
     pub async fn discard(self) -> Result<(), DbError> {
         close_pool_bounded(&self.pool).await;
@@ -569,11 +573,18 @@ impl EmbeddedDb {
             tracing::info!("not this process's server to stop");
             return Ok(());
         }
-        let data_dir = match (&self.postgresql, &self.stop_settings) {
-            (Some(postgresql), _) => postgresql.settings().data_dir.clone(),
-            (None, Some(settings)) => settings.data_dir.clone(),
-            // Externally managed: never ours, whatever the lock says.
-            (None, None) => return Ok(()),
+        // An owned server was either started here or adopted, so one of the
+        // two holds its settings; the `else` is for the type, not for a case.
+        let data_dir = self
+            .postgresql
+            .as_ref()
+            .map(|postgresql| &postgresql.settings().data_dir)
+            .or(self
+                .stop_settings
+                .as_ref()
+                .map(|settings| &settings.data_dir));
+        let Some(data_dir) = data_dir.cloned() else {
+            return Ok(());
         };
         let Some(pg_ctl) = pg_ctl_stop_immediate(&data_dir) else {
             return Err(DbError::io(

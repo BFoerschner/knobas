@@ -68,6 +68,7 @@
 use std::fs::{File, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -384,19 +385,27 @@ pub async fn serve_until_closed(
 /// held lock file, handed to it as its stdin, and a `flock` lock belongs to
 /// the open file description, which a child inherits and keeps for as long as
 /// it lives -- however the parent goes. That is what keeps the claim/reap
-/// invariants standing over a root that is half gone: a reaper sweeping in
-/// the meantime finds it owned and leaves it alone (it would otherwise unlink
-/// the same tree, harmlessly, but wait for it), and a claimant handed the
-/// same pid waits on the lock instead of taking over a directory `rm` is
-/// still inside. Should the child be killed, the lock dies with it and the
-/// next sweep finishes the job, as for any abandoned root.
+/// invariants standing over a root that is half gone. A reaper sweeping in
+/// the meantime finds it owned and skips it; without the lock it would take
+/// the root as abandoned and unlink the same tree itself, harmlessly, but
+/// synchronously, so the next server's start would wait for it. A claimant
+/// handed the same pid waits on the lock instead of taking over a directory
+/// `rm` is still inside; its wait is bounded by [`CLAIM_TIMEOUT`] (30 s),
+/// against an unlinking that took 10 s for 4 GB on an idle machine. Should
+/// the child be killed, the lock dies with it and the next sweep finishes the
+/// job, as for any abandoned root.
 ///
 /// Where no child can be spawned the removal happens here, as it used to.
 fn remove_root(root: &Path, lock: &File) {
     if remove_root_in_background(root, lock).is_err() {
-        let _ = std::fs::remove_dir_all(root);
-        let _ = std::fs::remove_file(lock_path(root));
+        remove_root_in_place(root);
     }
+}
+
+/// Remove a scratch root and the lock beside it, here and now.
+fn remove_root_in_place(root: &Path) {
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_file(lock_path(root));
 }
 
 /// `rm -rf <root> <root>.lock`, holding `lock` until both are gone.
@@ -407,15 +416,16 @@ fn remove_root(root: &Path, lock: &File) {
 /// ownership lock the reaper checks is this same file, so anything that
 /// looks at the root while `rm` runs sees an owner.
 #[cfg(unix)]
-fn remove_root_in_background(root: &Path, lock: &File) -> std::io::Result<Child> {
+fn remove_root_in_background(root: &Path, lock: &File) -> std::io::Result<()> {
     let mut rm = Command::new("rm");
     rm.arg("-rf").arg(root).arg(lock_path(root));
-    spawn_holding(rm, lock)
+    // The child is not waited for: it is meant to outlive this process.
+    spawn_holding(rm, lock).map(drop)
 }
 
 /// No `rm`, and `CreateProcess` does not carry a `flock`: remove in place.
 #[cfg(not(unix))]
-fn remove_root_in_background(_root: &Path, _lock: &File) -> std::io::Result<Child> {
+fn remove_root_in_background(_root: &Path, _lock: &File) -> std::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
@@ -426,6 +436,7 @@ fn remove_root_in_background(_root: &Path, _lock: &File) -> std::io::Result<Chil
 /// whatever happens to this process's own handle. Its stdout and stderr go
 /// nowhere: a child that outlives this process must not keep the pipes this
 /// process was given open, or whoever reads them waits for the child too.
+#[cfg(unix)]
 fn spawn_holding(mut command: Command, lock: &File) -> std::io::Result<Child> {
     let held = lock.try_clone()?;
     command
@@ -612,8 +623,7 @@ fn reap_abandoned(own_root: &Path) {
             continue;
         };
         stop_server(&path);
-        let _ = std::fs::remove_dir_all(&path);
-        let _ = std::fs::remove_file(lock_path(&path));
+        remove_root_in_place(&path);
     }
 
     sweep_orphan_locks(parent, own_root);
@@ -894,8 +904,8 @@ mod tests {
     fn a_removed_root_takes_its_lock_with_it() {
         let dir = tempfile::tempdir().unwrap();
         let root = scratch(dir.path(), "removed", Some("4242-1"));
+        // A tree rather than an empty directory, so the removal has to recurse.
         std::fs::create_dir_all(root.join("data").join("base")).unwrap();
-        std::fs::write(root.join("data").join("PG_VERSION"), "18").unwrap();
         let lock = hold_lock(&root);
 
         remove_root(&root, &lock);

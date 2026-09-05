@@ -925,9 +925,9 @@ async fn the_test_server_serves_until_its_stdin_closes_and_then_stops() {
 /// nothing.
 ///
 /// The root's name is the connector's convention, `$TMPDIR/knobas-test-<pid>`
-/// with `<pid>.lock` beside it, which the `test` recipe's own comments name
-/// too; the test spells it out rather than importing it because the path is
-/// the contract a shell could check.
+/// with `knobas-test-<pid>.lock` beside it (`test_util`'s module docs; the
+/// `test` recipe's comment names the prefix). The test spells it out rather
+/// than importing it because the path is the contract a shell could check.
 #[test]
 fn the_test_server_takes_its_root_with_it() {
     use std::io::BufRead;
