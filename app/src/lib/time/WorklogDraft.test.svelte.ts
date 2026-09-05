@@ -12,6 +12,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { Candidate, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
+import { offsetMinutes } from "./draft";
 import WorklogDraft from "./WorklogDraft.svelte";
 
 const TICKET = "jira:PAY-231";
@@ -194,7 +195,12 @@ test("it sends the interval, the edited comment and the reader's own day", async
     comment: "- Retry SEPA payouts",
   });
   // East of UTC is positive, which is the opposite of `getTimezoneOffset`.
-  expect(sent[0]!.offsetMinutes).toBe(-new Date().getTimezoneOffset());
+  // Negating the platform's answer inline is what `offsetMinutes` exists to
+  // stop: in a zero-offset zone it builds `-0`, and `toBe` is `Object.is`, so
+  // the expectation would miss the `+0` the component correctly sends (#406).
+  // The sign convention itself is pinned in `draft.test.ts` against fake
+  // offsets, so reading it from the helper here costs no coverage.
+  expect(sent[0]!.offsetMinutes).toBe(offsetMinutes());
 
   await vi.waitFor(() => expect(onlogged).toHaveBeenCalledTimes(1));
   expect(onclose).toHaveBeenCalledTimes(1);
