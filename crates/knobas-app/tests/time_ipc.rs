@@ -31,6 +31,7 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
 use knobas_app::time::{self, BlockKind, TimerTarget};
+use knobas_core::write_queue::WriteState;
 use sqlx::{PgPool, Row};
 
 const TICKET: &str = "jira:PAY-231";
@@ -2095,6 +2096,90 @@ async fn line(pool: &PgPool, verb: &str, at: DateTime<Utc>) {
         .expect("the line is moved into the interval");
 }
 
+/// A comment write the reader queued through knobas, **at a moment this test
+/// dictates**, in whatever state the queue has reached.
+///
+/// `queue` stamps `queued_at` with `now()`, for the same reason
+/// [`line`]'s activity row needs moving: a fixture whose moment is the wall
+/// clock is inside the interval or outside it depending on when the suite runs.
+///
+/// `settled_at` is **derived** from `state`, not passed: migration `0005`'s
+/// `write_queue_settled_chk` makes the two one fact -- `(state in
+/// ('sent','discarded')) = (settled_at is not null)` -- so a caller that could
+/// choose them separately could only choose them wrong. It lands four hours
+/// after `at`, deliberately outside every fixture's interval: the read is keyed
+/// on when the reader wrote the comment and never on when the queue got rid of
+/// it, and a settled time inside the window could not tell those two apart.
+async fn commented(
+    pool: &PgPool,
+    entity_id: &str,
+    body: &str,
+    at: DateTime<Utc>,
+    state: WriteState,
+) -> i64 {
+    let entity = knobas_core::entity::EntityRef::parse(entity_id).expect("an entity id");
+    let op = knobas_source::WriteOp::Comment {
+        entity: entity_id.to_owned(),
+        body: body.to_owned(),
+    };
+    let row = knobas_core::write_queue::queue(
+        pool,
+        &entity.namespace,
+        &entity,
+        op.identifier(),
+        serde_json::to_value(&op).expect("the op serializes"),
+        serde_json::json!({}),
+    )
+    .await
+    .expect("a queued write");
+    let settled_at =
+        matches!(state, WriteState::Sent | WriteState::Discarded).then(|| at + Duration::hours(4));
+    sqlx::query(
+        "update knobas.write_queue set queued_at = $1, state = $2, settled_at = $3 where id = $4",
+    )
+    .bind(at)
+    .bind(state.as_str())
+    .bind(settled_at)
+    .bind(row.id)
+    .execute(pool)
+    .await
+    .expect("the write is moved into the interval");
+    row.id
+}
+
+/// A comment the reader queued and the queue has not settled yet -- the
+/// ordinary case, and the one that says the read is not keyed on delivery.
+async fn comment_pending(pool: &PgPool, entity_id: &str, body: &str, at: DateTime<Utc>) -> i64 {
+    commented(pool, entity_id, body, at, WriteState::Pending).await
+}
+
+/// A note of the reader's, **last saved at a moment this test dictates**.
+///
+/// `saves` is how many times the editor's autosave wrote it, which is the
+/// number the draft must not be able to see: `note::save` stamps
+/// `updated_at = now()` every time, so the fixture saves that many times and
+/// then moves the one row's stamp, exactly as a real afternoon's typing would
+/// leave it.
+async fn note_edited(pool: &PgPool, title: &str, at: DateTime<Utc>, saves: usize) -> String {
+    let row = knobas_core::note::create(pool, title, "", "user")
+        .await
+        .expect("a note");
+    let id = knobas_core::entity::EntityRef::parse(&row.id).expect("a note id");
+    for save in 0..saves {
+        knobas_core::note::save(pool, &id, title, &format!("draft {save}"), "user")
+            .await
+            .expect("the note saves")
+            .expect("the note is there");
+    }
+    sqlx::query("update knobas.note set updated_at = $1 where id = $2")
+        .bind(at)
+        .bind(&row.id)
+        .execute(pool)
+        .await
+        .expect("the note is moved into the interval");
+    row.id
+}
+
 fn registry() -> knobas_app::sources::Registry {
     knobas_app::sources::Registry::builtin()
 }
@@ -2288,6 +2373,19 @@ async fn a_passive_block_is_not_drafted() {
 ///   a worklog comment that says "stopped the timer" is knobas talking about
 ///   itself -- and neither is the write queue's `unclaimed` (#336), which is
 ///   knobas talking about a write it withdrew.
+///
+/// Story 32's other two kinds (#409) are the same directions again, and they
+/// are here rather than in a fixture of their own because "the interval does
+/// the narrowing" is one rule and this is where it is pinned: a comment queued
+/// inside the window and a note saved inside it are offered, and neither is
+/// offered from **before** the window or from **after** it.
+///
+/// Both edges, because they are two mutants and only one of them is obvious.
+/// A read that dropped its `<= to` would still pass every yesterday fixture --
+/// what it wrongly sweeps in is the afternoon *after* the timer stopped, and
+/// until #409 nothing in this file had a candidate that late. So the far edge
+/// gets fixtures of its own, at a plausible hour rather than a contrived one.
+/// Neither read touches `knobas.activity`.
 #[tokio::test]
 async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     let pool = scratch("worklog-candidates").await;
@@ -2322,6 +2420,31 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     line(&pool, "linked", at(9, 30)).await;
     line(&pool, "stopped", at(9, 40)).await;
     line(&pool, "unclaimed", at(9, 45)).await;
+
+    comment_pending(
+        &pool,
+        "jira:PAY-231",
+        "Rolled the retry window back",
+        at(10, 0),
+    )
+    .await;
+    comment_pending(
+        &pool,
+        "jira:PAY-999",
+        "Yesterday's reply",
+        at(9, 30) - Duration::days(1),
+    )
+    .await;
+    comment_pending(&pool, "jira:PAY-998", "This afternoon's reply", at(15, 0)).await;
+    let inside = note_edited(&pool, "SEPA retry window", at(10, 20), 1).await;
+    let before = note_edited(
+        &pool,
+        "Last week's reading",
+        at(9, 30) - Duration::days(1),
+        1,
+    )
+    .await;
+    let after = note_edited(&pool, "This afternoon's reading", at(15, 0), 1).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
     let ids: Vec<&str> = draft.candidates.iter().map(|c| c.id.as_str()).collect();
@@ -2362,6 +2485,63 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         draft.candidates
     );
 
+    // Story 32's other two kinds, read from where the fact already lives
+    // (#409): the write queue and `knobas.note`.
+    assert!(
+        draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet == "- commented on PAY-231"),
+        "a comment posted through knobas is a candidate: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("PAY-999")),
+        "a comment queued before the interval is not in it: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("PAY-998")),
+        "a comment queued after the interval is not in it either -- the window \
+         has a far edge: {:?}",
+        draft.candidates
+    );
+    assert!(
+        draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet == "- edited the note SEPA retry window"),
+        "a note edited in the interval is a candidate, by its title: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft.comment.contains(&inside),
+        "a note's bullet says its title and never its uuid: {}",
+        draft.comment
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.entity_id.as_deref() == Some(before.as_str())),
+        "a note edited before the interval is not in it: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.entity_id.as_deref() == Some(after.as_str())),
+        "a note edited after the interval is not in it either: {:?}",
+        draft.candidates
+    );
+
     // The comment the draft opens with is those bullets, in order, and
     // nothing else -- which is what the frontend re-joins when a box is
     // unticked.
@@ -2378,6 +2558,109 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         draft.comment.contains("- Retry SEPA payouts"),
         "{}",
         draft.comment
+    );
+}
+
+/// **An afternoon of typing is one checkbox** (#409).
+///
+/// The editor's autosave writes the note every 700 ms of pause
+/// (`app/src/lib/notes/NoteView.svelte`), so a note worked on for an hour is
+/// dozens of saves. The draft reads `knobas.note.updated_at` -- a stamp, not a
+/// count of events -- and this is the fixture that says so: twenty saves, one
+/// candidate, one bullet.
+///
+/// It is the whole reason #409 reads the note table instead of writing an
+/// activity line per save, and the assertion is `== 1` rather than `>= 1`
+/// because "the reader ticks twenty identical boxes" is the failure it rules
+/// out.
+#[tokio::test]
+async fn a_note_saved_all_afternoon_is_one_checkbox() {
+    let pool = scratch("worklog-note-autosave").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    let note = note_edited(&pool, "SEPA retry window", at(10, 0), 20).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    let mine: Vec<&knobas_app::time::worklog::Candidate> = draft
+        .candidates
+        .iter()
+        .filter(|c| c.entity_id.as_deref() == Some(note.as_str()))
+        .collect();
+    assert_eq!(
+        mine.len(),
+        1,
+        "twenty saves of one note are one candidate: {:?}",
+        draft.candidates
+    );
+    assert_eq!(mine[0].bullet, "- edited the note SEPA retry window");
+}
+
+/// Which comments count: everything the reader queued, except the one they
+/// took back (#409).
+///
+/// Four states are the same fact -- the reader wrote a comment -- and only
+/// `discarded` is not: a withdrawn write is a comment that was never made, and
+/// it is the one state where offering the box would put a line in Jira about
+/// something that did not happen. The other four follow the failure direction
+/// `NOT_WORK` already states: an extra checkbox is unticked, a missing one is
+/// lost work.
+///
+/// **`sent` carries a `settled_at` an hour outside the window on purpose.**
+/// The read is keyed on `queued_at`, when the reader wrote it, and a read
+/// keyed on delivery would drop this row and every `pending` one with it --
+/// which is the mutant this fixture exists to kill.
+#[tokio::test]
+async fn every_comment_but_the_withdrawn_one_is_a_candidate() {
+    let pool = scratch("worklog-comment-states").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    comment_pending(&pool, "jira:PAY-1", "not sent yet", at(9, 10)).await;
+    commented(
+        &pool,
+        "jira:PAY-2",
+        "delivered after the timer stopped",
+        at(9, 20),
+        WriteState::Sent,
+    )
+    .await;
+    commented(
+        &pool,
+        "jira:PAY-3",
+        "the target moved",
+        at(9, 30),
+        WriteState::Held,
+    )
+    .await;
+    commented(
+        &pool,
+        "jira:PAY-4",
+        "Jira said no",
+        at(9, 40),
+        WriteState::Refused,
+    )
+    .await;
+    commented(
+        &pool,
+        "jira:PAY-5",
+        "thought better of it",
+        at(9, 50),
+        WriteState::Discarded,
+    )
+    .await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    let bullets: Vec<&str> = draft.candidates.iter().map(|c| c.bullet.as_str()).collect();
+    for key in ["PAY-1", "PAY-2", "PAY-3", "PAY-4"] {
+        assert!(
+            bullets.contains(&format!("- commented on {key}").as_str()),
+            "a {key} comment the reader made is a candidate: {bullets:?}"
+        );
+    }
+    assert!(
+        !bullets.iter().any(|b| b.contains("PAY-5")),
+        "a comment the reader withdrew was never made: {bullets:?}"
     );
 }
 

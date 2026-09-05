@@ -243,8 +243,14 @@ export function deleteBlock(id: number): Promise<void> {
   return invoke<void>("delete_block", { id });
 }
 
-/** Where a worklog-draft candidate was seen — `worklog::CandidateSource`. */
-export type CandidateSource = "mirror" | "activity";
+/**
+ * Where a worklog-draft candidate was seen — `worklog::CandidateSource`.
+ *
+ * Four sources because each fact is read from the table it already lives in
+ * (#409): the mirror, the reader's activity lines, the write queue's comments,
+ * and notes by their `updated_at`.
+ */
+export type CandidateSource = "mirror" | "activity" | "write" | "note";
 
 /**
  * One thing knobas saw the reader do inside a draft's interval —
@@ -256,7 +262,10 @@ export type CandidateSource = "mirror" | "activity";
  * every worklog knobas has ever sent is spelled one way.
  */
 export interface Candidate {
-  /** Stable within a draft — `"item:jira:PAY-231"`, `"activity:4211"`. */
+  /**
+   * Stable within a draft — `"item:jira:PAY-231"`, `"activity:4211"`,
+   * `"write:97"`, or a note's own `"note:<uuid>"`.
+   */
   id: string;
   source: CandidateSource;
   /** RFC 3339, UTC. */
