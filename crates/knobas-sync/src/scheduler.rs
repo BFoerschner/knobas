@@ -1818,7 +1818,10 @@ fn cancelled_result() -> RunResult {
 /// Look for due sources every [`SchedulerTiming::tick`], or whenever something
 /// pokes `wake`.
 async fn tick_loop(inner: Arc<Inner>) {
-    let SchedulerTiming { startup_delay, tick } = inner.deps.timing;
+    let SchedulerTiming {
+        startup_delay,
+        tick,
+    } = inner.deps.timing;
     tokio::select! {
         () = inner.cancel.cancelled() => return,
         () = tokio::time::sleep(startup_delay) => {}
