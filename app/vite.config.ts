@@ -37,6 +37,25 @@ export default defineConfig(({ mode }) => ({
     // function at run time.
     include: ["src/**/*.test.ts", "src/**/*.test.svelte.ts"],
     setupFiles: ["src/lib/shell/test-setup.ts"],
+    // One zone for every run, rather than whatever zone the person or the
+    // runner happened to be in. `getTimezoneOffset` is ambient input, so an
+    // unpinned suite tests a different thing on a laptop than on a runner:
+    // #406 was an assertion that built `-0` and could only be wrong at an
+    // offset of zero, green in Berlin for as long as no runner ran and red on
+    // the first one that did. Pinning makes the zone a decision.
+    //
+    // Berlin and not UTC because it is the zone the app is developed and read
+    // in: a fixture's `09:00` means on screen what it means in the test, and
+    // the offset is positive, which is the sign the backend is given -- so the
+    // ordinary case is the one under test rather than a degenerate one. The
+    // cost is real and worth naming: no run now sits at an offset of zero, so
+    // #406's own shape is witnessed by nothing except deliberately asking for
+    // it with `TZ=UTC npx vitest run`.
+    //
+    // This is Vitest setting `process.env.TZ` in each worker and Node
+    // re-reading it. `test-setup.ts` refuses to run if that ever stops
+    // working, because the failure is otherwise silent.
+    env: { TZ: "Europe/Berlin" },
     // Pinned, not inherited. `test-setup.ts`'s rejection guard is the *first*
     // `afterEach` registered, and it only works because `"stack"` unwinds
     // `afterEach` in reverse, so it runs after each file's own teardown --
