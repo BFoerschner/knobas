@@ -96,15 +96,17 @@ check:
     # per-binary lines (`test: ok <package> <target> N passed; N failed; N
     # ignored; ...`, one per test binary and one per doc-test crate) added
     # up here, independently of the total `test` prints itself, so the two
-    # can be compared. A failing half is its whole log, so nothing has to be
-    # re-run to see why.
+    # can be compared. Two spaces after the verdict: the per-binary lines are
+    # padded there and the recipe's own total lines (`test: ok: ...`,
+    # `test: FAILED (...)`) are not, so a total cannot be counted as a binary.
+    # A failing half is its whole log, so nothing has to be re-run to see why.
     report() {
         local name=$1 log=$2 status=$3
         if [ "$status" -eq 0 ]; then
             echo "check: $(tail -n 1 "$log")"
             case $name in
                 front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
-                cargo) awk '/^test: (ok|FAILED) / { n++; for (i = 1; i < NF; i++) {
+                cargo) awk '/^test: (ok|FAILED)  / { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
                              if ($(i+1) == "ignored;") g += $i } }
@@ -549,8 +551,15 @@ test:
     jobs=${KNOBAS_TEST_JOBS:-6}
     cores=$(getconf _NPROCESSORS_ONLN)
     case $jobs in
-        ''|*[!0-9]*|0) echo "error: KNOBAS_TEST_JOBS must be a whole number of at least 1, not '$jobs' (0 would be xargs's 'no limit')" >&2; exit 1 ;;
+        ''|*[!0-9]*) echo "error: KNOBAS_TEST_JOBS must be a whole number of at least 1, not '$jobs'" >&2; exit 1 ;;
     esac
+    # Through arithmetic, not compared as a string: `00` is all digits and
+    # would otherwise reach xargs as `-P 00`, which it reads as 0 -- no limit,
+    # the one value this bound exists to keep out.
+    jobs=$((10#$jobs))
+    if [ "$jobs" -lt 1 ]; then
+        echo "error: KNOBAS_TEST_JOBS must be at least 1 (0 would be xargs's 'no limit')" >&2; exit 1
+    fi
     [ "$jobs" -le "$cores" ] || jobs=$cores
 
     # One binary: run it with everything it prints in `out/<n>.log`, its exit
