@@ -31,6 +31,7 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
 use knobas_app::time::{self, BlockKind, TimerTarget};
+use knobas_core::write_queue::WriteState;
 use sqlx::{PgPool, Row};
 
 const TICKET: &str = "jira:PAY-231";
@@ -2102,16 +2103,19 @@ async fn line(pool: &PgPool, verb: &str, at: DateTime<Utc>) {
 /// [`line`]'s activity row needs moving: a fixture whose moment is the wall
 /// clock is inside the interval or outside it depending on when the suite runs.
 ///
-/// `settled_at` is moved with `state` rather than left behind, because
-/// `write_queue_settled_chk` refuses the pair otherwise -- a terminal state and
-/// no settled time is a row the database will not hold.
+/// `settled_at` is **derived** from `state`, not passed: migration `0005`'s
+/// `write_queue_settled_chk` makes the two one fact -- `(state in
+/// ('sent','discarded')) = (settled_at is not null)` -- so a caller that could
+/// choose them separately could only choose them wrong. It lands four hours
+/// after `at`, deliberately outside every fixture's interval: the read is keyed
+/// on when the reader wrote the comment and never on when the queue got rid of
+/// it, and a settled time inside the window could not tell those two apart.
 async fn commented(
     pool: &PgPool,
     entity_id: &str,
     body: &str,
     at: DateTime<Utc>,
-    state: &str,
-    settled_at: Option<DateTime<Utc>>,
+    state: WriteState,
 ) -> i64 {
     let entity = knobas_core::entity::EntityRef::parse(entity_id).expect("an entity id");
     let op = knobas_source::WriteOp::Comment {
@@ -2128,11 +2132,13 @@ async fn commented(
     )
     .await
     .expect("a queued write");
+    let settled_at =
+        matches!(state, WriteState::Sent | WriteState::Discarded).then(|| at + Duration::hours(4));
     sqlx::query(
         "update knobas.write_queue set queued_at = $1, state = $2, settled_at = $3 where id = $4",
     )
     .bind(at)
-    .bind(state)
+    .bind(state.as_str())
     .bind(settled_at)
     .bind(row.id)
     .execute(pool)
@@ -2144,7 +2150,7 @@ async fn commented(
 /// A comment the reader queued and the queue has not settled yet -- the
 /// ordinary case, and the one that says the read is not keyed on delivery.
 async fn comment_pending(pool: &PgPool, entity_id: &str, body: &str, at: DateTime<Utc>) -> i64 {
-    commented(pool, entity_id, body, at, "pending", None).await
+    commented(pool, entity_id, body, at, WriteState::Pending).await
 }
 
 /// A note of the reader's, **last saved at a moment this test dictates**.
@@ -2368,11 +2374,18 @@ async fn a_passive_block_is_not_drafted() {
 ///   itself -- and neither is the write queue's `unclaimed` (#336), which is
 ///   knobas talking about a write it withdrew.
 ///
-/// Story 32's other two kinds (#409) are the same four directions again, and
-/// they are here rather than in a fixture of their own because "the interval
-/// does the narrowing" is one rule and this is where it is pinned: a comment
-/// queued inside the window and a note saved inside it are offered, and the
-/// same two an hour early are not. Neither reads `knobas.activity`.
+/// Story 32's other two kinds (#409) are the same directions again, and they
+/// are here rather than in a fixture of their own because "the interval does
+/// the narrowing" is one rule and this is where it is pinned: a comment queued
+/// inside the window and a note saved inside it are offered, and neither is
+/// offered from **before** the window or from **after** it.
+///
+/// Both edges, because they are two mutants and only one of them is obvious.
+/// A read that dropped its `<= to` would still pass every yesterday fixture --
+/// what it wrongly sweeps in is the afternoon *after* the timer stopped, and
+/// until #409 nothing in this file had a candidate that late. So the far edge
+/// gets fixtures of its own, at a plausible hour rather than a contrived one.
+/// Neither read touches `knobas.activity`.
 #[tokio::test]
 async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     let pool = scratch("worklog-candidates").await;
@@ -2422,14 +2435,16 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         at(9, 30) - Duration::days(1),
     )
     .await;
+    comment_pending(&pool, "jira:PAY-998", "This afternoon's reply", at(15, 0)).await;
     let inside = note_edited(&pool, "SEPA retry window", at(10, 20), 1).await;
-    let outside = note_edited(
+    let before = note_edited(
         &pool,
         "Last week's reading",
         at(9, 30) - Duration::days(1),
         1,
     )
     .await;
+    let after = note_edited(&pool, "This afternoon's reading", at(15, 0), 1).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
     let ids: Vec<&str> = draft.candidates.iter().map(|c| c.id.as_str()).collect();
@@ -2485,7 +2500,16 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
             .candidates
             .iter()
             .any(|c| c.bullet.contains("PAY-999")),
-        "a comment queued outside the interval is not in it: {:?}",
+        "a comment queued before the interval is not in it: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("PAY-998")),
+        "a comment queued after the interval is not in it either -- the window \
+         has a far edge: {:?}",
         draft.candidates
     );
     assert!(
@@ -2505,8 +2529,16 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         !draft
             .candidates
             .iter()
-            .any(|c| c.entity_id.as_deref() == Some(outside.as_str())),
-        "a note edited outside the interval is not in it: {:?}",
+            .any(|c| c.entity_id.as_deref() == Some(before.as_str())),
+        "a note edited before the interval is not in it: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.entity_id.as_deref() == Some(after.as_str())),
+        "a note edited after the interval is not in it either: {:?}",
         draft.candidates
     );
 
@@ -2590,8 +2622,7 @@ async fn every_comment_but_the_withdrawn_one_is_a_candidate() {
         "jira:PAY-2",
         "delivered after the timer stopped",
         at(9, 20),
-        "sent",
-        Some(at(9, 20) + Duration::hours(4)),
+        WriteState::Sent,
     )
     .await;
     commented(
@@ -2599,8 +2630,7 @@ async fn every_comment_but_the_withdrawn_one_is_a_candidate() {
         "jira:PAY-3",
         "the target moved",
         at(9, 30),
-        "held",
-        None,
+        WriteState::Held,
     )
     .await;
     commented(
@@ -2608,8 +2638,7 @@ async fn every_comment_but_the_withdrawn_one_is_a_candidate() {
         "jira:PAY-4",
         "Jira said no",
         at(9, 40),
-        "refused",
-        None,
+        WriteState::Refused,
     )
     .await;
     commented(
@@ -2617,8 +2646,7 @@ async fn every_comment_but_the_withdrawn_one_is_a_candidate() {
         "jira:PAY-5",
         "thought better of it",
         at(9, 50),
-        "discarded",
-        Some(at(9, 55)),
+        WriteState::Discarded,
     )
     .await;
 

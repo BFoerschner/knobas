@@ -150,22 +150,31 @@ pub struct Candidate {
     pub bullet: String,
 }
 
-/// Where a [`Candidate`] was seen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CandidateSource {
-    /// An item in the mirror whose author is the username that item's source
-    /// is configured with -- a commit, a pull request, a build, a page.
-    Mirror,
-    /// A line the reader's own actions wrote in `knobas.activity`.
-    Activity,
-    /// A comment the reader posted through knobas -- a row in
-    /// `knobas.write_queue`, which is the only place a comment knobas sent
-    /// exists as a fact of its own.
-    Write,
-    /// A note the reader edited -- a row in `knobas.note`, read by its
-    /// `updated_at`.
-    Note,
+knobas_core::closed_vocabulary! {
+    /// Where a [`Candidate`] was seen.
+    ///
+    /// Declared this way since #409 took it from two members to four: `ALL` is
+    /// generated from the same list as the variants, so a fifth source cannot
+    /// be added without appearing in the list the TypeScript mirror is pinned
+    /// against (`commands::time`'s
+    /// `the_candidate_sources_match_their_typescript_mirror`). The wire
+    /// spelling is unchanged -- the macro applies the same
+    /// `rename_all = "snake_case"` this enum carried by hand.
+    pub enum CandidateSource {
+        /// An item in the mirror whose author is the username that item's
+        /// source is configured with -- a commit, a pull request, a build, a
+        /// page.
+        Mirror => "mirror",
+        /// A line the reader's own actions wrote in `knobas.activity`.
+        Activity => "activity",
+        /// A comment the reader posted through knobas -- a row in
+        /// `knobas.write_queue`, which is the only place a comment knobas sent
+        /// exists as a fact of its own.
+        Write => "write",
+        /// A note the reader edited -- a row in `knobas.note`, read by its
+        /// `updated_at`.
+        Note => "note",
+    }
 }
 
 /// What the draft offers: one interval, its candidates, and a comment made

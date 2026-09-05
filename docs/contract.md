@@ -3876,7 +3876,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   rows are now spoken for* is re-derived by the same rule the draft used, because a caller that
   could name them could name another ticket's, or the same ones twice.
 
-  **DTOs**: `Draft`, `Candidate`, `CandidateSource` (`mirror` | `activity`) and `Worklog`, all
+  **DTOs**: `Draft`, `Candidate`, `CandidateSource` (`mirror` | `activity` | `write` | `note` --
+  two at ratification, four since #409 gave the draft a read per table rather than one funnelled
+  through `knobas.activity`; a DTO widening with no new command and no migration, the class of
+  #284's `EntityRow.path` and #337's `DayRecord`) and `Worklog`, all
   mirrored in `app/src/lib/ipc/time.ts` and pinned by `assert_shape`/`declared_union` in
   `commands/time.rs`. The mirror's two functions take `ReaderDay` and `LoggedWork` **objects**
   rather than six positional arguments — three of them adjacent strings, where a swap is silent —
