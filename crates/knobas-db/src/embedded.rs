@@ -539,8 +539,9 @@ impl EmbeddedDb {
     /// directory opens cleanly next time. The gate server `just test` runs
     /// has no next time -- its root is removed the moment it stops -- and by
     /// then it holds one database per test binary, several hundred `create
-    /// database`s' worth of files for that checkpoint to sync: 1.2 s of fast
-    /// stop against 0.2 s of immediate (#421). This is `-m immediate`: the
+    /// database`s' worth of files for that checkpoint to sync: 0.84 s of
+    /// fast stop against 0.11 s of immediate, measured on 355 databases
+    /// (#421). This is `-m immediate`: the
     /// backends are told to quit and the postmaster exits, leaving the
     /// directory in the state a crash would.
     ///
