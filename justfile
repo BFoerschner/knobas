@@ -463,8 +463,47 @@ clippy-libs:
 # descendants explicitly with `TERM` (deepest first, so xargs cannot start
 # the next binary after its current one dies) before closing the pipe.
 #
+# GATE SLOTS. At most two of these recipes run on one machine at a time
+# (Björn, 2026-09-06, #425; the measurement is #422's). The ceiling is SysV
+# shared memory, not CPU: macOS allows 32 segments machine-wide
+# (`kern.sysv.shmmni`), every postmaster holds one, and one gate peaks at 13
+# -- the gate server plus up to 12 transient servers the `knobas-db`
+# lifecycle suite starts. Two gates fit; three fit only when their peaks miss
+# each other, and cost 2.4x the single wall each; five ran the kernel out and
+# every worktree went red with `shmget: No space left on device`. So the
+# recipe takes one of `KNOBAS_GATE_SLOTS` (default 2) slots before it does
+# anything else, and with none free prints one line naming the holders' pids
+# and polls, up to `KNOBAS_GATE_SLOT_WAIT` seconds (default 900), then exits
+# 1 with the same line. The slot is held from before the build to after the
+# server has stopped -- a waiting gate's compile would otherwise share the
+# cores the two running gates are already saturating -- and released by the
+# same EXIT, INT and TERM traps that close the pipe.
+#
+# A slot is a symlink, `$TMPDIR/knobas-gate-slots/slot-<n>`, whose target is
+# the holder's pid. `ln -s` is the atomic primitive: it fails on an existing
+# name like `mkdir` does, and macOS ships no `flock` binary; unlike a
+# directory with a pid file inside it, the link carries its pid from the
+# instant it exists, so no taker can ever see a slot that is held by nobody.
+# A slot whose pid is dead (`kill -0` fails) is a gate that was SIGKILLed or
+# lost its machine, and the next taker reclaims it: it renames the link
+# aside -- one rename wins if two takers try, and the loser sees no link and
+# simply takes the slot -- checks that what it moved still names the dead
+# pid, and only then unlinks it and takes the slot; a live claim that slipped
+# in between is put back. That is why a dead slot is removed and re-taken
+# rather than adopted where it lies. What the scheme cannot see: a dead
+# holder's pid recycled onto some unrelated process (the slot then waits for
+# that process; `rm` the link), and another user's gate, whose pid `kill -0`
+# cannot signal and so reads as dead -- this is a one-user machine. Not
+# `knobas-test-*`, whose prefix the connector's reaper sweeps, and not
+# `knobas-gate.*`, so a count of those still counts gate directories. The
+# waiting line is `test: ...` without the two spaces the per-binary lines
+# carry, so `check`'s sum cannot count it. `check.yml` runs one gate on its
+# runner and takes the first slot without waiting; a `cargo test` by hand is
+# not a gate and takes none.
+#
 # Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
-# pgrep and getconf. `check.yml` on `ubuntu-latest` runs the same recipe.
+# pgrep, getconf, `ln -s`, `readlink` and `mv`. `check.yml` on
+# `ubuntu-latest` runs the same recipe.
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -474,6 +513,45 @@ test:
     # The traps are armed before anything they clean up exists, so an
     # interrupt between `mktemp` and the server's start leaks nothing.
     gate= server_pid= pool_pid= doc_pid= closed=
+    slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
+    slot= held=
+    # One pass over the slots: takes a free one (or one whose holder is
+    # dead) and returns 0 with `slot` set; else returns 1 with `held` naming
+    # the pids that hold them. The reclaim is rename, check, unlink, take --
+    # see GATE SLOTS above for why not `rm` and take.
+    take_slot() {
+        local i name holder reap=$slot_root/reap-$$
+        held=
+        for ((i = 1; i <= slots; i++)); do
+            name=$slot_root/slot-$i
+            if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
+            holder=$(readlink "$name" 2>/dev/null || true)
+            if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+                held="$held $holder"; continue
+            fi
+            if mv "$name" "$reap" 2>/dev/null; then
+                holder=$(readlink "$reap" 2>/dev/null || true)
+                if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+                    ln -s "$holder" "$name" 2>/dev/null || true
+                    rm -f "$reap"
+                    held="$held $holder"; continue
+                fi
+                rm -f "$reap"
+            fi
+            if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
+            holder=$(readlink "$name" 2>/dev/null || true)
+            held="$held ${holder:-?}"
+        done
+        held=${held# }
+        return 1
+    }
+    release_slot() {
+        [ -n "$slot" ] || return 0
+        # Only a link that still names this shell: a reclaimer removes a
+        # slot only when its holder is dead, so this is belt and braces.
+        [ "$(readlink "$slot" 2>/dev/null || true)" != "$$" ] || rm -f "$slot"
+        slot=
+    }
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -496,9 +574,40 @@ test:
         fi
         [ -z "$gate" ] || rm -rf "$gate"
     }
-    trap 'close_pipe' EXIT
-    trap 'stop_run; close_pipe; trap - INT; kill -INT $$' INT
-    trap 'stop_run; close_pipe; trap - TERM; kill -TERM $$' TERM
+    trap 'close_pipe; release_slot' EXIT
+    trap 'stop_run; close_pipe; release_slot; trap - INT; kill -INT $$' INT
+    trap 'stop_run; close_pipe; release_slot; trap - TERM; kill -TERM $$' TERM
+
+    slots=${KNOBAS_GATE_SLOTS:-2}
+    case $slots in
+        ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOTS must be a whole number of at least 1, not '$slots'" >&2; exit 1 ;;
+    esac
+    slots=$((10#$slots))
+    if [ "$slots" -lt 1 ]; then
+        echo "error: KNOBAS_GATE_SLOTS must be at least 1 (0 would let no gate ever start)" >&2; exit 1
+    fi
+    # Seconds; 0 is one try and no wait.
+    slot_wait=${KNOBAS_GATE_SLOT_WAIT:-900}
+    case $slot_wait in
+        ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOT_WAIT must be a whole number of seconds, not '$slot_wait'" >&2; exit 1 ;;
+    esac
+    slot_wait=$((10#$slot_wait))
+    mkdir -p "$slot_root"
+    wait_from=$SECONDS announced=
+    until take_slot; do
+        waited=$((SECONDS - wait_from))
+        if [ -z "$announced" ]; then
+            announced=1
+            echo "test: all $slots gate slots are held (pids $held); waiting up to $slot_wait s for one to free"
+        fi
+        if [ "$waited" -ge "$slot_wait" ]; then
+            echo "error: all $slots gate slots are still held (pids $held) after $waited s; giving up" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    waited=$((SECONDS - wait_from))
+    [ "$waited" -eq 0 ] || echo "test: gate slot free after $waited s"
 
     gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
     just _test-executables > "$gate/executables"
