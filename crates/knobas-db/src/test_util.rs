@@ -46,6 +46,7 @@
 //! server and all. See [`take_over`].
 
 use std::fs::{File, TryLockError};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -181,6 +182,94 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
 /// Connections a test pool gets. The same five the application pool has, so a
 /// test that exhausts one is exhausting what the app would.
 const TEST_POOL_SIZE: u32 = 5;
+
+/// `max_connections` for the server `just test` starts.
+///
+/// PLACEHOLDER until measured.
+const GATE_MAX_CONNECTIONS: u32 = 400;
+
+/// This process's scratch root: `$TMPDIR/knobas-test-<pid>`.
+fn scratch_root() -> PathBuf {
+    std::env::temp_dir().join(format!("{DIR_PREFIX}{}", std::process::id()))
+}
+
+/// What the `knobas-test-server` binary runs: one server in this process's
+/// scratch root, under the same claim-and-reap scheme a test binary's own
+/// server lives under, for as long as `input` stays open.
+///
+/// The protocol is the smallest one a shell can drive: the maintenance
+/// database's URL on `output`, one line, then nothing; end-of-file on `input`
+/// (or `SIGINT`/`SIGTERM`) is the signal to stop. The server is stopped
+/// through the same `stop()` a clean quit of the app uses, and the scratch
+/// root goes with it, so a gate that ends normally leaves nothing for the next
+/// run's reaper. A gate killed with `SIGKILL` does leave the postmaster
+/// behind, and that is what the reaper is for.
+///
+/// `input` is read on a plain thread rather than `spawn_blocking`: a runtime
+/// shutting down waits for its blocking tasks, and a thread parked in `read`
+/// on a pipe nobody will close (a signal arrived first) would hold the exit.
+///
+/// # Errors
+///
+/// [`DbError`] if the server cannot be started or stopped, or the URL cannot
+/// be written.
+pub async fn serve_until_closed(
+    mut input: impl Read + Send + 'static,
+    mut output: impl Write,
+) -> Result<(), crate::DbError> {
+    let root_dir = scratch_root();
+    claim(&root_dir);
+    reap_abandoned(&root_dir);
+    let db = EmbeddedDb::start_with_max_connections(root_dir.clone(), GATE_MAX_CONNECTIONS).await?;
+
+    let url = db
+        .connector()
+        .with_database(crate::embedded::MAINTENANCE_DATABASE)
+        .url();
+    let announce = writeln!(output, "{url}").and_then(|()| output.flush());
+    if let Err(source) = announce {
+        // Nobody is listening, so nobody will close the pipe: stop now
+        // rather than serve for ever.
+        db.stop().await?;
+        return Err(crate::DbError::Io {
+            path: PathBuf::from("<stdout>"),
+            source,
+        });
+    }
+
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut input, &mut std::io::sink());
+        let _ = closed_tx.send(());
+    });
+    tokio::select! {
+        _ = closed_rx => {}
+        _ = tokio::signal::ctrl_c() => {}
+        () = terminated() => {}
+    }
+
+    db.stop().await?;
+    let _ = std::fs::remove_dir_all(&root_dir);
+    let _ = std::fs::remove_file(lock_path(&root_dir));
+    Ok(())
+}
+
+/// Resolves when `SIGTERM` arrives; never, where there is no such signal.
+#[cfg(unix)]
+async fn terminated() {
+    use tokio::signal::unix::{SignalKind, signal};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            term.recv().await;
+        }
+        Err(_) => std::future::pending().await,
+    }
+}
+
+#[cfg(not(unix))]
+async fn terminated() {
+    std::future::pending().await
+}
 
 /// The ownership lock path for a scratch directory: a sibling, never a child.
 fn lock_path(root_dir: &Path) -> PathBuf {

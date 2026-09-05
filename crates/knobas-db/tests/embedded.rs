@@ -859,3 +859,57 @@ async fn an_existing_url_that_answers_nothing_fails_fast_rather_than_after_thirt
         "the failure took {took:?}; sqlx' 30 s pool-acquire wait is the bug this bounds"
     );
 }
+
+/// The test-server entry point `just test` runs: one server for a whole gate,
+/// alive exactly as long as its stdin is open.
+///
+/// Spawned the way the recipe spawns it -- a pipe on each end -- so what is
+/// observed is the contract the recipe relies on: the first line on stdout is
+/// a usable URL for the maintenance database, and closing the pipe is what
+/// stops the server. Prior art for the stop half is
+/// `a_launch_that_adopts_an_orphaned_server_takes_ownership_and_can_stop_it`.
+#[tokio::test]
+async fn the_test_server_serves_until_its_stdin_closes_and_then_stops() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+
+    use sqlx::Connection;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_knobas-test-server"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn the test server");
+    let stdout = child.stdout.take().unwrap();
+    let mut url = String::new();
+    std::io::BufReader::new(stdout)
+        .read_line(&mut url)
+        .expect("the test server's first line");
+    let url = url.trim_end().to_owned();
+    assert!(
+        url.starts_with("postgresql://"),
+        "the first line on stdout is the URL, not {url:?}"
+    );
+
+    let mut conn = sqlx::PgConnection::connect(&url)
+        .await
+        .expect("connect to the URL the server printed");
+    let (port, database): (i32, String) =
+        sqlx::query_as("select inet_server_port(), current_database()")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(database, "postgres", "the URL names the maintenance database");
+    let port = u16::try_from(port).unwrap();
+    conn.close().await.unwrap();
+    assert!(port_answers(port), "the server is up while stdin is open");
+
+    // The recipe's shutdown: close the pipe, nothing else.
+    drop(child.stdin.take());
+    let status = child.wait().expect("wait for the test server");
+    assert!(status.success(), "the test server exited with {status}");
+    assert!(
+        !port_answers(port),
+        "closing stdin must stop the server, not just the process"
+    );
+}

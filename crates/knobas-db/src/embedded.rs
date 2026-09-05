@@ -211,6 +211,32 @@ impl Connector {
         self.options.get_database()
     }
 
+    /// The connection URL, password and all.
+    ///
+    /// The one place the string comes back out, and it exists only with
+    /// `test-util` on: the test-server entry point has to hand its URL to the
+    /// test binaries through the environment, which is a string. Nothing a
+    /// shipped build compiles can call this, so the redaction the type exists
+    /// for still holds there.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn url(&self) -> String {
+        use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+
+        let user = utf8_percent_encode(self.options.get_username(), NON_ALPHANUMERIC);
+        let password = self
+            .password
+            .as_deref()
+            .map(|password| format!(":{}", utf8_percent_encode(password, NON_ALPHANUMERIC)))
+            .unwrap_or_default();
+        let database = self.options.get_database().unwrap_or_default();
+        format!(
+            "postgresql://{user}{password}@{}:{}/{database}",
+            self.options.get_host(),
+            self.options.get_port()
+        )
+    }
+
     /// The libpq environment a child process needs to reach this server.
     ///
     /// `pg_dump` and `pg_restore` take their connection from the environment
@@ -350,37 +376,31 @@ impl EmbeddedDb {
         }
 
         let settings = build_settings(&cfg.root_dir)?;
-        let data_dir = settings.data_dir.clone();
+        launch(&cfg.root_dir, settings).await
+    }
 
-        match start_managed(&cfg.root_dir, settings.clone()).await? {
-            Started::Ready(db) => Ok(*db),
-            Started::StaleLock { port, serving } => {
-                // The lock file sent us to a stranger, so it is not describing
-                // any live postmaster of ours. Ephemeral ports are recycled:
-                // after a crash and a reboot, the port a dead server recorded
-                // can belong to anything. Clear the lock and start normally --
-                // the alternative, `AlreadyRunning`, would be both false and
-                // unrecoverable, leaving the user to find and delete
-                // `postmaster.pid` by hand before knobas would launch again.
-                tracing::warn!(
-                    port,
-                    serving,
-                    "postmaster.pid points at a server that is not ours: clearing the stale lock"
-                );
-                clear_lock(&data_dir)?;
-                match start_managed(&cfg.root_dir, settings).await? {
-                    Started::Ready(db) => Ok(*db),
-                    // Only reachable if something recreated the lock file in
-                    // between; at that point it is genuinely ambiguous.
-                    Started::StaleLock { port, serving } => Err(DbError::AlreadyRunning {
-                        data_dir,
-                        reason: format!(
-                            "postmaster.pid keeps naming port {port}, which is served by {serving}"
-                        ),
-                    }),
-                }
-            }
-        }
+    /// [`start`](Self::start) for a managed server with a larger connection
+    /// limit than the desktop app's server has.
+    ///
+    /// For the test server `just test` runs: every test binary of a gate opens
+    /// its pools on that one server, so PostgreSQL's default ceiling of 100 is
+    /// what a parallel run would hit first. The knob is exposed here rather
+    /// than through [`DbConfig`] because no shipped path wants it -- hence
+    /// `test-util` only.
+    ///
+    /// # Errors
+    ///
+    /// As [`start`](Self::start).
+    #[cfg(feature = "test-util")]
+    pub async fn start_with_max_connections(
+        root_dir: PathBuf,
+        max_connections: u32,
+    ) -> Result<EmbeddedDb, DbError> {
+        let mut settings = build_settings(&root_dir)?;
+        settings
+            .configuration
+            .insert("max_connections".to_owned(), max_connections.to_string());
+        launch(&root_dir, settings).await
     }
 
     /// The connection pool for the `knobas` database.
@@ -509,6 +529,45 @@ impl EmbeddedDb {
             }
         }
         Ok(())
+    }
+}
+
+/// Bring a managed server up from `settings`, recovering once from a lock
+/// file that provably describes no postmaster of ours.
+///
+/// The managed half of [`EmbeddedDb::start`], split from it so the test
+/// server's start shares the recovery rather than a copy of it.
+async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbError> {
+    let data_dir = settings.data_dir.clone();
+
+    match start_managed(root_dir, settings.clone()).await? {
+        Started::Ready(db) => Ok(*db),
+        Started::StaleLock { port, serving } => {
+            // The lock file sent us to a stranger, so it is not describing
+            // any live postmaster of ours. Ephemeral ports are recycled:
+            // after a crash and a reboot, the port a dead server recorded
+            // can belong to anything. Clear the lock and start normally --
+            // the alternative, `AlreadyRunning`, would be both false and
+            // unrecoverable, leaving the user to find and delete
+            // `postmaster.pid` by hand before knobas would launch again.
+            tracing::warn!(
+                port,
+                serving,
+                "postmaster.pid points at a server that is not ours: clearing the stale lock"
+            );
+            clear_lock(&data_dir)?;
+            match start_managed(root_dir, settings).await? {
+                Started::Ready(db) => Ok(*db),
+                // Only reachable if something recreated the lock file in
+                // between; at that point it is genuinely ambiguous.
+                Started::StaleLock { port, serving } => Err(DbError::AlreadyRunning {
+                    data_dir,
+                    reason: format!(
+                        "postmaster.pid keeps naming port {port}, which is served by {serving}"
+                    ),
+                }),
+            }
+        }
     }
 }
 
