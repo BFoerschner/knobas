@@ -69,6 +69,32 @@ gh workflow run check.yml --ref <branch>    # the Linux opinion a Mac cannot giv
 gh workflow run testenv.yml --ref <branch>  # after touching testenv/
 ```
 
+## Releases
+
+`release.yml` bundles the app for all three desktop targets. None of them can be
+cross-compiled from a Mac — a Tauri bundle links the platform's own webview — so
+each is built on its own runner. Tag first, then dispatch the tag by name:
+
+```bash
+git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+gh workflow run release.yml --ref main -f tag=v0.2.0 -f platforms=all
+```
+
+| `platforms` | runner | artifacts | billed at |
+|---|---|---|---|
+| `macos` | `macos-latest` | `.dmg` (arm64 only) | **10x** |
+| `windows` | `windows-latest` | `.exe` (NSIS), `.msi` (WiX) | 2x |
+| `linux` | `ubuntu-latest` | `.deb`, `.rpm`, `.AppImage` | 1x |
+
+Name a single platform when only one is in question — macOS costs ten times what
+Linux does per minute, and a re-run of a leg that already succeeded buys nothing.
+
+The release is created as a **draft** so it cannot be published half-built;
+publishing is a click once the legs you wanted have finished. Nothing is signed:
+there is no Apple Developer ID and no Windows certificate, so macOS calls the app
+damaged (`xattr -dr com.apple.quarantine /Applications/knobas.app`) and Windows
+shows a SmartScreen warning. The Linux artifacts carry the runner's glibc floor.
+
 Setting `KNOBAS_DB_URL` points **the app** at a Postgres you manage instead of
 starting an embedded one — for developing against a server with real data in
 it. It has no effect on `just check`: the tests always stand up their own
