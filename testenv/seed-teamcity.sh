@@ -205,6 +205,7 @@ mnt_do() {  # mnt_do <command> [curl --data args...]
     || die "POST /mnt/do/$_cmd failed"
   _code=$(printf '%s' "$_out" | tail -n 1)
   _body=$(printf '%s' "$_out" | sed '$d')
+  # shellcheck disable=SC2015  # `A && B || die`: dying when either test fails is the point; 0.9.0 (ubuntu-latest) flags it, 0.11.0 does not
   [ "$_code" = "200" ] && [ "$_body" = "OK" ] \
     || die "/mnt/do/$_cmd answered $_code: $_body"
 }

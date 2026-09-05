@@ -275,8 +275,10 @@ _inventory-write FILE:
 # the same place so a test that reads a path relative to its crate behaves
 # identically under both. Nothing in the tree does today (checked 2026-09-05:
 # no runtime `CARGO_*` read, no relative filesystem path in a test), which is
-# why it is a column here and not a workaround anywhere else. `inventory` and `test` both consume this: one enumeration
-# expression, kept in one place, so the two recipes cannot drift apart on
+# why it is a column here and not a workaround anywhere else.
+#
+# `inventory` and `test` both consume this: one enumeration expression, kept
+# in one place, so the two recipes cannot drift apart on
 # what a test executable is (before #415 each carried its own copy). Within a
 # recipe it is the only cargo call before the binaries run -- `test` used to
 # build once and then enumerate in a second `--no-run`. Across recipes it
@@ -439,7 +441,9 @@ clippy-libs:
 # has drained, between `----- <package> <target> -----` markers, so nothing
 # has to be re-run to see why. The last line is the total, and `check` adds
 # up the per-binary lines itself as a cross-check on it. Exit status is 1 if
-# any binary's, or the doc-test run's, was non-zero.
+# any binary's status was non-zero, or the doc-test run's, or xargs's own,
+# or if libtest's `failed` counts added up over every log are -- the last
+# is the harness's word and the one signal a broken status file cannot fake.
 #
 # THE WORKER runs under `xargs` as `bash -c`, so it is an exported function
 # rather than a script file; it finds its inputs through `KNOBAS_GATE_DIR`
@@ -529,8 +533,10 @@ test:
     export KNOBAS_GATE_DIR="$gate"
 
     # N = 6. Measured 2026-09-05 on the 12-core machine, warm tree, nothing
-    # else running, this recipe (the recipe's own clock, which excludes the
-    # server's ~10 s teardown of a 4 GB data directory afterwards):
+    # else running, this recipe, from its start to its last binary (the
+    # server's teardown afterwards -- `pg_ctl stop` and the removal of a data
+    # directory that has grown to 355 databases and 4 GB -- adds a further
+    # 10-12 s at every N, so `just test` end to end is 46-49 s at N=6):
     #   N=12: 43 s, 42 s   N=8: 36 s, 38 s   N=6: 38 s, 34 s, 37 s   N=4: 36 s
     # From 12 down to 8 the run gets 5 s shorter and below 8 it stops moving.
     # The pool is CPU-bound, not queue-bound: every binary's libtest runs one
@@ -542,6 +548,9 @@ test:
     # of 82 client backends against the server's 400 (N=12 peaked at 143).
     jobs=${KNOBAS_TEST_JOBS:-6}
     cores=$(getconf _NPROCESSORS_ONLN)
+    case $jobs in
+        ''|*[!0-9]*|0) echo "error: KNOBAS_TEST_JOBS must be a whole number of at least 1, not '$jobs' (0 would be xargs's 'no limit')" >&2; exit 1 ;;
+    esac
     [ "$jobs" -le "$cores" ] || jobs=$cores
 
     # One binary: run it with everything it prints in `out/<n>.log`, its exit
@@ -551,7 +560,10 @@ test:
         local n=$1 pkg target exe dir status=0 summary
         local log="$KNOBAS_GATE_DIR/out/$n.log"
         IFS=$'\t' read -r _ pkg target exe dir < <(sed -n "${n}p" "$KNOBAS_GATE_DIR/tests")
-        ( cd "$dir" && exec "$exe" ) > "$log" 2>&1 || status=$?
+        # `</dev/null`: GNU xargs gives a child /dev/null for stdin, BSD xargs
+        # hands it its own, which here is the queue of job numbers -- a test
+        # that read stdin would eat the queue on macOS and not on Linux.
+        ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1 || status=$?
         echo "$status" > "$KNOBAS_GATE_DIR/out/$n.status"
         summary=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9]* passed; [0-9]* failed; [0-9]* ignored;\).*finished in \([0-9.]*s\)$/\1 \2/p' "$log" | tail -n 1)
         if [ "$status" -eq 0 ] && [ -n "$summary" ]; then
@@ -605,17 +617,23 @@ test:
     done < "$gate/tests"
 
     doc_crates=$(grep -c '^ *Doc-tests ' "$gate/doc.log" || true)
-    totals=$(cat "$gate"/out/*.log "$gate/doc.log" | awk '/^test result:/ { for (i = 1; i < NF; i++) {
-                 if ($(i+1) == "passed;") p += $i
-                 if ($(i+1) == "failed;") f += $i
-                 if ($(i+1) == "ignored;") g += $i } }
-               END { printf "%d passed, %d failed, %d ignored", p, f, g }')
+    # `|| true` on the cat: if no worker ever ran, `out/*.log` matches nothing
+    # and the recipe must still reach its FAILED line rather than die here.
+    IFS=$'\t' read -r failed_tests totals < <(
+        (cat "$gate"/out/*.log "$gate/doc.log" 2>/dev/null || true) \
+          | awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                     if ($(i+1) == "passed;") p += $i
+                     if ($(i+1) == "failed;") f += $i
+                     if ($(i+1) == "ignored;") g += $i } }
+                 END { printf "%d\t%d passed, %d failed, %d ignored\n", f, p, f, g }')
     # Red on any binary's status, on the doc-test run's, on xargs's own, and
     # on libtest's failed count added up over every log: the last is the
     # harness's word rather than the runner's and is the one signal a broken
     # status file could not fake.
-    if [ "$failed" -ne 0 ] || [ "$doc_status" -ne 0 ] || [ "$pool_status" -ne 0 ] \
-       || [ "${totals#*passed, }" != "0 failed${totals#*failed}" ]; then
+    # The pipe is closed here rather than left to the EXIT trap so that the
+    # time on the last line is the whole run, the server's stop included.
+    close_pipe
+    if [ "$failed" -ne 0 ] || [ "$doc_status" -ne 0 ] || [ "$pool_status" -ne 0 ] || [ "$failed_tests" -ne 0 ]; then
         echo "test: FAILED ($failed of $count binaries, doc-tests exit $doc_status, pool exit $pool_status): $totals; in ${SECONDS} s" >&2
         exit 1
     fi

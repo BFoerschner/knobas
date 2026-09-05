@@ -346,6 +346,7 @@ jira GET /rest/api/2/field
 expect "list fields" 200
 EPIC_NAME_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.name=="Epic Name") | .id')
 EPIC_LINK_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.name=="Epic Link") | .id')
+# shellcheck disable=SC2015  # `A && B || die`: dying when either test fails is the point; 0.9.0 (ubuntu-latest) flags it, 0.11.0 does not
 [ -n "$EPIC_NAME_FIELD" ] && [ -n "$EPIC_LINK_FIELD" ] \
   || die "the Epic Name / Epic Link custom fields are missing -- is this a Jira Software project?"
 

@@ -358,6 +358,7 @@ ensure_counter() {  # ensure_counter <build type id> <number>
   _cur=$REST_BODY
   [ "$_cur" = "$2" ] && return 0
   rest_text PUT "/app/rest/buildTypes/id:$1/settings/buildNumberCounter" "$2"
+  # shellcheck disable=SC2015  # `A && B || die`: dying when either test fails is the point; 0.9.0 (ubuntu-latest) flags it, 0.11.0 does not
   [ "$REST_STATUS" = "200" ] && [ "$REST_BODY" = "$2" ] \
     || die "setting the build number counter of $1 to $2 answered $REST_STATUS '$REST_BODY'"
   say "build number counter of $1: $_cur -> $2"
