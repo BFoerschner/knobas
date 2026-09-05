@@ -251,6 +251,7 @@ async fn app(env: &Env, account: &str) -> SourcesState {
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
     })
     .await
     .expect("a scheduler over the scratch database");

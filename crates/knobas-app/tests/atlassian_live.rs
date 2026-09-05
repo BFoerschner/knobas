@@ -919,6 +919,7 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
         events: events.clone(),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
     })
     .await
     .expect("a scheduler over the scratch database");
@@ -2611,6 +2612,7 @@ async fn wiki_app(
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
         events: events.clone(),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
     })
     .await
     .expect("a scheduler over the scratch database");

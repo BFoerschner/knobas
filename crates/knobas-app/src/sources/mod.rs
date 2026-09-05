@@ -22,7 +22,7 @@ pub use registry::Registry;
 use std::sync::Arc;
 
 use knobas_secrets::SecretStore;
-use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use knobas_sync::scheduler::{Scheduler, SchedulerDeps, SchedulerTiming};
 use sqlx::PgPool;
 use tauri::Manager;
 
@@ -356,6 +356,7 @@ pub async fn start<R: tauri::Runtime>(
         registry: Arc::clone(&registry),
         secrets: Arc::clone(&secrets),
         events: Arc::new(TauriEvents::new(app.clone())),
+        timing: SchedulerTiming::default(),
     })
     .await?;
 
@@ -409,6 +410,7 @@ pub async fn test_scheduler<R: tauri::Runtime>(
         registry: Arc::new(Registry::builtin()),
         secrets: Arc::new(knobas_secrets::MemoryStore::new()),
         events: Arc::new(TauriEvents::new(app.clone())),
+        timing: SchedulerTiming::default(),
     })
     .await
 }

@@ -134,6 +134,7 @@ async fn app(jira_url: &str) -> SourcesState {
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
     })
     .await
     .expect("a scheduler over the scratch database");
