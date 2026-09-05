@@ -9,19 +9,22 @@
 #
 # **Minutes are the design constraint.** On a private repository GitHub bills
 # macOS minutes at 10x and Windows at 2x, so one cold run of both legs costs a
-# few hundred minutes of the account's monthly allowance. Hence: a `v*` tag is
-# the only automatic trigger, and the manual one can name a single platform, so
-# that iterating on the Windows port -- which is where the failures will be for
-# a while -- does not re-buy a macOS bundle that already exists.
+# few hundred minutes of the account's monthly allowance.
+#
+# So there is **no automatic trigger at all** (Björn, 2026-09-05: manual only,
+# the rule for every workflow in this directory). It ran on a `v*` tag until
+# then, which was already the cheapest automatic trigger available -- but a tag
+# push is easy to make by accident, and this is the one workflow that spends
+# 10x-billed minutes. Tag first, then dispatch the tag by name:
+#
+#     git tag -a v0.2.0 -m ... && git push origin v0.2.0
+#     gh workflow run release.yml --ref main -f tag=v0.2.0 -f platforms=both
+#
+# `platforms` is what makes iterating affordable: a Windows fix re-runs the
+# Windows leg alone rather than re-buying a macOS bundle that already exists.
 name: release
 
 on:
-  push:
-    tags: ['v*']
-  # For re-running a leg against a tag that already exists: a Windows fix does
-  # not need a new version, and re-running from the Actions UI would rebuild
-  # both legs off the *old* workflow file (a re-run always replays the ref the
-  # run was for).
   workflow_dispatch:
     inputs:
       tag:
@@ -42,7 +45,7 @@ permissions:
 
 # Two runs for the same tag are the same release; the later one wins.
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: true
 
 jobs:
@@ -56,20 +59,20 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-      # A tag push carries the tag in `github.ref_name`; a manual run carries a
-      # branch there and the tag in `inputs.tag`. Everything downstream reads
-      # this output rather than picking between them again.
+      # `github.ref_name` is the *branch* this was dispatched from, never the
+      # tag; the tag is only ever `inputs.tag`. Everything downstream reads this
+      # step's output rather than reaching for the ref again.
       - id: plan
         name: Resolve the tag and the platforms
         run: |
-          tag='${{ inputs.tag || github.ref_name }}'
+          tag='${{ inputs.tag }}'
           case "$tag" in
             v*) ;;
             *) echo "::error::'$tag' is not a v-prefixed release tag."; exit 1 ;;
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-          case '${{ inputs.platforms || 'both' }}' in
+          case '${{ inputs.platforms }}' in
             macos)   os='["macos-latest"]' ;;
             windows) os='["windows-latest"]' ;;
             *)       os='["macos-latest", "windows-latest"]' ;;
