@@ -536,9 +536,11 @@ test:
 
     # N = 6. Measured 2026-09-05 on the 12-core machine, warm tree, nothing
     # else running, this recipe, from its start to its last binary (the
-    # server's teardown afterwards -- `pg_ctl stop` and the removal of a data
-    # directory that has grown to 355 databases and 4 GB -- adds a further
-    # 10-12 s at every N, so `just test` end to end is 46-49 s at N=6):
+    # server's teardown afterwards used to add 10-12 s at every N -- `pg_ctl
+    # stop -m fast` plus the removal of a data directory grown to 355
+    # databases and 4 GB -- so `just test` end to end was 46-49 s at N=6;
+    # since #421 the server stops in immediate mode and leaves the removal to
+    # an `rm` that outlives it, and the teardown is under half a second):
     #   N=12: 43 s, 42 s   N=8: 36 s, 38 s   N=6: 38 s, 34 s, 37 s   N=4: 36 s
     # From 12 down to 8 the run gets 5 s shorter and below 8 it stops moving.
     # The pool is CPU-bound, not queue-bound: every binary's libtest runs one
