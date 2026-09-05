@@ -861,10 +861,19 @@ mod tests {
         let mut child = spawn_holding(sleeper, &lock).expect("spawn a child holding the lock");
         drop(lock);
 
-        assert!(
-            claim_abandoned(&root).is_none(),
-            "the child holds the lock, so the root must not read as abandoned"
-        );
+        // Held for as long as the child lives -- asked repeatedly rather
+        // than once, because a single failed attempt right after a `close`
+        // proves nothing on macOS (see the reaper test below), while a lock
+        // nobody holds is free within microseconds of the close: half a
+        // second of refusals is the child's doing.
+        let until = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < until {
+            assert!(
+                claim_abandoned(&root).is_none(),
+                "the child holds the lock, so the root must not read as abandoned"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
 
         child.kill().unwrap();
         child.wait().unwrap();
