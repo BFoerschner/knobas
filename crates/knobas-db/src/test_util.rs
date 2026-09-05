@@ -1,4 +1,6 @@
-//! One embedded PostgreSQL per test binary, shared by every test in it.
+//! One database per test binary, shared by every test in it -- on a server of
+//! the binary's own, or on the one server a `just test` starts for the whole
+//! run.
 //!
 //! Enabled by the `test-util` feature (not `cfg(test)` -- that is not set for
 //! a crate's own `tests/` directory, nor for downstream crates).
@@ -6,6 +8,24 @@
 //! Every caller gets the *same* database, so tests must isolate themselves
 //! with unique keys. Truncating shared tables would break tests running
 //! concurrently in the same binary.
+//!
+//! # Two ways to a server
+//!
+//! With [`GATE_URL_VAR`] (`KNOBAS_TEST_DB_URL`) unset -- `cargo test -p` by
+//! hand -- the binary runs `initdb`, starts a postmaster in its scratch root
+//! and uses the `knobas` database on it. That is the zero-config path, and it
+//! is what everything below the layout section describes.
+//!
+//! With it set, the binary goes to the server the URL names instead: a
+//! `create database` and a migration on a server somebody else started, in
+//! place of a whole bring-up. `just test` sets it, from the server the
+//! `knobas-test-server` binary ([`serve_until_closed`]) starts once per run;
+//! sixty-odd binaries each starting a postmaster of their own was most of the
+//! gate's wall-clock and, when two gates overlapped, more SysV shared-memory
+//! segments than macOS hands out (`shmget: No space left on device`). The
+//! server is reached through `existing_url`, so it is never owned here and
+//! nothing a binary does can stop it; the whole server goes when the recipe
+//! closes the entry point's stdin, databases and all.
 //!
 //! # Why the pool is not shared too
 //!
@@ -263,7 +283,27 @@ const TEST_POOL_SIZE: u32 = 5;
 
 /// `max_connections` for the server `just test` starts.
 ///
-/// PLACEHOLDER until measured.
+/// Formula: runner parallelism × per-binary peak, plus the scheduler suite's
+/// one connection per run outside its pool, plus PostgreSQL's reserved
+/// superuser slots.
+///
+/// * Runner parallelism: **12**, the core count of the 12-core machine the
+///   gate runs on. The recipe is serial today; #415 will run binaries through
+///   `xargs -P N` and pick `N`, and this is sized so that choice needs no
+///   change here up to the core count.
+/// * Per-binary peak: **29** client backends, measured (2026-09-05) by
+///   sampling `pg_stat_activity` every 0.25 s through a serial `just test`,
+///   where at most one binary is on the server at a time. The ceiling is
+///   higher -- every `#[tokio::test]` opens its own pool of [`TEST_POOL_SIZE`]
+///   and libtest runs up to one test per core, so 60 -- but the tests hold
+///   one or two connections each, not five. Budgeted as 30.
+/// * The scheduler suite: one connection per run on top of its pool, budgeted
+///   at one per test thread, **12**.
+/// * `superuser_reserved_connections`: **3**.
+///
+/// 12 × 30 + 12 + 3 = 375, rounded up to **400**. Each unused slot costs a
+/// few kilobytes of shared memory and nothing else; running out costs a
+/// `FATAL: sorry, too many clients already` in whichever binary asked last.
 const GATE_MAX_CONNECTIONS: u32 = 400;
 
 /// This process's scratch root: `$TMPDIR/knobas-test-<pid>`.

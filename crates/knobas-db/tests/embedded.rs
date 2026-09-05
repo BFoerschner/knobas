@@ -899,7 +899,10 @@ async fn the_test_server_serves_until_its_stdin_closes_and_then_stops() {
             .fetch_one(&mut conn)
             .await
             .unwrap();
-    assert_eq!(database, "postgres", "the URL names the maintenance database");
+    assert_eq!(
+        database, "postgres",
+        "the URL names the maintenance database"
+    );
     let port = u16::try_from(port).unwrap();
     conn.close().await.unwrap();
     assert!(port_answers(port), "the server is up while stdin is open");
@@ -1006,7 +1009,10 @@ async fn the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_
         server_identity(ours.pool()).await,
         "the child's shared connector is not on this test's server"
     );
-    assert_ne!(first, "postgres", "the maintenance database is not a test's");
+    assert_ne!(
+        first, "postgres",
+        "the maintenance database is not a test's"
+    );
     assert_ne!(first, "knobas", "nor is the app's");
     assert!(migrated, "the binary's database must arrive migrated");
 

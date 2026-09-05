@@ -344,7 +344,72 @@ clippy:
 clippy-libs:
     env -u RUSTUP_TOOLCHAIN cargo clippy --workspace --lib -- -D warnings
 
+# One embedded PostgreSQL for the whole run. Every test binary that uses
+# `knobas-db`'s shared test connector reaches it through `KNOBAS_TEST_DB_URL`
+# and gets a database of its own on it, instead of running `initdb` and
+# starting a postmaster of its own -- which sixty-odd binaries used to do, one
+# after another, and which is where two overlapping gates ran macOS out of
+# SysV shared-memory segments (#249). With the variable unset, as in a
+# `cargo test -p <crate>` by hand, each binary still brings up its own server.
+#
+# The server is `knobas-test-server`, a `test-util`-only bin in `knobas-db`
+# (see its `Cargo.toml`). It is built by the same `cargo test --no-run` that
+# builds the test binaries, found through cargo's JSON the way `_inventory-write`
+# finds them, and the second `cargo test` below rebuilds nothing. The first
+# `--no-run` runs with its stderr shown so a compile error reads as one, not as
+# "no server binary"; `-q` because cargo otherwise names every one of the 126
+# executables it built, which is 126 lines of nothing on every gate.
+#
+# The server lives as long as its stdin is open: fd 3 here is the write end of
+# a fifo it reads, and closing that fd is the shutdown. The traps close it on
+# EXIT and, because bash runs no EXIT trap when a signal it has no handler for
+# kills the shell, on INT and TERM too -- each restoring the default
+# disposition and re-raising, as `inventory` does -- so a cancelled gate leaves
+# no postmaster behind. The server also stops itself on SIGINT/SIGTERM, which a
+# Ctrl-C delivers to it directly; either route ends in the same `pg_ctl stop`.
+#
+# A fifo rather than `coproc`: `/bin/bash` on macOS is 3.2, which has none.
 test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env -u RUSTUP_TOOLCHAIN cargo test -q --workspace --no-run
+    server=$(env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
+      | jq -r 'select(.executable != null and .target.kind == ["bin"] and .target.name == "knobas-test-server")
+               | .executable')
+    if [ -z "$server" ]; then
+        echo "error: cargo built no knobas-test-server; is knobas-db's test-util bin still declared?" >&2
+        exit 1
+    fi
+
+    # Not `knobas-test-...`: that prefix names the scratch roots the test
+    # connector's reaper sweeps, and a directory so named with no lock beside
+    # it is deleted from under this recipe by the first binary that starts.
+    pipe=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    mkfifo "$pipe/stdin"
+    "$server" < "$pipe/stdin" > "$pipe/url" &
+    server_pid=$!
+    exec 3> "$pipe/stdin"
+    closed=
+    close_pipe() {
+        [ -z "$closed" ] || return 0
+        closed=1
+        exec 3>&-
+        wait "$server_pid" || echo "warning: the test server exited with status $?" >&2
+        rm -rf "$pipe"
+    }
+    trap 'close_pipe' EXIT
+    trap 'close_pipe; trap - INT; kill -INT $$' INT
+    trap 'close_pipe; trap - TERM; kill -TERM $$' TERM
+
+    # `read` fails on a line with no newline yet, so this waits for the whole URL.
+    until read -r url < "$pipe/url" && [ -n "$url" ]; do
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+            echo "error: the test server exited before printing a URL" >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+    export KNOBAS_TEST_DB_URL="$url"
     env -u RUSTUP_TOOLCHAIN cargo test --workspace
 
 # Install app/ dependencies if they are missing or older than the lockfile.
