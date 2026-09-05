@@ -384,25 +384,34 @@ test:
     # Not `knobas-test-...`: that prefix names the scratch roots the test
     # connector's reaper sweeps, and a directory so named with no lock beside
     # it is deleted from under this recipe by the first binary that starts.
-    pipe=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
-    mkfifo "$pipe/stdin"
-    "$server" < "$pipe/stdin" > "$pipe/url" &
-    server_pid=$!
-    exec 3> "$pipe/stdin"
+    # The traps are armed before anything they clean up exists, so an
+    # interrupt between `mktemp` and the server's start leaks nothing.
+    pipe=
+    server_pid=
     closed=
     close_pipe() {
         [ -z "$closed" ] || return 0
         closed=1
         exec 3>&-
-        wait "$server_pid" || echo "warning: the test server exited with status $?" >&2
-        rm -rf "$pipe"
+        if [ -n "$server_pid" ]; then
+            wait "$server_pid" || echo "warning: the test server exited with status $?" >&2
+        fi
+        [ -z "$pipe" ] || rm -rf "$pipe"
     }
     trap 'close_pipe' EXIT
     trap 'close_pipe; trap - INT; kill -INT $$' INT
     trap 'close_pipe; trap - TERM; kill -TERM $$' TERM
 
-    # `read` fails on a line with no newline yet, so this waits for the whole URL.
-    until read -r url < "$pipe/url" && [ -n "$url" ]; do
+    pipe=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    mkfifo "$pipe/stdin"
+    "$server" < "$pipe/stdin" > "$pipe/url" &
+    server_pid=$!
+    exec 3> "$pipe/stdin"
+
+    # `read` fails on a line with no newline yet, so this waits for the whole
+    # URL; the file itself appears a moment after the fifo is opened, hence the
+    # silenced stderr.
+    until read -r url < "$pipe/url" 2>/dev/null && [ -n "$url" ]; do
         if ! kill -0 "$server_pid" 2>/dev/null; then
             echo "error: the test server exited before printing a URL" >&2
             exit 1
@@ -410,7 +419,11 @@ test:
         sleep 0.1
     done
     export KNOBAS_TEST_DB_URL="$url"
-    env -u RUSTUP_TOOLCHAIN cargo test --workspace
+    # `3>&-`: cargo, every test binary and every postmaster a lifecycle test
+    # starts would otherwise inherit the fifo's write end, and the server sees
+    # EOF only when the *last* holder is gone -- a postmaster a failing test
+    # left behind would turn a red gate into one that never returns.
+    env -u RUSTUP_TOOLCHAIN cargo test --workspace 3>&-
 
 # Install app/ dependencies if they are missing or older than the lockfile.
 #

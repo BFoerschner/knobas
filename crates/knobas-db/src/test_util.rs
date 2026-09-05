@@ -195,10 +195,7 @@ impl Shared {
             .await
             .expect("close the handle on the gate's server");
 
-        let name = format!(
-            "knobas_test_{}",
-            run_nonce().replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-        );
+        let name = format!("knobas_test_{}", identifier_slug(run_nonce()));
         Shared {
             connector: create_migrated_database(&server, &name).await,
             _own_server: None,
@@ -226,18 +223,23 @@ impl Shared {
 pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-    let slug: String = label
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
     let name = format!(
-        "knobas_scratch_{slug}_{}_{}",
+        "knobas_scratch_{}_{}_{}",
+        identifier_slug(label),
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
 
     let server = test_connector().await;
     create_migrated_database(&server, &name).await
+}
+
+/// `text` reduced to what may sit inside a database name without quoting:
+/// ASCII alphanumerics, everything else an underscore.
+fn identifier_slug(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 /// `create database` on `server`'s server, then the schema, then a connector

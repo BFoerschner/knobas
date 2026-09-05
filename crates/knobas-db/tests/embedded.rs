@@ -949,12 +949,21 @@ async fn the_shared_connector_never_lands_on_the_maintenance_database() {
     assert_ne!(database, "postgres");
 }
 
+/// Where a child process's shared connector ended up, as the test above
+/// reports it.
+struct Landing {
+    port: i32,
+    system_identifier: String,
+    database: String,
+    migrated: bool,
+}
+
 /// What a child process of this binary reports through the test above, with
 /// `KNOBAS_TEST_DB_URL` set to `url`.
 ///
 /// A child rather than `set_var` in this process: the shared connector is
 /// decided once per process, and the other tests here have already decided it.
-fn landing_of_a_child_with(url: &str) -> (i32, String, String, bool) {
+fn landing_of_a_child_with(url: &str) -> Landing {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -975,12 +984,12 @@ fn landing_of_a_child_with(url: &str) -> (i32, String, String, bool) {
         .find_map(|line| line.strip_prefix("landed="))
         .unwrap_or_else(|| panic!("no landed= line in:\n{stdout}"));
     let mut fields = landed.split(' ');
-    (
-        fields.next().unwrap().parse().unwrap(),
-        fields.next().unwrap().to_owned(),
-        fields.next().unwrap().to_owned(),
-        fields.next().unwrap().parse().unwrap(),
-    )
+    Landing {
+        port: fields.next().unwrap().parse().unwrap(),
+        system_identifier: fields.next().unwrap().to_owned(),
+        database: fields.next().unwrap().to_owned(),
+        migrated: fields.next().unwrap().parse().unwrap(),
+    }
 }
 
 /// With `KNOBAS_TEST_DB_URL` set, the shared connector reaches *that* server
@@ -1003,21 +1012,24 @@ async fn the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_
     .unwrap();
     let url = maintenance_url(dir.path());
 
-    let (port, identifier, first, migrated) = landing_of_a_child_with(&url);
+    let first = landing_of_a_child_with(&url);
     assert_eq!(
-        (port, identifier),
+        (first.port, first.system_identifier.clone()),
         server_identity(ours.pool()).await,
         "the child's shared connector is not on this test's server"
     );
     assert_ne!(
-        first, "postgres",
+        first.database, "postgres",
         "the maintenance database is not a test's"
     );
-    assert_ne!(first, "knobas", "nor is the app's");
-    assert!(migrated, "the binary's database must arrive migrated");
+    assert_ne!(first.database, "knobas", "nor is the app's");
+    assert!(first.migrated, "the binary's database must arrive migrated");
 
-    let (_, _, second, _) = landing_of_a_child_with(&url);
-    assert_ne!(first, second, "two binaries must not share a database");
+    let second = landing_of_a_child_with(&url);
+    assert_ne!(
+        first.database, second.database,
+        "two binaries must not share a database"
+    );
 
     ours.stop().await.unwrap();
 }

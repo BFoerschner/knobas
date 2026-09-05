@@ -213,8 +213,8 @@ impl Connector {
 
     /// The connection URL, password and all.
     ///
-    /// The one place the string comes back out, and it exists only with
-    /// `test-util` on: the test-server entry point has to hand its URL to the
+    /// The one place a `Connector` gives the string back, and it exists only
+    /// with `test-util` on: the test-server entry point has to hand its URL to the
     /// test binaries through the environment, which is a string. Nothing a
     /// shipped build compiles can call this, so the redaction the type exists
     /// for still holds there.
