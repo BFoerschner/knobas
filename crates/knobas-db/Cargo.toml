@@ -7,7 +7,31 @@ version.workspace = true
 # Exposes `knobas_db::test_util` to other crates' tests. Gated on the feature
 # alone rather than `cfg(test)`, which is not set for a crate's own `tests/`
 # directory nor for downstream crates.
-test-util = []
+#
+# `tokio/signal` rides on it for the test-server entry point below, which
+# stops its server on Ctrl-C as well as on a closed stdin; the shipped build
+# never enables the feature, so it never pays for it.
+test-util = ["tokio/signal"]
+
+# The test-server entry point `just test` starts: one embedded PostgreSQL for
+# the whole gate, which every test binary then reaches through
+# `KNOBAS_TEST_DB_URL` (see `test_util`).
+#
+# A `[[bin]]` rather than an example because cargo hands integration tests a
+# `CARGO_BIN_EXE_<name>` for a bin and nothing for an example, and the
+# lifecycle suite spawns it by that path. `required-features` keeps it out of
+# every build that does not turn `test-util` on: `cargo build -p knobas-app`,
+# `tauri build` and `clippy --workspace --lib` never see it, and `cargo test`
+# builds it only because the self-dev-dependency below enables the feature.
+# `test = false`: it has no tests of its own, so no harness for it enters the
+# inventory.
+[[bin]]
+name = "knobas-test-server"
+path = "src/bin/knobas_test_server.rs"
+required-features = ["test-util"]
+test = false
+doc = false
+bench = false
 
 [dependencies]
 # `default-features = false` drops the crate's `tls-native-tls` default, which
