@@ -852,21 +852,38 @@ mod tests {
         );
     }
 
+    /// Every variant, named once.
+    ///
+    /// **No wildcard arm, deliberately**, the device
+    /// `knobas_sync::write_queue::target_entity` uses for `WriteOp`: the list
+    /// below is what the mirror is compared against, and a new variant that
+    /// was not added to it would leave the union short by one with every test
+    /// still green. The match is what stops that -- it fails to compile until
+    /// the new source is written down here, and then the assertion fails until
+    /// it is written down in TypeScript too.
+    fn every_candidate_source() -> Vec<crate::time::worklog::CandidateSource> {
+        use crate::time::worklog::CandidateSource::{Activity, Mirror, Note, Write};
+        let all = vec![Mirror, Activity, Write, Note];
+        for source in &all {
+            match source {
+                Mirror | Activity | Write | Note => {}
+            }
+        }
+        all
+    }
+
     #[test]
     fn the_candidate_sources_match_their_typescript_mirror() {
-        let rust: Vec<String> = [
-            crate::time::worklog::CandidateSource::Mirror,
-            crate::time::worklog::CandidateSource::Activity,
-        ]
-        .iter()
-        .map(|source| {
-            serde_json::to_value(source)
-                .unwrap()
-                .as_str()
-                .expect("a candidate source serialises to a string")
-                .to_owned()
-        })
-        .collect();
+        let rust: Vec<String> = every_candidate_source()
+            .iter()
+            .map(|source| {
+                serde_json::to_value(source)
+                    .unwrap()
+                    .as_str()
+                    .expect("a candidate source serialises to a string")
+                    .to_owned()
+            })
+            .collect();
         let mut declared = declared_union(MIRROR, "CandidateSource");
         declared.sort();
         let mut rust = rust;

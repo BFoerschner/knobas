@@ -19,11 +19,20 @@
 //! window the work sat in *and* the time that is about to be logged.
 //!
 //! **The candidates are a proposal, never a record.** They are what knobas can
-//! see the reader did in that window -- items in the mirror authored by the
-//! username their source is configured with, and their own activity lines --
-//! and each one is a checkbox. Nothing is logged because a candidate exists;
-//! the comment is generated from what is checked and is editable down to
-//! empty.
+//! see the reader did in that window, and each one is a checkbox. Nothing is
+//! logged because a candidate exists; the comment is generated from what is
+//! checked and is editable down to empty.
+//!
+//! There are four places knobas can see it from, and the rule (#409) is that
+//! **each fact is read from the table it already lives in**: items in the
+//! mirror authored by the username their source is configured with; the
+//! reader's own activity lines; comments in the write queue; and notes, by
+//! their `updated_at`. The alternative -- funnelling the last two through
+//! `knobas.activity` so there would be one source instead of four -- was
+//! ruled out in #391: it would have meant an activity line per autosave in an
+//! append-only log, and a `NOT_WORK` that reads a write's payload as well as
+//! its verb. Four small reads are the cheaper shape, and none of them writes
+//! anything.
 //!
 //! **A worklog's local copy is written before the write lands.** The row is
 //! the record that a person logged their day; whether Jira has taken it yet is
@@ -53,6 +62,7 @@
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use knobas_core::entity::EntityRef;
+use knobas_core::write_queue::WriteState;
 use knobas_source::WriteOp;
 use sqlx::{PgPool, Row};
 
@@ -67,6 +77,15 @@ use crate::sources::SourcesState;
 /// pins the two together, so a rename in the SPI fails here instead of leaving
 /// the draft quietly unavailable on every source.
 pub(super) const LOG_WORK: &str = "log_work";
+
+/// The op identifier of a comment the reader posted through knobas --
+/// `knobas_source::WriteOp::Comment`'s.
+///
+/// Spelled here for [`LOG_WORK`]'s reason and pinned the same way, by
+/// `the_identifier_is_the_one_the_spi_defines`: a rename in the SPI fails that
+/// test instead of quietly emptying [`MY_COMMENTS`], which would look exactly
+/// like an afternoon with no comments in it.
+const COMMENT: &str = "comment";
 
 /// The actor whose activity lines are the reader's own.
 const ACTOR: &str = "user";
@@ -109,9 +128,11 @@ const NOT_WORK: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Candidate {
     /// Stable within a draft, and the key the checkbox list is drawn on --
-    /// `"item:jira:PAY-231"`, `"activity:4211"`. Two candidates can share an
-    /// entity (a commit and the activity line about it), so the entity id
-    /// alone would not do.
+    /// `"item:jira:PAY-231"`, `"activity:4211"`, `"write:97"`, and a note's own
+    /// `"note:<uuid>"`, which is already in a namespace of its own. Two
+    /// candidates can share an entity (a commit and the activity line about
+    /// it; a pull request of the reader's own and the comment they left on it),
+    /// so the entity id alone would not do.
     pub id: String,
     /// Where this candidate was seen.
     pub source: CandidateSource,
@@ -138,6 +159,13 @@ pub enum CandidateSource {
     Mirror,
     /// A line the reader's own actions wrote in `knobas.activity`.
     Activity,
+    /// A comment the reader posted through knobas -- a row in
+    /// `knobas.write_queue`, which is the only place a comment knobas sent
+    /// exists as a fact of its own.
+    Write,
+    /// A note the reader edited -- a row in `knobas.note`, read by its
+    /// `updated_at`.
+    Note,
 }
 
 /// What the draft offers: one interval, its candidates, and a comment made
@@ -399,6 +427,67 @@ const MY_ACTIVITY: &str = "select id, at, verb, entity_id from knobas.activity
         and verb <> all($4)
       order by at, id";
 
+/// Comments the reader posted through knobas inside the interval (#409).
+///
+/// **The queue row is the fact, not an activity line about it.** A comment is
+/// not a mirror item -- no adapter mirrors comments as items, they fold into
+/// the item's indexed text -- and the activity lines the queue writes are the
+/// bookkeeping [`NOT_WORK`] exists to drop. This table is where "the reader
+/// commented" is recorded once, as one row, however many states the queue
+/// narrates it through afterwards. That is what spares this read the digest's
+/// one-line-per-write rule (`crate::standup`'s `WRITTEN`, and the #361/#362
+/// working-out beside it).
+///
+/// **`queued_at`, never `settled_at`.** The interval asks what the reader did
+/// while the clock was running, and `queued_at` is the moment they wrote it
+/// (`0005`: "when the user made the edit", never updated). Keying on delivery
+/// would drop every write the queue has not settled yet -- most of them, on a
+/// laptop that has been offline all afternoon -- and would file a comment
+/// written before lunch under the evening it finally went out.
+///
+/// **Every state but `discarded`.** `sent`, `pending`, `held` and `refused`
+/// are all comments the reader wrote; a discarded write is one they took back,
+/// and it is the only state where the checkbox would put a line in Jira about
+/// something that never happened. The failure direction is [`NOT_WORK`]'s.
+///
+/// No author test, because the queue has no other writer: every row in it is a
+/// write this person made through this app.
+///
+/// **If the queue is ever pruned, old comments leave the drafts of old days.**
+/// Nothing prunes it today; `crate::standup`'s `WORKLOGS` already hedges
+/// against the day something does, and this read has no such second copy to
+/// fall back on. A prune would need to reckon with that, which is why it is
+/// written here rather than discovered later.
+const MY_COMMENTS: &str = "select id, entity_id, queued_at from knobas.write_queue
+      where op = $1 and state <> $2
+        and queued_at >= $3 and queued_at <= $4
+      order by queued_at, id";
+
+/// Notes the reader edited inside the interval (#409).
+///
+/// **A stamp, not a count of events.** `note::save` is what the editor's
+/// autosave calls, every 700 ms of pause, so an hour on one note is dozens of
+/// writes; `updated_at` is overwritten by each of them and the row stays one
+/// row. Reading it here is what makes an afternoon of typing one checkbox
+/// rather than forty, and it is why #409 writes no activity line per save --
+/// `knobas.activity` is append-only (`knobas_core::activity`), so a line per
+/// save could not be collapsed after the fact.
+///
+/// No author test, and none is possible: a note is knobas' own, not something
+/// mirrored from a source with a username on it.
+///
+/// A note deleted inside the interval is not here, because `note::delete`
+/// takes the row (the entity survives, tombstoned). That is the right answer
+/// -- the reader deleted it -- and not an omission to chase through the
+/// tombstone.
+///
+/// `title` is never empty: `note::save` stores `named(title)`, which is the
+/// title or the word for a note without one, so the bullet always has a word
+/// to say.
+const MY_NOTES: &str = "select id, title, updated_at from knobas.note
+      where updated_at >= $1 and updated_at <= $2
+      order by updated_at, id";
+
 /// The key half of an entity id -- `PAY-231` out of `jira:PAY-231`.
 ///
 /// The same half `Detail.svelte`'s header and the timer strip read, so a
@@ -454,6 +543,55 @@ async fn candidates(
             at,
             bullet: format!("- {verb} {what}").trim_end().to_owned(),
             entity_id,
+        });
+    }
+
+    for row in sqlx::query(MY_COMMENTS)
+        .bind(COMMENT)
+        .bind(WriteState::Discarded.as_str())
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await?
+    {
+        let id: i64 = row.try_get("id")?;
+        let entity_id: String = row.try_get("entity_id")?;
+        let at: DateTime<Utc> = row.try_get("queued_at")?;
+        out.push(Candidate {
+            id: format!("write:{id}"),
+            source: CandidateSource::Write,
+            at,
+            // The key, not the body. The payload carries what was written and
+            // a comment can be paragraphs long; the bullet says the thing the
+            // reader would say out loud, and the words themselves are already
+            // on the ticket this bullet names.
+            bullet: format!("- commented on {}", key_of(&entity_id)),
+            entity_id: Some(entity_id),
+        });
+    }
+
+    for row in sqlx::query(MY_NOTES)
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await?
+    {
+        let entity_id: String = row.try_get("id")?;
+        let title: String = row.try_get("title")?;
+        let at: DateTime<Utc> = row.try_get("updated_at")?;
+        out.push(Candidate {
+            // The note's own id, which is already in a namespace of its own --
+            // no `note:` prefix to add, unlike `item:` and `activity:` above.
+            id: entity_id.clone(),
+            source: CandidateSource::Note,
+            at,
+            // The title, never `key_of` it: a note's key is a uuid, and a
+            // worklog comment reading "- edited 0192ab..." is the failure
+            // #409 was filed to avoid. "the note" is in the words because a
+            // mirror bullet is a bare title, and without it a note and a
+            // commit would read the same.
+            bullet: format!("- edited the note {title}"),
+            entity_id: Some(entity_id),
         });
     }
 
@@ -839,6 +977,15 @@ mod tests {
             comment: String::new(),
         };
         assert_eq!(op.identifier(), LOG_WORK);
+
+        // `COMMENT` fails differently and worse: a rename leaves the draft
+        // available and its comment checkboxes silently gone, which reads as
+        // an afternoon nobody commented in.
+        let op = WriteOp::Comment {
+            entity: "jira:PAY-231".to_owned(),
+            body: "Rolled the retry window back".to_owned(),
+        };
+        assert_eq!(op.identifier(), COMMENT);
     }
 
     fn candidate(id: &str, bullet: &str) -> Candidate {
