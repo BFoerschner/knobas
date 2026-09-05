@@ -28,7 +28,7 @@
 //! each other's outcomes on the very rule the schema exists to make
 //! structural. The same reasoning `tests/start_work.rs` records for its flows.
 
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, SubsecRound, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
 use knobas_app::time::{self, BlockKind, TimerTarget};
 use knobas_core::write_queue::WriteState;
@@ -828,7 +828,11 @@ async fn extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker() {
         .expect("the sweep closed it");
     assert!(closed.ended_by_relaunch, "this test needs a marked block");
 
-    let now = Utc::now();
+    // Microseconds, which is what `timestamptz` keeps: on Linux the clock
+    // carries nanoseconds, and the end read back would never equal the one
+    // written (found by #415's ubuntu-latest run; macOS's clock stops at
+    // microseconds, so the gate here could not see it).
+    let now = Utc::now().trunc_subsecs(6);
     let extended = time::day::update(&pool, closed.id, closed.started_at, now, closed.target)
         .await
         .expect("a relaunch-ended block is editable");
@@ -1354,7 +1358,12 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
 async fn a_beat_the_shell_sends_reaches_the_day_read_as_a_passive_block() {
     let pool = scratch("time-passive-wire").await;
     time::passive::set_enabled(&pool, true).await.unwrap();
-    let now = Utc::now();
+    // Microseconds, as above: `opened` below is seeded through `timestamptz`
+    // and compared with what comes back, and `now` is also the floor of the
+    // window `ended_at` is asserted inside. A beat landing in the same
+    // microsecond as `now` comes back with that microsecond's nanoseconds
+    // stripped, and would sit just under a floor that kept them.
+    let now = Utc::now().trunc_subsecs(6);
     let window = Duration::seconds(time::passive::BEAT_WINDOW_SECONDS);
 
     // Budget for the cap to spend: focused, with nothing in the foreground.
