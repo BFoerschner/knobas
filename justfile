@@ -92,20 +92,25 @@ check:
     # errors` as a rule, the machine-format `COMPLETED N FILES` line when
     # svelte-check sees CLAUDECODE=1 in the environment (4.7.6 chooses its
     # output by that variable, not by whether stdout is a terminal) -- then
-    # vitest's totals and the vite build; for the cargo chain: its
-    # `test result:` lines added up. A failing half is its whole log, so
-    # nothing has to be re-run to see why.
+    # vitest's totals and the vite build; for the cargo chain: `test`'s
+    # per-binary lines (`test: ok <package> <target> N passed; N failed; N
+    # ignored; ...`, one per test binary and one per doc-test crate) added
+    # up here, independently of the total `test` prints itself, so the two
+    # can be compared. Two spaces after the verdict: the per-binary lines are
+    # padded there and the recipe's own total lines (`test: ok: ...`,
+    # `test: FAILED (...)`) are not, so a total cannot be counted as a binary.
+    # A failing half is its whole log, so nothing has to be re-run to see why.
     report() {
         local name=$1 log=$2 status=$3
         if [ "$status" -eq 0 ]; then
             echo "check: $(tail -n 1 "$log")"
             case $name in
                 front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
-                cargo) awk '/^test result:/ { n++; for (i = 1; i < NF; i++) {
+                cargo) awk '/^test: (ok|FAILED)  / { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
                              if ($(i+1) == "ignored;") g += $i } }
-                           END { printf "  %d test result lines: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
+                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
@@ -214,15 +219,12 @@ inventory-update:
 
 # Enumerate the workspace's tests into the file named by $1.
 #
-# `--no-run` builds the test binaries and `--message-format=json` names them;
-# asking each binary to `--list` itself is what makes the result the *harness's*
-# answer rather than a guess parsed out of the source. `--list` enumerates, it
-# does not execute, so nothing here starts a database.
-#
-# The package name comes from `package_id`, which cargo spells two ways
-# depending on version (`<path>#<version>` and `<path>#<name>@<version>`); both
-# are handled. LC_ALL=C keeps the sort byte-wise, so the file does not churn
-# when a machine's locale differs.
+# The binaries come from `_test-executables` below (one build, one
+# enumeration, shared with `test`); asking each binary to `--list` itself is
+# what makes the result the *harness's* answer rather than a guess parsed out
+# of the source. `--list` enumerates, it does not execute, so nothing here
+# starts a database. LC_ALL=C keeps the sort byte-wise, so the file does not
+# churn when a machine's locale differs.
 #
 # `test-inventory-conditional.txt` is subtracted here rather than at diff time,
 # so `test-inventory.txt` means one thing on every machine: the tests that exist
@@ -255,17 +257,65 @@ _inventory-write FILE:
     trap 'rm -f "$tmp"; trap - INT; kill -INT $$' INT
     trap 'rm -f "$tmp"; trap - TERM; kill -TERM $$' TERM
     if [ -e "{{FILE}}" ]; then cp -p "{{FILE}}" "$tmp"; fi
-    env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
-      | jq -r 'select(.executable != null and .profile.test == true)
-               | (.package_id | if test("#.*@") then (split("#")[1] | split("@")[0])
-                                else (split("#")[0] | split("/") | last) end) as $pkg
-               | "\($pkg)\t\(.target.kind[0])/\(.target.name)\t\(.executable)"' \
-      | while IFS=$'\t' read -r pkg target exe; do
+    just _test-executables \
+      | awk -F'\t' '$1 == "test"' \
+      | while IFS=$'\t' read -r _ pkg target exe _; do
             "$exe" --list 2>/dev/null | sed -n 's/: test$//p' | sed "s|^|${pkg}\t${target}\t|"
         done \
       | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
       | LC_ALL=C sort > "$tmp"
     mv "$tmp" "{{FILE}}"
+
+# Build the workspace's test executables and name them, one per line:
+#
+#     test    <package>  <kind>/<target>        <executable>  <package dir>
+#     server  knobas-db  bin/knobas-test-server <executable>  <package dir>
+#
+# tab-separated. The package directory is the binary's working directory
+# under `cargo test` (cargo runs each test binary from its package root and
+# sets the `CARGO_*` runtime variables there); `test` runs every binary from
+# the same place so a test that reads a path relative to its crate behaves
+# identically under both. Nothing in the tree does today (checked 2026-09-05:
+# no runtime `CARGO_*` read, no relative filesystem path in a test), which is
+# why it is a column here and not a workaround anywhere else.
+#
+# `inventory` and `test` both consume this: one enumeration expression, kept
+# in one place, so the two recipes cannot drift apart on
+# what a test executable is (before #415 each carried its own copy). Within a
+# recipe it is the only cargo call before the binaries run -- `test` used to
+# build once and then enumerate in a second `--no-run`. Across recipes it
+# still runs once each; the second run on a warm tree is a no-op build and
+# under a second.
+#
+# `--no-run` builds; `--message-format=json-render-diagnostics` names what it
+# built on stdout and still renders compiler diagnostics on stderr the way a
+# plain `cargo test` does, so a broken tree reads as a compile error here and
+# not as "no executables" further down. `-q` silences cargo's own progress
+# lines and nothing else.
+#
+# The `test` lines are every executable built with the test harness (the
+# `.profile.test` flag: `tests/*.rs` targets, each crate's unit tests, and a
+# bin's unit tests). The `server` line is `knobas-test-server`, the
+# `test-util`-only bin `test` starts one Postgres from; it is built by the same
+# invocation because `knobas-db`'s self-dev-dependency turns the feature on,
+# and it is not a `test` line because its `Cargo.toml` says `test = false`.
+#
+# The package name comes from `package_id`, which cargo spells two ways
+# depending on version (`<path>#<version>` and `<path>#<name>@<version>`); both
+# are handled.
+_test-executables:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env -u RUSTUP_TOOLCHAIN cargo test -q --workspace --no-run --message-format=json-render-diagnostics \
+      | jq -r 'select(.executable != null)
+               | (.package_id | if test("#.*@") then (split("#")[1] | split("@")[0])
+                                else (split("#")[0] | split("/") | last) end) as $pkg
+               | (.manifest_path | split("/")[:-1] | join("/")) as $dir
+               | if .profile.test == true then
+                   "test\t\($pkg)\t\(.target.kind[0])/\(.target.name)\t\(.executable)\t\($dir)"
+                 elif .target.kind == ["bin"] and .target.name == "knobas-test-server" then
+                   "server\t\($pkg)\tbin/\(.target.name)\t\(.executable)\t\($dir)"
+                 else empty end'
 
 # shellcheck over every tracked script in testenv/.
 #
@@ -353,12 +403,9 @@ clippy-libs:
 # `cargo test -p <crate>` by hand, each binary still brings up its own server.
 #
 # The server is `knobas-test-server`, a `test-util`-only bin in `knobas-db`
-# (see its `Cargo.toml`). It is built by the same `cargo test --no-run` that
-# builds the test binaries, found through cargo's JSON the way `_inventory-write`
-# finds them, and the second `cargo test` below rebuilds nothing. The first
-# `--no-run` runs with its stderr shown so a compile error reads as one, not as
-# "no server binary"; `-q` because cargo otherwise names every one of the 126
-# executables it built, which is 126 lines of nothing on every gate.
+# (see its `Cargo.toml`). `_test-executables` builds it together with the test
+# binaries and names both; nothing below runs cargo again except the doc-test
+# run, which rebuilds nothing.
 #
 # The server lives as long as its stdin is open: fd 3 here is the write end of
 # a fifo it reads, and closing that fd is the shutdown. The traps close it on
@@ -369,26 +416,77 @@ clippy-libs:
 # Ctrl-C delivers to it directly; either route ends in the same `pg_ctl stop`.
 #
 # A fifo rather than `coproc`: `/bin/bash` on macOS is 3.2, which has none.
+#
+# THE BINARIES RUN IN PARALLEL, not one after another as `cargo test` runs
+# them. 112 binaries, 98 of them under 3 s each, still added up to 71 s of the
+# serial gate; through `xargs -P`, with each binary's stdout and stderr
+# captured to its own file under the gate directory, the run is as long as
+# its slowest binary plus the queue behind it. Each worker always exits 0 and
+# writes the binary's real status to a file beside its log, because xargs
+# stops feeding on an exit of 255 and reports 123 for anything else non-zero,
+# and neither tells which binary it was; a red must never cut the others
+# short or hide behind them. Doc-tests (`cargo test --workspace --doc`, 14
+# short binaries, not in the inventory because cargo builds no executable for
+# them) run alongside the pool with their output captured the same way.
+# Binaries run without `--ignored`, so the live suites stay ignored.
+#
+# JOBS. `N` is bounded to the core count (`getconf _NPROCESSORS_ONLN`, which
+# both macOS and Linux answer) and chosen by measurement on the 12-core
+# machine, warm tree, idle, 2026-09-05: the numbers are in the recipe beside
+# the constant. `KNOBAS_TEST_JOBS` overrides it, for measuring another value
+# without editing this file.
+#
+# WHAT IS PRINTED. A passing binary is one line -- package, target, libtest's
+# `N passed; N failed; N ignored;` and its `finished in` time -- printed as
+# it finishes, so a run shows progress and a reader sees which binary is
+# slow. A failing binary's captured output is printed in full once the pool
+# has drained, between `----- <package> <target> -----` markers, so nothing
+# has to be re-run to see why. The last line is the total, and `check` adds
+# up the per-binary lines itself as a cross-check on it. Exit status is 1 if
+# any binary's status was non-zero, or the doc-test run's, or xargs's own,
+# or if libtest's `failed` counts added up over every log are -- the last
+# is the harness's word and the one signal a broken status file cannot fake.
+#
+# THE WORKER runs under `xargs` as `bash -c`, so it is an exported function
+# rather than a script file; it finds its inputs through `KNOBAS_GATE_DIR`
+# because xargs hands it nothing but the line number. `3>&-` on the pool and
+# on the doc-test run: xargs, every test binary and every postmaster a
+# lifecycle test starts would otherwise inherit the fifo's write end, and the
+# server sees EOF only when the *last* holder is gone -- a postmaster a
+# failing test left behind would turn a red gate into one that never returns.
+#
+# THE POOL RUNS AS A BACKGROUND JOB and the shell `wait`s on it, for the reason
+# `check` gives: bash runs a trap only after the foreground command returns,
+# so with `xargs` in the foreground a signal aimed at this shell alone would
+# do nothing until the whole run had finished. Background jobs start with
+# `INT` ignored, which the binaries inherit, so the traps kill the pool's
+# descendants explicitly with `TERM` (deepest first, so xargs cannot start
+# the next binary after its current one dies) before closing the pipe.
+#
+# Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
+# pgrep and getconf. `check.yml` on `ubuntu-latest` runs the same recipe.
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    env -u RUSTUP_TOOLCHAIN cargo test -q --workspace --no-run
-    server=$(env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
-      | jq -r 'select(.executable != null and .target.kind == ["bin"] and .target.name == "knobas-test-server")
-               | .executable')
-    if [ -z "$server" ]; then
-        echo "error: cargo built no knobas-test-server; is knobas-db's test-util bin still declared?" >&2
-        exit 1
-    fi
-
     # Not `knobas-test-...`: that prefix names the scratch roots the test
     # connector's reaper sweeps, and a directory so named with no lock beside
     # it is deleted from under this recipe by the first binary that starts.
     # The traps are armed before anything they clean up exists, so an
     # interrupt between `mktemp` and the server's start leaks nothing.
-    pipe=
-    server_pid=
-    closed=
+    gate= server_pid= pool_pid= doc_pid= closed=
+    descendants() {
+        local p
+        for p in $(pgrep -P "$1" || true); do descendants "$p"; done
+        echo "$1"
+    }
+    stop_run() {
+        local p pids=
+        for p in $pool_pid $doc_pid; do pids="$pids $(descendants "$p")"; done
+        [ -z "${pids// /}" ] || kill -TERM $pids 2>/dev/null || true
+        # Not a bare `wait`: that would also wait on the server, which only
+        # exits once `close_pipe` has closed its stdin.
+        for p in $pool_pid $doc_pid; do wait "$p" 2>/dev/null || true; done
+    }
     close_pipe() {
         [ -z "$closed" ] || return 0
         closed=1
@@ -396,22 +494,37 @@ test:
         if [ -n "$server_pid" ]; then
             wait "$server_pid" || echo "warning: the test server exited with status $?" >&2
         fi
-        [ -z "$pipe" ] || rm -rf "$pipe"
+        [ -z "$gate" ] || rm -rf "$gate"
     }
     trap 'close_pipe' EXIT
-    trap 'close_pipe; trap - INT; kill -INT $$' INT
-    trap 'close_pipe; trap - TERM; kill -TERM $$' TERM
+    trap 'stop_run; close_pipe; trap - INT; kill -INT $$' INT
+    trap 'stop_run; close_pipe; trap - TERM; kill -TERM $$' TERM
 
-    pipe=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
-    mkfifo "$pipe/stdin"
-    "$server" < "$pipe/stdin" > "$pipe/url" &
+    gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    just _test-executables > "$gate/executables"
+    awk -F'\t' '$1 == "test"' "$gate/executables" > "$gate/tests"
+    server=$(awk -F'\t' '$1 == "server" { print $4 }' "$gate/executables")
+    count=$(wc -l < "$gate/tests" | tr -d ' ')
+    if [ -z "$server" ]; then
+        echo "error: cargo built no knobas-test-server; is knobas-db's test-util bin still declared?" >&2
+        exit 1
+    fi
+    if [ "$count" -eq 0 ]; then
+        echo "error: cargo built no test executables" >&2
+        exit 1
+    fi
+
+    mkfifo "$gate/stdin"
+    "$server" < "$gate/stdin" > "$gate/url" &
     server_pid=$!
-    exec 3> "$pipe/stdin"
+    exec 3> "$gate/stdin"
 
     # `read` fails on a line with no newline yet, so this waits for the whole
     # URL; the file itself appears a moment after the fifo is opened, hence the
-    # silenced stderr.
-    until read -r url < "$pipe/url" 2>/dev/null && [ -n "$url" ]; do
+    # silenced stderr -- redirected *before* the `<`, because bash applies
+    # redirections left to right and reports a failed open on whatever stderr
+    # is at that moment.
+    until read -r url 2>/dev/null < "$gate/url" && [ -n "$url" ]; do
         if ! kill -0 "$server_pid" 2>/dev/null; then
             echo "error: the test server exited before printing a URL" >&2
             exit 1
@@ -419,11 +532,121 @@ test:
         sleep 0.1
     done
     export KNOBAS_TEST_DB_URL="$url"
-    # `3>&-`: cargo, every test binary and every postmaster a lifecycle test
-    # starts would otherwise inherit the fifo's write end, and the server sees
-    # EOF only when the *last* holder is gone -- a postmaster a failing test
-    # left behind would turn a red gate into one that never returns.
-    env -u RUSTUP_TOOLCHAIN cargo test --workspace 3>&-
+    export KNOBAS_GATE_DIR="$gate"
+
+    # N = 6. Measured 2026-09-05 on the 12-core machine, warm tree, nothing
+    # else running, this recipe, from its start to its last binary (the
+    # server's teardown afterwards -- `pg_ctl stop` and the removal of a data
+    # directory that has grown to 355 databases and 4 GB -- adds a further
+    # 10-12 s at every N, so `just test` end to end is 46-49 s at N=6):
+    #   N=12: 43 s, 42 s   N=8: 36 s, 38 s   N=6: 38 s, 34 s, 37 s   N=4: 36 s
+    # From 12 down to 8 the run gets 5 s shorter and below 8 it stops moving.
+    # The pool is CPU-bound, not queue-bound: every binary's libtest runs one
+    # test thread per core, so 6 binaries already offer 72 runnable threads
+    # to 12 cores, and the sum of libtest's own times inflates from 82 s
+    # (serial) to 128/180/245/380 s at N=4/6/8/12 -- pure contention. 6 is
+    # the middle of the flat region: half the cores, the 1-minute load
+    # average near 12 rather than the 18 N=12 reaches, and a connection peak
+    # of 82 client backends against the server's 400 (N=12 peaked at 143).
+    jobs=${KNOBAS_TEST_JOBS:-6}
+    cores=$(getconf _NPROCESSORS_ONLN)
+    case $jobs in
+        ''|*[!0-9]*) echo "error: KNOBAS_TEST_JOBS must be a whole number of at least 1, not '$jobs'" >&2; exit 1 ;;
+    esac
+    # Through arithmetic, not compared as a string: `00` is all digits and
+    # would otherwise reach xargs as `-P 00`, which it reads as 0 -- no limit,
+    # the one value this bound exists to keep out.
+    jobs=$((10#$jobs))
+    if [ "$jobs" -lt 1 ]; then
+        echo "error: KNOBAS_TEST_JOBS must be at least 1 (0 would be xargs's 'no limit')" >&2; exit 1
+    fi
+    [ "$jobs" -le "$cores" ] || jobs=$cores
+
+    # One binary: run it with everything it prints in `out/<n>.log`, its exit
+    # status in `out/<n>.status`, and one line on stdout. The summary is the
+    # binary's own `test result:` line reduced to its counts and time.
+    run_one() {
+        local n=$1 pkg target exe dir status=0 summary
+        local log="$KNOBAS_GATE_DIR/out/$n.log"
+        IFS=$'\t' read -r _ pkg target exe dir < <(sed -n "${n}p" "$KNOBAS_GATE_DIR/tests")
+        # `</dev/null`: GNU xargs gives a child /dev/null for stdin, BSD xargs
+        # hands it its own, which here is the queue of job numbers -- a test
+        # that read stdin would eat the queue on macOS and not on Linux.
+        ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1 || status=$?
+        echo "$status" > "$KNOBAS_GATE_DIR/out/$n.status"
+        summary=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9]* passed; [0-9]* failed; [0-9]* ignored;\).*finished in \([0-9.]*s\)$/\1 \2/p' "$log" | tail -n 1)
+        if [ "$status" -eq 0 ] && [ -n "$summary" ]; then
+            printf 'test: ok      %-24s %-40s %s\n' "$pkg" "$target" "$summary"
+        else
+            printf 'test: FAILED  %-24s %-40s %s (exit %s)\n' "$pkg" "$target" "${summary:-no test result line}" "$status"
+        fi
+    }
+    export -f run_one
+    mkdir "$gate/out"
+
+    echo "test: $count binaries, $jobs at a time, doc-tests alongside; one Postgres for all of them"
+    ( awk '{ print NR }' "$gate/tests" | xargs -P "$jobs" -I{} bash -c 'run_one "$1"' _ {} ) 3>&- &
+    pool_pid=$!
+    ( env -u RUSTUP_TOOLCHAIN cargo test --workspace --doc ) > "$gate/doc.log" 2>&1 3>&- &
+    doc_pid=$!
+
+    # A reaped pid is cleared at once, so a later signal cannot aim `stop_run`
+    # at whatever process has since been given the number.
+    pool_status=0; wait "$pool_pid" || pool_status=$?
+    pool_pid=
+    doc_status=0; wait "$doc_pid" || doc_status=$?
+    doc_pid=
+
+    # Doc-tests: one line per crate on success, in the same shape as the
+    # binaries' lines so `check` adds them up the same way; the whole log on
+    # failure.
+    if [ "$doc_status" -eq 0 ]; then
+        awk '/^ +Doc-tests / { crate = $2 }
+             /^test result:/ { sub(/^test result: [A-Za-z]*\. /, ""); sub(/ 0 measured.*finished in /, " ")
+                               printf "test: ok      %-24s %-40s %s\n", crate, "doc-tests", $0 }' "$gate/doc.log"
+    else
+        echo "test: doc-tests FAILED (exit $doc_status); their full output follows" >&2
+        echo "----- doc-tests -----" >&2
+        cat "$gate/doc.log" >&2
+        echo "----- end of doc-tests -----" >&2
+    fi
+
+    # Every binary the pool did not report a 0 for, in list order, in full.
+    failed=0
+    n=0
+    while IFS=$'\t' read -r _ pkg target exe _; do
+        n=$((n + 1))
+        status=$(cat "$gate/out/$n.status" 2>/dev/null || echo "not run")
+        [ "$status" = 0 ] && grep -q '^test result:' "$gate/out/$n.log" && continue
+        failed=$((failed + 1))
+        echo "test: $pkg $target FAILED (exit $status); its full output follows" >&2
+        echo "----- $pkg $target -----" >&2
+        [ ! -f "$gate/out/$n.log" ] || cat "$gate/out/$n.log" >&2
+        echo "----- end of $pkg $target -----" >&2
+    done < "$gate/tests"
+
+    doc_crates=$(grep -c '^ *Doc-tests ' "$gate/doc.log" || true)
+    # `|| true` on the cat: if no worker ever ran, `out/*.log` matches nothing
+    # and the recipe must still reach its FAILED line rather than die here.
+    IFS=$'\t' read -r failed_tests totals < <(
+        (cat "$gate"/out/*.log "$gate/doc.log" 2>/dev/null || true) \
+          | awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                     if ($(i+1) == "passed;") p += $i
+                     if ($(i+1) == "failed;") f += $i
+                     if ($(i+1) == "ignored;") g += $i } }
+                 END { printf "%d\t%d passed, %d failed, %d ignored\n", f, p, f, g }')
+    # Red on any binary's status, on the doc-test run's, on xargs's own, and
+    # on libtest's failed count added up over every log: the last is the
+    # harness's word rather than the runner's and is the one signal a broken
+    # status file could not fake.
+    # The pipe is closed here rather than left to the EXIT trap so that the
+    # time on the last line is the whole run, the server's stop included.
+    close_pipe
+    if [ "$failed" -ne 0 ] || [ "$doc_status" -ne 0 ] || [ "$pool_status" -ne 0 ] || [ "$failed_tests" -ne 0 ]; then
+        echo "test: FAILED ($failed of $count binaries, doc-tests exit $doc_status, pool exit $pool_status): $totals; in ${SECONDS} s" >&2
+        exit 1
+    fi
+    echo "test: ok: $count binaries and $doc_crates doc-test crates, $totals, in ${SECONDS} s"
 
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
