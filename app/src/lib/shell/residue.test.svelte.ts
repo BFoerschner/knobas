@@ -287,6 +287,7 @@ const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
+const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
 const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
@@ -343,6 +344,8 @@ const ASSET_DETAIL = {
   properties: [],
   held_by: [],
   holds: [],
+  exposes: [],
+  reachable_via: [],
   history: [],
   effective_environment: null,
   effective_owner: null,
@@ -714,6 +717,47 @@ const CASES: Case[] = [
           move: () => Promise.reject(new Error("no write in this test")),
           onclose: () => {},
           onmoved: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The route editor (#432). One effect -- the level its target picker is
+     * standing on -- and it re-reads on every step down, so a walk unmounted
+     * mid-step is the case this covers, `MoveDialog`'s above for the picker
+     * this one is built on.
+     */
+    name: "RouteDialog",
+    source: "lib/assets/RouteDialog.svelte",
+    open: (target) => ({
+      app: mount(RouteDialog, {
+        target,
+        props: {
+          asset: {
+            id: "asset:traefik",
+            parent_id: null,
+            type_id: "reverse_proxy",
+            type_label: "Reverse proxy",
+            monogram: "RP",
+            name: "traefik",
+            status: "none",
+            environment: null,
+            owner: null,
+            has_children: false,
+            health: "none",
+            inside: "none",
+            problems_inside: 0,
+          },
+          heldBy: [],
+          route: null,
+          tree: () => deferred([]),
+          create: () => Promise.reject(new Error("no write in this test")),
+          edit: () => Promise.reject(new Error("no write in this test")),
+          remove: () => Promise.reject(new Error("no write in this test")),
+          onclose: () => {},
+          onsaved: () => {},
+          ondeleted: () => {},
         },
       }),
     }),

@@ -61,6 +61,12 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
   // the backend out of `knobas_core::asset`. This one says "an asset, as against a
   // ticket or a page", and matches `knobas_core::entity::OWNED_KINDS`.
   asset: { label: "Asset", plural: "Assets", monogram: "AS" },
+  // M4.0 (#432). A route is an entity of its own — searchable, linkable, with
+  // its own `#/route/<id>` address — so the launcher and the room tiles need a
+  // word and a chip for it. `RO` and not `RT`: `RP` is the repository above,
+  // and the estate's *type* table spends both `RP` and `RT` on a reverse proxy
+  // and a runtime. Matches `knobas_core::entity::OWNED_KINDS`.
+  route: { label: "Route", plural: "Routes", monogram: "RO" },
 };
 
 /**

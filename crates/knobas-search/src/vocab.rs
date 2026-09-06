@@ -663,7 +663,8 @@ mod tests {
             full_sync_exhaustive: true,
         }])]);
 
-        assert_eq!(catalog.owned_kinds(), ["asset", "note"]);
+        // `route` joined `asset` and `note` with M4.0's routes (#432).
+        assert_eq!(catalog.owned_kinds(), ["asset", "note", "route"]);
         for owned in knobas_core::entity::OWNED_KINDS {
             let info = catalog.info(owned.id);
             assert_eq!(

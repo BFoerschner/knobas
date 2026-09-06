@@ -77,12 +77,49 @@
 //! inbox filter and the tray's proposal scope are one walk and cannot
 //! disagree.
 //!
+//! # Routes, read from both ends (#432)
+//!
+//! `CONTEXT.md`, **Route**: *"a knobas-owned entity an asset exposes: a URL or
+//! endpoint, with or without a target asset. An asset is reachable via the
+//! routes that land on it or on something that holds it"*. Both ends are
+//! fields on one row (ADR-0014), and the two halves of that sentence are the
+//! two reads [`get`] makes:
+//!
+//! * [`ROUTES_EXPOSED`] -- what this asset exposes, by `asset_id`;
+//! * [`ROUTES_REACHABLE`] -- what lands on this asset **or anywhere else on
+//!   its containment path**, above it or below it. A container's Traefik route
+//!   is exposed by the proxy, lands on the container, and is also how the VM
+//!   holding the container is reached. That statement's own docs give the
+//!   argument in full, including the two readings it reconciles and the estate
+//!   that decides between them.
+//!
+//! There is **one row shape for both**, [`RouteRow`], and *where* a route
+//! lands is read off it rather than carried beside it: in `reachable_via`, a
+//! route whose `target_id` is the asset's own id lands here, and any other
+//! `target_id` is the asset on the path that it lands on, named by
+//! `target_name` -- an ancestor when the pane's held-by path holds it and
+//! something inside otherwise. A second field saying the same thing would be a
+//! fact on the wire twice, and story 31's dashed wire is exactly that
+//! comparison.
+//!
+//! A route has **no type and therefore no typed properties**: nineteen types
+//! describe things that hold things, and a URL is not one of them. Its
+//! properties are the reader's own, all four kinds, which is where the
+//! certificate expiry of spec story 14 lives -- knobas does not own
+//! monitoring, so an expiry knobas *checks* is a Kuma monitor (M4.1) and an
+//! expiry knobas *records* is a property.
+//!
 //! # What this module deliberately does not do yet
 //!
-//! Routes are **#432**; the create/edit surface (#429) and the keyboard walk
-//! and spines (#430) have since landed. [`in_context`] serves a *stored* room; the
-//! Assets tile's rule for the derived rooms -- *All work*'s top level, a
-//! source room's monitored assets, a project room's nothing -- is **#435**.
+//! The create/edit surface (#429) and the keyboard walk and spines (#430)
+//! have landed, and so have the routes above. [`in_context`] serves a *stored*
+//! room; the Assets tile's rule for the derived rooms -- *All work*'s top
+//! level, a source room's monitored assets, a project room's nothing -- is
+//! **#435**. A route is **not moved between exposing assets** -- there is no
+//! `move_route` -- because a route is the address *of* the thing that answers
+//! it: re-exposing one somewhere else is a different route with a different
+//! history, which is a delete and a create. The wires story 31 draws between a
+//! route row and its target are #433's.
 
 use std::collections::HashMap;
 
@@ -106,6 +143,13 @@ const ACTOR: &str = "user";
 /// out of that array because an index is not a name; a test pins the two
 /// together.
 pub const NAMESPACE: &str = "asset";
+
+/// The namespace and the `knobas.entity.kind` a route is written under.
+///
+/// [`NAMESPACE`]'s twin, and reserved for the same reason: `0006`'s
+/// `item_entity_reserved_chk` has listed `route` since it was written, so no
+/// mirror row can name a `route:` id and no sweep can reach one.
+pub const ROUTE_NAMESPACE: &str = "route";
 
 /// How many history lines the pane asks for.
 ///
@@ -253,6 +297,44 @@ impl Environment {
             .into_iter()
             .find(|environment| environment.as_str() == value)
             .ok_or_else(|| IpcError::internal(format!("unknown environment {value:?}")))
+    }
+}
+
+/// Who can reach a route.
+///
+/// Two values, because the question a reader asks of a URL is *can somebody
+/// outside open this* -- and every finer shade (which VPN, which network,
+/// which allow-list) is a fact with a name of its own and belongs in a
+/// property. `internal` is the default: it is the safe reading of a route
+/// nobody has classified, and `0018`'s `route_visibility_chk` is the same two
+/// spellings, kept in step by
+/// [`tests::every_visibility_is_one_the_schema_accepts`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    #[default]
+    Internal,
+    Public,
+}
+
+impl Visibility {
+    /// Every visibility, for a walk that must not miss one.
+    pub const ALL: [Visibility; 2] = [Visibility::Internal, Visibility::Public];
+
+    /// The stored spelling, which is also the wire value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Visibility::Internal => "internal",
+            Visibility::Public => "public",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, IpcError> {
+        Self::ALL
+            .into_iter()
+            .find(|visibility| visibility.as_str() == value)
+            .ok_or_else(|| IpcError::internal(format!("unknown route visibility {value:?}")))
     }
 }
 
@@ -445,7 +527,65 @@ pub struct AssetDetail {
     pub held_by: Vec<AssetRow>,
     /// What sits directly under it, in the column's own order.
     pub holds: Vec<AssetRow>,
+    /// The routes **this asset exposes** (#432), by name.
+    pub exposes: Vec<RouteRow>,
+    /// The routes whose target is on this asset's containment path -- landing
+    /// on it, on something that holds it, or on something it holds -- nearest
+    /// first (#432). [`ROUTES_REACHABLE`] argues that rule.
+    ///
+    /// A route whose [`target_id`](RouteRow::target_id) is this asset's own id
+    /// lands here; any other target is the asset on the path it lands on, and
+    /// [`target_name`](RouteRow::target_name) names it. That comparison is the
+    /// whole of "reached through something else", so there is no second field
+    /// carrying it.
+    pub reachable_via: Vec<RouteRow>,
     /// This asset's own lines from the activity stream, newest first.
+    pub history: Vec<ActivityRow>,
+}
+
+/// One route, as both ends read it.
+///
+/// The same shape in `exposes` and in `reachable_via`, deliberately: it is one
+/// row in the database and the two lists are two `where` clauses over it, so a
+/// shape per direction would be two things to keep in step for no fact gained.
+/// Both names are resolved by the read, so neither end has to fetch the other
+/// to draw a line.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct RouteRow {
+    /// `route:<uuid>`, and also the id of this route's `knobas.entity` row --
+    /// which is what makes `#/route/<id>` an address (spec §2).
+    pub id: String,
+    /// The asset that exposes it. Never null: a route with nothing answering
+    /// it is not a row this model can hold.
+    pub asset_id: String,
+    /// That asset's name.
+    pub asset_name: String,
+    /// The asset it lands on, or `null` for an endpoint that lands on nothing
+    /// knobas knows.
+    pub target_id: Option<String>,
+    /// That asset's name, `null` with the target.
+    pub target_name: Option<String>,
+    /// What the route is called -- *Gitea*, *TeamCity (tunnel)*.
+    pub name: String,
+    /// The URL or endpoint, carrying its scheme.
+    pub url: String,
+    pub visibility: Visibility,
+    /// The reader's own keys, by key. A route has no type, so every one of
+    /// them is custom -- see [`custom_properties`].
+    pub properties: Vec<AssetProperty>,
+}
+
+/// Everything the pane draws for one route.
+///
+/// Its own history (story 11 applied to the other entity this module writes)
+/// and the row. **No held-by path of its own**: a route sits on the asset that
+/// exposes it, and [`RouteRow::asset_id`] is where the Tree opens -- which is
+/// what makes `#/route/<id>` land at the exposing asset with the route
+/// selected rather than in a surface of its own.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RouteDetail {
+    pub route: RouteRow,
+    /// This route's own lines from the activity stream, newest first.
     pub history: Vec<ActivityRow>,
 }
 
@@ -471,6 +611,35 @@ pub enum AssetEdit {
     },
     Owner {
         value: Option<String>,
+    },
+    Property {
+        key: String,
+        value: Option<PropertyValue>,
+    },
+}
+
+/// One field of a route, and what it is being set to.
+///
+/// [`AssetEdit`]'s shape for [`AssetEdit`]'s reason: one field at a time, one
+/// history line each with a `from` and a `to`, and `null` on the two nullable
+/// fields is an unambiguous **clear**. The asset that exposes a route is not
+/// among them -- see the module docs.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "field", rename_all = "snake_case")]
+pub enum RouteEdit {
+    Name {
+        value: String,
+    },
+    Url {
+        value: String,
+    },
+    /// The asset it lands on; `null` makes it an endpoint that lands on
+    /// nothing knobas knows, which is a legal route.
+    Target {
+        value: Option<String>,
+    },
+    Visibility {
+        value: Visibility,
     },
     Property {
         key: String,
@@ -527,6 +696,114 @@ const ONE: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.envi
 /// The properties bag, read on its own because it is the one column a column
 /// row has no use for.
 const PROPERTIES: &str = "select properties from knobas.asset where id = $1";
+
+/// What one asset **exposes** (#432).
+///
+/// Both names are joined in rather than fetched by the caller: a pane drawing
+/// "Gitea → knobas-gitea" would otherwise need a read per row, and the two
+/// joins are the same index lookups the foreign keys already index. `ta` is a
+/// **left** join because a route with no target is a legal row.
+///
+/// Three statements rather than one spliced constant, for [`CHILDREN`]'s
+/// reason: the SQL audit is over literal text.
+const ROUTES_EXPOSED: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
+            r.visibility, r.properties,
+            ea.name as asset_name, ta.name as target_name
+       from knobas.route r
+       join knobas.asset ea on ea.id = r.asset_id
+       left join knobas.asset ta on ta.id = r.target_id
+      where r.asset_id = $1
+      order by r.name asc, r.id asc";
+
+/// What one asset is **reachable via**: every route whose target sits on this
+/// asset's own containment path -- the asset itself, anything that holds it,
+/// anything it holds (#432).
+///
+/// # Why the path and not only the ancestors
+///
+/// The two documents this ticket answers to read the relation in opposite
+/// directions, and both are true sentences about reachability:
+///
+/// * `CONTEXT.md`, **Route**: *"an asset is reachable via the routes that land
+///   on it **or on something that holds it**"* -- the ancestors. A URL landing
+///   on a VM is how the service inside it is reached.
+/// * Issue #432's acceptance criterion: *"the container reads it under
+///   reachable-via, **and so does the VM that holds the container**"* -- the
+///   descendants. A URL landing on a container is how the machine running it
+///   is reached.
+///
+/// The estate settles it (ADR-0013: the real thing is the witness).
+/// **Every** route in `testenv/hetzner/estate.json` lands on a container, so
+/// under the ancestors alone no server, no engine and no site in the real
+/// estate would ever read a single route -- the pane's *Reachable via* would
+/// be empty on every asset a person actually looks at, and "how is this box
+/// reached" would have no answer. So the rule is the union the two readings
+/// have between them, and it is one rule rather than two: **a route reaches an
+/// asset when its target is on the same containment path**, in either
+/// direction. Nothing else changes; the direction it was reached from is read
+/// off the row by the pane, which has the held-by path already.
+///
+/// **Why the descendants are the whole subtree and not one hop.** The
+/// criterion's own words -- *the VM that holds the container* -- read like one
+/// step, and in the real estate they are not: a container sits inside a
+/// `container_engine` which sits on the `vm`
+/// (`testenv/hetzner/estate.json`: `knobas-teamcity` the container, *Docker
+/// engine (knobas-teamcity)*, `knobas-teamcity` the VM). A one-hop rule would
+/// stop at the engine and answer nothing for the box, which is the question
+/// being asked. There is no honest depth between one and all of them.
+///
+/// The cost is that the estate's **root** reads every route the estate has.
+/// That is the reading taken deliberately rather than a case not thought of:
+/// it is true (everything under it is reached by those routes), it is ordered
+/// nearest-first so the useful rows are at the top, and a cap belongs to the
+/// surface that finds it too long rather than to the read -- the pane draws a
+/// list per asset, and the asset a person works on is never the root.
+///
+/// `up` is [`ANCESTORS`]' walk, starting at the asset **itself** rather than
+/// at its parent, and `down` is [`ROLLUP`]'s subtree walk. `union` rather than
+/// `union all` where they meet: the asset is depth 0 of both and is one row,
+/// not two. A route cannot appear twice -- its one target is either above,
+/// below or the asset, never two of those, because `parent_id` has no cycles.
+///
+/// `order by depth` puts the nearest first, which is the order the question is
+/// asked in: what lands *here* before what lands on the box this is on.
+///
+/// `ta` is an inner join here and a left join in [`ROUTES_EXPOSED`], and that
+/// is not an inconsistency: every row this statement can return has a target,
+/// because `r.target_id = path.id` is what selected it.
+const ROUTES_REACHABLE: &str = "with recursive up (id, parent_id, depth) as (
+         select a.id, a.parent_id, 0 from knobas.asset a where a.id = $1
+         union all
+         select p.id, p.parent_id, up.depth + 1
+           from knobas.asset p join up on p.id = up.parent_id
+     ),
+     down (id, depth) as (
+         select a.id, 0 from knobas.asset a where a.id = $1
+         union all
+         select c.id, down.depth + 1
+           from knobas.asset c join down on c.parent_id = down.id
+     ),
+     path (id, depth) as (
+         select id, depth from up
+         union
+         select id, depth from down
+     )
+     select r.id, r.asset_id, r.target_id, r.name, r.url, r.visibility, r.properties,
+            ea.name as asset_name, ta.name as target_name
+       from path
+       join knobas.route r on r.target_id = path.id
+       join knobas.asset ea on ea.id = r.asset_id
+       join knobas.asset ta on ta.id = r.target_id
+      order by path.depth asc, r.name asc, r.id asc";
+
+/// One route by id.
+const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
+            r.visibility, r.properties,
+            ea.name as asset_name, ta.name as target_name
+       from knobas.route r
+       join knobas.asset ea on ea.id = r.asset_id
+       left join knobas.asset ta on ta.id = r.target_id
+      where r.id = $1";
 
 /// The health rollup for a set of assets: the worst status at or under each
 /// one, the worst status strictly under it, and how many descendants carry a
@@ -745,6 +1022,9 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         .await?
         .try_get("properties")?;
 
+    let exposes = routes(pool, ROUTES_EXPOSED, id).await?;
+    let reachable_via = routes(pool, ROUTES_REACHABLE, id).await?;
+
     let entity = entity_of(id)?;
     let history = knobas_core::activity::recent(pool, HISTORY_LIMIT, Some(&entity)).await?;
 
@@ -755,7 +1035,56 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         asset,
         held_by,
         holds,
+        exposes,
+        reachable_via,
         history,
+    })
+}
+
+/// One route, with its own history -- what `#/route/<id>` opens on.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] for an id no route carries; [`IpcError`] if a read
+/// fails.
+pub async fn get_route(pool: &PgPool, id: &str) -> Result<RouteDetail, IpcError> {
+    let route = one_route(pool, id).await?;
+    let entity = entity_of(id)?;
+    let history = knobas_core::activity::recent(pool, HISTORY_LIMIT, Some(&entity)).await?;
+    Ok(RouteDetail { route, history })
+}
+
+/// [`ROUTES_EXPOSED`] or [`ROUTES_REACHABLE`] for one asset.
+///
+/// The statement is a `&'static str` the caller picks from the two above --
+/// never anything composed -- which is [`set_column`]'s arrangement applied to
+/// the two reads that differ in nothing but their `where` clause.
+async fn routes(
+    pool: &PgPool,
+    statement: &'static str,
+    asset_id: &str,
+) -> Result<Vec<RouteRow>, IpcError> {
+    sqlx::query(statement)
+        .bind(asset_id)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(route_row_of)
+        .collect()
+}
+
+fn route_row_of(row: &sqlx::postgres::PgRow) -> Result<RouteRow, IpcError> {
+    let stored: serde_json::Value = row.try_get("properties")?;
+    Ok(RouteRow {
+        id: row.try_get("id")?,
+        asset_id: row.try_get("asset_id")?,
+        asset_name: row.try_get("asset_name")?,
+        target_id: row.try_get("target_id")?,
+        target_name: row.try_get("target_name")?,
+        name: row.try_get("name")?,
+        url: row.try_get("url")?,
+        visibility: Visibility::parse(&row.try_get::<String, _>("visibility")?)?,
+        properties: custom_properties(&stored),
     })
 }
 
@@ -785,25 +1114,7 @@ pub fn properties_of(type_id: &str, stored: &serde_json::Value) -> Vec<AssetProp
         }
     }
 
-    if let Some(bag) = bag {
-        // `serde_json::Map` iterates in key order under the default feature
-        // set, and the sort below does not depend on that: a custom list whose
-        // order moved between reads would make the pane flicker.
-        let mut custom: Vec<(&String, &serde_json::Value)> = bag
-            .iter()
-            .filter(|(key, _)| !claimed.contains(&key.as_str()))
-            .collect();
-        custom.sort_by(|left, right| left.0.cmp(right.0));
-        for (key, raw) in custom {
-            out.push(AssetProperty {
-                key: key.clone(),
-                label: key.clone(),
-                value: serde_json::from_value(raw.clone()).ok(),
-                custom: true,
-            });
-        }
-    }
-
+    out.extend(unclaimed(stored, &claimed));
     out
 }
 
@@ -910,6 +1221,41 @@ pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>,
             .then_with(|| left.asset.id.cmp(&right.asset.id))
     });
     Ok(out)
+}
+
+/// The properties of a thing that declares none: every key in the bag, by key.
+///
+/// A route's whole property list (#432). It is [`properties_of`] with the
+/// schema half missing rather than a second walk of the bag, because "custom
+/// keys, in key order, labelled by themselves" is one rule and the pane draws
+/// both lists with one component.
+#[must_use]
+pub fn custom_properties(stored: &serde_json::Value) -> Vec<AssetProperty> {
+    unclaimed(stored, &[])
+}
+
+/// The bag's keys that no schema claimed, in key order.
+fn unclaimed(stored: &serde_json::Value, claimed: &[&str]) -> Vec<AssetProperty> {
+    let Some(bag) = stored.as_object() else {
+        return Vec::new();
+    };
+    // `serde_json::Map` iterates in key order under the default feature set,
+    // and the sort below does not depend on that: a custom list whose order
+    // moved between reads would make the pane flicker.
+    let mut custom: Vec<(&String, &serde_json::Value)> = bag
+        .iter()
+        .filter(|(key, _)| !claimed.contains(&key.as_str()))
+        .collect();
+    custom.sort_by(|left, right| left.0.cmp(right.0));
+    custom
+        .into_iter()
+        .map(|(key, raw)| AssetProperty {
+            key: key.clone(),
+            label: key.clone(),
+            value: serde_json::from_value(raw.clone()).ok(),
+            custom: true,
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1231,12 +1577,24 @@ pub async fn move_to(
     })
 }
 
-/// Delete a **leaf**.
+/// Delete a **leaf** that exposes nothing.
 ///
 /// An asset that holds anything is refused with a `conflict` naming what it
 /// holds: deleting a subtree by deleting its root is the one destructive
 /// action nobody asks for twice, and `0017` leaves the foreign key with no
-/// cascade as the floor under this refusal.
+/// cascade as the floor under this refusal. An asset that still **exposes
+/// routes** is refused the same way and for the same reason, with `0018`'s
+/// own cascade-less foreign key underneath it -- a route whose exposing asset
+/// is gone is not a row this model can hold, and the pane's *Exposes* list is
+/// where the reader sees what to delete first.
+///
+/// What is **not** refused is an asset some route **lands on**. That route is
+/// somebody else's row, the model says an endpoint landing on nothing knobas
+/// knows is still a route, and refusing here would make a container
+/// undeletable because a proxy three branches away points at it. Those targets
+/// are cleared in this transaction, each with a history line of its own on the
+/// route -- `0018`'s `on delete set null` is the floor under that rather than
+/// the road to it, because a constraint cannot write the line.
 ///
 /// The `knobas.asset` row goes and the **entity row is tombstoned**, the
 /// treatment `knobas_core::note::delete` gives a note: links drawn to this
@@ -1263,7 +1621,318 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<Written<()>, IpcError> {
         )));
     }
 
+    let exposed: i64 = sqlx::query("select count(*) as n from knobas.route where asset_id = $1")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?
+        .try_get("n")?;
+    if exposed > 0 {
+        return Err(IpcError::conflict(format!(
+            "{:?} still exposes {exposed} route(s) -- delete them first",
+            current.name
+        )));
+    }
+
+    let mut lines = Vec::new();
+    // The routes that land on it lose their target rather than blocking the
+    // delete, and each one says so in its own history.
+    let orphaned = sqlx::query(
+        "update knobas.route set target_id = null, updated_at = now()
+          where target_id = $1 returning id",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for row in &orphaned {
+        let route = entity_of(&row.try_get::<String, _>("id")?)?;
+        lines.push(
+            knobas_core::activity::record_with(
+                &mut *tx,
+                ACTOR,
+                "edited",
+                Some(&route),
+                serde_json::json!({ "field": "target", "from": id, "to": null }),
+            )
+            .await?,
+        );
+    }
+
     sqlx::query("delete from knobas.asset where id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("update knobas.entity set deleted_at = now(), updated_at = now() where id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    let entity = entity_of(id)?;
+    lines.push(
+        knobas_core::activity::record_with(
+            &mut *tx,
+            ACTOR,
+            "deleted",
+            Some(&entity),
+            serde_json::json!({ "asset": { "name": current.name, "type": current.type_id } }),
+        )
+        .await?,
+    );
+    tx.commit().await?;
+
+    Ok(Written {
+        value: (),
+        activity: lines,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Routes: writing (#432)
+// ---------------------------------------------------------------------------
+
+/// Expose a route on `asset_id`.
+///
+/// The id is minted here, [`create`]'s rule for [`create`]'s reason: creating
+/// is not naming, and an import keeps the estate file's id instead (#439).
+///
+/// **A route may land on the asset that exposes it.** A reverse proxy's own
+/// dashboard is exposed by the proxy and reached at the proxy, and the estate
+/// this model answers to has one; so there is no self-target refusal, and the
+/// pane draws that route under both *Exposes* and *Reachable via*, which is
+/// what it is.
+///
+/// # Errors
+///
+/// [`IpcError::invalid`] for a blank name, a URL with no scheme, or a property
+/// value nothing could read back; [`IpcError::not_found`] for an exposing
+/// asset or a target that is not there.
+pub async fn create_route(
+    pool: &PgPool,
+    asset_id: &str,
+    name: &str,
+    url: &str,
+    target_id: Option<&str>,
+    visibility: Visibility,
+    properties: &[(String, PropertyValue)],
+) -> Result<Written<RouteRow>, IpcError> {
+    let name = vet_name_of("a route", name)?;
+    let url = vet_url(url)?;
+    let bag = vet_custom_properties(properties)?;
+
+    let id = EntityRef::new(ROUTE_NAMESPACE, &Uuid::new_v4().to_string()).to_string();
+    let mut tx = pool.begin().await?;
+
+    // Normalised the way `RouteEdit::Target` normalises it: a blank string is
+    // the wire's other spelling of "no target", and the two commands reading
+    // one value two ways -- a clear on the edit, `no asset  for a route to
+    // land on` on the create -- is the kind of disagreement nobody finds
+    // until a dialog sends an empty field.
+    let target_id = target_id.map(str::trim).filter(|value| !value.is_empty());
+
+    must_exist(&mut tx, asset_id, "to expose a route on").await?;
+    if let Some(target) = target_id {
+        must_exist(&mut tx, target, "for a route to land on").await?;
+    }
+
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title, updated_at) values ($1, $2, $3, now())",
+    )
+    .bind(&id)
+    .bind(ROUTE_NAMESPACE)
+    .bind(&name)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "insert into knobas.route (id, asset_id, target_id, name, url, visibility, properties)
+         values ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(&id)
+    .bind(asset_id)
+    .bind(target_id)
+    .bind(&name)
+    .bind(&url)
+    .bind(visibility.as_str())
+    .bind(serde_json::Value::Object(bag))
+    .execute(&mut *tx)
+    .await?;
+
+    let entity = entity_of(&id)?;
+    let line = knobas_core::activity::record_with(
+        &mut *tx,
+        ACTOR,
+        "created",
+        Some(&entity),
+        serde_json::json!({
+            "route": { "name": name, "url": url, "asset": asset_id, "target": target_id },
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Written {
+        value: one_route(pool, &id).await?,
+        activity: vec![line],
+    })
+}
+
+/// Apply `edits` to a route, one history line each.
+///
+/// [`edit`]'s rules, applied to the other entity this module writes: in order,
+/// in one transaction, and an edit that changes nothing writes no line.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] for an id no route carries or a target that is not
+/// there; [`IpcError::invalid`] for a blank name, a URL with no scheme or a
+/// property value nothing could read back.
+pub async fn edit_route(
+    pool: &PgPool,
+    id: &str,
+    edits: &[RouteEdit],
+) -> Result<Written<RouteRow>, IpcError> {
+    let mut tx = pool.begin().await?;
+    let current = locked_route(&mut tx, id).await?;
+    let mut lines = Vec::new();
+
+    for change in edits {
+        let line = match change {
+            RouteEdit::Name { value } => {
+                let name = vet_name_of("a route", value)?;
+                if name == current.name {
+                    continue;
+                }
+                set_route_column(&mut tx, SET_ROUTE_NAME, id, Some(&name)).await?;
+                sqlx::query(
+                    "update knobas.entity set title = $2, updated_at = now() where id = $1",
+                )
+                .bind(id)
+                .bind(&name)
+                .execute(&mut *tx)
+                .await?;
+                Some((
+                    "renamed",
+                    serde_json::json!({ "field": "name", "from": current.name, "to": name }),
+                ))
+            }
+            RouteEdit::Url { value } => {
+                let url = vet_url(value)?;
+                if url == current.url {
+                    continue;
+                }
+                set_route_column(&mut tx, SET_ROUTE_URL, id, Some(&url)).await?;
+                Some((
+                    "edited",
+                    serde_json::json!({ "field": "url", "from": current.url, "to": url }),
+                ))
+            }
+            RouteEdit::Target { value } => {
+                let target = value.as_deref().map(str::trim).filter(|v| !v.is_empty());
+                if target == current.target_id.as_deref() {
+                    continue;
+                }
+                if let Some(target) = target {
+                    must_exist(&mut tx, target, "for a route to land on").await?;
+                }
+                set_route_column(&mut tx, SET_ROUTE_TARGET, id, target).await?;
+                Some((
+                    "edited",
+                    serde_json::json!({
+                        "field": "target", "from": current.target_id, "to": target,
+                    }),
+                ))
+            }
+            RouteEdit::Visibility { value } => {
+                if *value == current.visibility {
+                    continue;
+                }
+                set_route_column(&mut tx, SET_ROUTE_VISIBILITY, id, Some(value.as_str())).await?;
+                Some((
+                    "edited",
+                    serde_json::json!({
+                        "field": "visibility",
+                        "from": current.visibility.as_str(),
+                        "to": value.as_str(),
+                    }),
+                ))
+            }
+            RouteEdit::Property { key, value } => {
+                let key = key.trim();
+                if key.is_empty() {
+                    return Err(IpcError::invalid("a property needs a key"));
+                }
+                if let Some(value) = value {
+                    value.vet(key)?;
+                }
+                let before = current.properties.get(key).cloned();
+                let after = value.as_ref().map(stored_value).transpose()?;
+                if before == after {
+                    continue;
+                }
+                match &after {
+                    Some(after) => {
+                        sqlx::query(
+                            "update knobas.route
+                                set properties = properties || jsonb_build_object($2::text, $3::jsonb),
+                                    updated_at = now()
+                              where id = $1",
+                        )
+                        .bind(id)
+                        .bind(key)
+                        .bind(after)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    None => {
+                        sqlx::query(
+                            "update knobas.route set properties = properties - $2::text,
+                                    updated_at = now()
+                              where id = $1",
+                        )
+                        .bind(id)
+                        .bind(key)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
+                Some((
+                    "edited",
+                    serde_json::json!({ "field": "property", "key": key, "from": before, "to": after }),
+                ))
+            }
+        };
+
+        if let Some((verb, detail)) = line {
+            let entity = entity_of(id)?;
+            lines.push(
+                knobas_core::activity::record_with(&mut *tx, ACTOR, verb, Some(&entity), detail)
+                    .await?,
+            );
+        }
+    }
+    tx.commit().await?;
+
+    Ok(Written {
+        value: one_route(pool, id).await?,
+        activity: lines,
+    })
+}
+
+/// Delete a route.
+///
+/// No `conflict` to raise: nothing hangs off a route, which is what makes it
+/// the one thing in the estate that deletes without a question. The
+/// `knobas.route` row goes and the **entity row is tombstoned**, the treatment
+/// [`delete`] gives an asset and `knobas_core::note::delete` gives a note, so
+/// links drawn to the route stay visible and marked rather than dangling.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] for an id no route carries.
+pub async fn delete_route(pool: &PgPool, id: &str) -> Result<Written<()>, IpcError> {
+    let mut tx = pool.begin().await?;
+    let current = locked_route(&mut tx, id).await?;
+
+    sqlx::query("delete from knobas.route where id = $1")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -1278,7 +1947,7 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<Written<()>, IpcError> {
         ACTOR,
         "deleted",
         Some(&entity),
-        serde_json::json!({ "asset": { "name": current.name, "type": current.type_id } }),
+        serde_json::json!({ "route": { "name": current.name, "url": current.url } }),
     )
     .await?;
     tx.commit().await?;
@@ -1478,6 +2147,174 @@ fn no_such_asset(id: &str) -> IpcError {
     IpcError::not_found(format!("no asset {id}"))
 }
 
+/// The same, for a route.
+fn no_such_route(id: &str) -> IpcError {
+    IpcError::not_found(format!("no route {id}"))
+}
+
+// ---------------------------------------------------------------------------
+// The plumbing the route writers share (#432)
+// ---------------------------------------------------------------------------
+
+/// The stored route, as its writers need it.
+struct StoredRoute {
+    target_id: Option<String>,
+    name: String,
+    url: String,
+    visibility: Visibility,
+    properties: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Read a route inside a transaction and hold it until the transaction ends.
+///
+/// `for update`, for [`locked`]'s reason: every writer here reads a value,
+/// decides against it and writes, and two edits racing on one route would
+/// otherwise each record a change from the value the other one replaced.
+async fn locked_route(
+    tx: &mut Transaction<'_, Postgres>,
+    id: &str,
+) -> Result<StoredRoute, IpcError> {
+    let row = sqlx::query(
+        "select target_id, name, url, visibility, properties
+           from knobas.route where id = $1 for update",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| no_such_route(id))?;
+
+    let properties: serde_json::Value = row.try_get("properties")?;
+    Ok(StoredRoute {
+        target_id: row.try_get("target_id")?,
+        name: row.try_get("name")?,
+        url: row.try_get("url")?,
+        visibility: Visibility::parse(&row.try_get::<String, _>("visibility")?)?,
+        properties: match properties {
+            serde_json::Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        },
+    })
+}
+
+/// One route as the wire carries it, after a write.
+async fn one_route(pool: &PgPool, id: &str) -> Result<RouteRow, IpcError> {
+    let row = sqlx::query(ROUTE_ONE)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| no_such_route(id))?;
+    route_row_of(&row)
+}
+
+/// Refuse an asset id nothing answers to, saying what it was wanted **for**.
+///
+/// Named for what it does rather than for what it asks: it *refuses*, and it
+/// takes a lock while it is at it, which is not what a reader expects of a
+/// function called `exists`. The neighbours it sits among are `vet_name_of`,
+/// `vet_url` and `no_such_asset`.
+///
+/// `for update`, for [`path_below`]'s reason one row over: a route created
+/// against an asset deleted in a transaction committing in between would leave
+/// the insert failing on the foreign key with Postgres' own sentence instead
+/// of this one. The lock is what makes the check and the insert one decision.
+async fn must_exist(
+    tx: &mut Transaction<'_, Postgres>,
+    asset_id: &str,
+    wanted_for: &str,
+) -> Result<(), IpcError> {
+    sqlx::query("select 1 as one from knobas.asset where id = $1 for update")
+        .bind(asset_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .map(|_| ())
+        .ok_or_else(|| IpcError::not_found(format!("no asset {asset_id} {wanted_for}")))
+}
+
+/// The four statements that set a single route column, each named where it is
+/// used -- [`SET_STATUS`]'s arrangement, for its reason.
+const SET_ROUTE_NAME: &str = "update knobas.route set name = $2, updated_at = now() where id = $1";
+const SET_ROUTE_URL: &str = "update knobas.route set url = $2, updated_at = now() where id = $1";
+const SET_ROUTE_TARGET: &str =
+    "update knobas.route set target_id = $2, updated_at = now() where id = $1";
+// No `coalesce` here, unlike `SET_STATUS`: a status edit carries an `Option`
+// and a cleared one means `none`, while a route's visibility is never cleared
+// -- `RouteEdit::Visibility` carries the value itself -- so a default in the
+// statement would be an arm no caller can reach.
+const SET_ROUTE_VISIBILITY: &str =
+    "update knobas.route set visibility = $2, updated_at = now() where id = $1";
+
+/// Run one of the four `SET_ROUTE_*` statements.
+async fn set_route_column(
+    tx: &mut Transaction<'_, Postgres>,
+    statement: &'static str,
+    id: &str,
+    value: Option<&str>,
+) -> Result<(), IpcError> {
+    sqlx::query(statement)
+        .bind(id)
+        .bind(value)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// A URL or endpoint, refused when it is neither.
+///
+/// **A scheme and no more.** `https://kuma.local`, `postgres://10.0.0.20:5432`
+/// and `ssh://hel1` are all routes the estate actually has, so this is not the
+/// http(s) rule [`PropertyValue::vet`] applies to a *url property* -- that one
+/// guards an *open URL* action, and this one guards a fact about a machine.
+/// What it does refuse is a bare host, because "reachable at kuma.local" does
+/// not say how, and whitespace, because a URL with a space in it is a line
+/// somebody pasted two of.
+fn vet_url(url: &str) -> Result<String, IpcError> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(IpcError::invalid("a route needs a URL"));
+    }
+    if url.split_once("://").is_none_or(|(scheme, rest)| {
+        scheme.is_empty()
+            || !scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+            || rest.is_empty()
+    }) {
+        return Err(IpcError::invalid(format!(
+            "{url:?} carries no scheme -- a route is a URL or an endpoint, \
+             `https://…` or `postgres://…`, not a bare host"
+        )));
+    }
+    if url.chars().any(char::is_whitespace) {
+        return Err(IpcError::invalid(format!(
+            "{url:?} has whitespace in it, so it is not one address"
+        )));
+    }
+    Ok(url.to_owned())
+}
+
+/// The properties of a thing with no schema to check them against.
+///
+/// [`vet_properties`] without the type: a route declares nothing, so every key
+/// is the reader's own and any of the four kinds fits it. The *values* are
+/// vetted exactly as an asset's are -- a blank text, a non-finite number, a
+/// date that is not a date and a URL with no scheme are refused here too,
+/// because those rules are about what can be read back and not about who
+/// declared the key.
+fn vet_custom_properties(
+    properties: &[(String, PropertyValue)],
+) -> Result<serde_json::Map<String, serde_json::Value>, IpcError> {
+    let mut bag = serde_json::Map::new();
+    for (key, value) in properties {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(IpcError::invalid("a property needs a key"));
+        }
+        value.vet(key)?;
+        bag.insert(key.to_owned(), stored_value(value)?);
+    }
+    Ok(bag)
+}
+
 /// The asset's entity reference, for the activity line every mutation writes.
 ///
 /// The failure is `internal` rather than `invalid` because the id was read
@@ -1508,9 +2345,19 @@ fn vet_type(type_id: &str) -> Result<&'static AssetType, IpcError> {
 }
 
 fn vet_name(name: &str) -> Result<String, IpcError> {
+    vet_name_of("an asset", name)
+}
+
+/// The same rule, said about whichever entity is being named.
+///
+/// `what` is the article and the noun -- *an asset*, *a route* -- because the
+/// refusal is read by somebody who has just pressed Save on a dialog, and
+/// "an asset needs a name" over a route's name box is a sentence about
+/// something they were not doing.
+fn vet_name_of(what: &str, name: &str) -> Result<String, IpcError> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(IpcError::invalid("an asset needs a name"));
+        return Err(IpcError::invalid(format!("{what} needs a name")));
     }
     Ok(name.to_owned())
 }
@@ -1559,6 +2406,9 @@ mod tests {
     const MIGRATION: &str =
         include_str!("../../../knobas-db/migrations/0017_the_estate_and_its_assets.sql");
 
+    const ROUTE_MIGRATION: &str =
+        include_str!("../../../knobas-db/migrations/0018_the_route_an_asset_exposes.sql");
+
     /// The spellings the wire uses and the ones the schema accepts are one
     /// list in two languages, and neither may grow without the other.
     ///
@@ -1591,12 +2441,31 @@ mod tests {
         assert_eq!(listed.len(), Environment::ALL.len(), "{listed:?}");
     }
 
+    /// `0018`'s vocabulary, held to the wire's the way the two above are.
+    #[test]
+    fn every_visibility_is_one_the_schema_accepts() {
+        let listed = vocabulary(ROUTE_MIGRATION, "route_visibility_chk");
+        for visibility in Visibility::ALL {
+            assert!(
+                listed.contains(&visibility.as_str()),
+                "{:?} is on the wire and not in the constraint: {listed:?}",
+                visibility.as_str()
+            );
+        }
+        assert_eq!(listed.len(), Visibility::ALL.len(), "{listed:?}");
+    }
+
     /// The `'a','b'` list on the line naming `constraint`.
+    ///
+    /// Two migrations are read through this now (`0017`'s two vocabularies and
+    /// `0018`'s), so the panics name the constraint rather than a file: a
+    /// message that said `0017` while reading `0018` would send the next
+    /// reader to the wrong file on the one day it fires.
     fn vocabulary<'m>(migration: &'m str, constraint: &str) -> Vec<&'m str> {
         let line = migration
             .lines()
             .find(|line| line.contains(constraint))
-            .unwrap_or_else(|| panic!("{constraint} is missing from 0017"));
+            .unwrap_or_else(|| panic!("{constraint} is missing from its migration"));
         let (_, rest) = line
             .rsplit_once(" in (")
             .unwrap_or_else(|| panic!("{constraint} does not list its values: {line}"));
@@ -1640,6 +2509,15 @@ mod tests {
             "app/src/lib/shell/timer.ts does not declare `{declaration}`, so the \
              top strip is looking up a namespace the estate no longer mints"
         );
+    }
+
+    /// And the route's, which is the same argument for the other entity this
+    /// module writes: a `route:` id no mirror row may name is a route no
+    /// sweep can reach.
+    #[test]
+    fn the_route_namespace_is_one_knobas_core_reserves() {
+        assert!(knobas_core::entity::is_reserved_namespace(ROUTE_NAMESPACE));
+        assert!(knobas_core::entity::is_owned_kind(ROUTE_NAMESPACE));
     }
 
     fn text(value: &str) -> PropertyValue {
@@ -1802,6 +2680,118 @@ mod tests {
     fn a_blank_name_is_refused_and_a_padded_one_is_trimmed() {
         assert!(vet_name("  \t ").is_err());
         assert_eq!(vet_name("  vm-db-01 ").unwrap(), "vm-db-01");
+        // And the refusal names the thing being named, which is the whole
+        // point of the second argument.
+        assert!(
+            vet_name("").unwrap_err().message.contains("an asset"),
+            "the asset's refusal says asset"
+        );
+        assert!(
+            vet_name_of("a route", " ")
+                .unwrap_err()
+                .message
+                .contains("a route"),
+            "the route's refusal says route"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // #432: routes
+    // -----------------------------------------------------------------
+
+    /// A route's address is a URL or an endpoint, and the rule is *a scheme*.
+    ///
+    /// The three accepted spellings are ones the real estate holds or plainly
+    /// will (`testenv/hetzner/estate.json`'s tunnels are `http://`, its
+    /// databases speak `postgres://`, every server is reached over `ssh://`),
+    /// and the refusals are the two ways a reader gets it wrong: a bare host,
+    /// which does not say *how* the thing is reached, and a pasted line with
+    /// whitespace in it, which is not one address.
+    ///
+    /// The last case is the one worth having: this is deliberately **not**
+    /// `PropertyValue::vet`'s http(s) rule. That one guards the *open URL*
+    /// action; a route is a fact about a machine, and a database endpoint is
+    /// the commonest route there is that no browser can open.
+    #[test]
+    fn a_route_url_needs_a_scheme_and_nothing_more() {
+        for good in [
+            "https://kuma.local",
+            "postgres://10.20.4.20:5432",
+            "ssh://hel1",
+            "  http://127.0.0.1:3000/  ",
+        ] {
+            assert_eq!(vet_url(good).unwrap(), good.trim(), "{good:?} is a route");
+        }
+        for bad in ["", "   ", "kuma.local", "://nowhere", "https://", "http:/x"] {
+            assert!(vet_url(bad).is_err(), "{bad:?} is not an address");
+        }
+        let spaced = vet_url("https://kuma.local /health").unwrap_err();
+        assert!(spaced.message.contains("whitespace"), "{}", spaced.message);
+        assert_eq!(spaced.code, crate::IpcErrorCode::Invalid);
+    }
+
+    /// A route declares nothing, so every key it carries is the reader's own.
+    ///
+    /// The same list [`properties_of`] draws for the custom half of an asset,
+    /// which is the point of there being one walk: the pane draws both with
+    /// one component, and a route's certificate expiry is a property like any
+    /// other.
+    #[test]
+    fn a_routes_properties_are_all_custom_in_key_order() {
+        let listed = custom_properties(&stored(&[
+            ("opened_by", text("tunnel up")),
+            (
+                "cert_expires",
+                PropertyValue::Date {
+                    value: "2026-12-01".to_owned(),
+                },
+            ),
+        ]));
+        assert_eq!(
+            listed
+                .iter()
+                .map(|p| (p.key.as_str(), p.custom))
+                .collect::<Vec<_>>(),
+            [("cert_expires", true), ("opened_by", true)],
+            "by key, and every one of them the reader's own"
+        );
+        assert_eq!(
+            listed[0].label, "cert_expires",
+            "a custom key labels itself"
+        );
+        // And the same two rules a bag that is not a bag gets.
+        assert!(custom_properties(&serde_json::json!("not an object")).is_empty());
+        assert_eq!(
+            custom_properties(&serde_json::json!({ "port": [] }))[0].value,
+            None,
+            "an unreadable value reads as unset"
+        );
+    }
+
+    /// A route's property values are vetted the way an asset's are, and
+    /// against no schema.
+    ///
+    /// Both halves matter: the *value* rules are about what can be read back
+    /// and apply everywhere, and the *schema* rule cannot apply here because
+    /// a route has no type -- so a key called `port` may be text on one route
+    /// and a number on another, which is what an asset's declared `port`
+    /// may not be.
+    #[test]
+    fn a_routes_property_is_vetted_for_its_value_and_against_no_schema() {
+        assert!(
+            vet_custom_properties(&[("port".to_owned(), text("8080"))]).is_ok(),
+            "no type declares a route's `port`, so text fits"
+        );
+        assert!(
+            vet_custom_properties(&[("port".to_owned(), PropertyValue::Number { value: 8080.0 })])
+                .is_ok()
+        );
+        let blank = vet_custom_properties(&[("note".to_owned(), text("  "))]).unwrap_err();
+        assert_eq!(blank.code, crate::IpcErrorCode::Invalid);
+        assert!(
+            vet_custom_properties(&[(" ".to_owned(), text("x"))]).is_err(),
+            "a property needs a key"
+        );
     }
 
     // -----------------------------------------------------------------

@@ -299,6 +299,11 @@ pub fn run() {
             commands::assets::asset_types,
             // #434, appended after #428's group for the same reason.
             commands::assets::context_assets,
+            // #432's routes, appended after those.
+            commands::assets::get_route,
+            commands::assets::create_route,
+            commands::assets::edit_route,
+            commands::assets::delete_route,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -329,6 +329,8 @@ vi.mock("./lib/ipc/assets", () => ({
       properties: [],
       held_by: asset.parent_id === null ? [] : [SITE],
       holds: asset.id === SITE.id ? [VM] : [],
+      exposes: [],
+      reachable_via: [],
       history: [],
       effective_environment: null,
       effective_owner: null,
@@ -347,6 +349,14 @@ vi.mock("./lib/ipc/assets", () => ({
   editAsset: () => Promise.reject(new Error("no estate writes in this test")),
   moveAsset: () => Promise.reject(new Error("no estate writes in this test")),
   deleteAsset: () => Promise.reject(new Error("no estate writes in this test")),
+  // The routes an asset exposes and is reached by (#432). Here for
+  // `contextAssets`' reason: the Tree imports all four at module scope, and a
+  // mock short of an export throws inside the view's effect rather than
+  // failing as a missing feature.
+  getRoute: () => Promise.reject(new Error("no route in this test")),
+  createRoute: () => Promise.reject(new Error("no estate writes in this test")),
+  editRoute: () => Promise.reject(new Error("no estate writes in this test")),
+  deleteRoute: () => Promise.reject(new Error("no estate writes in this test")),
 }));
 
 /**

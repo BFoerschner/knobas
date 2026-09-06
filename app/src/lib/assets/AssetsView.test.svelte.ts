@@ -20,7 +20,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
-import type { AssetDetail, AssetProperty, AssetRow } from "../ipc/assets";
+import type { AssetDetail, AssetProperty, AssetRow, RouteRow } from "../ipc/assets";
 import { DEBOUNCE_MS } from "../launcher";
 import { createRouter } from "../shell/router.svelte";
 import AssetsView from "./AssetsView.svelte";
@@ -106,6 +106,66 @@ const GITEA_DB = row({
   has_children: false,
 });
 const ESTATE = [SITE, VM, SIBLING, CONTAINER, GITEA, GITEA_DB];
+
+/**
+ * The routes this corner of the estate exposes (#432).
+ *
+ * Two of them, on the *other* VM so that the container's own pane and the
+ * proxy's are different panes: one landing on `gitea` and one landing on
+ * nothing. The pair is what makes both halves of the pane assertable — a
+ * fixture with one targeted route could not tell "exposes" from "reachable
+ * via" apart on the exposing asset, and one with no untargeted route could
+ * not witness the endpoint case at all.
+ */
+const GITEA_ROUTE: RouteRow = {
+  id: "route:gitea",
+  asset_id: SIBLING.id,
+  asset_name: SIBLING.name,
+  target_id: GITEA.id,
+  target_name: GITEA.name,
+  name: "Gitea",
+  url: "http://127.0.0.1:3000/",
+  visibility: "public",
+  properties: [
+    { key: "opened_by", label: "opened_by", value: { kind: "text", value: "compose" }, custom: true },
+  ],
+};
+const DASHBOARD_ROUTE: RouteRow = {
+  id: "route:dashboard",
+  asset_id: SIBLING.id,
+  asset_name: SIBLING.name,
+  target_id: null,
+  target_name: null,
+  name: "Traefik dashboard",
+  url: "http://traefik.hel1.example:8080/dashboard",
+  visibility: "internal",
+  properties: [],
+};
+const ROUTES = [DASHBOARD_ROUTE, GITEA_ROUTE];
+
+/**
+ * `assets::ROUTES_REACHABLE`'s rule, as the fake bridge answers it: every
+ * route whose target is on this asset's containment path, above it or below.
+ *
+ * A copy of the rule and not of its answer, for `inForce`'s reason -- the
+ * seam under test is the *pane*, and a hard-coded list would draw the right
+ * words for the wrong asset.
+ */
+function reachableVia(asset: AssetRow, heldBy: AssetRow[], estate: AssetRow[]): RouteRow[] {
+  const holds = (root: string, id: string): boolean => {
+    for (let at = estate.find((candidate) => candidate.id === id); at !== undefined; ) {
+      if (at.id === root) return true;
+      at = estate.find((candidate) => candidate.id === at?.parent_id);
+    }
+    return false;
+  };
+  const path = new Set([asset.id, ...heldBy.map((held) => held.id)]);
+  return ROUTES.filter(
+    (route) =>
+      route.target_id !== null &&
+      (path.has(route.target_id) || holds(asset.id, route.target_id)),
+  );
+}
 
 function row(over: Partial<AssetRow> & Pick<AssetRow, "id" | "name">): AssetRow {
   return {
@@ -196,6 +256,8 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
     effective_owner: inForce(asset, heldBy, (candidate) => candidate.owner),
     held_by: heldBy,
     holds: estate.filter((candidate) => candidate.parent_id === asset.id),
+    exposes: ROUTES.filter((route) => route.asset_id === asset.id),
+    reachable_via: reachableVia(asset, heldBy, estate),
     history:
       asset.id === CONTAINER.id
         ? [
@@ -243,6 +305,7 @@ let scrolled: ScrollIntoViewOptions[] = [];
 function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
   const searched: SearchQuery[] = [];
+  const opened: string[] = [];
   location.hash = hash;
   const router = createRouter();
   app = mount(AssetsView, {
@@ -288,11 +351,26 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
             return Promise.reject(cause);
           }
         },
+        getRoute: (routeId: string) => {
+          const route = ROUTES.find((candidate) => candidate.id === routeId);
+          return route === undefined
+            ? Promise.reject({ code: "not_found", message: `no route ${routeId}` })
+            : Promise.resolve({ route, history: [] });
+        },
+        // The OS browser, for `assetTypes`' reason above: this file is about
+        // the read and presses no route's URL, but a port left out falls
+        // through to the real `openExternal` and the first test that ever did
+        // would hand the URL to `@tauri-apps/plugin-opener`. Pressing it is
+        // `AssetsView.write.test.svelte.ts`' claim.
+        openExternal: (url: string) => {
+          opened.push(url);
+          return Promise.resolve();
+        },
       },
     },
   });
   flushSync();
-  return { router, asked, searched };
+  return { router, asked, searched, opened };
 }
 
 /** What a test may put in front of the view besides the estate. */
@@ -994,4 +1072,112 @@ test("clicking a spine anchors this path and not the next one", async () => {
   await vi.waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
   expect(spines()).toEqual(["hel1"]);
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
+});
+
+/**
+ * **Both ends of a route, in the pane of the asset each end is about** (#432).
+ *
+ * The exposing VM lists what it offers; the container the route lands on lists
+ * how it is reached, with the exposing asset named. The untargeted route is
+ * the control in the same fixture: it is under *Exposes* and reaches nobody,
+ * so a pane that put every route in both lists fails here.
+ */
+test("the pane draws what an asset exposes and what reaches it", async () => {
+  render("#/asset/asset:vm-app-02");
+  await vi.waitFor(() => expect(text()).toContain("Exposes"));
+
+  const exposing = text();
+  expect(exposing).toContain("Gitea");
+  expect(exposing).toContain("http://127.0.0.1:3000/");
+  // A public route says so; an internal one is the unmarked default.
+  expect(exposing).toContain("public");
+  expect(exposing).toContain("Traefik dashboard");
+  expect(exposing).toContain("lands on nothing knobas knows");
+  // A route's properties are the reader's own and are drawn as they are.
+  expect(exposing).toContain("opened_by compose");
+  // The VM holds `gitea`, so the route landing on it also reaches the VM --
+  // and the pane says which end that is.
+  expect(exposing).toContain("inside, on gitea");
+
+});
+
+/**
+ * The other end of the same pair, in a pane of its own so that what is on
+ * screen is one asset's: the container the route lands on says *lands here*
+ * and names who offers it, and the untargeted route — which reaches nobody —
+ * is not on this pane at all.
+ */
+test("the pane of the asset a route lands on names the end it came from", async () => {
+  render("#/asset/asset:gitea");
+  await vi.waitFor(() => expect(text()).toContain("Reachable via"));
+
+  const landing = text();
+  expect(landing).toContain("lands here");
+  expect(landing).toContain("exposed by vm-app-02");
+  expect(landing).toContain("Exposes No routes.");
+  // The endpoint lands on nothing, so it reaches nobody and is nowhere here.
+  expect(landing).not.toContain("Traefik dashboard");
+});
+
+/**
+ * **A route's address opens the Tree at the asset exposing it, with the route
+ * selected** — this ticket's third criterion, and story 14's point: a ticket
+ * about a certificate links to the route whose certificate it is, and the link
+ * has to land somewhere that says what the route belongs to.
+ *
+ * The address carries no asset, so the columns below are the proof that the
+ * view resolved one: `#/route/gitea` draws `hel1 / vm-app-02` from nothing but
+ * the route's own read.
+ */
+test("a route's address opens the Tree at the asset that exposes it", async () => {
+  const { router, asked } = render("#/route/route:gitea");
+
+  // Three columns: the estate, what the site holds, and what the *exposing*
+  // asset holds — the layout `#/asset/asset:vm-app-02` draws, from an address
+  // that named no asset at all.
+  await vi.waitFor(() =>
+    expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]),
+  );
+  expect(marked()).toEqual(["hel1", "vm-app-02", null]);
+  expect(asked).toContain(SITE.id);
+  // The address is kept as the route's: a reader who copied this link must be
+  // able to hand it on, and the pane marks the route it names.
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+    routeId: "route:gitea",
+  });
+  // Marked in **both** lists, and that is the fixture rather than a bug: the
+  // VM exposes this route *and* is reached by it, because it lands on the
+  // container the VM holds. What the mark means is "this is the route the
+  // address names", and it names one route.
+  const selected = [...target.querySelectorAll('li[aria-current="true"]')];
+  expect(selected).toHaveLength(2);
+  for (const row of selected) expect(row.textContent).toContain("Gitea");
+  expect(target.querySelectorAll("li[aria-current]")).toHaveLength(2);
+});
+
+/**
+ * Clicking a route in *reachable via* goes to the exposing asset, not to the
+ * one being read — which is the same rule the address above follows, reached
+ * by a click instead of a link.
+ */
+test("clicking a route reached from elsewhere opens the asset exposing it", async () => {
+  const { router } = render("#/asset/asset:gitea");
+  await vi.waitFor(() => expect(text()).toContain("Reachable via"));
+
+  const route = [...target.querySelectorAll<HTMLButtonElement>("li button.link")].find(
+    (button) => button.textContent?.trim() === "Gitea",
+  );
+  route?.click();
+  flushSync();
+
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+    routeId: "route:gitea",
+  });
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
 });

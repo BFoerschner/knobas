@@ -63,9 +63,13 @@
     assetTree as realAssetTree,
     assetTypes as realAssetTypes,
     createAsset as realCreateAsset,
+    createRoute as realCreateRoute,
     deleteAsset as realDeleteAsset,
+    deleteRoute as realDeleteRoute,
     editAsset as realEditAsset,
+    editRoute as realEditRoute,
     getAsset as realGetAsset,
+    getRoute as realGetRoute,
     moveAsset as realMoveAsset,
     type AssetDetail,
     type AssetRow,
@@ -74,6 +78,8 @@
     type Inherited,
     type AssetType,
     type PropertyKind,
+    type RouteDetail,
+    type RouteRow,
   } from "../ipc/assets";
   import { search as realSearch } from "../ipc/search";
   // The launcher's own debounce, imported rather than copied: two search
@@ -83,8 +89,10 @@
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
   import { hashFor, type Router } from "../shell/router.svelte";
+  import { openExternal as realOpenExternal } from "../shell/open-external";
   import CreateDialog from "./CreateDialog.svelte";
   import MoveDialog from "./MoveDialog.svelte";
+  import RouteDialog from "./RouteDialog.svelte";
   import {
     draftOf,
     inputTypeFor,
@@ -99,8 +107,10 @@
     emptyPath,
     estateQuery,
     heldByPath,
+    landingOf,
     matchesIn,
     problemBadge,
+    routeAddressOf,
     selectionIn,
     sourceOf,
     stripFor,
@@ -123,6 +133,19 @@
     editAsset: typeof realEditAsset;
     moveAsset: typeof realMoveAsset;
     deleteAsset: typeof realDeleteAsset;
+    /** The routes an asset exposes and is reached by (#432). */
+    getRoute: typeof realGetRoute;
+    createRoute: typeof realCreateRoute;
+    editRoute: typeof realEditRoute;
+    deleteRoute: typeof realDeleteRoute;
+    /**
+     * The OS browser, for the *open URL* action a route finally gives this
+     * view something to point at (spec §12.2's actions list).
+     *
+     * A port like the rest, and for the rest's reason: a test must be able to
+     * press the button without a Tauri backend behind it.
+     */
+    openExternal: typeof realOpenExternal;
   }
 
   let {
@@ -161,13 +184,44 @@
     editAsset: realEditAsset,
     moveAsset: realMoveAsset,
     deleteAsset: realDeleteAsset,
+    getRoute: realGetRoute,
+    createRoute: realCreateRoute,
+    editRoute: realEditRoute,
+    deleteRoute: realDeleteRoute,
+    openExternal: realOpenExternal,
     ...ports,
   };
 
-  /** The asset the address names, or `null` for the bare `#/assets/tree`. */
-  const selectedId = $derived(
-    router.route.view === "assets" ? router.route.assetId : null,
+  /**
+   * The route the address names (#432), or `null` for every other address.
+   *
+   * `#/route/<id>` is the Tree at the asset that exposes the route, so this is
+   * read *before* the selected asset: the address does not carry an asset id
+   * and the route's own read is what supplies one.
+   */
+  const routeId = $derived(
+    router.route.view === "assets" ? (router.route.routeId ?? null) : null,
   );
+
+  /** The route `routeId` names, once it has been read. */
+  let routeDetail = $state<RouteDetail | null>(null);
+
+  /**
+   * The asset the address names, or `null` for the bare `#/assets/tree`.
+   *
+   * Two ways an address names one, and the second is the route's: story 14's
+   * *a ticket about a certificate links to the route whose certificate it is*
+   * has to open somewhere a reader can see what the route belongs to, which is
+   * the pane of the asset exposing it. The `routeDetail.route.id === routeId`
+   * guard is what keeps a stale read from selecting the previous route's asset
+   * for the frame between two route addresses.
+   */
+  const selectedId = $derived.by(() => {
+    if (router.route.view !== "assets") return null;
+    if (router.route.assetId !== null) return router.route.assetId;
+    if (routeId === null || routeDetail === null) return null;
+    return routeDetail.route.id === routeId ? routeDetail.route.asset_id : null;
+  });
 
   /** The pane's read. `null` until something is selected and read. */
   let detail = $state<AssetDetail | null>(null);
@@ -222,6 +276,9 @@
   let creating = $state<CreateAt | null>(null);
   let moving = $state(false);
   let deleting = $state(false);
+  /** The route editor: open on a new route, or on one of the pane's own. */
+  let exposing = $state(false);
+  let editingRoute = $state<RouteRow | null>(null);
   /** The property row being edited, by key, and the text in its field. */
   let editingKey = $state<string | null>(null);
   let draft = $state("");
@@ -252,6 +309,36 @@
 
   const detailRead = latestRead<AssetDetail>();
   const columnsRead = latestRead<AssetRow[][]>();
+  const routeRead = latestRead<RouteDetail>();
+
+  /**
+   * Read the route the address names, and nothing else.
+   *
+   * A read of its own rather than a search through the pane's `exposes`: the
+   * pane has no asset to read until this answers, which is the whole point of
+   * the address — a link into the estate from a ticket knows the route and
+   * nothing else. It re-runs on a write (`revision`) so that editing the
+   * selected route redraws it.
+   */
+  $effect(() => {
+    const id = routeId;
+    void revision;
+    if (id === null) {
+      routeDetail = null;
+      return;
+    }
+    void routeRead(() => io.getRoute(id), {
+      ok: (answer) => {
+        // `failure` is left alone: it belongs to the pane's own read, and a
+        // route landing is no evidence that the asset read succeeded.
+        routeDetail = answer;
+      },
+      fail: (cause) => {
+        routeDetail = null;
+        failure = ipcErrorMessage(cause);
+      },
+    });
+  });
 
   /**
    * The type table, once.
@@ -629,6 +716,8 @@
     creating = null;
     moving = false;
     deleting = false;
+    exposing = false;
+    editingRoute = null;
     writeFailure = null;
   }
 
@@ -838,7 +927,14 @@
     if (verb === "deleted") return "Deleted";
     if (verb === "moved") return `Moved to ${nameOf(fields.to) ?? said(fields.to)}`;
     const field = fields.field === "property" ? said(fields.key) : said(fields.field);
-    return `${field}: ${said(fields.from)} → ${said(fields.to)}`;
+    // A route's `target` edit carries asset **ids** on both sides, for the
+    // reason a move's line does: the name at the moment of the edit is not
+    // the name now. So it gets a move's treatment too, rather than putting
+    // `target: asset:postgres → nothing` in front of a reader who has the
+    // word *postgres* on the same pane.
+    const shown = (value: unknown): string =>
+      fields.field === "target" ? (nameOf(value) ?? said(value)) : said(value);
+    return `${field}: ${shown(fields.from)} → ${shown(fields.to)}`;
   }
 
   /**
@@ -861,6 +957,29 @@
   function reading(property: AssetProperty): string {
     if (property.value === null) return "—";
     return String(property.value.value);
+  }
+
+  /** Open a route's own address — the Tree, at the asset exposing it. */
+  function openRoute(route: RouteRow) {
+    router.go(routeAddressOf(route));
+  }
+
+  /**
+   * Hand a route's URL to the OS browser — spec §12.2's *open URL*, which
+   * this ticket is the one that finally has a URL for.
+   *
+   * `openExternal` refuses anything that is not `http:`/`https:`, and the
+   * refusal is **shown rather than swallowed**: a route is a URL *or an
+   * endpoint*, so `postgres://10.0.0.20:5432` is a perfectly good route that
+   * no browser can open, and the reader is owed that sentence rather than a
+   * button that does nothing.
+   */
+  async function openInBrowser(url: string) {
+    try {
+      await io.openExternal(url);
+    } catch (rejection) {
+      writeFailure = `Could not open the link: ${ipcErrorMessage(rejection)}`;
+    }
   }
 
   /**
@@ -1340,6 +1459,145 @@
           {/if}
         </section>
 
+        <!--
+          Both ends of a route, and they are two lists rather than one with a
+          direction column: *what this asset offers* and *how this asset is
+          reached* are different questions, and the mockup's pane asks them
+          under two headings ("N out · M in").
+        -->
+        <!--
+          What every route row draws whichever list it is in: its name, whether
+          it is public, its URL as the *open URL* action, and the reader's own
+          properties. One snippet rather than two copies, the way `inForce`
+          above is one — the halves that differ are the line under it, and they
+          are what each list passes in.
+        -->
+        {#snippet routeRow(route: RouteRow, where: import("svelte").Snippet)}
+          <li class:on={route.id === routeId} aria-current={route.id === routeId ? "true" : undefined}>
+            <span class="rname">
+              <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
+              {#if route.visibility === "public"}
+                <span class="vis">public</span>
+              {/if}
+            </span>
+            <button
+              class="url mono"
+              title="Open {route.url}"
+              onclick={() => void openInBrowser(route.url)}
+            >
+              {route.url}
+            </button>
+            <span class="rto">{@render where()}</span>
+            {#each route.properties as property (property.key)}
+              <span class="rprop faint">{property.label} {reading(property)}</span>
+            {/each}
+          </li>
+        {/snippet}
+
+        <section class="grp">
+          <h3 class="lab">Exposes</h3>
+          {#if detail.exposes.length === 0}
+            <p class="empty">No routes.</p>
+          {:else}
+            <ul class="lst routes">
+              {#each detail.exposes as route (route.id)}
+                {@render routeRow(route, lands)}
+                {#snippet lands()}
+                  {#if route.target_id !== null}
+                    {@const to = route.target_id}
+                    <span class="faint" aria-hidden="true">→</span>
+                    <button class="link" onclick={() => goToSource(addressOf({ id: to }))}>
+                      {route.target_name}
+                    </button>
+                  {:else}
+                    <span class="faint">lands on nothing knobas knows</span>
+                  {/if}
+                  <button
+                    class="btn sm"
+                    onclick={() => {
+                      editingRoute = route;
+                      // The same clean slate `Add a route` opens on: a failure
+                      // from the last write, or from a link that would not
+                      // open, is drawn above *Properties* and far from here,
+                      // and one left behind the dialog reads as this edit's.
+                      writeFailure = null;
+                    }}
+                  >
+                    Edit…
+                  </button>
+                {/snippet}
+              {/each}
+            </ul>
+          {/if}
+          <button
+            class="btn sm"
+            onclick={() => {
+              exposing = true;
+              writeFailure = null;
+            }}
+          >
+            Add a route
+          </button>
+        </section>
+
+        <section class="grp">
+          <h3 class="lab">Reachable via</h3>
+          {#if detail.reachable_via.length === 0}
+            <p class="empty">Nothing lands here.</p>
+          {:else}
+            <ul class="lst routes">
+              {#each detail.reachable_via as route (route.id)}
+                {@render routeRow(route, arrives)}
+                <!--
+                  Where it lands and who offers it — the two facts that make
+                  this list readable from the arriving end. `landing` is
+                  `tree.ts`' one answer to "here, through something above, or
+                  on something inside".
+                -->
+                {#snippet arrives()}
+                  {@const landing = landingOf(detail!, route)}
+                  {#if landing.goTo}
+                    <button class="link" onclick={() => goToSource(landing.goTo)}>
+                      {landing.note}
+                    </button>
+                  {:else}
+                    <span class="faint">{landing.note}</span>
+                  {/if}
+                  <span class="faint">· exposed by</span>
+                  <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
+                    {route.asset_name}
+                  </button>
+                {/snippet}
+              {/each}
+            </ul>
+          {/if}
+        </section>
+
+        <!--
+          The selected route's **own** history (spec #427: routes *"have their
+          own history"*), drawn only when the address names one. Beside the
+          asset's rather than inside the route rows: a line per route in the
+          list would be a wall of them, and what a reader who followed
+          `#/route/<id>` came for is the story of that one route.
+        -->
+        {#if routeDetail !== null && routeDetail.route.id === routeId}
+          <section class="grp">
+            <h3 class="lab">{routeDetail.route.name} — history</h3>
+            {#if routeDetail.history.length === 0}
+              <p class="empty">Nothing recorded.</p>
+            {:else}
+              <ol class="hist">
+                {#each routeDetail.history as entry (entry.id)}
+                  <li>
+                    <span class="hw">{line(entry.verb, entry.detail)}</span>
+                    <span class="ha faint">{ago(entry.at, now())}</span>
+                  </li>
+                {/each}
+              </ol>
+            {/if}
+          </section>
+        {/if}
+
         <section class="grp">
           <h3 class="lab">History</h3>
           {#if detail.history.length === 0}
@@ -1387,6 +1645,50 @@
       moving = false;
       // The address is unchanged — the asset kept its id — so the re-read is
       // what redraws the columns at the new path.
+      revision += 1;
+    }}
+  />
+{/if}
+
+{#if (exposing || editingRoute !== null) && detail}
+  <!--
+    One dialog for both, opened on a route or on nothing. `route` decides
+    which, and `closeEditors` puts both away when the selection moves — a
+    route editor left standing over another asset would save this asset's URL
+    onto that one.
+  -->
+  <!-- Bound here: a callback prop is its own scope and the narrowing above
+       does not reach into it — `deleting`'s dialog below binds for the same
+       reason. -->
+  {@const on = detail.asset}
+  <RouteDialog
+    asset={on}
+    heldBy={detail.held_by}
+    route={editingRoute}
+    tree={io.assetTree}
+    create={io.createRoute}
+    edit={io.editRoute}
+    remove={io.deleteRoute}
+    onclose={() => {
+      exposing = false;
+      editingRoute = null;
+    }}
+    onsaved={(row) => {
+      exposing = false;
+      editingRoute = null;
+      // The address, not a local insert: the route is selected in the pane
+      // because the Tree read it back, which is the path a link from a ticket
+      // takes as well.
+      router.go(routeAddressOf(row));
+      revision += 1;
+    }}
+    ondeleted={() => {
+      exposing = false;
+      editingRoute = null;
+      // Back to the asset that exposed it: the route's own address would
+      // answer `not_found` and draw the deep-link failure over a deletion
+      // that worked — `confirmDelete`'s rule.
+      router.go(addressOf(on));
       revision += 1;
     }}
   />
@@ -1878,6 +2180,57 @@
   .ask {
     margin: 0;
     font-size: 13px;
+  }
+
+  /* One route per row: what it is called, where it answers, and where it
+     lands — three lines at the width the pane has, not a table. */
+  .routes li {
+    display: grid;
+    gap: 2px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .routes li.on {
+    box-shadow: inset 2px 0 0 var(--link);
+    padding-left: 6px;
+  }
+
+  .routes .rname {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .routes .vis {
+    font: 500 9px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--amber);
+  }
+
+  .routes .url {
+    justify-self: start;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  .routes .url:hover {
+    color: var(--link);
+  }
+
+  .routes .rto,
+  .routes .rprop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 11px;
   }
 
   .lst,

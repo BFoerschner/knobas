@@ -1506,6 +1506,654 @@ async fn a_context_that_is_not_there_draws_an_empty_tile() {
 }
 
 // ---------------------------------------------------------------------------
+// Routes, read from both ends (#432)
+// ---------------------------------------------------------------------------
+
+/// The estate the route tests work over: [`three_levels`] plus the thing that
+/// exposes routes.
+///
+/// **site hel1 → VM vm-db-01 → { container postgres, reverse proxy traefik }**.
+/// The proxy is a sibling of the container rather than a level of its own,
+/// which is where the real estate keeps one, and it is what makes "exposed by
+/// one asset, landing on another" a sentence this fixture can say.
+async fn with_a_proxy(pool: &PgPool) -> (AssetRow, AssetRow, AssetRow, AssetRow) {
+    let (site, vm, container) = three_levels(pool).await;
+    let proxy = make(pool, Some(&vm.id), "reverse_proxy", "traefik", &[]).await;
+    (site, vm, container, proxy)
+}
+
+/// One route as the reader would type it: exposed by the proxy, landing on the
+/// container.
+async fn expose(
+    pool: &PgPool,
+    asset: &AssetRow,
+    name: &str,
+    url: &str,
+    target: Option<&AssetRow>,
+) -> assets::RouteRow {
+    assets::create_route(
+        pool,
+        &asset.id,
+        name,
+        url,
+        target.map(|row| row.id.as_str()),
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap_or_else(|error| panic!("expose {name}: {}", error.message))
+    .value
+}
+
+/// What one asset's pane says under *Exposes* and under *Reachable via*.
+async fn both_ends(pool: &PgPool, id: &str) -> (Vec<String>, Vec<(String, String)>) {
+    let detail = assets::get(pool, id).await.expect("the pane");
+    (
+        detail.exposes.into_iter().map(|route| route.name).collect(),
+        detail
+            .reachable_via
+            .into_iter()
+            .map(|route| (route.name, route.target_name.unwrap_or_default()))
+            .collect(),
+    )
+}
+
+/// The acceptance criterion, end to end: a route on a reverse proxy landing on
+/// a container is read by the proxy that exposes it, by the container it lands
+/// on, **and by every other asset on the container's containment path** --
+/// the VM that holds it and the site above that.
+///
+/// The last of those is the reading `assets::ROUTES_REACHABLE` argues for and
+/// this ticket's criterion asks for in as many words. It is what the real
+/// estate needs: every route in `testenv/hetzner/estate.json` lands on a
+/// container, so under the narrower reading no server in it would read one.
+///
+/// The proxy is the **negative control** in the same fixture: it exposes the
+/// route and is not on the container's path, so its *Reachable via* is empty.
+/// Without it, a read that answered with every route in the database would
+/// pass every other assertion here.
+#[tokio::test]
+async fn a_route_reads_from_both_ends_and_from_every_asset_on_the_path() {
+    let pool = pool("routes-both-ends").await;
+    let (site, vm, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    assert!(route.id.starts_with("route:"), "{}", route.id);
+    assert_eq!(route.asset_name, "traefik", "the end that exposes it");
+    assert_eq!(route.target_name.as_deref(), Some("postgres"));
+    assert_eq!(route.visibility, assets::Visibility::Internal);
+
+    // The exposing end.
+    let (exposes, reachable) = both_ends(&pool, &proxy.id).await;
+    assert_eq!(exposes, ["Postgres UI"], "the proxy exposes it");
+    assert!(
+        reachable.is_empty(),
+        "and is not reached by it: {reachable:?}"
+    );
+
+    // The landing end, and everything that holds it.
+    for (asset, who) in [
+        (&container, "the asset it lands on"),
+        (&vm, "the VM that holds the container"),
+        (&site, "and the site above that"),
+    ] {
+        let (exposes, reachable) = both_ends(&pool, &asset.id).await;
+        assert!(exposes.is_empty(), "{who} exposes nothing: {exposes:?}");
+        assert_eq!(
+            reachable,
+            [("Postgres UI".to_owned(), "postgres".to_owned())],
+            "{who} reads it under reachable via, with the asset it lands on named"
+        );
+    }
+
+    // Which end a row is on is read off `target_id` and nothing else: on the
+    // container it is the asset's own id, and on the VM it is not -- which is
+    // how the pane says "lands here" against "through postgres" and how story
+    // 31's wire knows to be dashed.
+    let here = assets::get(&pool, &container.id)
+        .await
+        .expect("the container");
+    assert_eq!(
+        here.reachable_via[0].target_id.as_deref(),
+        Some(container.id.as_str())
+    );
+    let above = assets::get(&pool, &vm.id).await.expect("the VM");
+    assert_ne!(
+        above.reachable_via[0].target_id.as_deref(),
+        Some(vm.id.as_str())
+    );
+}
+
+/// A route with no target is a route: an endpoint that lands on nothing knobas
+/// knows still reads under *Exposes*, and reaches nobody.
+///
+/// The two-route fixture is what makes the second half a claim: the targeted
+/// route is in the same list on the same asset, so "reachable via is empty
+/// everywhere" cannot be true by the read being broken.
+#[tokio::test]
+async fn a_route_with_no_target_reads_under_exposes_only() {
+    let pool = pool("routes-no-target").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+    let endpoint = expose(
+        &pool,
+        &proxy,
+        "Traefik dashboard",
+        "http://10.0.0.4:8080/dashboard",
+        None,
+    )
+    .await;
+    expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    assert_eq!(endpoint.target_id, None);
+    assert_eq!(endpoint.target_name, None);
+
+    // A blank target is the wire's other spelling of "no target", and the two
+    // commands agree about it: `RouteEdit::Target` has always trimmed and
+    // dropped an empty one, and `create_route` does now -- before, the same
+    // value cleared the target on an edit and answered `not_found` on a
+    // create.
+    let blank_target = assets::create_route(
+        &pool,
+        &proxy.id,
+        "Kuma",
+        "https://kuma.hel1.internal/",
+        Some("   "),
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .expect("a blank target is no target, not a missing asset")
+    .value;
+    assert_eq!(blank_target.target_id, None);
+
+    let (exposes, reachable) = both_ends(&pool, &proxy.id).await;
+    assert_eq!(
+        exposes,
+        ["Kuma", "Postgres UI", "Traefik dashboard"],
+        "all three, by name"
+    );
+    assert!(reachable.is_empty(), "{reachable:?}");
+
+    // The one with a target still reaches its end, and the one without reaches
+    // nowhere -- which is the whole difference between them.
+    let (_, reachable) = both_ends(&pool, &container.id).await;
+    assert_eq!(
+        reachable,
+        [("Postgres UI".to_owned(), "postgres".to_owned())]
+    );
+}
+
+/// Editing the target moves the route from one end to the other, and both
+/// ends say so on the next read.
+///
+/// Three states over one route -- landing on the container, landing on the
+/// proxy itself, landing on nothing -- because the middle one is the case a
+/// self-target refusal would have made impossible, and the estate has one: a
+/// reverse proxy's own dashboard is exposed by the proxy and reached at the
+/// proxy.
+#[tokio::test]
+async fn editing_the_target_updates_both_ends_and_writes_the_line() {
+    let pool = pool("routes-edit-target").await;
+    let (_, vm, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    // Onto the proxy itself: the container stops reading it and so does the
+    // VM, because the VM held the *container*, and the proxy now reads it at
+    // both ends at once.
+    let moved = assets::edit_route(
+        &pool,
+        &route.id,
+        &[assets::RouteEdit::Target {
+            value: Some(proxy.id.clone()),
+        }],
+    )
+    .await
+    .expect("the edit")
+    .value;
+    assert_eq!(moved.target_name.as_deref(), Some("traefik"));
+
+    let (exposes, reachable) = both_ends(&pool, &proxy.id).await;
+    assert_eq!(exposes, ["Postgres UI"]);
+    assert_eq!(
+        reachable,
+        [("Postgres UI".to_owned(), "traefik".to_owned())],
+        "a route may land on the asset that exposes it"
+    );
+    let (_, gone) = both_ends(&pool, &container.id).await;
+    assert!(gone.is_empty(), "the container is not reached any more");
+    // The VM still reads it -- not because the container does, but because the
+    // proxy is on the VM. Asserted so that the line above cannot be read as
+    // "the whole path forgot it".
+    let (_, still) = both_ends(&pool, &vm.id).await;
+    assert_eq!(still.len(), 1, "the proxy is inside the VM too");
+
+    // And cleared: `null` is an unambiguous clear, and nothing reaches it.
+    let cleared = assets::edit_route(
+        &pool,
+        &route.id,
+        &[assets::RouteEdit::Target { value: None }],
+    )
+    .await
+    .expect("the clear")
+    .value;
+    assert_eq!(cleared.target_id, None);
+    let (_, none) = both_ends(&pool, &proxy.id).await;
+    assert!(none.is_empty(), "{none:?}");
+
+    // Story 11 for the route's own history: each edit is a line with a `from`
+    // and a `to`, newest first.
+    let lines: Vec<(String, serde_json::Value)> = assets::get_route(&pool, &route.id)
+        .await
+        .expect("the route")
+        .history
+        .into_iter()
+        .map(|line| (line.verb, line.detail))
+        .collect();
+    assert_eq!(
+        lines
+            .iter()
+            .map(|(verb, _)| verb.as_str())
+            .collect::<Vec<_>>(),
+        ["edited", "edited", "created"]
+    );
+    assert_eq!(lines[0].1["field"], serde_json::json!("target"));
+    assert_eq!(lines[0].1["from"], serde_json::json!(proxy.id));
+    assert_eq!(lines[0].1["to"], serde_json::Value::Null);
+    assert_eq!(lines[1].1["from"], serde_json::json!(container.id));
+    assert_eq!(lines[1].1["to"], serde_json::json!(proxy.id));
+}
+
+/// The other four edits, and the one that is not there.
+///
+/// A rename moves the entity's title with it -- the launcher reads that
+/// column, so a route renamed in the pane and not in `knobas.entity` would be
+/// two names for one thing. An edit that changes nothing writes no line, which
+/// is [`assets::edit`]'s rule applied to the other entity this module writes.
+#[tokio::test]
+async fn a_route_is_renamed_re_pointed_and_re_classified_one_line_each() {
+    let pool = pool("routes-edit").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    let edited = assets::edit_route(
+        &pool,
+        &route.id,
+        &[
+            assets::RouteEdit::Name {
+                value: "  Postgres console  ".to_owned(),
+            },
+            assets::RouteEdit::Url {
+                value: "https://pg.hel1.internal/console".to_owned(),
+            },
+            assets::RouteEdit::Visibility {
+                value: assets::Visibility::Public,
+            },
+            assets::RouteEdit::Property {
+                key: "cert_expires".to_owned(),
+                value: Some(PropertyValue::Date {
+                    value: "2026-12-01".to_owned(),
+                }),
+            },
+        ],
+    )
+    .await
+    .expect("the edits")
+    .value;
+
+    assert_eq!(edited.name, "Postgres console", "trimmed");
+    assert_eq!(edited.url, "https://pg.hel1.internal/console");
+    assert_eq!(edited.visibility, assets::Visibility::Public);
+    assert_eq!(
+        edited
+            .properties
+            .iter()
+            .map(|p| (p.key.as_str(), p.custom))
+            .collect::<Vec<_>>(),
+        [("cert_expires", true)],
+        "a route declares no schema, so the expiry is the reader's own key"
+    );
+
+    let title: String = sqlx::query_scalar("select title from knobas.entity where id = $1")
+        .bind(&route.id)
+        .fetch_one(&pool)
+        .await
+        .expect("the entity row");
+    assert_eq!(title, "Postgres console", "the address's title moved too");
+
+    let before = assets::get_route(&pool, &route.id)
+        .await
+        .unwrap()
+        .history
+        .len();
+    let again = assets::edit_route(
+        &pool,
+        &route.id,
+        &[assets::RouteEdit::Visibility {
+            value: assets::Visibility::Public,
+        }],
+    )
+    .await
+    .expect("a second edit")
+    .activity;
+    assert!(
+        again.is_empty(),
+        "an edit that changes nothing writes no line"
+    );
+    assert_eq!(
+        assets::get_route(&pool, &route.id)
+            .await
+            .unwrap()
+            .history
+            .len(),
+        before
+    );
+}
+
+/// A route goes, and its address is kept and marked -- the treatment an asset
+/// and a note get, so a link drawn to it stays visible rather than dangling.
+#[tokio::test]
+async fn a_route_is_deleted_and_its_entity_row_is_tombstoned() {
+    let pool = pool("routes-delete").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    assets::delete_route(&pool, &route.id)
+        .await
+        .expect("the delete");
+
+    assert_eq!(
+        code(&assets::get_route(&pool, &route.id).await.unwrap_err()),
+        IpcErrorCode::NotFound
+    );
+    let (exposes, _) = both_ends(&pool, &proxy.id).await;
+    assert!(exposes.is_empty(), "{exposes:?}");
+    let (_, reachable) = both_ends(&pool, &container.id).await;
+    assert!(reachable.is_empty(), "{reachable:?}");
+
+    let tombstoned: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("select deleted_at from knobas.entity where id = $1")
+            .bind(&route.id)
+            .fetch_one(&pool)
+            .await
+            .expect("the entity row survives");
+    assert!(tombstoned.is_some(), "the address is kept and marked");
+
+    // Read from `knobas.activity` directly: `get_route` can never read this
+    // line back, so dropping the `record_with` call would otherwise leave this
+    // file green.
+    let (verb, detail): (String, serde_json::Value) = sqlx::query_as(
+        "select verb, detail from knobas.activity
+          where entity_id = $1 order by id desc limit 1",
+    )
+    .bind(&route.id)
+    .fetch_one(&pool)
+    .await
+    .expect("the delete's own line");
+    assert_eq!(verb, "deleted");
+    assert_eq!(detail["route"]["name"], serde_json::json!("Postgres UI"));
+}
+
+/// The two ways an asset and a route meet at a delete, and they are
+/// deliberately different.
+///
+/// An asset that still **exposes** routes is refused by name and by count: a
+/// route with nothing answering it is not a row this model can hold. An asset
+/// a route only **lands on** is deleted, and the route survives as an endpoint
+/// that lands on nothing knobas knows -- with a line of its own saying the
+/// target went, because a `set null` performed by a constraint is a change
+/// nobody wrote down.
+#[tokio::test]
+async fn deleting_an_asset_refuses_the_routes_it_exposes_and_clears_the_ones_it_answers() {
+    let pool = pool("routes-asset-delete").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    let refused = assets::delete(&pool, &proxy.id).await.unwrap_err();
+    assert_eq!(code(&refused), IpcErrorCode::Conflict);
+    assert!(refused.message.contains("traefik"), "{}", refused.message);
+    assert!(refused.message.contains('1'), "{}", refused.message);
+    assets::get(&pool, &proxy.id)
+        .await
+        .expect("nothing was removed by the attempt");
+
+    // The other end: the container goes, and the route stays.
+    assets::delete(&pool, &container.id)
+        .await
+        .expect("an asset a route lands on is still a leaf");
+    let orphaned = assets::get_route(&pool, &route.id)
+        .await
+        .expect("the route");
+    assert_eq!(orphaned.route.target_id, None, "it lands on nothing now");
+    assert_eq!(
+        orphaned
+            .history
+            .first()
+            .map(|line| (line.verb.as_str(), line.detail["field"].clone())),
+        Some(("edited", serde_json::json!("target"))),
+        "and the route says so in its own history"
+    );
+    assert_eq!(
+        orphaned.history[0].detail["from"],
+        serde_json::json!(container.id)
+    );
+
+    // Which leaves the proxy deletable, once its route goes.
+    assets::delete_route(&pool, &route.id)
+        .await
+        .expect("the route");
+    assets::delete(&pool, &proxy.id).await.expect("now a leaf");
+}
+
+/// A route is an **entity**: `route:` namespace, kind `route`, one row in
+/// `knobas.entity` carrying the title -- which is what gives it the
+/// `#/route/<id>` address story 14 asks for, and what puts it in the
+/// launcher's corpus.
+///
+/// The `fts` half is the corpus' own claim read at the source: a route is
+/// matched on its **name and its URL** (`knobas_search::corpus::ROUTE`), so a
+/// query for a host or a port finds the route that carries it. The negative is
+/// in the same assertion: the site's name is nowhere in the route's own
+/// columns and does not match, which is the difference between this corpus and
+/// `ASSET`'s ancestor-matching one.
+#[tokio::test]
+async fn a_route_is_an_entity_in_the_namespace_knobas_reserves() {
+    let pool = pool("routes-entity").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+
+    let (kind, title): (String, String) =
+        sqlx::query_as("select kind, title from knobas.entity where id = $1")
+            .bind(&route.id)
+            .fetch_one(&pool)
+            .await
+            .expect("the entity row");
+    assert_eq!(kind, "route");
+    assert_eq!(title, "Postgres UI");
+    assert!(knobas_core::entity::is_owned_kind(&kind));
+    assert!(knobas_core::entity::is_reserved_namespace("route"));
+
+    for (query, hit) in [
+        ("Postgres", true),
+        ("pg.hel1.internal", true),
+        ("hel1", false),
+    ] {
+        let matched: Vec<String> = sqlx::query_scalar(
+            "select name from knobas.route
+              where fts @@ websearch_to_tsquery('english', $1)",
+        )
+        .bind(query)
+        .fetch_all(&pool)
+        .await
+        .expect("the index");
+        assert_eq!(
+            !matched.is_empty(),
+            hit,
+            "{query:?} against a route's own name and url: {matched:?}"
+        );
+    }
+}
+
+/// What a route refuses, each for its own reason and each by name.
+#[tokio::test]
+async fn a_route_that_could_not_be_read_back_is_refused() {
+    let pool = pool("routes-refusals").await;
+    let (_, _, container, proxy) = with_a_proxy(&pool).await;
+
+    let blank = assets::create_route(
+        &pool,
+        &proxy.id,
+        "   ",
+        "https://pg.hel1.internal/",
+        None,
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(code(&blank), IpcErrorCode::Invalid);
+    assert!(blank.message.contains("a route"), "{}", blank.message);
+
+    let bare = assets::create_route(
+        &pool,
+        &proxy.id,
+        "Postgres UI",
+        "pg.hel1.internal",
+        None,
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(code(&bare), IpcErrorCode::Invalid);
+    assert!(bare.message.contains("scheme"), "{}", bare.message);
+
+    // Neither end may be an asset that is not there, and the refusal says
+    // which end it was wanted for.
+    let no_asset = assets::create_route(
+        &pool,
+        "asset:nobody",
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        None,
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(code(&no_asset), IpcErrorCode::NotFound);
+    assert!(no_asset.message.contains("expose"), "{}", no_asset.message);
+
+    let no_target = assets::create_route(
+        &pool,
+        &proxy.id,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some("asset:nobody"),
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(code(&no_target), IpcErrorCode::NotFound);
+    assert!(
+        no_target.message.contains("land on"),
+        "{}",
+        no_target.message
+    );
+
+    // Nothing was written by any of the four.
+    let (exposes, _) = both_ends(&pool, &proxy.id).await;
+    assert!(exposes.is_empty(), "{exposes:?}");
+
+    // And an edit refuses the same way, against a route that does exist.
+    let route = expose(
+        &pool,
+        &proxy,
+        "Postgres UI",
+        "https://pg.hel1.internal/",
+        Some(&container),
+    )
+    .await;
+    for (edit, expected) in [
+        (
+            assets::RouteEdit::Url {
+                value: "pg.hel1.internal".to_owned(),
+            },
+            IpcErrorCode::Invalid,
+        ),
+        (
+            assets::RouteEdit::Target {
+                value: Some("asset:nobody".to_owned()),
+            },
+            IpcErrorCode::NotFound,
+        ),
+    ] {
+        let refused = assets::edit_route(&pool, &route.id, &[edit])
+            .await
+            .unwrap_err();
+        assert_eq!(code(&refused), expected);
+    }
+    assert_eq!(
+        assets::get_route(&pool, &route.id).await.unwrap().route.url,
+        "https://pg.hel1.internal/",
+        "a refused edit leaves the route as it was"
+    );
+    assert_eq!(
+        code(&assets::get_route(&pool, "route:nobody").await.unwrap_err()),
+        IpcErrorCode::NotFound
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The wiring: registered, named, and decoding.
 // ---------------------------------------------------------------------------
 
@@ -1529,6 +2177,10 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::delete_asset,
             knobas_app::commands::assets::asset_types,
             knobas_app::commands::assets::context_assets,
+            knobas_app::commands::assets::get_route,
+            knobas_app::commands::assets::create_route,
+            knobas_app::commands::assets::edit_route,
+            knobas_app::commands::assets::delete_route,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -1627,6 +2279,48 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             serde_json::json!({ "assetId": "asset:7f2c" }),
         ),
         ("context_assets", serde_json::json!({ "ctxId": "ctx:7f2c" })),
+        ("get_route", serde_json::json!({ "routeId": "route:9a1b" })),
+        (
+            "create_route",
+            serde_json::json!({
+                "assetId": "asset:traefik", "name": "Gitea",
+                "url": "https://gitea.local/",
+            }),
+        ),
+        (
+            "create_route",
+            serde_json::json!({
+                "assetId": "asset:traefik", "name": "Gitea",
+                "url": "https://gitea.local/", "targetId": "asset:7f2c",
+                "visibility": "public",
+                "properties": [["cert_expires", { "kind": "date", "value": "2026-12-01" }]],
+            }),
+        ),
+        (
+            "create_route",
+            serde_json::json!({
+                "assetId": "asset:traefik", "name": "Gitea",
+                "url": "https://gitea.local/", "targetId": null, "visibility": null,
+            }),
+        ),
+        (
+            "edit_route",
+            serde_json::json!({
+                "routeId": "route:9a1b",
+                "edits": [
+                    { "field": "name", "value": "Gitea (tunnel)" },
+                    { "field": "url", "value": "https://gitea.local/" },
+                    { "field": "target", "value": null },
+                    { "field": "visibility", "value": "internal" },
+                    { "field": "property", "key": "cert_expires",
+                      "value": { "kind": "date", "value": "2026-12-01" } },
+                ],
+            }),
+        ),
+        (
+            "delete_route",
+            serde_json::json!({ "routeId": "route:9a1b" }),
+        ),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(

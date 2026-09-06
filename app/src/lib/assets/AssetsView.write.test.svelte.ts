@@ -38,6 +38,9 @@ import type {
   AssetRow,
   AssetType,
   PropertyValue,
+  RouteEdit,
+  RouteRow,
+  Visibility,
 } from "../ipc/assets";
 import type { ActivityRow } from "../ipc/entity";
 import { createRouter } from "../shell/router.svelte";
@@ -102,10 +105,27 @@ interface Stored {
   properties: Record<string, PropertyValue>;
 }
 
-/** One in-memory estate, answering the seven commands the view calls. */
-function estate(seed: Stored[]) {
+/**
+ * One route as the store holds it — the wire row minus the two names, which
+ * are resolved on the way out the way the backend's join resolves them.
+ */
+interface StoredRoute {
+  id: string;
+  asset_id: string;
+  target_id: string | null;
+  name: string;
+  url: string;
+  visibility: Visibility;
+  properties: Record<string, PropertyValue>;
+}
+
+/** One in-memory estate, answering the eleven commands the view calls. */
+function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
   const rows = [...seed];
+  const routes = [...seedRoutes];
   const lines: ActivityRow[] = [];
+  const opened: string[] = [];
+  let openRefusal: { code: string; message: string } | null = null;
   let minted = 0;
   let at = 0;
 
@@ -198,9 +218,76 @@ function estate(seed: Stored[]) {
     return walk;
   }
 
+  function routeRow(stored: StoredRoute): RouteRow {
+    const target = stored.target_id === null ? undefined : rows.find((r) => r.id === stored.target_id);
+    return {
+      id: stored.id,
+      asset_id: stored.asset_id,
+      asset_name: find(stored.asset_id).name,
+      target_id: stored.target_id,
+      target_name: target?.name ?? null,
+      name: stored.name,
+      url: stored.url,
+      visibility: stored.visibility,
+      // `assets::custom_properties`: a route declares nothing, so every key is
+      // the reader's own and the list is by key.
+      properties: Object.keys(stored.properties)
+        .sort()
+        .map((key) => ({ key, label: key, value: stored.properties[key]!, custom: true })),
+    };
+  }
+
+  function findRoute(id: string): StoredRoute {
+    const found = routes.find((candidate) => candidate.id === id);
+    if (found === undefined) throw { code: "not_found", message: `no route ${id}` };
+    return found;
+  }
+
+  /** `assets::ROUTES_REACHABLE`: the target is on this asset's own path. */
+  function reachable(stored: Stored): RouteRow[] {
+    const above = new Set([stored.id, ...ancestors(stored).map((held) => held.id)]);
+    const under = (id: string): boolean => {
+      for (let at = rows.find((candidate) => candidate.id === id); at !== undefined; ) {
+        if (at.id === stored.id) return true;
+        at = rows.find((candidate) => candidate.id === at?.parent_id);
+      }
+      return false;
+    };
+    return routes
+      .filter((route) => route.target_id !== null && (above.has(route.target_id) || under(route.target_id)))
+      .map(routeRow);
+  }
+
   return {
     /** What is in the estate right now, for an assertion that is not on markup. */
     rows,
+    /** And what it exposes — the same, for the routes. */
+    routes,
+    /** Every URL the view handed to the OS browser, in order. */
+    opened,
+    /**
+     * Make the next open fail, the way `shell/open-external` fails a scheme
+     * it will not hand to a browser.
+     *
+     * A knob rather than a second fixture: a route is *a URL or an endpoint*,
+     * so `postgres://…` is a legal route the browser cannot take, and the
+     * view's job is to say so rather than to leave a dead button.
+     */
+    refuseToOpen(refusal: { code: string; message: string }) {
+      openRefusal = refusal;
+    },
+    /**
+     * The OS browser.
+     *
+     * A port with a fake here for `assetTypes`' reason in
+     * `AssetsView.test.svelte.ts`: one left out falls through to the real
+     * `openExternal`, and the first test to press a route's URL would hand it
+     * to `@tauri-apps/plugin-opener` for real.
+     */
+    openExternal: (url: string) => {
+      opened.push(url);
+      return openRefusal === null ? Promise.resolve() : Promise.reject(openRefusal);
+    },
     assetTypes: () => Promise.resolve(TYPES),
     assetTree: (parentId?: string | null) => Promise.resolve(children(parentId ?? null)),
     getAsset: (assetId: string): Promise<AssetDetail> => {
@@ -215,6 +302,11 @@ function estate(seed: Stored[]) {
           effective_owner: null,
           held_by: ancestors(stored),
           holds: children(stored.id),
+          exposes: routes
+            .filter((route) => route.asset_id === assetId)
+            .sort((left, right) => left.name.localeCompare(right.name))
+            .map(routeRow),
+          reachable_via: reachable(stored),
           history: lines.filter((line) => line.entity_id === assetId).reverse(),
         });
       } catch (cause) {
@@ -299,6 +391,91 @@ function estate(seed: Stored[]) {
         });
       }
       rows.splice(rows.indexOf(stored), 1);
+      return Promise.resolve();
+    },
+    getRoute: (routeId: string) => {
+      try {
+        const stored = findRoute(routeId);
+        return Promise.resolve({
+          route: routeRow(stored),
+          history: lines.filter((line) => line.entity_id === routeId).reverse(),
+        });
+      } catch (cause) {
+        return Promise.reject(cause);
+      }
+    },
+    createRoute: (
+      assetId: string,
+      name: string,
+      url: string,
+      targetId?: string | null,
+      visibility?: Visibility,
+      properties?: [string, PropertyValue][],
+    ) => {
+      // `assets::vet_url`'s rule, in the sentence it uses: what this witnesses
+      // is that the view shows the backend's refusal in place, and the
+      // sentence itself is `assets_ipc.rs`' claim.
+      if (!url.includes("://")) {
+        return Promise.reject({
+          code: "invalid",
+          message: `"${url}" carries no scheme -- a route is a URL or an endpoint`,
+        });
+      }
+      minted += 1;
+      const stored: StoredRoute = {
+        id: `route:new-${minted}`,
+        asset_id: assetId,
+        target_id: targetId ?? null,
+        name: name.trim(),
+        url: url.trim(),
+        visibility: visibility ?? "internal",
+        properties: Object.fromEntries(properties ?? []),
+      };
+      routes.push(stored);
+      record(stored.id, "created", { route: { name: stored.name, url: stored.url } });
+      return Promise.resolve(routeRow(stored));
+    },
+    editRoute: (routeId: string, edits: RouteEdit[]) => {
+      const stored = findRoute(routeId);
+      for (const edit of edits) {
+        // `assets::edit_route`'s two rules, both of which the pane depends on:
+        // an edit that changes nothing writes no line, and one that does
+        // writes its **old and new** value.
+        const was = {
+          name: stored.name,
+          url: stored.url,
+          target: stored.target_id,
+          visibility: stored.visibility,
+          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
+        }[edit.field];
+        if (edit.field === "name") stored.name = edit.value.trim();
+        if (edit.field === "url") stored.url = edit.value.trim();
+        if (edit.field === "target") stored.target_id = edit.value;
+        if (edit.field === "visibility") stored.visibility = edit.value;
+        if (edit.field === "property") {
+          if (edit.value === null) delete stored.properties[edit.key];
+          else stored.properties[edit.key] = edit.value;
+        }
+        const now = {
+          name: stored.name,
+          url: stored.url,
+          target: stored.target_id,
+          visibility: stored.visibility,
+          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
+        }[edit.field];
+        if (JSON.stringify(was) === JSON.stringify(now)) continue;
+        record(routeId, edit.field === "name" ? "renamed" : "edited", {
+          field: edit.field,
+          ...(edit.field === "property" ? { key: edit.key } : {}),
+          from: was,
+          to: now,
+        });
+      }
+      return Promise.resolve(routeRow(stored));
+    },
+    deleteRoute: (routeId: string) => {
+      const stored = findRoute(routeId);
+      routes.splice(routes.indexOf(stored), 1);
       return Promise.resolve();
     },
   };
@@ -889,4 +1066,291 @@ test("a custom property is stored as the kind the picker was set to", async () =
   // number box.
   click("Add a property");
   expect((field("New property kind") as HTMLSelectElement).value).toBe("text");
+});
+
+/**
+ * **A route is exposed from the pane, lands on an asset picked by walking, and
+ * is selected at its own address** (#432, criterion 3).
+ *
+ * Nothing here tells the view what was created: the dialog answers with a row,
+ * the view goes to the **route's** address, and what is on screen is the read
+ * that followed — the same path the create dialog takes for an asset.
+ *
+ * The target is picked by walking the estate rather than typed, so the click
+ * on `postgres` is also the assertion that the picker reads a level at a time.
+ */
+test("a route is exposed from the pane and lands where the picker was walked", async () => {
+  const store = estate(seed());
+  const { router } = render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+
+  click("Add a route");
+  expect(text()).toContain("On vm-db-01");
+  type("Name", "Postgres UI");
+  type("URL or endpoint", "https://pg.hel1.example/");
+  choose("Visibility", "public");
+  // The picker opens where the route is exposed, so the container is one
+  // click away — and clicking it is what makes it the target. `Land on …`
+  // rather than `Open …`: in this picker choosing and walking are one click,
+  // which is the difference from the move picker's rows.
+  await vi.waitFor(() => button("Land on postgres"));
+  click("Land on postgres");
+  click("Expose");
+
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+  const written = store.routes[0];
+  expect(written).toMatchObject({
+    asset_id: "asset:vm-db-01",
+    target_id: "asset:postgres",
+    name: "Postgres UI",
+    url: "https://pg.hel1.example/",
+    visibility: "public",
+  });
+  // The route's own address, kept: a reader who copies this link gets the
+  // route rather than the asset.
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+    routeId: written?.id,
+  });
+  const pane = text();
+  expect(pane).toContain("https://pg.hel1.example/");
+  expect(pane).toContain("→ postgres");
+  // Exposed here, and reaching the container this VM holds — both ends, in
+  // the one pane that is on both.
+  expect(pane).toContain("inside, on postgres");
+});
+
+/**
+ * **A URL with no scheme is refused in the dialog, in the backend's own
+ * words**, and nothing is written.
+ *
+ * The same rule the asset dialogs follow: knobas' refusals are shown where the
+ * reader is working and are the backend's sentence, not one the frontend
+ * composed — a second copy of "what is a URL" here would be the copy that goes
+ * stale the day a route may be an `ssh://` endpoint.
+ */
+test("a route with no scheme is refused in place and nothing is written", async () => {
+  const store = estate(seed());
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+
+  click("Add a route");
+  type("Name", "Postgres UI");
+  type("URL or endpoint", "pg.hel1.example");
+  click("Expose");
+
+  await vi.waitFor(() => expect(text()).toContain("carries no scheme"));
+  expect(store.routes).toHaveLength(0);
+  // The dialog is still open on what the reader typed, so the fix is one edit
+  // rather than a re-entry.
+  expect((field("Name") as HTMLInputElement).value).toBe("Postgres UI");
+});
+
+/**
+ * **An exposed route is edited and deleted from the same dialog**, and each
+ * lands the reader where the thing they were looking at still exists.
+ *
+ * The delete goes back to the asset that exposed it: the route's own address
+ * would answer `not_found` and draw the deep-link failure over a deletion that
+ * worked, which is the rule the asset delete already follows.
+ */
+test("a route is edited and then deleted from the pane", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  const { router } = render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Edit…");
+  expect((field("URL or endpoint") as HTMLInputElement).value).toBe("https://pg.hel1.example/");
+  type("Name", "Postgres console");
+  // Clearing the target is a first-class choice: an endpoint that lands on
+  // nothing knobas knows is a route the model holds on purpose.
+  click("Clear");
+  click("Save");
+
+  await vi.waitFor(() => expect(text()).toContain("Postgres console"));
+  expect(store.routes[0]).toMatchObject({ name: "Postgres console", target_id: null });
+  expect(text()).toContain("lands on nothing knobas knows");
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+    routeId: "route:pg",
+  });
+
+  click("Edit…");
+  click("Delete");
+  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+  expect(store.routes).toHaveLength(0);
+  // Back at the asset that exposed it, not at an address that is now gone.
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: "asset:vm-db-01",
+  });
+});
+
+/**
+ * **A property of the reader's own is written on a route, and cleared from
+ * it** — spec #427's *"the certificate expiry as a property"* (#432).
+ *
+ * A route declares no keys, so this is the whole of its property surface: a
+ * key, one of the four kinds, and a value. The date kind is the one this
+ * example needs, and it is also the one that would silently arrive as a string
+ * if the picker were ignored — which is why the assertion is on the stored
+ * shape and not only on what the pane draws.
+ */
+test("a certificate expiry is written on a route as a property and cleared again", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Edit…");
+  click("Add a property");
+  type("Property key", "cert_expires");
+  choose("Property kind", "date");
+  type("Property value", "2026-12-01");
+  click("Save");
+
+  await vi.waitFor(() => expect(text()).toContain("cert_expires 2026-12-01"));
+  expect(store.routes[0]?.properties).toEqual({
+    cert_expires: { kind: "date", value: "2026-12-01" },
+  });
+
+  // And emptying the value clears the key: a blank text is refused by the
+  // backend with *clear the property instead*, so that is what a blank means.
+  click("Edit…");
+  type("Property value", "");
+  click("Save");
+
+  // The chip is gone from the route's row, and the route's history says where
+  // it went — which is the difference between a cleared property and one that
+  // was never there.
+  await vi.waitFor(() => expect(text()).not.toContain("cert_expires 2026-12-01"));
+  expect(text()).toContain("cert_expires: 2026-12-01 → nothing");
+  expect(store.routes[0]?.properties).toEqual({});
+});
+
+/**
+ * **A route's URL is handed to the OS browser** — spec §12.2's *open URL*
+ * action, which #432 is the ticket that finally gives this view a URL for.
+ *
+ * Both halves, because only one of them is the happy one: a route is *a URL
+ * or an endpoint*, so `postgres://10.0.0.20:5432` is a route the model holds
+ * on purpose and no browser can take. The refusal is the view's own claim —
+ * it is **shown rather than swallowed** — and without this the button had no
+ * test at all: the port existed, its doc said a test must be able to press it
+ * without a Tauri backend, and nothing pressed it.
+ */
+test("a route's URL opens in the browser, and a scheme no browser takes is said out loud", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+    {
+      id: "route:sql",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres wire",
+      url: "postgres://pg.hel1.example:5432/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Open https://pg.hel1.example/");
+  await vi.waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
+  expect(text()).not.toContain("Could not open the link");
+
+  // `shell/open-external`'s own sentence for a scheme it will not hand over.
+  store.refuseToOpen({
+    code: "invalid",
+    message: "refused to open postgres://pg.hel1.example:5432/ — only http and https",
+  });
+  click("Open postgres://pg.hel1.example:5432/");
+  await vi.waitFor(() =>
+    expect(text()).toContain("Could not open the link: refused to open"),
+  );
+  expect(store.opened).toHaveLength(2);
+  // And the route is still on the pane: a refused open changes nothing.
+  expect(store.routes).toHaveLength(2);
+});
+
+/**
+ * **The route the address names shows its own history** — spec #427: routes
+ * *"are created and edited from the pane, have `#/route/<id>` addresses, and
+ * their own history"*.
+ *
+ * The asset's history is beside it and says nothing about the route, which is
+ * the point of the two lists: a route's line is written on the **route's**
+ * entity, so an asset whose route was renamed shows nothing and the route
+ * shows the rename.
+ */
+test("a route's own history is drawn when its address names it", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/route/route:pg", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI — history"));
+  expect(text()).toContain("Nothing recorded.");
+
+  click("Edit…");
+  type("Name", "Postgres console");
+  click("Save");
+
+  await vi.waitFor(() => expect(text()).toContain("Postgres console — history"));
+  // One line, with the old value and the new: the three fields the dialog also
+  // sent changed nothing, and an edit that changes nothing writes no line.
+  expect(text()).toContain("name: Postgres UI → Postgres console");
+  expect(text()).not.toContain("url:");
+  // The asset's own history is the other list on this pane, and the route's
+  // rename is not in it.
+  expect(text()).toContain("History Nothing recorded.");
+
+  // A target change carries asset **ids** on the wire, for the reason a move's
+  // line does — so the pane names them, the way it names a move's new parent.
+  // Without this the reader would get `target: asset:postgres → nothing` with
+  // the word *postgres* three lines above it on the same pane.
+  click("Edit…");
+  click("Clear");
+  click("Save");
+  await vi.waitFor(() => expect(text()).toContain("target: postgres → nothing"));
+  expect(text()).not.toContain("asset:postgres");
 });

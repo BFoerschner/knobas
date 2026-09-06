@@ -216,7 +216,7 @@ Loading assets from outside — an estate file, later an adapter — with a prev
 _Avoid_: sync (that is the mirror's word), seed (that is what the test environment does to a source)
 
 **Route**:
-A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or without a target asset. An asset is *reachable via* the routes that land on it or on something that holds it.
+A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or without a target asset. An asset is *reachable via* the routes whose target is anywhere on its own containment path — landing on it, on something that holds it, or on something it holds. (Amended 2026-09-06, #432: this entry read *"land on it or on something that holds it"*, and the ticket's own criterion asked for the other direction as well — *"the container reads it under reachable-via, and so does the VM that holds the container"*. Both are true sentences about reachability and the real estate needs both: every route in `testenv/hetzner/estate.json` lands on a container, so under the narrower reading no server in it would read a single route.)
 _Avoid_: URL (that is a route's property), ingress, endpoint (bare)
 
 **Monitor**:

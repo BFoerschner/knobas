@@ -76,15 +76,40 @@ test("#/entity/<id> is a detail whose kind is not known yet", () => {
 /** M4 addresses parse, so the shell can say "arrives in M<n>" rather than
  * rendering a blank screen or, worse, treating `monitor` as a kind.
  *
- * `#/time` left this list with #279, `#/standup` with #288 and `#/assets` and
- * `#/asset` with #428; each has a view of its own now, and the tests around
- * this one are where they went. `#/asset` bare is here rather than there
- * deliberately: an address that sets out to name an asset and names none is a
- * typo, not the estate. */
+ * `#/time` left this list with #279, `#/standup` with #288, `#/assets` and
+ * `#/asset` with #428 and `#/route` with #432; each has a view of its own now,
+ * and the tests around this one are where they went. The two **bare** ones are
+ * here rather than there deliberately: an address that sets out to name an
+ * asset or a route and names none is a typo, not the estate. */
 test("a later milestone's address is known-unknown, not a kind", () => {
-  for (const hash of ["#/monitor/db-1", "#/route/edge", "#/asset/", "#/asset"]) {
+  for (const hash of ["#/monitor/db-1", "#/asset/", "#/asset", "#/route", "#/route/"]) {
     expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
+});
+
+/**
+ * A route's address is the Tree as well (#432), and it carries the route
+ * rather than an asset.
+ *
+ * `assetId` is `null` because the address does not carry one: the view reads
+ * the route and opens at the asset exposing it. The round trip is what keeps
+ * the more specific address from being flattened to the asset's on the way
+ * back out — a reader who copies a link to a route must get a link to the
+ * route.
+ */
+test("a route's address reaches the Tree, carrying the route", () => {
+  expect(parseHash("#/route/route:9a1b")).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+    routeId: "route:9a1b",
+  });
+  expect(hashFor(parseHash("#/route/route:9a1b"))).toBe("#/route/route:9a1b");
+  // The route wins over an asset id where an address carries both, because it
+  // is the more specific of the two.
+  expect(
+    hashFor({ view: "assets", tab: "tree", assetId: "asset:7f2c", routeId: "route:9a1b" }),
+  ).toBe("#/route/route:9a1b");
 });
 
 /**
