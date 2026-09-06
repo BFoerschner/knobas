@@ -343,6 +343,7 @@ vi.mock("./lib/ipc/assets", () => ({
       effective_owner: null,
       // The monitor names an import kept (#439). Nothing here is imported.
       monitors: [],
+      monitoring: [],
     });
   },
   // The type table the create/edit dialogs read (#429). Answered rather than

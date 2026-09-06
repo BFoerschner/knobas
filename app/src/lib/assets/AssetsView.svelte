@@ -50,11 +50,20 @@
   badge: work is what the mirror holds, so a link to another asset or to a
   context is not in it.
 
+  **The pane's *Monitoring* section** (#445) lists the monitors attached to
+  this asset by a `monitored-by` link, each with the state Kuma last published
+  and one click to its own page there; under it are the names the estate file
+  gave that have not found a monitor yet. Two lists because they are two facts:
+  what is attached, and what is still waiting to be. A monitor that left
+  `/metrics` — paused, or deleted — is still attached and says so, because a
+  section that dropped it would tell an asset somebody deliberately silenced a
+  check on that nothing watches it.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
-  and arrive with the routes that carry the URLs (#432). Wires are #433's and
-  monitoring is M4.1's; monitors are also the half of story 37's *own* health
-  that is not here yet. The Monitors tab is M4.1's, so the tab strip has one tab
+  and arrive with the routes that carry the URLs (#432). Wires are #433's;
+  monitors are also the half of story 37's *own* health that is not here yet,
+  which is #444's. The Monitors tab is #448's, so the tab strip has one tab
   in it: a disabled sibling would teach the reader only that the app is
   unfinished. **Environment, owner and status are
   editable fields on `AssetEdit` and this pane does not set them**: #431 owns
@@ -84,6 +93,7 @@
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
+    type AttachedMonitor,
     type Environment,
     type Inherited,
     type AssetType,
@@ -1250,6 +1260,40 @@
   }
 
   /**
+   * A monitor's address inside knobas — its own detail, not its page in Kuma.
+   *
+   * `hashFor` and not a template string, for `LinksPanel.addressOf`'s reason:
+   * an entity key can carry `#` and `/`, and an unencoded one truncates the
+   * fragment at the browser level. A Kuma monitor's key is its numeric id
+   * today, which is exactly the kind of fact that stops being true.
+   */
+  function monitorAddress(watch: AttachedMonitor): string {
+    return hashFor({
+      view: "room",
+      ctx: "all",
+      detail: { kind: "monitor", entityId: watch.entity_id },
+    });
+  }
+
+  /**
+   * The monitor names the estate file kept that have **not** found a monitor.
+   *
+   * `detail.monitors` is every name the file gave, including the ones that
+   * have since resolved -- the import never removes a name, because the file
+   * is one of the two things that puts one there. So the queue is the
+   * difference between what was named and what is attached, computed here
+   * rather than stored: the backend's two lists are both true, and which of
+   * them a name is *still* in is a rendering question.
+   */
+  const namedAndWaiting = $derived(
+    detail === null
+      ? []
+      : detail.monitors.filter(
+          (name) => !detail!.monitoring.some((watch) => watch.name === name),
+        ),
+  );
+
+  /**
    * Follow a `ValueSource`'s link, where it has one.
    *
    * A function rather than a `!` in the template: `goTo` is `null` exactly
@@ -1926,25 +1970,62 @@
         </section>
 
         <!--
-          The monitor names an import kept on this asset (#439).
+          **Monitoring** — the monitors watching this asset (#445, story 33's
+          own row of the pane), and under it the names the estate file gave
+          that have not found one yet (#439).
 
-          Drawn only when there are some, unlike *Exposes* and *Reachable via*:
-          those two answer "what is this reachable at", which is a question
-          about every asset, and this one is the estate file's own note about
-          which Uptime Kuma checks watch it. A section reading "no monitors" on
-          every hand-made asset would be a sentence about a file nobody
-          imported.
+          Two sections and not one, because they are two different facts. What
+          is *attached* is a `monitored-by` link to a mirrored monitor, and it
+          carries a state and a page in Kuma; what is *named* is a string the
+          file kept on the asset, which the next import or the next sync
+          resolves. A name that has found its monitor is in the first list and
+          must not be repeated in the second — the second is the queue, not the
+          roster.
 
-          Names and not links, and it says so: a monitor is a mirrored item and
-          nothing emits one until M4.1, so what is here is what the file said,
-          waiting to be resolved. Once it is, the link is in the *Linked* panel
-          below with every other one — this list is the queue, not the result.
+          Both drawn only when they have something, unlike *Exposes* and
+          *Reachable via*: those answer "what is this reachable at", which is a
+          question about every asset, and a *Monitoring* heading reading
+          "nothing" on every hand-made asset would be a sentence about a file
+          nobody imported.
         -->
-        {#if detail.monitors.length > 0}
-          <section class="grp">
-            <h3 class="lab">Monitors named by the import</h3>
+        {#if detail.monitoring.length > 0}
+          <section class="grp watch">
+            <h3 class="lab">Monitoring</h3>
             <ul class="lst">
-              {#each detail.monitors as name (name)}
+              {#each detail.monitoring as watch (watch.entity_id)}
+                <li>
+                  <button class="link" onclick={() => router.go(monitorAddress(watch))}>
+                    {watch.name}
+                  </button>
+                  <!--
+                    A monitor that left `/metrics` is paused or deleted (#442),
+                    and either way Kuma is publishing nothing about it: no
+                    state to show and no page to open. Saying so is the point —
+                    a blank beside a live row would read as "up".
+                  -->
+                  {#if watch.withdrawn}
+                    <span class="faint">Paused or gone from Kuma</span>
+                  {:else if watch.state !== null}
+                    <span class="hl {watch.state}">{watch.state}</span>
+                  {:else}
+                    <span class="faint">no reading</span>
+                  {/if}
+                  {#if watch.web_url !== null}
+                    <button class="link" onclick={() => void openInBrowser(watch.web_url!)}>
+                      Open in Kuma
+                    </button>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
+        {#if namedAndWaiting.length > 0}
+          <section class="grp named">
+            <h3 class="lab">Named by the import, not in Kuma yet</h3>
+            <ul class="lst">
+              {#each namedAndWaiting as name (name)}
                 <li class="mono">{name}</li>
               {/each}
             </ul>
@@ -2637,6 +2718,22 @@
 
   .prop button.src {
     text-decoration: underline;
+  }
+
+  /* The state words, coloured the way `.prop .hl` colours health: one
+     vocabulary, one palette. `pending` and `maintenance` are Kuma's other two
+     and fall through to the inherited colour, which is what "no opinion"
+     should look like. */
+  .watch .hl.up {
+    color: var(--ok);
+  }
+
+  .watch .hl.warn {
+    color: var(--amber);
+  }
+
+  .watch .hl.down {
+    color: var(--fail);
   }
 
   .prop .hl.warn {

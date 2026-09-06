@@ -357,6 +357,7 @@ const ASSET_DETAIL = {
   effective_environment: null,
   effective_owner: null,
   monitors: [],
+  monitoring: [],
 };
 
 const ASSET_TIMER = {

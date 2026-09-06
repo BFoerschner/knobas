@@ -307,12 +307,37 @@ export interface AssetDetail {
    * kept them (#439).
    *
    * **Names, not monitors.** A name becomes a `monitored-by` link the moment
-   * the mirror holds a monitor called that; until then it is all knobas has,
-   * because no adapter emits the `monitor` kind before M4.1. So this is what
-   * the estate file said, and {@link links} is what has been resolved out of
-   * it.
+   * the mirror holds a monitor called that. So this is what the estate file
+   * said, and {@link monitoring} is what has been resolved out of it — a name
+   * in both has arrived, a name in only this one is still waiting.
    */
   monitors: string[];
+  /**
+   * The monitors watching this asset, by name — the pane's *monitoring*
+   * section (#445).
+   */
+  monitoring: AttachedMonitor[];
+}
+
+/**
+ * One monitor watching an asset — `assets::AttachedMonitor`.
+ *
+ * The attachment is a `monitored-by` link; the state and the address are the
+ * mirror's, and both are null when the mirror no longer holds the monitor —
+ * which is what a **paused** monitor is, since Kuma drops it from `/metrics`
+ * and the adapter tombstones it.
+ */
+export interface AttachedMonitor {
+  /** `<source>:<monitor id in Kuma>` — the address its detail opens at. */
+  entity_id: string;
+  /** Its name, which is the name an estate file uses to ask for it. */
+  name: string;
+  /** `up`, `down`, `pending`, `maintenance`, or null when there is no reading. */
+  state: string | null;
+  /** Its own page in Uptime Kuma (story 71); null when there is none left. */
+  web_url: string | null;
+  /** Whether it has left the mirror — paused in Kuma, or deleted. */
+  withdrawn: boolean;
 }
 
 /**
@@ -382,8 +407,7 @@ export interface AssetChange {
  * One `monitored-by` link an apply would draw — `assets::MonitorLink`.
  *
  * Only the names the mirror actually holds. A name it does not hold is kept on
- * the asset and resolved by the next import or by the M4.1 sync, so this list
- * is empty until the Kuma adapter lands.
+ * the asset and reported as an {@link UnresolvedMonitor} instead.
  */
 export interface MonitorLink {
   asset_id: string;
@@ -395,11 +419,29 @@ export interface MonitorLink {
 }
 
 /**
+ * One monitor name on one asset that answers to nothing in the mirror —
+ * `assets::UnresolvedMonitor`.
+ *
+ * {@link MonitorLink}'s negative. Reported on **every** preview and not only
+ * on the one that first kept the name: {@link AssetChange.monitors} lists what
+ * an apply would write, so a name already on the asset is absent from it, and
+ * a second preview of an unchanged file would otherwise say nothing at all
+ * about six names that still find no monitor.
+ */
+export interface UnresolvedMonitor {
+  asset_id: string;
+  asset_name: string;
+  /** The Uptime Kuma name, as the file spells it. */
+  monitor_name: string;
+}
+
+/**
  * What an import would do, before it has done any of it —
  * `assets::ImportPreview`.
  *
  * The three groups the Import dialog draws, plus the monitor links, which are
- * a write and therefore have to be announced by the same read.
+ * a write and therefore have to be announced by the same read, and the names
+ * that found no monitor.
  */
 export interface ImportPreview {
   /** What the file calls the estate. */
@@ -411,6 +453,8 @@ export interface ImportPreview {
   /** The known assets with something to change, and what. */
   changes: AssetChange[];
   monitor_links: MonitorLink[];
+  /** The names the mirror does not hold, by asset and then by name. */
+  unresolved: UnresolvedMonitor[];
 }
 
 /** What an import did — `assets::ImportOutcome`. */

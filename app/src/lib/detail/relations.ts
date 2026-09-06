@@ -38,6 +38,21 @@ export interface Relation {
   forward: string;
   /** How it reads from the end it points **at**. */
   inverse: string;
+  /**
+   * The relation this word is the **inverse reading of**, when it is one.
+   *
+   * An offered word carrying this is not a second stored relation: it is the
+   * same row, asked for from the other side. {@link drawn} stores `inverseOf`
+   * and swaps the ends, so `monitors` picked on a monitor and `monitored-by`
+   * picked on an asset produce one identical row — which is what keeps every
+   * estate read filtering on one word (`knobas_app::assets::MONITORED_BY`)
+   * however the reader got there.
+   *
+   * Such a word is never on a stored row, so {@link readingOf} is never asked
+   * about it; the two readings above are here because it is offered in a list
+   * whose whole job is to say what a word means.
+   */
+  inverseOf?: string;
 }
 
 /**
@@ -78,7 +93,40 @@ export const RELATIONS: readonly Relation[] = [
   // source room's Assets tile reads — `knobas_app::assets::MONITORED_BY`,
   // pinned to this list by that module's mirror test.
   { id: "monitored-by", forward: "monitored by", inverse: "monitors" },
+  // The same relation, offered to a reader standing on the **monitor** (#445).
+  // `monitored-by` is a sentence about the asset — *knobas-gitea monitored by
+  // gitea* — so picking it from the monitor's own detail would draw the row
+  // backwards and say the monitor was monitored by the container. `inverseOf`
+  // is how one word covers both ends without two words reaching the database.
+  { id: "monitors", forward: "monitors", inverse: "monitored by", inverseOf: "monitored-by" },
 ];
+
+/** One link about to be written: the ends, in order, and the stored word. */
+export interface DrawnLink {
+  fromId: string;
+  toId: string;
+  relation: string;
+}
+
+/**
+ * The row *Link to…* writes for one pick.
+ *
+ * `openId` is the entity whose detail the dialog was opened over and
+ * `targetId` the thing that was picked, so an ordinary relation is drawn from
+ * the first to the second — the reader is saying *this ⟨relation⟩ that*. A
+ * relation the table marks as the inverse reading of another (see
+ * {@link Relation.inverseOf}) is that same sentence with the row the other way
+ * round: the stored word is the one it is the inverse of, and the target is
+ * the end it is drawn from.
+ *
+ * An unknown relation is drawn as asked. §5a's vocabulary is open, and knobas
+ * cannot know that a word it has never seen is somebody's inverse.
+ */
+export function drawn(relation: string, openId: string, targetId: string): DrawnLink {
+  const known = RELATIONS.find((candidate) => candidate.id === relation);
+  if (!known?.inverseOf) return { fromId: openId, toId: targetId, relation };
+  return { fromId: targetId, toId: openId, relation: known.inverseOf };
+}
 
 /**
  * How `relation` reads from one of its ends.

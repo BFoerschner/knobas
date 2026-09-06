@@ -10,7 +10,7 @@
 import { expect, test } from "vitest";
 
 import type { LinkEntry } from "../ipc/entity";
-import { DEFAULT_RELATION, RELATIONS, groupLinks, readingOf } from "./relations";
+import { DEFAULT_RELATION, RELATIONS, drawn, groupLinks, readingFor, readingOf } from "./relations";
 
 function entry(over: { relation?: string; from?: string; to?: string; id?: string } = {}): LinkEntry {
   const from = over.from ?? "mock:PAY-231";
@@ -155,4 +155,65 @@ test("groups and rows keep the order the read handed them over", () => {
 
   expect(groups.map((group) => group.reading)).toEqual(["documents", "blocks"]);
   expect(groups[0]!.entries.map((item) => item.link.id)).toEqual(["newest", "oldest"]);
+});
+
+/**
+ * Issue #445: *Link to…* draws a monitor's attachment **from either end**,
+ * and both ends read the right way round.
+ *
+ * The stored word is one word — `monitored-by`, `knobas_app::assets`'
+ * `MONITORED_BY`, which the import writes and every estate read filters on —
+ * and it is a sentence about the *asset*: `knobas-gitea monitored by gitea`.
+ * A reader standing on the **monitor** who picks that word would draw the row
+ * backwards and get `gitea monitored by knobas-gitea`, which is the opposite
+ * of the truth. So `monitors` is offered from that end, and it is the same
+ * row: `inverseOf` says which word is stored, and the ends are swapped.
+ *
+ * Asserted as literal words and literal ids, never by re-running `drawn`'s own
+ * rule: a table with `monitors` and `monitored-by` transposed would satisfy
+ * any expectation computed the way the code computes it.
+ */
+test("monitors is the monitor's end of monitored-by, and reads that way from both", () => {
+  expect(readingOf("monitored-by", true)).toBe("monitored by");
+  expect(readingOf("monitored-by", false)).toBe("monitors");
+});
+
+test("an ordinary relation is drawn from the entity whose detail is open", () => {
+  expect(drawn("blocks", "mock:PAY-231", "mock:PAY-228")).toEqual({
+    fromId: "mock:PAY-231",
+    toId: "mock:PAY-228",
+    relation: "blocks",
+  });
+  // A relation nobody curated is nobody's inverse either: §5a's open
+  // vocabulary is stored as typed and drawn the way it was asked for.
+  expect(drawn("supersedes-eventually", "mock:PAY-231", "mock:PAY-228")).toEqual({
+    fromId: "mock:PAY-231",
+    toId: "mock:PAY-228",
+    relation: "supersedes-eventually",
+  });
+});
+
+test("monitors, picked from a monitor, stores monitored-by with the asset at the from end", () => {
+  expect(drawn("monitors", "kuma:7", "asset:knobas-gitea")).toEqual({
+    fromId: "asset:knobas-gitea",
+    toId: "kuma:7",
+    relation: "monitored-by",
+  });
+
+  // And the row that produces reads the right sentence from each end — which
+  // is the whole reason for the swap.
+  const row = entry({ relation: "monitored-by", from: "asset:knobas-gitea", to: "kuma:7" });
+  expect(readingFor(row, "kuma:7")).toBe("monitors");
+  expect(readingFor(row, "asset:knobas-gitea")).toBe("monitored by");
+});
+
+/**
+ * The same gesture from the asset's end draws the identical row — which is
+ * what makes "from either end" one link rather than two spellings of one fact
+ * that every estate read would then have to know about.
+ */
+test("monitored-by, picked from an asset, draws the same row as monitors picked from the monitor", () => {
+  expect(drawn("monitored-by", "asset:knobas-gitea", "kuma:7")).toEqual(
+    drawn("monitors", "kuma:7", "asset:knobas-gitea"),
+  );
 });

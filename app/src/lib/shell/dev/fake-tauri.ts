@@ -1048,6 +1048,11 @@ function assetDetail(args: Record<string, unknown>) {
     // the pane reads `detail.monitors.length`, so a fixture short of the key
     // throws on the pane of every asset rather than drawing nothing.
     monitors: asset.monitors,
+    // Nothing is *attached*, and that is the honest answer: an attachment is a
+    // `monitored-by` link to a mirrored monitor, this fixture has no link
+    // graph and no mirror, so every name the file gave is still a name (#445).
+    // The pane therefore draws the waiting list and no *Monitoring* section.
+    monitoring: [],
     history: [
       // This session's own writes first, newest first, which is what makes
       // *every mutation appears in the pane's history immediately* (#429)
@@ -1171,7 +1176,19 @@ function estatePreview(args: Record<string, unknown>) {
     known: entries.filter((entry) => held(entry.id)),
     new: entries.filter((entry) => !held(entry.id)),
     changes: [],
+    // No monitor in this fixture answers to any name, because there is no
+    // mirror here and no Kuma: every name the file gives is therefore
+    // unresolved, and the dialog draws that group rather than an empty
+    // *Monitors to attach* (#445). Composed from the file rather than
+    // recorded, so deleting an asset in the harness moves its names with it.
     monitor_links: [],
+    unresolved: file.assets.flatMap((entry) =>
+      (entry.monitors ?? []).map((monitor_name) => ({
+        asset_id: entry.id,
+        asset_name: entry.name,
+        monitor_name,
+      })),
+    ),
   };
 }
 

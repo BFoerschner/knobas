@@ -75,6 +75,7 @@ function detail(
     reachable_via: reachableVia,
     history: [],
     monitors: [],
+    monitoring: [],
   };
 }
 
