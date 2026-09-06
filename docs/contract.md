@@ -5983,7 +5983,12 @@ From this commit on, each of the following requires an orchestrator decision **a
      nothing back.
   2. After a restore, every source the archive brought is asked about at the keychain, and one this
      machine holds no secret for is set to `auth_state = 'missing_secret'` with a detail line saying
-     why. `auth_state` is a **column on `knobas.source_config`**, so without this a share export's
+     why — written through `knobas_sync::config::set_health`, the seam every other credential
+     verdict goes through, plus one statement clearing `secret_expires_at` (which that seam
+     deliberately `coalesce`s, and which here measures a credential on somebody else's machine).
+     The step is **best-effort**: the archive is already in the database by then, so a locked
+     keychain reported as a failed restore would send a person round a loop whose second attempt is
+     refused as a `conflict`. `auth_state` is a **column on `knobas.source_config`**, so without this a share export's
      recipient inherits the sharer's verdict — a sources view saying `ok` about systems they cannot
      reach. Asked per source rather than assumed, because the assumption is wrong the other way too:
      a person restoring their own backup onto the machine that took it still has every credential,
