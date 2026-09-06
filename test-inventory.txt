@@ -232,6 +232,7 @@ knobas-app	lib/knobas_app	time::worklog::tests::the_key_is_the_half_after_the_fi
 knobas-app	lib/knobas_app	time::worklog::tests::the_timers_own_verbs_are_not_work
 knobas-app	test/adapter_to_mirror	a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched
 knobas-app	test/adapter_to_mirror	a_classic_projects_epic_link_reaches_the_stored_payload
+knobas-app	test/adapter_to_mirror	a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name
 knobas-app	test/adapter_to_mirror	a_teamcity_project_survives_its_builds_through_its_configurations
 knobas-app	test/assets_ipc	a_column_is_ordered_by_name_and_not_by_when_it_was_made
 knobas-app	test/assets_ipc	a_column_row_reports_its_effective_health_and_what_is_wrong_inside
@@ -1802,6 +1803,7 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_configuration_that_cannot_work_is_refused_at_build_time
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::the_base_url_loses_its_trailing_slash
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::the_instances_descriptor_is_the_template_under_its_own_name
+knobas-source-kuma	lib/knobas_source_kuma	source::tests::the_roster_note_counts_in_english
 knobas-source-kuma	test/contract	a_full_sync_mirrors_every_monitor_with_its_state
 knobas-source-kuma	test/contract	a_monitor_that_stops_being_published_is_tombstoned
 knobas-source-kuma	test/contract	a_refused_key_is_unauthorized_and_says_which_status
