@@ -79,6 +79,40 @@ export function targetReading(target: TimerTarget): string {
 }
 
 /**
+ * The namespace knobas mints its own assets under —
+ * `knobas_app::assets::NAMESPACE`, one of
+ * `knobas_core::entity::RESERVED_NAMESPACES`.
+ *
+ * Local, and named beside {@link CONTEXT_NAMESPACE} because the two are this
+ * module's whole vocabulary of namespaces: one it refuses and one it has to
+ * look up. It is **not** the app's single copy of the word — the estate's own
+ * search asks for `kinds: ["asset"]` in `assets/tree.ts`, which is the kind
+ * and not the id namespace, and those two agreeing is
+ * `knobas_core::entity::OWNED_KINDS`' invariant rather than this constant's.
+ */
+const ASSET_NAMESPACE = "asset";
+
+/**
+ * The asset a target is on, or `null` — what the strip has to look up before
+ * it can name it (#437).
+ *
+ * **Why an asset needs looking up and a ticket does not.** {@link
+ * targetReading} answers with the *key* half of an entity id, which is the
+ * reader's own shorthand for everything a source mirrors: `jira:PAY-231` reads
+ * `PAY-231`, the string they would have typed. knobas mints its own ids, so an
+ * asset's key is a uuid — `asset:9f3c…` — and the shorthand for a machine is
+ * its **name** and its type's chip, which live on the asset and not in its id.
+ * So this says *which* asset, and the surface that has a bridge does the rest.
+ *
+ * The namespace is what is matched, not the entity's kind: the strip has a
+ * target and a target is an id, and the id is the half that is always there.
+ */
+export function assetTargetId(target: TimerTarget | null | undefined): string | null {
+  if (!target || target.kind !== "entity") return null;
+  return namespaceOf(target.entity_id) === ASSET_NAMESPACE ? target.entity_id : null;
+}
+
+/**
  * How long the timer has been running — `"0:07"`, `"45:12"`, `"3:20:07"`.
  *
  * The shape the sync countdown uses (`sources/diagnostics.ts`), with one
@@ -108,6 +142,20 @@ export interface TargetCandidate {
   entityId: string;
   title: string;
   kind: string;
+  /**
+   * Where this one sits, drawn under the title in place of the id — an
+   * asset's path through the estate, `hel1 / vm-db-01` (#437).
+   *
+   * The corpus' own word (`SearchHit.path`, `assets/tree.ts`'s `Match.path`),
+   * so the value keeps its name from the statement that computed it to the row
+   * that draws it.
+   *
+   * Optional, and absent is what a recent item has: `jira:PAY-231` is the
+   * reader's own shorthand and is worth the second line, while `asset:9f3c…`
+   * is a uuid and is not. Two containers both called `postgres` are told apart
+   * by nothing else, which is what the line is for.
+   */
+  path?: string;
 }
 
 /** A recent entity, as a candidate. */

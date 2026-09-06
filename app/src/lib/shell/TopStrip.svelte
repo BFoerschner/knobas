@@ -34,7 +34,10 @@
   count is absent at zero rather than drawn as `0`.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
+  import { getAsset as realGetAsset, type AssetDetail } from "../ipc/assets";
   import type { AuthState } from "../ipc/sources";
   import ContextTabs from "./ContextTabs.svelte";
   import Flap from "./Flap.svelte";
@@ -42,9 +45,10 @@
   import { sourceMonogram } from "./monogram";
   import { builtinContexts, type RoomContext } from "./contexts";
   import { health as sharedHealth, isActionable, type Health } from "./health.svelte";
+  import { latestRead } from "./latest-read";
   import { hashFor, type Router } from "./router.svelte";
   import { timer as sharedTimer, type Timer } from "./timer.svelte";
-  import { targetReading } from "./timer";
+  import { assetTargetId, targetReading } from "./timer";
   import { dayKey } from "../time/day";
 
   let {
@@ -55,6 +59,7 @@
     inbox = sharedInbox,
     timer = sharedTimer,
     ontimer,
+    asset,
   }: {
     router: Router;
     onsearch: () => void;
@@ -104,7 +109,26 @@
      * Tauri bridge behind it.
      */
     health?: Health;
+    /**
+     * Read one asset, so the slot can name an asset target (#437).
+     *
+     * A port with the real command as its default, the shape `timer` and
+     * `health` have: the strip is correct whatever a caller passes, and a test
+     * can hand it an estate with no Tauri bridge behind it.
+     *
+     * **Called for an asset target and for nothing else.** Every other target
+     * is already readable off its own id — `jira:PAY-231` reads `PAY-231`, the
+     * string the reader would have typed — and asking the estate about one
+     * would be a `not_found` per ticket.
+     */
+    asset?: ((assetId: string) => Promise<AssetDetail>) | undefined;
   } = $props();
+
+  // svelte-ignore state_referenced_locally
+  // Read once, at init: production omits this prop, and a bridge swapped
+  // mid-life would leave the name on screen read through one estate and
+  // re-read through another.
+  const readAsset = asset ?? realGetAsset;
 
   const onSources = $derived(router.route.view === "sources");
   const onInbox = $derived(router.route.view === "inbox");
@@ -125,6 +149,75 @@
    * so the button reads as current when the reader is standing in either.
    */
   const onAssets = $derived(router.route.view === "assets");
+
+  /** The asset the clock is on, or `null` for every other target (#437). */
+  const onAsset = $derived(assetTargetId(timer.current?.target ?? null));
+
+  /**
+   * That asset once the estate has answered for it, keyed by the id it was
+   * read for.
+   *
+   * The id travels with the name so the slot can refuse a name that belongs to
+   * the *previous* target: a stop and a start on another asset are two events
+   * a beat apart, and a slot that drew whatever the last read produced would
+   * name the machine the reader has just stopped working on.
+   */
+  let named = $state<{ id: string; name: string; monogram: string } | null>(null);
+  const readAssetLatest = latestRead<AssetDetail>();
+
+  /**
+   * Read the asset the clock is on, and **try again until it is named**.
+   *
+   * Tracked on `timer.current` as well as on the id, and that is the retry:
+   * the store re-reads the timer on every activity line and every heartbeat
+   * (`timer.svelte.ts`), so each of those is a fresh attempt at a name that is
+   * still missing. Without it, the commonest case would be the permanently
+   * unnamed one — `get_asset` rejects `not_ready` for the whole of bring-up,
+   * which is exactly when a relaunch-restored timer is first drawn, and a
+   * single attempt would leave the reader looking at a uuid for the rest of
+   * the session.
+   *
+   * The read is skipped once the name is in hand, so a beat every thirty
+   * seconds does not cost a round trip for an answer the slot already has.
+   * `untrack` on that check, because reading `named` in an effect that writes
+   * it is a loop for no gain: the value it is checked against was written by
+   * this same effect.
+   */
+  $effect(() => {
+    const id = onAsset;
+    timer.current;
+    if (id === null) {
+      named = null;
+      return;
+    }
+    if (untrack(() => named)?.id === id) return;
+    void readAssetLatest(() => readAsset(id), {
+      ok: (detail) => {
+        named = { id, name: detail.asset.name, monogram: detail.asset.monogram };
+      },
+      fail: () => {
+        // **Nothing is said, and the slot is not dropped.** Spec §2's promise
+        // is that a reader always knows the clock is running; a name knobas
+        // could not fetch is not worth trading that for, and the id's key is
+        // still a true thing to draw. The next beat tries again.
+        named = null;
+      },
+    });
+  });
+
+  /** The asset's name and chip, or `null` — see {@link named} for the key. */
+  const heldAsset = $derived(named !== null && named.id === onAsset ? named : null);
+
+  /**
+   * What the slot calls the thing the clock is on.
+   *
+   * The asset's name where the estate has answered, and `targetReading`'s key
+   * everywhere else — including an asset whose read has not landed yet, which
+   * is a uuid and is still better than an empty slot.
+   */
+  const timerReading = $derived(
+    timer.current === null ? "" : (heldAsset?.name ?? targetReading(timer.current.target)),
+  );
 
   /**
    * How each state reads in the cluster's tooltip.
@@ -259,8 +352,8 @@
   {#if timer.current}
     <button
       class="tb-btn timer run"
-      aria-label="Timing {targetReading(timer.current.target)} — {timer.elapsed}"
-      title="Timing {targetReading(timer.current.target)}. Stop it with ⌘T."
+      aria-label="Timing {timerReading} — {timer.elapsed}"
+      title="Timing {timerReading}. Stop it with ⌘T."
       onclick={() => ontimer?.()}
       disabled={ontimer === undefined}
     >
@@ -270,7 +363,17 @@
         slot they were written for.
       -->
       <span class="pulse" aria-hidden="true"></span>
-      <span class="ctx">{targetReading(timer.current.target)}</span>
+      <!--
+        The asset's own chip — `VM`, `CT`, `DB` — and the same one the Tree's
+        columns put on the row, because it is the asset's monogram and not the
+        kind's: on this surface the question is *which machine*, and `AS` would
+        answer *an asset*, which the name already says. Drawn only for an asset,
+        which is the one target whose name is not in its id.
+      -->
+      {#if heldAsset}
+        <span class="mg" title={heldAsset.id}>{heldAsset.monogram}</span>
+      {/if}
+      <span class="ctx">{timerReading}</span>
       <!--
         A flap: the archetypal value that changes while you watch (spec §2,
         story 16). `Flap` honours `prefers-reduced-motion` itself, so a reader

@@ -269,6 +269,7 @@ const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
+const TopStrip = (await import("./TopStrip.svelte")).default;
 const Room = (await import("./Room.svelte")).default;
 const SuggestionTray = (await import("./SuggestionTray.svelte")).default;
 const ShellFixture = (await import("./Shell.fixture.svelte")).default;
@@ -298,6 +299,71 @@ const PassiveSection = (await import("../settings/PassiveSection.svelte")).defau
 const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
 const { createNotifications } = await import("../inbox/notify.svelte");
 const { createHealth } = await import("./health.svelte");
+const { createInbox } = await import("../inbox/inbox.svelte");
+
+/**
+ * A timer store the strip can draw, held on an **asset** (#437).
+ *
+ * A literal rather than `createTimer`: the strip reads the store and never
+ * drives it, and the one thing this case has to be true of is that something
+ * is running and that it is an asset — which is what makes the strip issue the
+ * look-up whose teardown is under test.
+ */
+/** The estate's browse, answering with nothing: this file tests teardowns. */
+const EMPTY_SEARCH = {
+  interpreted: {
+    text: "",
+    prefix: null,
+    filters: { sources: [], kinds: ["asset"], updated_within_days: null, mine: false, authors: [] },
+    unknown_tokens: [],
+  },
+  groups: [],
+  total: 0,
+  took_ms: 1,
+  coverage: [],
+};
+
+/** One asset, as `get_asset` answers for the strip's look-up. */
+const ASSET_DETAIL = {
+  asset: {
+    id: "asset:9f3c11de",
+    parent_id: null,
+    type_id: "vm",
+    type_label: "VM",
+    monogram: "VM",
+    name: "vm-db-01",
+    status: "none" as const,
+    environment: null,
+    owner: null,
+    has_children: false,
+    health: "none" as const,
+    inside: "none" as const,
+    problems_inside: 0,
+  },
+  properties: [],
+  held_by: [],
+  holds: [],
+  history: [],
+  effective_environment: null,
+  effective_owner: null,
+};
+
+const ASSET_TIMER = {
+  current: {
+    target: { kind: "entity" as const, entity_id: "asset:9f3c11de" },
+    started_at: "2026-09-06T09:00:00Z",
+    last_heartbeat: "2026-09-06T09:00:00Z",
+  },
+  elapsed: "0:07",
+  foreground: null,
+  roomContext: null,
+  refresh: async () => {},
+  start: async () => {},
+  stop: async () => null,
+  switchTo: async () => null,
+  press: async () => ({ did: "pick" as const, closed: null }),
+  begin: () => () => {},
+};
 
 /**
  * The launcher's IPC, injected.
@@ -758,6 +824,41 @@ const CASES: Case[] = [
           onpick: () => {},
           onclose: () => {},
           recent: () => deferred<EntityRow[]>([]),
+          // The estate's browse is the picker's second read (#437), and it is
+          // deferred for the reason the recents are: both land after the
+          // unmount.
+          estate: () => deferred(EMPTY_SEARCH),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The top strip's asset look-up (#437). Its effect reads `get_asset` for
+     * an asset target so the slot can name it, and the read is `deferred` here
+     * — so the half this component actually has is "unmounted while the read
+     * is still in flight", which is a reader stopping the clock a moment after
+     * it started.
+     */
+    name: "TopStrip",
+    source: "lib/shell/TopStrip.svelte",
+    open: (target) => ({
+      app: mount(TopStrip, {
+        target,
+        props: {
+          router: createRouter(),
+          onsearch: () => {},
+          health: createHealth(),
+          inbox: createInbox({
+            inboxItems: () => Promise.resolve([]),
+            inboxCount: () => Promise.resolve(0),
+            snoozeInboxItem: () => Promise.resolve(),
+            completeInboxItem: () => Promise.resolve(),
+            listen: () => Promise.resolve(() => {}),
+          }),
+          timer: ASSET_TIMER,
+          ontimer: undefined,
+          asset: () => deferred(ASSET_DETAIL),
         },
       }),
     }),

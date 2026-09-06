@@ -1617,6 +1617,31 @@ mod tests {
         assert!(knobas_core::entity::is_owned_kind(NAMESPACE));
     }
 
+    /// The shell keeps its own copy of this word, and this is what stops the
+    /// two drifting (#437).
+    ///
+    /// `app/src/lib/shell/timer.ts`'s `assetTargetId` decides whether the top
+    /// strip looks a timer target up in the estate, and it decides it on the
+    /// namespace half of the id. A rename here would leave that matching a
+    /// spelling nothing mints any more -- the strip silently back on drawing
+    /// uuids, and every frontend test still green, because each of them
+    /// supplies its own `asset:` id.
+    ///
+    /// A source scan from Rust for the same reason
+    /// `commands::time::tests::the_shells_context_namespace_is_the_one_the_backend_refuses`
+    /// gives for its own: the constant lives in TypeScript, and nothing else
+    /// in the tree compares it to the Rust it claims to mirror.
+    #[test]
+    fn the_shells_asset_namespace_is_the_one_the_estate_mints() {
+        const SHELL: &str = include_str!("../../../../app/src/lib/shell/timer.ts");
+        let declaration = format!("const ASSET_NAMESPACE = \"{NAMESPACE}\";");
+        assert!(
+            SHELL.contains(&declaration),
+            "app/src/lib/shell/timer.ts does not declare `{declaration}`, so the \
+             top strip is looking up a namespace the estate no longer mints"
+        );
+    }
+
     fn text(value: &str) -> PropertyValue {
         PropertyValue::Text {
             value: value.to_owned(),

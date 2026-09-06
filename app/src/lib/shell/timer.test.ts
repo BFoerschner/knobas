@@ -9,6 +9,7 @@
 import { expect, test } from "vitest";
 
 import {
+  assetTargetId,
   canBeTarget,
   elapsedReading,
   legalCandidates,
@@ -90,6 +91,24 @@ test("an entity target reads as its key, and a label as itself", () => {
   expect(targetReading({ kind: "label", label: "DB config for the migration" })).toBe(
     "DB config for the migration",
   );
+});
+
+/**
+ * An asset is the one target whose key says nothing (#437).
+ *
+ * The other direction is what makes it a rule: a mirrored item whose *key*
+ * begins with the word is not an asset, because the namespace is the half
+ * before the first colon and nothing else. Without that, `jira:asset:7` would
+ * send the strip looking for an asset that is not there.
+ */
+test("an asset target is the one the strip has to look up, matched on its namespace", () => {
+  expect(assetTargetId({ kind: "entity", entity_id: "asset:9f3c" })).toBe("asset:9f3c");
+  // Case-insensitively, the way every other namespace rule here is matched.
+  expect(assetTargetId({ kind: "entity", entity_id: "ASSET:9f3c" })).toBe("ASSET:9f3c");
+  expect(assetTargetId({ kind: "entity", entity_id: "jira:PAY-231" })).toBeNull();
+  expect(assetTargetId({ kind: "entity", entity_id: "jira:asset:7" })).toBeNull();
+  expect(assetTargetId({ kind: "label", label: "patching vm-db-01" })).toBeNull();
+  expect(assetTargetId(null)).toBeNull();
 });
 
 test("the elapsed reading counts up, and grows an hours field only when there is one", () => {
