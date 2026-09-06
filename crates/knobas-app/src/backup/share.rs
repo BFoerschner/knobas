@@ -182,7 +182,14 @@ mod tests {
         );
         assert_eq!(
             parts.tables(),
-            vec!["entity", "link", "asset", "route", "context", "source_config"],
+            vec![
+                "entity",
+                "link",
+                "asset",
+                "route",
+                "context",
+                "source_config"
+            ],
         );
     }
 

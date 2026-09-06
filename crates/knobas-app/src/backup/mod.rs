@@ -427,9 +427,10 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 /// A source whose secret *is* here keeps whatever health it arrived with:
 /// stale, and settled by the next run, which is what `auth_checked_at` is for.
 async fn settle_credential_health(state: &BackupState) -> Result<(), ExportError> {
-    let sources: Vec<String> = sqlx::query_scalar("select id from knobas.source_config order by id")
-        .fetch_all(&state.pool)
-        .await?;
+    let sources: Vec<String> =
+        sqlx::query_scalar("select id from knobas.source_config order by id")
+            .fetch_all(&state.pool)
+            .await?;
     for id in sources {
         if knobas_secrets::spawn::get(&state.secrets, &id)
             .await?
@@ -461,7 +462,6 @@ async fn settle_credential_health(state: &BackupState) -> Result<(), ExportError
 /// credential to go with it.
 const RESTORED_WITHOUT_A_SECRET: &str =
     "restored from an archive; archives never carry credentials, so this source needs its own";
-
 
 /// The archives on disk, newest first.
 ///

@@ -563,12 +563,14 @@ async fn seed_estate(pool: &sqlx::PgPool, tag: &str) -> Estate {
     .expect("seed a route");
 
     // contexts
-    sqlx::query("insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','Payouts',$2)")
-        .bind(&context)
-        .bind(&ticket)
-        .execute(pool)
-        .await
-        .expect("seed a context");
+    sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','Payouts',$2)",
+    )
+    .bind(&context)
+    .bind(&ticket)
+    .execute(pool)
+    .await
+    .expect("seed a context");
 
     // notes
     sqlx::query("insert into knobas.note (id, title, body_md) values ($1, 'Runbook', $2)")
@@ -747,7 +749,10 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         .await
         .expect("the entity rows");
     for id in [&estate.ticket, &estate.pr, &estate.asset, &estate.route] {
-        assert!(addressed.contains(id), "{id} has no entity row after the restore");
+        assert!(
+            addressed.contains(id),
+            "{id} has no entity row after the restore"
+        );
     }
     let anchored: Option<String> =
         sqlx::query_scalar("select anchor_id from knobas.context where id = $1")
@@ -797,22 +802,34 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
     for (label, parts, expected) in [
         (
             "links",
-            backup::ShareParts { links: true, ..none },
+            backup::ShareParts {
+                links: true,
+                ..none
+            },
             vec!["entity", "link"],
         ),
         (
             "assets",
-            backup::ShareParts { assets: true, ..none },
+            backup::ShareParts {
+                assets: true,
+                ..none
+            },
             vec!["asset", "entity", "route"],
         ),
         (
             "contexts",
-            backup::ShareParts { contexts: true, ..none },
+            backup::ShareParts {
+                contexts: true,
+                ..none
+            },
             vec!["context", "entity"],
         ),
         (
             "notes",
-            backup::ShareParts { notes: true, ..none },
+            backup::ShareParts {
+                notes: true,
+                ..none
+            },
             vec!["entity", "note"],
         ),
         (
@@ -822,7 +839,10 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
         ),
         (
             "sources",
-            backup::ShareParts { sources: true, ..none },
+            backup::ShareParts {
+                sources: true,
+                ..none
+            },
             vec!["source_config"],
         ),
     ] {
@@ -927,7 +947,9 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
 
     // 1. The table list.
     assert!(
-        data_tables(&archive).await.contains(&"source_config".to_owned()),
+        data_tables(&archive)
+            .await
+            .contains(&"source_config".to_owned()),
         "the sources part is on by default"
     );
 
@@ -942,7 +964,10 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
         sql.contains(&estate.source),
         "this scan proves nothing unless the source is in the script it read"
     );
-    assert!(!sql.contains(PAT), "the credential itself is in the archive");
+    assert!(
+        !sql.contains(PAT),
+        "the credential itself is in the archive"
+    );
     for envelope in ["\"kind\":\"pat\"", "\"secret\"", "\"v\":1"] {
         assert!(
             !sql.contains(envelope),
@@ -989,7 +1014,8 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
         .await
         .expect("a share export");
 
-    let secrets: Arc<dyn knobas_secrets::SecretStore> = Arc::new(knobas_secrets::MemoryStore::new());
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
     knobas_secrets::spawn::put(
         &secrets,
         &estate.source,
@@ -1007,11 +1033,12 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
         .await
         .expect("restore");
 
-    let state: String = sqlx::query_scalar("select auth_state from knobas.source_config where id = $1")
-        .bind(&estate.source)
-        .fetch_one(&same_machine.pool)
-        .await
-        .expect("the restored source configuration");
+    let state: String =
+        sqlx::query_scalar("select auth_state from knobas.source_config where id = $1")
+            .bind(&estate.source)
+            .fetch_one(&same_machine.pool)
+            .await
+            .expect("the restored source configuration");
     assert_eq!(
         state, "ok",
         "the keychain holds this source's secret, so nothing about it is missing"
@@ -1045,7 +1072,10 @@ async fn restoring_a_partial_archive_leaves_the_targets_own_settings_alone() {
     .await
     .expect("the colleague's own schedule");
     let before = rows(&colleague.pool, "setting").await;
-    assert!(before > 0, "this test is about settings that are there to lose");
+    assert!(
+        before > 0,
+        "this test is about settings that are there to lose"
+    );
 
     hand_over(&sharer_dir, &colleague_dir, &record.file);
     backup::restore(&colleague, &record.file)
@@ -1141,7 +1171,9 @@ async fn a_nightly_export_never_prunes_a_share_export() {
         .expect("a share export");
     std::fs::write(dir.path().join("knobas-20260101-030000.knobas"), b"x").unwrap();
 
-    let backup_record = backup::export_now(&service).await.expect("a nightly export");
+    let backup_record = backup::export_now(&service)
+        .await
+        .expect("a nightly export");
 
     let mut left: Vec<String> = std::fs::read_dir(dir.path())
         .unwrap()
