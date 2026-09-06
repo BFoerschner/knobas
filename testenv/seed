@@ -4,6 +4,7 @@
 #
 #   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
 #   ./seed --env       print the env vars for an already-seeded environment
+#   ./seed --env-kuma  print just Uptime Kuma's two, which need no Gitea seed
 #   ./seed --atlassian set up the opt-in real Jira and Confluence containers,
 #                      then seed the Tidewater content into both
 #   ./seed --teamcity  set up the opt-in real TeamCity server and its agent,
@@ -23,6 +24,9 @@ cd "$(dirname "$0")"
 
 STATE=seed-state.json
 KEY_FILE=kuma-api-key
+# The published port docker-compose.yml gives Uptime Kuma, in one place: both
+# printers below hand it to a suite, and two copies is one to forget.
+KUMA_URL=http://127.0.0.1:3001
 
 # The variables an adapter test suite needs. Printed at the end of a seed and
 # by `--env`, so a consumer never has to know where the seed put things.
@@ -32,7 +36,7 @@ print_env() {
   echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$STATE")"
   echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$STATE")"
   echo "export KNOBAS_GITEA_REPO=payout-service"
-  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_URL=http://127.0.0.1:3001"
+  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_URL=$KUMA_URL"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
   echo "export KNOBAS_MOCKD_JIRA_URL=http://127.0.0.1:8210"
   echo "export KNOBAS_MOCKD_TEAMCITY_URL=http://127.0.0.1:8212"
@@ -60,13 +64,27 @@ print_env() {
   fi
 }
 
+# Kuma's two, on their own. `--env` needs seed-state.json, which is Gitea's:
+# `just kuma-live` would then have to seed Gitea to run a Kuma suite, and
+# seed-gitea.sh re-mints the Gitea token when the worktree it runs from has no
+# state file -- 401ing whatever agent is mid-run against it (README.md, "One
+# environment, one owner at a time"). A Kuma recipe has no business doing that,
+# so it asks for the half it needs.
+print_env_kuma() {
+  [ -r "$KEY_FILE" ] || {
+    echo "seed: $KEY_FILE not found -- run ./seed-kuma.sh first" >&2; exit 1; }
+  echo "export KNOBAS_KUMA_URL=$KUMA_URL"
+  echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
+}
+
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
+if [ "${1:-}" = "--env-kuma" ]; then print_env_kuma; exit 0; fi
 # Two statements, not `a && exec b`: under `set -e` a failing left side of `&&`
 # is exempt from errexit and would fall through to the usage error below.
 if [ "${1:-}" = "--atlassian" ]; then ./seed-atlassian.sh; exec ./seed-atlassian-content.sh; fi
 if [ "${1:-}" = "--teamcity" ]; then shift; exec ./seed-teamcity.sh "$@"; fi
 [ $# -eq 0 ] || {
-  echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian|--teamcity [--running]]" >&2; exit 2; }
+  echo "seed: unknown argument '$1'; usage: ./seed [--env|--env-kuma|--atlassian|--teamcity [--running]]" >&2; exit 2; }
 
 for tool in docker curl jq; do
   command -v "$tool" >/dev/null || { echo "seed: $tool is required" >&2; exit 1; }
