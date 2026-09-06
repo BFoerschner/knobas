@@ -117,10 +117,7 @@ pub const TYPES: &[AssetType] = &[
         id: "site",
         label: "Site",
         monogram: "SI",
-        properties: &[
-            p("location", "Location", T),
-            p("provider", "Provider", T),
-        ],
+        properties: &[p("location", "Location", T), p("provider", "Provider", T)],
     },
     AssetType {
         id: "hypervisor",

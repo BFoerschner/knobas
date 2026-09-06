@@ -341,10 +341,18 @@ pub struct AssetDetail {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "field", rename_all = "snake_case")]
 pub enum AssetEdit {
-    Name { value: String },
-    Status { value: AssetStatus },
-    Environment { value: Option<Environment> },
-    Owner { value: Option<String> },
+    Name {
+        value: String,
+    },
+    Status {
+        value: AssetStatus,
+    },
+    Environment {
+        value: Option<Environment>,
+    },
+    Owner {
+        value: Option<String>,
+    },
     Property {
         key: String,
         value: Option<PropertyValue>,
@@ -571,12 +579,14 @@ pub async fn create(
         Some(parent) => path_below(&mut tx, parent).await?,
     };
 
-    sqlx::query("insert into knobas.entity (id, kind, title, updated_at) values ($1, $2, $3, now())")
-        .bind(&id)
-        .bind(NAMESPACE)
-        .bind(&name)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title, updated_at) values ($1, $2, $3, now())",
+    )
+    .bind(&id)
+    .bind(NAMESPACE)
+    .bind(&name)
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query(
         "insert into knobas.asset (id, parent_id, type_id, name, properties, path_text)
@@ -968,8 +978,12 @@ async fn set_column(
     value: Option<&str>,
 ) -> Result<(), IpcError> {
     let statement = match column {
-        "status" => "update knobas.asset set status = coalesce($2, 'none'), updated_at = now() where id = $1",
-        "environment" => "update knobas.asset set environment = $2, updated_at = now() where id = $1",
+        "status" => {
+            "update knobas.asset set status = coalesce($2, 'none'), updated_at = now() where id = $1"
+        }
+        "environment" => {
+            "update knobas.asset set environment = $2, updated_at = now() where id = $1"
+        }
         "owner" => "update knobas.asset set owner = $2, updated_at = now() where id = $1",
         other => return Err(IpcError::internal(format!("no such asset column {other}"))),
     };
@@ -1161,7 +1175,9 @@ mod tests {
         let (list, _) = rest
             .split_once(')')
             .unwrap_or_else(|| panic!("{constraint} does not close its list: {line}"));
-        list.split(',').map(|value| value.trim_matches('\'')).collect()
+        list.split(',')
+            .map(|value| value.trim_matches('\''))
+            .collect()
     }
 
     /// The namespace an asset id is written in is the one `knobas-core`
@@ -1206,8 +1222,12 @@ mod tests {
             [
                 // The VM schema's four, in its order, including the one
                 // nothing filled in.
-                "hostname", "ip", "os", "size", // then the custom keys, by key
-                "backup window", "zzz-note",
+                "hostname",
+                "ip",
+                "os",
+                "size", // then the custom keys, by key
+                "backup window",
+                "zzz-note",
             ]
         );
         assert_eq!(
@@ -1251,11 +1271,7 @@ mod tests {
     fn a_property_value_is_vetted_for_the_kind_it_claims() {
         assert!(text("10.0.0.4").vet("ip").is_ok());
         assert!(text("   ").vet("ip").is_err());
-        assert!(
-            PropertyValue::Number { value: 8080.0 }
-                .vet("port")
-                .is_ok()
-        );
+        assert!(PropertyValue::Number { value: 8080.0 }.vet("port").is_ok());
         assert!(
             PropertyValue::Number {
                 value: f64::INFINITY
@@ -1303,8 +1319,12 @@ mod tests {
     fn a_typed_key_refuses_a_kind_its_type_did_not_declare() {
         let service = types::find("service").unwrap();
         assert!(
-            vet_against_schema(Some(service), "port", &PropertyValue::Number { value: 443.0 })
-                .is_ok()
+            vet_against_schema(
+                Some(service),
+                "port",
+                &PropertyValue::Number { value: 443.0 }
+            )
+            .is_ok()
         );
         let wrong = vet_against_schema(Some(service), "port", &text("443")).unwrap_err();
         assert!(wrong.message.contains("port"), "{}", wrong.message);

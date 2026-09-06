@@ -198,11 +198,7 @@ async fn one_asset_reads_with_its_held_by_path_and_its_properties() {
 
     // The container's schema is image, ports, restart_policy -- in that order,
     // with the two nobody filled in drawn as rows with no value.
-    let keys: Vec<&str> = detail
-        .properties
-        .iter()
-        .map(|p| p.key.as_str())
-        .collect();
+    let keys: Vec<&str> = detail.properties.iter().map(|p| p.key.as_str()).collect();
     assert_eq!(keys, ["image", "ports", "restart_policy"]);
     assert_eq!(detail.properties[0].value, Some(text("postgres:18")));
     assert_eq!(detail.properties[1].value, None);
@@ -239,7 +235,10 @@ async fn a_custom_property_is_stored_beside_the_typed_ones_and_marked() {
     .await
     .expect("the custom property");
 
-    let listed = assets::get(&pool, &vm.id).await.expect("the pane").properties;
+    let listed = assets::get(&pool, &vm.id)
+        .await
+        .expect("the pane")
+        .properties;
     let custom: Vec<&str> = listed
         .iter()
         .filter(|p| p.custom)
@@ -287,7 +286,10 @@ async fn editing_a_property_writes_the_old_to_new_line() {
     assert_eq!(detail["to"]["value"], "10.0.0.9");
 
     // And the value really moved, not just the line.
-    let listed = assets::get(&pool, &vm.id).await.expect("the pane").properties;
+    let listed = assets::get(&pool, &vm.id)
+        .await
+        .expect("the pane")
+        .properties;
     assert_eq!(listed[1].value, Some(text("10.0.0.9")));
 }
 
@@ -314,9 +316,16 @@ async fn clearing_a_property_removes_the_key_and_records_the_clear() {
     assert_eq!(detail["from"]["value"], "Debian 13");
     assert!(detail["to"].is_null());
 
-    let listed = assets::get(&pool, &vm.id).await.expect("the pane").properties;
+    let listed = assets::get(&pool, &vm.id)
+        .await
+        .expect("the pane")
+        .properties;
     assert_eq!(
-        listed.iter().find(|p| p.key == "os").expect("the row").value,
+        listed
+            .iter()
+            .find(|p| p.key == "os")
+            .expect("the row")
+            .value,
         None,
         "the schema still lists it; the value is gone"
     );
@@ -441,8 +450,14 @@ async fn an_edit_that_does_not_fit_the_schema_is_refused_by_name() {
     assert_eq!(code(&blank), IpcErrorCode::Invalid);
 
     // Nothing was written: the refusal came before the transaction committed.
-    assert_eq!(assets::get(&pool, &service.id).await.unwrap().asset.name, "kuma");
-    assert!(history(&pool, &service.id).await.len() == 1, "only `created`");
+    assert_eq!(
+        assets::get(&pool, &service.id).await.unwrap().asset.name,
+        "kuma"
+    );
+    assert!(
+        history(&pool, &service.id).await.len() == 1,
+        "only `created`"
+    );
 
     let unknown = assets::create(&pool, None, "flowrun-scenario", "orchestra", &[])
         .await
@@ -508,13 +523,18 @@ async fn an_asset_can_be_moved_to_the_top_of_the_estate() {
     let pool = pool("assets-move-top").await;
     let (site, vm, _) = three_levels(&pool).await;
 
-    assets::move_to(&pool, &vm.id, None).await.expect("the move");
+    assets::move_to(&pool, &vm.id, None)
+        .await
+        .expect("the move");
     let top = assets::tree(&pool, None).await.expect("the top level");
     let mut names: Vec<&str> = top.iter().map(|a| a.name.as_str()).collect();
     names.sort_unstable();
     assert_eq!(names, ["hel1", "vm-db-01"]);
     assert!(
-        assets::tree(&pool, Some(&site.id)).await.unwrap().is_empty(),
+        assets::tree(&pool, Some(&site.id))
+            .await
+            .unwrap()
+            .is_empty(),
         "the site no longer holds it"
     );
 }
@@ -628,7 +648,9 @@ async fn a_leaf_is_deleted_and_its_entity_row_is_tombstoned() {
     let pool = pool("assets-delete").await;
     let (_, vm, container) = three_levels(&pool).await;
 
-    assets::delete(&pool, &container.id).await.expect("the delete");
+    assets::delete(&pool, &container.id)
+        .await
+        .expect("the delete");
 
     assert!(assets::tree(&pool, Some(&vm.id)).await.unwrap().is_empty());
     assert_eq!(
@@ -779,7 +801,10 @@ use tauri::Manager;
 fn every_asset_command_is_registered_and_its_arguments_decode() {
     for (cmd, args) in [
         ("asset_tree", serde_json::json!({})),
-        ("asset_tree", serde_json::json!({ "parentId": "asset:hel1" })),
+        (
+            "asset_tree",
+            serde_json::json!({ "parentId": "asset:hel1" }),
+        ),
         ("asset_tree", serde_json::json!({ "parentId": null })),
         ("get_asset", serde_json::json!({ "assetId": "asset:7f2c" })),
         (
