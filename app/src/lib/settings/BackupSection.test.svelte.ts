@@ -565,13 +565,15 @@ test("the restore confirm says what the restore does and what it will not do", a
   expect(said).toMatch(/refus|declin|will not/i);
   // The mirror is not in the archive, so sources re-sync afterwards.
   expect(said).toMatch(/re-sync|resync/i);
-  // ...and the re-sync is not promised to bring the whole mirror back. The
-  // archive carries `knobas.source_config.cursor` and `knobas_db::backup::
-  // restore` clears only `knobas.setting`, so a restored source runs
-  // `run_from_stored_cursor` from the position the archive recorded — it
-  // fetches what changed upstream since, not everything it once held.
   expect(said).toMatch(/does not rebuild/i);
-  expect(said).toMatch(/resume from the position/i);
+  // ...and it says where that re-sync starts, which changed with #455:
+  // `backup::restore` clears every restored source's cursor, because no
+  // archive carries a mirror and a position measured against one that is gone
+  // makes the first sync fetch nothing. So the first run is a full one — and
+  // the sentence this dialog used to carry, that sources "resume from the
+  // position the archive recorded", is now false and is pinned out.
+  expect(said).toMatch(/from the top|full sync/i);
+  expect(said).not.toMatch(/resume from the position/i);
 });
 
 test("cancelling the restore confirm restores nothing", async () => {

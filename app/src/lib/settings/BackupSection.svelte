@@ -438,9 +438,10 @@
       </p>
       <p>
         The synced mirror is not in the archive either, and a restore does not rebuild it: search
-        is thin until each source has re-synced. Sources resume from the position the archive
-        recorded rather than from nothing, so a re-sync brings back what changed upstream since —
-        not necessarily everything the mirror used to hold.
+        is thin until each source has re-synced. Each restored source reads its system
+        <b>from the top</b> — no archive carries a mirror, so there is no position left worth
+        resuming from — which makes the first sync of each a full one, and a slow one on a large
+        system.
       </p>
       <p>
         This only works into a knobas that <b>holds no data yet</b>. If this one already has
