@@ -228,3 +228,78 @@ test("a server's pane draws the file's properties at the kinds the type declares
   const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
   expect(custom).toEqual([...custom].sort());
 });
+
+/**
+ * The Import dialog under `?fake-ipc` (#440).
+ *
+ * The estate this fixture draws **is** the file `--demo` imports, so choosing
+ * that file is the one Import gesture a reader will make here, and what it has
+ * to answer is criterion 3's sentence: every entry already in the tree.
+ *
+ * Last in the file, and the two tests are ordered: the second one deletes an
+ * asset, and the fixture's estate is session state that a fresh
+ * `demoHandlers()` does not reset — the same rule the suggestion tests above
+ * are written under.
+ */
+const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8");
+
+test("importing the estate file previews every entry as already in the tree", () => {
+  const handlers = demoHandlers();
+  const preview = handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as {
+    name: string;
+    known: { id: string; kind: string }[];
+    new: unknown[];
+    changes: unknown[];
+  };
+
+  expect(preview.name).toBe(ESTATE_ON_DISK.name);
+  expect(preview.known.map((entry) => entry.id)).toEqual([
+    ...ESTATE_ON_DISK.assets.map((asset) => asset.id),
+    ...ESTATE_ON_DISK.routes.map((route) => route.id),
+  ]);
+  expect(preview.new).toEqual([]);
+  // Applying an all-known import writes nothing, and says six zeroes.
+  expect(handlers["apply_estate_import"]!({ file: ESTATE_TEXT })).toEqual({
+    assets_created: 0,
+    routes_created: 0,
+    properties_set: 0,
+    properties_kept: 0,
+    monitors_kept: 0,
+    monitors_linked: 0,
+  });
+
+  // Any other file is the real command's to parse, and is refused by name
+  // rather than answered from this estate.
+  expect(() => handlers["preview_estate_import"]!({ file: '{"name":"somewhere else"}' })).toThrow(
+    expect.objectContaining({ code: "invalid" }),
+  );
+  expect(() => handlers["preview_estate_import"]!({ file: "not json" })).toThrow(
+    expect.objectContaining({ code: "invalid" }),
+  );
+});
+
+test("an asset deleted here comes back as new, and the import brings it back", () => {
+  const handlers = demoHandlers();
+  // A leaf, so the delete is not refused for what it holds.
+  handlers["delete_asset"]!({ assetId: "asset:db-confluence" });
+
+  const gone = handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as {
+    new: { id: string; name: string; type_label: string | null }[];
+  };
+  expect(gone.new).toEqual([
+    { id: "asset:db-confluence", kind: "asset", name: "confluence", type_label: "Database", parent_id: "asset:knobas-confluence-db" },
+  ]);
+
+  expect(handlers["apply_estate_import"]!({ file: ESTATE_TEXT })).toMatchObject({
+    assets_created: 1,
+    routes_created: 0,
+  });
+  // And it is in the tree again, with the origin line the real import writes.
+  const detail = handlers["get_asset"]!({ assetId: "asset:db-confluence" }) as {
+    history: { actor: string; verb: string }[];
+  };
+  expect(detail.history[0]).toMatchObject({ actor: "import", verb: "imported" });
+  expect(
+    (handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as { new: unknown[] }).new,
+  ).toEqual([]);
+});
