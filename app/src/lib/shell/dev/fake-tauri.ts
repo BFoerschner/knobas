@@ -308,13 +308,19 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // #429 brings both, and the writes to answer them with.
     asset_tree: (args) => assetColumn(args),
     get_asset: (args) => assetDetail(args),
+    // The Tree's search box (#430), and **only** the Tree's: a query that is
+    // not narrowed to assets is refused rather than answered from the estate,
+    // because the launcher's corpus is the mirror's and this fixture has no
+    // mirror to search. A handler that answered everything with assets would
+    // make a QA pass over the launcher look like it worked.
+    search: (args) => estateSearch(args),
   };
 }
 
 // -- the estate -------------------------------------------------------------
 
 /**
- * A slice of the **real** test infrastructure, three levels deep (#428).
+ * A slice of the **real** test infrastructure, five levels deep (#428, #430).
  *
  * Deliberately not Tidewater-shaped: spec #427 rules that the estate is the
  * real thing -- the Hetzner servers, their containers and databases -- and
@@ -323,8 +329,13 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
  * that file lands, this can read it instead.
  *
  * Small on purpose. It exists so a browser can be pointed at the Tree, not so
- * that it can stand in for PostgreSQL: three levels is what makes a path a
- * path, and a fourth would only make the screenshot wider.
+ * that it can stand in for PostgreSQL. #428 stopped at three levels, which is
+ * what makes a path a path; #430 needs the two the real estate actually has
+ * under a VM — the container engine and the container's database — because a
+ * strip that fits every column cannot show a column *collapsing*, and the
+ * spine is the thing a browser has to photograph. The chain is
+ * `testenv/hetzner/estate.json`'s own: site → VM → container engine →
+ * container → database.
  */
 const FIXTURE_ESTATE: {
   id: string;
@@ -389,8 +400,23 @@ const FIXTURE_ESTATE: {
     ],
   },
   {
-    id: "asset:teamcity",
+    id: "asset:teamcity-docker",
     parent_id: "asset:knobas-teamcity",
+    type_id: "container_engine",
+    type_label: "Container engine",
+    monogram: "CE",
+    name: "Docker engine (knobas-teamcity)",
+    status: "up",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "socket", label: "Socket", value: null, custom: false },
+      { key: "version", label: "Version", value: { kind: "text", value: "27.3" }, custom: false },
+    ],
+  },
+  {
+    id: "asset:teamcity",
+    parent_id: "asset:teamcity-docker",
     type_id: "container",
     type_label: "Container",
     monogram: "CT",
@@ -405,8 +431,23 @@ const FIXTURE_ESTATE: {
     ],
   },
   {
+    id: "asset:teamcity-db",
+    parent_id: "asset:teamcity",
+    type_id: "database",
+    type_label: "Database",
+    monogram: "DB",
+    name: "teamcity",
+    status: "up",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "engine", label: "Engine", value: { kind: "text", value: "PostgreSQL 18" }, custom: false },
+      { key: "port", label: "Port", value: { kind: "number", value: 5432 }, custom: false },
+    ],
+  },
+  {
     id: "asset:teamcity-agent",
-    parent_id: "asset:knobas-teamcity",
+    parent_id: "asset:teamcity-docker",
     type_id: "container",
     type_label: "Container",
     monogram: "CT",
@@ -539,6 +580,82 @@ function assetDetail(args: Record<string, unknown>) {
       { id: 1, at: SYNCED_AT, actor: "user", verb: "created", entity_id: asset.id, detail: {} },
     ],
   };
+}
+
+/**
+ * `search`, narrowed to the estate — what `assets/tree.ts`'s `estateQuery`
+ * asks for.
+ *
+ * A **substring match over names**, where the real corpus is PostgreSQL FTS
+ * over the name and the ancestor path with `corpus::ASSET`'s weights. So this
+ * answers the same *shape* and a different question, which is all a browser
+ * pass needs: what it certifies is that the box draws its offers and that
+ * taking one opens the columns. What certifies the query itself is
+ * `crates/knobas-app/tests/search_ipc.rs`, against a real database.
+ */
+function estateSearch(args: Record<string, unknown>) {
+  const query = (args.query ?? {}) as {
+    raw?: string;
+    filters?: { kinds?: string[] };
+  };
+  if (!(query.filters?.kinds ?? []).includes("asset")) {
+    throw {
+      code: "not_ready",
+      message: "the fixture answers the Tree's asset search only (#430) — there is no mirror here",
+      source_id: null,
+    };
+  }
+  const needle = (query.raw ?? "").trim().toLowerCase();
+  const hits = FIXTURE_ESTATE.filter(
+    (asset) => needle !== "" && asset.name.toLowerCase().includes(needle),
+  ).map((asset, index) => ({
+    entity_id: asset.id,
+    kind: "asset",
+    source_id: "asset",
+    updated_at: null,
+    synced_at: SYNCED_AT,
+    title: asset.name,
+    path: assetPathText(asset),
+    rank: 1 - index / 10,
+    snippet: [],
+  }));
+  return {
+    interpreted: {
+      text: query.raw ?? "",
+      prefix: null,
+      filters: { sources: [], kinds: ["asset"], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups:
+      hits.length === 0
+        ? []
+        : [
+            {
+              kind: "asset",
+              label: "Asset",
+              plural: "Assets",
+              monogram: "AS",
+              total: hits.length,
+              hits,
+            },
+          ],
+    total: hits.length,
+    took_ms: 2,
+    coverage: [],
+  };
+}
+
+/** `knobas.asset.path_text`: the ancestors' names, outermost first. */
+function assetPathText(asset: (typeof FIXTURE_ESTATE)[number]): string | null {
+  const names: string[] = [];
+  let walk = asset.parent_id;
+  while (walk !== null) {
+    const held = FIXTURE_ESTATE.find((row) => row.id === walk);
+    if (!held) break;
+    names.unshift(held.name);
+    walk = held.parent_id;
+  }
+  return names.length === 0 ? null : names.join(" / ");
 }
 
 // -- the demo corpus --------------------------------------------------------
