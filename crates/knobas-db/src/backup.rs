@@ -294,12 +294,15 @@ pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupErr
 /// What `pg_restore --file=-` prints: the script a person with nothing but
 /// PostgreSQL's own tools would get. (`--file` is not optional -- a
 /// `pg_restore` given neither a database nor a file refuses rather than
-/// defaulting to stdout, the same refusal [`restore`] relies on.) Two things need it. A user restoring a knobas archive by hand is the
-/// promise `--format=custom` was chosen for; and it is the only seam at which
-/// "**nothing secret is in the archive**" is a claim about the *file* rather
-/// than about the argument list that produced it (#454). A `TABLE DATA` entry
-/// in the table of contents says a table's rows are in there and says nothing
-/// about what is in them.
+/// defaulting to stdout, the same refusal [`restore`] relies on.)
+///
+/// **It exists so that "nothing secret is in the archive" can be asserted
+/// against the archive** (#454). Nothing in the running app calls it; the
+/// caller is `knobas-app`'s `tests/backup_ipc.rs`, and it is `pub` for that
+/// reason and no other. That is not a test-only convenience but the only
+/// reading of the claim that means anything: a `TABLE DATA` entry in the table
+/// of contents says a table's rows are in the file and says nothing whatever
+/// about what is in them, and an argument list cannot witness itself.
 ///
 /// The whole script comes back as a `String`, so this is for reading an
 /// archive, not for streaming a large one anywhere.

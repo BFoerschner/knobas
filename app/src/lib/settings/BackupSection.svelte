@@ -5,7 +5,8 @@
 
   The engine underneath is already headless and already ratified (issue #38,
   PR #67): this file is a surface over `backup_status`, `backup_now`,
-  `set_backup_schedule` and `restore_backup`, and it changes neither side.
+  `set_backup_schedule` and `restore_backup`, and it changes neither side. The
+  share export (#454) hangs off the same read and adds `share_export`.
 
   ## One read, and what re-reads it
 

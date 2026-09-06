@@ -51,6 +51,7 @@ export interface ShareParts {
   links: boolean;
   /** Assets and the routes they expose. */
   assets: boolean;
+  /** Contexts, and what each is anchored to. */
   contexts: boolean;
   /** Off by default. */
   notes: boolean;

@@ -493,11 +493,13 @@ async fn a_fresh_machine_restores_after_taking_its_own_first_backup() {
 
 /// Everything a share export could carry, seeded into one database.
 ///
-/// Every part's tables and three that are in **no** part -- the activity
-/// stream, the write queue and the mirror -- because "and nothing else" is
-/// only a claim if the things that must not travel are actually there to be
-/// carried.
-struct Estate {
+/// Every part's tables and the ones that are in **no** part -- the activity
+/// stream and the mirror -- because "and nothing else" is only a claim if the
+/// things that must not travel are actually there to be carried.
+///
+/// Not called `Estate`: `CONTEXT.md` fixes that word for the tree of assets,
+/// their routes and the monitors on them, and this is the whole corpus.
+struct Seeded {
     ticket: String,
     pr: String,
     asset: String,
@@ -507,7 +509,7 @@ struct Estate {
     source: String,
 }
 
-async fn seed_estate(pool: &sqlx::PgPool, tag: &str) -> Estate {
+async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     let t = format!("{tag}{}", uuid::Uuid::new_v4().simple());
     let ticket = format!("jira:PAY-{t}");
     let pr = format!("gitea:pr-{t}");
@@ -638,7 +640,7 @@ async fn seed_estate(pool: &sqlx::PgPool, tag: &str) -> Estate {
     .await
     .expect("seed a mirror row");
 
-    Estate {
+    Seeded {
         ticket,
         pr,
         asset,
@@ -689,7 +691,7 @@ fn hand_over(from: &tempfile::TempDir, to: &tempfile::TempDir, file: &str) {
 #[tokio::test]
 async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     let (sharer, sharer_dir) = service("sharesource").await;
-    let estate = seed_estate(&sharer.pool, "share").await;
+    let estate = seed_corpus(&sharer.pool, "share").await;
 
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
@@ -796,7 +798,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
 #[tokio::test]
 async fn each_part_alone_brings_exactly_its_own_tables() {
     let (sharer, dir) = service("sharetoggles").await;
-    seed_estate(&sharer.pool, "toggle").await;
+    seed_corpus(&sharer.pool, "toggle").await;
 
     let none = backup::ShareParts::none();
     for (label, parts, expected) in [
@@ -866,7 +868,7 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
 #[tokio::test]
 async fn switching_notes_and_time_on_brings_the_notes_and_the_hours() {
     let (sharer, sharer_dir) = service("sharepersonal").await;
-    let estate = seed_estate(&sharer.pool, "personal").await;
+    let estate = seed_corpus(&sharer.pool, "personal").await;
 
     let record = backup::share_export(
         &sharer,
@@ -945,7 +947,7 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
     let sharer_secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
     let (sharer, sharer_dir) = service_with("sharesecret", Arc::clone(&sharer_secrets)).await;
-    let estate = seed_estate(&sharer.pool, "secret").await;
+    let estate = seed_corpus(&sharer.pool, "secret").await;
     knobas_secrets::spawn::put(
         &sharer_secrets,
         &estate.source,
@@ -1026,7 +1028,7 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
 #[tokio::test]
 async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_health_alone() {
     let (sharer, sharer_dir) = service("keepsecretsource").await;
-    let estate = seed_estate(&sharer.pool, "keep").await;
+    let estate = seed_corpus(&sharer.pool, "keep").await;
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
         .expect("a share export");
@@ -1071,7 +1073,7 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
 #[tokio::test]
 async fn restoring_a_partial_archive_leaves_the_targets_own_settings_alone() {
     let (sharer, sharer_dir) = service("settingsource").await;
-    seed_estate(&sharer.pool, "settings").await;
+    seed_corpus(&sharer.pool, "settings").await;
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
         .expect("a share export");
@@ -1117,7 +1119,7 @@ async fn restoring_a_partial_archive_leaves_the_targets_own_settings_alone() {
 #[tokio::test]
 async fn a_share_export_restored_over_a_populated_database_is_a_conflict() {
     let (sharer, sharer_dir) = service("shareconflictsource").await;
-    seed_estate(&sharer.pool, "conflict").await;
+    seed_corpus(&sharer.pool, "conflict").await;
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
         .expect("a share export");
@@ -1181,7 +1183,7 @@ async fn a_nightly_export_never_prunes_a_share_export() {
     )
     .await
     .expect("store a schedule");
-    seed_estate(&service.pool, "keepshare").await;
+    seed_corpus(&service.pool, "keepshare").await;
 
     let shared = backup::share_export(&service, backup::ShareParts::default())
         .await

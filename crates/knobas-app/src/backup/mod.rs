@@ -44,8 +44,10 @@
 //!
 //! §14 asks for "a small settings surface (export now / schedule / restore)".
 //! knobas has no settings view to hang one off, so it is **issue #69**,
-//! blocked on that view existing. What is here is what #69 will call: the four
+//! blocked on that view existing. What is here is what #69 will call: the
 //! commands in [`crate::commands::backup`] and the typed mirror beside them.
+//! (#69 landed in PR #102, and M4.2 (#454) added [`share_export`] to the same
+//! surface -- the section's *Share…* dialog.)
 
 pub mod policy;
 pub mod share;
@@ -403,7 +405,7 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
         return Err(ExportError::NoSuchArchive(file.to_owned()));
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
-    settle_credential_health(state).await?;
+    settle_credential_health(state).await;
     Ok(())
 }
 
@@ -426,7 +428,31 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 ///
 /// A source whose secret *is* here keeps whatever health it arrived with:
 /// stale, and settled by the next run, which is what `auth_checked_at` is for.
-async fn settle_credential_health(state: &BackupState) -> Result<(), ExportError> {
+/// # Why it lives here, and why it cannot fail the restore
+///
+/// Here, because it is a step of *restore* and the rest of restore is here.
+/// The verdict itself is written through `knobas_sync::config::set_health`,
+/// the seam every other credential verdict in this repo goes through, so there
+/// is no second spelling of `missing_secret` and no second `update` to keep in
+/// step with that one.
+///
+/// **Best-effort.** By the time this runs the archive is already in the
+/// database and there is no undoing it, so reporting a locked keychain as a
+/// failed restore would send a person round a loop whose second attempt is
+/// refused as a `conflict` -- against the data the first attempt put there.
+/// What is at stake is a verdict the next sync run settles anyway, and a
+/// warning in the log is the honest weight for it.
+async fn settle_credential_health(state: &BackupState) {
+    if let Err(error) = settle_health(state).await {
+        tracing::warn!(
+            %error,
+            "the restore finished, but the sources it brought could not be checked against \
+             this machine's keychain"
+        );
+    }
+}
+
+async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
     let sources: Vec<String> =
         sqlx::query_scalar("select id from knobas.source_config order by id")
             .fetch_all(&state.pool)
@@ -438,21 +464,24 @@ async fn settle_credential_health(state: &BackupState) -> Result<(), ExportError
         {
             continue;
         }
-        // The same statement `knobas_sync::config::set_health` writes, without
-        // the event: nothing is listening during a restore, and the sources
-        // view re-reads on its next mount.
-        sqlx::query(
-            "update knobas.source_config
-                set auth_state = 'missing_secret',
-                    auth_checked_at = now(),
-                    auth_detail = $2,
-                    secret_expires_at = null
-              where id = $1",
+        knobas_sync::config::set_health(
+            &state.pool,
+            &id,
+            knobas_sync::config::AuthState::MissingSecret,
+            Some(RESTORED_WITHOUT_A_SECRET),
+            None,
         )
-        .bind(&id)
-        .bind(RESTORED_WITHOUT_A_SECRET)
-        .execute(&state.pool)
         .await?;
+        // `set_health` writes `secret_expires_at = coalesce($4, …)`, so that a
+        // connection test which learned nothing about expiry cannot erase what
+        // an earlier one learned. Here there is nothing to keep: the countdown
+        // was measured against a credential sitting on somebody else's
+        // machine, and a PAT-expiry line under a source with no PAT is a
+        // sentence about nothing.
+        sqlx::query("update knobas.source_config set secret_expires_at = null where id = $1")
+            .bind(&id)
+            .execute(&state.pool)
+            .await?;
         tracing::info!(source_id = %id, "restored source has no credential on this machine");
     }
     Ok(())

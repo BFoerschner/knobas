@@ -67,7 +67,7 @@ pub struct ShareParts {
     pub links: bool,
     /// `knobas.asset` and `knobas.route` -- the estate.
     pub assets: bool,
-    /// `knobas.context`.
+    /// `knobas.context` -- the rooms, and what each one is anchored to.
     pub contexts: bool,
     /// `knobas.note`. **Off by default**: a note is the private half of what
     /// knobas holds.
@@ -100,9 +100,14 @@ const ENTITY: &str = "entity";
 
 impl ShareParts {
     /// Whether any part is on at all.
+    ///
+    /// Asked of [`tables`](Self::tables) rather than of the fields, so the two
+    /// cannot come apart: "empty exactly when nothing is on" is the invariant
+    /// the empty-selection guard rests on, and a second cascade over the same
+    /// six booleans is a second place for it to stop being true.
     #[must_use]
-    pub const fn any(self) -> bool {
-        self.links || self.assets || self.contexts || self.notes || self.time || self.sources
+    pub fn any(self) -> bool {
+        !self.tables().is_empty()
     }
 
     /// The `knobas` tables this selection dumps, in a stable order and without
