@@ -5,7 +5,8 @@
 
   The engine underneath is already headless and already ratified (issue #38,
   PR #67): this file is a surface over `backup_status`, `backup_now`,
-  `set_backup_schedule` and `restore_backup`, and it changes neither side.
+  `set_backup_schedule` and `restore_backup`, and it changes neither side. The
+  share export (#454) hangs off the same read and adds `share_export`.
 
   ## One read, and what re-reads it
 
@@ -35,9 +36,12 @@
     backupStatus,
     restoreBackup,
     setBackupSchedule,
+    shareDefaults,
+    shareExport,
     type ArchiveFile,
     type BackupSchedule,
     type BackupStatus,
+    type ShareParts,
   } from "../ipc/backup";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
@@ -78,6 +82,22 @@
   /** The archive a restore confirm is asking about, if any. */
   let restoring = $state<ArchiveFile | null>(null);
   let restoreInFlight = $state(false);
+  /**
+   * The share export's toggles, and whether its dialog is up.
+   *
+   * A live object with a separate flag, for the reason `draft` above is one:
+   * `bind:checked` reads its getter again on a later tick, and a `null` by
+   * then throws into a promise nothing awaits. Reset to the ratified defaults
+   * on every open, so a dialog cancelled with notes switched on does not open
+   * that way next time — a share export is a decision made once per export,
+   * not a stored preference.
+   */
+  let shareDraft = $state<ShareParts>({ ...shareDefaults });
+  let sharing = $state(false);
+  let shareInFlight = $state(false);
+
+  /** Whether the share dialog has anything to export. */
+  const shareEmpty = $derived(!Object.values(shareDraft).some(Boolean));
 
   /**
    * Which `backup_status` is the current one.
@@ -243,6 +263,35 @@
       exporting = false;
     }
   }
+  /** Open the share dialog on the ratified defaults. */
+  function openShare() {
+    shareDraft = { ...shareDefaults };
+    sharing = true;
+  }
+
+  /**
+   * Take a share export of the chosen parts.
+   *
+   * Re-reads afterwards for the reason *Export now* does, and a different one:
+   * the archive lands in the same directory and is listed with the backups, so
+   * the person who took it can see where it went and hand it over.
+   *
+   * A refused export leaves the dialog open — an empty selection is a decision
+   * not yet made, the same rule the restore confirm follows.
+   */
+  async function confirmShare() {
+    shareInFlight = true;
+    try {
+      const record = await shareExport({ ...shareDraft });
+      sharing = false;
+      push({ text: `Share export written to ${record.file}.`, ms: 15_000 });
+      await load();
+    } catch (cause) {
+      push({ text: `Share export failed: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      shareInFlight = false;
+    }
+  }
 </script>
 
 <div class="tile-h">
@@ -260,6 +309,7 @@
       <button class="btn sm" disabled={exporting} onclick={() => void exportNow()}>
         {exporting ? "Exporting…" : "Export now"}
       </button>
+      <button class="btn sm" onclick={openShare}>Share…</button>
     </span>
   {/if}
 </div>
@@ -279,6 +329,13 @@
       Archives are written to <span class="mono">{status.directory}</span>. They contain
       everything knobas owns — links, contexts, notes, assets, worklogs — but not the synced
       mirror, which re-syncs.
+    </p>
+
+    <p class="sub">
+      A <b>share export</b> is the same kind of archive cut down to the parts a colleague should
+      get — links, assets, contexts and source configurations by default, with notes and time left
+      out. It is never deleted by the retention above, and it restores through the same
+      <i>Restore</i> below.
     </p>
 
     <p class="sub">
@@ -345,6 +402,67 @@
       <button class="btn" onclick={() => (restoring = null)}>Cancel</button>
       <button class="btn danger" disabled={restoreInFlight} onclick={() => void confirmRestore()}>
         Restore
+      </button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if sharing}
+  <Modal title="Share export" center onclose={() => (sharing = false)}>
+    {#snippet body()}
+      <p class="note top">
+        Which parts of this knobas the archive carries. Everything else stays here: the activity
+        stream, the synced mirror, and knobas's own settings — the recipient keeps their schedule
+        and their preferences.
+      </p>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.links} />
+        Links, and the titles of what they join
+      </label>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.assets} />
+        Assets and their routes
+      </label>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.contexts} />
+        Contexts
+      </label>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.notes} />
+        Notes
+      </label>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.time} />
+        Time — the timer, its blocks and your worklogs
+      </label>
+      <label class="chk">
+        <input type="checkbox" bind:checked={shareDraft.sources} />
+        Source configurations
+      </label>
+      <!--
+        Said here rather than only in the docs: an entity row is the *address*
+        of a thing and the archive carries the whole address book, so a note's
+        title travels with notes switched off even though its body does not.
+        A person deciding what to hand over needs that in front of them.
+      -->
+      <p class="note">
+        Titles travel with any part: a colleague restoring this sees the name of every ticket,
+        page, asset and note knobas knows about, and the contents of only the parts ticked here.
+        Credentials are never in an archive — they live in the keychain, and each source asks for
+        its own on the other machine.
+      </p>
+      {#if shareEmpty}
+        <p class="note fail">Nothing is ticked, so there is nothing to export.</p>
+      {/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (sharing = false)}>Cancel</button>
+      <button
+        class="btn pri"
+        disabled={shareInFlight || shareEmpty}
+        onclick={() => void confirmShare()}
+      >
+        {shareInFlight ? "Exporting…" : "Export"}
       </button>
     {/snippet}
   </Modal>
@@ -463,6 +581,15 @@
 
   .row.arc .btn {
     height: 20px;
+  }
+
+  .chk + .chk {
+    margin-top: 6px;
+  }
+
+  .note.top {
+    margin-top: 0;
+    margin-bottom: 12px;
   }
 
   .note {

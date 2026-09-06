@@ -201,6 +201,7 @@ pub fn run() {
             commands::app::complete_first_run,
             commands::backup::backup_status,
             commands::backup::backup_now,
+            commands::backup::share_export,
             commands::backup::set_backup_schedule,
             commands::backup::restore_backup,
             commands::entity::list_contexts,

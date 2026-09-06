@@ -233,7 +233,7 @@ _Avoid_: incident, notification (bare), problem (that is the rolled-up count on 
 Everything knobas owns, notes included; the mirror is excluded (it re-syncs).
 
 **Share export**:
-A curated export — links, assets, contexts, smart lists — with notes and time excluded by default; every part toggleable. *Time* is the timer, [blocks](#block), [worklogs](#worklog) and the time settings: personal the way a note is, and a colleague reading a link map has no use for somebody's hours. The default is recorded; the export itself is M4. (#283)
+A curated export — links, assets, contexts and [source](#source) configurations by default, with notes and time off; every part toggleable. *Time* is the timer, [blocks](#block) and [worklogs](#worklog): personal the way a note is, and a colleague reading a link map has no use for somebody's hours. The archive is the backup's own format restricted to those tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, and the ordinary restore reads it. Two things it cannot carry, both because `pg_dump` restricts by table and never by row (#454): **the time settings**, since `knobas.setting` is one table holding every feature's bookkeeping and the recipient keeps their own; and **only some titles**, since an entity row is an address and the whole address book travels — a note's title crosses with notes off, its body does not. No credential is ever in an archive, so a restored source configuration lands as *missing secret*. Smart lists are built-ins, so there is no toggle for them until a saved one exists. (#283, #427, #454)
 
 ## Surfaces
 

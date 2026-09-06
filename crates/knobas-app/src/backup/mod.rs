@@ -44,10 +44,13 @@
 //!
 //! §14 asks for "a small settings surface (export now / schedule / restore)".
 //! knobas has no settings view to hang one off, so it is **issue #69**,
-//! blocked on that view existing. What is here is what #69 will call: the four
+//! blocked on that view existing. What is here is what #69 will call: the
 //! commands in [`crate::commands::backup`] and the typed mirror beside them.
+//! (#69 landed in PR #102, and M4.2 (#454) added [`share_export`] to the same
+//! surface -- the section's *Share…* dialog.)
 
 pub mod policy;
+pub mod share;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -56,11 +59,13 @@ use std::time::Duration;
 use chrono::{DateTime, Local, Utc};
 use knobas_db::backup::BackupError;
 use knobas_db::embedded::Connector;
+use knobas_secrets::SecretStore;
 use sqlx::PgPool;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 pub use policy::BackupSchedule;
+pub use share::ShareParts;
 
 /// `knobas.setting` key holding the [`BackupSchedule`] as JSON.
 const SCHEDULE_KEY: &str = "backup.schedule";
@@ -128,6 +133,8 @@ pub enum ExportError {
     },
     #[error("there is no archive called {0} in the backup directory")]
     NoSuchArchive(String),
+    #[error("a share export needs at least one part; every one of them is switched off")]
+    NoParts,
 }
 
 impl From<ExportError> for crate::IpcError {
@@ -137,6 +144,10 @@ impl From<ExportError> for crate::IpcError {
             // wait for M4's merge-restore.
             ExportError::Backup(BackupError::TargetNotEmpty { .. }) => Self::conflict(error),
             ExportError::NoSuchArchive(_) => Self::not_found(error),
+            // The one refusal the *caller* made: every toggle off. `invalid`
+            // rather than `internal`, because nothing went wrong -- the
+            // request cannot be honoured as asked.
+            ExportError::NoParts => Self::invalid(error),
             _ => Self::internal(error),
         }
     }
@@ -158,6 +169,10 @@ pub struct BackupState {
     /// Where archives are written -- inside the profile, so the demo profile
     /// cannot write into the real one's backups (P13).
     pub directory: PathBuf,
+    /// The same store `sources` uses, so that a restore can ask whether this
+    /// machine actually holds a credential for a source the archive brought.
+    /// See [`restore`].
+    pub secrets: Arc<dyn SecretStore>,
     cancel: CancellationToken,
 }
 
@@ -169,11 +184,17 @@ impl BackupState {
     /// could misuse, unlike `AppState::over_pool`, so it is not behind a
     /// feature.
     #[must_use]
-    pub fn new(pool: PgPool, connector: Connector, directory: PathBuf) -> Self {
+    pub fn new(
+        pool: PgPool,
+        connector: Connector,
+        directory: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Self {
         Self {
             pool,
             connector,
             directory,
+            secrets,
             cancel: CancellationToken::new(),
         }
     }
@@ -305,6 +326,46 @@ pub async fn export_if_due(state: &BackupState) -> Result<Option<BackupRecord>, 
     export_now(state).await.map(Some)
 }
 
+/// Take a **share export**: the same archive, restricted to `parts`.
+///
+/// Spec #427 (M4.2). Not a backup, and deliberately not treated as one:
+///
+/// * it is named `knobas-share-<stamp>.knobas`, so retention cannot age out an
+///   archive a person made on purpose to hand to somebody
+///   ([`policy::expired`] skips it);
+/// * it does not record itself as `backup.last`, so the nightly schedule still
+///   measures from the last *backup* and a week of share exports does not look
+///   like a week of backups;
+/// * it prunes nothing.
+///
+/// It is still one of this profile's archives -- it is listed by
+/// [`status`] and [`restore`] accepts it -- because the archive a colleague is
+/// handed is the archive they drop into their own backup directory and
+/// restore.
+///
+/// # Errors
+/// [`ExportError::NoParts`] when every toggle is off, and [`ExportError`] if
+/// the dump fails.
+pub async fn share_export(
+    state: &BackupState,
+    parts: ShareParts,
+) -> Result<BackupRecord, ExportError> {
+    if !parts.any() {
+        return Err(ExportError::NoParts);
+    }
+    let taken_at = Utc::now();
+    let file = policy::share_name(&taken_at.with_timezone(&Local));
+    let path = state.directory.join(&file);
+
+    let bytes = knobas_db::backup::dump_tables(&state.connector, &path, &parts.tables()).await?;
+    tracing::info!(file = %file, bytes, ?parts, "share export written");
+    Ok(BackupRecord {
+        taken_at,
+        file,
+        bytes: i64::try_from(bytes).unwrap_or(i64::MAX),
+    })
+}
+
 /// Everything the settings dialog draws.
 ///
 /// # Errors
@@ -342,8 +403,105 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
         return Err(ExportError::NoSuchArchive(file.to_owned()));
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
+    settle_credential_health(state).await;
     Ok(())
 }
+
+/// Say `missing_secret` about every source this machine has no credential for.
+///
+/// **No archive carries a secret** -- spec §14 puts every credential in the OS
+/// keychain and nothing secret ever reaches Postgres -- but `auth_state` is a
+/// column on `knobas.source_config`, so a restore brings across what the
+/// *other* machine last learned about its own credentials. Left alone, a share
+/// export's recipient gets a sources view saying `ok` about systems they
+/// cannot reach, and a scheduler that keeps asking.
+///
+/// So the verdict is recomputed from the one fact this machine can establish
+/// without a network: whether its keychain holds a secret under the source's
+/// id. It is asked per source rather than assumed, because the assumption is
+/// wrong in the other direction too -- a person restoring their own backup
+/// onto the machine that took it still has every credential, and
+/// `missing_secret` would take those sources out of `trigger_all` until they
+/// went and re-entered a password that was never lost.
+///
+/// A source whose secret *is* here keeps whatever health it arrived with:
+/// stale, and settled by the next run, which is what `auth_checked_at` is for.
+/// # Why it lives here, and why it cannot fail the restore
+///
+/// Here, because it is a step of *restore* and the rest of restore is here.
+/// The verdict itself is written through `knobas_sync::config::set_health`,
+/// the seam every other credential verdict in this repo goes through, so there
+/// is no second spelling of `missing_secret` and no second `update` to keep in
+/// step with that one.
+///
+/// **Best-effort.** By the time this runs the archive is already in the
+/// database and there is no undoing it, so reporting a locked keychain as a
+/// failed restore would send a person round a loop whose second attempt is
+/// refused as a `conflict` -- against the data the first attempt put there.
+/// What is at stake is a verdict the next sync run settles anyway, and a
+/// warning in the log is the honest weight for it.
+async fn settle_credential_health(state: &BackupState) {
+    if let Err(error) = settle_health(state).await {
+        tracing::warn!(
+            %error,
+            "the restore finished, but the sources it brought could not all be settled \
+             against this machine's keychain"
+        );
+    }
+}
+
+async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
+    let sources: Vec<String> =
+        sqlx::query_scalar("select id from knobas.source_config order by id")
+            .fetch_all(&state.pool)
+            .await?;
+    for id in sources {
+        match knobas_secrets::spawn::get(&state.secrets, &id).await {
+            // This machine holds it; nothing about this source is missing.
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            // Per source, because the question is per source. A store that
+            // refuses one entry -- a locked keychain, a denied prompt -- must
+            // not end the loop and leave every source after it wearing the
+            // verdict the *other* machine reached. And a refusal is not
+            // `missing_secret` either: it is this machine having learned
+            // nothing, which the next sync run settles.
+            Err(error) => {
+                tracing::warn!(
+                    source_id = %id,
+                    %error,
+                    "the keychain would not say whether this machine holds this source's secret"
+                );
+                continue;
+            }
+        }
+        knobas_sync::config::set_health(
+            &state.pool,
+            &id,
+            knobas_sync::config::AuthState::MissingSecret,
+            Some(RESTORED_WITHOUT_A_SECRET),
+            None,
+        )
+        .await?;
+        // `set_health` writes `secret_expires_at = coalesce($4, …)`, so that a
+        // connection test which learned nothing about expiry cannot erase what
+        // an earlier one learned. Here there is nothing to keep: the countdown
+        // was measured against a credential sitting on somebody else's
+        // machine, and a PAT-expiry line under a source with no PAT is a
+        // sentence about nothing.
+        sqlx::query("update knobas.source_config set secret_expires_at = null where id = $1")
+            .bind(&id)
+            .execute(&state.pool)
+            .await?;
+        tracing::info!(source_id = %id, "restored source has no credential on this machine");
+    }
+    Ok(())
+}
+
+/// What the sources view says about a source an archive brought with no
+/// credential to go with it.
+const RESTORED_WITHOUT_A_SECRET: &str =
+    "restored from an archive; archives never carry credentials, so this source needs its own";
 
 /// The archives on disk, newest first.
 ///
@@ -377,7 +535,15 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
             })
         })
         .collect();
-    found.sort_by(|a, b| b.file.cmp(&a.file));
+    // On the stamp, not on the whole name: `knobas-share-` sorts above every
+    // `knobas-<digit>`, so comparing file names would put every share export
+    // at the top of the list for ever, whatever day it was taken (#454). The
+    // whole name breaks a tie, so the order is total.
+    found.sort_by(|a, b| {
+        policy::stamp(&b.file)
+            .cmp(policy::stamp(&a.file))
+            .then_with(|| b.file.cmp(&a.file))
+    });
     found
 }
 
@@ -401,10 +567,25 @@ fn prune(state: &BackupState, keep: u32) -> Result<(), ExportError> {
 /// `sources::start`.
 pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::EmbeddedDb) {
     let profile = app.state::<crate::Profile>().inner().clone();
+    // The store `sources::start` built, which ran before this in `spawn_bring_up`
+    // and returns `Err` rather than leaving its state unmanaged -- so the
+    // fallback below is unreachable. It is an empty store rather than a panic
+    // because of which way the mistake would go: an empty keychain makes
+    // `restore` call every source `missing_secret`, which is the conservative
+    // answer and one a user can act on, where reusing a stale `ok` is a
+    // sources view that lies.
+    let secrets = app.try_state::<crate::sources::SourcesState>().map_or_else(
+        || {
+            tracing::error!("the backup service started before the sync engine");
+            Arc::new(knobas_secrets::MemoryStore::new()) as Arc<dyn SecretStore>
+        },
+        |sources| Arc::clone(&sources.secrets),
+    );
     let state = Arc::new(BackupState::new(
         db.pool().clone(),
         db.connector(),
         profile.backup_dir(),
+        secrets,
     ));
 
     if !app.manage(Arc::clone(&state)) {

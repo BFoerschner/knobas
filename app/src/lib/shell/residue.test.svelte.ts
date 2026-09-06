@@ -247,6 +247,11 @@ vi.mock("../ipc/backup", () => ({
     }),
   backupNow: () => deferred({ taken_at: "2026-08-29T01:00:00Z", file: "knobas-x.knobas", bytes: 1 }),
   setBackupSchedule: () => deferred(undefined),
+  // The section reads these on mount to seed the share dialog; a mock that
+  // replaces the module has to carry them or the component throws.
+  shareDefaults: { links: true, assets: true, contexts: true, notes: false, time: false, sources: true },
+  shareExport: () =>
+    deferred({ taken_at: "2026-08-29T01:00:00Z", file: "knobas-share-x.knobas", bytes: 1 }),
   restoreBackup: () => deferred(undefined),
 }));
 
