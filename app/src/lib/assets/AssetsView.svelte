@@ -777,6 +777,9 @@
       adding = false;
       newKey = "";
       newValue = "";
+      // The kind resets with the other two: a form that reopened on the last
+      // kind would offer a date box to a reader who came back for a port.
+      newKind = "text";
     }
   }
 
@@ -1241,7 +1244,22 @@
               text, because `"8080"` and `8080` are different properties and a
               date read as a string cannot be ordered against another one.
             -->
-            <div class="add">
+            <!--
+              `Esc` is read on the form and not on each field: the key box and
+              the kind picker are as much a way out of this form as the value
+              box is, and a press in either of them would otherwise close the
+              form *and* walk the selection (see `cancelEditor`).
+              `svelte-ignore` because the wrapper is a form, not a control: the
+              role a key handler usually asks for is one the three fields
+              inside already carry.
+            -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="add"
+              onkeydown={(event) => {
+                if (event.key === "Escape") cancelEditor(event, () => (adding = false));
+              }}
+            >
               <input
                 class="inp k"
                 type="text"
@@ -1265,7 +1283,6 @@
                 oninput={(event) => (newValue = event.currentTarget.value)}
                 onkeydown={(event) => {
                   if (event.key === "Enter") void addProperty();
-                  if (event.key === "Escape") cancelEditor(event, () => (adding = false));
                 }}
               />
               <div class="add-f">
@@ -1577,6 +1594,9 @@
     flex: none;
     align-items: center;
     padding: 6px 0;
+    /* Its own, since #429 moved the full column's to the `.colw` wrapper the
+       spine does not have: without it a run of spines is one grey block. */
+    border-right: 1px solid var(--hair);
     background: var(--panel);
     cursor: pointer;
   }

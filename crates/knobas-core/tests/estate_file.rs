@@ -261,8 +261,8 @@ fn every_type_is_in_the_type_table() {
 /// shape that occurs in provisioned infrastructure and is not offered is a
 /// convention that has drifted from the thing it describes.
 ///
-/// It runs on **types**, not on assets, so the six distinct pairs this file
-/// holds are six assertions and not twenty-odd. It is one-directional on
+/// It runs on **types**, not on assets, so the seven distinct pairs this file
+/// holds are seven assertions and not twenty-odd. It is one-directional on
 /// purpose: a type may suggest a pair the estate has no instance of -- the
 /// design draws chains this infrastructure does not reach into -- and only the
 /// other direction is a drift.
@@ -284,7 +284,7 @@ fn every_pair_the_real_estate_holds_is_a_pair_the_type_table_suggests() {
         pairs.insert((holder, field(asset, "type")));
     }
     assert!(
-        pairs.len() >= 5,
+        pairs.len() >= 7,
         "the estate has stopped describing a tree of more than one shape: {pairs:?}"
     );
 

@@ -361,6 +361,15 @@ function columns(): string[][] {
   );
 }
 
+/** Each column's monogram chips, in order — the type each row draws as. */
+function chips(): string[][] {
+  return [...target.querySelectorAll("ol.col")].map((column) =>
+    [...column.querySelectorAll("button.row span.mg")].map((chip) =>
+      (chip.textContent ?? "").trim(),
+    ),
+  );
+}
+
 function marked(): (string | null)[] {
   return [...target.querySelectorAll("ol.col")].map((column) => {
     const on = column.querySelector('button.row[aria-current="true"] span.nm');
@@ -450,6 +459,23 @@ function type(label: string, value: string) {
   flushSync();
 }
 
+/**
+ * Pick an option the way a person does — a `<select>` answers to `change`.
+ *
+ * Its own helper rather than a branch inside {@link type}, because the two
+ * events are the difference between a control a reader can operate and one
+ * that only looks operable: `bind:value` on a select reads `change`, and a
+ * test that sent `input` alone would assert on the *default* while believing
+ * it had chosen.
+ */
+function choose(label: string, value: string) {
+  const control = field(label);
+  control.value = value;
+  control.dispatchEvent(new Event("input", { bubbles: true }));
+  control.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+
 beforeEach(() => {
   target = document.createElement("div");
   document.body.append(target);
@@ -520,6 +546,10 @@ test("a deeper column's plus creates inside that column's asset, with its conven
   expect(text()).toContain("Usual here: Container engine, Service");
 
   type("Name", "redis");
+  // *And any type allowed*: the dialog opens on the first suggestion
+  // (`container_engine`) and this picks a different one, so what lands is the
+  // type the reader chose rather than the one the conventions defaulted to.
+  choose("Type", "service");
   click("Create");
 
   await vi.waitFor(() =>
@@ -527,6 +557,13 @@ test("a deeper column's plus creates inside that column's asset, with its conven
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", "redis"]);
   expect(store.rows.find((row) => row.name === "redis")?.parent_id).toBe("asset:vm-db-01");
+  expect(store.rows.find((row) => row.name === "redis")?.type_id).toBe("service");
+  // The monogram is asserted **here** and not on the root create: there the
+  // new asset, its only sibling and the type the dialog defaults to are all
+  // `site`, so `"SI"` is what a constant, the wrong row and the right row all
+  // say alike. Here the created row is a `service` beside a `container`, and
+  // the two chips differ.
+  expect(chips()).toEqual([["SI"], ["VM", "VM"], ["CT", "SV"]]);
 });
 
 /**
@@ -601,6 +638,10 @@ test("moving an asset redraws the columns at its new path", async () => {
   // The line the move wrote, with the parent's **name**: the backend can only
   // write down an id, and the pane resolves it against the path it just read.
   expect(text()).toContain("Moved to vm-app-02");
+  // The third column reads the same either way -- `postgres` is the only
+  // thing under both VMs -- so this line witnesses that the layout survived
+  // the move and nothing more. What says the move landed is the marked row in
+  // column two, below, and the held-by line above.
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
   expect(marked()).toEqual(["hel1", "vm-app-02", "postgres"]);
   expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-app-02");
@@ -624,15 +665,21 @@ test("a cycle is refused with the message the command gives, and nothing moves",
   click("Move…");
   await walkInto("hel1");
   await walkInto("vm-db-01");
-  click("Move into vm-db-01");
+  // Two hops down, not one: `postgres` is `hel1`'s *grand*child, so what
+  // refuses this is the walk up the whole held-by chain rather than the
+  // one-step case `asset_no_self_parent_chk` closes in the database. The
+  // offender the sentence names is `vm-db-01`, which is neither end of the
+  // move -- a refusal that named an end would have survived this.
+  await walkInto("postgres");
+  click("Move into postgres");
 
   await vi.waitFor(() =>
     expect(text()).toContain(
-      'moving "hel1" under "vm-db-01" would make a cycle: "vm-db-01" is already held by "hel1"',
+      'moving "hel1" under "postgres" would make a cycle: "vm-db-01" is already held by "hel1"',
     ),
   );
   // The dialog stays open on the refusal, and the estate is untouched.
-  expect(text()).toContain("Move into vm-db-01");
+  expect(text()).toContain("Move into postgres");
   expect(store.rows.find((row) => row.id === "asset:hel1")?.parent_id).toBeNull();
 });
 
@@ -796,4 +843,50 @@ test("Esc in a property editor cancels the edit and does not walk the selection"
   // ...and the reader is still on the asset they were editing.
   expect(location.hash).toBe("#/asset/asset:postgres");
   expect(text()).toContain("hel1 / vm-db-01 / postgres");
+
+  // The add form's *first* field, not its last: the key box and the kind
+  // picker are as much a way out of the form as the value box is, and a
+  // handler hung on one field would have left the other two walking.
+  click("Add a property");
+  const key = field("New property key");
+  key.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+  expect(text()).toContain("Add a property");
+  expect(location.hash).toBe("#/asset/asset:postgres");
+});
+
+/**
+ * **A custom property is stored as the kind the form was told, not as the kind
+ * its text looks like.**
+ *
+ * The ticket's *"adds custom properties of text, number, date or url"*. The
+ * pane asks for the kind rather than guessing it — `"8080"` and `8080` are
+ * different properties, and a date read as a string cannot be ordered against
+ * another one — so the witness is the **tag** on the stored value and not the
+ * text on the screen, which is the same either way. An `addProperty` that
+ * ignored the picker and parsed everything as text would survive any
+ * assertion made on the rendered value.
+ */
+test("a custom property is stored as the kind the picker was set to", async () => {
+  const store = estate(seed());
+  render("#/asset/asset:postgres", store);
+  await vi.waitFor(() => expect(text()).toContain("Image postgres:18"));
+
+  click("Add a property");
+  type("New property key", "metrics port");
+  choose("New property kind", "number");
+  type("New property value", "9187");
+  click("Add");
+
+  await vi.waitFor(() => expect(text()).toContain("metrics port 9187"));
+  expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
+    image: { kind: "text", value: "postgres:18" },
+    "metrics port": { kind: "number", value: 9187 },
+  });
+
+  // And the form comes back on `text` rather than on the kind it was last
+  // left in: a reader adding a hostname after a port should not be handed a
+  // number box.
+  click("Add a property");
+  expect((field("New property kind") as HTMLSelectElement).value).toBe("text");
 });

@@ -5146,11 +5146,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   navigation contract growth — `#/assets/tree` and `#/asset/<id>` are #428's and the dialogs are
   not addresses.
 
-  Ratified by the orchestrator as spec #427 and issue #429, whose acceptance criteria specify
-  creating with the type conventions, editing typed and custom properties, the move and its
-  cycle refusal, the delete and its refusal, and this entry.
+  Ratified by the orchestrator as spec #427 and issue #429. Unlike #428's, **#429's acceptance
+  criteria do not ask for this entry** -- they say "IPC tests already cover the commands", which
+  reads as *no new command*. The entry is owed by the standing rule at the head of this section
+  rather than by the ticket, and it is written because the ticket's own criteria cannot be met
+  without the table on the wire: a create dialog needs `suggests` for *usual here*, and a pane
+  editing a declared-but-unfilled property needs the kind, which no `AssetProperty` carries.
   **Björn keeps the gate for frozen contracts and this entry is flagged for his review.**
-
 
 - **`AssetRow` and `AssetDetail` grow the computed fields, issue #431 (2026-09-06):** inherited
   environment and owner with their source, effective health, and the "N problems inside" count.

@@ -9,12 +9,12 @@
 
   **Where you have walked to is what you are moving into.** There is no
   separate "target" to select: the breadcrumb says where the picker is standing
-  and *Move here* puts the asset there, which makes the top of the estate an
+  and *Move into …* puts the asset there, which makes the top of the estate an
   ordinary destination (walk back to *Estate*) rather than a special button.
 
   ## The picker does not hide the moves the backend refuses
 
-  A reader can walk into the asset's own subtree and press *Move here*, and
+  A reader can walk into the asset's own subtree and press *Move into …*, and
   `move_asset` refuses it with the sentence it has for exactly this — naming
   both ends **and the asset that closes the loop**. Two reasons that is right
   rather than lazy:

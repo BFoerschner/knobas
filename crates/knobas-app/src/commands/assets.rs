@@ -67,7 +67,6 @@ fn announce<R: tauri::Runtime>(
 /// is always `Ok` is an error branch every caller has to write and no test can
 /// reach.
 #[tauri::command]
-#[must_use]
 pub fn asset_types() -> Vec<AssetType> {
     assets::types()
 }

@@ -499,8 +499,14 @@ function worst(statuses: FixtureAsset["status"][]): FixtureAsset["status"] {
  * monograms, schemas and `suggests` lists `knobas_core::asset` declares.
  * **Not all nineteen**, for the estate's own reason one paragraph up: this is a
  * fixture a browser is pointed at, and nine types is what it takes to see a
- * *usual here* line and a typed-property editor. When #439's import can read
- * `testenv/hetzner/estate.json` directly, this can read the table with it.
+ * *usual here* line and a typed-property editor. The `suggests` lists are
+ * nonetheless the **whole** lists the real table declares, so one of them names
+ * a type this subset omits (`container` suggests `runtime`). That is on
+ * purpose: `typeChoices` drops ids the list it is given does not carry, so a
+ * full copy costs nothing and a trimmed one would be a second list disagreeing
+ * with the first -- which is the drift this fixture already had once. When
+ * #439's import can read `testenv/hetzner/estate.json` directly, this can read
+ * the table with it.
  */
 const ASSET_TYPES: {
   id: string;

@@ -155,7 +155,7 @@ use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
 ///
 /// # Where the `suggests` lists come from
 ///
-/// Two sources, and nothing invented beyond them:
+/// Three buckets, in descending order of how much they answer to:
 ///
 /// * **Design §12.1's two chains** -- *site > hypervisor > VM > engine >
 ///   container > runtime > scenario > step > connector* and *database server >
@@ -170,10 +170,18 @@ use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
 ///   so the conventions answer to an estate that exists (ADR-0013) rather than
 ///   to a diagram.
 ///
-/// The remaining few -- a service or a database server on a VM, a middleware
-/// behind a reverse proxy, a module or a connector under a service -- are the
-/// neighbouring types §12.1's own prose names, and they are suggestions: the
-/// dialog offers all nineteen whatever is listed here.
+/// * **The neighbouring types §12.1's prose names, and the few this estate
+///   will plainly grow into.** A service or a database server on a VM, a
+///   middleware behind a reverse proxy, a module or a connector under a
+///   service. And four the chains do not draw and the estate has no instance
+///   of yet, each argued rather than assumed: a `network` under a `site`
+///   (a network belongs to the place it is provisioned in, and there is
+///   nowhere else in the table to hang one), a `reverse_proxy` on a `vm` (the
+///   estate runs one and will hold it once it is described), and a `service`
+///   inside a `container` and behind a `reverse_proxy` -- the two ways a
+///   service is actually reached here. These are the judgement calls, and
+///   they are suggestions: the dialog offers all nineteen whatever is listed,
+///   and nothing in the table is a constraint.
 pub const TYPES: &[AssetType] = &[
     AssetType {
         id: "site",

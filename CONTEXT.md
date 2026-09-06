@@ -264,5 +264,9 @@ _Avoid_: board, assets board, columns view
 A column of the [Tree](#tree) collapsed to a 30px strip, labelled with the [asset](#asset) of the reader's own path that runs through it — or, for a column their path does not reach, with the first asset in it — and re-expanded by clicking it. What collapses is decided by the width left beside the fixed pane and never by depth: the point is that a deep path does not push the pane off the screen. (#430, spec story 28)
 _Avoid_: breadcrumb (that is a line of names, not a column), rail, collapsed column (as a name — that is what a spine *is*)
 
+**Type convention**:
+The child [asset](#asset) types the built-in table records as usually held inside one — `AssetType::suggests`, drawn by the create dialog as *usual here* and by nothing else. An **ordering, never a filter**: the dialog offers every declared type whatever the conventions say, and `assets::create` accepts any type under any parent. Deliberately not called a *suggestion*, which is already the word for a machine-proposed [link](#link) that is accepted or dismissed; a type convention is neither proposed nor persisted. What the conventions answer to is the real estate — `testenv/hetzner/estate.json` — and not a diagram (ADR-0013). (#429, spec story 17)
+_Avoid_: suggestion (that is a link), rule, constraint, allowed types
+
 **Tidewater**:
 The fictional company whose dataset seeds demos, fixtures, and the test environment.
