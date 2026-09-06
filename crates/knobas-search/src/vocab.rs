@@ -663,7 +663,7 @@ mod tests {
             full_sync_exhaustive: true,
         }])]);
 
-        assert_eq!(catalog.owned_kinds(), ["note"]);
+        assert_eq!(catalog.owned_kinds(), ["asset", "note"]);
         for owned in knobas_core::entity::OWNED_KINDS {
             let info = catalog.info(owned.id);
             assert_eq!(

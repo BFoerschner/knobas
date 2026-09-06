@@ -329,13 +329,23 @@ fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
     Ok(query)
 }
 
-/// Whether this prefix names a corpus knobas does not have yet.
+/// Whether this prefix names a corpus the launcher does not answer from yet.
 ///
-/// Assets are M4 (interfaces §2.4: *"the parser must simply return no `asset:`
-/// results rather than pretending"*), and `t `, `>` and `?` are not corpus
-/// searches at all -- worklogs, the command palette and help. Every one of them
-/// is still **parsed and echoed**, so the launcher greys the prefix out with a
-/// reason instead of showing tickets for `asset:`.
+/// `t `, `>` and `?` are not corpus searches at all -- worklogs, the command
+/// palette and help. Every one of them is still **parsed and echoed**, so the
+/// launcher greys the prefix out with a reason instead of showing tickets for
+/// `asset:`.
+///
+/// **`asset:` is the one entry here whose corpus now exists** (amended by
+/// #428, which read "assets are M4" while there was no asset table). The
+/// estate landed with [`corpus::ASSET`], so a *plain* query already answers
+/// with asset rows; what has not landed is the launcher's own asset hit --
+/// the monogram, the path from the root, and the action chain -- which is
+/// #436, and which is what the prefix promises a reader who types it. So this
+/// stays until #436, which is the ticket that removes the line, the way #46
+/// removed `note:`'s. Interfaces §2.4's *"the parser must simply return no
+/// `asset:` results rather than pretending"* still holds; the reason is now
+/// the rendering rather than the rows.
 ///
 /// `note:` was in this list until #46 and is not any more: notes have a corpus
 /// ([`corpus::NOTE`]) and a write path behind it. Removing it here is the whole
@@ -351,10 +361,11 @@ fn empty_corpus(prefix: Option<Prefix>) -> bool {
 /// A response that understood the query and found nothing.
 ///
 /// No coverage, and it is not an omission: both callers are queries that never
-/// reached a corpus at all -- an empty box, or a prefix whose corpus this
-/// milestone does not have. `asset: @jonas` finds nothing because there are no
-/// assets, which the greyed-out prefix already says; adding "and Buildserver
-/// has no authors" would explain the wrong absence.
+/// reached a corpus at all -- an empty box, or a prefix the launcher does not
+/// answer from yet. `asset: @jonas` finds nothing because `asset:` is still
+/// short-circuited until #436 draws an asset hit, which the greyed-out prefix
+/// already says; adding "and Buildserver has no authors" would explain the
+/// wrong absence.
 fn empty(interpreted: ParsedQuery, started: Instant) -> SearchResponse {
     SearchResponse {
         interpreted,
@@ -469,10 +480,20 @@ mod tests {
         );
     }
 
-    /// The prefixes whose corpus M1 does not have, and -- just as important --
-    /// the ones whose corpus it does.
+    /// The prefixes the launcher does not answer from, and -- just as
+    /// important -- the ones it does.
+    ///
+    /// `Prefix::Asset` is in the first list and its corpus is in
+    /// [`corpus::ALL`]: since #428 the rows exist and a plain query returns
+    /// them; #436 is what draws an asset hit and takes the prefix off this
+    /// list. Both halves of that are deliberate, so both are asserted.
     #[test]
     fn only_the_absent_corpora_short_circuit() {
+        assert!(
+            corpus::ALL.iter().any(|corpus| corpus.kind == "'asset'"),
+            "the asset corpus exists (#428); `asset:` is short-circuited for \
+             the launcher's rendering (#436), not for want of rows"
+        );
         for absent in [Prefix::Asset, Prefix::Time, Prefix::Action, Prefix::Help] {
             assert!(empty_corpus(Some(absent)), "{absent:?}");
         }

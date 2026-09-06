@@ -271,8 +271,13 @@ const ADDRESSES = [
   // The standup digest is a real view since #288, and it has to render from a
   // cold deep link with an empty database like every other address.
   "#/standup",
-  // M4 addresses, reserved so an open kind never collides with a view.
-  "#/assets/board",
+  // The Assets view is real since #428, in both its spellings: the tab
+  // address, and one asset. The second is opened against an empty database, so
+  // what it has to render from cold is the *miss* -- which is exactly the
+  // deep-link case a notification produces.
+  "#/assets/tree",
+  "#/asset/asset:7f2c",
+  // M4.1 addresses, reserved so an open kind never collides with a view.
   "#/monitor/kuma",
   "#/start-work/mock:PAY-231",
   // And what a person can type.
@@ -301,15 +306,16 @@ test("an address a later milestone owns says which, and offers the way back", as
   // what makes the assertion below about the ladder rather than about
   // whichever address ran last.
   await open("#/ctx/all");
-  // `#/assets/board` and not `#/standup`, which reaches a view of its own
-  // since #288. This test is about the *pane* a reserved-but-unbuilt address
-  // renders, so it has to name an address that is still one.
-  location.hash = "#/assets/board";
+  // `#/monitor/kuma` and not `#/standup` or `#/assets/tree`, both of which
+  // reach views of their own now (#288, #428). This test is about the *pane* a
+  // reserved-but-unbuilt address renders, so it has to name an address that is
+  // still one.
+  location.hash = "#/monitor/kuma";
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   flushSync();
 
   const text = (target.textContent ?? "").replace(/\s+/g, " ");
-  expect(text).toContain("#/assets/board");
+  expect(text).toContain("#/monitor/kuma");
   expect(text).toMatch(/milestone/i);
   const back = [...target.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.trim() === "Back to the room",

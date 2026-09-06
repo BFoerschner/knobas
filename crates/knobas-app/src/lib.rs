@@ -24,6 +24,7 @@
 //! reaches the backend with a `fetch`, and without it every command call is
 //! blocked in a release build while working perfectly in dev.
 
+pub mod assets;
 pub mod backup;
 pub mod commands;
 mod error;
@@ -287,6 +288,14 @@ pub fn run() {
             commands::entity::set_standup_publish_target,
             commands::entity::create_action_item_ticket,
             commands::entity::notify,
+            // Appended at the foot of the list, after #288's group: the barrel
+            // is append-only (§10.8), and this is M4.0's first group.
+            commands::assets::asset_tree,
+            commands::assets::get_asset,
+            commands::assets::create_asset,
+            commands::assets::edit_asset,
+            commands::assets::move_asset,
+            commands::assets::delete_asset,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

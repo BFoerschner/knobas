@@ -283,6 +283,7 @@ const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
+const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
 const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
@@ -564,6 +565,28 @@ const CASES: Case[] = [
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             logAllPreview: () => Promise.reject(new Error("no plan in this test")),
             logAll: () => Promise.reject(new Error("no write in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The Assets view (#428). Two effects -- the pane's read, keyed on the
+     * address, and the columns', keyed on the layout that read produces --
+     * `deferred` here, so both land after the unmount, which is what a reader
+     * opening the Tree and moving straight on does.
+     */
+    name: "AssetsView",
+    source: "lib/assets/AssetsView.svelte",
+    open: (target) => ({
+      app: mount(AssetsView, {
+        target,
+        props: {
+          router: createRouter(),
+          ports: {
+            assetTree: () => deferred([]),
+            getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
           },
         },
       }),

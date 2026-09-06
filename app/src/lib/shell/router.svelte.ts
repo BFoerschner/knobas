@@ -8,6 +8,8 @@
  * |                        | or a stored context's own id                     |
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
+ * | `#/assets/tree`        | the Assets view, on its Tree tab (#428)          |
+ * | `#/asset/<entity_id>`  | the Tree, opened at one asset (#428)             |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
  * | `#/time/<YYYY-MM-DD>`  | the day review for one day (#279)                |
@@ -23,13 +25,27 @@
  * would otherwise collide on one key. `:` is legal in a URI fragment, so the
  * address stays readable.
  *
- * `#/assets/*`, `#/route/*` and `#/monitor/*` are M4. They parse to `unknown`
- * rather than being mistaken for kinds, so the shell can say which milestone
- * they arrive in. `#/start-work/*` was one of them until #44 and is now a view
- * of its own — it stays in `RESERVED` so that an adapter declaring a
- * `start-work` *kind* could never take the address. `#/inbox` graduated the
- * same way with #45, `#/time` with #279 and `#/standup` with #288.
+ * `#/route/*` and `#/monitor/*` are M4.0's routes (#432) and M4.1's monitors.
+ * They parse to `unknown` rather than being mistaken for kinds, so the shell
+ * can say which milestone they arrive in. `#/start-work/*` was one of them
+ * until #44 and is now a view of its own — it stays in `RESERVED` so that an
+ * adapter declaring a `start-work` *kind* could never take the address.
+ * `#/inbox` graduated the same way with #45, `#/time` with #279, `#/standup`
+ * with #288, and `#/assets` and `#/asset` with #428.
  */
+
+/**
+ * The Assets view's tabs — `CONTEXT.md`, **Tree**: *"its sibling tab is
+ * Monitors"*.
+ *
+ * One member today, and deliberately not a bare string: `"monitors"` arrives
+ * with M4.1 and every place that branches on the tab has to fail
+ * `svelte-check` when it does, rather than fall through to the Tree.
+ *
+ * Never "board" — ADR-0009, which is why the first tab is called *Tree* at
+ * all.
+ */
+export type AssetsTab = "tree";
 
 export type Route =
   | {
@@ -38,6 +54,16 @@ export type Route =
       /** `kind: null` is the `#/entity/<id>` alias: the kind is not known yet. */
       detail: { kind: string | null; entityId: string } | null;
     }
+  /**
+   * The Assets view (#428): the estate, on one of its tabs.
+   *
+   * `assetId` is the asset the Tree opens at, and it is *not* a second view:
+   * `#/asset/<id>` and `#/assets/tree` draw the same surface, one of them with
+   * a selection. Story 35 — *opening an asset's address re-opens the Tree at
+   * its path* — is that sentence, and a separate detail view would have made
+   * it a second surface to keep in step with the first.
+   */
+  | { view: "assets"; tab: AssetsTab; assetId: string | null }
   | {
       view: "inbox";
       /** A stored context to pre-filter by (#47), or `null` for the whole stream. */
@@ -189,6 +215,19 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
   // head owns the whole address -- `#/standup/anything` is the digest, the
   // same rule `#/sources/x` and `#/time/whenever` already follow.
   if (head === "standup") return { view: "standup" };
+  // Before the open-kind branch, for the reason `time` and `standup` are:
+  // both words are in `RESERVED`, so these are the only things that can reach
+  // the view. The head owns the whole address, so `#/assets/whatever` is the
+  // Tree rather than "arrives in a later milestone" -- the rule `#/sources/x`
+  // and `#/time/whenever` already follow. `#/asset` with no id is *not* the
+  // view: an address that sets out to name an asset and does not is a typo,
+  // not the estate.
+  if (head === "assets") return { view: "assets", tab: "tree", assetId: null };
+  if (head === "asset") {
+    return tail === ""
+      ? { view: "unknown", hash }
+      : { view: "assets", tab: "tree", assetId: tail };
+  }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
@@ -238,6 +277,10 @@ export function hashFor(route: Route): string {
       return route.day === null ? "#/time" : `#/time/${route.day}`;
     case "standup":
       return "#/standup";
+    case "assets":
+      return route.assetId === null
+        ? `#/assets/${route.tab}`
+        : `#/asset/${encodeId(route.assetId)}`;
     case "sources":
       return "#/sources";
     case "settings":

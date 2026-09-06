@@ -26,10 +26,12 @@
   the moment it is pressed, so the address names the day rather than meaning
   "whenever this was opened".
 
-  The Assets buttons of spec §2 are M4's and are deliberately absent. Reserving
-  a slot for a button that cannot work is how a shell fills up with dead chrome,
-  and a disabled control teaches the reader nothing except that the app is
-  unfinished.
+  **Assets** joined them in M4.0 (#428): spec §2's Assets button, opening the
+  Tree. Always drawn, the rule *Today* and *Standup* follow — it is a
+  destination rather than a reading. It carries **no count**: the open-alert
+  badge spec §2 puts on it is M4.1's, and a badge that could only ever read
+  zero would be a number nobody could act on, which is the reason the inbox
+  count is absent at zero rather than drawn as `0`.
 -->
 <script lang="ts">
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -116,6 +118,13 @@
   const onTime = $derived(router.route.view === "time");
   /** *Standup*: the digest at its own address (#288). */
   const onStandup = $derived(router.route.view === "standup");
+  /**
+   * §2's *Assets*: the estate (#428).
+   *
+   * True for `#/asset/<id>` as well as `#/assets/tree` — they are one view,
+   * so the button reads as current when the reader is standing in either.
+   */
+  const onAssets = $derived(router.route.view === "assets");
 
   /**
    * How each state reads in the cluster's tooltip.
@@ -219,6 +228,27 @@
       <path d="M2.5 4h11M2.5 8h7M2.5 12h9" />
     </svg>
     <span class="k">Standup</span>
+  </button>
+
+  <!--
+    *Assets* (#428). Beside *Standup* because it is the same kind of thing — a
+    destination one click from anywhere. The address is the Tree tab, which is
+    what the view opens on; a reader who was last on an asset gets the Tree at
+    the top rather than back where they were, which is the same rule *Today*
+    follows in carrying the date it was pressed on.
+  -->
+  <button
+    class="tb-btn {onAssets ? 'on' : ''}"
+    aria-current={onAssets ? "page" : undefined}
+    title="Assets — the estate as a tree"
+    onclick={() => router.go(hashFor({ view: "assets", tab: "tree", assetId: null }))}
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="2.5" width="12" height="4" rx="1" />
+      <rect x="2" y="9.5" width="12" height="4" rx="1" />
+      <path d="M4.5 4.5h.01M4.5 11.5h.01" />
+    </svg>
+    <span class="k">Assets</span>
   </button>
 
   <!--
