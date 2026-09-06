@@ -1,9 +1,12 @@
-//! The estate: assets, the tree they sit in, and the eight commands that read
-//! and edit it (spec #427 "M4.0 Estate", issues #428, #429, #431 and #434).
+//! The estate: assets, the tree they sit in, the routes they expose, the
+//! Import that loads them from a file, and the commands that read and edit all
+//! of it (spec #427 "M4.0 Estate", issues #428, #429, #431, #432, #434, #435
+//! and #439).
 //!
-//! Six of the eight landed with #428; `asset_types` joined them with #429,
-//! when the create dialog gave the built-in table a reader, and
-//! `context_assets` with #434, when the room's Assets tile did.
+//! Six of the fifteen landed with #428; `asset_types` joined them with #429,
+//! when the create dialog gave the built-in table a reader, `context_assets`
+//! with #434 and `source_assets` with #435, when the room's Assets tile did,
+//! the four route commands with #432, and the Import's pair with #439.
 //!
 //! `commands/assets.rs` is a set of shims over this module; every decision
 //! lives here, with tests, because a `#[tauri::command]` cannot be called from
@@ -109,6 +112,45 @@
 //! monitoring, so an expiry knobas *checks* is a Kuma monitor (M4.1) and an
 //! expiry knobas *records* is a property.
 //!
+//! # The Import (#439)
+//!
+//! `CONTEXT.md`, **Import**: *"loading assets from outside — an estate file,
+//! later an adapter — with a preview of what is already in the tree and what
+//! is new"*. [`preview_import`] and [`apply_import`] are those two halves, and
+//! the preview **is** the plan: the apply reads its own preview's `changes`
+//! and `monitor_links` to know what to write, so *"the preview said it would"*
+//! is a property of the code rather than a pair of rules kept in step.
+//!
+//! Four decisions worth finding here rather than in a diff:
+//!
+//! * **What the file may overwrite is a property nobody has claimed.** Spec
+//!   #427: *"a hand edit is any activity line by the user on that property"*.
+//!   [`HAND_EDITED`] is that sentence as one statement, and [`ACTOR_IMPORT`] is
+//!   what keeps the import's own lines out of it.
+//! * **Nothing already in the tree is re-parented, renamed, or given a new
+//!   environment or owner.** An import creates, and it sets *properties*:
+//!   where an asset sits, what it is called and which environment and owner
+//!   are set **on it** are what a person chose on purpose, and #439's
+//!   criteria are about the property bag. The file's `environment` and `owner`
+//!   are therefore read on the insert path alone, which is why the checked-in
+//!   estate sets them at its root and nowhere else (`estate_file.rs` asserts
+//!   exactly that) -- the root is created once and everything under it
+//!   inherits.
+//!   It is also what makes the uncapped recursive CTEs behind
+//!   [`recompute_paths`] and [`ROLLUP`] safe under an import: the only
+//!   `parent_id` written is on a row being inserted, in [`ordered`]'s
+//!   parent-first order, and a file whose assets hold each other is refused by
+//!   name before the first insert.
+//! * **A monitor name is kept even when it resolves to nothing.** `0020` is
+//!   the column, and it is the *"a name the mirror does not hold yet is kept on
+//!   the asset"* half of spec #427's import sentence; the other half, drawing
+//!   `monitored-by` links for the names the mirror does hold, is
+//!   [`monitor_links`] and answers with nothing until M4.1's Kuma adapter
+//!   emits a monitor.
+//! * **The file's plain scalars become tagged values here.** #428 chose
+//!   `{"kind":…,"value":…}` and left the translation to this ticket;
+//!   [`property_of`] is it, and the kind a type declares is what decides.
+//!
 //! # What this module deliberately does not do yet
 //!
 //! The create/edit surface (#429), the keyboard walk and spines (#430), the
@@ -126,7 +168,7 @@
 //! Monitors themselves are **M4.1**, so [`monitored_by`] answers with nothing
 //! until the Kuma adapter emits the kind it reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use knobas_core::activity::ActivityRow;
 use knobas_core::asset::{self, AssetType, PropertyKind};
@@ -593,6 +635,23 @@ pub struct AssetDetail {
     /// is the same gesture as linking a ticket. What the *badge* counts is
     /// narrower and is [`AssetRow::linked_work`].
     pub links: Vec<LinkEntry>,
+    /// The Uptime Kuma names of the monitors watching this asset, as an
+    /// [`import`](apply_import) kept them (#439, `0020`).
+    ///
+    /// **Names, not monitors.** A name becomes a `monitored-by` link the
+    /// moment the mirror holds a monitor called that -- and until then it is
+    /// all knobas has, because no adapter emits the `monitor` kind before
+    /// M4.1. So this list is what the estate file said and the [`links`] list
+    /// is what has been resolved out of it; a name in both is a name whose
+    /// monitor has arrived.
+    ///
+    /// On [`AssetDetail`] and not on [`AssetRow`], for [`properties`]' reason:
+    /// a Miller column draws neither, and putting it on the row would put it
+    /// on every column of every walk to serve one pane.
+    ///
+    /// [`links`]: AssetDetail::links
+    /// [`properties`]: AssetDetail::properties
+    pub monitors: Vec<String>,
 }
 
 /// One route, as both ends read it.
@@ -746,9 +805,14 @@ const ONE: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.envi
             exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
        from knobas.asset a where a.id = $1";
 
-/// The properties bag, read on its own because it is the one column a column
-/// row has no use for.
-const PROPERTIES: &str = "select properties from knobas.asset where id = $1";
+/// The properties bag and the monitor names, read on their own because they
+/// are the two columns a *column row* has no use for.
+///
+/// `monitors` joined this read with the import (#439) rather than becoming a
+/// statement of its own: it is one more column of the row the pane is already
+/// fetching, and a second round trip for an array that is empty on most assets
+/// would be a read per pane for nothing.
+const PROPERTIES: &str = "select properties, monitors from knobas.asset where id = $1";
 
 /// What one asset **exposes** (#432).
 ///
@@ -1126,11 +1190,9 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
     let held_by = rows_of(pool, &ancestors).await?;
     let holds = tree(pool, Some(id)).await?;
 
-    let stored: serde_json::Value = sqlx::query(PROPERTIES)
-        .bind(id)
-        .fetch_one(pool)
-        .await?
-        .try_get("properties")?;
+    let row = sqlx::query(PROPERTIES).bind(id).fetch_one(pool).await?;
+    let stored: serde_json::Value = row.try_get("properties")?;
+    let monitors: Vec<String> = row.try_get("monitors")?;
 
     let exposes = routes(pool, ROUTES_EXPOSED, id).await?;
     let reachable_via = routes(pool, ROUTES_REACHABLE, id).await?;
@@ -1153,6 +1215,7 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         reachable_via,
         history,
         links,
+        monitors,
     })
 }
 
@@ -1495,26 +1558,24 @@ pub async fn create(
         Some(parent) => path_below(&mut tx, parent).await?,
     };
 
-    sqlx::query(
-        "insert into knobas.entity (id, kind, title, updated_at) values ($1, $2, $3, now())",
+    insert_asset(
+        &mut tx,
+        AssetRowInsert {
+            id: &id,
+            parent_id,
+            type_id,
+            name: &name,
+            properties: &bag,
+            // A hand-created asset sets neither: it inherits the environment
+            // and the owner in force above it (#431), and it watches nothing
+            // until a monitor is attached to it. Only the import (#439) has
+            // values for the three, because only a file states them.
+            environment: None,
+            owner: None,
+            monitors: &[],
+            path_text: &path_text,
+        },
     )
-    .bind(&id)
-    .bind(NAMESPACE)
-    .bind(&name)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        "insert into knobas.asset (id, parent_id, type_id, name, properties, path_text)
-         values ($1, $2, $3, $4, $5, $6)",
-    )
-    .bind(&id)
-    .bind(parent_id)
-    .bind(type_id)
-    .bind(&name)
-    .bind(serde_json::Value::Object(bag))
-    .bind(&path_text)
-    .execute(&mut *tx)
     .await?;
 
     let entity = entity_of(&id)?;
@@ -1924,27 +1985,18 @@ pub async fn create_route(
         must_exist(&mut tx, target, "for a route to land on").await?;
     }
 
-    sqlx::query(
-        "insert into knobas.entity (id, kind, title, updated_at) values ($1, $2, $3, now())",
+    insert_route(
+        &mut tx,
+        RouteRowInsert {
+            id: &id,
+            asset_id,
+            target_id,
+            name: &name,
+            url: &url,
+            visibility,
+            properties: &bag,
+        },
     )
-    .bind(&id)
-    .bind(ROUTE_NAMESPACE)
-    .bind(&name)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        "insert into knobas.route (id, asset_id, target_id, name, url, visibility, properties)
-         values ($1, $2, $3, $4, $5, $6, $7)",
-    )
-    .bind(&id)
-    .bind(asset_id)
-    .bind(target_id)
-    .bind(&name)
-    .bind(&url)
-    .bind(visibility.as_str())
-    .bind(serde_json::Value::Object(bag))
-    .execute(&mut *tx)
     .await?;
 
     let entity = entity_of(&id)?;
@@ -2150,8 +2202,1386 @@ pub async fn delete_route(pool: &PgPool, id: &str) -> Result<Written<()>, IpcErr
 }
 
 // ---------------------------------------------------------------------------
+// The Import (#439)
+// ---------------------------------------------------------------------------
+
+/// The actor every line the Import writes carries.
+///
+/// **Not [`ACTOR`], and that is the whole merge rule.** Spec #427 settles what
+/// survives a second import in one sentence: the apply "sets properties the
+/// file names on assets whose value was never edited by hand (*a hand edit is
+/// any activity line by the user on that property*)". So the question the
+/// merge asks is *who wrote this line*, and it is only answerable if the
+/// import's own lines are not the person's. `knobas.activity.actor` is open
+/// text -- `0001` documents `user` and `sync:<source_id>` and constrains
+/// neither -- and this is the fourth spelling in it, beside `knobas`, which is
+/// the app acting on its own behalf rather than on a file's.
+///
+/// One consequence worth stating: a property this import set is claimed by
+/// nobody, so a later import of a file that changed it changes it again. That
+/// is the point -- the file stays authoritative over everything no person has
+/// touched.
+const ACTOR_IMPORT: &str = "import";
+
+/// The only format version there has ever been.
+///
+/// A file claiming another number is refused rather than read on the
+/// assumption that a bigger version is a superset of this one: the fields this
+/// module reads are the fields `deny_unknown_fields` insists on, so a version 2
+/// that moved one would import a silently emptier estate.
+const FILE_VERSION: i64 = 1;
+
+/// The `properties` key the file's `description` lands in.
+///
+/// An asset has no description column: `0017` gives it a name, a type, a
+/// status, an environment, an owner and a bag. The estate file gives most of
+/// its entries a sentence saying what the thing is *for*, which is the text a
+/// reader coming to a strange asset most wants -- so it goes in the bag, as an
+/// ordinary custom text property, drawn and editable in the pane like every
+/// other one. No built-in type declares the key, so it never collides with a
+/// schema; an entry that spells it **both** ways at once is refused rather
+/// than resolved, because there is no honest answer to which of the two the
+/// author meant.
+const DESCRIPTION_KEY: &str = "description";
+
+/// The estate file, as the Import reads it.
+///
+/// `deny_unknown_fields` on all three shapes, and it is the decision
+/// `knobas-core`'s `tests/estate_file.rs` made when it closed the file's key
+/// vocabulary: *"a misspelled key reads as an absent optional field, and an
+/// absent optional field is legal everywhere it appears"*. A `parnet` would
+/// hang the asset off the root, a `targets` would land the route on nothing
+/// and a `monitor` would drop the name -- all silently, and all in a file
+/// somebody wrote by hand. `ASSET_KEYS` and `ROUTE_KEYS` over there are these
+/// field lists, and
+/// [`tests::the_file_shapes_read_the_keys_the_estate_files_own_check_allows`]
+/// is the pin that keeps the two from drifting.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EstateFile {
+    /// [`FILE_VERSION`], or absent.
+    #[serde(default)]
+    version: Option<i64>,
+    /// What the file calls the estate it describes -- the preview's heading,
+    /// and the estate every origin line names.
+    #[serde(default)]
+    name: Option<String>,
+    /// The file's prose about itself. Read so that a real estate file parses,
+    /// and deliberately not stored: it is a fact about the file, and there is
+    /// nothing in the estate it describes to hang it on.
+    #[serde(default, rename = "description")]
+    _description: Option<String>,
+    #[serde(default)]
+    assets: Vec<FileAsset>,
+    #[serde(default)]
+    routes: Vec<FileRoute>,
+}
+
+/// One asset entry of the file.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileAsset {
+    /// Kept as the asset's id (story 22), which is what makes a second import
+    /// recognise it.
+    id: String,
+    #[serde(rename = "type")]
+    type_id: String,
+    name: String,
+    #[serde(default)]
+    parent: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    environment: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    /// **Plain scalars**, translated into the tagged wire shape by
+    /// [`property_of`] -- #428 chose that shape and left this translation to
+    /// the import in as many words.
+    #[serde(default)]
+    properties: serde_json::Map<String, serde_json::Value>,
+    /// The Uptime Kuma names of the monitors watching this asset (story 25).
+    #[serde(default)]
+    monitors: Vec<String>,
+}
+
+/// One route entry of the file.
+///
+/// No `visibility`: the file's key vocabulary has never carried one, and
+/// `0018`'s default -- `internal`, the safe reading of a route nobody has
+/// classified -- is the honest value for a route whose author did not say.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileRoute {
+    id: String,
+    /// The asset that exposes it.
+    asset: String,
+    /// The asset it lands on, when it lands on one knobas holds.
+    #[serde(default)]
+    target: Option<String>,
+    name: String,
+    url: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    properties: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One entry of the preview's *already in the tree* or *new* group.
+///
+/// Assets and routes in one shape and one list per group, because the question
+/// a group answers is about the **file** -- what of it does knobas already
+/// hold -- and a reader counting what is new counts entries rather than two
+/// populations. Which of the two an entry is, is [`kind`](Self::kind).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ImportEntry {
+    /// The file's own id, which is the id the asset or route carries.
+    pub id: String,
+    /// [`NAMESPACE`] or [`ROUTE_NAMESPACE`] -- the word `knobas.entity.kind`
+    /// holds, so the preview carries no vocabulary of its own.
+    pub kind: String,
+    pub name: String,
+    /// The type's label for an asset; `null` for a route, which has no type.
+    pub type_label: Option<String>,
+    /// Where the file puts it: the parent for an asset, the exposing asset for
+    /// a route. `null` only for an asset at the top of the estate.
+    pub parent_id: Option<String>,
+}
+
+/// What an apply would do with one property the file names.
+///
+/// Two values and no third, because there are two ways a file's value can meet
+/// a stored one: nobody has claimed the property, so the file wins, or
+/// somebody has, so they do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PropertyPlan {
+    /// The stored value is replaced by the file's.
+    Set,
+    /// The stored value stays, because a person edited this property by hand
+    /// and the file never silently undoes that (story 24).
+    Kept,
+}
+
+/// One property of one asset already in the tree whose file value differs from
+/// the stored one.
+///
+/// Only the ones that **differ**: a preview listing every property of every
+/// known asset is a preview nobody reads, and *what would change* is the
+/// group's own name. A key the file does not mention is not here either -- the
+/// file is authoritative over what it says and silent about the rest, so an
+/// import never removes a property.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct PropertyChange {
+    pub key: String,
+    /// The type's label for a declared key, the key itself for a custom one --
+    /// [`AssetProperty::label`]'s rule, so the two lists read alike.
+    pub label: String,
+    /// What the asset carries now; `null` for a key it does not carry yet.
+    pub from: Option<PropertyValue>,
+    /// What the file says.
+    pub to: PropertyValue,
+    pub plan: PropertyPlan,
+}
+
+/// One asset already in the tree that an apply would change.
+///
+/// An asset with nothing to change is **not** here -- it is in
+/// [`ImportPreview::known`] with the rest -- so this list is the third group
+/// the Import dialog draws and its length is the honest answer to *what would
+/// this do*.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct AssetChange {
+    pub id: String,
+    /// The name the asset carries **in the tree**, which is what the reader is
+    /// looking at. The import does not rename: a name is the one thing about
+    /// an asset a person is certain to have chosen deliberately, and a file
+    /// re-titling twenty-three of them is not a change anybody asked for by
+    /// pressing *Import*.
+    pub name: String,
+    /// Every property whose file value differs, whether it would be set or
+    /// kept. Both, in one list, because *"the file says `cx23` and it stays
+    /// `cx33` because you typed that"* is the sentence story 24 is about, and
+    /// a list carrying only what changes cannot say it.
+    pub properties: Vec<PropertyChange>,
+    /// Monitor names the file lists that this asset does not carry yet.
+    ///
+    /// Additive: an import never removes a name, because a file is one of the
+    /// two things that puts one there and the M4.1 sync is the other.
+    pub monitors: Vec<String>,
+}
+
+/// One `monitored-by` link an apply would draw.
+///
+/// A row per link rather than a count, because the reader's question is *which
+/// of my monitors did it find* -- and because a name that resolves and a name
+/// that does not look identical in the file. A name the mirror does not hold
+/// is not here: it is kept on the asset (`0020`) and resolved by the next
+/// import or by the M4.1 sync, which is spec #427's own sentence.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MonitorLink {
+    pub asset_id: String,
+    pub asset_name: String,
+    /// The Uptime Kuma name, as the file spells it and as the mirror holds it.
+    pub monitor_name: String,
+    /// The mirrored monitor's entity id -- the other end of the link.
+    pub monitor_id: String,
+}
+
+/// What an import would do, before it has done any of it.
+///
+/// The three groups the dialog draws -- already in the tree, new, and what
+/// would change -- plus the monitor links, which are a write and therefore
+/// have to be announced by the same read that announces the others.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ImportPreview {
+    /// What the file calls the estate.
+    pub name: String,
+    /// Entries whose id knobas already holds. On a second import of an
+    /// unchanged file this is the whole file and every other list is empty.
+    pub known: Vec<ImportEntry>,
+    /// Entries an apply would create, **in the order it would create them**:
+    /// an asset before the assets it holds, then the routes.
+    pub new: Vec<ImportEntry>,
+    /// The known assets with something to change, and what.
+    pub changes: Vec<AssetChange>,
+    /// The `monitored-by` links an apply would draw.
+    pub monitor_links: Vec<MonitorLink>,
+}
+
+/// What an import did.
+///
+/// Counted rather than listed: the preview is where a reader looks at the
+/// detail, and this is what the summary line says and what the dialog reports
+/// when it is over.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ImportOutcome {
+    pub assets_created: i64,
+    pub routes_created: i64,
+    /// Properties the file's value was written to.
+    pub properties_set: i64,
+    /// Properties left as they were because a hand edit claimed them.
+    pub properties_kept: i64,
+    /// Monitor names newly kept on an asset.
+    pub monitors_kept: i64,
+    /// `monitored-by` links drawn.
+    pub monitors_linked: i64,
+}
+
+/// Everything an apply would write, decided before anything is written.
+///
+/// **The preview is the plan.** [`apply_import`] reads
+/// [`ImportPreview::changes`] and [`ImportPreview::monitor_links`] to know what
+/// to write, so a property the preview did not mention cannot be set and a link
+/// it did not list cannot be drawn. That is not a note about discipline: it is
+/// the only place either instruction exists, which is what makes *"the preview
+/// said it would"* structural rather than two rules somebody keeps in step.
+///
+/// The two lists below are the part a preview entry cannot carry, because a
+/// row needs its type, its properties and its owner and an entry is a line in
+/// a dialog.
+struct Plan {
+    preview: ImportPreview,
+    assets: Vec<AssetInsert>,
+    routes: Vec<RouteInsert>,
+}
+
+/// One new asset an apply writes, with the id the file gave it.
+struct AssetInsert {
+    id: String,
+    parent_id: Option<String>,
+    type_id: String,
+    name: String,
+    properties: serde_json::Map<String, serde_json::Value>,
+    environment: Option<Environment>,
+    owner: Option<String>,
+    monitors: Vec<String>,
+}
+
+/// One new route an apply writes, with the id the file gave it.
+struct RouteInsert {
+    id: String,
+    asset_id: String,
+    target_id: Option<String>,
+    name: String,
+    url: String,
+    properties: serde_json::Map<String, serde_json::Value>,
+}
+
+/// What an import of `file` would do, having written nothing.
+///
+/// **The read runs in a transaction that is rolled back**, which is how
+/// *preview writes nothing* is made structural rather than merely asserted:
+/// every statement it runs is a `select`, and the one thing that could make
+/// that untrue -- a write added here by somebody reaching for the plan's own
+/// helpers -- is undone on the way out. `tests/assets_ipc.rs`'s
+/// `a_preview_writes_nothing_at_all` counts the tables either side of it.
+///
+/// # Errors
+///
+/// [`IpcError::invalid`] for a file that is not JSON, carries a key the format
+/// does not define, names a type nobody declares, names a parent or a target
+/// that is neither in the file nor in the estate, or whose assets hold each
+/// other in a cycle; [`IpcError`] if a read fails.
+pub async fn preview_import(pool: &PgPool, file: &str) -> Result<ImportPreview, IpcError> {
+    let mut tx = pool.begin().await?;
+    let plan = plan(&mut tx, file).await?;
+    tx.rollback().await?;
+    Ok(plan.preview)
+}
+
+/// Apply `file`: create what is new, set what nobody has claimed, keep what
+/// somebody has.
+///
+/// **One transaction**, so a file refused halfway leaves an estate that never
+/// heard of it. An import that got as far as the third server and gave up
+/// would otherwise leave a reader guessing which half of their infrastructure
+/// is in the tree.
+///
+/// **The plan is computed inside that transaction**, not handed in from the
+/// preview: an argument carrying a plan would be a caller's chance to send one
+/// the reader never saw, and a plan computed before the transaction opened
+/// could be stale by a hand edit. What the dialog showed and what this writes
+/// are two runs of one function over one file, which is what makes them agree.
+///
+/// **Nothing already in the tree is re-parented**, and that is what keeps the
+/// uncapped recursive CTEs behind [`recompute_paths`] and [`ROLLUP`] safe. Its
+/// name, its environment and its owner are left alone for the neighbouring
+/// reason -- see the module docs. The
+/// only `parent_id` this writes is on a row it is inserting -- a row with no
+/// children yet, whose parent is already there ([`ordered`]) -- so no cycle can
+/// reach the table however the file is shaped, and a file whose own assets hold
+/// each other is refused by name before the first insert. [`move_to`] remains
+/// the only writer that can put an existing asset under an existing asset, and
+/// it walks the ancestors first.
+///
+/// **Only the summary line is announced.** Every created asset gets its own
+/// origin line and every property set gets its own edited line -- story 11
+/// applies to an import like any other mutation -- but the first import of the
+/// checked-in estate writes thirty-three of them, and the status bar's
+/// latest-change line wants *one* sentence about what just happened. The lines
+/// are all in the stream and all in each entity's own history; what
+/// [`Written::activity`] carries is the one the shell announces.
+///
+/// # Errors
+///
+/// [`preview_import`]'s, plus [`IpcError`] if a write fails.
+pub async fn apply_import(pool: &PgPool, file: &str) -> Result<Written<ImportOutcome>, IpcError> {
+    let mut tx = pool.begin().await?;
+    let Plan {
+        preview,
+        assets,
+        routes,
+    } = plan(&mut tx, file).await?;
+    let from = preview.name.clone();
+    let mut outcome = ImportOutcome::default();
+
+    // Assets first and in the plan's order, which is a parent before what it
+    // holds: `parent_id` is a foreign key into this same table, and
+    // `path_below` reads the parent's own path to build the child's.
+    for insert in &assets {
+        let path_text = match &insert.parent_id {
+            None => String::new(),
+            Some(parent) => path_below(&mut tx, parent).await?,
+        };
+        insert_asset(
+            &mut tx,
+            AssetRowInsert {
+                id: &insert.id,
+                parent_id: insert.parent_id.as_deref(),
+                type_id: &insert.type_id,
+                name: &insert.name,
+                properties: &insert.properties,
+                environment: insert.environment,
+                owner: insert.owner.as_deref(),
+                monitors: &insert.monitors,
+                path_text: &path_text,
+            },
+        )
+        .await?;
+        outcome.assets_created += 1;
+        outcome.monitors_kept += count(insert.monitors.len());
+        origin_line(&mut tx, &insert.id, &from).await?;
+    }
+
+    for insert in &routes {
+        insert_route(
+            &mut tx,
+            RouteRowInsert {
+                id: &insert.id,
+                asset_id: &insert.asset_id,
+                target_id: insert.target_id.as_deref(),
+                name: &insert.name,
+                url: &insert.url,
+                visibility: Visibility::default(),
+                properties: &insert.properties,
+            },
+        )
+        .await?;
+        outcome.routes_created += 1;
+        origin_line(&mut tx, &insert.id, &from).await?;
+    }
+
+    for change in &preview.changes {
+        let entity = entity_of(&change.id)?;
+        for property in &change.properties {
+            if property.plan == PropertyPlan::Kept {
+                outcome.properties_kept += 1;
+                continue;
+            }
+            sqlx::query(SET_PROPERTY)
+                .bind(&change.id)
+                .bind(&property.key)
+                .bind(stored_value(&property.to)?)
+                .execute(&mut *tx)
+                .await?;
+            knobas_core::activity::record_with(
+                &mut *tx,
+                ACTOR_IMPORT,
+                "edited",
+                Some(&entity),
+                serde_json::json!({
+                    "field": "property", "key": property.key,
+                    "from": property.from, "to": property.to, "estate": from,
+                }),
+            )
+            .await?;
+            outcome.properties_set += 1;
+        }
+        if !change.monitors.is_empty() {
+            sqlx::query(ADD_MONITORS)
+                .bind(&change.id)
+                .bind(&change.monitors)
+                .execute(&mut *tx)
+                .await?;
+            outcome.monitors_kept += count(change.monitors.len());
+            knobas_core::activity::record_with(
+                &mut *tx,
+                ACTOR_IMPORT,
+                "edited",
+                Some(&entity),
+                serde_json::json!({
+                    "field": "monitors", "added": change.monitors, "estate": from,
+                }),
+            )
+            .await?;
+        }
+    }
+
+    for link in &preview.monitor_links {
+        knobas_core::link::create_with(
+            &mut *tx,
+            &entity_of(&link.asset_id)?,
+            &entity_of(&link.monitor_id)?,
+            MONITORED_BY,
+            knobas_core::link::Origin::Imported,
+            None,
+            ACTOR_IMPORT,
+        )
+        .await?;
+        outcome.monitors_linked += 1;
+    }
+
+    // The per-run summary (story 23's other half): one line, no entity, and
+    // the counts the dialog reports. Written even when every count is zero --
+    // *"I imported that file again and it changed nothing"* is a fact about the
+    // estate, and a log that only records the imports that did something cannot
+    // answer when the last one ran.
+    let summary = knobas_core::activity::record_with(
+        &mut *tx,
+        ACTOR_IMPORT,
+        "imported",
+        None,
+        serde_json::json!({ "estate": from, "outcome": outcome }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Written {
+        value: outcome,
+        activity: vec![summary],
+    })
+}
+
+/// A length as the outcome counts it.
+///
+/// `i64` because that is what every other count on this bridge is, and
+/// saturating because the alternative is an `unwrap` on a conversion that
+/// cannot fail for any file a person could write.
+fn count(len: usize) -> i64 {
+    i64::try_from(len).unwrap_or(i64::MAX)
+}
+
+/// The origin line one created asset or route carries (story 23).
+///
+/// `"imported"` **with** the entity, against the summary's `"imported"` with
+/// none: the two are told apart by whether they name something, which is the
+/// distinction a reader makes anyway -- a line in an asset's own history is
+/// about that asset, and the line in the stream with no entity is about the
+/// run.
+async fn origin_line(
+    tx: &mut Transaction<'_, Postgres>,
+    id: &str,
+    from: &str,
+) -> Result<(), IpcError> {
+    let entity = entity_of(id)?;
+    knobas_core::activity::record_with(
+        &mut **tx,
+        ACTOR_IMPORT,
+        "imported",
+        Some(&entity),
+        serde_json::json!({ "estate": from }),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Set one key of an asset's property bag -- the statement [`edit`] runs for a
+/// hand edit, run here for a file's value.
+const SET_PROPERTY: &str = "update knobas.asset
+    set properties = properties || jsonb_build_object($2::text, $3::jsonb),
+        updated_at = now()
+  where id = $1";
+
+/// Add monitor names to an asset, keeping the ones it has.
+///
+/// An append rather than an assignment: an import never removes a monitor
+/// name. What it appends is what the plan found missing, so the `array_cat`
+/// cannot introduce a duplicate.
+const ADD_MONITORS: &str = "update knobas.asset
+    set monitors = array_cat(monitors, $2::text[]), updated_at = now()
+  where id = $1";
+
+/// The assets the file names that the estate already holds, with what they
+/// carry.
+const KNOWN_ASSETS: &str =
+    "select id, name, properties, monitors from knobas.asset where id = any($1::text[])";
+
+/// The routes the file names that the estate already holds.
+const KNOWN_ROUTES: &str = "select id from knobas.route where id = any($1::text[])";
+
+/// The assets the file *refers to* without describing, that the estate holds.
+///
+/// A file may hang a new subtree under something a person created by hand, and
+/// a route may land on it. Those ids are not in the file's own `assets` list,
+/// so [`KNOWN_ASSETS`] never reads them -- this is the narrow second read that
+/// tells *a parent elsewhere in the estate* from *a parent that is nowhere at
+/// all*.
+const REFERENCED_ASSETS: &str = "select id from knobas.asset where id = any($1::text[])";
+
+/// The properties **a person** has edited on the assets the file names.
+///
+/// Spec #427's rule, as one statement: *"a hand edit is any activity line by
+/// the user on that property"*. Not the newest line, not a line since the last
+/// import -- any line, ever, by `user`. The consequence is deliberate and worth
+/// stating: a reader who edits a property and then types the file's own value
+/// back has still claimed it, and no import moves it again. The alternative is
+/// a stored copy of what the last import wrote, which is a second writer of
+/// every property and a merge base to keep in step with the properties
+/// themselves.
+///
+/// `detail ? 'key'` is what narrows it to the property edits: [`edit`] writes
+/// `{"field":"property","key":…}` and every other line it writes carries no
+/// `key` at all.
+const HAND_EDITED: &str = "select distinct entity_id, detail->>'key' as key
+  from knobas.activity
+ where actor = $2
+   and entity_id = any($1::text[])
+   and detail->>'field' = 'property'
+   and detail ? 'key'";
+
+/// The mirrored monitors whose name the file uses.
+///
+/// Through `sync.live_item` rather than `sync.item`, so a monitor of a disabled
+/// source or a tombstoned one draws no link -- the filter every other reader in
+/// this app inherits (`0012`).
+///
+/// **It answers nothing today**, because no adapter emits the `monitor` kind
+/// until M4.1; the statement is the real one all the same, for
+/// [`MONITORED_ASSETS`]' reason. What the import does with a name that resolves
+/// to nothing is keep it (`0020`), which is spec #427's own sentence.
+const LIVE_MONITORS: &str =
+    "select entity_id, title from sync.live_item where kind = $2 and title = any($1::text[])";
+
+/// The `monitored-by` links the assets the file names already take part in.
+///
+/// Both directions, because `knobas.link` is unique on the **unordered** pair
+/// (`link_pair_active_idx`, `0011`): a link drawn monitor-to-asset by another
+/// surface is the same link, and drawing it again would be refused as a
+/// duplicate in the middle of a transaction that had already created twenty
+/// assets.
+const MONITOR_LINKS: &str = "select from_id, to_id from knobas.confirmed_link
+ where relation = $2 and (from_id = any($1::text[]) or to_id = any($1::text[]))";
+
+/// One asset the estate already holds, as the plan needs to read it.
+struct StoredAsset {
+    name: String,
+    properties: serde_json::Map<String, serde_json::Value>,
+    monitors: Vec<String>,
+}
+
+/// Read `file`, decide everything, write nothing.
+///
+/// Runs against the caller's transaction, so that the plan and whatever is done
+/// with it see one snapshot of the estate.
+async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, IpcError> {
+    let parsed: EstateFile = serde_json::from_str(file).map_err(|error| {
+        IpcError::invalid(format!(
+            "this is not an estate file: {error}. An estate file is JSON with an \
+             `assets` list and a `routes` list."
+        ))
+    })?;
+    if let Some(version) = parsed.version.filter(|version| *version != FILE_VERSION) {
+        return Err(IpcError::invalid(format!(
+            "this file says it is version {version} and this build reads \
+             version {FILE_VERSION}"
+        )));
+    }
+    let name = parsed
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("an estate file")
+        .to_owned();
+
+    // Every id in its own namespace, and no id twice: an id is an address, and
+    // a file giving two entries one would create the first and then update it
+    // with the second.
+    let mut seen: HashSet<&str> = HashSet::new();
+    for asset in &parsed.assets {
+        vet_file_id(&asset.id, NAMESPACE)?;
+        if !seen.insert(&asset.id) {
+            return Err(duplicate_file_id(&asset.id));
+        }
+    }
+    for route in &parsed.routes {
+        vet_file_id(&route.id, ROUTE_NAMESPACE)?;
+        if !seen.insert(&route.id) {
+            return Err(duplicate_file_id(&route.id));
+        }
+    }
+
+    let asset_ids: Vec<String> = parsed.assets.iter().map(|a| a.id.clone()).collect();
+    let route_ids: Vec<String> = parsed.routes.iter().map(|r| r.id.clone()).collect();
+
+    let mut stored: HashMap<String, StoredAsset> = HashMap::new();
+    for row in sqlx::query(KNOWN_ASSETS)
+        .bind(&asset_ids)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        let properties: serde_json::Value = row.try_get("properties")?;
+        stored.insert(
+            row.try_get("id")?,
+            StoredAsset {
+                name: row.try_get("name")?,
+                properties: match properties {
+                    serde_json::Value::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                },
+                monitors: row.try_get("monitors")?,
+            },
+        );
+    }
+
+    let mut known_routes: HashSet<String> = HashSet::new();
+    for row in sqlx::query(KNOWN_ROUTES)
+        .bind(&route_ids)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        known_routes.insert(row.try_get("id")?);
+    }
+
+    let mut hand_edited: HashSet<(String, String)> = HashSet::new();
+    for row in sqlx::query(HAND_EDITED)
+        .bind(&asset_ids)
+        .bind(ACTOR)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        if let (Some(entity), Some(key)) = (
+            row.try_get::<Option<String>, _>("entity_id")?,
+            row.try_get::<Option<String>, _>("key")?,
+        ) {
+            hand_edited.insert((entity, key));
+        }
+    }
+
+    // Every reference the file makes has to resolve -- to something in the
+    // file, or to something the estate already holds. Checked before anything
+    // below reads a parent, so a dangling one reads as a sentence about the
+    // file rather than as a foreign-key violation in Postgres' own words.
+    let file_assets: HashSet<&str> = parsed.assets.iter().map(|a| a.id.as_str()).collect();
+    let referenced = referenced_assets(tx, &parsed, &file_assets).await?;
+    let mut in_estate: HashSet<&str> = stored.keys().map(String::as_str).collect();
+    in_estate.extend(referenced.iter().map(String::as_str));
+    for asset in &parsed.assets {
+        if let Some(parent) = asset.parent.as_deref() {
+            resolves(parent, &file_assets, &in_estate, &asset.id, "as its parent")?;
+        }
+    }
+    for route in &parsed.routes {
+        resolves(
+            &route.asset,
+            &file_assets,
+            &in_estate,
+            &route.id,
+            "as the asset exposing it",
+        )?;
+        if let Some(target) = route.target.as_deref() {
+            resolves(
+                target,
+                &file_assets,
+                &in_estate,
+                &route.id,
+                "as the asset it lands on",
+            )?;
+        }
+    }
+
+    let mut known: Vec<ImportEntry> = Vec::new();
+    let mut new: Vec<ImportEntry> = Vec::new();
+    let mut changes: Vec<AssetChange> = Vec::new();
+    let mut inserts: Vec<AssetInsert> = Vec::new();
+    // Every monitor name each asset would carry after this import: what it has
+    // plus what the file adds. The link half reads this, so a name kept by an
+    // earlier import is resolved by this one -- spec #427's *"resolved by the
+    // next import"*.
+    let mut wanted: HashMap<String, Vec<String>> = HashMap::new();
+
+    for asset in ordered(&parsed.assets, &in_estate)? {
+        let declared = vet_type(&asset.type_id)?;
+        let file_name = vet_name(&asset.name)?;
+        let properties = bag_of(
+            Some(declared),
+            &asset.properties,
+            asset.description.as_deref(),
+        )?;
+        let monitors = vet_monitors(&asset.monitors, &asset.id)?;
+        let entry = ImportEntry {
+            id: asset.id.clone(),
+            kind: NAMESPACE.to_owned(),
+            name: file_name.clone(),
+            type_label: Some(declared.label.to_owned()),
+            parent_id: asset.parent.clone(),
+        };
+
+        match stored.get(&asset.id) {
+            None => {
+                new.push(entry);
+                wanted.insert(asset.id.clone(), monitors.clone());
+                inserts.push(AssetInsert {
+                    id: asset.id.clone(),
+                    parent_id: asset.parent.clone(),
+                    type_id: asset.type_id.clone(),
+                    name: file_name,
+                    properties,
+                    environment: asset
+                        .environment
+                        .as_deref()
+                        .map(|value| vet_environment(value, &asset.id))
+                        .transpose()?,
+                    owner: asset
+                        .owner
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|owner| !owner.is_empty())
+                        .map(str::to_owned),
+                    monitors,
+                });
+            }
+            Some(current) => {
+                known.push(entry);
+                let mut differing: Vec<PropertyChange> = Vec::new();
+                for (key, value) in &properties {
+                    let before = current.properties.get(key);
+                    if before == Some(value) {
+                        continue;
+                    }
+                    differing.push(PropertyChange {
+                        key: key.clone(),
+                        label: label_of(Some(declared), key),
+                        from: before.and_then(|raw| serde_json::from_value(raw.clone()).ok()),
+                        to: serde_json::from_value(value.clone()).map_err(IpcError::internal)?,
+                        plan: if hand_edited.contains(&(asset.id.clone(), key.clone())) {
+                            PropertyPlan::Kept
+                        } else {
+                            PropertyPlan::Set
+                        },
+                    });
+                }
+                let missing: Vec<String> = monitors
+                    .iter()
+                    .filter(|name| !current.monitors.contains(name))
+                    .cloned()
+                    .collect();
+                let mut all = current.monitors.clone();
+                all.extend(missing.iter().cloned());
+                wanted.insert(asset.id.clone(), all);
+                if !differing.is_empty() || !missing.is_empty() {
+                    changes.push(AssetChange {
+                        id: asset.id.clone(),
+                        name: current.name.clone(),
+                        properties: differing,
+                        monitors: missing,
+                    });
+                }
+            }
+        }
+    }
+
+    let mut route_inserts: Vec<RouteInsert> = Vec::new();
+    for route in &parsed.routes {
+        let file_name = vet_name_of("a route", &route.name)?;
+        let url = vet_url(&route.url)?;
+        let entry = ImportEntry {
+            id: route.id.clone(),
+            kind: ROUTE_NAMESPACE.to_owned(),
+            name: file_name.clone(),
+            type_label: None,
+            parent_id: Some(route.asset.clone()),
+        };
+        if known_routes.contains(&route.id) {
+            // A route already in the tree is left exactly as it is. Its own
+            // facts are a name, a URL and a target, all three of them things a
+            // person may have corrected in the pane, and the model has no way
+            // to tell a correction from a stale file -- which is the question
+            // story 24 answers for an asset's *properties* and for nothing
+            // else. So a known route is known, and re-exposing one elsewhere
+            // stays a delete and a create (see [`create_route`]).
+            known.push(entry);
+            continue;
+        }
+        new.push(entry);
+        route_inserts.push(RouteInsert {
+            id: route.id.clone(),
+            asset_id: route.asset.clone(),
+            target_id: route.target.clone(),
+            name: file_name,
+            url,
+            properties: bag_of(None, &route.properties, route.description.as_deref())?,
+        });
+    }
+
+    let links = monitor_links(tx, &wanted, &stored, &inserts).await?;
+
+    Ok(Plan {
+        preview: ImportPreview {
+            name,
+            known,
+            new,
+            changes,
+            monitor_links: links,
+        },
+        assets: inserts,
+        routes: route_inserts,
+    })
+}
+
+/// The ids the file points at without describing, that the estate holds.
+async fn referenced_assets(
+    tx: &mut Transaction<'_, Postgres>,
+    parsed: &EstateFile,
+    file_assets: &HashSet<&str>,
+) -> Result<Vec<String>, IpcError> {
+    let mut wanted: Vec<String> = Vec::new();
+    let mut want = |id: Option<&str>| {
+        if let Some(id) = id.filter(|id| !file_assets.contains(id)) {
+            wanted.push(id.to_owned());
+        }
+    };
+    for asset in &parsed.assets {
+        want(asset.parent.as_deref());
+    }
+    for route in &parsed.routes {
+        want(Some(route.asset.as_str()));
+        want(route.target.as_deref());
+    }
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut found: Vec<String> = Vec::new();
+    for row in sqlx::query(REFERENCED_ASSETS)
+        .bind(&wanted)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        found.push(row.try_get("id")?);
+    }
+    Ok(found)
+}
+
+/// Refuse a reference that names nothing.
+fn resolves(
+    id: &str,
+    file_assets: &HashSet<&str>,
+    in_estate: &HashSet<&str>,
+    entry: &str,
+    wanted_for: &str,
+) -> Result<(), IpcError> {
+    if file_assets.contains(id) || in_estate.contains(id) {
+        return Ok(());
+    }
+    Err(IpcError::invalid(format!(
+        "`{entry}` names `{id}` {wanted_for}, and there is no such asset in the \
+         file or in the estate"
+    )))
+}
+
+/// The file's assets, **a parent before what it holds**.
+///
+/// The order the apply inserts in, and the reason it can write `parent_id`
+/// straight into the insert: every row it writes is a row with no children yet
+/// whose parent is already there.
+///
+/// **A file whose assets hold each other is refused here, by name, before a
+/// row is written.** A cycle reaching `knobas.asset` would make
+/// [`recompute_paths`] run forever, which no gate can wait out; the ordering
+/// and this refusal are two readings of one pass, because a set of assets that
+/// cannot be ordered parent-first is exactly a set that holds itself.
+///
+/// `in_estate` is **every** id the estate already holds among the ones the
+/// file names *or points at* -- not just the file's own entries. A file may
+/// hang a new subtree under something a person created by hand
+/// ([`REFERENCED_ASSETS`]), and a parent that is already there is a parent
+/// nothing waits for; reading only the file's own known ids here would leave
+/// such an asset forever unready and refuse a legal file with a sentence about
+/// a cycle it does not have.
+fn ordered<'a>(
+    assets: &'a [FileAsset],
+    in_estate: &HashSet<&str>,
+) -> Result<Vec<&'a FileAsset>, IpcError> {
+    let mut out: Vec<&'a FileAsset> = Vec::with_capacity(assets.len());
+    let mut placed: HashSet<&'a str> = HashSet::new();
+    let mut left: Vec<&'a FileAsset> = assets.iter().collect();
+
+    while !left.is_empty() {
+        let mut ready: Vec<&'a FileAsset> = Vec::new();
+        let mut waiting: Vec<&'a FileAsset> = Vec::new();
+        for asset in left {
+            // An asset the estate already holds is not being inserted, so
+            // nothing waits for it and it waits for nothing.
+            let is_ready = in_estate.contains(asset.id.as_str())
+                || match asset.parent.as_deref() {
+                    // At the top of the estate, and nothing to wait for.
+                    None => true,
+                    Some(parent) => placed.contains(parent) || in_estate.contains(parent),
+                };
+            if is_ready {
+                ready.push(asset);
+            } else {
+                waiting.push(asset);
+            }
+        }
+        if ready.is_empty() {
+            let mut names: Vec<&str> = waiting.iter().map(|asset| asset.id.as_str()).collect();
+            names.sort_unstable();
+            return Err(IpcError::invalid(format!(
+                "these assets hold each other, so there is no order to write \
+                 them in: {}",
+                names.join(", ")
+            )));
+        }
+        for asset in &ready {
+            placed.insert(asset.id.as_str());
+        }
+        out.extend(ready);
+        left = waiting;
+    }
+    Ok(out)
+}
+
+/// The `monitored-by` links an apply would draw.
+///
+/// Over every asset the file names -- the new ones as well as the known ones,
+/// because a monitor the mirror already holds should be joined to the asset the
+/// same import created a moment earlier.
+async fn monitor_links(
+    tx: &mut Transaction<'_, Postgres>,
+    wanted: &HashMap<String, Vec<String>>,
+    stored: &HashMap<String, StoredAsset>,
+    inserts: &[AssetInsert],
+) -> Result<Vec<MonitorLink>, IpcError> {
+    let mut names: Vec<String> = wanted.values().flatten().cloned().collect();
+    names.sort_unstable();
+    names.dedup();
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut mirrored: HashMap<String, Vec<String>> = HashMap::new();
+    for row in sqlx::query(LIVE_MONITORS)
+        .bind(&names)
+        .bind(MONITOR_KIND)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        mirrored
+            .entry(row.try_get("title")?)
+            .or_default()
+            .push(row.try_get("entity_id")?);
+    }
+    if mirrored.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids: Vec<String> = wanted.keys().cloned().collect();
+    let mut drawn: HashSet<(String, String)> = HashSet::new();
+    for row in sqlx::query(MONITOR_LINKS)
+        .bind(&ids)
+        .bind(MONITORED_BY)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        let from: String = row.try_get("from_id")?;
+        let to: String = row.try_get("to_id")?;
+        drawn.insert((from.clone(), to.clone()));
+        drawn.insert((to, from));
+    }
+
+    let name_of = |id: &str| {
+        stored
+            .get(id)
+            .map(|asset| asset.name.clone())
+            .or_else(|| {
+                inserts
+                    .iter()
+                    .find(|insert| insert.id == id)
+                    .map(|insert| insert.name.clone())
+            })
+            .unwrap_or_else(|| id.to_owned())
+    };
+
+    // By asset id and then by monitor name, so two runs over one file answer
+    // in one order: a `HashMap`'s own is not an order a reader can rely on.
+    let mut assets: Vec<&String> = wanted.keys().collect();
+    assets.sort();
+    let mut links: Vec<MonitorLink> = Vec::new();
+    for asset_id in assets {
+        for monitor_name in &wanted[asset_id] {
+            for monitor_id in mirrored.get(monitor_name).into_iter().flatten() {
+                if drawn.contains(&(asset_id.clone(), monitor_id.clone())) {
+                    continue;
+                }
+                links.push(MonitorLink {
+                    asset_id: asset_id.clone(),
+                    asset_name: name_of(asset_id),
+                    monitor_name: monitor_name.clone(),
+                    monitor_id: monitor_id.clone(),
+                });
+            }
+        }
+    }
+    Ok(links)
+}
+
+/// The file's plain scalars as the tagged values everything else in this module
+/// carries, plus the entry's `description` as a property of its own.
+fn bag_of(
+    declared: Option<&'static AssetType>,
+    properties: &serde_json::Map<String, serde_json::Value>,
+    description: Option<&str>,
+) -> Result<serde_json::Map<String, serde_json::Value>, IpcError> {
+    let mut bag = serde_json::Map::new();
+    for (key, raw) in properties {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(IpcError::invalid("a property needs a key"));
+        }
+        let value = property_of(declared, key, raw)?;
+        value.vet(key)?;
+        bag.insert(key.to_owned(), stored_value(&value)?);
+    }
+    if let Some(description) = description.map(str::trim).filter(|text| !text.is_empty()) {
+        if bag.contains_key(DESCRIPTION_KEY) {
+            return Err(IpcError::invalid(format!(
+                "this entry carries a `{DESCRIPTION_KEY}` of its own and a \
+                 `{DESCRIPTION_KEY}` property, and they say different things"
+            )));
+        }
+        bag.insert(
+            DESCRIPTION_KEY.to_owned(),
+            stored_value(&PropertyValue::Text {
+                value: description.to_owned(),
+            })?,
+        );
+    }
+    Ok(bag)
+}
+
+/// One plain scalar, given the kind the type declares for its key.
+///
+/// The file writes `"cx23"` and `2`; everything downstream of this module
+/// carries `{"kind":"text","value":"cx23"}`. #428 chose the tagged shape and
+/// left this translation to the import in as many words, and the rule is the
+/// one that loses nothing:
+///
+/// * a **declared** key takes the kind its type declares, so a `port` the
+///   schema calls a number is a number and a `last_run` it calls a date is a
+///   date -- and [`PropertyValue::vet`] refuses one that is not really either;
+/// * an **undeclared** key takes the kind JSON already gave it: a string is
+///   text, a number is a number.
+///
+/// The one inference deliberately not made is a URL out of a string beginning
+/// `https://`. `jdbc_url` and a service's `url` are both in the real estate and
+/// only one of them is openable, and the *kind* is what the open-URL action
+/// reads -- so a custom key stays text until somebody says otherwise in the
+/// pane.
+///
+/// A shape that is neither string nor number -- a bool, a list, an object, a
+/// null -- is refused rather than stringified, because there is no reading of
+/// `["a","b"]` as a property that a reader would recognise on the other side.
+fn property_of(
+    declared: Option<&'static AssetType>,
+    key: &str,
+    raw: &serde_json::Value,
+) -> Result<PropertyValue, IpcError> {
+    let kind = declared
+        .and_then(|declared| {
+            declared
+                .properties
+                .iter()
+                .find(|property| property.key == key)
+        })
+        .map(|property| property.kind);
+    match raw {
+        serde_json::Value::String(value) => match kind {
+            None | Some(PropertyKind::Text) => Ok(PropertyValue::Text {
+                value: value.clone(),
+            }),
+            Some(PropertyKind::Date) => Ok(PropertyValue::Date {
+                value: value.clone(),
+            }),
+            Some(PropertyKind::Url) => Ok(PropertyValue::Url {
+                value: value.clone(),
+            }),
+            Some(PropertyKind::Number) => Err(kind_mismatch(key, kind, "string")),
+        },
+        serde_json::Value::Number(value) => match kind {
+            None | Some(PropertyKind::Number) => Ok(PropertyValue::Number {
+                value: value.as_f64().ok_or_else(|| {
+                    IpcError::invalid(format!("`{key}` is a number JSON cannot carry"))
+                })?,
+            }),
+            Some(_) => Err(kind_mismatch(key, kind, "number")),
+        },
+        other => Err(IpcError::invalid(format!(
+            "`{key}` is {other}, and an estate file's properties are plain \
+             strings and numbers"
+        ))),
+    }
+}
+
+/// A file value whose JSON shape is not the kind its type declares.
+fn kind_mismatch(key: &str, kind: Option<PropertyKind>, was: &str) -> IpcError {
+    IpcError::invalid(format!(
+        "`{key}` is a {} property and the file gives it a {was}",
+        kind.map_or("custom", PropertyKind::as_str)
+    ))
+}
+
+/// What the pane calls a key: the type's label, or the key itself.
+fn label_of(declared: Option<&'static AssetType>, key: &str) -> String {
+    declared
+        .and_then(|declared| {
+            declared
+                .properties
+                .iter()
+                .find(|property| property.key == key)
+        })
+        .map_or_else(|| key.to_owned(), |property| property.label.to_owned())
+}
+
+/// An id the file gave, in the namespace its entry belongs to.
+///
+/// The namespace is not decoration: `0017`'s `asset_id_ns_chk` and `0018`'s
+/// `route_id_ns_chk` refuse anything else, so a file calling a route
+/// `asset:tunnel-jira` would fail on a constraint halfway through the write
+/// rather than on a sentence about the file.
+fn vet_file_id(id: &str, namespace: &str) -> Result<(), IpcError> {
+    let parsed = EntityRef::parse(id).map_err(|error| {
+        IpcError::invalid(format!(
+            "`{id}` is not an id an estate file can give: {error}"
+        ))
+    })?;
+    if parsed.namespace != namespace {
+        return Err(IpcError::invalid(format!(
+            "`{id}` is in the `{}` namespace and this entry is a {namespace}; an \
+             imported id keeps the file's spelling, so it has to be the right one",
+            parsed.namespace
+        )));
+    }
+    Ok(())
+}
+
+fn duplicate_file_id(id: &str) -> IpcError {
+    IpcError::invalid(format!(
+        "`{id}` is the id of two entries in this file, and an id is an address"
+    ))
+}
+
+/// The file's environment, refused by name rather than by `0017`'s constraint.
+fn vet_environment(value: &str, id: &str) -> Result<Environment, IpcError> {
+    Environment::ALL
+        .into_iter()
+        .find(|environment| environment.as_str() == value)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "`{id}` is in the environment {value:?}, which is not one of {:?}",
+                Environment::ALL.map(Environment::as_str)
+            ))
+        })
+}
+
+/// The monitor names one asset lists, trimmed, deduplicated and refused when
+/// blank.
+///
+/// `estate_file.rs` states the rule this enforces at the other end: an empty
+/// entry is refused rather than dropped, *"so that nothing watches this and
+/// somebody meant to fill this in do not read alike"*. `0020`'s
+/// `asset_monitors_chk` is the floor under it.
+fn vet_monitors(monitors: &[String], id: &str) -> Result<Vec<String>, IpcError> {
+    let mut out: Vec<String> = Vec::new();
+    for name in monitors {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(IpcError::invalid(format!(
+                "`{id}` names a monitor with a blank name; leave the entry out \
+                 instead"
+            )));
+        }
+        if !out.iter().any(|kept| kept == name) {
+            out.push(name.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
 // The plumbing the four writers share
 // ---------------------------------------------------------------------------
+
+/// The entity row every asset and every route is written beside.
+///
+/// **`on conflict` because a delete tombstones the entity row and removes only
+/// the `knobas.asset` one.** [`create`] can never reach that clause -- it mints
+/// a fresh UUID -- but the import keeps the file's id, so re-importing a file
+/// that names an asset the reader deleted meets its own tombstone. Without the
+/// clause that is a duplicate-key error surfaced as `internal`, halfway through
+/// a transaction, on a file the preview called importable.
+///
+/// Reviving it is the right answer rather than a refusal: the id is the estate
+/// file's, an id carries its namespace so nothing of another kind can collide
+/// with it, and a file that still names the asset is a file saying the thing is
+/// there. `deleted_at = null` is what puts it back in the launcher and takes
+/// the *withdrawn* marker off the links drawn to it, which are the two things
+/// the tombstone was doing.
+const REVIVE_ENTITY: &str = "insert into knobas.entity (id, kind, title, updated_at)
+     values ($1, $2, $3, now())
+     on conflict (id) do update
+        set kind = excluded.kind, title = excluded.title,
+            deleted_at = null, updated_at = now()";
+
+/// One asset row on its way into the table, as either writer hands it over.
+///
+/// A struct rather than nine positional arguments, and a **shared** insert
+/// rather than one per writer: [`create`] mints an id and states nothing about
+/// environment, owner or monitors, and the import (#439) keeps the file's id
+/// and states all three. Everything else about the two is identical, and two
+/// copies of "insert the entity row, then the asset row" is exactly the pair
+/// that drifts the first time a column is added to one of them.
+struct AssetRowInsert<'a> {
+    /// Minted (`create`) or the estate file's (the import). Either way it is
+    /// the id of the `knobas.entity` row written beside it.
+    id: &'a str,
+    parent_id: Option<&'a str>,
+    type_id: &'a str,
+    name: &'a str,
+    properties: &'a serde_json::Map<String, serde_json::Value>,
+    environment: Option<Environment>,
+    owner: Option<&'a str>,
+    /// The Uptime Kuma names of the monitors watching it (`0020`), which only
+    /// a file states.
+    monitors: &'a [String],
+    /// Already resolved by the caller, because the two callers resolve it
+    /// differently: `create` reads the parent once, and the import walks a
+    /// whole file parent-first.
+    path_text: &'a str,
+}
+
+/// The entity row and the asset row, written together.
+async fn insert_asset(
+    tx: &mut Transaction<'_, Postgres>,
+    row: AssetRowInsert<'_>,
+) -> Result<(), IpcError> {
+    sqlx::query(REVIVE_ENTITY)
+        .bind(row.id)
+        .bind(NAMESPACE)
+        .bind(row.name)
+        .execute(&mut **tx)
+        .await?;
+
+    sqlx::query(
+        "insert into knobas.asset
+             (id, parent_id, type_id, name, properties, path_text, environment, owner, monitors)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(row.id)
+    .bind(row.parent_id)
+    .bind(row.type_id)
+    .bind(row.name)
+    .bind(serde_json::Value::Object(row.properties.clone()))
+    .bind(row.path_text)
+    .bind(row.environment.map(Environment::as_str))
+    .bind(row.owner)
+    .bind(row.monitors)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// One route row on its way into the table -- [`AssetRowInsert`]'s twin, for
+/// its reason.
+struct RouteRowInsert<'a> {
+    id: &'a str,
+    asset_id: &'a str,
+    target_id: Option<&'a str>,
+    name: &'a str,
+    url: &'a str,
+    visibility: Visibility,
+    properties: &'a serde_json::Map<String, serde_json::Value>,
+}
+
+/// The entity row and the route row, written together.
+async fn insert_route(
+    tx: &mut Transaction<'_, Postgres>,
+    row: RouteRowInsert<'_>,
+) -> Result<(), IpcError> {
+    sqlx::query(REVIVE_ENTITY)
+        .bind(row.id)
+        .bind(ROUTE_NAMESPACE)
+        .bind(row.name)
+        .execute(&mut **tx)
+        .await?;
+
+    sqlx::query(
+        "insert into knobas.route (id, asset_id, target_id, name, url, visibility, properties)
+         values ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(row.id)
+    .bind(row.asset_id)
+    .bind(row.target_id)
+    .bind(row.name)
+    .bind(row.url)
+    .bind(row.visibility.as_str())
+    .bind(serde_json::Value::Object(row.properties.clone()))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
 
 /// The stored row, as the writers need it: the wire row plus the two columns
 /// no reader draws.
@@ -2592,6 +4022,8 @@ fn vet_properties(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     const MIGRATION: &str =
@@ -3144,6 +4576,243 @@ mod tests {
         assert!(
             ROLLUP.contains("min(case when u.depth = 0 then 3"),
             "ROLLUP's `inside` no longer excludes the asset itself: {ROLLUP}"
+        );
+    }
+
+    /// The estate file's own checker (`knobas-core`'s `tests/estate_file.rs`)
+    /// and the shapes this module deserialises read **the same keys**.
+    ///
+    /// The two are the format, written twice in two crates that cannot see
+    /// each other: `knobas-core` cannot depend on `knobas-app`, so the closed
+    /// key vocabulary over there and `deny_unknown_fields` over here are the
+    /// only two statements of what an entry may say. A key added to one alone
+    /// is either a fact the import drops on the floor (added there) or a file
+    /// the checker calls illegal and the import happily reads (added here) --
+    /// and the checker says as much in its own words: *"if it is new, add it
+    /// here and teach the import about it"*.
+    ///
+    /// The field names are read **out of serde's own refusal**, which lists
+    /// them: `deny_unknown_fields` renders "unknown field `zzz`, expected one
+    /// of `id`, `type`, …". That is the deserialiser's own answer rather than
+    /// a third list here, which is the whole point -- a `#[serde(rename)]`
+    /// moves the name in the error too.
+    #[test]
+    fn the_file_shapes_read_the_keys_the_estate_files_own_check_allows() {
+        const CHECK: &str = include_str!("../../../knobas-core/tests/estate_file.rs");
+
+        /// The quoted strings of a `const NAME: &[&str] = &[ … ];` list.
+        fn listed(source: &str, name: &str) -> BTreeSet<String> {
+            let (_, rest) = source
+                .split_once(&format!("const {name}: &[&str] = &["))
+                .unwrap_or_else(|| panic!("estate_file.rs no longer declares {name}"));
+            let (body, _) = rest
+                .split_once("];")
+                .unwrap_or_else(|| panic!("{name} does not close its list"));
+            let keys: BTreeSet<String> = body
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect();
+            assert!(!keys.is_empty(), "this parse read nothing out of {name}");
+            keys
+        }
+
+        /// The fields serde says a shape accepts, read out of its own refusal.
+        fn accepted<'de, T: serde::Deserialize<'de>>(what: &str) -> BTreeSet<String> {
+            let refusal = serde_json::from_str::<T>(r#"{"zzz":1}"#)
+                .err()
+                .unwrap_or_else(|| panic!("{what} accepted a key it does not declare"))
+                .to_string();
+            let (_, rest) = refusal
+                .split_once("expected one of ")
+                .unwrap_or_else(|| panic!("serde no longer lists the fields: {refusal}"));
+            let fields: BTreeSet<String> = rest
+                .split('`')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect();
+            assert!(
+                !fields.is_empty(),
+                "this parse read nothing out of {refusal}"
+            );
+            fields
+        }
+
+        assert_eq!(
+            accepted::<FileAsset>("FileAsset"),
+            listed(CHECK, "ASSET_KEYS"),
+            "the estate file's asset keys and the import's asset shape disagree"
+        );
+        assert_eq!(
+            accepted::<FileRoute>("FileRoute"),
+            listed(CHECK, "ROUTE_KEYS"),
+            "the estate file's route keys and the import's route shape disagree"
+        );
+    }
+
+    /// The checked-in estate parses, and its plain scalars become the tagged
+    /// values everything downstream carries.
+    ///
+    /// The file is the only asset fixture there is (ADR-0013), and this is the
+    /// half of reading it that needs no database: a `2` becomes a number and a
+    /// `"cx23"` becomes text, which is the translation #428 left to this
+    /// ticket. The `description` landing in the bag is here too, because it is
+    /// the one field of the format with nowhere of its own to go.
+    #[test]
+    fn the_checked_in_estate_parses_and_its_scalars_become_tagged_values() {
+        const ESTATE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+        let parsed: EstateFile = serde_json::from_str(ESTATE).expect("the real estate file");
+        assert_eq!(parsed.assets.len(), 23, "the estate file's assets");
+        assert_eq!(parsed.routes.len(), 9, "the estate file's routes");
+
+        let server = parsed
+            .assets
+            .iter()
+            .find(|asset| asset.id == "asset:hetzner-teamcity")
+            .expect("the TeamCity host is in the estate file");
+        let bag = bag_of(
+            Some(vet_type(&server.type_id).expect("`vm` is a type")),
+            &server.properties,
+            server.description.as_deref(),
+        )
+        .expect("the server's properties translate");
+        assert_eq!(
+            bag["vcpu"],
+            serde_json::json!({ "kind": "number", "value": 2.0 }),
+            "a JSON number is a number property"
+        );
+        assert_eq!(
+            bag["server_type"],
+            serde_json::json!({ "kind": "text", "value": "cx23" }),
+            "a JSON string on an undeclared key is a text property"
+        );
+        assert!(
+            bag[DESCRIPTION_KEY]["value"]
+                .as_str()
+                .is_some_and(|text| text.contains("SSH")),
+            "the entry's description is a text property of its own: {:?}",
+            bag[DESCRIPTION_KEY]
+        );
+        // The negative control for the two above: a declared key takes the
+        // kind its *type* declares, and `os` is one -- so a table that
+        // answered `text` to everything would pass the pair and fail nothing.
+        assert_eq!(
+            bag["os"],
+            serde_json::json!({ "kind": "text", "value": "ubuntu-24.04" })
+        );
+    }
+
+    /// A value whose JSON shape is not the kind the type declares is refused,
+    /// and so is one JSON has no property spelling for.
+    #[test]
+    fn a_file_value_that_is_not_the_kind_its_type_declares_is_refused() {
+        let scenario = vet_type("scenario").expect("`scenario` is a type");
+        // `last_run` is the table's one date, and `position` (on `step`) its
+        // one number -- so these are the two arms that only a real declared
+        // kind can reach.
+        assert!(
+            bag_of(
+                Some(scenario),
+                &serde_json::from_str(r#"{"last_run":"yesterday"}"#).unwrap(),
+                None,
+            )
+            .is_err(),
+            "a declared date takes a date"
+        );
+        assert_eq!(
+            bag_of(
+                Some(scenario),
+                &serde_json::from_str(r#"{"last_run":"2026-09-06"}"#).unwrap(),
+                None,
+            )
+            .expect("a real date")["last_run"],
+            serde_json::json!({ "kind": "date", "value": "2026-09-06" })
+        );
+        let step = vet_type("step").expect("`step` is a type");
+        assert!(
+            bag_of(
+                Some(step),
+                &serde_json::from_str(r#"{"position":"third"}"#).unwrap(),
+                None,
+            )
+            .is_err(),
+            "a declared number takes a number"
+        );
+        for shape in [
+            r#"{"k":true}"#,
+            r#"{"k":["a"]}"#,
+            r#"{"k":null}"#,
+            r#"{"k":{}}"#,
+        ] {
+            assert!(
+                bag_of(None, &serde_json::from_str(shape).unwrap(), None).is_err(),
+                "{shape} is not a plain scalar"
+            );
+        }
+    }
+
+    /// The file's assets come back parent-first, and a file that holds itself
+    /// is refused rather than ordered.
+    ///
+    /// The ordering is what lets the apply write `parent_id` straight into the
+    /// insert, and the refusal is what keeps a cycle away from
+    /// `recompute_paths`' uncapped recursive CTE -- the two are one pass, so
+    /// they are asserted together.
+    #[test]
+    fn the_files_assets_are_ordered_parent_first_and_a_cycle_is_refused() {
+        let file: EstateFile = serde_json::from_str(
+            r#"{"assets":[
+                 {"id":"asset:leaf","type":"container","name":"leaf","parent":"asset:mid"},
+                 {"id":"asset:mid","type":"vm","name":"mid","parent":"asset:root"},
+                 {"id":"asset:root","type":"site","name":"root"}]}"#,
+        )
+        .expect("a small file");
+        let nothing_yet = HashSet::new();
+        assert_eq!(
+            ordered(&file.assets, &nothing_yet)
+                .expect("a tree orders")
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["asset:root", "asset:mid", "asset:leaf"],
+            "the file lists a leaf first and the order is the tree's"
+        );
+
+        let loop_file: EstateFile = serde_json::from_str(
+            r#"{"assets":[
+                 {"id":"asset:a","type":"site","name":"a","parent":"asset:b"},
+                 {"id":"asset:b","type":"site","name":"b","parent":"asset:a"}]}"#,
+        )
+        .expect("a small file");
+        let refusal = ordered(&loop_file.assets, &nothing_yet).expect_err("a cycle has no order");
+        assert!(
+            refusal.message.contains("asset:a") && refusal.message.contains("asset:b"),
+            "the refusal names both ends: {}",
+            refusal.message
+        );
+
+        // A subtree hung under an asset the estate already holds and the file
+        // does not describe. `REFERENCED_ASSETS` is the read that finds such a
+        // parent, and this is the half of it that decides whether the file can
+        // be written at all: without the estate's own ids here, a legal file
+        // waits for a parent that is never placed and is refused as a cycle it
+        // does not have.
+        let under_the_estate: EstateFile = serde_json::from_str(
+            r#"{"assets":[
+                 {"id":"asset:new","type":"vm","name":"new","parent":"asset:by-hand"}]}"#,
+        )
+        .expect("a small file");
+        assert!(
+            ordered(&under_the_estate.assets, &nothing_yet).is_err(),
+            "a parent that is nowhere is not orderable"
+        );
+        assert_eq!(
+            ordered(&under_the_estate.assets, &HashSet::from(["asset:by-hand"]))
+                .expect("a parent already in the estate is a parent nothing waits for")
+                .len(),
+            1
         );
     }
 }

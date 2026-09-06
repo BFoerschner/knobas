@@ -1,0 +1,72 @@
+-- 0020_the_monitors_an_estate_file_names.sql -- the one fact an estate file
+-- carries that the asset model had nowhere to put.
+--
+-- Single-writer (orchestrator), like every migration: a stream that needs more
+-- schema requests 0021 and never edits this file or its predecessors -- sqlx
+-- checksums applied migrations and an edit fails startup on every existing
+-- database. `0017` is the asset and its tree (#428), `0018` the route an asset
+-- exposes (#432), `0019` what the estate is findable by (#436); this number was
+-- allocated to M4.0's import (#439) and to nothing else. Recorded as a ratified
+-- exception in `docs/contract.md` §10.8.
+--
+-- It was written as `0019` and renumbered on the rebase: #436's launcher
+-- corpus took that number first, and two migrations sharing one version is a
+-- startup failure rather than a merge conflict -- `git` sees two filenames and
+-- sqlx sees one number twice.
+--
+-- ## Why a column and not a link
+--
+-- `CONTEXT.md`, **Monitor**: "a mirrored item of the Uptime Kuma source, kind
+-- `monitor` … attached to an asset by a `monitored-by` link". So the *end
+-- state* of a monitor name is a link, and this column is not that link and
+-- never becomes one on its own.
+--
+-- What it holds is the half-resolved thing in between, which spec #427 names
+-- in as many words: the import "draws monitored-by links for the monitor names
+-- the file lists, resolved against the mirror's live monitors; **a name the
+-- mirror does not hold yet is kept on the asset** and resolved by the next
+-- import or the M4.1 sync". A name is not a link because the thing it names
+-- may not have been synced yet -- and today none of them has, since no adapter
+-- emits the `monitor` kind until M4.1. Writing a link to an entity that does
+-- not exist is refused by `knobas.link`'s own foreign keys; dropping the name
+-- on the floor would mean the estate file's `monitors` arrays are read once,
+-- resolve nothing, and are never seen again.
+--
+-- ## Why `text[]` and not a table, and not the properties bag
+--
+-- An asset carries **zero or more** monitor names and nothing hangs off one:
+-- no order the reader chose, no per-name attribute, no id worth addressing. A
+-- side table would be a join on every pane read for a list that is empty on
+-- twenty-three of the estate's twenty-three assets today and one name long on
+-- the seven that have one.
+--
+-- Not `properties`, which is where a fact with no column usually goes in this
+-- model: that bag is a map of `{"kind":…,"value":…}` scalars a *reader* owns
+-- and edits, and `PropertyValue` has no list. A monitor name in it would be
+-- editable in the pane as free text, would collide with a reader's own key
+-- called `monitors`, and would make "did a person edit this" -- the rule the
+-- import's whole merge rests on -- a question about something no person can
+-- usefully edit.
+--
+-- ## Not null, defaulted, and closed against the two empties
+--
+-- `not null default '{}'` so "no monitors" is one value and every asset that
+-- existed before this migration has it. `asset_monitors_chk` refuses a null
+-- element and a blank one for `estate_file.rs`'s stated reason -- "leave the
+-- key out instead, so that *nothing watches this* and *somebody meant to fill
+-- this in* do not read alike". `array_position` is null-only when the array
+-- holds no null; `&&` is overlap, so the second clause is "does this array
+-- contain the empty string".
+--
+-- No uniqueness clause here: a duplicate name is meaningless rather than
+-- illegal, and `knobas_app::assets`' import is the one writer -- it unions
+-- what it stores, so a duplicate cannot arrive through the only door there is.
+-- A CHECK for it would be a second copy of that rule in a language that cannot
+-- say why.
+
+alter table knobas.asset
+  add column monitors text[] not null default '{}'::text[];
+
+alter table knobas.asset
+  add constraint asset_monitors_chk
+  check (array_position(monitors, null) is null and not (monitors && array['']::text[]));

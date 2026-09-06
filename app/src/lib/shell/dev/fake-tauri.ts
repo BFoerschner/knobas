@@ -366,6 +366,16 @@ const FIXTURE_ESTATE: {
   environment: "dev" | "stage" | "prod" | "shared" | null;
   owner: string | null;
   properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  /**
+   * The Uptime Kuma names an import kept on the asset (#439).
+   *
+   * Declared on every entry rather than on the two that have one, for
+   * `links`' reason below: `AssetDetail.monitors` is a `string[]` and the pane
+   * reads `.length`, so an entry short of the key hands it `undefined`. The
+   * two names are `testenv/hetzner/estate.json`'s own for these machines --
+   * nothing here is invented.
+   */
+  monitors: string[];
 }[] = [
   {
     id: "asset:hel1",
@@ -381,6 +391,7 @@ const FIXTURE_ESTATE: {
       { key: "location", label: "Location", value: { kind: "text", value: "Helsinki" }, custom: false },
       { key: "provider", label: "Provider", value: { kind: "text", value: "Hetzner" }, custom: false },
     ],
+    monitors: [],
   },
   {
     // The notebook the tunnel's forwards are exposed *from* (#433). The
@@ -401,6 +412,7 @@ const FIXTURE_ESTATE: {
       { key: "ip", label: "IP", value: null, custom: false },
       { key: "os", label: "OS", value: { kind: "text", value: "macOS 26" }, custom: false },
     ],
+    monitors: [],
   },
   {
     id: "asset:knobas-teamcity",
@@ -419,6 +431,7 @@ const FIXTURE_ESTATE: {
       { key: "size", label: "Size", value: { kind: "text", value: "cx23" }, custom: false },
       { key: "renewed", label: "renewed", value: { kind: "date", value: "2026-09-05" }, custom: true },
     ],
+    monitors: ["knobas-teamcity"],
   },
   {
     id: "asset:knobas-jira",
@@ -436,6 +449,7 @@ const FIXTURE_ESTATE: {
       { key: "os", label: "OS", value: { kind: "text", value: "Debian 13" }, custom: false },
       { key: "size", label: "Size", value: { kind: "text", value: "cpx22" }, custom: false },
     ],
+    monitors: ["knobas-jira"],
   },
   {
     id: "asset:teamcity-docker",
@@ -451,6 +465,7 @@ const FIXTURE_ESTATE: {
       { key: "socket", label: "Socket", value: null, custom: false },
       { key: "version", label: "Version", value: { kind: "text", value: "27.3" }, custom: false },
     ],
+    monitors: [],
   },
   {
     id: "asset:teamcity",
@@ -467,6 +482,7 @@ const FIXTURE_ESTATE: {
       { key: "ports", label: "Ports", value: { kind: "text", value: "8111" }, custom: false },
       { key: "restart_policy", label: "Restart policy", value: null, custom: false },
     ],
+    monitors: [],
   },
   {
     id: "asset:teamcity-db",
@@ -482,6 +498,7 @@ const FIXTURE_ESTATE: {
       { key: "engine", label: "Engine", value: { kind: "text", value: "PostgreSQL 18" }, custom: false },
       { key: "port", label: "Port", value: { kind: "number", value: 5432 }, custom: false },
     ],
+    monitors: [],
   },
   {
     id: "asset:teamcity-agent",
@@ -498,6 +515,7 @@ const FIXTURE_ESTATE: {
       { key: "ports", label: "Ports", value: null, custom: false },
       { key: "restart_policy", label: "Restart policy", value: null, custom: false },
     ],
+    monitors: [],
   },
 ];
 
@@ -797,6 +815,9 @@ function createAsset(args: Record<string, unknown>) {
       value: null,
       custom: false,
     })),
+    // None, and that is the honest answer: only an import puts a monitor name
+    // on an asset (#439), and creating one by hand is the other door.
+    monitors: [],
   };
   FIXTURE_ESTATE.push(created);
   ASSET_HISTORY.push({ entity_id: created.id, verb: "created", detail: {} });
@@ -996,6 +1017,10 @@ function assetDetail(args: Record<string, unknown>) {
     // the field and the panel; the fixture kept neither) it is `undefined`,
     // and `groupLinks` throws on the pane of every asset.
     links: [],
+    // The monitor names an import kept (#439), for `links`' reason exactly:
+    // the pane reads `detail.monitors.length`, so a fixture short of the key
+    // throws on the pane of every asset rather than drawing nothing.
+    monitors: asset.monitors,
     history: [
       // This session's own writes first, newest first, which is what makes
       // *every mutation appears in the pane's history immediately* (#429)

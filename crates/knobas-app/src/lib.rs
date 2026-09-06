@@ -307,6 +307,9 @@ pub fn run() {
             // #435, appended after those: the source room's half of #434's
             // tile.
             commands::assets::source_assets,
+            // #439's Import, appended after those for the same reason.
+            commands::assets::preview_estate_import,
+            commands::assets::apply_estate_import,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

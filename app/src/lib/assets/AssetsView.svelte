@@ -68,6 +68,7 @@
 <script lang="ts">
   import { ipcErrorMessage, type SearchResponse } from "../ipc";
   import {
+    applyEstateImport as realApplyEstateImport,
     assetTree as realAssetTree,
     assetTypes as realAssetTypes,
     createAsset as realCreateAsset,
@@ -79,6 +80,7 @@
     getAsset as realGetAsset,
     getRoute as realGetRoute,
     moveAsset as realMoveAsset,
+    previewEstateImport as realPreviewEstateImport,
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
@@ -102,6 +104,7 @@
   import { hashFor, type Router } from "../shell/router.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import CreateDialog from "./CreateDialog.svelte";
+  import ImportDialog from "./ImportDialog.svelte";
   import MoveDialog from "./MoveDialog.svelte";
   import RouteDialog from "./RouteDialog.svelte";
   import {
@@ -170,6 +173,15 @@
      * a second dialog to keep in step with the first.
      */
     unlink: typeof realUnlink;
+    /**
+     * The Import's two halves (#439): what a file would do, and doing it.
+     *
+     * Both, because the dialog is the one surface where a read and a write
+     * are one gesture -- a preview a test could not stub would make the
+     * dialog's three groups unreachable.
+     */
+    previewEstateImport: typeof realPreviewEstateImport;
+    applyEstateImport: typeof realApplyEstateImport;
   }
 
   let {
@@ -214,6 +226,8 @@
     deleteRoute: realDeleteRoute,
     openExternal: realOpenExternal,
     unlink: realUnlink,
+    previewEstateImport: realPreviewEstateImport,
+    applyEstateImport: realApplyEstateImport,
     ...ports,
   };
 
@@ -306,6 +320,15 @@
   let editingRoute = $state<RouteRow | null>(null);
   /** Whether *Link to…* is open over the pane (story 36). */
   let linking = $state(false);
+  /**
+   * Whether the Import is open (#439).
+   *
+   * A whole-view capability rather than a pane one, which is why it sits in
+   * the room bar beside the tab strip: an import is about the estate, and the
+   * address that most needs it -- `#/assets/tree` with an empty tree -- has no
+   * asset selected to hang a button off.
+   */
+  let importing = $state(false);
   /** The property row being edited, by key, and the text in its field. */
   let editingKey = $state<string | null>(null);
   let draft = $state("");
@@ -438,6 +461,15 @@
    */
   $effect(() => {
     const parents = path.parents;
+    // A write bumps `revision`, and the columns read it as well as the pane
+    // does (#439). Without it an **import** draws nothing: it creates assets
+    // under an address that has not changed, and with nothing selected
+    // `path` is the same empty path before and after, so the one effect that
+    // could notice never re-runs. The same line also relabels a column row
+    // after a rename. It costs a second read of the columns on the writes
+    // where `path` was going to change anyway -- a move, a delete -- and
+    // `latestRead` is what keeps the loser of those two from landing.
+    void revision;
     void columnsRead(() => Promise.all(parents.map((parent) => io.assetTree(parent))), {
       ok: (lists) => {
         columns = lists;
@@ -1266,6 +1298,12 @@
       </button>
     </nav>
 
+    <!--
+      Beside the tab strip, not on a column header: an import is about the
+      whole estate, and the address that most needs it — a tree with nothing
+      in it yet — has neither a column nor a selection to hang it off.
+    -->
+    <button class="tb-btn imp" onclick={() => (importing = true)}>Import</button>
   </div>
 
   {#if typesFailure}
@@ -1875,6 +1913,32 @@
         </section>
 
         <!--
+          The monitor names an import kept on this asset (#439).
+
+          Drawn only when there are some, unlike *Exposes* and *Reachable via*:
+          those two answer "what is this reachable at", which is a question
+          about every asset, and this one is the estate file's own note about
+          which Uptime Kuma checks watch it. A section reading "no monitors" on
+          every hand-made asset would be a sentence about a file nobody
+          imported.
+
+          Names and not links, and it says so: a monitor is a mirrored item and
+          nothing emits one until M4.1, so what is here is what the file said,
+          waiting to be resolved. Once it is, the link is in the *Linked* panel
+          below with every other one — this list is the queue, not the result.
+        -->
+        {#if detail.monitors.length > 0}
+          <section class="grp">
+            <h3 class="lab">Monitors named by the import</h3>
+            <ul class="lst">
+              {#each detail.monitors as name (name)}
+                <li class="mono">{name}</li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
+        <!--
           The selected route's **own** history (spec #427: routes *"have their
           own history"*), drawn only when the address names one. Beside the
           asset's rather than inside the route rows: a line per route in the
@@ -1955,6 +2019,21 @@
       // column because the Tree read it back, which is the same path a click
       // takes and the reason a cold link lands in the same place.
       router.go(addressOf(row));
+    }}
+  />
+{/if}
+
+{#if importing}
+  <ImportDialog
+    preview={io.previewEstateImport}
+    apply={io.applyEstateImport}
+    onclose={() => (importing = false)}
+    onimported={() => {
+      importing = false;
+      // The address is unchanged — an import creates assets and never moves
+      // the reader — so the re-read is what draws the new columns, the same
+      // path every other write in this view takes.
+      revision += 1;
     }}
   />
 {/if}
@@ -2064,6 +2143,16 @@
 {/if}
 
 <style>
+  /*
+    Pushed to the far end of the room bar: the tab strip is the destination
+    picker and this is an action on the whole estate, so they are not a row of
+    peers. `.tb-btn` itself is the shell's, shared with the top strip's own
+    buttons, and only the placement is this view's.
+  */
+  .imp {
+    margin-left: auto;
+  }
+
   /* Three rows now: the room bar, the search strip, and the tree under both.
      `app.css` gives `.view` two, and the strip is this view's own. */
   .view {

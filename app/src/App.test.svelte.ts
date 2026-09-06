@@ -341,6 +341,8 @@ vi.mock("./lib/ipc/assets", () => ({
       links: [],
       effective_environment: null,
       effective_owner: null,
+      // The monitor names an import kept (#439). Nothing here is imported.
+      monitors: [],
     });
   },
   // The type table the create/edit dialogs read (#429). Answered rather than
@@ -368,6 +370,11 @@ vi.mock("./lib/ipc/assets", () => ({
   createRoute: () => Promise.reject(new Error("no estate writes in this test")),
   editRoute: () => Promise.reject(new Error("no estate writes in this test")),
   deleteRoute: () => Promise.reject(new Error("no estate writes in this test")),
+  // The Import's two halves (#439), here for `contextAssets`' reason: the Tree
+  // reads both at module scope, and a mock short of an export throws inside
+  // the view's effect rather than failing as a missing feature.
+  previewEstateImport: () => Promise.reject(new Error("no import in this test")),
+  applyEstateImport: () => Promise.reject(new Error("no estate writes in this test")),
 }));
 
 /**

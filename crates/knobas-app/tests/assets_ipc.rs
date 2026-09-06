@@ -23,7 +23,7 @@
 
 use knobas_app::assets::{self, AssetEdit, AssetRow, AssetStatus, Environment, PropertyValue};
 use knobas_app::{IpcError, IpcErrorCode};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tauri::ipc::CallbackFn;
 use tauri::test::MockRuntime;
 
@@ -2501,6 +2501,679 @@ async fn a_source_rooms_tile_draws_its_worst_asset_first() {
 }
 
 // ---------------------------------------------------------------------------
+// The Import (#439)
+// ---------------------------------------------------------------------------
+
+/// The real estate file, embedded.
+///
+/// The only asset fixture there is: spec #427 rules out anything
+/// Tidewater-shaped for assets, because a made-up estate proves that the
+/// import parses and not that a real estate fits the model (ADR-0013).
+/// Embedded rather than read at run time, so this suite and the file's own
+/// checker (`knobas-core`'s `tests/estate_file.rs`) fail together the day it
+/// stops being true.
+const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+
+/// One count.
+async fn rows(pool: &PgPool, statement: &'static str) -> i64 {
+    sqlx::query(statement)
+        .fetch_one(pool)
+        .await
+        .expect("a count")
+        .try_get("n")
+        .expect("a count")
+}
+
+/// How many assets, routes, activity lines and links there are.
+///
+/// The four tables an import can write, counted together, so that "wrote
+/// nothing" is a claim about all of them rather than about the one a reader
+/// thought to check.
+async fn tables(pool: &PgPool) -> (i64, i64, i64, i64) {
+    (
+        rows(pool, "select count(*) as n from knobas.asset").await,
+        rows(pool, "select count(*) as n from knobas.route").await,
+        rows(pool, "select count(*) as n from knobas.activity").await,
+        rows(pool, "select count(*) as n from knobas.link").await,
+    )
+}
+
+/// The estate file with one asset's properties changed -- what a file that has
+/// moved on since the last import looks like.
+fn estate_with(id: &str, properties: &[(&str, serde_json::Value)]) -> String {
+    let mut file: serde_json::Value = serde_json::from_str(ESTATE_FILE).expect("the estate file");
+    let asset = file["assets"]
+        .as_array_mut()
+        .expect("the assets")
+        .iter_mut()
+        .find(|asset| asset["id"] == id)
+        .unwrap_or_else(|| panic!("{id} is in the estate file"));
+    for (key, value) in properties {
+        asset["properties"][*key] = value.clone();
+    }
+    file.to_string()
+}
+
+/// One asset's property, as the pane reads it.
+async fn property(pool: &PgPool, id: &str, key: &str) -> Option<PropertyValue> {
+    assets::get(pool, id)
+        .await
+        .unwrap_or_else(|error| panic!("{id}: {}", error.message))
+        .properties
+        .into_iter()
+        .find(|property| property.key == key)
+        .and_then(|property| property.value)
+}
+
+/// **The preview writes nothing at all** -- the first acceptance criterion,
+/// and the one a reader cannot check by looking at a dialog.
+///
+/// Over the *real* file and over a database that already holds it, so the
+/// preview has every reason to write: a property to set and a plan to record.
+/// All four tables are counted, because a preview that wrote one activity line
+/// would still leave the asset count right.
+#[tokio::test]
+async fn a_preview_writes_nothing_at_all() {
+    let pool = pool("assets-import-preview-writes-nothing").await;
+    assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first import");
+    let moved_on = estate_with(
+        "asset:hetzner-teamcity",
+        &[("server_type", serde_json::json!("cx33"))],
+    );
+
+    let before = tables(&pool).await;
+    let preview = assets::preview_import(&pool, &moved_on)
+        .await
+        .expect("the preview");
+    assert_eq!(
+        preview.changes.len(),
+        1,
+        "this preview has something to report, so it has a reason to write"
+    );
+    assert_eq!(
+        tables(&pool).await,
+        before,
+        "the preview wrote something: assets, routes, activity lines, links"
+    );
+}
+
+/// **The first import creates the whole estate with the file's own ids**, and
+/// every created asset carries an origin line.
+///
+/// The real file, through the seam the two commands are shims over. What is
+/// asserted is what a reader would look at afterwards: the tree is the one the
+/// file describes, the ids are the file's, the environment and owner set at
+/// the root are in force five levels down, a plain `2` arrived as a number,
+/// the entry's prose arrived as a property, and the monitor names are on the
+/// assets.
+#[tokio::test]
+async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
+    let pool = pool("assets-import-first").await;
+    let written = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the estate imports");
+    let outcome = written.value;
+
+    assert_eq!(outcome.assets_created, 23, "the file's assets");
+    assert_eq!(outcome.routes_created, 9, "the file's routes");
+    assert_eq!(outcome.properties_set, 0, "there was nothing to change");
+    assert_eq!(outcome.properties_kept, 0);
+    assert_eq!(outcome.monitors_kept, 7, "the file's monitor names");
+    assert_eq!(
+        outcome.monitors_linked, 0,
+        "no adapter emits a monitor until M4.1, so no name resolves"
+    );
+
+    // One line is announced, and it is the run's rather than an asset's.
+    assert_eq!(written.activity.len(), 1, "one line is announced, not 33");
+    assert_eq!(written.activity[0].verb, "imported");
+    assert_eq!(
+        written.activity[0].entity_id, None,
+        "the summary is the import's line, not an asset's"
+    );
+    assert_eq!(
+        written.activity[0].detail["outcome"]["assets_created"],
+        serde_json::json!(23)
+    );
+
+    let top = assets::tree(&pool, None).await.expect("the top level");
+    assert_eq!(
+        top.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["asset:knobas-estate"],
+        "the estate is one tree with one root"
+    );
+
+    // Five levels down, by the file's own ids, with the path the file draws.
+    let db = assets::get(&pool, "asset:db-jira")
+        .await
+        .expect("Jira's database is in the tree");
+    assert_eq!(
+        db.held_by
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "knobas test estate",
+            "Hetzner Cloud nbg1",
+            "knobas-jira",
+            "Docker engine (knobas-jira)",
+            "knobas-jira-db",
+        ],
+        "the containment path is the file's, outermost first"
+    );
+    assert_eq!(
+        db.effective_environment.map(|value| value.value),
+        Some(Environment::Dev),
+        "the environment set at the root is in force five levels down"
+    );
+    assert_eq!(
+        db.effective_owner.map(|value| value.source_id),
+        Some("asset:knobas-estate".to_owned()),
+        "the owner is inherited from the root, and the pane can say from where"
+    );
+
+    // The scalars, translated. A JSON number is a number property; the entry's
+    // own prose is a text property, because the model has no description
+    // column; and a key the *type* declares takes the type's kind, which is
+    // the negative control for the pair above.
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "vcpu").await,
+        Some(PropertyValue::Number { value: 2.0 })
+    );
+    assert!(
+        matches!(
+            property(&pool, "asset:hetzner-teamcity", "description").await,
+            Some(PropertyValue::Text { value }) if value.contains("SSH")
+        ),
+        "the file's description is a property of the asset"
+    );
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "os").await,
+        Some(text("ubuntu-24.04"))
+    );
+
+    // Every created asset carries its origin line, and it names the estate.
+    let gitea = assets::get(&pool, "asset:knobas-gitea")
+        .await
+        .expect("the Gitea container");
+    assert!(
+        gitea.history.iter().any(|line| line.verb == "imported"
+            && line.detail["estate"] == serde_json::json!("knobas test estate")),
+        "the origin line is missing: {:?}",
+        gitea
+            .history
+            .iter()
+            .map(|line| line.verb.as_str())
+            .collect::<Vec<_>>()
+    );
+    let without = rows(
+        &pool,
+        "select count(*) as n from knobas.asset a
+          where not exists (select 1 from knobas.activity l
+                             where l.entity_id = a.id and l.verb = 'imported')",
+    )
+    .await;
+    assert_eq!(without, 0, "{without} imported assets carry no origin line");
+
+    // The monitor names are on the assets, waiting for M4.1 to resolve them.
+    assert_eq!(gitea.monitors, ["gitea"], "the name the file gave");
+
+    // The routes, both ends resolved, carrying the file's own properties.
+    let notebook = assets::get(&pool, "asset:notebook")
+        .await
+        .expect("the notebook");
+    assert_eq!(
+        notebook.exposes.len(),
+        8,
+        "the notebook exposes every forward but the reverse one"
+    );
+    let tunnel = notebook
+        .exposes
+        .iter()
+        .find(|route| route.id == "route:tunnel-jira")
+        .expect("Jira's forward");
+    assert_eq!(tunnel.url, "http://127.0.0.1:8080/");
+    assert_eq!(tunnel.target_name.as_deref(), Some("knobas-jira"));
+    assert!(
+        tunnel
+            .properties
+            .iter()
+            .any(|property| property.key == "forward"),
+        "the route carries the file's own properties: {:?}",
+        tunnel.properties
+    );
+}
+
+/// **A hand-edited property survives the next import, and the preview said it
+/// would** -- while an untouched property the file changed is updated.
+///
+/// Two properties of one asset, changed by the file in the same breath, told
+/// apart by nothing but who last wrote one of them. That is spec #427's rule
+/// -- *"a hand edit is any activity line by the user on that property"* -- and
+/// it is why the two are asserted side by side: a merge that kept everything,
+/// or set everything, would satisfy half of this test.
+#[tokio::test]
+async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it_would() {
+    let pool = pool("assets-import-hand-edit").await;
+    assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first import");
+
+    // The reader corrects the role by hand. Nobody touches the OS.
+    assets::edit(
+        &pool,
+        "asset:hetzner-teamcity",
+        &[AssetEdit::Property {
+            key: "role".to_owned(),
+            value: Some(text("teamcity, and the agent")),
+        }],
+    )
+    .await
+    .expect("the hand edit");
+
+    // The file moves on, and changes both.
+    let moved_on = estate_with(
+        "asset:hetzner-teamcity",
+        &[
+            ("role", serde_json::json!("teamcity-only")),
+            ("os", serde_json::json!("ubuntu-26.04")),
+        ],
+    );
+
+    let preview = assets::preview_import(&pool, &moved_on)
+        .await
+        .expect("the preview");
+    assert_eq!(
+        preview.changes.len(),
+        1,
+        "one asset has something to change"
+    );
+    let change = &preview.changes[0];
+    assert_eq!(change.id, "asset:hetzner-teamcity");
+    assert_eq!(
+        change
+            .properties
+            .iter()
+            .map(|property| (property.key.as_str(), property.plan))
+            .collect::<Vec<_>>(),
+        [
+            ("os", assets::PropertyPlan::Set),
+            ("role", assets::PropertyPlan::Kept),
+        ],
+        "the preview says, per property, which value wins"
+    );
+    // And it says what it would be replacing, which is the sentence the dialog
+    // draws: *the file says `teamcity-only` and it stays `teamcity, and the
+    // agent`, because you typed that*.
+    let role = &change.properties[1];
+    assert_eq!(
+        role.from,
+        Some(text("teamcity, and the agent")),
+        "the preview carries the value that is staying"
+    );
+    assert_eq!(role.to, text("teamcity-only"));
+    assert_eq!(role.label, "role", "a custom key is labelled by itself");
+
+    let outcome = assets::apply_import(&pool, &moved_on)
+        .await
+        .expect("the second import")
+        .value;
+    assert_eq!(outcome.properties_set, 1);
+    assert_eq!(outcome.properties_kept, 1);
+    assert_eq!(outcome.assets_created, 0);
+
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "role").await,
+        Some(text("teamcity, and the agent")),
+        "the file undid a hand edit"
+    );
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "os").await,
+        Some(text("ubuntu-26.04")),
+        "an untouched property the file changed was not updated"
+    );
+    // The import's own line is not the reader's, which is what makes the rule
+    // above decidable at all: the OS it has just set is still the file's to
+    // change next time.
+    let history = history(&pool, "asset:hetzner-teamcity").await;
+    assert!(
+        history
+            .iter()
+            .any(|(verb, detail)| verb == "edited" && detail["key"] == serde_json::json!("os")),
+        "the property the import set has a line of its own: {history:?}"
+    );
+}
+
+/// **A second import of the same file previews all-known and applies
+/// nothing**, and the monitor names stay on the assets.
+///
+/// The idempotence criterion, from both ends: the preview says every entry is
+/// already in the tree and nothing would change, and the apply that follows
+/// leaves every table alone but the log -- which grows by the one summary
+/// line, because *"I imported that file again and it changed nothing"* is a
+/// fact about the estate and a log that recorded only the imports that did
+/// something could not answer when the last one ran.
+#[tokio::test]
+async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
+    let pool = pool("assets-import-idempotent").await;
+    assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first import");
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second preview");
+    assert_eq!(
+        preview.known.len(),
+        32,
+        "twenty-three assets and nine routes are all already in the tree"
+    );
+    assert!(preview.new.is_empty(), "{:?}", preview.new);
+    assert!(preview.changes.is_empty(), "{:?}", preview.changes);
+    assert!(preview.monitor_links.is_empty());
+    assert_eq!(preview.name, "knobas test estate");
+
+    let (assets_before, routes_before, activity_before, links_before) = tables(&pool).await;
+    let outcome = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second import")
+        .value;
+    assert_eq!(
+        outcome,
+        assets::ImportOutcome::default(),
+        "a second import of an unchanged file did something"
+    );
+    let (assets_after, routes_after, activity_after, links_after) = tables(&pool).await;
+    assert_eq!((assets_after, routes_after), (assets_before, routes_before));
+    assert_eq!(links_after, links_before);
+    assert_eq!(
+        activity_after,
+        activity_before + 1,
+        "exactly one line was written: the summary"
+    );
+
+    // And the names the first import kept are still there to be resolved.
+    assert_eq!(
+        assets::get(&pool, "asset:knobas-teamcity")
+            .await
+            .expect("the TeamCity container")
+            .monitors,
+        ["teamcity (tunnel)"]
+    );
+}
+
+/// **A monitor the mirror holds becomes a link; one it does not stays a
+/// name.**
+///
+/// Spec #427's import sentence in both halves. The mirror is seeded by hand
+/// because no adapter emits the `monitor` kind until M4.1 -- the arrangement
+/// `a_source_rooms_tile_lists_the_assets_its_own_monitors_watch` uses, and for
+/// its reason: the statement is the real one, and a read that answered nothing
+/// whatever the mirror held would pass every other test in this file.
+///
+/// The negative is the other six names, which resolve to nothing and are still
+/// on their assets afterwards. Without it this would pass against an import
+/// that drew a link and threw the name away.
+#[tokio::test]
+async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_name() {
+    let pool = pool("assets-import-monitors").await;
+    monitor(&pool, "kuma", "gitea").await;
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the preview");
+    assert_eq!(
+        preview
+            .monitor_links
+            .iter()
+            .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
+            .collect::<Vec<_>>(),
+        [("asset:knobas-gitea", "gitea")],
+        "the one name the mirror holds is the one link the preview offers"
+    );
+
+    let outcome = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the import")
+        .value;
+    assert_eq!(outcome.monitors_linked, 1);
+    assert_eq!(
+        outcome.monitors_kept, 7,
+        "every name is kept, linked or not"
+    );
+    assert_eq!(
+        links_of(&pool, "asset:knobas-gitea").await,
+        [(
+            "monitored-by".to_owned(),
+            "kuma:gitea".to_owned(),
+            "monitor".to_owned(),
+        )],
+        "the resolved name is a monitored-by link"
+    );
+    assert_eq!(
+        assets::get(&pool, "asset:knobas-jira")
+            .await
+            .expect("Jira's container")
+            .monitors,
+        ["jira (tunnel)"],
+        "a name the mirror does not hold is kept, for the next import"
+    );
+
+    // Run it again: the link is already there and is not drawn twice, which is
+    // what `knobas.link`'s unordered uniqueness would otherwise refuse in the
+    // middle of a transaction that had already done its work.
+    let again = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second import")
+        .value;
+    assert_eq!(again.monitors_linked, 0);
+    assert_eq!(links_of(&pool, "asset:knobas-gitea").await.len(), 1);
+}
+
+/// A file may hang a new subtree under an asset **a person made by hand**, and
+/// an asset the reader deleted comes back when a file still names it.
+///
+/// Two failures with one shape: the plan asks whether an id is already in the
+/// estate, and both of these are ids the file's own `assets` list never
+/// mentions or no longer answers for.
+///
+/// * The **parent** case is what `REFERENCED_ASSETS` exists for. An import
+///   whose ordering only knew the file's own ids would leave such an asset
+///   waiting for a parent that is never placed and refuse a legal file as a
+///   cycle it does not have -- and the real estate file could not catch that,
+///   because every parent in it is internal.
+/// * The **deleted** case is `assets::delete`'s tombstone: it removes the
+///   `knobas.asset` row and leaves the `knobas.entity` one marked, so an
+///   import keeping the file's id meets its own tombstone. Reviving it is the
+///   answer, and the assertion that it *is* revived rather than merely
+///   re-inserted is `deleted_at` reading null -- a link drawn to it stops
+///   being marked withdrawn and the launcher finds it again.
+#[tokio::test]
+async fn a_file_reaches_an_asset_made_by_hand_and_brings_a_deleted_one_back() {
+    let pool = pool("assets-import-outside-ids").await;
+    let by_hand = make(&pool, None, "site", "made by hand", &[]).await;
+
+    let under_it = format!(
+        r#"{{"name":"a wing","assets":[
+             {{"id":"asset:wing","type":"vm","name":"wing","parent":"{}"}},
+             {{"id":"asset:wing-docker","type":"container_engine","name":"docker",
+               "parent":"asset:wing"}}],"routes":[]}}"#,
+        by_hand.id
+    );
+
+    let preview = assets::preview_import(&pool, &under_it)
+        .await
+        .expect("a subtree under an asset the estate already holds");
+    assert_eq!(
+        preview
+            .new
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        ["asset:wing", "asset:wing-docker"],
+        "the parent-first order reaches through an id the file does not describe"
+    );
+    assets::apply_import(&pool, &under_it)
+        .await
+        .expect("the subtree writes");
+    assert_eq!(
+        assets::get(&pool, "asset:wing")
+            .await
+            .expect("the new asset")
+            .held_by
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["made by hand"],
+        "the file hung its subtree under the asset a person made"
+    );
+
+    // Now the reader deletes a leaf the import created, and imports again.
+    assets::delete(&pool, "asset:wing-docker")
+        .await
+        .expect("a leaf deletes");
+    let tombstoned = rows(
+        &pool,
+        "select count(*) as n from knobas.entity
+          where id = 'asset:wing-docker' and deleted_at is not null",
+    )
+    .await;
+    assert_eq!(tombstoned, 1, "delete leaves the entity row marked");
+
+    let outcome = assets::apply_import(&pool, &under_it)
+        .await
+        .expect("a file that still names a deleted asset brings it back")
+        .value;
+    assert_eq!(
+        outcome.assets_created, 1,
+        "only the deleted one is new again"
+    );
+    assert_eq!(
+        rows(
+            &pool,
+            "select count(*) as n from knobas.entity
+              where id = 'asset:wing-docker' and deleted_at is null",
+        )
+        .await,
+        1,
+        "the entity row is revived, not left marked withdrawn beside a live asset"
+    );
+}
+
+/// **A file whose assets hold each other is refused before a row is written**,
+/// and named.
+///
+/// The reason this is a test and not a comment: the recursive CTEs behind
+/// `recompute_paths` and the health rollup carry no depth cap, and they hold
+/// today because `create` mints a fresh id and `move_to` walks the ancestors
+/// first. An import writing `parent_id` out of a file is the third writer, and
+/// a cycle reaching the table would make the path rewrite run forever -- a
+/// failure no gate can wait out and no timeout here would catch. So it is
+/// refused where it can still be a sentence.
+///
+/// Asserted on **both** commands, because a preview that ordered the file
+/// happily would put an *Apply* button over a file that cannot be written.
+#[tokio::test]
+async fn a_file_whose_assets_hold_each_other_is_refused_before_a_row_is_written() {
+    let pool = pool("assets-import-cycle").await;
+    let looping = r#"{"name":"a loop","assets":[
+        {"id":"asset:a","type":"site","name":"a","parent":"asset:b"},
+        {"id":"asset:b","type":"site","name":"b","parent":"asset:a"}],"routes":[]}"#;
+
+    let before = tables(&pool).await;
+    let refusals = [
+        assets::preview_import(&pool, looping)
+            .await
+            .expect_err("a cycle has no order"),
+        assets::apply_import(&pool, looping)
+            .await
+            .expect_err("a cycle has no order"),
+    ];
+    for refusal in &refusals {
+        assert_eq!(code(refusal), IpcErrorCode::Invalid);
+        assert!(
+            refusal.message.contains("asset:a") && refusal.message.contains("asset:b"),
+            "the refusal names the assets that hold each other: {}",
+            refusal.message
+        );
+    }
+    assert_eq!(tables(&pool).await, before, "the refusal wrote something");
+}
+
+/// Every other way a file can be wrong, refused **by name and before a
+/// write**.
+///
+/// One test rather than seven, because each is one line of the same rule: the
+/// file is read whole and refused whole. The real file is the control at the
+/// end -- without it, a preview that refused everything would pass all seven
+/// cases and fail nothing.
+#[tokio::test]
+async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
+    let pool = pool("assets-import-refusals").await;
+    let before = tables(&pool).await;
+
+    for (why, file, named) in [
+        (
+            "not JSON at all",
+            "{ this is not json",
+            "not an estate file",
+        ),
+        (
+            "a misspelled key",
+            r#"{"assets":[{"id":"asset:a","type":"site","name":"a","parnet":"asset:b"}]}"#,
+            "parnet",
+        ),
+        (
+            "a type nobody declares",
+            r#"{"assets":[{"id":"asset:a","type":"kubernetes","name":"a"}]}"#,
+            "kubernetes",
+        ),
+        (
+            "a parent that is nowhere",
+            r#"{"assets":[{"id":"asset:a","type":"site","name":"a","parent":"asset:gone"}]}"#,
+            "asset:gone",
+        ),
+        (
+            "a route landing on nothing",
+            r#"{"assets":[{"id":"asset:a","type":"site","name":"a"}],
+                "routes":[{"id":"route:r","asset":"asset:a","target":"asset:gone",
+                           "name":"r","url":"https://r/"}]}"#,
+            "asset:gone",
+        ),
+        (
+            "an id in the wrong namespace",
+            r#"{"assets":[{"id":"route:a","type":"site","name":"a"}]}"#,
+            "namespace",
+        ),
+        (
+            "one id on two entries",
+            r#"{"assets":[{"id":"asset:a","type":"site","name":"a"},
+                          {"id":"asset:a","type":"site","name":"b"}]}"#,
+            "two entries",
+        ),
+    ] {
+        let refusal = match assets::preview_import(&pool, file).await {
+            Ok(preview) => panic!("{why} was accepted: {preview:?}"),
+            Err(refusal) => refusal,
+        };
+        assert_eq!(code(&refusal), IpcErrorCode::Invalid, "{why}");
+        assert!(
+            refusal.message.contains(named),
+            "{why}: the refusal does not name {named:?}: {}",
+            refusal.message
+        );
+    }
+
+    assert!(
+        assets::preview_import(&pool, ESTATE_FILE).await.is_ok(),
+        "the real estate file is not one of the seven"
+    );
+    assert_eq!(tables(&pool).await, before, "a refused preview wrote a row");
+}
+
+// ---------------------------------------------------------------------------
 // The wiring: registered, named, and decoding.
 // ---------------------------------------------------------------------------
 
@@ -2529,6 +3202,8 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::edit_route,
             knobas_app::commands::assets::delete_route,
             knobas_app::commands::assets::source_assets,
+            knobas_app::commands::assets::preview_estate_import,
+            knobas_app::commands::assets::apply_estate_import,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -2670,6 +3345,14 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             serde_json::json!({ "routeId": "route:9a1b" }),
         ),
         ("source_assets", serde_json::json!({ "sourceId": "kuma" })),
+        (
+            "preview_estate_import",
+            serde_json::json!({ "file": ESTATE_FILE }),
+        ),
+        (
+            "apply_estate_import",
+            serde_json::json!({ "file": ESTATE_FILE }),
+        ),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
