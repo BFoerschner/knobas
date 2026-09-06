@@ -9,7 +9,7 @@
  * mirror is left out because it re-syncs (design §16.12, ratified).
  *
  * Called from the settings view's backup section (`#/settings`, issue #69,
- * landed in PR #102).
+ * landed in PR #102), which also drives the share export of M4.2 (#454).
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -33,6 +33,42 @@ export interface BackupRecord {
   file: string;
   bytes: number;
 }
+
+/**
+ * Which parts a share export carries — `backup::share::ShareParts`.
+ *
+ * A backup is everything knobas owns; a **share export** is the same archive
+ * restricted to the parts a colleague should get. Links, assets, contexts and
+ * sources are on by default; notes and time are off, because a colleague
+ * reading a link map has no use for somebody's notes or hours.
+ *
+ * `knobas.setting` is in no part, so a share export never carries the sharer's
+ * schedule, first-run state or preferences — see the Rust module's docs for
+ * why "the time settings" could not be one of them.
+ */
+export interface ShareParts {
+  /** Links, and the entity rows their ends name. */
+  links: boolean;
+  /** Assets and the routes they expose. */
+  assets: boolean;
+  contexts: boolean;
+  /** Off by default. */
+  notes: boolean;
+  /** The timer, its blocks, the worklogs and the observations. Off by default. */
+  time: boolean;
+  /** Source configurations. No secret is in one — credentials live in the OS keychain. */
+  sources: boolean;
+}
+
+/** The ratified defaults, so a caller can start from them and toggle. */
+export const shareDefaults: ShareParts = {
+  links: true,
+  assets: true,
+  contexts: true,
+  notes: false,
+  time: false,
+  sources: true,
+};
 
 /** One archive on disk — `backup::ArchiveFile`. */
 export interface ArchiveFile {
@@ -60,6 +96,18 @@ export function backupStatus(): Promise<BackupStatus> {
 /** *Export now* — take a backup whatever the schedule says. */
 export function backupNow(): Promise<BackupRecord> {
   return invoke<BackupRecord>("backup_now");
+}
+
+/**
+ * *Share export* — an archive restricted to `parts`.
+ *
+ * Written into the same directory as the backups, under
+ * `knobas-share-<stamp>.knobas`: retention never deletes it, it does not count
+ * as the last backup, and {@link restoreBackup} reads it like any other
+ * archive. Rejects with `invalid` when every part is switched off.
+ */
+export function shareExport(parts: ShareParts): Promise<BackupRecord> {
+  return invoke<BackupRecord>("share_export", { parts });
 }
 
 /** Change the nightly schedule; answers with the redrawn status. */

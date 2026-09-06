@@ -130,6 +130,17 @@ pub enum BackupError {
     )]
     TargetNotEmpty { table: String, rows: i64 },
 
+    /// A dump was asked for with no tables in it.
+    ///
+    /// The refusal is here rather than in the caller because of what
+    /// `pg_dump` does with the alternative: an argument list carrying neither
+    /// `--schema` nor a single `--table` dumps **the whole database**, mirror
+    /// and all. So a share export whose every part is switched off would
+    /// silently become the largest archive knobas can produce, which is the
+    /// one outcome nobody asking for it wants.
+    #[error("a share export with no parts in it would dump the whole database")]
+    EmptyScope,
+
     /// The target has never been migrated, so there is nothing to restore
     /// *into*.
     #[error(
@@ -169,6 +180,63 @@ pub struct TocEntry {
 /// [`BackupError::Tool`] when it refuses, [`BackupError::Io`] when the archive
 /// cannot be written or measured.
 pub async fn dump(connector: &Connector, archive: &Path) -> Result<u64, BackupError> {
+    // The ratified scope, expressed as a *schema* and never as a table list --
+    // so a table Links v1 or any later migration adds is in the backup without
+    // anyone remembering to add it.
+    dump_with(connector, archive, &[format!("--schema={OWNED_SCHEMA}")]).await
+}
+
+/// Write a compressed logical dump of *some* of the `knobas` schema.
+///
+/// The share export of spec #427 (M4.2): the same custom-format archive
+/// [`dump`] writes, restricted to `tables` -- unqualified names in
+/// [`OWNED_SCHEMA`] -- and carrying its own DDL for them, so the archive is
+/// still one `pg_restore` can read on its own.
+///
+/// Returns the archive's size in bytes.
+///
+/// # Why a table list here and a schema there
+///
+/// The two arguments answer different questions. A *backup* is "everything
+/// knobas owns", which is a property of the schema and must keep holding as
+/// migrations add tables. A *share export* is "these parts and no others",
+/// which is a property of a list somebody chose -- and a list that silently
+/// grew when a migration landed would be the leak this feature exists to
+/// prevent. So the backup is schema-scoped by design and this is not, and
+/// [`crate::backup`]'s callers own the mapping from a part to its tables.
+///
+/// # Errors
+///
+/// [`BackupError::EmptyScope`] when `tables` is empty -- see there, it is not a
+/// nicety -- [`BackupError::ToolMissing`] when the bundled `pg_dump` is not
+/// there, [`BackupError::Tool`] when it refuses, [`BackupError::Io`] when the
+/// archive cannot be written or measured.
+pub async fn dump_tables(
+    connector: &Connector,
+    archive: &Path,
+    tables: &[&str],
+) -> Result<u64, BackupError> {
+    if tables.is_empty() {
+        return Err(BackupError::EmptyScope);
+    }
+    // `--table` takes a *pattern*, and an unquoted one is matched with the
+    // wildcards of `psql`'s `\d`. Every name here is a crate-internal
+    // constant, but quoting them costs nothing and keeps a future table whose
+    // name contains a `_` -- which is a single-character wildcard -- from
+    // pulling a sibling into a share export nobody meant to include.
+    let args: Vec<String> = tables
+        .iter()
+        .map(|table| format!("--table=\"{OWNED_SCHEMA}\".\"{table}\""))
+        .collect();
+    dump_with(connector, archive, &args).await
+}
+
+/// The dump both entry points make, differing only in what they scope it to.
+async fn dump_with(
+    connector: &Connector,
+    archive: &Path,
+    scope: &[String],
+) -> Result<u64, BackupError> {
     if let Some(parent) = archive.parent() {
         std::fs::create_dir_all(parent).map_err(|source| BackupError::Io {
             path: parent.to_path_buf(),
@@ -176,22 +244,16 @@ pub async fn dump(connector: &Connector, archive: &Path) -> Result<u64, BackupEr
         })?;
     }
 
-    run_tool(
-        connector,
-        PG_DUMP,
-        &[
-            // A compressed logical dump (§14). `custom` compresses by default
-            // and is the only format `pg_restore` can filter.
-            OsStr::new("--format=custom"),
-            // The ratified scope, expressed as a *schema* and never as a table
-            // list -- so a table Links v1 or any later migration adds is in the
-            // backup without anyone remembering to add it.
-            OsStr::new(&format!("--schema={OWNED_SCHEMA}")),
-            OsStr::new("--file"),
-            archive.as_os_str(),
-        ],
-    )
-    .await?;
+    let mut args: Vec<&OsStr> = vec![
+        // A compressed logical dump (§14). `custom` compresses by default
+        // and is the only format `pg_restore` can filter.
+        OsStr::new("--format=custom"),
+    ];
+    args.extend(scope.iter().map(|arg| OsStr::new(arg.as_str())));
+    args.push(OsStr::new("--file"));
+    args.push(archive.as_os_str());
+
+    run_tool(connector, PG_DUMP, &args).await?;
 
     let bytes = std::fs::metadata(archive)
         .map_err(|source| BackupError::Io {
@@ -225,6 +287,48 @@ pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupErr
         .lines()
         .filter_map(parse_toc_line)
         .collect())
+}
+
+/// The SQL an archive would replay -- its DDL and every row it holds.
+///
+/// What `pg_restore --file=-` prints: the script a person with nothing but
+/// PostgreSQL's own tools would get. (`--file` is not optional -- a
+/// `pg_restore` given neither a database nor a file refuses rather than
+/// defaulting to stdout, the same refusal [`restore`] relies on.) Two things need it. A user restoring a knobas archive by hand is the
+/// promise `--format=custom` was chosen for; and it is the only seam at which
+/// "**nothing secret is in the archive**" is a claim about the *file* rather
+/// than about the argument list that produced it (#454). A `TABLE DATA` entry
+/// in the table of contents says a table's rows are in there and says nothing
+/// about what is in them.
+///
+/// The whole script comes back as a `String`, so this is for reading an
+/// archive, not for streaming a large one anywhere.
+///
+/// # Errors
+///
+/// [`BackupError::ToolMissing`] or [`BackupError::Tool`] if `pg_restore` will
+/// not read the file.
+pub async fn archive_sql(archive: &Path) -> Result<String, BackupError> {
+    // Neither a server nor a password: the script is rendered from the file.
+    let mut command = tool_command(PG_RESTORE)?;
+    command.arg("--file=-").arg(archive);
+    let output = run(PG_RESTORE, &mut command).await?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Whether `archive` carries the rows of `table` in [`OWNED_SCHEMA`].
+///
+/// A **data** entry, not a declaration: a share export's DDL and its contents
+/// are the same list today, but "the restore will write this table" is the
+/// question being asked, and `TABLE` without `TABLE DATA` answers it *no*.
+///
+/// # Errors
+///
+/// Whatever [`archive_contents`] refuses with.
+async fn carries(archive: &Path, table: &str) -> Result<bool, BackupError> {
+    Ok(archive_contents(archive).await?.iter().any(|entry| {
+        entry.kind == "TABLE DATA" && entry.schema == OWNED_SCHEMA && entry.name == table
+    }))
 }
 
 /// One `pg_restore --list` line, or `None` for a comment or a header.
@@ -294,6 +398,16 @@ fn is_description_word(word: &str) -> bool {
 /// "Holds rows" means *content*; [`BOOKKEEPING_TABLE`] is excluded and
 /// replaced by the archive's own, for the reason recorded there.
 ///
+/// # A partial archive
+///
+/// An archive missing tables restores as readily as a whole one (#454): the
+/// share export of spec #427 is the same custom-format dump restricted to the
+/// parts somebody chose, and `pg_restore` writes what the archive holds. The
+/// occupancy refusal is unchanged and applies to a partial archive exactly as
+/// it does to a full one -- a share export is not a merge either. The one
+/// thing that has to notice the difference is the `knobas.setting` clear
+/// above, which is now conditional on the archive carrying that table.
+///
 /// # Foreign keys
 ///
 /// `--disable-triggers`. A data-only restore loads tables in the archive's
@@ -316,19 +430,28 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
         Occupancy::Empty => {}
     }
     // Every other table in the schema has just been proved empty, so the only
-    // rows here are the ones this knobas wrote about itself. The archive
+    // rows here are the ones this knobas wrote about itself. A full archive
     // carries its own, keyed the same way, and a data-only load would collide
     // on the primary key -- `--disable-triggers` holds off *triggers*, not a
     // unique index. The archive's settings are the user's; these are a default
     // this machine invented on its way to asking for them back.
-    // Both halves of the name are crate constants; nothing from a caller
-    // reaches this string, which is what `AssertSqlSafe` is asserting (the
-    // same use `test_util::scratch_database` makes of it).
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "delete from {OWNED_SCHEMA}.{BOOKKEEPING_TABLE}"
-    )))
-    .execute(&mut conn)
-    .await?;
+    //
+    // **Only when the archive actually carries them** (#454). A share export
+    // is restricted to the parts somebody chose and never includes
+    // `knobas.setting`, so clearing the table unconditionally would delete
+    // this machine's own schedule, first-run flag and retention stamp and put
+    // nothing back in their place -- a restore that quietly resets the
+    // settings of the knobas doing the restoring.
+    if carries(archive, BOOKKEEPING_TABLE).await? {
+        // Both halves of the name are crate constants; nothing from a caller
+        // reaches this string, which is what `AssertSqlSafe` is asserting (the
+        // same use `test_util::scratch_database` makes of it).
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "delete from {OWNED_SCHEMA}.{BOOKKEEPING_TABLE}"
+        )))
+        .execute(&mut conn)
+        .await?;
+    }
     let _ = conn.close().await;
 
     // Explicit, although `PGDATABASE` is set: `pg_restore` treats "no

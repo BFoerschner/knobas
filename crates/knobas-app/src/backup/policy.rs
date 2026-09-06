@@ -165,8 +165,48 @@ pub fn archive_name<Tz: TimeZone>(local: &DateTime<Tz>) -> String
 where
     Tz::Offset: std::fmt::Display,
 {
+    stamped_name("", local)
+}
+
+/// What marks a share export's file name.
+///
+/// A share export is one of this profile's archives -- listed, and restorable
+/// -- and it is **not** a backup: it was made on purpose, to be handed to
+/// somebody, and retention deleting it a week later is a file the user
+/// intended to keep and did not. So the difference is in the name, where a
+/// person reading their backup directory can see it too.
+const SHARE_INFIX: &str = "share-";
+
+/// The file name for a share export taken at `local` (#454).
+///
+/// `knobas-share-<stamp>.knobas`: our prefix and our extension, so
+/// [`is_archive_name`] accepts it and [`restore`](crate::backup::restore) will
+/// read it, with the infix that keeps [`expired`] away from it.
+pub fn share_name<Tz: TimeZone>(local: &DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    stamped_name(SHARE_INFIX, local)
+}
+
+/// Whether a file name is a *nightly backup* of ours, as distinct from any
+/// archive of ours.
+///
+/// The narrower of the two questions, and the one retention asks: everything
+/// [`expired`] returns is deleted, so a name it cannot recognise as a backup
+/// must be left alone rather than aged out. A share export is exactly such a
+/// name.
+#[must_use]
+pub fn is_backup_name(name: &str) -> bool {
+    is_archive_name(name) && !name.starts_with(&format!("knobas-{SHARE_INFIX}"))
+}
+
+fn stamped_name<Tz: TimeZone>(infix: &str, local: &DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
     format!(
-        "knobas-{:04}{:02}{:02}-{:02}{:02}{:02}.{}",
+        "knobas-{infix}{:04}{:02}{:02}-{:02}{:02}{:02}.{}",
         local.year(),
         local.month(),
         local.day(),
@@ -201,8 +241,13 @@ pub fn is_archive_name(name: &str) -> bool {
 ///
 /// Takes names rather than paths, and returns names, so the retention rule is
 /// decided without a directory in sight. The caller does the deleting.
+///
+/// **Backups only** (#454): a share export was made deliberately and is never
+/// aged out, however many of them there are.
 pub fn expired(names: &[String], keep: u32) -> Vec<String> {
-    let mut ours: Vec<&String> = names.iter().filter(|n| is_archive_name(n)).collect();
+    // `is_backup_name`, not `is_archive_name`: a share export is one of ours
+    // and is not a backup, and nothing here may delete it.
+    let mut ours: Vec<&String> = names.iter().filter(|n| is_backup_name(n)).collect();
     // The timestamp is fixed-width and zero-padded, so byte order is time
     // order. Reversed: newest first, and everything past `keep` goes.
     ours.sort_unstable();
@@ -373,6 +418,54 @@ mod tests {
         assert!(
             is_archive_name("knobas-20260828-030000.knobas"),
             "and the ordinary name is still one"
+        );
+    }
+
+    /// A share export wears our prefix and our extension, is therefore
+    /// restorable, and is not a backup.
+    #[test]
+    fn a_share_export_is_an_archive_of_ours_and_not_a_backup() {
+        let name = share_name(&zone().with_ymd_and_hms(2026, 9, 6, 14, 30, 15).unwrap());
+        assert_eq!(name, "knobas-share-20260906-143015.knobas");
+        assert!(
+            is_archive_name(&name),
+            "a share export has to be one `restore` will read"
+        );
+        assert!(
+            !is_backup_name(&name),
+            "a share export is not a backup, or retention would delete it"
+        );
+
+        let backup = archive_name(&zone().with_ymd_and_hms(2026, 9, 6, 14, 30, 15).unwrap());
+        assert_eq!(backup, "knobas-20260906-143015.knobas");
+        assert!(is_backup_name(&backup));
+        assert_ne!(backup, name, "the two must not collide on the same second");
+    }
+
+    /// **Retention never deletes a share export.**
+    ///
+    /// The failure this is about is quiet and a week late: a person takes a
+    /// share export to send to a colleague, seven nightly backups happen, and
+    /// the file they meant to keep is gone. A `keep` of one and three share
+    /// exports, so nothing about the number of backups can carry the
+    /// assertion.
+    #[test]
+    fn retention_never_ages_out_a_share_export() {
+        let names: Vec<String> = [
+            "knobas-20260901-030000.knobas",
+            "knobas-20260902-030000.knobas",
+            "knobas-share-20260901-090000.knobas",
+            "knobas-share-20260902-090000.knobas",
+            "knobas-share-20260903-090000.knobas",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+
+        assert_eq!(
+            expired(&names, 1),
+            vec!["knobas-20260901-030000.knobas".to_owned()],
+            "only the older *backup* ages out"
         );
     }
 

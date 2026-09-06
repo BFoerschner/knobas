@@ -20,7 +20,7 @@
 use std::sync::Arc;
 
 use crate::IpcError;
-use crate::backup::{self, BackupRecord, BackupSchedule, BackupState, BackupStatus};
+use crate::backup::{self, BackupRecord, BackupSchedule, BackupState, BackupStatus, ShareParts};
 
 /// The state, cloned out of the managed `Arc` so no Tauri guard is held across
 /// an await.
@@ -55,6 +55,28 @@ pub async fn backup_now<R: tauri::Runtime>(
 ) -> Result<BackupRecord, IpcError> {
     let service = service(&app)?;
     Ok(backup::export_now(&service).await?)
+}
+
+/// *Share export*: an archive restricted to the parts a colleague should get.
+///
+/// Spec #427 (M4.2). The same custom-format archive `backup_now` writes and
+/// `restore_backup` reads, holding only the chosen parts -- so it restores on
+/// a clean machine with the existing restore and opens in a standard tool.
+/// It is not a backup: it does not reset the nightly schedule's clock and
+/// retention never deletes it.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) when every part is switched off,
+/// [`Internal`](crate::IpcErrorCode::Internal) if `pg_dump` fails.
+#[tauri::command]
+pub async fn share_export<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    parts: ShareParts,
+) -> Result<BackupRecord, IpcError> {
+    let service = service(&app)?;
+    Ok(backup::share_export(&service, parts).await?)
 }
 
 /// Change the nightly schedule. Answers with the whole status, so the dialog
@@ -157,6 +179,40 @@ mod tests {
         );
     }
 
+    /// The share export's toggles, both directions.
+    ///
+    /// Serialised, so a field added on the Rust side and not in the mirror
+    /// fails here rather than at run time; and decoded from what the dialog
+    /// sends, which a serialise-only check cannot see.
+    #[test]
+    fn the_share_parts_serialise_the_keys_the_mirror_declares() {
+        let json = serde_json::to_value(ShareParts::default()).unwrap();
+        assert_mirrored(
+            &json,
+            &["assets", "contexts", "links", "notes", "sources", "time"],
+        );
+        assert_eq!(json["links"], true, "the ratified default is links on");
+        assert_eq!(json["notes"], false, "the ratified default is notes off");
+        assert_eq!(json["time"], false, "the ratified default is time off");
+
+        let sent = serde_json::json!({
+            "links": true, "assets": false, "contexts": false,
+            "notes": true, "time": true, "sources": false
+        });
+        let decoded: ShareParts = serde_json::from_value(sent).unwrap();
+        assert_eq!(
+            decoded,
+            ShareParts {
+                links: true,
+                assets: false,
+                contexts: false,
+                notes: true,
+                time: true,
+                sources: false,
+            }
+        );
+    }
+
     #[test]
     fn the_status_and_the_record_serialise_the_keys_the_mirror_declares() {
         let record = BackupRecord {
@@ -185,7 +241,7 @@ mod tests {
         );
     }
 
-    /// The four commands, named in the mirror's `invoke` calls.
+    /// The five commands, named in the mirror's `invoke` calls.
     ///
     /// `tests/ipc.rs` proves they are registered and dispatch; this proves the
     /// frontend calls them by the names they are registered under. A typo on
@@ -195,6 +251,7 @@ mod tests {
         for command in [
             "backup_status",
             "backup_now",
+            "share_export",
             "set_backup_schedule",
             "restore_backup",
         ] {

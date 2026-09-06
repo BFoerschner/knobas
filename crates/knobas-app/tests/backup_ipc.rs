@@ -32,6 +32,19 @@ const LOCAL_ORIGIN: &str = "tauri://localhost";
 /// test that let it drop early would be writing into a path that no longer
 /// exists.
 async fn service(label: &str) -> (Arc<BackupState>, tempfile::TempDir) {
+    service_with(label, Arc::new(knobas_secrets::MemoryStore::new())).await
+}
+
+/// The same, over a keychain the caller has stocked.
+///
+/// A restore asks the store whether this machine holds a credential for each
+/// source the archive brought (`backup::restore`), so the store is the fixture
+/// for both directions of that question -- an empty one is the fresh machine,
+/// and one holding the secret is the person restoring their own backup.
+async fn service_with(
+    label: &str,
+    secrets: Arc<dyn knobas_secrets::SecretStore>,
+) -> (Arc<BackupState>, tempfile::TempDir) {
     let connector = knobas_db::test_util::scratch_database(label).await;
     let pool = connector
         .pool(2)
@@ -39,7 +52,12 @@ async fn service(label: &str) -> (Arc<BackupState>, tempfile::TempDir) {
         .expect("a pool on the scratch database");
     let dir = tempfile::tempdir().expect("a scratch backup directory");
     (
-        Arc::new(BackupState::new(pool, connector, dir.path().to_path_buf())),
+        Arc::new(BackupState::new(
+            pool,
+            connector,
+            dir.path().to_path_buf(),
+            secrets,
+        )),
         dir,
     )
 }
@@ -468,6 +486,688 @@ async fn a_fresh_machine_restores_after_taking_its_own_first_backup() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The share export (#454): an archive restricted to parts, and a restore that
+// accepts one.
+// ---------------------------------------------------------------------------
+
+/// Everything a share export could carry, seeded into one database.
+///
+/// Every part's tables and three that are in **no** part -- the activity
+/// stream, the write queue and the mirror -- because "and nothing else" is
+/// only a claim if the things that must not travel are actually there to be
+/// carried.
+struct Estate {
+    ticket: String,
+    pr: String,
+    asset: String,
+    route: String,
+    context: String,
+    note: String,
+    source: String,
+}
+
+async fn seed_estate(pool: &sqlx::PgPool, tag: &str) -> Estate {
+    let t = format!("{tag}{}", uuid::Uuid::new_v4().simple());
+    let ticket = format!("jira:PAY-{t}");
+    let pr = format!("gitea:pr-{t}");
+    let asset = format!("asset:{t}");
+    let route = format!("route:{t}");
+    let context = format!("ctx:{t}");
+    let note = format!("note:{t}");
+    let source = format!("src-{t}");
+
+    for (id, kind, title) in [
+        (&ticket, "ticket", "Retry failed payouts"),
+        (&pr, "pr", "Backoff"),
+        (&asset, "asset", "db-01"),
+        (&route, "route", "postgres"),
+        (&note, "note", "Runbook"),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+            .bind(id)
+            .bind(kind)
+            .bind(title)
+            .execute(pool)
+            .await
+            .expect("seed an entity");
+    }
+
+    // links
+    sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+         values ($1, $2, 'implements', 'manual', 'user')",
+    )
+    .bind(&ticket)
+    .bind(&pr)
+    .execute(pool)
+    .await
+    .expect("seed a link");
+
+    // assets: an asset and the route it exposes
+    sqlx::query(
+        "insert into knobas.asset (id, type_id, name, environment) values ($1, 'database', 'db-01', 'prod')",
+    )
+    .bind(&asset)
+    .execute(pool)
+    .await
+    .expect("seed an asset");
+    sqlx::query(
+        "insert into knobas.route (id, asset_id, name, url)
+         values ($1, $2, 'postgres', 'postgres://db-01.internal:5432')",
+    )
+    .bind(&route)
+    .bind(&asset)
+    .execute(pool)
+    .await
+    .expect("seed a route");
+
+    // contexts
+    sqlx::query("insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','Payouts',$2)")
+        .bind(&context)
+        .bind(&ticket)
+        .execute(pool)
+        .await
+        .expect("seed a context");
+
+    // notes
+    sqlx::query("insert into knobas.note (id, title, body_md) values ($1, 'Runbook', $2)")
+        .bind(&note)
+        .bind("How to drain the payout queue.")
+        .execute(pool)
+        .await
+        .expect("seed a note");
+
+    // sources
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, auth_state)
+         values ($1, 'jira', 'Jira', 'https://jira.example', 'pat', 'ok')",
+    )
+    .bind(&source)
+    .execute(pool)
+    .await
+    .expect("seed a source configuration");
+
+    // time: a running timer, a block, the worklog it became, an observation
+    sqlx::query("insert into knobas.timer (entity_id, label, started_at) values ($1, null, now())")
+        .bind(&ticket)
+        .execute(pool)
+        .await
+        .expect("seed a timer");
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values (now() - interval '2 hours', now() - interval '1 hour', $1, 'manual')",
+    )
+    .bind(&ticket)
+    .execute(pool)
+    .await
+    .expect("seed a block");
+    sqlx::query(
+        "insert into knobas.worklog (entity_id, started_at, seconds, comment, block_ids)
+         select $1, now() - interval '2 hours', 3600, 'drained the payout queue', array[b.id]
+           from knobas.block b
+          where b.entity_id = $1",
+    )
+    .bind(&ticket)
+    .execute(pool)
+    .await
+    .expect("seed a worklog");
+    sqlx::query("insert into knobas.heartbeat (at, entity_id) values (now(), $1)")
+        .bind(&ticket)
+        .execute(pool)
+        .await
+        .expect("seed an observation");
+
+    // ...and three tables no part names.
+    sqlx::query(
+        "insert into knobas.activity (actor, verb, entity_id, detail)
+         values ('user', 'linked', $1, '{}'::jsonb)",
+    )
+    .bind(&ticket)
+    .execute(pool)
+    .await
+    .expect("seed an activity line");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload)
+         values ($1, 'jira', 'ticket', 'Retry failed payouts', '{}'::jsonb)",
+    )
+    .bind(&ticket)
+    .execute(pool)
+    .await
+    .expect("seed a mirror row");
+
+    Estate {
+        ticket,
+        pr,
+        asset,
+        route,
+        context,
+        note,
+        source,
+    }
+}
+
+/// How many rows a table holds -- the reading every assertion below is made of.
+async fn rows(pool: &sqlx::PgPool, table: &str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select count(*) from knobas.{table}"
+    )))
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|error| panic!("count knobas.{table}: {error}"))
+}
+
+/// Every `knobas` table the archive holds *rows* for, read off the file.
+async fn data_tables(archive: &std::path::Path) -> Vec<String> {
+    let mut tables: Vec<String> = knobas_db::backup::archive_contents(archive)
+        .await
+        .expect("read the archive's table of contents")
+        .into_iter()
+        .filter(|entry| entry.kind == "TABLE DATA" && entry.schema == "knobas")
+        .map(|entry| entry.name)
+        .collect();
+    tables.sort();
+    tables
+}
+
+/// Move `file` from one profile's backup directory into another's, which is
+/// what handing somebody an archive is.
+fn hand_over(from: &tempfile::TempDir, to: &tempfile::TempDir, file: &str) {
+    std::fs::copy(from.path().join(file), to.path().join(file)).expect("hand the archive over");
+}
+
+/// **The whole promise, end to end**: a share export taken with the ratified
+/// defaults, restored into an empty knobas, is the link map and the estate and
+/// none of the hours.
+///
+/// The restore is what makes it mean something. A table of contents says a
+/// table's rows are in the archive; only a database that has them says they
+/// arrived, and only a database that *has been restored into* can say a note
+/// did not.
+#[tokio::test]
+async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
+    let (sharer, sharer_dir) = service("sharesource").await;
+    let estate = seed_estate(&sharer.pool, "share").await;
+
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export with the defaults");
+    assert!(
+        record.file.starts_with("knobas-share-") && record.file.ends_with(".knobas"),
+        "a share export is named apart from a backup: {}",
+        record.file
+    );
+    assert!(record.bytes > 0, "the archive is empty");
+
+    // It is not a backup: nothing about the nightly schedule moved.
+    let status = backup::status(&sharer).await.expect("status");
+    assert_eq!(
+        status.last, None,
+        "a share export must not count as the last backup"
+    );
+
+    // The colleague's machine: migrated, empty, its own first backup taken.
+    let (colleague, colleague_dir) = service("sharetarget").await;
+    backup::export_if_due(&colleague)
+        .await
+        .expect("the colleague's first nightly run")
+        .expect("a machine that has never backed up is due");
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("a share export restores like any other archive");
+
+    let there = &colleague.pool;
+    for (table, expected) in [
+        ("link", 1),
+        ("asset", 1),
+        ("route", 1),
+        ("context", 1),
+        ("source_config", 1),
+    ] {
+        assert_eq!(
+            rows(there, table).await,
+            expected,
+            "knobas.{table} did not come across"
+        );
+    }
+    for absent in ["note", "block", "worklog", "timer", "heartbeat", "activity"] {
+        assert_eq!(
+            rows(there, absent).await,
+            0,
+            "knobas.{absent} is in a share export taken with the defaults"
+        );
+    }
+
+    // The addresses came with the things that have them, and the ends of the
+    // link resolve on the far machine.
+    let addressed: Vec<String> = sqlx::query_scalar("select id from knobas.entity order by id")
+        .fetch_all(there)
+        .await
+        .expect("the entity rows");
+    for id in [&estate.ticket, &estate.pr, &estate.asset, &estate.route] {
+        assert!(addressed.contains(id), "{id} has no entity row after the restore");
+    }
+    let anchored: Option<String> =
+        sqlx::query_scalar("select anchor_id from knobas.context where id = $1")
+            .bind(&estate.context)
+            .fetch_one(there)
+            .await
+            .expect("the restored context");
+    assert_eq!(
+        anchored.as_ref(),
+        Some(&estate.ticket),
+        "the context came across still anchored to the ticket it was about"
+    );
+    let ends: (String, String) = sqlx::query_as("select from_id, to_id from knobas.link")
+        .fetch_one(there)
+        .await
+        .expect("the restored link");
+    assert_eq!(ends, (estate.ticket.clone(), estate.pr.clone()));
+    assert_eq!(
+        rows(there, "note").await,
+        0,
+        "the note's body stayed on the machine that wrote it"
+    );
+    // ...and its *address* did not, which is the recorded consequence of the
+    // address book travelling whole: `pg_dump` restricts an archive by table
+    // and never by row, so an entity row rides across for every entity there
+    // is, note titles included. What a notes-off export withholds is the
+    // note's contents, not the fact that a note by that title exists. See
+    // `backup::share`'s module docs.
+    assert!(
+        addressed.contains(&estate.note),
+        "the entity table travels whole; this assertion is the record of that"
+    );
+}
+
+/// **Each toggle alone brings exactly its tables and nothing else**, read off
+/// each archive's own table of contents.
+///
+/// Six dumps over one populated database, so every table exists and has rows
+/// in all six: an archive missing a table is missing it because the argument
+/// list said so, and not because there was nothing to dump.
+#[tokio::test]
+async fn each_part_alone_brings_exactly_its_own_tables() {
+    let (sharer, dir) = service("sharetoggles").await;
+    seed_estate(&sharer.pool, "toggle").await;
+
+    let none = backup::ShareParts::none();
+    for (label, parts, expected) in [
+        (
+            "links",
+            backup::ShareParts { links: true, ..none },
+            vec!["entity", "link"],
+        ),
+        (
+            "assets",
+            backup::ShareParts { assets: true, ..none },
+            vec!["asset", "entity", "route"],
+        ),
+        (
+            "contexts",
+            backup::ShareParts { contexts: true, ..none },
+            vec!["context", "entity"],
+        ),
+        (
+            "notes",
+            backup::ShareParts { notes: true, ..none },
+            vec!["entity", "note"],
+        ),
+        (
+            "time",
+            backup::ShareParts { time: true, ..none },
+            vec!["block", "heartbeat", "timer", "worklog"],
+        ),
+        (
+            "sources",
+            backup::ShareParts { sources: true, ..none },
+            vec!["source_config"],
+        ),
+    ] {
+        let record = backup::share_export(&sharer, parts)
+            .await
+            .unwrap_or_else(|error| panic!("a share export of {label} alone: {error}"));
+        let held = data_tables(&dir.path().join(&record.file)).await;
+        assert_eq!(held, expected, "the {label} part");
+        assert!(
+            !held.contains(&"setting".to_owned()),
+            "the {label} part carries knobas.setting, which is every feature's bookkeeping"
+        );
+    }
+}
+
+/// The other direction of the defaults: the parts that are **off** by default
+/// arrive when they are switched on, and their rows are readable afterwards.
+///
+/// Without this, "notes and time are excluded" and "notes and time are not
+/// implemented" are the same passing test.
+#[tokio::test]
+async fn switching_notes_and_time_on_brings_the_notes_and_the_hours() {
+    let (sharer, sharer_dir) = service("sharepersonal").await;
+    let estate = seed_estate(&sharer.pool, "personal").await;
+
+    let record = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            notes: true,
+            time: true,
+            ..backup::ShareParts::default()
+        },
+    )
+    .await
+    .expect("a share export with notes and time on");
+
+    let (colleague, colleague_dir) = service("sharepersonaltarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("restore");
+
+    let there = &colleague.pool;
+    for (table, expected) in [
+        ("note", 1),
+        ("timer", 1),
+        ("block", 1),
+        ("worklog", 1),
+        ("heartbeat", 1),
+    ] {
+        assert_eq!(
+            rows(there, table).await,
+            expected,
+            "knobas.{table} was switched on and did not arrive"
+        );
+    }
+    let body: String = sqlx::query_scalar("select body_md from knobas.note where id = $1")
+        .bind(&estate.note)
+        .fetch_one(there)
+        .await
+        .expect("the restored note");
+    assert_eq!(body, "How to drain the payout queue.");
+    assert_eq!(
+        rows(there, "activity").await,
+        0,
+        "the activity stream is in no part, whatever is switched on"
+    );
+}
+
+/// **A share export carries no secret, and a source restored from one says so.**
+///
+/// Three readings, because the claim has three parts. The archive's table list
+/// names one table for the sources part. The archive's own *contents* -- the
+/// SQL `pg_restore` would replay, which is the only place a value can be
+/// looked for -- hold neither the credential nor the shape knobas stores one
+/// in. And the source lands on the far machine as `missing_secret`, which is
+/// the honest verdict there: the keychain is the colleague's and has nothing
+/// under that id.
+#[tokio::test]
+async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
+    const PAT: &str = "knobas-test-pat-2f6c9a4e1b";
+
+    let sharer_secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    let (sharer, sharer_dir) = service_with("sharesecret", Arc::clone(&sharer_secrets)).await;
+    let estate = seed_estate(&sharer.pool, "secret").await;
+    knobas_secrets::spawn::put(
+        &sharer_secrets,
+        &estate.source,
+        knobas_secrets::Secret {
+            kind: knobas_source::AuthMethod::Pat,
+            value: PAT.to_owned(),
+        },
+    )
+    .await
+    .expect("the sharer's own credential");
+
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+    let archive = sharer_dir.path().join(&record.file);
+
+    // 1. The table list.
+    assert!(
+        data_tables(&archive).await.contains(&"source_config".to_owned()),
+        "the sources part is on by default"
+    );
+
+    // 2. The contents. `pg_restore` with no destination prints the script it
+    //    would replay: the DDL and every row. A `TABLE DATA` entry says a
+    //    table's rows are in the file and says nothing about what is in them,
+    //    so this is the reading that can see a secret.
+    let sql = knobas_db::backup::archive_sql(&archive)
+        .await
+        .expect("render the archive");
+    assert!(
+        sql.contains(&estate.source),
+        "this scan proves nothing unless the source is in the script it read"
+    );
+    assert!(!sql.contains(PAT), "the credential itself is in the archive");
+    for envelope in ["\"kind\":\"pat\"", "\"secret\"", "\"v\":1"] {
+        assert!(
+            !sql.contains(envelope),
+            "the keychain envelope's {envelope} is in the archive"
+        );
+    }
+
+    // 3. The colleague's machine, whose keychain holds nothing.
+    let (colleague, colleague_dir) = service("sharesecrettarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("restore");
+
+    let (state, detail): (String, Option<String>) =
+        sqlx::query_as("select auth_state, auth_detail from knobas.source_config where id = $1")
+            .bind(&estate.source)
+            .fetch_one(&colleague.pool)
+            .await
+            .expect("the restored source configuration");
+    assert_eq!(
+        state, "missing_secret",
+        "the sharer's machine said `ok`; this one has no credential at all"
+    );
+    assert!(
+        detail.is_some_and(|line| line.contains("archive")),
+        "the sources view has to be able to say why"
+    );
+}
+
+/// ...and a machine that **does** hold the credential keeps the health it
+/// restored.
+///
+/// The other direction, and the one that stops the rule above from being
+/// "always say missing_secret": a person restoring their own backup onto the
+/// machine that took it has every credential still, and marking those sources
+/// missing would drop them out of `trigger_all` until somebody re-typed a
+/// password that was never lost.
+#[tokio::test]
+async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_health_alone() {
+    let (sharer, sharer_dir) = service("keepsecretsource").await;
+    let estate = seed_estate(&sharer.pool, "keep").await;
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+
+    let secrets: Arc<dyn knobas_secrets::SecretStore> = Arc::new(knobas_secrets::MemoryStore::new());
+    knobas_secrets::spawn::put(
+        &secrets,
+        &estate.source,
+        knobas_secrets::Secret {
+            kind: knobas_source::AuthMethod::Pat,
+            value: "still-here".to_owned(),
+        },
+    )
+    .await
+    .expect("the credential this machine already holds");
+    let (same_machine, target_dir) = service_with("keepsecrettarget", secrets).await;
+    hand_over(&sharer_dir, &target_dir, &record.file);
+
+    backup::restore(&same_machine, &record.file)
+        .await
+        .expect("restore");
+
+    let state: String = sqlx::query_scalar("select auth_state from knobas.source_config where id = $1")
+        .bind(&estate.source)
+        .fetch_one(&same_machine.pool)
+        .await
+        .expect("the restored source configuration");
+    assert_eq!(
+        state, "ok",
+        "the keychain holds this source's secret, so nothing about it is missing"
+    );
+}
+
+/// **A restore never resets the settings of the knobas doing the restoring.**
+///
+/// A share export carries no `knobas.setting`, and the restore used to clear
+/// that table unconditionally before loading the archive's own -- which for a
+/// partial archive is a delete with nothing to put back. The colleague's
+/// nightly schedule, first-run flag and retention stamp are theirs.
+#[tokio::test]
+async fn restoring_a_partial_archive_leaves_the_targets_own_settings_alone() {
+    let (sharer, sharer_dir) = service("settingsource").await;
+    seed_estate(&sharer.pool, "settings").await;
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+
+    let (colleague, colleague_dir) = service("settingtarget").await;
+    backup::save_schedule(
+        &colleague.pool,
+        BackupSchedule {
+            enabled: true,
+            hour: 22,
+            minute: 15,
+            keep: 3,
+        },
+    )
+    .await
+    .expect("the colleague's own schedule");
+    let before = rows(&colleague.pool, "setting").await;
+    assert!(before > 0, "this test is about settings that are there to lose");
+
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("restore");
+
+    assert_eq!(
+        backup::status(&colleague).await.expect("status").schedule,
+        BackupSchedule {
+            enabled: true,
+            hour: 22,
+            minute: 15,
+            keep: 3
+        },
+        "the restore reset the schedule of the machine it restored onto"
+    );
+    assert_eq!(rows(&colleague.pool, "setting").await, before);
+}
+
+/// A partial archive is refused over a populated database exactly as a whole
+/// one is: a share export is not a merge either.
+#[tokio::test]
+async fn a_share_export_restored_over_a_populated_database_is_a_conflict() {
+    let (sharer, sharer_dir) = service("shareconflictsource").await;
+    seed_estate(&sharer.pool, "conflict").await;
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+
+    let (colleague, colleague_dir) = service("shareconflicttarget").await;
+    seed_entity(&colleague.pool, "shareconflict").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+
+    let error = backup::restore(&colleague, &record.file)
+        .await
+        .expect_err("a populated knobas must not be overwritten by a share export either");
+    assert_eq!(
+        knobas_app::IpcError::from(error).code,
+        knobas_app::IpcErrorCode::Conflict
+    );
+}
+
+/// A share export with every part switched off is refused, and nothing is
+/// written.
+///
+/// `pg_dump` given neither a schema nor a table dumps the **whole database**,
+/// mirror included -- so the empty selection is the one that must never reach
+/// it, and this is the assertion that keeps the guard in front of it.
+#[tokio::test]
+async fn a_share_export_with_no_parts_is_refused_and_writes_nothing() {
+    let (sharer, dir) = service("shareempty").await;
+
+    let error = backup::share_export(&sharer, backup::ShareParts::none())
+        .await
+        .expect_err("nothing selected is nothing to export");
+    assert!(
+        matches!(error, backup::ExportError::NoParts),
+        "{error:?} -- an empty selection must be refused by name"
+    );
+    assert_eq!(
+        knobas_app::IpcError::from(error).code,
+        knobas_app::IpcErrorCode::Invalid,
+        "nothing went wrong; the request cannot be honoured as asked"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "the refusal left a file behind"
+    );
+}
+
+/// Retention never ages out a share export, at the seam that does the deleting.
+///
+/// `policy::expired` has the rule; this is the wire. `keep: 1` and an export
+/// on either side of it, so a rule that read the share export as a backup
+/// would delete it here.
+#[tokio::test]
+async fn a_nightly_export_never_prunes_a_share_export() {
+    let (service, dir) = service("sharekeep").await;
+    backup::save_schedule(
+        &service.pool,
+        BackupSchedule {
+            keep: 1,
+            ..BackupSchedule::default()
+        },
+    )
+    .await
+    .expect("store a schedule");
+    seed_estate(&service.pool, "keepshare").await;
+
+    let shared = backup::share_export(&service, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+    std::fs::write(dir.path().join("knobas-20260101-030000.knobas"), b"x").unwrap();
+
+    let backup_record = backup::export_now(&service).await.expect("a nightly export");
+
+    let mut left: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    let mut expected = vec![backup_record.file.clone(), shared.file.clone()];
+    expected.sort();
+    assert_eq!(
+        left, expected,
+        "keep=1 aged out the old backup and must have left the share export alone"
+    );
+
+    // ...and it is still listed, because it is still restorable.
+    assert!(
+        backup::status(&service)
+            .await
+            .expect("status")
+            .archives
+            .iter()
+            .any(|archive| archive.file == shared.file),
+        "a share export a user has to be able to restore has to be listed"
+    );
+}
+
 /// One entity, run-unique, so a database can be *populated* in the sense the
 /// occupancy guard means. Returns its id.
 async fn seed_entity(pool: &sqlx::PgPool, tag: &str) -> String {
@@ -502,6 +1202,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
             knobas_app::commands::backup::backup_now,
             knobas_app::commands::backup::set_backup_schedule,
             knobas_app::commands::backup::restore_backup,
+            knobas_app::commands::backup::share_export,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -555,6 +1256,13 @@ fn every_backup_command_is_registered_and_its_arguments_decode() {
         (
             "restore_backup",
             serde_json::json!({ "file": "knobas-20260828-030000.knobas" }),
+        ),
+        (
+            "share_export",
+            serde_json::json!({ "parts": {
+                "links": true, "assets": true, "contexts": true,
+                "notes": false, "time": false, "sources": true
+            } }),
         ),
     ] {
         let rejection = invoke(cmd, args).expect_err("nothing is managed, so nothing is ready");
