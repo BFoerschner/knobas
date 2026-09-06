@@ -274,6 +274,7 @@ const SuggestionTray = (await import("./SuggestionTray.svelte")).default;
 const ShellFixture = (await import("./Shell.fixture.svelte")).default;
 const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
+const AssetsTile = (await import("./AssetsTile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const InboxView = (await import("../inbox/InboxView.svelte")).default;
@@ -403,6 +404,27 @@ const CASES: Case[] = [
           miniBoardLayout: "columns" as const,
           onopen: () => {},
           onlayout: () => {},
+          onmaximise: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The room's Assets tile (#434). Its effect is the membership read, and it
+     * is handed a **stored** room's filter -- the only shape that issues one,
+     * so a case built on a derived room would install nothing and prove
+     * nothing.
+     */
+    name: "AssetsTile",
+    source: "lib/shell/AssetsTile.svelte",
+    open: (target) => ({
+      app: mount(AssetsTile, {
+        target,
+        props: {
+          filter: { sources: [], context: "ctx:pay", project: null },
+          ports: { contextAssets: () => deferred([]) },
+          onopen: () => {},
           onmaximise: () => {},
         },
       }),

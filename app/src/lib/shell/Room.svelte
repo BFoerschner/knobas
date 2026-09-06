@@ -20,9 +20,11 @@
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";
   import { createNote, listEntities, type EntityRow } from "../ipc/entity";
+  import AssetsTile from "./AssetsTile.svelte";
   import RoomBar from "./RoomBar.svelte";
   import SuggestionTray from "./SuggestionTray.svelte";
   import Tile from "./Tile.svelte";
+  import { ASSETS_TILE, roomDrawsAssets } from "./assets-tile";
   import { contextById, type RoomContext } from "./contexts";
   import { miniBoardOverrides, type MiniBoardOverrides } from "./mini-board-overrides.svelte";
   import { kindRegistry } from "./kind-registry.svelte";
@@ -142,12 +144,28 @@
   const tiles = $derived(
     kinds === null ? [] : tilesFor(kinds, (kind) => kindRegistry.info(kind)),
   );
+
+  /**
+   * Whether this room draws an Assets tile (#434).
+   *
+   * Not a kind tile, and it could not be one: `tilesFor` is driven by the
+   * kinds the room's *mirror* scan reported, and an asset is knobas' own — no
+   * source ever syncs one, so no scan can ever report the kind. The rule is
+   * the room's filter's, in `assets-tile.ts`, which is also what the tile
+   * reads through.
+   *
+   * It is read here rather than inside the tile so the grid can be sized and
+   * the empty state decided before anything mounts: a stored room with assets
+   * and nothing synced has one tile, not the "nothing synced yet" page.
+   */
+  const drawsAssets = $derived(roomDrawsAssets(context.filter));
   /**
    * Two columns, so the row count is half the tiles — capped at the four the
    * stylesheet declares (`.tiles.rows-*`), past which the board scrolls rather
    * than growing rows nobody can see.
    */
-  const rows = $derived(Math.min(4, Math.max(1, Math.ceil(tiles.length / 2))));
+  const tileCount = $derived(tiles.length + (drawsAssets ? 1 : 0));
+  const rows = $derived(Math.min(4, Math.max(1, Math.ceil(tileCount / 2))));
 
   /**
    * The tile the reader maximised, or null for the grid (#250).
@@ -252,7 +270,7 @@
     </div>
   {:else if kinds === null}
     <div class="empty"><p class="muted">Reading the room…</p></div>
-  {:else if tiles.length === 0}
+  {:else if tileCount === 0}
     <div class="empty">
       <p>Nothing synced into this room yet.</p>
       <p class="muted">
@@ -267,7 +285,7 @@
       Restoring mounts the others again and they read again, as they do on
       any room switch.
     -->
-    <div class="tiles rows-{rows}" class:one={tiles.length === 1} class:max={maximised !== null}>
+    <div class="tiles rows-{rows}" class:one={tileCount === 1} class:max={maximised !== null}>
       {#each tiles as spec (spec.id)}
         {#if maximised === null || maximised === spec.id}
           <Tile
@@ -284,6 +302,21 @@
           />
         {/if}
       {/each}
+      <!--
+        Last in the grid, after the kind tiles: the estate is what the work in
+        this room runs on, and a reader scanning a room reads the work first.
+        Drawn under the same maximise gesture as any other tile (#250) — one
+        id, the room's, so maximising the Assets tile restores like the rest.
+      -->
+      {#if drawsAssets && (maximised === null || maximised === ASSETS_TILE)}
+        <AssetsTile
+          filter={context.filter}
+          maximised={maximised === ASSETS_TILE}
+          onopen={(row) =>
+            router.go(hashFor({ view: "assets", tab: "tree", assetId: row.asset.id }))}
+          onmaximise={() => toggleMaximise(ASSETS_TILE)}
+        />
+      {/if}
     </div>
   {/if}
 

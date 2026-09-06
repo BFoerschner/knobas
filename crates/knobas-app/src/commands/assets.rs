@@ -33,7 +33,7 @@ use tauri::{Emitter, State};
 
 use knobas_core::asset::AssetType;
 
-use crate::assets::{self, AssetDetail, AssetEdit, AssetRow, PropertyValue};
+use crate::assets::{self, AssetDetail, AssetEdit, AssetRow, MemberAsset, PropertyValue};
 use crate::{IpcError, Lifecycle};
 
 /// Put the lines a mutation wrote on the wire, the way `commands::entity` and
@@ -203,6 +203,31 @@ pub async fn delete_asset<R: tauri::Runtime>(
     let written = assets::delete(&pool, &asset_id).await?;
     announce(&app, written.activity);
     Ok(())
+}
+
+/// The assets a stored room's Assets tile draws: this context's member assets,
+/// worst health first, each with the path it sits at (#434).
+///
+/// The membership rule is `knobas_core::context::member_ids`' -- the same one
+/// statement `context_members` answers with and the per-context inbox filter
+/// intersects on -- so an asset reached through its ancestors is in this list
+/// and in that badge by construction, and there is no second walk to keep in
+/// step.
+///
+/// A context that does not exist answers with no assets rather than an error,
+/// like `context_members`: an address can outlive the thing it names.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
+/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn context_assets(
+    lifecycle: State<'_, Lifecycle>,
+    ctx_id: String,
+) -> Result<Vec<MemberAsset>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::in_context(&pool, &ctx_id).await
 }
 
 #[cfg(test)]
@@ -443,7 +468,7 @@ mod tests {
         );
     }
 
-    /// The seven commands are invoked from the mirror by the names they are
+    /// The eight commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -455,6 +480,7 @@ mod tests {
         for command in [
             "asset_tree",
             "get_asset",
+            "context_assets",
             "create_asset",
             "edit_asset",
             "move_asset",
@@ -483,6 +509,7 @@ mod tests {
         for (call, argument) in [
             ("asset_tree", "parentId"),
             ("get_asset", "assetId"),
+            ("context_assets", "ctxId"),
             ("create_asset", "typeId"),
             ("create_asset", "parentId"),
             ("edit_asset", "edits"),
@@ -540,6 +567,26 @@ mod tests {
                 "holds",
                 "history",
             ],
+        );
+    }
+
+    /// The Assets tile's row (#434), exercised with a **path present**.
+    ///
+    /// `None` would serialize to the same `null` key a declared
+    /// `string | null` accepts, so the populated shape is the one that tells
+    /// the two languages apart -- the discipline
+    /// `the_asset_property_matches_its_typescript_mirror` states above.
+    #[test]
+    fn the_member_asset_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "MemberAsset",
+            &serde_json::to_value(MemberAsset {
+                asset: row(),
+                path: Some("hel / hel1".to_owned()),
+            })
+            .unwrap(),
+            &["asset", "path"],
         );
     }
 }

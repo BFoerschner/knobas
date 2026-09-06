@@ -49,8 +49,16 @@ crate::closed_vocabulary! {
         Imported => "imported",
         /// Mirrored from a relation the source system already states.
         Source => "source",
-        /// Drawn by knobas as a consequence of another action, e.g. linking an
-        /// asset to a ticket adding the asset to that ticket's context.
+        /// Drawn by knobas as a consequence of what the user wrote: a note's
+        /// `[[ref]]` links are the population (`crate::note`'s `reconcile_refs`,
+        /// which owns every row of this origin).
+        ///
+        /// **Not** the asset-in-a-context case this example used to give.
+        /// Spec #427 ruled that membership is computed rather than stored --
+        /// *"the implied membership of an asset linked to a member ticket is
+        /// computed, not stored, as the ADR requires"* -- so `context::member_ids`
+        /// answers it from the link the user drew and no row of this origin is
+        /// written for it (ADR-0008, amended by #434).
         Implied => "implied",
     }
 }

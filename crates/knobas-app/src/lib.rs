@@ -297,6 +297,8 @@ pub fn run() {
             commands::assets::move_asset,
             commands::assets::delete_asset,
             commands::assets::asset_types,
+            // #434, appended after #428's group for the same reason.
+            commands::assets::context_assets,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

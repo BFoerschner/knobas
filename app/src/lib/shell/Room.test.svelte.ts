@@ -8,7 +8,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
+import type { MemberAsset } from "../ipc/assets";
 import type {
+  ContextRow,
   EntityDetail,
   EntityFilter,
   EntityPage,
@@ -85,8 +87,27 @@ vi.mock("../ipc/entity", () => ({
   unlink: () => Promise.reject(new Error("this test never unlinks")),
 }));
 
+/**
+ * The Assets tile's read (#434), which a *stored* room mounts.
+ *
+ * A plain function for `Tile.test.svelte.ts`' reason, and mocked at all
+ * because the room mounts the tile with no `ports` — the real module reaches
+ * Tauri, which is not here. What the tile draws is
+ * `AssetsTile.test.svelte.ts`'; what this file is about is *which rooms draw
+ * it*.
+ */
+const assetCalls: string[] = [];
+let assets: (ctxId: string) => Promise<MemberAsset[]> = () => Promise.resolve([]);
+
+vi.mock("../ipc/assets", () => ({
+  contextAssets: (ctxId: string) => {
+    assetCalls.push(ctxId);
+    return assets(ctxId);
+  },
+}));
+
 const { default: Room } = await import("./Room.svelte");
-const { builtinContexts } = await import("./contexts");
+const { builtinContexts, storedContext } = await import("./contexts");
 const { createRouter } = await import("./router.svelte");
 const { createMiniBoardOverrides } = await import("./mini-board-overrides.svelte");
 
@@ -241,8 +262,10 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
 
 beforeEach(() => {
   calls.length = 0;
+  assetCalls.length = 0;
   answer = () => Promise.resolve({ rows: [], total: 0 });
   board = () => Promise.resolve({ columns: [], sources: [] });
+  assets = () => Promise.resolve([]);
 });
 
 /** Let every queued promise and the DOM catch up. */
@@ -1041,6 +1064,130 @@ test("pressing the effective default on a demoted override clears it, seen once 
   expect(screen.describedBy("columns")).toBeNull();
   expect(screen.describedBy("stacked")).toBeNull();
   expect(screen.hiddenReasons()).toEqual([]);
+
+  screen.done();
+});
+
+// ---------------------------------------------------------------------------
+// The Assets tile (#434)
+// ---------------------------------------------------------------------------
+
+/** A stored room: a context somebody made, whose room narrows by membership. */
+const STORED: ContextRow = {
+  id: "ctx:pay",
+  kind: "adhoc",
+  title: "payments stack",
+  anchor_id: null,
+  created_at: "2026-09-06T09:00:00Z",
+  archived_at: null,
+};
+
+/** One member asset, as the tile's read answers with it. */
+function memberAsset(name: string, path: string | null): MemberAsset {
+  return {
+    asset: {
+      id: `asset:${name}`,
+      parent_id: null,
+      type_id: "vm",
+      type_label: "VM",
+      monogram: "VM",
+      name,
+      status: "none",
+      environment: null,
+      owner: null,
+      has_children: false,
+      health: "up",
+      inside: "none",
+      problems_inside: 0,
+    },
+    path,
+  };
+}
+
+/**
+ * Which rooms draw an Assets tile, and which do not (spec #427's per-room
+ * rule, of which #434 builds the stored room's half).
+ *
+ * Both directions in one test, over one mounted room, because the claim is
+ * about the *switch*: a tile drawn for every room would pass a stored-room
+ * assertion, and a tile drawn for none would pass a derived-room one. The
+ * read is the second half — a derived room must not merely hide the tile, it
+ * must not ask the backend for a membership it has no context for.
+ */
+test("a stored room draws an Assets tile of its member assets and a derived room draws none", async () => {
+  ticketsEverywhere();
+  assets = () => Promise.resolve([memberAsset("vm-db-01", "hel1")]);
+
+  const screen = render("#/ctx/all");
+  await vi.waitFor(() => expect(screen.tiles()).toContain("Tickets"));
+  await settle();
+  expect(screen.tiles(), "All work has no Assets tile until #435").not.toContain("Assets");
+  expect(assetCalls, "and asks nothing about a membership it has no context for").toEqual([]);
+
+  screen.relist([...CONTEXTS, storedContext(STORED)]);
+  screen.router.go("#/ctx/ctx:pay");
+  await settle();
+
+  expect(screen.tiles()).toContain("Assets");
+  // The *set* of contexts asked about, not the number of asks: the room
+  // re-mounts its tiles while its own survey is in flight, so how many times a
+  // tile reads is the room's business and which context it reads for is this
+  // one's.
+  expect([...new Set(assetCalls)]).toEqual(["ctx:pay"]);
+  expect(screen.text()).toContain("vm-db-01");
+  expect(screen.text(), "with the path it sits at").toContain("hel1");
+
+  screen.done();
+});
+
+/**
+ * A stored room whose corpus is empty is not an empty room: the estate is
+ * knobas' own and no sync ever puts an asset in the mirror, so the survey that
+ * decides the kind tiles cannot see one.
+ *
+ * Without this the room would draw *"Nothing synced into this room yet"* over
+ * a context that holds four servers — which is the failure the room's tile
+ * count exists to avoid, and it is the reason the Assets tile is counted
+ * before the empty state is chosen rather than after.
+ */
+test("a stored room with assets and nothing synced draws the tile, not the empty page", async () => {
+  assets = () => Promise.resolve([memberAsset("hel1", null)]);
+
+  const screen = render("#/ctx/all");
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
+
+  screen.relist([...CONTEXTS, storedContext(STORED)]);
+  screen.router.go("#/ctx/ctx:pay");
+  await settle();
+
+  expect(screen.tiles()).toEqual(["Assets"]);
+  expect(screen.text()).not.toContain("Nothing synced into this room yet");
+  expect(screen.grid(), "one tile is a list, not a two-column board").toContain("one");
+  expect(screen.text()).toContain("top level");
+
+  screen.done();
+});
+
+/** The maximise gesture is the room's, so it reaches the Assets tile too (#250). */
+test("the Assets tile maximises and restores like any other tile", async () => {
+  ticketsEverywhere();
+  assets = () => Promise.resolve([memberAsset("vm-db-01", "hel1")]);
+
+  const screen = render("#/ctx/all");
+  await vi.waitFor(() => expect(screen.tiles()).toContain("Tickets"));
+  screen.relist([...CONTEXTS, storedContext(STORED)]);
+  screen.router.go("#/ctx/ctx:pay");
+  await settle();
+  expect(screen.tiles()).toEqual(["Tickets", "Assets"]);
+
+  screen.maximise("Assets");
+  expect(screen.tiles()).toEqual(["Assets"]);
+  expect(screen.grid()).toContain("max");
+  expect(screen.maxButton("Assets")?.textContent?.trim()).toBe("Restore");
+
+  expect(screen.restoreTile()).toBe(true);
+  flushSync();
+  expect(screen.tiles()).toEqual(["Tickets", "Assets"]);
 
   screen.done();
 });

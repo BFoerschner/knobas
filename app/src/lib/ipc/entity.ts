@@ -71,8 +71,9 @@ export interface EntityFilter {
   updated_within_days: number | null;
   order: EntityOrder;
   /**
-   * Only members of this stored context (`ctx:<id>`), by the fixed one-hop
-   * rule (§16.11, ADR-0008) — or `null` for no scoping. Membership is
+   * Only members of this stored context (`ctx:<id>`), by the fixed rule
+   * (§16.11, ADR-0008: seed, direct links, one hop, and what the assets
+   * among them hold) — or `null` for no scoping. Membership is
    * resolved server-side per read, so a page and its `total` always describe
    * the same instant.
    */
@@ -954,9 +955,10 @@ export function promoteContext(entityId: string): Promise<ContextRow> {
 }
 
 /**
- * Who is in a context — `context_members`, by the fixed one-hop rule
- * (§16.11, ADR-0008): explicit adds and the anchor (an epic's tickets count
- * through their source-recorded parent), their direct links, and one hop out.
+ * Who is in a context — `context_members`, by the fixed rule (§16.11,
+ * ADR-0008): explicit adds and the anchor (an epic's tickets count through
+ * their source-recorded parent), their direct links, one hop out, and — since
+ * #434 — every asset held by one of those, at any depth.
  *
  * An unknown context has no members rather than an error. The per-context
  * inbox filter ("3 here") intersects the inbox stream with this set, so the
