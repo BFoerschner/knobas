@@ -12,7 +12,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { BackupSchedule, BackupStatus } from "../ipc/backup";
+import type { BackupSchedule, BackupStatus, ShareParts } from "../ipc/backup";
 import { settleRejections, takeUnhandled } from "../shell/unhandled";
 
 const NOW = new Date("2026-08-29T09:14:00Z");
@@ -24,6 +24,7 @@ const calls = {
   now: 0,
   setSchedule: [] as BackupSchedule[],
   restore: [] as string[],
+  share: [] as ShareParts[],
 };
 
 let status: BackupStatus;
@@ -37,6 +38,7 @@ let statusFails: unknown = null;
 let answerStatus: ((call: number) => Promise<BackupStatus>) | null = null;
 let nowFails: unknown = null;
 let restoreFails: unknown = null;
+let shareFails: unknown = null;
 /**
  * What `set_backup_schedule` *stores*, given what was posted.
  *
@@ -72,6 +74,28 @@ vi.mock("../ipc/backup", () => ({
   restoreBackup: (file: string) => {
     calls.restore.push(file);
     return restoreFails ? Promise.reject(restoreFails) : Promise.resolve();
+  },
+  // The real module's defaults, repeated rather than imported: this factory
+  // replaces the module, and a mock that reached back into it would be reading
+  // the thing under test. The Rust-side pin
+  // (`commands::backup::tests::the_share_parts_serialise_the_keys_the_mirror_declares`)
+  // is what keeps the real ones honest.
+  shareDefaults: {
+    links: true,
+    assets: true,
+    contexts: true,
+    notes: false,
+    time: false,
+    sources: true,
+  },
+  shareExport: (parts: ShareParts) => {
+    calls.share.push(parts);
+    if (shareFails) return Promise.reject(shareFails);
+    return Promise.resolve({
+      taken_at: NOW.toISOString(),
+      file: "knobas-share-20260829-091400.knobas",
+      bytes: 1_048_576,
+    });
   },
 }));
 
@@ -134,11 +158,13 @@ beforeEach(() => {
   calls.now = 0;
   calls.setSchedule = [];
   calls.restore = [];
+  calls.share = [];
   status = statusOf();
   statusFails = null;
   answerStatus = null;
   nowFails = null;
   restoreFails = null;
+  shareFails = null;
   stores = (posted) => posted;
   toasts.items = [];
   target = document.createElement("div");
@@ -752,4 +778,138 @@ test("closing the schedule dialog raises nothing, whichever way it is closed", a
   await settle();
   await settleRejections();
   expect(takeUnhandled(), "closing the restore confirm raised").toEqual([]);
+});
+
+/** One of the share dialog's tick boxes, by the words next to it. */
+function tick(label: string) {
+  const box = [...(dialog()?.querySelectorAll<HTMLLabelElement>("label.chk") ?? [])].find((l) =>
+    l.textContent?.includes(label),
+  );
+  return box?.querySelector<HTMLInputElement>("input[type=checkbox]");
+}
+
+/**
+ * The share dialog opens on the ratified defaults, and exports what is ticked.
+ *
+ * Two assertions in one, deliberately: what the boxes say when the dialog
+ * opens is the whole of the "notes and time are off by default" ruling as a
+ * person meets it, and the payload is what proves the boxes are wired to it
+ * rather than merely drawn that way. Notes is switched on before exporting, so
+ * the payload cannot be a copy of the defaults sent whatever was clicked.
+ */
+test("Share… opens on the defaults and exports the parts that are ticked", async () => {
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+
+  expect(tick("Links")!.checked).toBe(true);
+  expect(tick("Assets")!.checked).toBe(true);
+  expect(tick("Contexts")!.checked).toBe(true);
+  expect(tick("Source configurations")!.checked).toBe(true);
+  expect(tick("Notes")!.checked).toBe(false);
+  expect(tick("Time")!.checked).toBe(false);
+
+  tick("Notes")!.click();
+  await settle();
+  button("Export", dialog()!)!.click();
+  await settle();
+
+  expect(calls.share).toEqual([
+    { links: true, assets: true, contexts: true, notes: true, time: false, sources: true },
+  ]);
+  expect(dialog()).toBeNull();
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toContain(
+    "knobas-share-20260829-091400.knobas",
+  );
+  // Re-read, so the archive it wrote is on the list the reader can restore
+  // from and hand over.
+  expect(calls.status).toBe(2);
+});
+
+/**
+ * A dialog opened with notes ticked and cancelled opens unticked next time.
+ *
+ * A share export is a decision made per export, not a stored preference, and
+ * the failure this is about is the quiet one: a person shares their notes once
+ * on purpose and then ships them again a month later without noticing.
+ */
+test("the share dialog forgets what was ticked and cancelled", async () => {
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+  tick("Time")!.click();
+  await settle();
+  expect(tick("Time")!.checked).toBe(true);
+  button("Cancel", dialog()!)!.click();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+  expect(tick("Time")!.checked).toBe(false);
+});
+
+/**
+ * Nothing ticked is nothing to export: the button is refused before the call,
+ * and the dialog says why rather than leaving a dead button.
+ */
+test("a share export with nothing ticked cannot be started", async () => {
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+  for (const label of ["Links", "Assets", "Contexts", "Source configurations"]) {
+    tick(label)!.click();
+  }
+  await settle();
+
+  const start = button("Export", dialog()!)!;
+  expect(start.disabled).toBe(true);
+  expect(dialog()!.textContent).toContain("nothing to export");
+  start.click();
+  await settle();
+  expect(calls.share).toEqual([]);
+});
+
+/**
+ * A refused export says what the far side said and leaves the dialog up.
+ *
+ * The same rule the restore confirm follows: a decision that failed is still a
+ * decision the reader is in the middle of making.
+ */
+test("a failed share export reports the reason and keeps the dialog open", async () => {
+  shareFails = { code: "internal", message: "pg_dump: error: no space left on device" };
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+  button("Export", dialog()!)!.click();
+  await settle();
+
+  expect(dialog()).not.toBeNull();
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toContain("no space left on device");
+});
+
+/**
+ * What a person is handing over is stated before they hand it over.
+ *
+ * Titles travel with every part — the archive carries the whole address book,
+ * because `pg_dump` restricts by table and never by row — so a dialog that
+ * only listed the ticked parts would be describing an export narrower than the
+ * one it takes.
+ */
+test("the share dialog says that titles travel and credentials do not", async () => {
+  render();
+  await settle();
+  button("Share…")!.click();
+  await settle();
+
+  const said = dialog()!.textContent ?? "";
+  expect(said).toContain("Titles travel");
+  expect(said).toMatch(/credentials are never/i);
 });
