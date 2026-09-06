@@ -315,6 +315,11 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     edit_asset: (args) => editAsset(args),
     move_asset: (args) => moveAsset(args),
     delete_asset: (args) => deleteAsset(args),
+    // A route's own read, for the `#/route/<id>` address a click on a route's
+    // name opens (#432). The three writes are **not** here: creating a route
+    // from the dialog would need a minted id and a history of its own, and
+    // what this fixture exists for is the two reads a browser looks at.
+    get_route: (args) => routeDetail(args),
     // The room's Assets tile (#434). Empty for `context_members`' reason: the
     // fixture has no link graph, so no context holds anything and membership
     // -- assets included -- is honestly nothing. A stored room under
@@ -375,6 +380,26 @@ const FIXTURE_ESTATE: {
     properties: [
       { key: "location", label: "Location", value: { kind: "text", value: "Helsinki" }, custom: false },
       { key: "provider", label: "Provider", value: { kind: "text", value: "Hetzner" }, custom: false },
+    ],
+  },
+  {
+    // The notebook the tunnel's forwards are exposed *from* (#433). The
+    // estate file has it as a hypervisor holding OrbStack, its Docker engine
+    // and three containers; this stops at the machine, so the two routes that
+    // land inside it land on it.
+    id: "asset:notebook",
+    parent_id: null,
+    type_id: "hypervisor",
+    type_label: "Hypervisor",
+    monogram: "HV",
+    name: "devs-MacBook-Pro",
+    status: "up",
+    environment: "dev",
+    owner: "Björn",
+    properties: [
+      { key: "hostname", label: "Hostname", value: { kind: "text", value: "devs-MacBook-Pro" }, custom: false },
+      { key: "ip", label: "IP", value: null, custom: false },
+      { key: "os", label: "OS", value: { kind: "text", value: "macOS 26" }, custom: false },
     ],
   },
   {
@@ -477,6 +502,118 @@ const FIXTURE_ESTATE: {
 ];
 
 type FixtureAsset = (typeof FIXTURE_ESTATE)[number];
+
+/**
+ * The routes this corner of the estate exposes (#432, drawn as wires by #433).
+ *
+ * `testenv/hetzner/estate.json`'s own, mapped onto the ids above: the two
+ * tunnel forwards a person opens the servers through, and the one that runs
+ * the other way. Nothing is invented -- the file's routes are the tunnel's,
+ * and the fixture's shortening of the estate is what moves two of the targets
+ * up a level: the notebook's own containers are not modelled here, so the
+ * reverse forward lands on the notebook.
+ *
+ * They are what makes the Tree's wires visible in a browser at all: a wire
+ * runs from a route's row to the row (or the spine) of the asset at its far
+ * end, so a fixture with no routes draws none, whatever the code does.
+ */
+const FIXTURE_ROUTES: {
+  id: string;
+  asset_id: string;
+  target_id: string | null;
+  name: string;
+  url: string;
+  visibility: "internal" | "public";
+  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+}[] = [
+  {
+    id: "route:tunnel-teamcity",
+    asset_id: "asset:notebook",
+    target_id: "asset:teamcity",
+    name: "TeamCity (tunnel)",
+    url: "http://127.0.0.1:8111/",
+    visibility: "internal",
+    properties: [
+      {
+        key: "opened_by",
+        label: "opened_by",
+        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
+        custom: true,
+      },
+      {
+        key: "forward",
+        label: "forward",
+        value: { kind: "text", value: "ssh -N -L 127.0.0.1:8111:127.0.0.1:8111 knobas-teamcity" },
+        custom: true,
+      },
+    ],
+  },
+  {
+    id: "route:tunnel-jira",
+    asset_id: "asset:notebook",
+    target_id: "asset:knobas-jira",
+    name: "Jira (tunnel)",
+    url: "http://127.0.0.1:8080/",
+    visibility: "internal",
+    properties: [
+      {
+        key: "opened_by",
+        label: "opened_by",
+        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
+        custom: true,
+      },
+    ],
+  },
+  {
+    id: "route:tunnel-gitea-reverse",
+    asset_id: "asset:knobas-teamcity",
+    target_id: "asset:notebook",
+    name: "gitea (reverse tunnel)",
+    // The file spells this one with the docker network name the TeamCity
+    // containers resolve; `house-rules.test.ts` refuses any hostname that
+    // could answer, so the fixture carries the loopback address the same
+    // forward lands on instead.
+    url: "http://127.0.0.1:3000/",
+    visibility: "internal",
+    properties: [
+      {
+        key: "opened_by",
+        label: "opened_by",
+        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
+        custom: true,
+      },
+    ],
+  },
+];
+
+type FixtureRoute = (typeof FIXTURE_ROUTES)[number];
+
+/** One route on the wire -- the exposing and target names read off the estate. */
+function routeRow(route: FixtureRoute) {
+  const named = (id: string | null) =>
+    id === null ? null : (FIXTURE_ESTATE.find((asset) => asset.id === id)?.name ?? null);
+  return {
+    ...route,
+    asset_name: named(route.asset_id) ?? route.asset_id,
+    target_name: named(route.target_id),
+  };
+}
+
+/**
+ * `assets::ROUTES_REACHABLE`'s rule: every route whose target is on this
+ * asset's containment path, above it or below.
+ *
+ * The **rule** and not one of its answers, like `inForce` below: a hard-coded
+ * list would draw the right route on the wrong pane, and the pane is what a
+ * QA walk is looking at.
+ */
+function routesReaching(asset: FixtureAsset, heldBy: FixtureAsset[]) {
+  const under = new Set(descendants(asset).map((held) => held.id));
+  const path = new Set([asset.id, ...heldBy.map((held) => held.id)]);
+  return FIXTURE_ROUTES.filter(
+    (route) => route.target_id !== null && (path.has(route.target_id) || under.has(route.target_id)),
+  ).map(routeRow);
+}
 
 /** The two statuses `assets::ROLLUP` counts as a problem inside. */
 const PROBLEM: FixtureAsset["status"][] = ["warn", "down"];
@@ -751,6 +888,21 @@ function deleteAsset(args: Record<string, unknown>) {
       source_id: null,
     };
   }
+  // `assets::delete`'s two route rules (#432), because a QA walk that deleted
+  // an exposer here and not in the app would be reading the wrong app: a route
+  // still exposed refuses the delete, and a route still pointing at it is
+  // cleared rather than left dangling.
+  const exposed = FIXTURE_ROUTES.filter((route) => route.asset_id === asset.id).length;
+  if (exposed > 0) {
+    throw {
+      code: "conflict",
+      message: `"${asset.name}" still exposes ${exposed} route(s) -- delete them first`,
+      source_id: null,
+    };
+  }
+  for (const route of FIXTURE_ROUTES) {
+    if (route.target_id === asset.id) route.target_id = null;
+  }
   FIXTURE_ESTATE.splice(FIXTURE_ESTATE.indexOf(asset), 1);
   return null;
 }
@@ -769,6 +921,9 @@ function assetRow(asset: FixtureAsset) {
     health: worst([asset.status, inside]),
     inside,
     problems_inside: under.filter((held) => PROBLEM.includes(held.status)).length,
+    // Zero for the same reason `links` below is empty: no link graph here, so
+    // no asset is linked to any work and no row carries the badge (#435).
+    linked_work: 0,
   };
 }
 
@@ -833,6 +988,14 @@ function assetDetail(args: Record<string, unknown>) {
     effective_owner: inForce(asset, heldBy, (row) => row.owner),
     held_by: heldBy.map(assetRow),
     holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
+    exposes: FIXTURE_ROUTES.filter((route) => route.asset_id === asset.id).map(routeRow),
+    reachable_via: routesReaching(asset, heldBy),
+    // Empty for `context_assets`' reason and the mirror detail's: this fixture
+    // has no link graph, so an asset is linked to nothing and the pane draws
+    // the links panel's empty state. Absent rather than empty (#435 landed
+    // the field and the panel; the fixture kept neither) it is `undefined`,
+    // and `groupLinks` throws on the pane of every asset.
+    links: [],
     history: [
       // This session's own writes first, newest first, which is what makes
       // *every mutation appears in the pane's history immediately* (#429)
@@ -856,6 +1019,16 @@ function assetDetail(args: Record<string, unknown>) {
       { id: 1, at: SYNCED_AT, actor: "user", verb: "created", entity_id: asset.id, detail: {} },
     ],
   };
+}
+
+/** `get_route`: one route and its history, which this fixture has none of. */
+function routeDetail(args: Record<string, unknown>) {
+  const id = args.routeId as string;
+  const route = FIXTURE_ROUTES.find((candidate) => candidate.id === id);
+  if (!route) throw { code: "not_found", message: `no route ${id}`, source_id: null };
+  // Empty rather than invented: every line in a route's history is written by
+  // a write, and this fixture answers none of the three that write one.
+  return { route: routeRow(route), history: [] };
 }
 
 /**

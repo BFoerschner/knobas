@@ -34,6 +34,7 @@ import {
   estateQuery,
   matchesIn,
   walk,
+  wiresFor,
   workBadge,
 } from "./tree";
 
@@ -60,6 +61,7 @@ function detail(
   asset: AssetRow,
   ancestors: AssetRow[],
   reachableVia: RouteRow[] = [],
+  exposes: RouteRow[] = [],
 ): AssetDetail {
   return {
     asset,
@@ -69,7 +71,7 @@ function detail(
     effective_owner: null,
     held_by: ancestors,
     holds: [],
-    exposes: [],
+    exposes,
     reachable_via: reachableVia,
     history: [],
   };
@@ -636,4 +638,104 @@ test("a route addresses itself", () => {
   // The colon is left alone and everything else is encoded — `addressOf`'s
   // rule, which is why both delegate to one encoder.
   expect(routeAddressOf({ id: "route:a/b" })).toBe("#/route/route:a%2Fb");
+});
+
+// -- the wires (#433) --------------------------------------------------------
+
+/**
+ * The reverse proxy the wires are drawn from, in the walk's own estate.
+ *
+ * It sits beside `postgres` in the third column on purpose — that is the shape
+ * a wire is *for*, and it is the real one: a proxy answers for the containers
+ * next to it. The VM one column left is what the collapse can hide, so this
+ * one estate witnesses the row landing and the spine landing without a second
+ * fixture for the second half.
+ */
+const PROXY = row("asset:traefik", "traefik");
+
+/** `[top, inside hel1, inside vm-db-01]` again, with the proxy in the last one. */
+const WIRED = [[HEL1, NBG1], [SIBLING, VM], [PROXY, CONTAINER]];
+
+/** One route, exposed by `from`, landing on `target`. */
+function routeFrom(id: string, from: string, target: AssetRow | null): RouteRow {
+  return { ...route(target), id, asset_id: from, asset_name: from };
+}
+
+/**
+ * **Where a route row's wire lands: a row, a spine, or nowhere** — story 31's
+ * three cases, and the acceptance criterion's own list.
+ *
+ * The endpoint is decided by what is *drawn*, which is why the strip is an
+ * argument: the same route lands on `vm-db-01`'s row in a window wide enough
+ * to draw its column, and on the spine that hides it in one that is not. A
+ * target no open column lists is no wire at all rather than a line to the edge
+ * of the screen — the Tree opens the columns of one path, and an asset off
+ * that path is not on the surface to be pointed at.
+ */
+test("a wire lands on the target's row, on the spine that hides it, or nowhere", () => {
+  const onRow = routeFrom("route:pg", PROXY.id, CONTAINER);
+  const onVm = routeFrom("route:vm", PROXY.id, VM);
+  const nowhere = routeFrom("route:gone", PROXY.id, row("asset:elsewhere", "elsewhere"));
+  const bare = routeFrom("route:bare", PROXY.id, null);
+  const pane = detail(PROXY, [HEL1, VM], [], [onRow, onVm, nowhere, bare]);
+
+  // Every column drawn in full: both targets are rows, and both are solid.
+  // The route that lands outside the open path and the one that lands on
+  // nothing at all draw nothing — the list is two long, not four.
+  expect(wiresFor(pane, WIRED, { from: 0, to: 3 })).toEqual([
+    { key: "exposes:route:pg", column: 2, rowId: CONTAINER.id, dashed: false },
+    { key: "exposes:route:vm", column: 1, rowId: VM.id, dashed: false },
+  ]);
+
+  // The two columns the proxy was reached through collapsed: the VM's row is
+  // behind a spine, so its wire lands on the spine and says so by being
+  // dashed. The container beside the proxy is still a row, and still solid.
+  expect(wiresFor(pane, WIRED, { from: 2, to: 3 })).toEqual([
+    { key: "exposes:route:pg", column: 2, rowId: CONTAINER.id, dashed: false },
+    { key: "exposes:route:vm", column: 1, rowId: null, dashed: true },
+  ]);
+});
+
+/**
+ * **A route that reaches this asset through something above it is dashed**,
+ * however plainly its exposer is drawn — story 31's own clause, and
+ * {@link landingOf}'s `through` case seen from the other end.
+ *
+ * The wire on a *reachable via* row runs to the asset the route is exposed
+ * **from**, because what it lands on is the asset the reader is already
+ * standing in: a wire from the pane to the row beside it would draw the one
+ * fact the pane cannot fail to tell them. So the dash is the only thing left
+ * to carry *this arrives at the VM, not at you* — and it does.
+ */
+test("a wire from a route that arrives through an ancestor is dashed", () => {
+  const toVm = routeFrom("route:vm", PROXY.id, VM);
+  const toMe = routeFrom("route:me", PROXY.id, CONTAINER);
+  const pane = detail(CONTAINER, [HEL1, VM], [toVm, toMe]);
+
+  expect(wiresFor(pane, WIRED, { from: 0, to: 3 })).toEqual([
+    // Lands on the VM that holds this container: the exposer's row is drawn in
+    // full, and the wire to it is dashed all the same.
+    { key: "via:route:vm", column: 2, rowId: PROXY.id, dashed: true },
+    // Lands here: nothing is reached through anything, so the same exposer's
+    // row takes a solid one.
+    { key: "via:route:me", column: 2, rowId: PROXY.id, dashed: false },
+  ]);
+});
+
+/**
+ * **One key per drawn wire, even when one route is drawn twice.**
+ *
+ * A route exposed by an asset *and* targeting it reads in both of the pane's
+ * lists (`assets_ipc.rs` edits a target onto its own exposer), so the route id
+ * alone would key two wires the same and the view's `{#each}` would refuse the
+ * pair. The list each wire came from is what tells them apart.
+ */
+test("a route in both of the pane's lists draws two wires with two keys", () => {
+  const both = routeFrom("route:self", PROXY.id, PROXY);
+  const pane = detail(PROXY, [HEL1, VM], [both], [both]);
+
+  expect(wiresFor(pane, WIRED, { from: 0, to: 3 }).map((wire) => wire.key)).toEqual([
+    "exposes:route:self",
+    "via:route:self",
+  ]);
 });

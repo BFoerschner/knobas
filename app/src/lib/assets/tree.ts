@@ -151,6 +151,21 @@ export interface Landing {
   goTo: string | null;
 }
 
+/**
+ * Does this route arrive at something that *holds* the asset the pane shows,
+ * rather than at the asset itself?
+ *
+ * A question the **reachable via** list asks and the *Exposes* list has no
+ * version of: a route in that second list is exposed here, and its wire runs
+ * to its target and points straight at it, so there is nothing for it to
+ * arrive *through*. Asked in one place so that the note {@link landingOf}
+ * writes on a reachable-via row and the dash {@link wiresFor} draws on the
+ * same row cannot disagree about a route that comes in through a VM.
+ */
+function throughAnAncestor(detail: AssetDetail, route: RouteRow): boolean {
+  return detail.held_by.some((held) => held.id === route.target_id);
+}
+
 export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
   if (route.target_id === null) {
     // Not reachable from this list — a route with no target reaches nobody —
@@ -159,10 +174,9 @@ export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
     return { note: "lands on nothing", goTo: null };
   }
   if (route.target_id === detail.asset.id) return { note: "lands here", goTo: null };
-  const above = detail.held_by.some((held) => held.id === route.target_id);
   const name = route.target_name ?? route.target_id;
   return {
-    note: above ? `through ${name}` : `inside, on ${name}`,
+    note: throughAnAncestor(detail, route) ? `through ${name}` : `inside, on ${name}`,
     goTo: addressOf({ id: route.target_id }),
   };
 }
@@ -398,6 +412,128 @@ export function stripFor(columns: number, available: number, anchor: number | nu
   const deepest = columns - fits;
   const from = anchor === null ? deepest : Math.min(Math.max(0, anchor), deepest);
   return { from, to: from + fits };
+}
+
+
+/**
+ * One wire drawn from a route's row in the pane to the columns — story 31.
+ */
+export interface Wire {
+  /**
+   * Unique per drawn wire: the list it came from and the route's id.
+   *
+   * Not the route id alone — a route exposed by an asset and targeting that
+   * same asset reads in both lists, and two wires keyed alike is a `{#each}`
+   * the view refuses to draw.
+   */
+  key: string;
+  /** The column it lands in, whether that column is drawn or collapsed. */
+  column: number;
+  /** The row it lands on, or `null` when a spine is hiding that row. */
+  rowId: string | null;
+  /**
+   * Drawn dashed: the far end is reached *through* something rather than
+   * pointed at. Both ways that happens — a spine standing in for the row, and
+   * a route that arrives at an asset above this one — are the same fact for a
+   * reader, which is why they are one flag and not two.
+   */
+  dashed: boolean;
+}
+
+/**
+ * The wires the pane draws over the columns — story 31, issue #433.
+ *
+ * *A route's row draws a wire to its target asset or to the spine that holds
+ * it, dashed when the target is reached through an ancestor.* One call
+ * decides all of it — which route rows have a far end on screen, which column
+ * it is in, whether that column is drawn or collapsed to a spine, and whether
+ * the line is solid — so what is left for the view is two rectangles and a
+ * curve between them.
+ *
+ * **Which asset a row is wired to is the row's list, not the row's field.**
+ * The pane's two lists look at one route from two ends:
+ *
+ * * *Exposes* — the wire runs to the route's **target**, which is the whole
+ *   of the reader's question here: *where does this land*.
+ * * *Reachable via* — the wire runs to the asset that **exposes** it. The
+ *   target of one of these is the asset the reader is already standing in, or
+ *   something on its own path, so a wire to it would draw the one fact the
+ *   pane cannot fail to tell them; what they cannot see is where the route
+ *   comes *from*. `E1-miller-columns.html:637` anchors the two lists the same
+ *   way.
+ *
+ *   The rule is unconditional, and the one corner where it draws the wire it
+ *   was written to avoid is kept on purpose: an asset that exposes a route
+ *   landing on something it holds reads in both lists, so the via row's wire
+ *   runs to the reader's own row. It is honest there — the selection is not
+ *   always beside the pane, and a re-expanded spine can put its column behind
+ *   one, at which point the wire says *this arrives at the asset you have
+ *   selected, which is over there*.
+ *
+ * **The endpoint is what is drawn, and nothing else.** A wire lands only
+ * where a column on screen lists the asset at its far end — the mockup walks
+ * up a target's ancestors to find a visible one (`anchorPoint`,
+ * `E1-miller-columns.html:692`) and this cannot, because `RouteRow` carries a
+ * target's id and name and not its path. So the answers are the acceptance
+ * criterion's three: the target's own row, the spine hiding it, or no wire.
+ * The fourth would mean a new field on an IPC row, which is a §10.8
+ * amendment and a ticket of its own.
+ *
+ * @param detail the pane's read: the two route lists and the held-by path.
+ * @param columns what each column holds, aligned with {@link ColumnPath}.
+ * @param strip which of those columns are drawn in full ({@link stripFor}).
+ */
+export function wiresFor(detail: AssetDetail, columns: AssetRow[][], strip: Strip): Wire[] {
+  const wires: Wire[] = [];
+  for (const route of detail.exposes) {
+    // A route that lands on nothing has no far end to draw to, which is the
+    // one case `landingOf` calls "lands on nothing" and this one skips.
+    if (route.target_id === null) continue;
+    const key = wireKey("exposes", route.id);
+    const wire = wireTo({ key, to: route.target_id, through: false }, columns, strip);
+    if (wire !== null) wires.push(wire);
+  }
+  for (const route of detail.reachable_via) {
+    const key = wireKey("via", route.id);
+    const through = throughAnAncestor(detail, route);
+    const wire = wireTo({ key, to: route.asset_id, through }, columns, strip);
+    if (wire !== null) wires.push(wire);
+  }
+  return wires;
+}
+
+/**
+ * A wire's key: which of the pane's two lists the row is in, and which route.
+ *
+ * Exported because the view has to write the same string onto the route row
+ * the wire leaves — a wire is measured between two elements, and the one in
+ * the pane is found by this. Two spellings of it would be a wire that lands
+ * on an asset and starts nowhere.
+ */
+export function wireKey(list: "exposes" | "via", routeId: string): string {
+  return `${list}:${routeId}`;
+}
+
+/**
+ * One wire, or `null` when no open column lists the asset at its far end.
+ *
+ * @param wanted the row this wire leaves, the asset at its far end, and
+ *   whether the route reaches the pane's asset through something above it.
+ */
+function wireTo(
+  wanted: { key: string; to: string; through: boolean },
+  columns: AssetRow[][],
+  strip: Strip,
+): Wire | null {
+  const column = columns.findIndex((rows) => rows.some((row) => row.id === wanted.to));
+  if (column < 0) return null;
+  const hidden = column < strip.from || column >= strip.to;
+  return {
+    key: wanted.key,
+    column,
+    rowId: hidden ? null : wanted.to,
+    dashed: hidden || wanted.through,
+  };
 }
 
 /**

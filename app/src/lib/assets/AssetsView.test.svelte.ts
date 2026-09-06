@@ -16,6 +16,9 @@
  * the demo profile carries no assets until #440), and the PR says so for
  * Björn to rule on. What a browser could only photograph, this file asserts.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -1191,4 +1194,129 @@ test("clicking a route reached from elsewhere opens the asset exposing it", asyn
     routeId: "route:gitea",
   });
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+});
+
+// -- the wires (#433) --------------------------------------------------------
+
+/**
+ * Every wire the view drew, as *which route row it leaves* → *where it lands*,
+ * with the dashed ones marked.
+ *
+ * The geometry is deliberately not read: jsdom lays nothing out, so every
+ * rectangle it measures is zero and every wire's path would be the same
+ * string. What a browser has to certify — that the curve reaches the row it
+ * names — is the headless-Chrome pass in the PR; what this asserts is the
+ * half a browser photograph cannot: *which* route is wired to *which* asset,
+ * and whether the line says "through".
+ */
+function wires(): string[] {
+  return [...target.querySelectorAll("svg.wires path.wire")].map((wire) => {
+    const dashed = wire.classList.contains("dashed") ? " dashed" : "";
+    return `${wire.getAttribute("data-wire")} → ${wire.getAttribute("data-to")}${dashed}`;
+  });
+}
+
+/**
+ * **A route whose target is drawn in a column gets a solid wire to that row,
+ * and a route that lands on nothing gets none** — criterion 1, and its
+ * control in the same pane.
+ *
+ * The VM's own pane is where both ends of the pair are on screen at once: it
+ * *exposes* the Gitea route, whose target sits in the column under it, and it
+ * is also *reachable via* that same route, because the route lands on
+ * something it holds. So one route draws two wires — from each of the two rows
+ * it has in this pane — and the untargeted *Traefik dashboard* draws none.
+ */
+test("a route to an asset in an open column draws a solid wire to its row", async () => {
+  render("#/asset/asset:vm-app-02");
+
+  await vi.waitFor(() =>
+    expect(wires()).toEqual([
+      // From *Exposes*: to the container the route lands on, one column right.
+      "exposes:route:gitea → asset:gitea",
+      // From *Reachable via*: to the asset that exposes it, which is this one.
+      "via:route:gitea → asset:vm-app-02",
+    ]),
+  );
+});
+
+/**
+ * **A wire lands where its far end is drawn** — criterion 2, in the window
+ * that draws the column, and then in the one that does not.
+ *
+ * Four levels, and the *route* is the same in both: at 780px the exposing VM's
+ * column is drawn and the wire lands on its row; at 470px only the deepest
+ * column fits and the same wire lands on the spine standing in for it.
+ *
+ * Dashed in both, and here for a reason of its own — the route reaches this
+ * database *through* the container above it, which is story 31's other clause.
+ * The pure test in `tree.test.ts` is where a spine landing is dashed on the
+ * spine's account alone.
+ */
+test("a route whose exposer is drawn takes its wire to that row", async () => {
+  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+
+  await vi.waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
+});
+
+/**
+ * The same route in a window that cannot hold the column: its exposer is
+ * behind a spine now, and the wire lands there. One test each rather than one
+ * test that unmounts and re-renders — the width is a prop, and a second
+ * mounting inside one test would be the harness's `afterEach` written out by
+ * hand.
+ */
+test("a route whose exposer is behind a spine draws a dashed wire to the spine", async () => {
+  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 470 });
+
+  await vi.waitFor(() => expect(spines()).toEqual(["hel1", "vm-app-02", "gitea"]));
+  expect(wires()).toEqual(["via:route:gitea → spine:1 dashed"]);
+});
+
+/**
+ * **A column change leaves no wire behind** — criterion 3's second half.
+ *
+ * The wires are derived from the columns on screen rather than kept beside
+ * them, so an asset no route reaches draws none the moment its columns are
+ * drawn. A view that patched an SVG as it went would leave the VM's two lines
+ * hanging over the new path, pointing at rows that are no longer there.
+ */
+test("moving to an asset no route reaches leaves no wire behind", async () => {
+  const { router } = render("#/asset/asset:vm-app-02");
+  await vi.waitFor(() => expect(wires()).toHaveLength(2));
+
+  router.go("#/asset/asset:postgres");
+  flushSync();
+
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  expect(wires()).toEqual([]);
+});
+
+/**
+ * **The reduced-motion rule switches the wires' fade off and does not hide
+ * them** — story 31's *off under reduced motion's no-animation rule (still
+ * drawn, not animated)*, as far as a stylesheet can be asked.
+ *
+ * The rule is a stylesheet's, so it is read off disk the way `app-css.test.ts`
+ * reads the shell's and `tree.test.ts` reads the column widths: jsdom applies
+ * no media query, so *whether a browser then draws the wire* is the browser
+ * pass's claim and not this one. What this asserts is the regression with the
+ * least visible symptom — nothing looks broken, the setting is simply
+ * ignored — and it asserts it as **one rule**: `.wires .wire` and
+ * `animation: none` in the same block, because two independent substring
+ * checks pass on a block that turns some other element's animation off.
+ */
+test("switches the wires' fade off under reduced motion rather than hiding them", () => {
+  const view = readFileSync(join(process.cwd(), "src/lib/assets/AssetsView.svelte"), "utf8");
+  const block = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n  \}/.exec(view);
+
+  expect(block, "no prefers-reduced-motion block in the Tree's stylesheet").not.toBeNull();
+  expect(block?.[0]).toMatch(/\.wires \.wire[^{}]*\{[^}]*animation:\s*none/);
+  // Switched off, not hidden: a wire nobody can see is not the same promise,
+  // and there is more than one way to make one invisible.
+  for (const hiding of ["display: none", "visibility: hidden", "opacity: 0"]) {
+    expect(block?.[0], `the reduced-motion block hides the wires with ${hiding}`).not.toContain(
+      hiding,
+    );
+  }
 });
