@@ -111,21 +111,27 @@
 //!
 //! # What this module deliberately does not do yet
 //!
-//! The create/edit surface (#429) and the keyboard walk and spines (#430)
-//! have landed, and so have the routes above. [`in_context`] serves a *stored*
-//! room; the Assets tile's rule for the derived rooms -- *All work*'s top
-//! level, a source room's monitored assets, a project room's nothing -- is
-//! **#435**. A route is **not moved between exposing assets** -- there is no
-//! `move_route` -- because a route is the address *of* the thing that answers
-//! it: re-exposing one somewhere else is a different route with a different
-//! history, which is a delete and a create. The wires story 31 draws between a
-//! route row and its target are #433's.
+//! The create/edit surface (#429), the keyboard walk and spines (#430), the
+//! routes above, and the Assets tile in every kind of room (#434, #435) have
+//! landed: [`in_context`] serves a *stored* room and [`monitored_by`] a
+//! *source* room, while *All work*'s top level is [`tree`] with no parent and
+//! a project room reads nothing at all -- the frontend rule that picks among
+//! the four is `app/src/lib/shell/assets-tile.ts`. A route is **not moved
+//! between exposing assets** -- there is no `move_route` -- because a route is
+//! the address *of* the thing that answers it: re-exposing one somewhere else
+//! is a different route with a different history, which is a delete and a
+//! create. The wires story 31 draws between a route row and its target are
+//! #433's.
+//!
+//! Monitors themselves are **M4.1**, so [`monitored_by`] answers with nothing
+//! until the Kuma adapter emits the kind it reads.
 
 use std::collections::HashMap;
 
 use knobas_core::activity::ActivityRow;
 use knobas_core::asset::{self, AssetType, PropertyKind};
 use knobas_core::entity::EntityRef;
+use knobas_core::link::LinkEntry;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -166,6 +172,26 @@ const HISTORY_LIMIT: i64 = 50;
 /// and borrowing it would tie the estate's own rendering to an adapter rule
 /// that may change for reasons that have nothing to do with assets.
 const PATH_SEPARATOR: &str = " / ";
+
+/// The relation a monitor is attached to an asset with (spec #427, story 67).
+///
+/// Spelled here because [`monitored_by_source`] reads it and there is nothing
+/// else on this side of the bridge that knows the word: the relation
+/// vocabulary is a *rendering* decision and lives in
+/// `app/src/lib/detail/relations.ts`, which is where `monitored-by` is given
+/// its two readings. The two spellings are pinned together by
+/// `commands::assets`' mirror test, the way `DEFAULT_RELATION` is.
+pub const MONITORED_BY: &str = "monitored-by";
+
+/// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
+///
+/// **Nothing writes it yet.** The Kuma adapter is M4.1's, so a source room's
+/// tile is empty today -- and it is empty *by this read answering nothing*
+/// rather than by a stub, which is why the word is here now: the day the
+/// adapter lands, the room fills with no change to this module. It is one of
+/// `knobas_core::entity::RESERVED_NAMESPACES` for the separate reason that
+/// `monitor:` ids are knobas' to give.
+const MONITOR_KIND: &str = "monitor";
 
 // ---------------------------------------------------------------------------
 // The wire vocabularies
@@ -470,6 +496,21 @@ pub struct AssetRow {
     /// How many descendants carry `warn` or `down` -- the *N* in story 32's
     /// "N problems inside" badge. `0` draws no badge.
     pub problems_inside: i64,
+    /// How many **work items** this asset is linked to -- story 32's *other*
+    /// badge, the one #435 adds beside the problem count.
+    ///
+    /// A *work item* is an entity the mirror holds: a ticket, a build, a page,
+    /// a commit. Contexts, notes and other assets are knobas' own and are not
+    /// counted, which is the whole of what "linked **work**" means -- a
+    /// container held under a compose project links to the VM it runs on, and
+    /// that link is containment's neighbour rather than work.
+    ///
+    /// Confirmed links only, in either direction, and one per link rather than
+    /// one per item: a pair carries one active link per relation
+    /// (`link_pair_active_idx`), so an asset linked to one ticket as both
+    /// `deployed-from` and `documented-in` is two facts and reads as two. See
+    /// [`LINKED_WORK`].
+    pub linked_work: i64,
 }
 
 /// One row of the pane's property list.
@@ -541,6 +582,17 @@ pub struct AssetDetail {
     pub reachable_via: Vec<RouteRow>,
     /// This asset's own lines from the activity stream, newest first.
     pub history: Vec<ActivityRow>,
+    /// Every confirmed link this asset takes part in, either end, newest
+    /// first -- story 36's *Link to…* read back (#435).
+    ///
+    /// `knobas_core::link::entries_of`'s answer, unfiltered and unsorted here:
+    /// the panel that draws it is the one a ticket's detail draws
+    /// (`app/src/lib/detail/LinksPanel.svelte`), and a second population --
+    /// "work links" against "asset links" -- would be a second rule for the
+    /// reader to learn on a surface whose whole point is that linking an asset
+    /// is the same gesture as linking a ticket. What the *badge* counts is
+    /// narrower and is [`AssetRow::linked_work`].
+    pub links: Vec<LinkEntry>,
 }
 
 /// One route, as both ends read it.
@@ -658,12 +710,13 @@ pub enum RouteEdit {
 /// structural and the reason it is repeated here in prose. `path_text` is left
 /// out of **these three** -- the launcher reads it through the corpus and no
 /// *Miller column* draws it, so selecting it on every column of a walk would
-/// be bytes nobody asked for. [`MEMBER_ASSETS`] (#434) does select it, and
-/// that is the whole reason it is a fourth statement rather than one of these
-/// three: a room's Assets tile is a flat list of assets from anywhere in the
-/// estate, so where each one sits is the column that makes it readable.
+/// be bytes nobody asked for. The two **tile** statements, [`MEMBER_ASSETS`]
+/// (#434) and [`MONITORED_ASSETS`] (#435), do select it, and that is the whole
+/// reason they are statements of their own rather than two more of these: a
+/// room's Assets tile is a flat list of assets from anywhere in the estate, so
+/// where each one sits is the column that makes it readable.
 ///
-/// Four statements rather than one spliced constant: the SQL audit this repo
+/// Five statements rather than one spliced constant: the SQL audit this repo
 /// runs is over literal text, and a statement assembled from fragments is one
 /// a reader cannot check by reading.
 const CHILDREN: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
@@ -842,6 +895,56 @@ const ROLLUP: &str = "with recursive under (root, id, depth) as (
        from under u join knobas.asset d on d.id = u.id
       group by u.root";
 
+/// How many work items each of a set of assets is linked to -- the *linked
+/// work* badge (story 32, issue #435).
+///
+/// **`sync.live_item` is what makes an item "work".** The join is the whole
+/// definition: an entity the mirror holds is a ticket, a build, a page or a
+/// commit, and an entity it does not hold is a context, a note or another
+/// asset -- knobas' own, and not work. Going through the *view* rather than
+/// `sync.item` also carries the tombstone and disabled-source filters, so a
+/// badge never counts a ticket the source withdrew. That is deliberately
+/// **not** what `knobas_core::link::entries_of` does: the pane's list keeps a
+/// withdrawn end visible and marks it, because a link that dangles must not
+/// vanish silently -- but a *number* has nothing to mark, and a count that
+/// included the withdrawn ticket would send the reader looking for work that
+/// is not there.
+///
+/// Confirmed only: `knobas.confirmed_link` cannot hold a proposal, so a
+/// suggestion nobody has accepted is not counted and cannot be, however this
+/// statement is later edited.
+///
+/// A statement of its own, run once per read like [`ROLLUP`] and for the same
+/// reason: a whole literal a reader checks by reading, rather than a fragment
+/// spliced into the five column statements.
+const LINKED_WORK: &str = "select a.id as root, count(*) as linked_work
+       from unnest($1::text[]) as a(id)
+       join knobas.confirmed_link l on l.from_id = a.id or l.to_id = a.id
+       join sync.live_item i
+         on i.entity_id = case when l.from_id = a.id then l.to_id else l.from_id end
+      group by a.id";
+
+/// [`LINKED_WORK`] for `ids`, keyed by asset id.
+///
+/// An asset linked to nothing is **absent** rather than zero -- `count(*)`
+/// over a join that matched nothing produces no group -- so the caller reads
+/// `0` off the missing entry, which is the same answer with one fewer row on
+/// the wire.
+async fn linked_work(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, i64>, IpcError> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(LINKED_WORK).bind(ids).fetch_all(pool).await?;
+    let mut out = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        out.insert(
+            row.try_get::<String, _>("root")?,
+            row.try_get::<i64, _>("linked_work")?,
+        );
+    }
+    Ok(out)
+}
+
 /// What [`ROLLUP`] answers about one asset.
 ///
 /// Every id handed to [`rollup`] comes back, because the statement's anchor
@@ -880,6 +983,7 @@ async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>
 fn row_of(
     row: &sqlx::postgres::PgRow,
     rollups: &HashMap<String, Rollup>,
+    linked: &HashMap<String, i64>,
 ) -> Result<AssetRow, IpcError> {
     let id: String = row.try_get("id")?;
     let type_id: String = row.try_get("type_id")?;
@@ -887,6 +991,8 @@ fn row_of(
     let status = AssetStatus::parse(&row.try_get::<String, _>("status")?)?;
     let environment: Option<String> = row.try_get("environment")?;
     let rolled = rollups.get(&id).copied();
+    // Read here rather than in the field below: `id` is moved into the row.
+    let work = linked.get(&id).copied().unwrap_or(0);
     Ok(AssetRow {
         id,
         parent_id: row.try_get("parent_id")?,
@@ -905,6 +1011,7 @@ fn row_of(
         health: rolled.map_or(status, |r| r.health),
         inside: rolled.map_or(AssetStatus::None, |r| r.inside),
         problems_inside: rolled.map_or(0, |r| r.problems_inside),
+        linked_work: work,
     })
 }
 
@@ -919,7 +1026,10 @@ async fn rows_of(pool: &PgPool, rows: &[sqlx::postgres::PgRow]) -> Result<Vec<As
         .map(|row| row.try_get::<String, _>("id"))
         .collect::<Result<Vec<_>, _>>()?;
     let rollups = rollup(pool, &ids).await?;
-    rows.iter().map(|row| row_of(row, &rollups)).collect()
+    let linked = linked_work(pool, &ids).await?;
+    rows.iter()
+        .map(|row| row_of(row, &rollups, &linked))
+        .collect()
 }
 
 /// The nearest asset that sets a value: this one, then up the held-by path.
@@ -1027,6 +1137,10 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
 
     let entity = entity_of(id)?;
     let history = knobas_core::activity::recent(pool, HISTORY_LIMIT, Some(&entity)).await?;
+    // The same read a ticket's detail makes, against the same statement: an
+    // asset is an entity, so "what is this linked to" has one answer in this
+    // app and the pane draws it through the panel the slide-over draws.
+    let links = knobas_core::link::entries_of(pool, &entity).await?;
 
     Ok(AssetDetail {
         properties: properties_of(&asset.type_id, &stored),
@@ -1038,6 +1152,7 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         exposes,
         reachable_via,
         history,
+        links,
     })
 }
 
@@ -1152,6 +1267,33 @@ const MEMBER_ASSETS: &str = "select a.id, a.parent_id, a.type_id, a.name, a.stat
       where a.id = any($1::text[])
       order by a.name asc, a.id asc";
 
+/// The assets a **source**'s monitors are attached to (spec #427 story 44).
+///
+/// [`MEMBER_ASSETS`]' columns over a different `where`, and a statement of its
+/// own for the reason all five are: a whole literal a reader checks by
+/// reading.
+/// `$1` is the source id, `$2` the relation ([`MONITORED_BY`]) and `$3` the
+/// kind ([`MONITOR_KIND`]) -- bound rather than written into the text, so each
+/// word has one spelling in this crate.
+///
+/// An `exists` rather than a join: an asset carrying two monitors is one row
+/// of a tile, and a join would draw it twice.
+const MONITORED_ASSETS: &str =
+    "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
+            a.owner, nullif(a.path_text, '') as path,
+            exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
+       from knobas.asset a
+      where exists (
+            select 1 from knobas.confirmed_link l
+              join sync.live_item i
+                on i.entity_id = case when l.from_id = a.id then l.to_id else l.from_id end
+             where (l.from_id = a.id or l.to_id = a.id)
+               and l.relation = $2
+               and i.source_id = $1
+               and i.kind = $3
+      )
+      order by a.name asc, a.id asc";
+
 /// The assets a stored room's Assets tile draws: the context's member assets,
 /// worst health first (spec #427 story 41, issue #434).
 ///
@@ -1197,7 +1339,60 @@ pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>,
         .bind(&members)
         .fetch_all(pool)
         .await?;
-    let assets = rows_of(pool, &rows).await?;
+    tile_rows(pool, &rows).await
+}
+
+/// The assets a **source** room's Assets tile draws: everything this source's
+/// monitors are attached to, worst health first (spec #427 story 44, issue
+/// #435).
+///
+/// **A `monitored-by` link to an item of this source, and nothing else.** The
+/// rule spec #427 states is *"a source room lists assets with a monitored-by
+/// link to that source's monitors"*, and every clause of it is in
+/// [`MONITORED_ASSETS`]: the relation, the source, and `kind = 'monitor'` --
+/// which is what keeps a Jira room from listing the assets its *tickets*
+/// happen to be linked to.
+///
+/// **It answers nothing today, and that is the read working.** No adapter
+/// emits `monitor` until M4.1, so the mirror holds none and the join matches
+/// none. Written as the real statement rather than as an empty `Vec` because
+/// the difference is not visible from the tile and is the whole difference
+/// between a room that fills itself the day the adapter lands and a room
+/// somebody has to remember to come back to.
+///
+/// **Not membership's rule.** A monitor watches the thing it was pointed at;
+/// that a VM holds the container somebody is monitoring does not make the VM
+/// monitored, so there is no ancestor expansion here and
+/// [`knobas_core::context::member_ids`] is not consulted. What rolls up the
+/// tree is *health*, which every row carries already.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+pub async fn monitored_by(pool: &PgPool, source_id: &str) -> Result<Vec<MemberAsset>, IpcError> {
+    let rows = sqlx::query(MONITORED_ASSETS)
+        .bind(source_id)
+        .bind(MONITORED_BY)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?;
+    tile_rows(pool, &rows).await
+}
+
+/// The rows of a tile's read, hydrated and put in the order a tile draws them.
+///
+/// One helper for both tile reads rather than a copy each: the *ordering* is
+/// the tile's and not one room kind's, and two copies of a three-key sort are
+/// two chances for a room to be ordered differently from the room beside it.
+///
+/// `severity` is smaller-is-worse, so this is an ascending sort and the worst
+/// row is first. The statement cannot do it: `health` is the rollup's answer
+/// and the rollup is a read of its own.
+async fn tile_rows(
+    pool: &PgPool,
+    rows: &[sqlx::postgres::PgRow],
+) -> Result<Vec<MemberAsset>, IpcError> {
+    let assets = rows_of(pool, rows).await?;
     let mut out: Vec<MemberAsset> = rows
         .iter()
         .zip(assets)
@@ -1208,10 +1403,6 @@ pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>,
             })
         })
         .collect::<Result<Vec<_>, IpcError>>()?;
-
-    // `severity` is smaller-is-worse, so this is an ascending sort and the
-    // worst row is first. The statement cannot do it: `health` is the rollup's
-    // answer and the rollup is a read of its own.
     out.sort_by(|left, right| {
         left.asset
             .health
@@ -2520,6 +2711,25 @@ mod tests {
         assert!(knobas_core::entity::is_owned_kind(ROUTE_NAMESPACE));
     }
 
+    /// [`MONITOR_KIND`]'s doc comment claims the word is one knobas keeps, and
+    /// this is the assertion behind the claim (#435).
+    ///
+    /// It is **not** an owned kind: a monitor is mirrored from Uptime Kuma
+    /// (spec #427, *"assets are knobas-owned; monitors are mirrored"*), so the
+    /// mirror row it arrives as is `kuma:<id>` and the namespace is the
+    /// source's. What the reservation buys is that no *source* may call itself
+    /// `monitor` and write its items where monitors live -- which is what
+    /// makes [`MONITORED_ASSETS`]' `kind` clause a statement about Kuma's
+    /// checks rather than about whatever a source happened to name itself.
+    #[test]
+    fn the_monitor_kind_is_a_word_knobas_keeps_for_itself() {
+        assert!(knobas_core::entity::is_reserved_namespace(MONITOR_KIND));
+        assert!(
+            !knobas_core::entity::is_owned_kind(MONITOR_KIND),
+            "a monitor is mirrored, not owned"
+        );
+    }
+
     fn text(value: &str) -> PropertyValue {
         PropertyValue::Text {
             value: value.to_owned(),
@@ -2814,6 +3024,7 @@ mod tests {
             health: AssetStatus::None,
             inside: AssetStatus::None,
             problems_inside: 0,
+            linked_work: 0,
         }
     }
 

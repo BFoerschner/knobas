@@ -9,11 +9,11 @@
  * source's grouping of its own items and an estate has no such grouping to
  * guess at.
  *
- * Only the stored room's read is built (#434). The other three are **#435**'s,
- * and until then this answers `none` for them, which is what the tile draws
- * nothing for. That is why the answer is a tagged union of one useful member
- * rather than a boolean: #435 adds members here and every caller keeps
- * compiling until it has handled them.
+ * All four are built: #434 the stored room's, #435 the rest. The answer is a
+ * tagged union rather than a boolean because each of the three that reads
+ * anything reads something *different* — a context's members, the estate's
+ * top level, one source's monitored assets — and a caller told only "yes"
+ * would have to work out which from the filter a second time.
  *
  * A module of its own, and pure, because it is the one part of the tile that
  * can be wrong without a database or a window — the rule spec #427 names as a
@@ -45,23 +45,74 @@ export type AssetsTileRead =
       /** The context whose membership scopes the read. */
       ctx: string;
     }
+  | {
+      /**
+       * *All work*: the estate's **top level**, with its problem counts
+       * (story 43) — the first Miller column, in the widest room.
+       *
+       * The top level and not every asset: the widest room gives the widest
+       * *view*, and a flat list of four hundred containers is the opposite of
+       * one. What each root carries about its subtree is `problems_inside`,
+       * which every row has already.
+       */
+      kind: "roots";
+    }
+  | {
+      /**
+       * A source room: the assets this source's monitors are attached to
+       * (story 44), by a `monitored-by` link.
+       */
+      kind: "source";
+      /** The source whose monitors scope the read. */
+      source: string;
+    }
   | { kind: "none" };
 
 /**
  * The rule.
  *
- * A stored room is the one that carries a `context`; every derived room leaves
- * it null and narrows by `sources`, `project`, or nothing (ADR-0010). So the
- * one field decides, and a project room — which sets `sources` *and*
- * `project` and no context — falls to `none` by that same reading rather than
- * by a case of its own.
+ * Three questions in the order that makes each answer unambiguous, over the
+ * three filter fields (ADR-0010):
+ *
+ * 1. **A `context`** is a stored room, which no derived room ever sets.
+ * 2. **A `project`** is a project room — the one room that narrows by two
+ *    fields at once, because a project key is unique only inside its own
+ *    source. It reads nothing, and that is story 45: *"show nothing rather
+ *    than something guessed"*, since a project is a source's grouping of its
+ *    own items and an estate has no such grouping to guess at.
+ * 3. **A `source`** is that source's room.
+ *
+ * What is left narrows by nothing at all, and that is *All work*.
+ *
+ * The order is load-bearing at step 2: a project room sets `sources` too, so
+ * asking about sources first would give it a source room's read.
+ *
+ * A filter naming **several** sources reads nothing. No room produces one —
+ * every source room names exactly its own — and a tile that picked the first
+ * of them would be showing one source's monitors under a heading that claims
+ * more.
  */
 export function assetsTileRead(filter: RoomFilter): AssetsTileRead {
   const ctx = filter.context;
-  if (ctx !== null && ctx !== undefined && ctx !== "") {
-    return { kind: "members", ctx };
-  }
-  return { kind: "none" };
+  if (named(ctx)) return { kind: "members", ctx };
+  if (named(filter.project)) return { kind: "none" };
+  const sources = filter.sources;
+  if (sources.length === 1) return { kind: "source", source: sources[0]! };
+  if (sources.length > 1) return { kind: "none" };
+  return { kind: "roots" };
+}
+
+/**
+ * Whether a narrowing field names anything.
+ *
+ * Both nullable fields cross the bridge as `string | null`, and both can also
+ * arrive as `""` — the address `#/ctx/` cannot make one, but the shape allows
+ * it, and a blank read as a value would send the tile after the members of a
+ * context with no id. One predicate rather than the same three comparisons
+ * written twice.
+ */
+function named(value: string | null | undefined): value is string {
+  return value !== null && value !== undefined && value !== "";
 }
 
 /**
@@ -69,8 +120,9 @@ export function assetsTileRead(filter: RoomFilter): AssetsTileRead {
  *
  * A second question rather than the room reading `.kind !== "none"` itself:
  * the room asks *do I draw one*, which is a boolean and always will be, and
- * the tile asks *what do I read*, which #435 grows. Keeping them apart is what
- * lets the union grow without `Room.svelte` learning its members.
+ * the tile asks *what do I read*, which is a union of four. Keeping them apart
+ * is what let #435 add three members without `Room.svelte` learning any of
+ * them.
  */
 export function roomDrawsAssets(filter: RoomFilter): boolean {
   return assetsTileRead(filter).kind !== "none";

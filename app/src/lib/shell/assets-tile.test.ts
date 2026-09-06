@@ -2,8 +2,8 @@
  * The Assets tile's per-room rule (spec #427, "The Kuma room and tiles").
  *
  * Four kinds of room, one rule, and the room's own filter is its whole input —
- * so this is a table rather than four tests, and the table is the thing #435
- * grows when the derived rooms get their reads.
+ * so this is a table rather than four tests. #434 built the stored room's
+ * case; #435 built the other three.
  *
  * `builtinContexts` builds the derived rooms rather than the filters being
  * hand-written here: what is under test is the rule against the filters the
@@ -44,24 +44,40 @@ test("a stored room reads its member assets", () => {
 });
 
 /**
- * The three derived rooms, which #434 does not build a read for.
+ * The three derived rooms, each with the read spec #427 gives it (stories 43,
+ * 44 and 45).
  *
- * *All work*'s top level, a source room's monitored assets and a project
- * room's nothing are #435's; until then each answers `none`, and the room
- * draws no tile at all — which is a different thing from a tile that is empty,
- * and the difference is what this asserts.
+ * The project room is the one that could pass by accident: it is the only room
+ * that sets two filter fields, so a rule asking about `sources` before
+ * `project` gives it a source room's read — the tile would then list the
+ * assets that source's monitors watch under a heading claiming to be about one
+ * project, which is precisely the guess story 45 refuses.
  *
- * The project room is the one that could pass by accident: it is the only
- * derived room that sets two filter fields, so a rule reading "no sources" or
- * "no project" rather than "no context" would answer differently for it than
- * for *All work*.
+ * *All work* is the mirror-image trap: its filter is **empty**, not "every
+ * source", so a rule reading "no sources named" as "nothing to show" would
+ * leave the widest room blank.
  */
 test.each([
-  ["all", "All work"],
-  ["src:kuma", "a source room"],
-  ["proj:kuma:PAY", "a project room"],
-])("%s (%s) draws no Assets tile yet", (id) => {
+  ["all", "All work", { kind: "roots" }, true],
+  ["src:kuma", "a source room", { kind: "source", source: "kuma" }, true],
+  ["proj:kuma:PAY", "a project room", { kind: "none" }, false],
+])("%s (%s) reads what its kind of room reads", (id, _what, read, draws) => {
   const filter = room(id).filter;
+  expect(assetsTileRead(filter)).toEqual(read);
+  expect(roomDrawsAssets(filter)).toBe(draws);
+});
+
+/**
+ * A filter naming two sources is nobody's room, and the honest answer is no
+ * tile.
+ *
+ * `EntityFilter.sources` is a list and the switcher only ever puts one id in
+ * it, so this is a shape the type allows and no room produces — which is
+ * exactly when a rule quietly picks the first element and shows one source's
+ * monitors under a heading that claims both.
+ */
+test("a filter over several sources is no source room", () => {
+  const filter = { sources: ["kuma", "jira"], context: null, project: null };
   expect(assetsTileRead(filter)).toEqual({ kind: "none" });
   expect(roomDrawsAssets(filter)).toBe(false);
 });
@@ -75,7 +91,19 @@ test.each([
  * context with no id.
  */
 test("a blank context is no context", () => {
-  expect(assetsTileRead({ sources: [], context: "", project: null })).toEqual({ kind: "none" });
+  expect(assetsTileRead({ sources: [], context: "", project: null })).toEqual({ kind: "roots" });
+});
+
+/**
+ * And a blank project is no project, for the same reason read the other way:
+ * a room narrowing by nothing is *All work*, however many of its fields
+ * arrived as empty strings rather than as nulls.
+ */
+test("a blank project in a source room is no project", () => {
+  expect(assetsTileRead({ sources: ["kuma"], context: null, project: "" })).toEqual({
+    kind: "source",
+    source: "kuma",
+  });
 });
 
 /** The grid keys the maximise gesture on this id, so it may not collide with

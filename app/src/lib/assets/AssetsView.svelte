@@ -42,13 +42,21 @@
   the pane and the history are one answer from the backend rather than an
   optimistic guess that a failed second write would leave standing.
 
+  **Linking is the same gesture here as on a ticket** (#435, story 36).
+  *Link to…* opens the dialog a slide-over opens, and what it drew reads back
+  through the panel a slide-over draws — with the relation worded per end, so
+  the container's pane says *runs on* and the VM's says *hosts* over the one
+  row. A column row carries the count of linked **work** beside the problem
+  badge: work is what the mirror holds, so a link to another asset or to a
+  context is not in it.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
-  and arrive with the routes that carry the URLs (#432). Wires, *Link to…*, the
-  linked-work badge and monitoring are #433, #435 and M4.1; monitors are also
-  the half of story 37's *own* health that is not here yet. The Monitors tab is
-  M4.1's, so the tab strip has one tab in it: a disabled sibling would teach the
-  reader only that the app is unfinished. **Environment, owner and status are
+  and arrive with the routes that carry the URLs (#432). Wires are #433's and
+  monitoring is M4.1's; monitors are also the half of story 37's *own* health
+  that is not here yet. The Monitors tab is M4.1's, so the tab strip has one tab
+  in it: a disabled sibling would teach the reader only that the app is
+  unfinished. **Environment, owner and status are
   editable fields on `AssetEdit` and this pane does not set them**: #431 owns
   their *in force* half and draws it, and a control that wrote the stored value
   beside a line reading "or inherited from vm-db-01" is a second ticket's
@@ -81,7 +89,10 @@
     type RouteDetail,
     type RouteRow,
   } from "../ipc/assets";
+  import { unlink as realUnlink, type LinkEntry } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
+  import LinkDialog from "../detail/LinkDialog.svelte";
+  import LinksPanel from "../detail/LinksPanel.svelte";
   // The launcher's own debounce, imported rather than copied: two search
   // boxes in one app that wait different amounts of time feel like two apps.
   import { DEBOUNCE_MS } from "../launcher";
@@ -115,6 +126,7 @@
     sourceOf,
     stripFor,
     walk,
+    workBadge,
     type ColumnPath,
     type Match,
   } from "./tree";
@@ -146,6 +158,15 @@
      * press the button without a Tauri backend behind it.
      */
     openExternal: typeof realOpenExternal;
+    /**
+     * Withdrawing a link from the pane's *Linked* panel.
+     *
+     * Only the *un*link is a port. Drawing one is `LinkDialog`'s own write —
+     * the dialog owns its picker, its failure line and its call, exactly as it
+     * does over a ticket's slide-over, and a second copy of that here would be
+     * a second dialog to keep in step with the first.
+     */
+    unlink: typeof realUnlink;
   }
 
   let {
@@ -189,6 +210,7 @@
     editRoute: realEditRoute,
     deleteRoute: realDeleteRoute,
     openExternal: realOpenExternal,
+    unlink: realUnlink,
     ...ports,
   };
 
@@ -279,6 +301,8 @@
   /** The route editor: open on a new route, or on one of the pane's own. */
   let exposing = $state(false);
   let editingRoute = $state<RouteRow | null>(null);
+  /** Whether *Link to…* is open over the pane (story 36). */
+  let linking = $state(false);
   /** The property row being edited, by key, and the text in its field. */
   let editingKey = $state<string | null>(null);
   let draft = $state("");
@@ -718,6 +742,7 @@
     deleting = false;
     exposing = false;
     editingRoute = null;
+    linking = false;
     writeFailure = null;
   }
 
@@ -992,6 +1017,17 @@
   function goToSource(hash: string | null) {
     if (hash !== null) router.go(hash);
   }
+
+  /**
+   * Withdraw one link, then re-read.
+   *
+   * The re-read is what puts the pane's list, the column's badge and the
+   * asset's history back in step: unlinking is a mutation like any other here,
+   * and `write` is the one path every mutation in this view takes.
+   */
+  async function removeLink(entry: LinkEntry) {
+    await write(() => io.unlink(entry.link.id));
+  }
 </script>
 
 <!--
@@ -1155,6 +1191,7 @@
               <ol class="col">
                 {#each column as row (row.id)}
                   {@const badge = problemBadge(row)}
+                  {@const work = workBadge(row)}
                   <li>
                     <button
                       class="row {chosen === row.id ? 'on' : ''}"
@@ -1164,6 +1201,18 @@
                     >
                       <span class="mg" title={row.type_label}>{row.monogram}</span>
                       <span class="nm">{row.name}</span>
+                      {#if work !== null}
+                        <!--
+                          Story 32's first badge: how much work is linked to
+                          this asset. Toneless on purpose — a linked ticket is
+                          neither good nor bad, and colouring it would make the
+                          busiest asset in the estate look like the sickest.
+                        -->
+                        <span
+                          class="badge work"
+                          title="{work} linked {work === 1 ? 'work item' : 'work items'}"
+                        >{work}</span>
+                      {/if}
                       {#if badge}
                         <!--
                           Story 32: what a *closed* branch is hiding. The number is
@@ -1292,6 +1341,22 @@
         <div class="acts">
           <button class="btn sm" onclick={beginRename}>Rename</button>
           <button class="btn sm" onclick={() => (moving = true)}>Move…</button>
+          <!--
+            Story 36: the same gesture a ticket's slide-over offers, opening
+            the same dialog. It is beside the other three rather than only
+            inside the panel below because it is an action *on the asset*, and
+            a reader who has not scrolled to the links yet is the one most
+            likely to want it.
+          -->
+          <button
+            class="btn sm"
+            onclick={() => {
+              linking = true;
+              writeFailure = null;
+            }}
+          >
+            Link to…
+          </button>
           <button class="btn sm danger" onclick={() => (deleting = true)}>Delete</button>
         </div>
 
@@ -1598,6 +1663,30 @@
           </section>
         {/if}
 
+        <!--
+          The panel a ticket's slide-over draws, mounted here with the asset's
+          own links (story 36). Not a list of this view's own: the readings, the
+          withdrawn marker, the reason line and the empty state are one set of
+          decisions, and the whole point of the story is that linking an asset
+          is the same gesture — and reads the same way — as linking a ticket.
+
+          The rows open through the room's `all` address, which is the panel's
+          own encoder: an asset row lands in the Tree, because `#/asset/<id>`
+          is what `hashFor` produces for the `asset` kind.
+        -->
+        <section class="grp">
+          <LinksPanel
+            entityId={detail.asset.id}
+            links={detail.links}
+            onopen={(hash) => router.go(hash)}
+            onunlink={(entry) => void removeLink(entry)}
+            onlink={() => {
+              linking = true;
+              writeFailure = null;
+            }}
+          />
+        </section>
+
         <section class="grp">
           <h3 class="lab">History</h3>
           {#if detail.history.length === 0}
@@ -1630,6 +1719,21 @@
       // column because the Tree read it back, which is the same path a click
       // takes and the reason a cold link lands in the same place.
       router.go(addressOf(row));
+    }}
+  />
+{/if}
+
+{#if linking && detail}
+  <LinkDialog
+    fromId={detail.asset.id}
+    fromTitle={detail.asset.name}
+    onclose={() => (linking = false)}
+    oncreated={() => {
+      linking = false;
+      // The address is unchanged — the asset is the same asset — so the
+      // re-read is what puts the new link in the panel and the new count in
+      // the column's badge.
+      revision += 1;
     }}
   />
 {/if}
@@ -1996,6 +2100,15 @@
 
   .row .badge.down {
     color: var(--fail);
+  }
+
+  /* The linked-work badge carries no alarm colour, because a linked ticket is
+     not a fault: it is the muted foreground, so it reads as a count rather
+     than as a state. It is drawn *before* the problem badge, so the two never
+     swap places on a row that has both. */
+  .row .badge.work {
+    color: var(--muted);
+    border-color: var(--hair2);
   }
 
   .pane {

@@ -110,6 +110,7 @@ function assetNamed(id: string, name: string, monogram: string): AssetDetail {
     health: "none",
     inside: "none",
     problems_inside: 0,
+    linked_work: 0,
   };
   return {
     asset,
@@ -121,6 +122,7 @@ function assetNamed(id: string, name: string, monogram: string): AssetDetail {
     exposes: [],
     reachable_via: [],
     history: [],
+    links: [],
     effective_environment: null,
     effective_owner: null,
   };

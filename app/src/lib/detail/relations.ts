@@ -63,6 +63,21 @@ export const RELATIONS: readonly Relation[] = [
   { id: "duplicates", forward: "duplicates", inverse: "duplicated by" },
   { id: "fixes", forward: "fixes", inverse: "fixed by" },
   { id: "runs-on", forward: "runs on", inverse: "hosts" },
+  // The four spec #427 story 15 names beyond containment, of which `runs-on`
+  // was already here (#289's neighbour). They are ordinary relations, not a
+  // second vocabulary: ADR-0014 makes *holding* a parent field, and everything
+  // else an asset says about another thing is a link like any other.
+  { id: "deployed-from", forward: "deployed from", inverse: "deploys" },
+  // `documented-in` is the same fact as `documents` read from the other end,
+  // so its inverse is that word and the panel groups the two together under
+  // one heading — which is right: a page that documents a container and a
+  // container documented in a page are one sentence, and two headings saying
+  // it twice would be two headings.
+  { id: "documented-in", forward: "documented in", inverse: "documents" },
+  // The relation the estate file's monitor names become (#439) and the one a
+  // source room's Assets tile reads — `knobas_app::assets::MONITORED_BY`,
+  // pinned to this list by that module's mirror test.
+  { id: "monitored-by", forward: "monitored by", inverse: "monitors" },
 ];
 
 /**

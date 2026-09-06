@@ -304,6 +304,9 @@ pub fn run() {
             commands::assets::create_route,
             commands::assets::edit_route,
             commands::assets::delete_route,
+            // #435, appended after those: the source room's half of #434's
+            // tile.
+            commands::assets::source_assets,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

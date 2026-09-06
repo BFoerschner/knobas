@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { MemberAsset } from "../ipc/assets";
+import type { AssetRow, MemberAsset } from "../ipc/assets";
 import type {
   ContextRow,
   EntityDetail,
@@ -88,21 +88,34 @@ vi.mock("../ipc/entity", () => ({
 }));
 
 /**
- * The Assets tile's read (#434), which a *stored* room mounts.
+ * The Assets tile's three reads (#434, #435), one per kind of room that has
+ * one.
  *
- * A plain function for `Tile.test.svelte.ts`' reason, and mocked at all
- * because the room mounts the tile with no `ports` — the real module reaches
- * Tauri, which is not here. What the tile draws is
- * `AssetsTile.test.svelte.ts`'; what this file is about is *which rooms draw
- * it*.
+ * Plain functions for `Tile.test.svelte.ts`' reason, and mocked at all because
+ * the room mounts the tile with no `ports` — the real module reaches Tauri,
+ * which is not here. What the tile draws is `AssetsTile.test.svelte.ts`'; what
+ * this file is about is *which rooms draw it and what each one asks for*.
+ *
+ * `assetCalls` records every read as `<kind> <argument>`, so one array can say
+ * that a project room asked nothing while a source room asked about itself.
  */
 const assetCalls: string[] = [];
 let assets: (ctxId: string) => Promise<MemberAsset[]> = () => Promise.resolve([]);
+let roots: () => Promise<AssetRow[]> = () => Promise.resolve([]);
+let monitored: (sourceId: string) => Promise<MemberAsset[]> = () => Promise.resolve([]);
 
 vi.mock("../ipc/assets", () => ({
   contextAssets: (ctxId: string) => {
-    assetCalls.push(ctxId);
+    assetCalls.push(`members ${ctxId}`);
     return assets(ctxId);
+  },
+  assetTree: (parentId?: string | null) => {
+    assetCalls.push(`tree ${parentId ?? "null"}`);
+    return roots();
+  },
+  sourceAssets: (sourceId: string) => {
+    assetCalls.push(`source ${sourceId}`);
+    return monitored(sourceId);
   },
 }));
 
@@ -266,6 +279,8 @@ beforeEach(() => {
   answer = () => Promise.resolve({ rows: [], total: 0 });
   board = () => Promise.resolve({ columns: [], sources: [] });
   assets = () => Promise.resolve([]);
+  roots = () => Promise.resolve([]);
+  monitored = () => Promise.resolve([]);
 });
 
 /** Let every queued promise and the DOM catch up. */
@@ -291,7 +306,10 @@ test("draws one tile per bucket present, and one per open kind", async () => {
   await vi.waitFor(() => expect(screen.tiles().length).toBeGreaterThan(0));
   flushSync();
 
-  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  // The Assets tile is last and is not a bucket: it comes from the room's
+  // filter (#434, #435), not from the survey, which is why the scan below is
+  // still unfiltered by kind.
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
   // The scan is unfiltered by kind — that is what makes it a survey.
   expect(calls[0]?.filter.kinds).toEqual([]);
 
@@ -321,7 +339,7 @@ test("a source room filters by its source and is named after it", async () => {
   answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1 });
 
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets"]));
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Assets"]));
   flushSync();
 
   expect(screen.text()).toContain("Tidewater Jira");
@@ -332,9 +350,15 @@ test("a source room filters by its source and is named after it", async () => {
   screen.done();
 });
 
-/** An empty corpus is a sentence, not a grid of empty tiles. */
+/**
+ * An empty corpus is a sentence, not a grid of empty tiles.
+ *
+ * A **project** room, because it is the one kind with no Assets tile of its
+ * own (story 45): every other room draws one whatever the mirror holds, and an
+ * empty *room* is now exactly a room with no tile of any kind.
+ */
 test("a room with nothing in it draws no tiles at all", async () => {
-  const screen = render("#/ctx/all");
+  const screen = render("#/ctx/proj:jira:QUIET");
   await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
   expect(screen.tiles()).toEqual([]);
   screen.done();
@@ -381,7 +405,8 @@ test("the tile grid sizes itself with a modifier class", async () => {
     );
 
   const screen = render("#/ctx/all");
-  await vi.waitFor(() => expect(screen.tiles().length).toBe(3));
+  // Three buckets and the room's own Assets tile.
+  await vi.waitFor(() => expect(screen.tiles().length).toBe(4));
   flushSync();
 
   const tiles = screen.target.querySelector(".tiles");
@@ -522,7 +547,9 @@ function serveCorpus() {
 test("maximising a tile draws it alone and Restore draws the grid again", async () => {
   serveCorpus();
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await vi.waitFor(() =>
+    expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]),
+  );
   await settle();
   expect(screen.grid()).not.toContain("max");
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
@@ -537,7 +564,7 @@ test("maximising a tile draws it alone and Restore draws the grid again", async 
 
   screen.maximise("Docs");
   await settle();
-  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
   expect(screen.grid()).not.toContain("max");
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
 
@@ -562,7 +589,9 @@ test("maximising a tile draws it alone and Restore draws the grid again", async 
 test("walking to another room restores the grid, and walking back finds it restored", async () => {
   serveCorpus();
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await vi.waitFor(() =>
+    expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]),
+  );
   await settle();
   screen.maximise("Docs");
   expect(screen.tiles()).toEqual(["Docs"]);
@@ -574,7 +603,9 @@ test("walking to another room restores the grid, and walking back finds it resto
 
   screen.router.go("#/ctx/src:jira");
   await settle();
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await vi.waitFor(() =>
+    expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]),
+  );
   expect(screen.grid()).not.toContain("max");
 
   screen.done();
@@ -593,7 +624,9 @@ test("walking to another room restores the grid, and walking back finds it resto
 test("a fresh list of the same rooms leaves the tile maximised", async () => {
   serveCorpus();
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await vi.waitFor(() =>
+    expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]),
+  );
   await settle();
   screen.maximise("Docs");
   expect(screen.tiles()).toEqual(["Docs"]);
@@ -620,7 +653,9 @@ test("a fresh list of the same rooms leaves the tile maximised", async () => {
 test("a detail opens over the maximised tile and leaves it maximised; restoreTile answers honestly", async () => {
   serveCorpus();
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await vi.waitFor(() =>
+    expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]),
+  );
   await settle();
 
   expect(screen.restoreTile(), "nothing to restore in a plain room").toBe(false);
@@ -640,7 +675,7 @@ test("a detail opens over the maximised tile and leaves it maximised; restoreTil
   expect(screen.restoreTile()).toBe(true);
   flushSync();
   await settle();
-  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
   expect(screen.restoreTile(), "a second press has nothing left to restore").toBe(false);
 
   screen.done();
@@ -703,7 +738,7 @@ test("a project room narrows every tile in it, its own count included", async ()
   await settle();
 
   expect(source.text()).toContain("6 items");
-  expect(source.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(source.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
   expect(source.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
   expect(source.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC", "Title of INC-1"]);
   source.done();
@@ -1099,41 +1134,65 @@ function memberAsset(name: string, path: string | null): MemberAsset {
       health: "up",
       inside: "none",
       problems_inside: 0,
+      linked_work: 0,
     },
     path,
   };
 }
 
 /**
- * Which rooms draw an Assets tile, and which do not (spec #427's per-room
- * rule, of which #434 builds the stored room's half).
+ * Which rooms draw an Assets tile, and what each one asks for (spec #427's
+ * per-room rule, #434 and #435).
  *
- * Both directions in one test, over one mounted room, because the claim is
+ * All four kinds in one test, over one mounted shell, because the claim is
  * about the *switch*: a tile drawn for every room would pass a stored-room
- * assertion, and a tile drawn for none would pass a derived-room one. The
- * read is the second half — a derived room must not merely hide the tile, it
- * must not ask the backend for a membership it has no context for.
+ * assertion, and a tile drawn for none would pass the project room's. The read
+ * is the second half — a project room must not merely hide the tile, it must
+ * not ask the backend anything, and a source room must ask about **itself**
+ * rather than about the project inside it.
+ *
+ * The *set* of reads, not the number: the room re-mounts its tiles while its
+ * own survey is in flight, so how often a tile reads is the room's business
+ * and what it reads for is this one's.
  */
-test("a stored room draws an Assets tile of its member assets and a derived room draws none", async () => {
+test("each kind of room draws the Assets tile its rule gives it, and reads for itself", async () => {
   ticketsEverywhere();
   assets = () => Promise.resolve([memberAsset("vm-db-01", "hel1")]);
+  roots = () => Promise.resolve([memberAsset("hel1", null).asset]);
+  monitored = () => Promise.resolve([memberAsset("postgres", "hel1 / vm-db-01")]);
 
+  // All work: the estate's top level.
   const screen = render("#/ctx/all");
   await vi.waitFor(() => expect(screen.tiles()).toContain("Tickets"));
   await settle();
-  expect(screen.tiles(), "All work has no Assets tile until #435").not.toContain("Assets");
-  expect(assetCalls, "and asks nothing about a membership it has no context for").toEqual([]);
+  expect(screen.tiles()).toContain("Assets");
+  expect([...new Set(assetCalls)]).toEqual(["tree null"]);
+  expect(screen.text()).toContain("hel1");
 
+  // A project room: nothing at all, and nothing asked.
+  assetCalls.length = 0;
+  screen.router.go("#/ctx/proj:jira:PAY");
+  await settle();
+  expect(screen.tiles(), "a project is a source's grouping of its own items").not.toContain(
+    "Assets",
+  );
+  expect(assetCalls).toEqual([]);
+
+  // A source room: its own monitors' assets.
+  assetCalls.length = 0;
+  screen.router.go("#/ctx/src:jira");
+  await settle();
+  expect(screen.tiles()).toContain("Assets");
+  expect([...new Set(assetCalls)]).toEqual(["source jira"]);
+  expect(screen.text()).toContain("postgres");
+
+  // A stored room: its member assets, with the path each sits at.
+  assetCalls.length = 0;
   screen.relist([...CONTEXTS, storedContext(STORED)]);
   screen.router.go("#/ctx/ctx:pay");
   await settle();
-
   expect(screen.tiles()).toContain("Assets");
-  // The *set* of contexts asked about, not the number of asks: the room
-  // re-mounts its tiles while its own survey is in flight, so how many times a
-  // tile reads is the room's business and which context it reads for is this
-  // one's.
-  expect([...new Set(assetCalls)]).toEqual(["ctx:pay"]);
+  expect([...new Set(assetCalls)]).toEqual(["members ctx:pay"]);
   expect(screen.text()).toContain("vm-db-01");
   expect(screen.text(), "with the path it sits at").toContain("hel1");
 
@@ -1153,7 +1212,9 @@ test("a stored room draws an Assets tile of its member assets and a derived room
 test("a stored room with assets and nothing synced draws the tile, not the empty page", async () => {
   assets = () => Promise.resolve([memberAsset("hel1", null)]);
 
-  const screen = render("#/ctx/all");
+  // A project room is where the empty page still lives, and it is the room
+  // this one has to be told apart from.
+  const screen = render("#/ctx/proj:jira:QUIET");
   await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
 
   screen.relist([...CONTEXTS, storedContext(STORED)]);

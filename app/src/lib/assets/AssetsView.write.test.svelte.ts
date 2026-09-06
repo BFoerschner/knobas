@@ -167,6 +167,7 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
       health: "none",
       inside: "none",
       problems_inside: 0,
+      linked_work: 0,
     };
   }
 
@@ -307,6 +308,9 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
             .sort((left, right) => left.name.localeCompare(right.name))
             .map(routeRow),
           reachable_via: reachable(stored),
+          // Nothing here draws a link; #435's writes are in
+          // `AssetsView.links.test.svelte.ts`.
+          links: [],
           history: lines.filter((line) => line.entity_id === assetId).reverse(),
         });
       } catch (cause) {

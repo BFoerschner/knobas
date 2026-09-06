@@ -1,5 +1,5 @@
-//! The estate at the seam the eight commands are shims over, and at the seam
-//! Tauri dispatches through (issues #428, #429, #431 and #434).
+//! The estate at the seam the nine commands are shims over, and at the seam
+//! Tauri dispatches through (issues #428, #429, #431, #434 and #435).
 //!
 //! Two halves, the same split `tests/backup_ipc.rs` and `tests/time_ipc.rs`
 //! make:
@@ -2154,6 +2154,353 @@ async fn a_route_that_could_not_be_read_back_is_refused() {
 }
 
 // ---------------------------------------------------------------------------
+// Links from an asset (#435)
+// ---------------------------------------------------------------------------
+
+/// A confirmed link carrying the relation the case is about.
+async fn link_as(pool: &PgPool, from: &str, to: &str, relation: &str) -> uuid::Uuid {
+    knobas_core::link::create(
+        pool,
+        &knobas_core::entity::EntityRef::parse(from).expect("a ref"),
+        &knobas_core::entity::EntityRef::parse(to).expect("a ref"),
+        relation,
+        knobas_core::link::Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .expect("the link")
+    .id
+}
+
+/// A mirrored **monitor**: what M4.1's Kuma adapter will write, written here
+/// by hand because no adapter emits the kind yet.
+///
+/// The row is what a source room's tile reads through, so seeding it is what
+/// makes "empty until M4.1" a statement about the *mirror* rather than about
+/// the read -- a read that always answered with nothing would pass this
+/// file's negatives and fail nothing.
+async fn monitor(pool: &PgPool, source: &str, key: &str) -> String {
+    let id = format!("{source}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .expect("the entity row");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,'monitor',$3,'','{}'::jsonb)",
+    )
+    .bind(&id)
+    .bind(source)
+    .bind(key)
+    .execute(pool)
+    .await
+    .expect("the mirror row");
+    id
+}
+
+/// How one asset's pane reads its links: `(relation, the other end, its kind)`.
+async fn links_of(pool: &PgPool, id: &str) -> Vec<(String, String, String)> {
+    assets::get(pool, id)
+        .await
+        .expect("the pane")
+        .links
+        .into_iter()
+        .map(|entry| (entry.link.relation, entry.other.entity_id, entry.other.kind))
+        .collect()
+}
+
+/// Story 36 end to end, at the seam the two panes read through: a container
+/// linked to a ticket with `deployed-from` and to a VM with `runs-on` is on
+/// **both** the ticket's detail and the VM's pane.
+///
+/// The two reads are deliberately different functions -- `get_entity_inner` is
+/// what a ticket's slide-over calls and `assets::get` is what the Tree's pane
+/// calls -- because story 36's claim is that they agree: one row, read
+/// undirected, so neither end has to be the end it was drawn from.
+///
+/// The **wording** is the frontend's and is asserted there
+/// (`app/src/lib/detail/relations.test.ts`: `runs-on` reads `runs on` forwards
+/// and `hosts` back). What has to be true here is the part a table of English
+/// cannot supply: the VM's read carries the link with `from_id` at the
+/// *container*, which is the only thing that lets the pane know it is the end
+/// being pointed at.
+#[tokio::test]
+async fn an_asset_linked_to_a_ticket_and_a_vm_is_on_both_of_their_details() {
+    let pool = pool("assets-link-both-ends").await;
+    let estate = two_branches(&pool).await;
+    let ticket = ticket(&pool, "PAY-231").await;
+
+    link_as(&pool, &estate.postgres.id, &ticket, "deployed-from").await;
+    link_as(&pool, &estate.postgres.id, &estate.db.id, "runs-on").await;
+
+    // The container's own pane carries both, drawn from the end it drew them.
+    let mut drawn = links_of(&pool, &estate.postgres.id).await;
+    drawn.sort();
+    assert_eq!(
+        drawn,
+        vec![
+            (
+                "deployed-from".to_owned(),
+                ticket.clone(),
+                "ticket".to_owned()
+            ),
+            (
+                "runs-on".to_owned(),
+                estate.db.id.clone(),
+                "asset".to_owned()
+            ),
+        ]
+    );
+
+    // The VM's pane carries the same row from the other side: the other end is
+    // the container, and `from_id` is the container too -- which is what makes
+    // the reading `hosts` rather than `runs on`.
+    let vm = assets::get(&pool, &estate.db.id).await.expect("the pane");
+    let held = vm
+        .links
+        .iter()
+        .find(|entry| entry.link.relation == "runs-on")
+        .expect("the VM is one end of the runs-on link");
+    assert_eq!(held.other.entity_id, estate.postgres.id);
+    assert_eq!(held.link.from_id, estate.postgres.id);
+    assert_ne!(
+        held.link.from_id, estate.db.id,
+        "the VM is the end pointed at, and a pane that read it as the from end \
+         would print `runs on` over a row that means `hosts`"
+    );
+
+    // And the ticket's own detail -- the other idiom, the slide-over -- shows
+    // the asset under its links.
+    let detail = knobas_app::commands::entity::get_entity_inner(&pool, &ticket)
+        .await
+        .expect("the ticket's detail");
+    assert_eq!(
+        detail
+            .links
+            .iter()
+            .map(|entry| (
+                entry.link.relation.as_str(),
+                entry.other.entity_id.as_str(),
+                entry.other.kind.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![("deployed-from", estate.postgres.id.as_str(), "asset")],
+        "the ticket shows the container it is deployed from"
+    );
+}
+
+/// Story 32's other badge: `linked_work` counts confirmed links to **work
+/// items** and to nothing else.
+///
+/// Every population the count has to exclude is in the fixture at once, which
+/// is the only way a number can witness an exclusion: two tickets (counted), a
+/// context and another asset (knobas' own, not work), and a proposal nobody
+/// has accepted (not a link at all). A rule counting confirmed *links* rather
+/// than links to *work* reads 4 here; one that kept the work join and forgot
+/// the confirmation reads 3; one that did neither reads 5.
+#[tokio::test]
+async fn the_linked_work_badge_counts_confirmed_links_to_work_items_only() {
+    let pool = pool("assets-linked-work").await;
+    let estate = two_branches(&pool).await;
+    let one = ticket(&pool, "PAY-1").await;
+    let two = ticket(&pool, "PAY-2").await;
+    let three = ticket(&pool, "PAY-3").await;
+    let ctx = knobas_core::context::create_adhoc(&pool, "payments stack")
+        .await
+        .expect("the context");
+
+    let counted = link_as(&pool, &estate.postgres.id, &one, "deployed-from").await;
+    link_as(&pool, &two, &estate.postgres.id, "documented-in").await;
+    link_as(&pool, &estate.postgres.id, &ctx.id, "related").await;
+    link_as(&pool, &estate.postgres.id, &estate.db.id, "runs-on").await;
+    propose(&pool, &estate.postgres.id, &three).await;
+
+    assert_eq!(
+        column_row(&pool, &estate.db.id, "postgres")
+            .await
+            .linked_work,
+        2,
+        "two tickets, whichever end each was drawn from"
+    );
+    assert_eq!(
+        assets::get(&pool, &estate.postgres.id)
+            .await
+            .expect("the pane")
+            .asset
+            .linked_work,
+        2,
+        "and the pane says what the column says"
+    );
+    assert_eq!(
+        column_row(&pool, &estate.site.id, "vm-db-01")
+            .await
+            .linked_work,
+        0,
+        "the VM's one link is to an asset, which is not work"
+    );
+
+    // Withdrawing the link takes its count with it: a tombstone is out of
+    // `knobas.confirmed_link`.
+    knobas_core::link::unlink(&pool, counted)
+        .await
+        .expect("unlink");
+    assert_eq!(
+        column_row(&pool, &estate.db.id, "postgres")
+            .await
+            .linked_work,
+        1
+    );
+
+    // And so does the *source* withdrawing the ticket. `sync.live_item` is
+    // what makes an item work, tombstone filter included -- the pane's list
+    // still shows the row and marks it, because a link that dangles must not
+    // vanish silently, but a number has nothing to mark.
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&two)
+        .execute(&pool)
+        .await
+        .expect("the withdrawal");
+    assert_eq!(
+        column_row(&pool, &estate.db.id, "postgres")
+            .await
+            .linked_work,
+        0
+    );
+    assert_eq!(
+        links_of(&pool, &estate.postgres.id).await.len(),
+        3,
+        "the withdrawn ticket, the context and the VM are all still in the pane"
+    );
+}
+
+/// One row of the column `parent` holds, by name.
+async fn column_row(pool: &PgPool, parent: &str, name: &str) -> AssetRow {
+    assets::tree(pool, Some(parent))
+        .await
+        .expect("the column")
+        .into_iter()
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("no {name} in the column under {parent}"))
+}
+
+/// An unconfirmed proposal: a `knobas.link` row with no `confirmed_at`, which
+/// is what `knobas.proposed_link` holds and `knobas.confirmed_link` cannot.
+async fn propose(pool: &PgPool, from: &str, to: &str) {
+    sqlx::query(
+        "insert into knobas.link
+             (from_id, to_id, relation, origin, created_by,
+              confirmed_at, rule, rule_class, reason)
+         values ($1,$2,'related','suggested','knobas',
+              null,'exact_key','exact_key','the branch name carries the key')",
+    )
+    .bind(from)
+    .bind(to)
+    .execute(pool)
+    .await
+    .expect("the proposal");
+}
+
+/// Story 44: a source room's tile lists the assets **that source's monitors**
+/// are attached to, and nothing else.
+///
+/// Three near misses are in the fixture, because each is a clause of the rule
+/// and a read that dropped any one of them would still list `postgres`: a
+/// monitor of a *different* source, an item of the right source that is not a
+/// monitor, and a `related` link to the right monitor. The container's holder
+/// is the fourth: attachment does not roll up the tree the way membership
+/// does, so `vm-db-01` is absent though it holds the monitored container.
+#[tokio::test]
+async fn a_source_rooms_tile_lists_the_assets_its_own_monitors_watch() {
+    let pool = pool("assets-monitored-by").await;
+    let estate = two_branches(&pool).await;
+
+    let kuma = monitor(&pool, "kuma", "1").await;
+    let elsewhere = monitor(&pool, "kuma2", "1").await;
+    let not_a_monitor = ticket(&pool, "PAY-9").await;
+
+    link_as(&pool, &estate.postgres.id, &kuma, "monitored-by").await;
+    link_as(&pool, &estate.redis.id, &elsewhere, "monitored-by").await;
+    link_as(&pool, &estate.app.id, &not_a_monitor, "monitored-by").await;
+    link_as(&pool, &estate.nginx.id, &kuma, "related").await;
+
+    assert_eq!(
+        assets::monitored_by(&pool, "kuma")
+            .await
+            .expect("the tile's read")
+            .into_iter()
+            .map(|row| (row.asset.name, row.path))
+            .collect::<Vec<_>>(),
+        vec![("postgres".to_owned(), Some("hel1 / vm-db-01".to_owned()))],
+        "the monitored container, with the path a flat list needs"
+    );
+
+    assert_eq!(
+        assets::monitored_by(&pool, "kuma2")
+            .await
+            .expect("the tile's read")
+            .into_iter()
+            .map(|row| row.asset.name)
+            .collect::<Vec<_>>(),
+        vec!["redis".to_owned()],
+        "each source's room lists its own monitors' assets"
+    );
+
+    assert_eq!(
+        assets::monitored_by(&pool, "jira")
+            .await
+            .expect("the tile's read")
+            .len(),
+        0,
+        "a source with no monitors has an empty tile, not an error -- which is \
+         every source until M4.1"
+    );
+}
+
+/// Worst first, the same order the stored room's tile draws in, because the
+/// order is the tile's and not one room kind's.
+#[tokio::test]
+async fn a_source_rooms_tile_draws_its_worst_asset_first() {
+    let pool = pool("assets-monitored-order").await;
+    let estate = two_branches(&pool).await;
+    let kuma = monitor(&pool, "kuma", "1").await;
+
+    for asset in [&estate.postgres, &estate.redis, &estate.app] {
+        link_as(&pool, &asset.id, &kuma, "monitored-by").await;
+    }
+    edit_one(
+        &pool,
+        &estate.redis.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Status {
+            value: AssetStatus::Up,
+        },
+    )
+    .await;
+    // `vm-app-02` is well itself and holds a container nobody has rated, so it
+    // sorts between the two -- and it is alphabetically *last*, which is what
+    // a name-only sort would get wrong.
+    assert_eq!(
+        assets::monitored_by(&pool, "kuma")
+            .await
+            .expect("the tile's read")
+            .into_iter()
+            .map(|row| row.asset.name)
+            .collect::<Vec<_>>(),
+        vec!["redis", "postgres", "vm-app-02"]
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The wiring: registered, named, and decoding.
 // ---------------------------------------------------------------------------
 
@@ -2181,6 +2528,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::create_route,
             knobas_app::commands::assets::edit_route,
             knobas_app::commands::assets::delete_route,
+            knobas_app::commands::assets::source_assets,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -2321,6 +2669,7 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             "delete_route",
             serde_json::json!({ "routeId": "route:9a1b" }),
         ),
+        ("source_assets", serde_json::json!({ "sourceId": "kuma" })),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
