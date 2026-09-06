@@ -191,7 +191,9 @@ fn response_time_of(payload: &Value) -> Option<i32> {
 /// about where their state lives*, which is a miss per monitor and still a
 /// row per monitor. The two are deliberately different answers.
 #[must_use]
-pub(crate) fn state_paths(descriptor: &knobas_source::SourceDescriptor) -> Option<Vec<PayloadPath>> {
+pub(crate) fn state_paths(
+    descriptor: &knobas_source::SourceDescriptor,
+) -> Option<Vec<PayloadPath>> {
     descriptor
         .entity_kinds
         .iter()
@@ -230,12 +232,13 @@ pub(crate) async fn append(
         THRESHOLD_RANGE,
     );
 
-    let live: Vec<(String, Value)> =
-        sqlx::query_as("select entity_id, payload from sync.live_item where source_id = $1 and kind = $2")
-            .bind(source_id)
-            .bind(KIND)
-            .fetch_all(&mut **tx)
-            .await?;
+    let live: Vec<(String, Value)> = sqlx::query_as(
+        "select entity_id, payload from sync.live_item where source_id = $1 and kind = $2",
+    )
+    .bind(source_id)
+    .bind(KIND)
+    .fetch_all(&mut **tx)
+    .await?;
     if live.is_empty() {
         return Ok(0);
     }
@@ -348,10 +351,11 @@ async fn setting<'e, E>(db: E, key: &str) -> Result<Option<i64>, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    let stored: Option<Value> = sqlx::query_scalar("select value from knobas.setting where key = $1")
-        .bind(key)
-        .fetch_optional(db)
-        .await?;
+    let stored: Option<Value> =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(key)
+            .fetch_optional(db)
+            .await?;
     Ok(stored.and_then(|value| value.as_i64()))
 }
 
@@ -368,14 +372,8 @@ async fn store(pool: &PgPool, key: &str, value: i64) -> Result<(), sqlx::Error> 
 }
 
 /// The stored number brought into range, or the default when there is none.
-fn clamped(
-    stored: Option<i64>,
-    default: i64,
-    range: std::ops::RangeInclusive<i64>,
-) -> i64 {
-    stored.map_or(default, |value| {
-        value.clamp(*range.start(), *range.end())
-    })
+fn clamped(stored: Option<i64>, default: i64, range: std::ops::RangeInclusive<i64>) -> i64 {
+    stored.map_or(default, |value| value.clamp(*range.start(), *range.end()))
 }
 
 #[cfg(test)]
@@ -516,7 +514,11 @@ mod tests {
     #[test]
     fn a_reading_is_rounded_and_the_threshold_reads_the_rounded_number() {
         let paths = state_at("state");
-        let sample = sample_of(&monitor("up".into(), serde_json::json!(1500.6)), &paths, 1500);
+        let sample = sample_of(
+            &monitor("up".into(), serde_json::json!(1500.6)),
+            &paths,
+            1500,
+        );
         assert_eq!(
             sample,
             Sample {

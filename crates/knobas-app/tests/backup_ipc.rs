@@ -389,13 +389,18 @@ async fn a_tick_sweeps_the_samples_retention_has_aged_out() {
     .await
     .expect("a schedule that never comes due");
 
-    sqlx::query("insert into knobas.entity (id, kind, title) values ('kuma:8', 'monitor', 'canary')")
-        .execute(&service.pool)
-        .await
-        .expect("a monitor to have samples of");
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ('kuma:8', 'monitor', 'canary')",
+    )
+    .execute(&service.pool)
+    .await
+    .expect("a monitor to have samples of");
     let now = chrono::Utc::now();
     let retention = chrono::Duration::days(knobas_sync::samples::DEFAULT_RETENTION_DAYS);
-    for at in [now - retention - chrono::Duration::days(1), now - chrono::Duration::days(1)] {
+    for at in [
+        now - retention - chrono::Duration::days(1),
+        now - chrono::Duration::days(1),
+    ] {
         sqlx::query(
             "insert into knobas.monitor_sample (entity_id, taken_at, state, response_time_ms)
              values ('kuma:8', $1, 'up', 35)",

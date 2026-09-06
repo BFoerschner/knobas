@@ -303,7 +303,10 @@ async fn a_monitor_the_second_run_does_not_publish_gets_no_second_sample() {
     );
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
-    corpus.lock().unwrap().retain(|monitor| monitor.key != "canary");
+    corpus
+        .lock()
+        .unwrap()
+        .retain(|monitor| monitor.key != "canary");
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
     assert_eq!(
@@ -578,5 +581,4 @@ async fn the_settings_default_and_survive_a_round_trip() {
     // cannot turn retention into "delete everything".
     assert_eq!(samples::set_retention_days(&pool, 0).await.unwrap(), 1);
     assert_eq!(samples::set_threshold_ms(&pool, -5).await.unwrap(), 0);
-
 }
