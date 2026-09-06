@@ -486,16 +486,28 @@ mod tests {
     /// the palette and the help card are not searches. So the list is checked
     /// against [`corpus::ALL`] in both directions -- a prefix that
     /// short-circuits must have no corpus behind it, which is what would have
-    /// failed on `asset:` from #428 until #436 and is what will fail on the
-    /// next prefix whose rows land before its rendering does.
+    /// failed on `asset:` from #428 until #436. `corpus_of` below is
+    /// **exhaustive**, with no `_` arm, so the next prefix cannot arrive
+    /// without a verdict on which of the two lists it belongs in.
     #[test]
     fn only_the_absent_corpora_short_circuit() {
-        // The prefix that pins a corpus, and the corpus it pins.
-        let corpus_of = |prefix: Prefix| match prefix {
-            Prefix::Asset => Some("'asset'"),
-            Prefix::Note => Some("'note'"),
-            _ => None,
-        };
+        // The prefix that pins a corpus, and the corpus it pins. Every variant
+        // is named rather than swept up by a wildcard: a wildcard would answer
+        // "no corpus" for a prefix nobody had thought about, which is the one
+        // answer that makes the assertion below pass for the wrong reason.
+        fn corpus_of(prefix: Prefix) -> Option<&'static str> {
+            match prefix {
+                Prefix::Asset => Some("'asset'"),
+                Prefix::Note => Some("'note'"),
+                Prefix::Action
+                | Prefix::Ticket
+                | Prefix::Person
+                | Prefix::Source
+                | Prefix::Time
+                | Prefix::List
+                | Prefix::Help => None,
+            }
+        }
         for prefix in [
             Prefix::Ticket,
             Prefix::Person,
