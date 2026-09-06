@@ -163,7 +163,11 @@ mod tests {
     #[test]
     fn an_unchanged_corpus_encodes_to_the_same_bytes() {
         let rows = [
-            ("7", "gitea", json!({ "state": "up", "response_time_ms": 35.0 })),
+            (
+                "7",
+                "gitea",
+                json!({ "state": "up", "response_time_ms": 35.0 }),
+            ),
             ("1", "knobas-teamcity", json!({ "state": "down" })),
         ];
         assert_eq!(position(&rows).encode(), position(&rows).encode());
@@ -177,12 +181,32 @@ mod tests {
     /// a monitor slower, renamed, or in another state is a poll that emits.
     #[test]
     fn a_changed_payload_changes_the_position() {
-        let before = position(&[("7", "gitea", json!({ "state": "up", "response_time_ms": 35.0 }))]);
+        let before = position(&[(
+            "7",
+            "gitea",
+            json!({ "state": "up", "response_time_ms": 35.0 }),
+        )]);
         for after in [
-            position(&[("7", "gitea", json!({ "state": "down", "response_time_ms": 35.0 }))]),
-            position(&[("7", "gitea", json!({ "state": "up", "response_time_ms": 36.0 }))]),
-            position(&[("7", "gitea-eu", json!({ "state": "up", "response_time_ms": 35.0 }))]),
-            position(&[("8", "gitea", json!({ "state": "up", "response_time_ms": 35.0 }))]),
+            position(&[(
+                "7",
+                "gitea",
+                json!({ "state": "down", "response_time_ms": 35.0 }),
+            )]),
+            position(&[(
+                "7",
+                "gitea",
+                json!({ "state": "up", "response_time_ms": 36.0 }),
+            )]),
+            position(&[(
+                "7",
+                "gitea-eu",
+                json!({ "state": "up", "response_time_ms": 35.0 }),
+            )]),
+            position(&[(
+                "8",
+                "gitea",
+                json!({ "state": "up", "response_time_ms": 35.0 }),
+            )]),
         ] {
             assert_ne!(before, after, "{}", after.encode());
         }

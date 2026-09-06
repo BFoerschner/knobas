@@ -170,7 +170,10 @@ monitor_status{monitor_id=\"99\",monitor_name=\"future\",monitor_type=\"http\",m
             item("8").body_text,
             "canary up http http://host.docker.internal:8299/"
         );
-        assert_eq!(item("1").body_text, "knobas-teamcity down ping 46.224.117.158");
+        assert_eq!(
+            item("1").body_text,
+            "knobas-teamcity down ping 46.224.117.158"
+        );
     }
 
     /// *Open in browser* renders from `web_url` and nothing else, and Kuma's

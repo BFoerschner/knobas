@@ -135,13 +135,13 @@ impl Source for KumaSource {
         );
 
         let previous = cursor.as_deref().and_then(Position::parse);
-        if let (Some(raw), Some(before)) = (cursor.as_ref(), previous.as_ref()) {
-            if *before == current {
-                // The cursor the caller handed in, byte for byte, rather than a
-                // re-encoding of an equal position: the engine compares the two
-                // strings to decide whether the run is worth an activity line.
-                return Ok(raw.clone());
-            }
+        if let (Some(raw), Some(before)) = (cursor.as_ref(), previous.as_ref())
+            && *before == current
+        {
+            // The cursor the caller handed in, byte for byte, rather than a
+            // re-encoding of an equal position: the engine compares the two
+            // strings to decide whether the run is worth an activity line.
+            return Ok(raw.clone());
         }
 
         for item in items {
@@ -193,7 +193,7 @@ mod tests {
             auth: Some(AuthMethod::ApiToken),
             secret: secret.map(str::to_owned),
             config,
-            }
+        }
     }
 
     /// A source that cannot work is refused when it is saved, not on the first

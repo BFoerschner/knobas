@@ -239,9 +239,7 @@ mod tests {
     /// is still a name.
     #[test]
     fn a_label_value_may_hold_the_punctuation_the_format_uses() {
-        let samples = parse(
-            "monitor_status{monitor_name=\"a\\\"b}, c\",monitor_id=\"9\"} 1",
-        );
+        let samples = parse("monitor_status{monitor_name=\"a\\\"b}, c\",monitor_id=\"9\"} 1");
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].label("monitor_name"), Some("a\"b}, c"));
         assert_eq!(samples[0].label("monitor_id"), Some("9"));
@@ -272,9 +270,7 @@ mod tests {
     /// response time of a monitor that is down.
     #[test]
     fn reads_the_values_the_format_allows() {
-        let samples = parse(
-            "a 1\nb -1\nc 0.8034557235421166\nd NaN\ne +Inf\nf -Inf\ng 1.5e-3\n",
-        );
+        let samples = parse("a 1\nb -1\nc 0.8034557235421166\nd NaN\ne +Inf\nf -Inf\ng 1.5e-3\n");
         let by = |n: &str| samples.iter().find(|s| s.name == n).unwrap().value;
         assert!((by("b") + 1.0).abs() < f64::EPSILON);
         assert!((by("c") - 0.803_455_723_542_116_6).abs() < f64::EPSILON);

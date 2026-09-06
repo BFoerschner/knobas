@@ -52,7 +52,10 @@ async fn a_full_sync_mirrors_every_monitor_with_its_state() {
         "gitea",
         "canary",
     ] {
-        assert!(names.contains(&expected), "{expected:?} is missing: {names:?}");
+        assert!(
+            names.contains(&expected),
+            "{expected:?} is missing: {names:?}"
+        );
     }
 
     let canary = sink
@@ -161,7 +164,10 @@ async fn a_state_change_re_emits_the_roster_and_moves_the_cursor() {
     let changed = Fake::serving(&flipped).await;
     let source = adapter(changed.base_url(), KEY);
     let mut second = VecSink(Vec::new());
-    let moved = source.sync(Some(cursor.clone()), &mut second).await.unwrap();
+    let moved = source
+        .sync(Some(cursor.clone()), &mut second)
+        .await
+        .unwrap();
 
     assert_ne!(moved, cursor, "a change must move the cursor");
     assert_eq!(second.0.len(), 8, "every run that emits at all is full");
@@ -202,7 +208,10 @@ async fn a_refused_key_is_unauthorized_and_says_which_status() {
 #[tokio::test]
 async fn test_connection_reports_the_version_and_the_roster_size() {
     let fake = Fake::start().await;
-    let info = adapter(fake.base_url(), KEY).test_connection().await.unwrap();
+    let info = adapter(fake.base_url(), KEY)
+        .test_connection()
+        .await
+        .unwrap();
     assert_eq!(info.server_version.as_deref(), Some("2.5.3"));
     assert_eq!(info.detail.as_deref(), Some("8 monitors"));
     assert_eq!(info.account, None);

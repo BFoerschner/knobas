@@ -55,7 +55,7 @@ pub(crate) fn credential(
             return Err(SourceError::protocol(
                 "this Uptime Kuma source has no authentication method configured; choose an API \
                  key"
-                    .to_owned(),
+                .to_owned(),
             ));
         }
         Some(other) => {
@@ -161,11 +161,7 @@ mod tests {
             credential(Some(AuthMethod::ApiToken), None),
             Err(SourceError::Unauthorized { status: None })
         ));
-        for wrong in [
-            AuthMethod::Pat,
-            AuthMethod::UserPassword,
-            AuthMethod::OAuth,
-        ] {
+        for wrong in [AuthMethod::Pat, AuthMethod::UserPassword, AuthMethod::OAuth] {
             let refused = credential(Some(wrong), Some("uk1_secret"));
             let message = match refused {
                 Err(SourceError::Protocol { message, .. }) => message,

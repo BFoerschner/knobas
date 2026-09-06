@@ -141,7 +141,9 @@ pub(crate) fn monitors(samples: &[Sample]) -> Vec<Monitor> {
         // sample arrives first and never overwritten -- one monitor cannot
         // disagree with itself, and re-reading it per family would only make
         // the result depend on which family Kuma printed last.
-        monitor.name.get_or_insert_with(|| present(sample, "monitor_name").unwrap_or_default());
+        monitor
+            .name
+            .get_or_insert_with(|| present(sample, "monitor_name").unwrap_or_default());
         if monitor.monitor_type.is_none() {
             monitor.monitor_type = present(sample, "monitor_type");
         }

@@ -203,7 +203,11 @@ async fn full_sync(source: &dyn Source) -> (Vec<SyncItem>, String) {
 /// just added has no series until its first heartbeat lands. Measured at ~2 s
 /// on the pinned image; the ceiling here is generous because a loaded machine
 /// is the normal case for this repository.
-async fn until(source: &dyn Source, what: &str, wanted: impl Fn(&[SyncItem]) -> bool) -> Vec<SyncItem> {
+async fn until(
+    source: &dyn Source,
+    what: &str,
+    wanted: impl Fn(&[SyncItem]) -> bool,
+) -> Vec<SyncItem> {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let (items, _) = full_sync(source).await;
@@ -361,7 +365,8 @@ async fn an_idle_poll_emits_nothing_and_keeps_its_cursor() {
             return;
         }
         assert_ne!(
-            next, cursor,
+            next,
+            cursor,
             "attempt {attempt} emitted {} items, so the corpus moved and the cursor must too",
             sink.0.len()
         );
@@ -391,9 +396,11 @@ async fn a_monitor_deleted_through_the_seeds_helper_is_swept() {
     let source = env.source();
 
     let scratch = Scratch::add();
-    let items = until(source.as_ref(), "the scratch monitor is published", |items| {
-        items.iter().any(|i| i.title == SCRATCH)
-    })
+    let items = until(
+        source.as_ref(),
+        "the scratch monitor is published",
+        |items| items.iter().any(|i| i.title == SCRATCH),
+    )
     .await;
     let id = items
         .iter()

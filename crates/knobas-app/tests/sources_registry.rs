@@ -227,10 +227,7 @@ fn building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_i
             .build(instance(
                 "my-instance",
                 &template.adapter_kind,
-                *template
-                    .auth_methods
-                    .first()
-                    .unwrap_or(&AuthMethod::Pat),
+                *template.auth_methods.first().unwrap_or(&AuthMethod::Pat),
             ))
             .unwrap_or_else(|e| panic!("{} should build: {e}", template.adapter_kind));
         assert_eq!(

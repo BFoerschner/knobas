@@ -206,13 +206,13 @@ mod tests {
     /// no way to set it.
     #[test]
     fn the_schema_and_the_config_struct_agree() {
-        let schema_keys: std::collections::BTreeSet<String> = descriptor_template().config_schema
-            ["properties"]
-            .as_object()
-            .expect("config_schema.properties is an object")
-            .keys()
-            .cloned()
-            .collect();
+        let schema_keys: std::collections::BTreeSet<String> =
+            descriptor_template().config_schema["properties"]
+                .as_object()
+                .expect("config_schema.properties is an object")
+                .keys()
+                .cloned()
+                .collect();
         let struct_keys: std::collections::BTreeSet<String> =
             serde_json::to_value(crate::KumaConfig::default())
                 .unwrap()
