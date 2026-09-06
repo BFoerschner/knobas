@@ -52,6 +52,7 @@ import type {
   NotificationDraft,
   Project,
 } from "./lib/ipc/entity";
+import type { AssetRow } from "./lib/ipc/assets";
 import type { CredentialHealth, SourceSummary } from "./lib/ipc/sources";
 // The shell's own reckoning of the reader's day, used by the tests below to
 // state the expectation in the same terms `App.svelte` computes it in --
@@ -276,6 +277,76 @@ vi.mock("./lib/ipc/time", () => ({
     adHocAsks.push({ blockId, ...when });
     return Promise.resolve(adHocOffer);
   },
+}));
+
+/**
+ * The estate the Assets view draws (#437).
+ *
+ * Mounted by the shell like every other view, so its two reads have to be
+ * answered here whether or not a test drives them — `App.svelte` passes no
+ * ports, and an unanswered read is a rejection the suite's own guard fails on.
+ *
+ * Two levels, one VM inside one site: the foreground rule the tests below
+ * witness is *the asset the pane holds*, and the shallowest fixture that could
+ * be wrong about which one that is has an ancestor to pick up instead.
+ */
+const SITE: AssetRow = {
+  id: "asset:hel1",
+  parent_id: null,
+  type_id: "site",
+  type_label: "Site",
+  monogram: "ST",
+  name: "hel1",
+  status: "none",
+  environment: "prod",
+  owner: null,
+  has_children: true,
+  health: "none",
+  inside: "none",
+  problems_inside: 0,
+};
+
+const VM: AssetRow = {
+  ...SITE,
+  id: "asset:vm-db-01",
+  parent_id: SITE.id,
+  type_id: "vm",
+  type_label: "VM",
+  monogram: "VM",
+  name: "vm-db-01",
+  environment: null,
+  has_children: false,
+};
+
+vi.mock("./lib/ipc/assets", () => ({
+  assetTree: (parentId?: string | null) =>
+    Promise.resolve(parentId === undefined || parentId === null ? [SITE] : [VM]),
+  getAsset: (assetId: string) => {
+    const asset = [SITE, VM].find((candidate) => candidate.id === assetId);
+    if (!asset) return Promise.reject(new Error(`no asset ${assetId}`));
+    return Promise.resolve({
+      asset,
+      properties: [],
+      held_by: asset.parent_id === null ? [] : [SITE],
+      holds: asset.id === SITE.id ? [VM] : [],
+      history: [],
+      effective_environment: null,
+      effective_owner: null,
+    });
+  },
+  // The type table the create/edit dialogs read (#429). Answered rather than
+  // left out: a mock short of an export the component imports is an error at
+  // mount, not a missing feature.
+  assetTypes: () => Promise.resolve([]),
+  // The room's Assets tile reads its context's members (#434). No room in
+  // this suite has an asset in it, so the honest answer is an empty tile —
+  // but the export has to be here, because the tile imports it at module
+  // scope and a mock short of it throws inside the tile's effect.
+  contextAssets: () => Promise.resolve([]),
+  createAsset: () => Promise.reject(new Error("no estate writes in this test")),
+  editAsset: () => Promise.reject(new Error("no estate writes in this test")),
+  moveAsset: () => Promise.reject(new Error("no estate writes in this test")),
+  deleteAsset: () => Promise.reject(new Error("no estate writes in this test")),
 }));
 
 /**
@@ -1448,6 +1519,69 @@ test("⌘T with nothing in front of the reader opens the picker and starts nothi
 
   expect(timerStarts, "a timer was started on nothing").toEqual([]);
   expect(timerStops, "⌘T stopped a timer that was not running").toBe(0);
+});
+
+/**
+ * **The Tree's pane is a rung of the foreground rule** (#437, stories 46 and
+ * 47).
+ *
+ * The rule reads *the open detail, else the Assets pane's asset, else the
+ * room's anchor, else none*, and it is still the one place that decides — so
+ * this is witnessed the way the three rungs above are, by pressing ⌘T and
+ * reading the target the timer was started on. The heartbeat's foreground is
+ * the same value out of the same `$derived`, which is why one press witnesses
+ * both halves of the ticket.
+ *
+ * The address is `#/asset/<id>` opened cold, not clicked into: that is what a
+ * reader coming back to a link does, and it is the state in which a rule that
+ * read a *click* rather than the address would have nothing to go on.
+ */
+test("⌘T with an asset in the Tree's pane starts the timer on that asset", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/asset/asset:vm-db-01";
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => target.querySelector(".pane h2")?.textContent?.trim() === "vm-db-01",
+    "the Tree never drew the asset in its pane",
+  );
+
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+
+  expect(timerStarts, "the clock did not start on the asset the pane holds").toEqual([
+    { kind: "entity", entity_id: "asset:vm-db-01" },
+  ]);
+  expect(pickerTitle(), "the picker opened over a foreground that existed").toBeNull();
+});
+
+/**
+ * The other direction, and the boundary the criterion names: **the Assets view
+ * with an empty pane is nothing in front of the reader**.
+ *
+ * `#/assets/tree` draws the same surface with no selection, and the view is not
+ * a room — so there is no anchor to fall back to and the honest answer is the
+ * picker. Without this the rung above would be satisfied by a rule that made
+ * *the Assets view* the foreground rather than the asset in it, and every
+ * observation taken while browsing the estate would be attributed to whichever
+ * asset was last read.
+ */
+test("⌘T in the Assets view with nothing selected starts nothing and asks", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/assets/tree";
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => target.querySelector(".tree .col .nm")?.textContent?.trim() === "hel1",
+    "the Tree never drew its first column",
+  );
+
+  pressTimerKey();
+  await until(() => pickerTitle() !== null, "⌘T never opened the picker");
+
+  expect(timerStarts, "a timer was started on a pane holding nothing").toEqual([]);
 });
 
 /**

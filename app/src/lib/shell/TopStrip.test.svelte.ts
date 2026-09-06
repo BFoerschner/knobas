@@ -9,9 +9,10 @@
  * dot among several, and that clicking the cluster lands where the fix is.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createInbox, type Inbox } from "../inbox/inbox.svelte";
+import type { AssetDetail, AssetRow } from "../ipc/assets";
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import type { RunningTimer, TimerTarget } from "../ipc/time";
 import TopStrip from "./TopStrip.svelte";
@@ -77,6 +78,7 @@ function render(
   inbox: Inbox = inboxOf(0),
   timer: Timer = timerOn(null),
   ontimer?: () => void,
+  asset?: (assetId: string) => Promise<AssetDetail>,
 ) {
   const health = createHealth({
     credentialHealth: () => Promise.resolve([]),
@@ -86,10 +88,38 @@ function render(
   const router = createRouter();
   app = mount(TopStrip, {
     target,
-    props: { router, onsearch: () => {}, health, inbox, timer, ontimer },
+    props: { router, onsearch: () => {}, health, inbox, timer, ontimer, asset },
   });
   flushSync();
   return { health, router, timer };
+}
+
+/** One asset, as `get_asset` answers for it (#437). */
+function assetNamed(id: string, name: string, monogram: string): AssetDetail {
+  const asset: AssetRow = {
+    id,
+    parent_id: null,
+    type_id: "vm",
+    type_label: "VM",
+    monogram,
+    name,
+    status: "none",
+    environment: null,
+    owner: null,
+    has_children: false,
+    health: "none",
+    inside: "none",
+    problems_inside: 0,
+  };
+  return {
+    asset,
+    properties: [],
+    held_by: [],
+    holds: [],
+    history: [],
+    effective_environment: null,
+    effective_owner: null,
+  };
 }
 
 /** The timer slot, if the strip is drawing one. */
@@ -349,6 +379,236 @@ test("a running timer shows what it is on and how long it has been", async () =>
   expect(flap, "the elapsed reading is not a flap").not.toBeNull();
   expect(flap!.textContent).toContain("45:12");
   expect(slot!.getAttribute("aria-label")).toBe("Timing PAY-231 — 45:12");
+});
+
+/**
+ * **An asset reads as its name, with its monogram** (#437).
+ *
+ * The one target whose key says nothing: knobas mints `asset:<uuid>`, so the
+ * half `targetReading` shows for a ticket is a uuid here. The strip looks the
+ * asset up and draws the chip its type carries — `VM`, the same chip the
+ * Tree's columns put on the row — beside the name.
+ *
+ * The uuid is asserted **absent**, not merely the name present: a slot that
+ * drew both would satisfy a `toContain("vm-db-01")` and still show the reader
+ * a uuid.
+ */
+test("an asset timer reads as the asset's name and monogram, never its uuid", async () => {
+  const timer = timerOn({ kind: "entity", entity_id: "asset:9f3c11de" });
+  render([], inboxOf(0), timer, undefined, (id) =>
+    Promise.resolve(assetNamed(id, "vm-db-01", "VM")),
+  );
+  await timer.refresh();
+  flushSync();
+  // The look-up is a round trip of its own; the slot draws the target's key
+  // until it lands.
+  await vi.waitFor(() => {
+    flushSync();
+    if (timerSlot()?.querySelector(".ctx")?.textContent !== "vm-db-01") {
+      throw new Error("the strip never named the asset");
+    }
+  });
+
+  const slot = timerSlot()!;
+  expect(slot.querySelector(".mg")?.textContent).toBe("VM");
+  expect(slot.textContent).not.toContain("9f3c11de");
+  expect(slot.getAttribute("aria-label")).toBe("Timing vm-db-01 — 45:12");
+});
+
+/**
+ * The failure direction, and the reason the look-up is not allowed to matter:
+ * an asset the read cannot answer for still leaves a slot that says the clock
+ * is running. A strip that blanked itself would lose the reading spec §2 asks
+ * to be always true — *a reader always knows what the clock is on* — over a
+ * name it could not fetch.
+ */
+test("an asset the read cannot name still shows a running clock", async () => {
+  const timer = timerOn({ kind: "entity", entity_id: "asset:9f3c11de" });
+  render([], inboxOf(0), timer, undefined, () => Promise.reject(new Error("not_ready")));
+  await timer.refresh();
+  flushSync();
+
+  const slot = timerSlot();
+  expect(slot, "the strip dropped the timer over a name it could not read").not.toBeNull();
+  expect(slot!.querySelector(".ctx")?.textContent).toBe("9f3c11de");
+  expect(slot!.querySelector(".mg")).toBeNull();
+});
+
+/**
+ * **A name belongs to the asset it was read for**, and to no other (#437).
+ *
+ * A stop and a start on another asset are two events a beat apart, and the
+ * second asset's read has not landed while the first's answer is still in the
+ * component. So the slot is driven through exactly that window: the second
+ * read is held open, and what the strip must *not* say in the meantime is the
+ * name of the machine the reader has just stopped working on.
+ */
+test("a second asset is never drawn under the first one's name", async () => {
+  const first = { kind: "entity", entity_id: "asset:aaa" } as const;
+  const second = { kind: "entity", entity_id: "asset:bbb" } as const;
+  let running: RunningTimer = {
+    target: first,
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T09:00:00Z",
+  };
+  const timer = createTimer({
+    currentTimer: () => Promise.resolve(running),
+    startTimer: () => Promise.resolve(running),
+    stopTimer: () => Promise.resolve(null),
+    timerHeartbeat: () => Promise.resolve(running),
+    listen: () => Promise.resolve(() => {}),
+    focused: () => true,
+    now: () => new Date("2026-09-03T09:45:12Z"),
+  });
+  let landSecond: ((detail: AssetDetail) => void) | null = null;
+  render([], inboxOf(0), timer, undefined, (id) =>
+    id === first.entity_id
+      ? Promise.resolve(assetNamed(id, "vm-db-01", "VM"))
+      : new Promise<AssetDetail>((resolve) => {
+          landSecond = resolve;
+        }),
+  );
+  await timer.refresh();
+  flushSync();
+  await vi.waitFor(() => {
+    flushSync();
+    if (timerSlot()?.querySelector(".ctx")?.textContent !== "vm-db-01") {
+      throw new Error("the strip never named the first asset");
+    }
+  });
+
+  running = { ...running, target: second };
+  await timer.refresh();
+  flushSync();
+
+  const slot = timerSlot()!;
+  expect(slot.querySelector(".ctx")?.textContent, "the strip kept naming the asset the clock has left").toBe(
+    "bbb",
+  );
+  expect(slot.querySelector(".mg"), "the first asset's chip outlived its name").toBeNull();
+
+  landSecond!(assetNamed(second.entity_id, "postgres", "CT"));
+  await vi.waitFor(() => {
+    flushSync();
+    if (timerSlot()?.querySelector(".ctx")?.textContent !== "postgres") {
+      throw new Error("the second asset's name never landed");
+    }
+  });
+  expect(timerSlot()!.querySelector(".mg")?.textContent).toBe("CT");
+});
+
+/**
+ * **The name is tried again until it lands** (#437).
+ *
+ * `get_asset` rejects `not_ready` for the whole of bring-up, and a
+ * relaunch-restored timer is drawn inside exactly that window — so a single
+ * attempt would leave the reader looking at a uuid for the rest of the
+ * session. The store re-reads the timer on every activity line and every
+ * beat, and each of those is the next attempt.
+ *
+ * The refusal is the fixture: the first read fails, the strip draws the key,
+ * and the second read — triggered by nothing but the timer being re-read —
+ * names it.
+ */
+test("an asset the estate could not name yet is named on the next read", async () => {
+  const running: RunningTimer = {
+    target: { kind: "entity", entity_id: "asset:9f3c11de" },
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T09:00:00Z",
+  };
+  const timer = createTimer({
+    currentTimer: () => Promise.resolve(running),
+    startTimer: () => Promise.resolve(running),
+    stopTimer: () => Promise.resolve(null),
+    timerHeartbeat: () => Promise.resolve(running),
+    listen: () => Promise.resolve(() => {}),
+    focused: () => true,
+    now: () => new Date("2026-09-03T09:45:12Z"),
+  });
+  let attempts = 0;
+  render([], inboxOf(0), timer, undefined, (id) => {
+    attempts += 1;
+    return attempts === 1
+      ? Promise.reject(new Error("not_ready"))
+      : Promise.resolve(assetNamed(id, "vm-db-01", "VM"));
+  });
+  await timer.refresh();
+  flushSync();
+  expect(timerSlot()!.querySelector(".ctx")?.textContent, "the first read did not fail").toBe(
+    "9f3c11de",
+  );
+
+  // The next re-read of the timer -- an activity line, or the thirty-second
+  // beat -- and nothing else.
+  await timer.refresh();
+  await vi.waitFor(() => {
+    flushSync();
+    if (timerSlot()?.querySelector(".ctx")?.textContent !== "vm-db-01") {
+      throw new Error("the strip never tried the name again");
+    }
+  });
+  expect(timerSlot()!.querySelector(".mg")?.textContent).toBe("VM");
+});
+
+/**
+ * ...and once it is named, a beat costs no round trip: the read is skipped
+ * while the name in hand belongs to the target in hand. A strip that re-read
+ * on every beat would ask the estate about one asset 120 times an hour for an
+ * answer it already had.
+ */
+test("a named asset is not re-read on every beat", async () => {
+  const running: RunningTimer = {
+    target: { kind: "entity", entity_id: "asset:9f3c11de" },
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T09:00:00Z",
+  };
+  const timer = createTimer({
+    currentTimer: () => Promise.resolve(running),
+    startTimer: () => Promise.resolve(running),
+    stopTimer: () => Promise.resolve(null),
+    timerHeartbeat: () => Promise.resolve(running),
+    listen: () => Promise.resolve(() => {}),
+    focused: () => true,
+    now: () => new Date("2026-09-03T09:45:12Z"),
+  });
+  let attempts = 0;
+  render([], inboxOf(0), timer, undefined, (id) => {
+    attempts += 1;
+    return Promise.resolve(assetNamed(id, "vm-db-01", "VM"));
+  });
+  await timer.refresh();
+  await vi.waitFor(() => {
+    flushSync();
+    if (timerSlot()?.querySelector(".ctx")?.textContent !== "vm-db-01") {
+      throw new Error("the strip never named the asset");
+    }
+  });
+
+  for (let beat = 0; beat < 3; beat += 1) {
+    await timer.refresh();
+    flushSync();
+  }
+  expect(attempts, "the strip re-read an asset it had already named").toBe(1);
+  expect(timerSlot()!.querySelector(".ctx")?.textContent).toBe("vm-db-01");
+});
+
+/**
+ * Nothing but an asset is looked up. A ticket's key is the reader's own
+ * shorthand and already right, and a strip that asked the estate about
+ * `jira:PAY-231` would be asking for a `not_found` on every ticket.
+ */
+test("a ticket timer asks the estate nothing", async () => {
+  const timer = timerOn({ kind: "entity", entity_id: "jira:PAY-231" });
+  let asked = 0;
+  render([], inboxOf(0), timer, undefined, (id) => {
+    asked += 1;
+    return Promise.resolve(assetNamed(id, "vm-db-01", "VM"));
+  });
+  await timer.refresh();
+  flushSync();
+
+  expect(timerSlot()!.querySelector(".ctx")?.textContent).toBe("PAY-231");
+  expect(asked, "the strip looked a ticket up in the estate").toBe(0);
 });
 
 /** An ad-hoc label reads as itself: it is already what a person typed. */

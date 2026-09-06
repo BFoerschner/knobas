@@ -190,7 +190,7 @@ The week under the day strip, Monday to Sunday with empty weekends collapsed: a 
 _Avoid_: report, timecard, week view
 
 **Passive attribution**:
-The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block) derived from [observations](#observation). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Observations are kept a month, and past the [observation horizon](#observation-horizon) knobas has no record of what was open at all. (#315, #337)
+The opt-in recording of which entity was in the foreground — the open detail, else the asset in the [Tree](#tree)'s pane, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block) derived from [observations](#observation). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. The Tree is a view in its own right and not a slide-over drawn over a room, so browsing the estate with nothing selected is a gap and never the last room's anchor. Observations are kept a month, and past the [observation horizon](#observation-horizon) knobas has no record of what was open at all. (#315, #337, #437)
 _Avoid_: automatic tracking, activity tracking (that is the activity stream's word)
 
 **Observation**:

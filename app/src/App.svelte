@@ -203,14 +203,22 @@
 
   /**
    * **What is in front of the reader**, by the rule spec #272 states for both
-   * the heartbeat and ⌘T: *the open detail, else the room's anchor, else
-   * none* (#278).
+   * the heartbeat and ⌘T: *the open detail, else the Assets pane's asset, else
+   * the room's anchor, else none* (#278, and the middle rung #437).
    *
    * Read off the address and the resolved room, for the same reason
    * `openEntity` is: the address is what says what is open, and it is the
    * shell's to read. `null` is a legal answer and not a missing one — it is
    * what makes ⌘T open the picker rather than start on nothing, and what
-   * passive attribution (#282) will record as an unattributed gap.
+   * passive attribution (#282) records as an unattributed gap.
+   *
+   * **The Assets view is not a room, so its rung is its own branch.** The
+   * pane's asset is `#/asset/<id>`'s id and nothing else: `#/assets/tree` is
+   * the same surface with nothing selected, and the view has no anchor to fall
+   * back to — story 47 asks for *the asset open in the pane*, and a browse of
+   * the estate with an empty pane is honestly nothing in front of the reader.
+   * That is also why this cannot be folded into the room branch: the two views
+   * answer the question from different halves of the address.
    *
    * Everything is put through `canBeTarget` before it leaves here. A promoted
    * context's anchor is a ticket or an epic, so it always passes today; the
@@ -219,6 +227,12 @@
    */
   const foreground = $derived.by(() => {
     const route = router.route;
+    if (route.view === "assets") {
+      const held = route.assetId;
+      return held && canBeTarget({ entityId: held })
+        ? ({ kind: "entity", entity_id: held } as const)
+        : null;
+    }
     if (route.view !== "room") return null;
     const open = route.detail?.entityId;
     if (open && canBeTarget({ entityId: open })) {

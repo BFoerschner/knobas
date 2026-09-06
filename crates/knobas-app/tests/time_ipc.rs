@@ -3285,3 +3285,125 @@ async fn asking_about_a_block_that_is_not_there_says_so() {
         .expect_err("there is no block 4711");
     assert_eq!(refusal.code, IpcErrorCode::NotFound);
 }
+
+// -- the estate (#437) ------------------------------------------------------
+//
+// An asset is an entity like any other, so nothing in `time` was written for
+// it and nothing here asks it to be. What these two witness is that the claim
+// holds through the seam a person reaches it by: the target survives a start
+// and a stop, the day review names it out of `knobas.entity`, and the
+// heartbeat's foreground records the asset the Tree's pane was holding.
+//
+// The asset is made through `knobas_app::assets::create`, never with an insert
+// of this file's own. `create` is what writes the `knobas.entity` row an asset
+// carries, and a fixture that wrote the two tables itself would be free to
+// give the entity row a title the estate does not have -- which is exactly the
+// join the first test asserts on.
+
+/// The estate this section works over: one site holding one VM.
+///
+/// Two levels, because the assertion is about the asset's own name and the
+/// shallowest fixture that can be wrong about it is one with an ancestor whose
+/// name could be picked up instead.
+async fn a_vm(pool: &PgPool) -> knobas_app::assets::AssetRow {
+    let site = knobas_app::assets::create(pool, None, "site", "hel1", &[])
+        .await
+        .expect("a site at the top of the estate")
+        .value;
+    knobas_app::assets::create(pool, Some(&site.id), "vm", "vm-db-01", &[])
+        .await
+        .expect("a VM inside it")
+        .value
+}
+
+/// **An asset is a legal timer target, and the block records it** (story 46).
+///
+/// Three claims in one run, because they are one sentence: `start` accepts
+/// `asset:<id>` and answers with it, the block `stop` writes carries the same
+/// target, and the day review names that block *vm-db-01* -- the asset's own
+/// name, joined out of the `knobas.entity` row `assets::create` wrote, and not
+/// the uuid half of the id, which is all the strip could read off the target
+/// on its own.
+#[tokio::test]
+async fn an_asset_is_a_legal_timer_target_and_its_block_carries_it() {
+    let pool = scratch("time-asset-target").await;
+    let vm = a_vm(&pool).await;
+    assert!(
+        vm.id.starts_with("asset:"),
+        "the estate mints `asset:<uuid>` ids: {}",
+        vm.id
+    );
+
+    let started = time::start(&pool, on(&vm.id), None)
+        .await
+        .expect("an asset is a target `vet` accepts");
+    assert_eq!(started.timer.target, on(&vm.id));
+
+    let stopped = time::stop(&pool).await.expect("it stops").expect("it ran");
+    assert_eq!(
+        stopped.block.target,
+        on(&vm.id),
+        "the block forgot which asset the afternoon was on"
+    );
+
+    let drawn = time::day::list(
+        &pool,
+        stopped.block.started_at,
+        Utc::now() + Duration::hours(1),
+    )
+    .await
+    .expect("the day is readable")
+    .blocks;
+    let [drawn] = drawn.as_slice() else {
+        panic!("one block on the day, not {}", drawn.len())
+    };
+    assert_eq!(
+        drawn.title.as_deref(),
+        Some("vm-db-01"),
+        "the day review draws the asset's own name, not its holder's and not \
+         a uuid"
+    );
+}
+
+/// **The pane's asset is what an observation records** (story 47).
+///
+/// The heartbeat's foreground is the Tree's selected asset, and with passive
+/// attribution on the observation carries it. The second beat is the boundary
+/// the criterion names in the other direction: the pane is empty, the shell
+/// sends `None`, and the observation is still written with nothing attributed
+/// -- so a Tree with nothing selected leaves a gap rather than a wrong asset.
+#[tokio::test]
+async fn an_observation_taken_over_the_panes_asset_records_that_asset() {
+    let pool = scratch("time-asset-foreground").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let vm = a_vm(&pool).await;
+
+    time::heartbeat(&pool, Some(on(&vm.id)))
+        .await
+        .expect("a beat lands whether or not a timer is running");
+    time::heartbeat(&pool, None)
+        .await
+        .expect("a beat with an empty pane is still a beat");
+
+    assert_eq!(observations(&pool).await, 2);
+    let on_the_asset: i64 =
+        sqlx::query_scalar("select count(*) from knobas.heartbeat where entity_id = $1")
+            .bind(&vm.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        on_the_asset, 1,
+        "the observation taken while the pane held vm-db-01 did not record it"
+    );
+    let unattributed: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.heartbeat where entity_id is null and label is null",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        unattributed, 1,
+        "an empty pane is an observation with nothing to attribute"
+    );
+}

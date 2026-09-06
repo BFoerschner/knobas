@@ -347,12 +347,21 @@ export const MATCH_LIMIT = 10;
  *   short-circuits that prefix until the launcher can draw an asset hit
  *   (#436). The Tree's box needs no prefix: everything it asks for is an
  *   asset already.
+ *
+ * **`raw` empty is a browse**, and that is the second caller (#437): the
+ * engine answers a text-free query carrying only a filter without ranking or
+ * excerpts, ordered by recency, so ⌘T's picker offers the assets a person has
+ * touched most recently through this same query. `limit` is a parameter for
+ * that caller and for no other reason — {@link MATCH_LIMIT} is what a box a
+ * reader can type more into wants, and a list with no box is a different
+ * number. There is one query builder because there is one question: *which
+ * assets*.
  */
-export function estateQuery(raw: string): SearchQuery {
+export function estateQuery(raw: string, limit: number = MATCH_LIMIT): SearchQuery {
   // `noFilters()` and then the one dimension, rather than the literal shape:
   // a dimension added to `SearchFilters` is one edit in the bridge and none
   // here.
-  return { raw, limit: MATCH_LIMIT, filters: { ...noFilters(), kinds: ["asset"] } };
+  return { raw, limit, filters: { ...noFilters(), kinds: ["asset"] } };
 }
 
 /** One asset the search box offers, in the engine's own order. */

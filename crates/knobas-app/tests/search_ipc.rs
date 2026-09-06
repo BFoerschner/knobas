@@ -430,3 +430,71 @@ async fn the_trees_search_answers_with_assets_and_their_paths() {
     // rather than an empty path line under every site in the estate.
     assert_eq!(found.groups[0].hits[0].row.path, None);
 }
+
+/// **The estate browses, so the timer picker can offer an asset** (#437).
+///
+/// The picker's second list is one `search` with no text and `kinds: ["asset"]`
+/// -- a *browse*, which the engine orders by recency and answers without a
+/// tsquery. Every frontend test of that list is made against a fake, so this is
+/// the only place the wire itself is witnessed: that a text-free query carrying
+/// only a kind filter is not short-circuited as "an empty box", that
+/// `corpus::ASSET` is what answers it, and that the hit carries the asset's
+/// path -- which is what the picker draws under the name so two containers
+/// called `postgres` are told apart.
+///
+/// Deliberately **not** the `asset:` prefix, which parses to the same filter
+/// and is short-circuited to nothing until #436 draws an asset hit in the
+/// launcher: the picker sets the filter itself, which is the mechanism that
+/// exists today.
+#[tokio::test]
+async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
+    let pool = pool().await;
+    let name = token("estate");
+    let site = knobas_app::assets::create(&pool, None, "site", &format!("site {name}"), &[])
+        .await
+        .expect("a site")
+        .value;
+    let vm = knobas_app::assets::create(&pool, Some(&site.id), "vm", &format!("vm {name}"), &[])
+        .await
+        .expect("a VM inside it")
+        .value;
+
+    let browse = SearchQuery {
+        raw: String::new(),
+        limit: 50,
+        filters: SearchFilters {
+            kinds: vec!["asset".to_owned()],
+            ..SearchFilters::default()
+        },
+    };
+    let answer = search_inner(&pool, browse)
+        .await
+        .expect("the estate browses");
+
+    let assets = answer
+        .groups
+        .iter()
+        .find(|group| group.kind == "asset")
+        .unwrap_or_else(|| {
+            panic!(
+                "a browse filtered to assets answered with no asset group: {:?}",
+                answer.groups.iter().map(|g| &g.kind).collect::<Vec<_>>()
+            )
+        });
+    let hit = assets
+        .hits
+        .iter()
+        .find(|hit| hit.row.entity_id == vm.id)
+        .expect("the VM this test made is in the estate's browse");
+    assert_eq!(hit.row.title, format!("vm {name}"));
+    assert_eq!(
+        hit.row.path.as_deref(),
+        Some(format!("site {name}").as_str()),
+        "the hit carries where the asset sits, which is what the picker draws \
+         under its name"
+    );
+    assert!(
+        assets.hits.iter().any(|hit| hit.row.entity_id == site.id),
+        "the browse is the estate and not one level of it"
+    );
+}

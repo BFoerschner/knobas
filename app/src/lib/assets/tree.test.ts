@@ -28,6 +28,7 @@ import {
   stripFor,
   COLUMN_WIDTH,
   SPINE_WIDTH,
+  MATCH_LIMIT,
   estateQuery,
   matchesIn,
   walk,
@@ -479,7 +480,27 @@ test("the tree's query narrows the launcher's engine to assets", () => {
   const query = estateQuery("postgres");
   expect(query.raw).toBe("postgres");
   expect(query.filters.kinds).toEqual(["asset"]);
-  expect(query.limit).toBeGreaterThan(0);
+  expect(query.limit).toBe(MATCH_LIMIT);
+  // Nothing else is narrowed: a source or an author filter here would
+  // silently hide most of an estate that has neither.
+  expect(query.filters.sources).toEqual([]);
+  expect(query.filters.authors).toEqual([]);
+  expect(query.filters.mine).toBe(false);
+});
+
+/**
+ * **Text-free is a browse, and the caller says how many** (#437).
+ *
+ * ⌘T's picker asks this builder for the estate with nothing typed, and it is a
+ * list with no box to narrow — so its number is its own and not the box's. The
+ * filter is what keeps a browse from being the empty box, which the engine
+ * answers with the launcher board instead.
+ */
+test("a text-free query is the browse the picker asks for, at the caller's limit", () => {
+  const query = estateQuery("", 20);
+  expect(query.raw).toBe("");
+  expect(query.filters.kinds).toEqual(["asset"]);
+  expect(query.limit).toBe(20);
 });
 
 /**
