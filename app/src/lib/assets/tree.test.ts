@@ -11,10 +11,10 @@
  */
 import { expect, test } from "vitest";
 
-import type { AssetDetail, AssetNode } from "../ipc/assets";
+import type { AssetDetail, AssetRow } from "../ipc/assets";
 import { addressOf, columnPathFor, emptyPath, heldByPath, selectionIn } from "./tree";
 
-function node(id: string, name: string, hasChildren = false): AssetNode {
+function row(id: string, name: string, hasChildren = false): AssetRow {
   return {
     id,
     parent_id: null,
@@ -29,7 +29,7 @@ function node(id: string, name: string, hasChildren = false): AssetNode {
   };
 }
 
-function detail(asset: AssetNode, ancestors: AssetNode[]): AssetDetail {
+function detail(asset: AssetRow, ancestors: AssetRow[]): AssetDetail {
   return { asset, properties: [], held_by: ancestors, holds: [], history: [] };
 }
 
@@ -48,9 +48,9 @@ test("no selection is the top level and nothing else", () => {
  * estate, whatever is selected.
  */
 test("a three-level selection opens one column per level", () => {
-  const site = node("asset:site", "hel1", true);
-  const vm = node("asset:vm", "vm-db-01", true);
-  const container = node("asset:ct", "postgres");
+  const site = row("asset:site", "hel1", true);
+  const vm = row("asset:vm", "vm-db-01", true);
+  const container = row("asset:ct", "postgres");
 
   const path = columnPathFor(detail(container, [site, vm]));
   expect(path.parents).toEqual([null, "asset:site", "asset:vm"]);
@@ -64,8 +64,8 @@ test("a three-level selection opens one column per level", () => {
  * rather than only highlight it.
  */
 test("a selection that holds something opens the column under it", () => {
-  const site = node("asset:site", "hel1", true);
-  const vm = node("asset:vm", "vm-db-01", true);
+  const site = row("asset:site", "hel1", true);
+  const vm = row("asset:vm", "vm-db-01", true);
 
   const path = columnPathFor(detail(vm, [site]));
   expect(path.parents).toEqual([null, "asset:site", "asset:vm"]);
@@ -79,8 +79,8 @@ test("a selection that holds something opens the column under it", () => {
  * promising a level that is not there.
  */
 test("a leaf opens no trailing column", () => {
-  const site = node("asset:site", "hel1", true);
-  const leaf = node("asset:ct", "postgres");
+  const site = row("asset:site", "hel1", true);
+  const leaf = row("asset:ct", "postgres");
 
   const path = columnPathFor(detail(leaf, [site]));
   expect(path.parents).toEqual([null, "asset:site"]);
@@ -89,7 +89,7 @@ test("a leaf opens no trailing column", () => {
 
 /** An asset at the top of the estate is one column, selected in it. */
 test("a top-level selection is the first column and nothing before it", () => {
-  const site = node("asset:site", "hel1", true);
+  const site = row("asset:site", "hel1", true);
   const path = columnPathFor(detail(site, []));
   expect(path.parents).toEqual([null, "asset:site"]);
   expect(path.selected).toEqual(["asset:site", null]);
@@ -101,7 +101,7 @@ test("a top-level selection is the first column and nothing before it", () => {
  * would take the view down in the one frame it is least able to afford it.
  */
 test("a column past the end of the path has nothing selected", () => {
-  const path = columnPathFor(detail(node("asset:site", "hel1"), []));
+  const path = columnPathFor(detail(row("asset:site", "hel1"), []));
   expect(selectionIn(path, 0)).toBe("asset:site");
   expect(selectionIn(path, 1)).toBe(null);
   expect(selectionIn(path, 9)).toBe(null);
@@ -114,9 +114,9 @@ test("a column past the end of the path has nothing selected", () => {
  * line that stopped at the parent would read as the path to somewhere else.
  */
 test("the held-by line ends at the asset and held_by does not", () => {
-  const site = node("asset:site", "hel1", true);
-  const vm = node("asset:vm", "vm-db-01", true);
-  const container = node("asset:ct", "postgres");
+  const site = row("asset:site", "hel1", true);
+  const vm = row("asset:vm", "vm-db-01", true);
+  const container = row("asset:ct", "postgres");
 
   const asset = detail(container, [site, vm]);
   expect(heldByPath(asset)).toEqual(["hel1", "vm-db-01", "postgres"]);

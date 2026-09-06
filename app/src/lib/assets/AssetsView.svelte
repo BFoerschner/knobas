@@ -32,12 +32,12 @@
     assetTree as realAssetTree,
     getAsset as realGetAsset,
     type AssetDetail,
-    type AssetNode,
+    type AssetRow,
     type AssetProperty,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import type { Router } from "../shell/router.svelte";
   import { ago } from "../shell/time";
+  import { hashFor, type Router } from "../shell/router.svelte";
   import { addressOf, columnPathFor, emptyPath, heldByPath, type ColumnPath } from "./tree";
 
   /**
@@ -74,7 +74,7 @@
   /** The pane's read. `null` until something is selected and read. */
   let detail = $state<AssetDetail | null>(null);
   /** One list per column, aligned with `path.parents`. */
-  let columns = $state<AssetNode[][]>([]);
+  let columns = $state<AssetRow[][]>([]);
   let failure = $state<string | null>(null);
   /** Nothing has come back yet — told apart from "an estate with nothing in it". */
   let loaded = $state(false);
@@ -91,7 +91,7 @@
   );
 
   const detailRead = latestRead<AssetDetail>();
-  const columnsRead = latestRead<AssetNode[][]>();
+  const columnsRead = latestRead<AssetRow[][]>();
 
   /** The address names an asset: read it, or clear the pane when it names none. */
   $effect(() => {
@@ -139,8 +139,8 @@
     });
   });
 
-  function select(node: AssetNode) {
-    router.go(addressOf(node));
+  function select(row: AssetRow) {
+    router.go(addressOf(row));
   }
 
   /** What a history line says, in one sentence. */
@@ -152,12 +152,14 @@
       }
       return String(value);
     };
-    const detail = (raw ?? {}) as Record<string, unknown>;
+    // `fields`, not `detail`: the component already has a `detail`, and two
+    // different things under one name in one file is a reader's trap.
+    const fields = (raw ?? {}) as Record<string, unknown>;
     if (verb === "created") return "Created";
     if (verb === "deleted") return "Deleted";
-    if (verb === "moved") return `Moved to ${said(detail.to)}`;
-    const field = detail.field === "property" ? said(detail.key) : said(detail.field);
-    return `${field}: ${said(detail.from)} → ${said(detail.to)}`;
+    if (verb === "moved") return `Moved to ${said(fields.to)}`;
+    const field = fields.field === "property" ? said(fields.key) : said(fields.field);
+    return `${field}: ${said(fields.from)} → ${said(fields.to)}`;
   }
 
   /** A property's value as text. `null` is drawn as an em dash, not as "null". */
@@ -176,7 +178,17 @@
       (ADR-0009). Its sibling *Monitors* arrives with M4.1.
     -->
     <nav class="tabs" aria-label="Assets views">
-      <button class="tab on" aria-current="page" onclick={() => router.go("#/assets/tree")}>
+      <!--
+        `hashFor` and not the literal `"#/assets/tree"`: the tab rides in the
+        address, so when *Monitors* arrives with M4.1 a literal would keep
+        type-checking while pointing at the wrong tab. Bare literals stay right
+        for the addresses that carry nothing (`"#/inbox"`, `"#/sources"`).
+      -->
+      <button
+        class="tab on"
+        aria-current="page"
+        onclick={() => router.go(hashFor({ view: "assets", tab: "tree", assetId: null }))}
+      >
         Tree
       </button>
     </nav>
@@ -197,17 +209,17 @@
       {:else}
         {#each columns as column, index (index)}
           <ol class="col">
-            {#each column as node (node.id)}
+            {#each column as row (row.id)}
               <li>
                 <button
-                  class="row {path.selected[index] === node.id ? 'on' : ''}"
-                  aria-current={path.selected[index] === node.id ? "true" : undefined}
-                  title={addressOf(node)}
-                  onclick={() => select(node)}
+                  class="row {path.selected[index] === row.id ? 'on' : ''}"
+                  aria-current={path.selected[index] === row.id ? "true" : undefined}
+                  title={addressOf(row)}
+                  onclick={() => select(row)}
                 >
-                  <span class="mg" title={node.type_label}>{node.monogram}</span>
-                  <span class="nm">{node.name}</span>
-                  {#if node.has_children}
+                  <span class="mg" title={row.type_label}>{row.monogram}</span>
+                  <span class="nm">{row.name}</span>
+                  {#if row.has_children}
                     <!--
                       The chevron is the only thing that says there is a next
                       column, which is why an empty trailing column is never
@@ -260,9 +272,9 @@
             <p class="empty">At the top of the estate.</p>
           {:else}
             <ul class="lst">
-              {#each detail.held_by as node (node.id)}
+              {#each detail.held_by as held (held.id)}
                 <li>
-                  <button class="link" onclick={() => select(node)}>{node.name}</button>
+                  <button class="link" onclick={() => select(held)}>{held.name}</button>
                 </li>
               {/each}
             </ul>
@@ -275,10 +287,10 @@
             <p class="empty">Nothing.</p>
           {:else}
             <ul class="lst">
-              {#each detail.holds as node (node.id)}
+              {#each detail.holds as held (held.id)}
                 <li>
-                  <button class="link" onclick={() => select(node)}>{node.name}</button>
-                  <span class="faint">{node.type_label}</span>
+                  <button class="link" onclick={() => select(held)}>{held.name}</button>
+                  <span class="faint">{held.type_label}</span>
                 </li>
               {/each}
             </ul>

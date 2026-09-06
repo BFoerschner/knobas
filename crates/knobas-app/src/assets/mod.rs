@@ -266,12 +266,17 @@ impl PropertyValue {
 
 /// One row of a Miller column, and the shape every read hands back.
 ///
+/// `Row` and not `Node`: `CONTEXT.md`'s **Asset** entry lists *node* among the
+/// words to avoid, and every list line this app already draws is a `…Row`
+/// (`EntityRow`, `LinkRow`, `ActivityRow`, `NoteRow`, `ContextRow`). The tree
+/// shape is `parent_id`'s, not this type's name's.
+///
 /// `has_children` is what the column draws its chevron from and what tells the
 /// Tree that there is a next column to open. It is computed by the read rather
 /// than stored: a stored count is a second copy of the parent field, and the
 /// two would disagree the first time a move failed halfway.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub struct AssetNode {
+pub struct AssetRow {
     /// `asset:<uuid>`, and also the id of this asset's `knobas.entity` row.
     pub id: String,
     /// The asset that holds this one; `null` at the top of the estate.
@@ -316,14 +321,14 @@ pub struct AssetProperty {
 /// Everything the fixed right pane draws for one asset.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct AssetDetail {
-    pub asset: AssetNode,
+    pub asset: AssetRow,
     /// Known keys first, custom after. See [`AssetProperty`].
     pub properties: Vec<AssetProperty>,
     /// The path down to this asset, **outermost first and excluding itself**.
     /// Empty for an asset at the top of the estate.
-    pub held_by: Vec<AssetNode>,
+    pub held_by: Vec<AssetRow>,
     /// What sits directly under it, in the column's own order.
-    pub holds: Vec<AssetNode>,
+    pub holds: Vec<AssetRow>,
     /// This asset's own lines from the activity stream, newest first.
     pub history: Vec<ActivityRow>,
 }
@@ -404,12 +409,12 @@ const ONE: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.envi
 /// row has no use for.
 const PROPERTIES: &str = "select properties from knobas.asset where id = $1";
 
-fn node_of(row: &sqlx::postgres::PgRow) -> Result<AssetNode, IpcError> {
+fn row_of(row: &sqlx::postgres::PgRow) -> Result<AssetRow, IpcError> {
     let type_id: String = row.try_get("type_id")?;
     let declared = asset::find(&type_id);
     let status: String = row.try_get("status")?;
     let environment: Option<String> = row.try_get("environment")?;
-    Ok(AssetNode {
+    Ok(AssetRow {
         id: row.try_get("id")?,
         parent_id: row.try_get("parent_id")?,
         type_label: declared.map_or_else(|| type_id.clone(), |t| t.label.to_owned()),
@@ -436,12 +441,12 @@ fn node_of(row: &sqlx::postgres::PgRow) -> Result<AssetNode, IpcError> {
 /// # Errors
 ///
 /// [`IpcError`] if the read fails.
-pub async fn tree(pool: &PgPool, parent_id: Option<&str>) -> Result<Vec<AssetNode>, IpcError> {
+pub async fn tree(pool: &PgPool, parent_id: Option<&str>) -> Result<Vec<AssetRow>, IpcError> {
     let rows = sqlx::query(CHILDREN)
         .bind(parent_id)
         .fetch_all(pool)
         .await?;
-    rows.iter().map(node_of).collect()
+    rows.iter().map(row_of).collect()
 }
 
 /// One asset, with everything the pane draws.
@@ -455,13 +460,13 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         .bind(id)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| IpcError::not_found(format!("no asset {id}")))?;
-    let asset = node_of(&row)?;
+        .ok_or_else(|| no_such_asset(id))?;
+    let asset = row_of(&row)?;
 
     let ancestors = sqlx::query(ANCESTORS).bind(id).fetch_all(pool).await?;
     let held_by = ancestors
         .iter()
-        .map(node_of)
+        .map(row_of)
         .collect::<Result<Vec<_>, _>>()?;
     let holds = tree(pool, Some(id)).await?;
 
@@ -471,7 +476,7 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         .await?
         .try_get("properties")?;
 
-    let entity = EntityRef::parse(id).map_err(IpcError::internal)?;
+    let entity = entity_of(id)?;
     let history = knobas_core::activity::recent(pool, HISTORY_LIMIT, Some(&entity)).await?;
 
     Ok(AssetDetail {
@@ -564,7 +569,7 @@ pub async fn create(
     type_id: &str,
     name: &str,
     properties: &[(String, PropertyValue)],
-) -> Result<Written<AssetNode>, IpcError> {
+) -> Result<Written<AssetRow>, IpcError> {
     let declared = vet_type(type_id)?;
     let name = vet_name(name)?;
     let bag = vet_properties(declared, properties)?;
@@ -599,7 +604,7 @@ pub async fn create(
     .execute(&mut *tx)
     .await?;
 
-    let entity = EntityRef::parse(&id).map_err(IpcError::internal)?;
+    let entity = entity_of(&id)?;
     let line = knobas_core::activity::record_with(
         &mut *tx,
         ACTOR,
@@ -633,7 +638,7 @@ pub async fn edit(
     pool: &PgPool,
     id: &str,
     edits: &[AssetEdit],
-) -> Result<Written<AssetNode>, IpcError> {
+) -> Result<Written<AssetRow>, IpcError> {
     let mut tx = pool.begin().await?;
     let current = locked(&mut tx, id).await?;
     let declared = asset::find(&current.type_id);
@@ -669,7 +674,7 @@ pub async fn edit(
                 if *value == current.status {
                     continue;
                 }
-                set_column(&mut tx, id, "status", Some(value.as_str())).await?;
+                set_column(&mut tx, SET_STATUS, id, Some(value.as_str())).await?;
                 Some((
                     "edited",
                     serde_json::json!({
@@ -683,7 +688,7 @@ pub async fn edit(
                 if *value == current.environment {
                     continue;
                 }
-                set_column(&mut tx, id, "environment", value.map(Environment::as_str)).await?;
+                set_column(&mut tx, SET_ENVIRONMENT, id, value.map(Environment::as_str)).await?;
                 Some((
                     "edited",
                     serde_json::json!({
@@ -698,7 +703,7 @@ pub async fn edit(
                 if value == current.owner.as_deref() {
                     continue;
                 }
-                set_column(&mut tx, id, "owner", value).await?;
+                set_column(&mut tx, SET_OWNER, id, value).await?;
                 Some((
                     "edited",
                     serde_json::json!({
@@ -716,7 +721,7 @@ pub async fn edit(
                     vet_against_schema(declared, key, value)?;
                 }
                 let before = current.properties.get(key).cloned();
-                let after = value.as_ref().map(|v| serde_json::to_value(v).unwrap());
+                let after = value.as_ref().map(stored_value).transpose()?;
                 if before == after {
                     continue;
                 }
@@ -754,7 +759,7 @@ pub async fn edit(
         };
 
         if let Some((verb, detail)) = line {
-            let entity = EntityRef::parse(id).map_err(IpcError::internal)?;
+            let entity = entity_of(id)?;
             lines.push(
                 knobas_core::activity::record_with(&mut *tx, ACTOR, verb, Some(&entity), detail)
                     .await?,
@@ -792,7 +797,7 @@ pub async fn move_to(
     pool: &PgPool,
     id: &str,
     new_parent_id: Option<&str>,
-) -> Result<Written<AssetNode>, IpcError> {
+) -> Result<Written<AssetRow>, IpcError> {
     let mut tx = pool.begin().await?;
     let current = locked(&mut tx, id).await?;
 
@@ -833,7 +838,7 @@ pub async fn move_to(
         .await?;
     recompute_paths(&mut tx, id).await?;
 
-    let entity = EntityRef::parse(id).map_err(IpcError::internal)?;
+    let entity = entity_of(id)?;
     let line = knobas_core::activity::record_with(
         &mut *tx,
         ACTOR,
@@ -891,7 +896,7 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<Written<()>, IpcError> {
         .execute(&mut *tx)
         .await?;
 
-    let entity = EntityRef::parse(id).map_err(IpcError::internal)?;
+    let entity = entity_of(id)?;
     let line = knobas_core::activity::record_with(
         &mut *tx,
         ACTOR,
@@ -937,7 +942,7 @@ async fn locked(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<Stored, 
     .bind(id)
     .fetch_optional(&mut **tx)
     .await?
-    .ok_or_else(|| IpcError::not_found(format!("no asset {id}")))?;
+    .ok_or_else(|| no_such_asset(id))?;
 
     let status: String = row.try_get("status")?;
     let environment: Option<String> = row.try_get("environment")?;
@@ -957,34 +962,34 @@ async fn locked(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<Stored, 
 }
 
 /// One asset as the wire carries it, after a write.
-async fn one(pool: &PgPool, id: &str) -> Result<AssetNode, IpcError> {
+async fn one(pool: &PgPool, id: &str) -> Result<AssetRow, IpcError> {
     let row = sqlx::query(ONE)
         .bind(id)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| IpcError::not_found(format!("no asset {id}")))?;
-    node_of(&row)
+        .ok_or_else(|| no_such_asset(id))?;
+    row_of(&row)
 }
 
-/// The three nullable text columns are set through one statement each, and the
-/// column name is a `&'static str` chosen by the match above it -- never
-/// anything a caller typed.
+/// The three statements that set a single column, each named where it is used.
+///
+/// `&'static str` constants rather than a helper that matches on a column
+/// *name*: an earlier draft did the latter and carried an arm no caller could
+/// reach, which is a second switch over a choice the call site has already
+/// made. Nothing a caller typed is ever any part of these.
+const SET_STATUS: &str =
+    "update knobas.asset set status = coalesce($2, 'none'), updated_at = now() where id = $1";
+const SET_ENVIRONMENT: &str =
+    "update knobas.asset set environment = $2, updated_at = now() where id = $1";
+const SET_OWNER: &str = "update knobas.asset set owner = $2, updated_at = now() where id = $1";
+
+/// Run one of [`SET_STATUS`], [`SET_ENVIRONMENT`] or [`SET_OWNER`].
 async fn set_column(
     tx: &mut Transaction<'_, Postgres>,
+    statement: &'static str,
     id: &str,
-    column: &'static str,
     value: Option<&str>,
 ) -> Result<(), IpcError> {
-    let statement = match column {
-        "status" => {
-            "update knobas.asset set status = coalesce($2, 'none'), updated_at = now() where id = $1"
-        }
-        "environment" => {
-            "update knobas.asset set environment = $2, updated_at = now() where id = $1"
-        }
-        "owner" => "update knobas.asset set owner = $2, updated_at = now() where id = $1",
-        other => return Err(IpcError::internal(format!("no such asset column {other}"))),
-    };
     sqlx::query(statement)
         .bind(id)
         .bind(value)
@@ -1068,6 +1073,33 @@ async fn cycle_through(
         .map_err(Into::into)
 }
 
+/// The `not_found` every read and every writer raises for an id no asset
+/// carries. One sentence, in one place: three call sites wrote it out and a
+/// fourth would have written it slightly differently.
+fn no_such_asset(id: &str) -> IpcError {
+    IpcError::not_found(format!("no asset {id}"))
+}
+
+/// The asset's entity reference, for the activity line every mutation writes.
+///
+/// The failure is `internal` rather than `invalid` because the id was read
+/// back out of `knobas.asset`, where `asset_id_ns_chk` has already made it a
+/// well-formed one: a parse that fails here means the row is malformed, which
+/// is knobas' fault and not the caller's.
+fn entity_of(id: &str) -> Result<EntityRef, IpcError> {
+    EntityRef::parse(id).map_err(IpcError::internal)
+}
+
+/// One property value as the `properties` bag stores it.
+///
+/// `to_value` can only fail on a non-finite float, which [`PropertyValue::vet`]
+/// has already refused by the time anything here calls this -- so the failure
+/// is `internal`, and it is a mapped error rather than an `unwrap` because a
+/// panic inside a command takes the window's IPC worker with it.
+fn stored_value(value: &PropertyValue) -> Result<serde_json::Value, IpcError> {
+    serde_json::to_value(value).map_err(IpcError::internal)
+}
+
 fn vet_type(type_id: &str) -> Result<&'static AssetType, IpcError> {
     asset::find(type_id).ok_or_else(|| {
         IpcError::invalid(format!(
@@ -1117,7 +1149,7 @@ fn vet_properties(
         }
         value.vet(key)?;
         vet_against_schema(Some(declared), key, value)?;
-        bag.insert(key.to_owned(), serde_json::to_value(value).unwrap());
+        bag.insert(key.to_owned(), stored_value(value)?);
     }
     Ok(bag)
 }

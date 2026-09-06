@@ -23,7 +23,7 @@
 
 use tauri::{Emitter, State};
 
-use crate::assets::{self, AssetDetail, AssetEdit, AssetNode, PropertyValue};
+use crate::assets::{self, AssetDetail, AssetEdit, AssetRow, PropertyValue};
 use crate::{IpcError, Lifecycle};
 
 /// Put the lines a mutation wrote on the wire, the way `commands::entity` and
@@ -56,7 +56,7 @@ fn announce<R: tauri::Runtime>(
 pub async fn asset_tree(
     lifecycle: State<'_, Lifecycle>,
     parent_id: Option<String>,
-) -> Result<Vec<AssetNode>, IpcError> {
+) -> Result<Vec<AssetRow>, IpcError> {
     let pool = lifecycle.pool()?;
     assets::tree(&pool, parent_id.as_deref()).await
 }
@@ -95,7 +95,7 @@ pub async fn create_asset<R: tauri::Runtime>(
     type_id: String,
     name: String,
     properties: Option<Vec<(String, PropertyValue)>>,
-) -> Result<AssetNode, IpcError> {
+) -> Result<AssetRow, IpcError> {
     let pool = lifecycle.pool()?;
     let written = assets::create(
         &pool,
@@ -126,7 +126,7 @@ pub async fn edit_asset<R: tauri::Runtime>(
     lifecycle: State<'_, Lifecycle>,
     asset_id: String,
     edits: Vec<AssetEdit>,
-) -> Result<AssetNode, IpcError> {
+) -> Result<AssetRow, IpcError> {
     let pool = lifecycle.pool()?;
     let written = assets::edit(&pool, &asset_id, &edits).await?;
     announce(&app, written.activity);
@@ -149,7 +149,7 @@ pub async fn move_asset<R: tauri::Runtime>(
     lifecycle: State<'_, Lifecycle>,
     asset_id: String,
     new_parent_id: Option<String>,
-) -> Result<AssetNode, IpcError> {
+) -> Result<AssetRow, IpcError> {
     let pool = lifecycle.pool()?;
     let written = assets::move_to(&pool, &asset_id, new_parent_id.as_deref()).await?;
     announce(&app, written.activity);
@@ -185,8 +185,8 @@ mod tests {
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
 
-    fn node() -> AssetNode {
-        AssetNode {
+    fn node() -> AssetRow {
+        AssetRow {
             id: "asset:7f2c".to_owned(),
             parent_id: Some("asset:site".to_owned()),
             type_id: "vm".to_owned(),
@@ -204,7 +204,7 @@ mod tests {
     fn the_asset_node_matches_its_typescript_mirror() {
         assert_shape(
             MIRROR,
-            "AssetNode",
+            "AssetRow",
             &serde_json::to_value(node()).unwrap(),
             &[
                 "id",

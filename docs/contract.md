@@ -5007,14 +5007,18 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The six commands**, all in the new module:
 
   ```rust
-  #[tauri::command] pub async fn asset_tree(.., parent_id: Option<String>) -> Result<Vec<assets::AssetNode>, IpcError>;
+  #[tauri::command] pub async fn asset_tree(.., parent_id: Option<String>) -> Result<Vec<assets::AssetRow>, IpcError>;
   #[tauri::command] pub async fn get_asset(.., asset_id: String) -> Result<assets::AssetDetail, IpcError>;
   #[tauri::command] pub async fn create_asset(.., parent_id: Option<String>, type_id: String, name: String,
-                                              properties: Option<Vec<(String, assets::PropertyValue)>>) -> Result<assets::AssetNode, IpcError>;
-  #[tauri::command] pub async fn edit_asset(.., asset_id: String, edits: Vec<assets::AssetEdit>) -> Result<assets::AssetNode, IpcError>;
-  #[tauri::command] pub async fn move_asset(.., asset_id: String, new_parent_id: Option<String>) -> Result<assets::AssetNode, IpcError>;
+                                              properties: Option<Vec<(String, assets::PropertyValue)>>) -> Result<assets::AssetRow, IpcError>;
+  #[tauri::command] pub async fn edit_asset(.., asset_id: String, edits: Vec<assets::AssetEdit>) -> Result<assets::AssetRow, IpcError>;
+  #[tauri::command] pub async fn move_asset(.., asset_id: String, new_parent_id: Option<String>) -> Result<assets::AssetRow, IpcError>;
   #[tauri::command] pub async fn delete_asset(.., asset_id: String) -> Result<(), IpcError>;
   ```
+
+  **`AssetRow` and not `AssetNode`.** `CONTEXT.md`'s **Asset** entry lists *node* among the words
+  to avoid, and every list line this app draws is a `…Row` (`EntityRow`, `LinkRow`, `ActivityRow`,
+  `NoteRow`, `ContextRow`). The tree shape is `parent_id`'s, not a type name's.
 
   **`parent_id: None` is a level, not a missing filter.** The estate's roots are the first Miller
   column, and a read that answered with every asset would draw a first column holding the whole

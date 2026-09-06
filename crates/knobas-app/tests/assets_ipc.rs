@@ -21,7 +21,7 @@
 //! deleted leaf leaves a column of two would be an assertion about whichever
 //! test ran first.
 
-use knobas_app::assets::{self, AssetEdit, AssetNode, AssetStatus, Environment, PropertyValue};
+use knobas_app::assets::{self, AssetEdit, AssetRow, AssetStatus, Environment, PropertyValue};
 use knobas_app::{IpcError, IpcErrorCode};
 use sqlx::PgPool;
 use tauri::ipc::CallbackFn;
@@ -60,7 +60,7 @@ async fn make(
     type_id: &str,
     name: &str,
     properties: &[(String, PropertyValue)],
-) -> AssetNode {
+) -> AssetRow {
     assets::create(pool, parent, type_id, name, properties)
         .await
         .unwrap_or_else(|error| panic!("create {name}: {}", error.message))
@@ -70,7 +70,7 @@ async fn make(
 /// The estate this file works over: **site → VM → container**, three levels,
 /// which is the shape the acceptance criterion asks for and the shallowest one
 /// in which "the path to a container" is a sentence with a middle.
-async fn three_levels(pool: &PgPool) -> (AssetNode, AssetNode, AssetNode) {
+async fn three_levels(pool: &PgPool) -> (AssetRow, AssetRow, AssetRow) {
     let site = make(pool, None, "site", "hel1", &[]).await;
     let vm = make(
         pool,

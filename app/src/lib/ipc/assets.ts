@@ -20,7 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ActivityRow } from "./entity";
 
 /**
- * What a property value may be — `assets::types::PropertyKind`.
+ * What a property value may be — `knobas_core::asset::PropertyKind`.
  *
  * The four story 6 names and no fifth; the *secret* kind is deferred with its
  * keychain convention, so there is nowhere in an asset a credential can be
@@ -80,13 +80,16 @@ export type AssetStatus = "up" | "warn" | "down" | "none";
 export type Environment = "dev" | "stage" | "prod" | "shared";
 
 /**
- * One row of a Miller column — `assets::AssetNode`.
+ * One row of a Miller column — `assets::AssetRow`.
+ *
+ * `Row` and not `Node`: `CONTEXT.md`'s **Asset** entry lists *node* among the
+ * words to avoid, and every list line this app already draws is a `…Row`.
  *
  * `type_label` and `monogram` are resolved by the backend out of the built-in
  * type table, so no surface here keeps a copy of nineteen types and their
  * chips.
  */
-export interface AssetNode {
+export interface AssetRow {
   /** `asset:<uuid>`, and also this asset's entity id. */
   id: string;
   /** The asset that holds this one; `null` at the top of the estate. */
@@ -124,11 +127,11 @@ export interface AssetProperty {
 
 /** Everything the fixed right pane draws — `assets::AssetDetail`. */
 export interface AssetDetail {
-  asset: AssetNode;
+  asset: AssetRow;
   properties: AssetProperty[];
   /** Outermost first, **excluding the asset itself**. Empty at the top. */
-  held_by: AssetNode[];
-  holds: AssetNode[];
+  held_by: AssetRow[];
+  holds: AssetRow[];
   /** This asset's own activity lines, newest first. */
   history: ActivityRow[];
 }
@@ -182,8 +185,8 @@ export type AssetEdit = NameEdit | StatusEdit | EnvironmentEdit | OwnerEdit | Pr
  * Omitted (or `null`) is the estate's **top level** — the first column — not
  * "every asset".
  */
-export function assetTree(parentId?: string | null): Promise<AssetNode[]> {
-  return invoke<AssetNode[]>("asset_tree", { parentId: parentId ?? null });
+export function assetTree(parentId?: string | null): Promise<AssetRow[]> {
+  return invoke<AssetRow[]>("asset_tree", { parentId: parentId ?? null });
 }
 
 /** One asset, with its properties, its held-by path, what it holds, and its history. */
@@ -201,8 +204,8 @@ export function createAsset(
   name: string,
   parentId?: string | null,
   properties?: [string, PropertyValue][],
-): Promise<AssetNode> {
-  return invoke<AssetNode>("create_asset", {
+): Promise<AssetRow> {
+  return invoke<AssetRow>("create_asset", {
     parentId: parentId ?? null,
     typeId,
     name,
@@ -211,8 +214,8 @@ export function createAsset(
 }
 
 /** Apply a list of edits, each one a history line with its old and new value. */
-export function editAsset(assetId: string, edits: AssetEdit[]): Promise<AssetNode> {
-  return invoke<AssetNode>("edit_asset", { assetId, edits });
+export function editAsset(assetId: string, edits: AssetEdit[]): Promise<AssetRow> {
+  return invoke<AssetRow>("edit_asset", { assetId, edits });
 }
 
 /**
@@ -221,8 +224,8 @@ export function editAsset(assetId: string, edits: AssetEdit[]): Promise<AssetNod
  * A move that would make a cycle rejects with `invalid`, naming the asset it
  * would have run into.
  */
-export function moveAsset(assetId: string, newParentId: string | null): Promise<AssetNode> {
-  return invoke<AssetNode>("move_asset", { assetId, newParentId });
+export function moveAsset(assetId: string, newParentId: string | null): Promise<AssetRow> {
+  return invoke<AssetRow>("move_asset", { assetId, newParentId });
 }
 
 /** Delete a leaf. An asset that still holds something rejects with `conflict`. */

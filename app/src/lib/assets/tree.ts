@@ -18,7 +18,7 @@
  * The spine collapse of story 28 and the keyboard walk of story 29 are #430's;
  * this module is the shape they will collapse and walk.
  */
-import type { AssetDetail, AssetNode } from "../ipc/assets";
+import type { AssetDetail, AssetRow } from "../ipc/assets";
 import { hashFor } from "../shell/router.svelte";
 
 /** The top of the estate: the column whose parent is nobody. */
@@ -56,7 +56,7 @@ export function emptyPath(): ColumnPath {
 export function columnPathFor(detail: AssetDetail | null): ColumnPath {
   if (detail === null) return emptyPath();
 
-  const ancestors = detail.held_by.map((node) => node.id);
+  const ancestors = detail.held_by.map((held) => held.id);
   const parents: (string | null)[] = [TOP, ...ancestors];
   const selected: (string | null)[] = [...ancestors, detail.asset.id];
 
@@ -76,7 +76,7 @@ export function columnPathFor(detail: AssetDetail | null): ColumnPath {
  * `held_by` is *what holds it*, which does not.
  */
 export function heldByPath(detail: AssetDetail): string[] {
-  return [...detail.held_by.map((node) => node.name), detail.asset.name];
+  return [...detail.held_by.map((held) => held.name), detail.asset.name];
 }
 
 /**
@@ -98,6 +98,6 @@ export function selectionIn(path: ColumnPath, column: number): string | null {
  * there is still exactly one encoder and a link from a ticket and a click in a
  * column cannot end up in different places.
  */
-export function addressOf(node: Pick<AssetNode, "id">): string {
-  return hashFor({ view: "assets", tab: "tree", assetId: node.id });
+export function addressOf(row: Pick<AssetRow, "id">): string {
+  return hashFor({ view: "assets", tab: "tree", assetId: row.id });
 }
