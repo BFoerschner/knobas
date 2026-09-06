@@ -88,7 +88,18 @@ export KNOBAS_GITEA_OWNER=tidewater
 export KNOBAS_GITEA_REPO=payout-service
 ```
 
-`eval "$(./seed --env)"` re-prints them without re-seeding. Once `./seed
+`eval "$(./seed --env)"` re-prints them without re-seeding. Once `./seed-kuma.sh`
+has run it also prints Uptime Kuma's two:
+
+```sh
+export KNOBAS_KUMA_URL=http://127.0.0.1:3001
+export KNOBAS_KUMA_API_KEY=<the seed's API key, also in kuma-api-key>
+```
+
+`eval "$(./seed --env-kuma)"` prints **only** those two, and needs no
+`seed-state.json` — which is Gitea's, and re-minting it is how one worktree's
+seed 401s another's live run. `just kuma-live` uses that form for exactly that
+reason. Once `./seed
 --teamcity` has run it also prints `KNOBAS_TEAMCITY_URL` and
 `KNOBAS_TEAMCITY_TOKEN`; the seeded TeamCity suite additionally reads
 `seed-state.json` for the fixture-number-to-id map, from
@@ -125,6 +136,7 @@ variables gate it and where those come from.
 | `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back, and then that pull request on the standup digest (M3.3's digest witness for Gitea). Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
 | `just teamcity-live-seeded` | two suites: `knobas-source-teamcity` / `live_teamcity_seeded` — the adapter against **our** seeded TeamCity — and then `knobas-app` / `teamcity_seeded_live`, read-only, which is M3.3's digest witness for this source (a seeded build the mirror attributes to the reader is on the digest for the day it ran) | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
+| `just kuma-live` | `knobas-source-kuma` / `live_kuma` — the Uptime Kuma adapter against **this** container: the estate mirrored, an idle poll that emits nothing, a monitor really deleted and reported gone, a wrong API key's 401 | `KNOBAS_KUMA_URL`, `KNOBAS_KUMA_API_KEY` | `./seed-kuma.sh` then `eval "$(./seed --env-kuma)"` (the recipe does both) |
 | `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
 
 **A recipe with nothing to run against fails; it does not pass quietly.** Each
@@ -180,9 +192,17 @@ it at the same time will break each other. Four ways:
   asset*, is gone on anyone's next `./seed`, silently and with no way back.
   Add a monitor that has to survive to `monitors.json`, not to the UI.
 
+- **`just kuma-live` re-mints the API key** when the worktree it runs from has
+  no `kuma-api-key` — Kuma hands a key's clear text out once, so a key that
+  exists in the instance with no copy on the host is replaced. A second agent
+  running it mid-run makes the first agent's `/metrics` requests answer 401,
+  which reads as a credential defect and is not one. It also adds and deletes
+  one monitor of its own, `knobas-live-scratch`, which is why the sweep above
+  matters: a killed run's leftover is removed by the next `./seed-kuma.sh`.
+
 So: **claim the environment before running `./seed`, `just gitea-live`,
-`just gitea-live-capped` or `just start-work-live`, and say when you release
-it.** `start-work-live` seeds too, and its branches carry the same `knobas-`
+`just gitea-live-capped`, `just start-work-live` or `just kuma-live`, and say
+when you release it.** `start-work-live` seeds too, and its branches carry the same `knobas-`
 prefix `live_gitea.rs` sweeps, so a concurrent `just gitea-live` deletes the
 branch out from under it. The failure mode is a
 mid-run 401 or a vanished branch, neither of which reads as "somebody else is
@@ -903,6 +923,27 @@ Uptime Kuma v2 prunes raw heartbeats to ~24 h, **absence of a metric means
 seed asserts presence, never a particular value, and never waits for heartbeat
 history.
 
+**A paused monitor is not in `/metrics` at all.** Measured on the pinned image
+on 2026-09-06 (#442): pausing a monitor over socket.io (`pauseMonitor`) removed
+every one of its eight series, and `resumeMonitor` put all eight back within one
+interval. So through this channel — which is the only channel an API key opens,
+and the whole of `knobas-source-kuma`'s read path — *paused* and *deleted* are
+**one observation**, and knobas tombstones a paused monitor and re-mirrors it on
+resume.
+
+That matters beyond the seed, because M4 spec #427's story 38 says a paused
+monitor reads as *none* in an asset's health rollup: a monitor knobas cannot
+see is not a monitor knobas can call paused. Telling the two apart needs the
+socket.io channel, which is the Kuma write half's ticket. Recorded here rather
+than left to be rediscovered, and stated in `crates/knobas-source-kuma/src/
+cursor.rs` where the tombstone is written.
+
+What the *adapter* reads from this document, and what each value means, is in
+that crate's `model.rs` — `monitor_id` as the identity, the literal string
+`"null"` for a field a monitor of that type has not got, `-1` as the response
+time of a check that did not answer, and the four state codes off
+`monitor_status`'s own `# HELP` line.
+
 A gotcha of the `add` event, hit while adding the first ping monitor:
 `server.js` runs `monitor.accepted_statuscodes.every(...)` on **every** monitor
 on the way in, with no type check first. A ping monitor needs no status codes
@@ -1083,6 +1124,7 @@ either platform -- disclosed here, in `notify.rs`'s and
 | `./seed` | Gitea and Kuma, in order. Idempotent — re-running is a no-op that exits 0. Needs `hetzner/hosts.env`, because `./seed-kuma.sh` does. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted. Needs `hetzner/hosts.env` for the three server IPs. |
+| `./kuma-monitor.sh` | `add <name> <url>` / `delete <name>` on one throwaway monitor, through the same socket.io channel the seed uses. Idempotent both ways. What `just kuma-live` witnesses a deletion with; not part of the baseline, so `./seed-kuma.sh` sweeps whatever it leaves. |
 | `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
