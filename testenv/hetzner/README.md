@@ -40,6 +40,14 @@ exists. So it is not documentation that may rot quietly -- it is a fixture, and
 editing anything here without editing it is a change to the estate that knobas
 has not been told about.
 
+Since #440 it has **three** readers, and all three read these bytes rather than
+a copy of them: `knobas_app::sources::demo` imports it on every `just demo`,
+`crates/knobas-app/tests/estate_exit.rs` runs M4.0's exit checklist over it, and
+`app/src/lib/shell/dev/fake-tauri.ts` -- the `?fake-ipc` browser harness --
+draws its Tree from it, so a QA screenshot and the demo profile show the same
+estate. Editing this file moves all three at once, which is the point; what
+holds it to a shape is `crates/knobas-core/tests/estate_file.rs`, below.
+
 Ids are stable slugs in the asset namespace (`asset:knobas-jira`), because an
 import keeps them and re-importing recognises them by id. Where a server and
 the container on it share a name, the server is the `hetzner-` one

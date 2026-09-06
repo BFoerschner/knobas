@@ -1180,6 +1180,19 @@
     if (verb === "created") return "Created";
     if (verb === "deleted") return "Deleted";
     if (verb === "moved") return `Moved to ${nameOf(fields.to) ?? said(fields.to)}`;
+    // The two lines an import writes (#439). Neither is an old-to-new edit,
+    // so both fell through to the composition below and rendered as
+    // `nothing: nothing → nothing` — on every asset in an imported estate,
+    // which since #440 is every asset the demo profile has.
+    if (verb === "imported") {
+      return fields.estate === undefined ? "Imported" : `Imported from ${said(fields.estate)}`;
+    }
+    if (fields.field === "monitors" && Array.isArray(fields.added)) {
+      // *Kept*, not *added*: a name is written down on the asset precisely
+      // because no monitor answers to it yet, and the line says which names
+      // are now waiting for one (spec #427).
+      return `monitors: kept ${fields.added.map(said).join(", ")}`;
+    }
     const field = fields.field === "property" ? said(fields.key) : said(fields.field);
     // A route's `target` edit carries asset **ids** on both sides, for the
     // reason a move's line does: the name at the moment of the edit is not

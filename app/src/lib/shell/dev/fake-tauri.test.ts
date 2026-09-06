@@ -13,6 +13,9 @@
  * `App.svelte`, exempting only files inside the harness directory itself;
  * a test one level up would be a second door into the fixture.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "vitest";
 
 import type { SuggestionPage } from "../../ipc/entity";
@@ -107,4 +110,121 @@ test("accepting or dismissing removes the row from the next read and drops the c
   expect(() => handlers["dismiss_suggestion"]!({ linkId: "link:fake-none" })).toThrow(
     expect.objectContaining({ code: "not_found" }),
   );
+});
+
+/**
+ * The estate the fixture answers with is `testenv/hetzner/estate.json` (#440).
+ *
+ * Read here off the **file on disk**, not off the same import the fixture
+ * uses: an assertion that compared the fixture to its own input would agree
+ * with itself. What is under test is the mapping the fixture does on the way
+ * — `assets::properties_of` and `assets::property_of` in TypeScript — because
+ * that is the half a browser screenshot is evidence about. If it is wrong, a
+ * QA pass photographs a pane the app would never draw.
+ */
+const ESTATE_ON_DISK = JSON.parse(
+  readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8"),
+) as {
+  name: string;
+  assets: {
+    id: string;
+    type: string;
+    name: string;
+    parent?: string;
+    description?: string;
+    properties?: Record<string, string | number>;
+  }[];
+  routes: { id: string; asset: string; target?: string }[];
+};
+
+/** One column of the Tree, as `asset_tree` answers it. */
+function column(handlers: ReturnType<typeof demoHandlers>, parentId: string | null) {
+  return handlers["asset_tree"]!({ parentId }) as { id: string; name: string }[];
+}
+
+test("the estate is the checked-in file, and every type it names has a chip", () => {
+  const handlers = demoHandlers();
+
+  // The top of the estate: the file has exactly one asset with no parent, and
+  // a fixture that lost the `parent` mapping would draw all twenty-three here.
+  const roots = ESTATE_ON_DISK.assets.filter((asset) => asset.parent === undefined);
+  expect(column(handlers, null).map((row) => row.id)).toEqual(roots.map((asset) => asset.id));
+
+  // Every type the estate uses is in the table, with a two-character monogram
+  // — `typeOf`'s fallback draws `??`, which is a chip that says the table has
+  // drifted from the estate it serves.
+  const types = handlers["asset_types"]!({}) as { id: string; monogram: string }[];
+  for (const asset of ESTATE_ON_DISK.assets) {
+    const declared = types.find((type) => type.id === asset.type);
+    expect(declared, `no type ${asset.type} for ${asset.id}`).toBeDefined();
+    expect(declared!.monogram).toHaveLength(2);
+  }
+
+  // Every route has both its ends in the estate, which is what a wire needs:
+  // one row to leave and one row to land on.
+  const ids = new Set(ESTATE_ON_DISK.assets.map((asset) => asset.id));
+  for (const route of ESTATE_ON_DISK.routes) {
+    expect(ids.has(route.asset), `${route.id} is exposed by nothing`).toBe(true);
+    expect(ids.has(route.target ?? ""), `${route.id} lands on nothing`).toBe(true);
+    expect(() => handlers["get_route"]!({ routeId: route.id })).not.toThrow();
+  }
+});
+
+/**
+ * The three servers and their containers — criterion 1's own words — and the
+ * property mapping, on the pane of a machine that exercises every branch of
+ * it: a declared key the file fills, a declared key it does not, a custom
+ * string, a custom **number**, and the `description` that has no column.
+ */
+test("a server's pane draws the file's properties at the kinds the type declares", () => {
+  const handlers = demoHandlers();
+
+  const nbg1 = column(handlers, "asset:hetzner-nbg1");
+  expect(nbg1.map((row) => row.name)).toEqual([
+    "knobas-confluence",
+    "knobas-jira",
+    "knobas-teamcity",
+  ]);
+  // Each of the three holds a Docker engine, and each engine holds containers.
+  for (const server of nbg1) {
+    const engines = column(handlers, server.id);
+    expect(engines).toHaveLength(1);
+    expect(column(handlers, engines[0]!.id).length).toBeGreaterThan(0);
+  }
+
+  const detail = handlers["get_asset"]!({ assetId: "asset:hetzner-teamcity" }) as {
+    properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  };
+  const file = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:hetzner-teamcity")!;
+  const at = (key: string) => detail.properties.find((property) => property.key === key);
+
+  // Declared by `vm`, in the type's order, and labelled by the type.
+  expect(detail.properties.slice(0, 4).map((property) => property.key)).toEqual([
+    "hostname",
+    "ip",
+    "os",
+    "size",
+  ]);
+  expect(at("os")).toEqual({
+    key: "os",
+    label: "OS",
+    value: { kind: "text", value: file.properties!.os },
+    custom: false,
+  });
+  // Declared and unfilled: `null`, which is the em dash the pane draws.
+  expect(at("hostname")!.value).toBeNull();
+  // Custom, labelled by its own key, and a number stays a number — the one
+  // place `valueOf` reads the JSON's type rather than the schema's.
+  expect(at("vcpu")).toEqual({
+    key: "vcpu",
+    label: "vcpu",
+    value: { kind: "number", value: file.properties!.vcpu },
+    custom: true,
+  });
+  // The description has no column in this model, so it is a property.
+  expect(at("description")!.value).toEqual({ kind: "text", value: file.description });
+
+  // And the custom rows are in key order, after the declared ones.
+  const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
+  expect(custom).toEqual([...custom].sort());
 });
