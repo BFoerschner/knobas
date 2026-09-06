@@ -3122,6 +3122,41 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
     assert_eq!(links_of(&pool, "asset:knobas-gitea").await.len(), 1);
 }
 
+/// **An estate with no Kuma at all reports all seven names, not none.**
+///
+/// The state every profile is in before the Kuma source is configured, and the
+/// one an empty-mirror short circuit would answer wrongly: a `return` taken
+/// when no monitor matches any name is a `return` taken *exactly* when the
+/// report has the most to say. Its sibling below seeds one monitor, so it
+/// cannot see that branch at all.
+#[tokio::test]
+async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() {
+    let pool = pool("assets-import-no-kuma").await;
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the preview");
+    assert!(preview.monitor_links.is_empty(), "there is nothing to link");
+    assert_eq!(
+        preview
+            .unresolved
+            .iter()
+            .map(|entry| entry.monitor_name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "knobas-confluence",
+            "knobas-jira",
+            "knobas-teamcity",
+            "confluence (tunnel)",
+            "gitea",
+            "jira (tunnel)",
+            "teamcity (tunnel)",
+        ],
+        "all seven of the file's names, because nothing in the mirror answers \
+         to any of them"
+    );
+}
+
 /// **A name that resolves to nothing is reported by *every* preview, not only
 /// the one that first put it on the asset.**
 ///
