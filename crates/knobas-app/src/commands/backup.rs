@@ -233,12 +233,19 @@ mod tests {
             archives: vec![crate::backup::ArchiveFile {
                 file: "knobas-20260828-030000.knobas".to_owned(),
                 bytes: 4096,
+                share: false,
             }],
         };
+        let json = serde_json::to_value(&status).unwrap();
         assert_mirrored(
-            &serde_json::to_value(&status).unwrap(),
+            &json,
             &["archives", "directory", "last", "next_due_at", "schedule"],
         );
+        // The rows inside, separately: `assert_mirrored` reads the keys of the
+        // object it is handed, and a field added to a *nested* DTO is
+        // invisible to it -- which is how `share` would have reached the
+        // frontend unmirrored (#455).
+        assert_mirrored(&json["archives"][0], &["bytes", "file", "share"]);
     }
 
     /// The five commands, named in the mirror's `invoke` calls.

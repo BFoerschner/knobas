@@ -117,8 +117,8 @@ function statusOf(over: Partial<BackupStatus> = {}): BackupStatus {
     },
     next_due_at: "2026-08-30T01:00:00Z",
     archives: [
-      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304 },
-      { file: "knobas-20260828-030000.knobas", bytes: 4_100_000 },
+      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304, share: false },
+      { file: "knobas-20260828-030000.knobas", bytes: 4_100_000, share: false },
     ],
     ...over,
   };
@@ -235,7 +235,7 @@ test("Export now names the file it wrote and where it went", async () => {
 
   status = statusOf({
     last: { taken_at: NOW.toISOString(), file: "knobas-20260829-091400.knobas", bytes: 4_194_304 },
-    archives: [{ file: "knobas-20260829-091400.knobas", bytes: 4_194_304 }],
+    archives: [{ file: "knobas-20260829-091400.knobas", bytes: 4_194_304, share: false }],
   });
   button("Export now")!.click();
   await settle();
@@ -468,6 +468,50 @@ test("every archive on disk is listed with its size", async () => {
   expect(archiveRow("knobas-20260828-030000.knobas")!.textContent).toContain("3.9 MB");
 });
 
+/**
+ * A share export is listed **apart** from the backups (#455, criterion 1).
+ *
+ * The two live in one directory and restore through one button, and a reader
+ * looking for the file they made to hand over should not have to read dates.
+ * They also do not obey the same rule — the retention sentence above this list
+ * is true of the backups and false of the share exports — so a single list
+ * under one heading says something wrong about half its rows.
+ *
+ * Both directions, because a grouping that put *everything* in one group would
+ * pass a one-sided assertion.
+ */
+test("a share export is listed apart from the backups, under its own heading", async () => {
+  status = statusOf({
+    archives: [
+      { file: "knobas-share-20260829-091400.knobas", bytes: 1_048_576, share: true },
+      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304, share: false },
+    ],
+  });
+  render();
+  await settle();
+
+  const shared = archiveRow("knobas-share-20260829-091400.knobas")!;
+  const backup = archiveRow("knobas-20260829-030000.knobas")!;
+  expect(shared.closest("[data-group]")!.getAttribute("data-group")).toBe("share");
+  expect(backup.closest("[data-group]")!.getAttribute("data-group")).toBe("backup");
+  // Restorable either way: the archive a colleague is handed is the one they
+  // drop into their own directory and restore.
+  expect(shared.textContent).toContain("Restore");
+  // And the group says the thing the retention sentence above does not cover.
+  expect(text()).toMatch(/share exports/i);
+});
+
+/**
+ * ...and with no share export on disk there is no empty heading for one.
+ */
+test("the share heading appears only once there is a share export", async () => {
+  render();
+  await settle();
+
+  expect(target.querySelector('[data-group="share"]')).toBeNull();
+  expect(target.querySelectorAll('[data-group="backup"] .arc[data-file]').length).toBe(2);
+});
+
 test("no archives yet says so rather than showing an empty list", async () => {
   status = statusOf({ last: null, archives: [] });
   render();
@@ -521,13 +565,15 @@ test("the restore confirm says what the restore does and what it will not do", a
   expect(said).toMatch(/refus|declin|will not/i);
   // The mirror is not in the archive, so sources re-sync afterwards.
   expect(said).toMatch(/re-sync|resync/i);
-  // ...and the re-sync is not promised to bring the whole mirror back. The
-  // archive carries `knobas.source_config.cursor` and `knobas_db::backup::
-  // restore` clears only `knobas.setting`, so a restored source runs
-  // `run_from_stored_cursor` from the position the archive recorded — it
-  // fetches what changed upstream since, not everything it once held.
   expect(said).toMatch(/does not rebuild/i);
-  expect(said).toMatch(/resume from the position/i);
+  // ...and it says where that re-sync starts, which changed with #455:
+  // `backup::restore` clears every restored source's cursor, because no
+  // archive carries a mirror and a position measured against one that is gone
+  // makes the first sync fetch nothing. So the first run is a full one — and
+  // the sentence this dialog used to carry, that sources "resume from the
+  // position the archive recorded", is now false and is pinned out.
+  expect(said).toMatch(/from the top|full sync/i);
+  expect(said).not.toMatch(/resume from the position/i);
 });
 
 test("cancelling the restore confirm restores nothing", async () => {

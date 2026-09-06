@@ -103,6 +103,18 @@ pub struct BackupRecord {
 pub struct ArchiveFile {
     pub file: String,
     pub bytes: i64,
+    /// Whether this is a **share export** rather than a nightly backup
+    /// (#455). The two live in the same directory and restore through the
+    /// same button, and they are not the same thing: one is this profile
+    /// backed up, the other is a curated cut of it made on purpose to hand to
+    /// somebody, which retention never deletes. The settings view lists them
+    /// apart, and this is what it reads to do it.
+    ///
+    /// On the row rather than re-derived on the far side, because the naming
+    /// rule is [`policy`]'s: a frontend that told them apart by looking for
+    /// `knobas-share-` would be a second place to keep
+    /// [`policy::share_name`] right.
+    pub share: bool,
 }
 
 /// Everything the settings dialog draws (issue #69).
@@ -403,11 +415,15 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
         return Err(ExportError::NoSuchArchive(file.to_owned()));
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
-    settle_credential_health(state).await;
+    settle_restored_sources(state).await;
     Ok(())
 }
 
-/// Say `missing_secret` about every source this machine has no credential for.
+/// Bring every source the archive brought into line with *this* machine.
+///
+/// Two things the archive is wrong about, both because it is a copy of a
+/// database and neither is a copy of anything: where each source stands, and
+/// whether its credential is here.
 ///
 /// **No archive carries a secret** -- spec §14 puts every credential in the OS
 /// keychain and nothing secret ever reaches Postgres -- but `auth_state` is a
@@ -426,6 +442,30 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 ///
 /// A source whose secret *is* here keeps whatever health it arrived with:
 /// stale, and settled by the next run, which is what `auth_checked_at` is for.
+///
+/// # ...and start every restored source from the top
+///
+/// `cursor` is where a source stood **against a mirror**, and no archive
+/// carries the mirror -- not a backup and not a share export, because it
+/// re-syncs (`knobas_db::backup::dump` is scoped to the `knobas` schema; the
+/// mirror is `sync.item`). So the position that arrives with the row
+/// describes a corpus that is not in the database, and a first run resuming
+/// from it asks the system only for what changed since somebody else's last
+/// sync. On the machine a share export was handed to, that is nothing: every
+/// link the archive brought stays an id with no item behind it, which is
+/// exactly the "list of dangling ids" spec #427's story 78 exists to prevent.
+///
+/// Cleared, then, so the recipient's first run is a full sync -- the run a
+/// source added by hand does, which is the position a restored source is
+/// actually in. It applies to a backup's restore for the same reason and not
+/// as a side effect: that machine's mirror is equally gone, and #454 recorded
+/// the resulting thin search as an escape somebody had to know to take
+/// (`backfill_source`). Clearing it here means nobody has to know.
+///
+/// Unconditional, where the health verdict is asked per source: "this
+/// database holds no mirror" is one fact about the whole restore, not six
+/// questions about six sources.
+///
 /// # Why it lives here, and why it cannot fail the restore
 ///
 /// Here, because it is a step of *restore* and the rest of restore is here.
@@ -434,22 +474,62 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 /// is no second spelling of `missing_secret` and no second `update` to keep in
 /// step with that one.
 ///
-/// **Best-effort.** By the time this runs the archive is already in the
-/// database and there is no undoing it, so reporting a locked keychain as a
-/// failed restore would send a person round a loop whose second attempt is
-/// refused as a `conflict` -- against the data the first attempt put there.
-/// What is at stake is a verdict the next sync run settles anyway, and a
-/// warning in the log is the honest weight for it.
-async fn settle_credential_health(state: &BackupState) {
+/// **Best-effort**, and for one reason that covers both halves: by the time
+/// this runs the archive is already in the database and there is no undoing
+/// it, so reporting either failure as a failed restore would send a person
+/// round a loop whose second attempt is refused as a `conflict` -- against the
+/// data the first attempt put there.
+///
+/// What the two halves cost if they are skipped is **not** the same, so they
+/// are two steps with a warning each and neither is skipped because the other
+/// failed. A health verdict the keychain would not give is settled by the next
+/// sync run anyway. A position that was not cleared is settled by nothing: the
+/// source resumes from a machine it has never been on, every run after it
+/// reports success, and the mirror stays empty until somebody orders a
+/// backfill -- so that warning names the outcome and the escape
+/// (`backfill_source`), because it is the one a reader has to act on. One
+/// warning for both would be false about three of the four ways this fails:
+/// the position is cleared first, so every later failure leaves it cleared.
+async fn settle_restored_sources(state: &BackupState) {
+    if let Err(error) = restart_restored_sources(state).await {
+        tracing::warn!(
+            %error,
+            "the restore finished, but the sources it brought may still be standing where the \
+             archive's machine stood: their syncs will report success and mirror nothing until \
+             a backfill is ordered for each"
+        );
+    }
     if let Err(error) = settle_health(state).await {
         tracing::warn!(
             %error,
             "the restore finished, but the sources it brought could not all be settled \
-             against this machine's keychain"
+             against this machine's keychain: one may read as reachable here because the \
+             archive's machine found it so, until its next run says otherwise"
         );
     }
 }
 
+/// The position half: clear every restored source's `cursor`.
+///
+/// First, and on its own, because it needs no keychain -- a store that refuses
+/// every question must not also leave the restored sources resuming from
+/// somebody else's position.
+async fn restart_restored_sources(state: &BackupState) -> Result<(), ExportError> {
+    let restarted = sqlx::query("update knobas.source_config set cursor = null")
+        .execute(&state.pool)
+        .await?
+        .rows_affected();
+    if restarted > 0 {
+        tracing::info!(
+            sources = restarted,
+            "restored sources will read their systems from the top: no archive carries the mirror"
+        );
+    }
+    Ok(())
+}
+
+/// The credential half: say `missing_secret` about every source this machine
+/// has no secret for.
 async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
     let sources: Vec<String> =
         sqlx::query_scalar("select id from knobas.source_config order by id")
@@ -531,6 +611,11 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
             }
             Some(ArchiveFile {
                 bytes: i64::try_from(meta.len()).unwrap_or(i64::MAX),
+                // Among the names already known to be archives of ours,
+                // the complement of the question retention asks -- and asked
+                // of the same function, so "not aged out" and "listed apart"
+                // cannot come to mean different sets of files.
+                share: !policy::is_backup_name(&name),
                 file: name,
             })
         })

@@ -100,6 +100,22 @@
   const shareEmpty = $derived(!Object.values(shareDraft).some(Boolean));
 
   /**
+   * The two kinds of archive, listed apart (#455).
+   *
+   * They sit in one directory and restore through one button, and they are not
+   * the same thing: the retention sentence above the list is true of the
+   * backups and false of the share exports, which retention never deletes. One
+   * list under one heading says something wrong about half its rows.
+   *
+   * Split on `archive.share`, which the Rust puts on the row — the naming rule
+   * (`knobas-share-…`) belongs to `backup::policy`, and a filter here that
+   * matched the prefix would be a second place to keep it right. Each group
+   * keeps the order the read came in, which is newest first.
+   */
+  const backups = $derived(status?.archives.filter((archive) => !archive.share) ?? []);
+  const shares = $derived(status?.archives.filter((archive) => archive.share) ?? []);
+
+  /**
    * Which `backup_status` is the current one.
    *
    * Two *Retry* presses over a failing read put two in flight at once, and
@@ -348,31 +364,66 @@
     </p>
   </div>
 
-  <div class="tile-h">
-    <span class="lab">Archives</span>
-    <span class="cnt">{status.archives.length}</span>
-  </div>
-
   {#if status.archives.length === 0}
+    <div class="tile-h">
+      <span class="lab">Archives</span>
+      <span class="cnt">0</span>
+    </div>
     <div class="empty">
       <p>No archives on disk yet — nothing to restore.</p>
     </div>
   {:else}
     <!--
-      Newest first, as `backup::archives` sorts them. The name carries its own
-      date (`knobas-YYYYMMDD-HHMMSS`), which is why there is no second column
-      re-deriving one here: that format is the Rust's to own, and a frontend
-      that parsed it would be a second place to keep it right.
+      Two groups, never one (#455): a share export is not a backup, and the
+      retention sentence above is true of one and false of the other.
+
+      Newest first within each, as `backup::archives` sorts them. The name
+      carries its own date (`knobas-YYYYMMDD-HHMMSS`), which is why there is no
+      second column re-deriving one here: that format is the Rust's to own, and
+      a frontend that parsed it would be a second place to keep it right.
+
+      Each group is drawn only when it holds something, so a profile that has
+      never taken a share export shows no empty heading for one.
     -->
-    {#each status.archives as archive (archive.file)}
-      <div class="row arc" data-file={archive.file}>
-        <span class="mono">{archive.file}</span>
-        <span class="r">{formatBytes(archive.bytes)}</span>
-        <span class="r">
-          <button class="btn sm" onclick={() => (restoring = archive)}>Restore</button>
-        </span>
+    {#if backups.length > 0}
+      <div data-group="backup">
+        <div class="tile-h">
+          <span class="lab">Backups</span>
+          <span class="cnt">{backups.length}</span>
+        </div>
+        {#each backups as archive (archive.file)}
+          <div class="row arc" data-file={archive.file}>
+            <span class="mono">{archive.file}</span>
+            <span class="r">{formatBytes(archive.bytes)}</span>
+            <span class="r">
+              <button class="btn sm" onclick={() => (restoring = archive)}>Restore</button>
+            </span>
+          </div>
+        {/each}
       </div>
-    {/each}
+    {/if}
+
+    {#if shares.length > 0}
+      <div data-group="share">
+        <div class="tile-h">
+          <span class="lab">Share exports</span>
+          <span class="cnt">{shares.length}</span>
+        </div>
+        <p class="sub grp">
+          Made on purpose to hand over, so the retention above never deletes one. Each restores
+          like any other archive — into a knobas that holds no data yet.
+        </p>
+        {#each shares as archive (archive.file)}
+          <div class="row arc" data-file={archive.file}>
+            <span class="mono">{archive.file}</span>
+            <span class="r">{formatBytes(archive.bytes)}</span>
+            <span class="r">
+              <button class="btn sm" onclick={() => (restoring = archive)}>Restore</button>
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {/if}
 {/if}
 
@@ -387,9 +438,10 @@
       </p>
       <p>
         The synced mirror is not in the archive either, and a restore does not rebuild it: search
-        is thin until each source has re-synced. Sources resume from the position the archive
-        recorded rather than from nothing, so a re-sync brings back what changed upstream since —
-        not necessarily everything the mirror used to hold.
+        is thin until each source has re-synced. Each restored source reads its system
+        <b>from the top</b> — no archive carries a mirror, so there is no position left worth
+        resuming from — which makes the first sync of each a full one, and a slow one on a large
+        system.
       </p>
       <p>
         This only works into a knobas that <b>holds no data yet</b>. If this one already has
@@ -520,6 +572,14 @@
 
   .sub {
     color: var(--muted);
+  }
+
+  /* The one-line note under a group heading, not inside the padded block. */
+  .sub.grp {
+    padding: 8px 12px 0;
+    font-size: 11px;
+    line-height: 1.5;
+    max-width: 78ch;
   }
 
   .fail {
