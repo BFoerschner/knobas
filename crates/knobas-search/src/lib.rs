@@ -23,10 +23,11 @@
 //! second full sort of every matching row, on the launcher's hot path. That is
 //! the M0 carry-over, and installing the builder here is what discharges it.
 //!
-//! The corpora are [`corpus::ALL`]: the mirror, and `knobas.note` since #46 --
-//! so one query answers over what knobas synced *and* what it owns. Asset
-//! ancestor paths are M4 (interfaces §2.4). A prefix whose corpus does not
-//! exist yet answers with *no rows* and still echoes what it understood --
+//! The corpora are [`corpus::ALL`]: the mirror, `knobas.note` since #46, and
+//! the estate's assets (#428) and routes (#432) -- so one query answers over
+//! what knobas synced *and* what it owns, an asset's ancestor path included
+//! (spec §4, interfaces §2.4). A prefix that names no corpus at all -- `t `,
+//! `>`, `?` -- answers with *no rows* and still echoes what it understood,
 //! never invented ones.
 //!
 //! The gotcha-2 confinement is enforced, not merely intended: `tests/
@@ -334,38 +335,35 @@ fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
 /// `t `, `>` and `?` are not corpus searches at all -- worklogs, the command
 /// palette and help. Every one of them is still **parsed and echoed**, so the
 /// launcher greys the prefix out with a reason instead of showing tickets for
-/// `asset:`.
+/// `t `.
 ///
-/// **`asset:` is the one entry here whose corpus now exists** (amended by
-/// #428, which read "assets are M4" while there was no asset table). The
-/// estate landed with [`corpus::ASSET`], so a *plain* query already answers
-/// with asset rows; what has not landed is the launcher's own asset hit --
-/// the monogram, the path from the root, and the action chain -- which is
-/// #436, and which is what the prefix promises a reader who types it. So this
-/// stays until #436, which is the ticket that removes the line, the way #46
-/// removed `note:`'s. Interfaces §2.4's *"the parser must simply return no
-/// `asset:` results rather than pretending"* still holds; the reason is now
-/// the rendering rather than the rows.
+/// **`asset:` left this list with #436** and is the second prefix to do so.
+/// The rows had existed since #428 ([`corpus::ASSET`], and [`corpus::ROUTE`]
+/// since #432), so a *plain* query already answered with them; what was
+/// missing was the launcher's own estate hit -- the monogram, the path from
+/// the root, and the action chain -- and a prefix that promised the estate and
+/// answered with nothing was the honest state until that landed. It has, so
+/// removing the variant here is the whole of what turns the prefix on: the
+/// parser already claimed it and already set `kinds = ["asset"]`.
+/// Interfaces §2.4's *"the parser must simply return no `asset:` results
+/// rather than pretending"* is discharged rather than broken -- there is
+/// nothing left to pretend about.
 ///
-/// `note:` was in this list until #46 and is not any more: notes have a corpus
-/// ([`corpus::NOTE`]) and a write path behind it. Removing it here is the whole
-/// of what turns the prefix on -- the parser already claimed it and already set
-/// `kinds = ["note"]`.
+/// `note:` was in this list until #46 and left it the same way, for the same
+/// reason.
 fn empty_corpus(prefix: Option<Prefix>) -> bool {
-    matches!(
-        prefix,
-        Some(Prefix::Asset | Prefix::Time | Prefix::Action | Prefix::Help)
-    )
+    matches!(prefix, Some(Prefix::Time | Prefix::Action | Prefix::Help))
 }
 
 /// A response that understood the query and found nothing.
 ///
 /// No coverage, and it is not an omission: both callers are queries that never
-/// reached a corpus at all -- an empty box, or a prefix the launcher does not
-/// answer from yet. `asset: @jonas` finds nothing because `asset:` is still
-/// short-circuited until #436 draws an asset hit, which the greyed-out prefix
-/// already says; adding "and Buildserver has no authors" would explain the
-/// wrong absence.
+/// reached a corpus at all -- an empty box, or a prefix that is not a corpus
+/// search (`t `, `>`, `?`). Reporting "and Buildserver has no authors" for one
+/// of those would explain the wrong absence. `asset: @jonas` is no longer one
+/// of them (#436): it reaches the corpora like any other query and is reported
+/// on like any other -- which is what "coverage reports assets like any other
+/// kind" means.
 fn empty(interpreted: ParsedQuery, started: Instant) -> SearchResponse {
     SearchResponse {
         interpreted,
@@ -483,29 +481,57 @@ mod tests {
     /// The prefixes the launcher does not answer from, and -- just as
     /// important -- the ones it does.
     ///
-    /// `Prefix::Asset` is in the first list and its corpus is in
-    /// [`corpus::ALL`]: since #428 the rows exist and a plain query returns
-    /// them; #436 is what draws an asset hit and takes the prefix off this
-    /// list. Both halves of that are deliberate, so both are asserted.
+    /// **Every prefix left in the first list is one that names no corpus at
+    /// all**, and that is now a property rather than a coincidence: worklogs,
+    /// the palette and the help card are not searches. So the list is checked
+    /// against [`corpus::ALL`] in both directions -- a prefix that
+    /// short-circuits must have no corpus behind it, which is what would have
+    /// failed on `asset:` from #428 until #436. `corpus_of` below is
+    /// **exhaustive**, with no `_` arm, so the next prefix cannot arrive
+    /// without a verdict on which of the two lists it belongs in.
     #[test]
     fn only_the_absent_corpora_short_circuit() {
-        assert!(
-            corpus::ALL.iter().any(|corpus| corpus.kind == "'asset'"),
-            "the asset corpus exists (#428); `asset:` is short-circuited for \
-             the launcher's rendering (#436), not for want of rows"
-        );
-        for absent in [Prefix::Asset, Prefix::Time, Prefix::Action, Prefix::Help] {
-            assert!(empty_corpus(Some(absent)), "{absent:?}");
+        // The prefix that pins a corpus, and the corpus it pins. Every variant
+        // is named rather than swept up by a wildcard: a wildcard would answer
+        // "no corpus" for a prefix nobody had thought about, which is the one
+        // answer that makes the assertion below pass for the wrong reason.
+        fn corpus_of(prefix: Prefix) -> Option<&'static str> {
+            match prefix {
+                Prefix::Asset => Some("'asset'"),
+                Prefix::Note => Some("'note'"),
+                Prefix::Action
+                | Prefix::Ticket
+                | Prefix::Person
+                | Prefix::Source
+                | Prefix::Time
+                | Prefix::List
+                | Prefix::Help => None,
+            }
         }
-        for present in [
+        for prefix in [
             Prefix::Ticket,
             Prefix::Person,
             Prefix::Source,
             Prefix::List,
-            // #46: notes are knobas' own corpus, not a milestone away.
+            // #46 for notes, #436 for the estate: both left the list the same
+            // way, once the launcher could draw what the corpus already held.
             Prefix::Note,
+            Prefix::Asset,
         ] {
-            assert!(!empty_corpus(Some(present)), "{present:?}");
+            assert!(!empty_corpus(Some(prefix)), "{prefix:?}");
+            if let Some(kind) = corpus_of(prefix) {
+                assert!(
+                    corpus::ALL.iter().any(|corpus| corpus.kind == kind),
+                    "{prefix:?} answers from {kind}, which is not in corpus::ALL"
+                );
+            }
+        }
+        for absent in [Prefix::Time, Prefix::Action, Prefix::Help] {
+            assert!(empty_corpus(Some(absent)), "{absent:?}");
+            assert!(
+                corpus_of(absent).is_none(),
+                "{absent:?} short-circuits and names a corpus: one of the two is wrong"
+            );
         }
         assert!(!empty_corpus(None));
     }

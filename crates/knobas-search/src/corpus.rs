@@ -29,10 +29,14 @@
 //!
 //! **Built.** [`ASSET`] is below and is in [`ALL`]; migration `0017` carries
 //! the column and the index this section sketched. The sketch is left as
-//! written -- it is the argument for the shape, and two of its details did not
-//! survive contact, both recorded on [`ASSET`] itself: there is no
-//! `props_text`, and `source_id` is the constant `'asset'` rather than an
-//! `imported_from` column the import (#439) has not yet asked for.
+//! written -- it is the argument for the shape, and one of its details did not
+//! survive contact, recorded on [`ASSET`] itself: `source_id` is the constant
+//! `'asset'` rather than an `imported_from` column the import (#439) has not
+//! yet asked for. The sketch's `props_text` was deferred by `0017` and landed
+//! with `0019` (#436), values-only and at the weight sketched here -- but not
+//! in the two lines below: PostgreSQL forbids a generated column from
+//! referencing another, so the real `fts` cannot read `props_text` and
+//! recomputes its expression instead. `0019` carries that and the mitigation.
 //!
 //! Assets are a tree, and spec §4 requires "pve-02" to find the containers
 //! *under* pve-02. The path therefore has to be part of the indexed text, and
@@ -236,8 +240,21 @@ pub const NOTE: Corpus = Corpus {
 /// absence is the miss ADR-0007 asks for: an empty string would draw an empty
 /// path line under every site in the launcher.
 ///
-/// **No `props_text`.** Migration `0017` records why: what a search for
-/// "8080" should mean is a decision, and it is not this ticket's.
+/// **`props_text` is the decision `0017` deferred, made by `0019` (#436).**
+/// `0017` left the column out because *"what a search for '8080' should mean is
+/// a decision"*, and #436's *"searching a hostname property finds the VM"* is
+/// what asks it. The answer is in the migration in full: the property
+/// **values** are indexed and the **keys** are not, at weight C -- below the
+/// name and below the ancestor path -- so `vm-db-01` and `8080` find the one
+/// row that carries them while `hostname` and `ports`, which are schema and
+/// stand on every asset of a type, find nothing. The column is *generated*
+/// rather than store-maintained, which `path_text` cannot be: an ancestor path
+/// needs a recursive CTE, a property bag is a column of the same row.
+///
+/// It joins `headline_text` as well as the index, and that pairing is the rule
+/// [`Corpus::headline_text`] states rather than a second decision: a hit
+/// matched on a property with nothing quotable in the excerpt is a row whose
+/// reason for being there is invisible.
 ///
 /// No `scope`, for [`NOTE`]'s reason: a deleted asset's row is gone, so there
 /// is nothing to filter out. No `author` either -- an asset's `owner` is who is
@@ -250,7 +267,7 @@ pub const ASSET: Corpus = Corpus {
     source_id: "'asset'",
     title: "a.name",
     fts: "a.fts",
-    headline_text: "a.name || ' — ' || a.path_text",
+    headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
     author: None,
     updated_at: "a.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -274,12 +291,41 @@ pub const ASSET: Corpus = Corpus {
 ///
 /// The consequence is deliberate rather than an oversight, and it is the one
 /// place this corpus differs from [`ASSET`]: a route is **shown** with its
-/// path and **matched** on its own name and URL. `0018`'s `fts` carries those
-/// two at weight A and nothing else, so "kuma" and "8111" find the routes that
-/// carry them, while "hel1" finds the *assets* under `hel1` and not every
-/// route exposed anywhere beneath it. That is the right answer for a launcher
-/// row: a query that named a host and came back with thirty routes it holds
-/// would have buried the host.
+/// path and **matched** on its own name and URL, while "hel1" finds the
+/// *assets* under `hel1` and not every route exposed anywhere beneath it. That
+/// is the right answer for a launcher row: a query that named a host and came
+/// back with thirty routes it holds would have buried the host.
+///
+/// **How much of a URL is actually reachable, measured (#436).** `0018` says
+/// *"`to_tsvector` lexes a URL into its host and path, so 'kuma' and '8111'
+/// find the routes that carry them"*. That is true of the estate's own URLs
+/// and not true in general, and the line between the two is worth having
+/// written down, because it is not where anybody would guess:
+///
+/// | URL | lexemes |
+/// |---|---|
+/// | `http://127.0.0.1:8111/` | `127.0.0.1`, `8111` |
+/// | `http://gitea:3000/` | `gitea`, `3000` |
+/// | `http://127.0.0.1:33001/dashboard` | `127.0.0.1`, `33001/dashboard` |
+/// | `https://kuma.example.test:3001/dashboard` | `kuma.example.test:3001/dashboard`, `kuma.example.test:3001`, `/dashboard` |
+///
+/// So it is the **path** that fuses things together, not the port: a URL that
+/// ends at `/` gives the port as a lexeme of its own, which is why every one
+/// of the nine routes in `testenv/hetzner/estate.json` is findable by the port
+/// that tells it apart (ADR-0013 -- the real container is the witness, and it
+/// was asked). A URL with a path folds the port into `33001/dashboard`, and a
+/// *named* host with a port is one lexeme whole. Those two are reachable only
+/// while the last word is still being typed, when
+/// [`Parsed::prefix_last_term`](crate::Parsed) makes the query a prefix --
+/// which means a hit that vanishes on the space bar -- and a path segment
+/// (`dashboard`) is not reachable at any stage.
+///
+/// **Not fixed here, deliberately.** #436 asks that a route be found by its
+/// URL, and on the estate that exists it is. Widening what `0018`'s `fts`
+/// indexes is a change to a surface ratified the day before and it belongs to
+/// a ticket that says so; `tests/corpus_seam.rs` runs both the positive and
+/// the two negatives, so the boundary is a fact the next reader inherits
+/// rather than one they have to measure again.
 ///
 /// `path` is the exposing asset's own path **plus its name**, which is where
 /// the route sits -- one level deeper than the asset's own answer, for the

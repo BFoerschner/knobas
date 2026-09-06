@@ -42,7 +42,10 @@
 //! rather than given a verdict. It contributed no corpus, so authorship is not
 //! why it is absent from the results, and saying anything about it here would
 //! explain the wrong absence -- the same reason `Searcher::search`'s
-//! short-circuits report nothing for `asset:`.
+//! short-circuits report nothing for `t `, `>` and `?`. (That list held
+//! `asset:` too until #436 turned the prefix on; an estate query is now
+//! reported on like any other, and answers with an empty report for the
+//! ordinary reason -- no *source* has synced an asset.)
 //!
 //! # Why existence and not sparsity
 //!
@@ -192,8 +195,8 @@ pub(crate) async fn author_coverage(
 /// `sync.live_item` where it belongs. A disabled source now contributes nothing
 /// to any corpus, so a verdict on it would explain an absence authorship had
 /// nothing to do with -- the same error as verdicting a source the kind scope
-/// excluded, and the same reason the short-circuits report nothing for
-/// `asset:`.
+/// excluded, and the same reason the short-circuits report nothing for a
+/// prefix that names no corpus at all.
 ///
 /// So the population is the one the grammar can name, and the two questions
 /// #200 separated have converged on one answer again. The separation itself is

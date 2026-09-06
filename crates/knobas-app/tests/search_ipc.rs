@@ -442,10 +442,11 @@ async fn the_trees_search_answers_with_assets_and_their_paths() {
 /// path -- which is what the picker draws under the name so two containers
 /// called `postgres` are told apart.
 ///
-/// Deliberately **not** the `asset:` prefix, which parses to the same filter
-/// and is short-circuited to nothing until #436 draws an asset hit in the
-/// launcher: the picker sets the filter itself, which is the mechanism that
-/// exists today.
+/// Deliberately **not** the `asset:` prefix, which parses to the same filter:
+/// the picker sets the filter itself, and that is the mechanism under test. The
+/// prefix was short-circuited to nothing when this was written and answers from
+/// the estate since #436; `the_asset_prefix_answers_from_the_estate_with_its_path`
+/// below is where the two are held to the same answer.
 #[tokio::test]
 async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
     let pool = pool().await;
@@ -496,5 +497,211 @@ async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
     assert!(
         assets.hits.iter().any(|hit| hit.row.entity_id == site.id),
         "the browse is the estate and not one level of it"
+    );
+}
+
+/// **`asset:` answers, and the launcher's own estate hit** (#436).
+///
+/// The prefix was **short-circuited** from M1 until this ticket: it parsed, it
+/// set `kinds = ["asset"]`, and `Searcher::search` then returned an empty
+/// response without reaching a corpus. The rows had existed since #428 and the
+/// greyed-out prefix was the honest state while nothing drew an estate row.
+/// This is the wire half of turning it on -- that the prefix now reaches
+/// `corpus::ASSET`, that what comes back carries the path from the root, and
+/// that `coverage` is computed for it *like any other kind* rather than left
+/// empty by a branch that never ran.
+///
+/// Through `knobas_app::assets::create` and not by hand: `path_text` is the
+/// store's to maintain and `props_text` is the database's to generate, and a
+/// test that inserted both itself would witness neither.
+#[tokio::test]
+async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
+    let pool = pool().await;
+    let t = seed(&pool, "prefix").await;
+
+    let site = knobas_app::assets::create(&pool, None, "site", &format!("site {t}"), &[])
+        .await
+        .unwrap()
+        .value;
+    let vm = knobas_app::assets::create(&pool, Some(&site.id), "vm", &format!("vm {t}"), &[])
+        .await
+        .unwrap()
+        .value;
+
+    // The prefix, typed, and nothing else: no filter set by the caller.
+    let response = search_inner(&pool, query(&format!("asset: {t}")))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.interpreted.prefix,
+        Some(knobas_search::Prefix::Asset)
+    );
+    assert_eq!(response.interpreted.filters.kinds, ["asset"]);
+    let kinds: Vec<_> = response.groups.iter().map(|g| g.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["asset"],
+        "`asset:` reaches the estate and keeps the mirror's rows out: {kinds:?}"
+    );
+    let hit = response.groups[0]
+        .hits
+        .iter()
+        .find(|hit| hit.row.entity_id == vm.id)
+        .expect("the VM the prefix was typed for");
+    assert_eq!(hit.row.path.as_deref(), Some(format!("site {t}").as_str()));
+
+    // **The prefix and the filter it parses to now answer the same thing**,
+    // which is the whole of what the short-circuit broke and the sharpest way
+    // to say it: the Tree's box has set `kinds = ["asset"]` by hand since #430
+    // and always reached the corpus, while the prefix that parses to exactly
+    // that filter returned nothing. Groups *and* coverage, because coverage
+    // was the other half `empty()` skipped -- and "assets are reported on like
+    // any other kind" is what that comes to.
+    let mut by_filter = query(&t);
+    by_filter.filters.kinds = vec!["asset".to_owned()];
+    let filtered = search_inner(&pool, by_filter).await.unwrap();
+    let named = |answer: &knobas_search::SearchResponse| {
+        answer
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .map(|hit| hit.row.entity_id.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(named(&response), named(&filtered));
+    assert_eq!(response.total, filtered.total);
+    assert_eq!(response.coverage.len(), filtered.coverage.len());
+
+    // And with an author filter on top, both are the *same* empty report --
+    // empty because no source has synced an asset, which is the reason
+    // `coverage_of` gives for leaving a source out, and not because a branch
+    // never ran. `note:` answers identically, which is the point of "like any
+    // other kind".
+    let with_author = |raw: &str, kinds: Vec<String>| {
+        let mut q = query(raw);
+        q.filters.authors = vec!["jonas".to_owned()];
+        q.filters.kinds = kinds;
+        q
+    };
+    let by_prefix = search_inner(&pool, with_author(&format!("asset: {t}"), Vec::new()))
+        .await
+        .unwrap();
+    let by_kind = search_inner(&pool, with_author(&t, vec!["asset".to_owned()]))
+        .await
+        .unwrap();
+    assert_eq!(by_prefix.coverage, by_kind.coverage);
+    assert_eq!(by_prefix.groups.len(), by_kind.groups.len());
+}
+
+/// **A hostname finds the VM, and a port finds the route** (#436, migration
+/// `0019`).
+///
+/// The ticket's two "find it by what it *is*" criteria, at the wire and through
+/// the real store. The hostname is the half `0019` adds: `0017` left an asset's
+/// property values out of `fts` because *"what a search for '8080' should mean
+/// is a decision"*, and this is that decision read back on a database that ran
+/// the migration. The port is the half that already worked, asserted here
+/// because nothing at the wire said so and because the URL shape is the real
+/// estate's rather than an invented one -- `corpus::ROUTE`'s docs carry where
+/// that stops, and `corpus_seam.rs` carries the negatives.
+///
+/// The mirror's ticket and PR carry the same token, so an estate-only answer
+/// is evidence that the estate was searched rather than evidence that nothing
+/// else matched.
+#[tokio::test]
+async fn a_property_value_and_a_url_are_what_a_reader_types() {
+    use knobas_app::assets::{PropertyValue, Visibility};
+
+    let pool = pool().await;
+    let t = seed(&pool, "props").await;
+    let host = format!("{t}-db-01");
+
+    let site = knobas_app::assets::create(&pool, None, "site", &format!("site {t}"), &[])
+        .await
+        .unwrap()
+        .value;
+    let vm = knobas_app::assets::create(
+        &pool,
+        Some(&site.id),
+        "vm",
+        &format!("vm {t}"),
+        &[
+            (
+                "hostname".to_owned(),
+                PropertyValue::Text {
+                    value: host.clone(),
+                },
+            ),
+            (
+                "os".to_owned(),
+                PropertyValue::Text {
+                    value: "Debian 13".to_owned(),
+                },
+            ),
+        ],
+    )
+    .await
+    .unwrap()
+    .value;
+
+    let found = search_inner(&pool, query(&host)).await.unwrap();
+    let ids: Vec<_> = found
+        .groups
+        .iter()
+        .flat_map(|group| &group.hits)
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert_eq!(ids, [vm.id.as_str()], "the hostname finds the VM");
+    // And it is drawn as an estate hit: the path is what tells two machines
+    // with the same name apart.
+    assert_eq!(
+        found.groups[0].hits[0].row.path.as_deref(),
+        Some(format!("site {t}").as_str())
+    );
+
+    // A **key** is schema and finds nothing: `hostname` stands on every VM in
+    // the estate, so a query for it that answered with all of them would be a
+    // launcher answering a question nobody asked.
+    let by_key = search_inner(&pool, query(&format!("hostname {t}")))
+        .await
+        .unwrap();
+    assert!(
+        !by_key
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .any(|hit| hit.row.entity_id == vm.id),
+        "the property key is not indexed; only its value is"
+    );
+
+    // The route, at the shape every route in `testenv/hetzner/estate.json`
+    // actually has -- a loopback host, no path, and the port that is the only
+    // thing telling nine of them apart (ADR-0013).
+    let route = knobas_app::assets::create_route(
+        &pool,
+        &vm.id,
+        &format!("Uptime Kuma {t}"),
+        "http://127.0.0.1:53002/",
+        None,
+        Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap()
+    .value;
+
+    let by_port = search_inner(&pool, query("53002")).await.unwrap();
+    let ports: Vec<_> = by_port
+        .groups
+        .iter()
+        .flat_map(|group| &group.hits)
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert_eq!(ports, [route.id.as_str()], "the port finds the route");
+    // And it opens at the asset exposing it: the row carries that asset's own
+    // path *plus its name*, which is where the route sits.
+    assert_eq!(
+        by_port.groups[0].hits[0].row.path.as_deref(),
+        Some(format!("site {t} / vm {t}").as_str())
     );
 }

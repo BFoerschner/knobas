@@ -1746,3 +1746,64 @@ async fn live_item_hides_a_disabled_source_but_not_an_unconfigured_one() {
         "re-enabling a source must restore its items as they were"
     );
 }
+
+/// **`0019`'s expression, written twice, read back against itself.**
+///
+/// PostgreSQL forbids a generated column from referencing another generated
+/// column, so `knobas.asset.fts` cannot read `props_text` and recomputes it.
+/// `0019` names that duplication and names this test as the mitigation: the
+/// two copies are adjacent in one file, and a change to one alone fails here
+/// rather than silently narrowing what the launcher matches.
+///
+/// Read from the live catalog rather than from the migration file, for the
+/// reason the tests above give: what the launcher matches is what PostgreSQL
+/// stored, and a file the runner never applied proves nothing.
+#[tokio::test]
+async fn the_assets_property_text_is_the_same_expression_the_index_matches() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    async fn generation(pool: &sqlx::PgPool, column: &str) -> (String, String) {
+        sqlx::query_as(
+            "select attgenerated::text, pg_get_expr(adbin, adrelid)
+               from pg_attribute
+               join pg_attrdef on adrelid = attrelid and adnum = attnum
+              where attrelid = 'knobas.asset'::regclass and attname = $1",
+        )
+        .bind(column)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    let (props_stored, props_expr) = generation(pool, "props_text").await;
+    let (fts_stored, fts_expr) = generation(pool, "fts").await;
+
+    // STORED, for roadmap §4 gotcha 1: PG 18 makes an unqualified generated
+    // column virtual, and a virtual column takes a `create index` without
+    // complaint and then recomputes every row on every keystroke.
+    assert_eq!(props_stored, "s", "props_text must be STORED");
+    assert_eq!(fts_stored, "s", "fts must be STORED");
+
+    assert!(
+        fts_expr.contains(&props_expr),
+        "the fts must weight the *same* text props_text holds, or an asset \
+         reads as findable by a property it cannot be found by.\n\
+         props_text: {props_expr}\n\
+         fts:        {fts_expr}"
+    );
+    // And at weight **C on that expression** -- below the name (A) and the
+    // ancestor path (B), which is the ranking `0017` designed and `0019` fills
+    // the last rung of. The weight is read off the `setweight` wrapping the
+    // property text, not off the first `'C'` anywhere in the statement: a
+    // property bag weighted A and some other term weighted C would satisfy the
+    // looser reading and invert the launcher's whole ranking.
+    let weighted = fts_expr
+        .split("setweight(")
+        .find(|term| term.contains(&props_expr))
+        .unwrap_or_else(|| panic!("no setweight carries the property text: {fts_expr}"));
+    assert!(
+        weighted.contains("'C'"),
+        "the property text must be weighted C, below the name and the path: {weighted}"
+    );
+}

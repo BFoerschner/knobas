@@ -53,11 +53,73 @@ export const linkChanges = $state({ count: 0 });
  * to a toast is an unhandled rejection nobody sees.
  */
 export async function linkTo(fromId: string, toId: string, label: string): Promise<void> {
+  await draw(fromId, toId, `Linked ${label}`, null);
+}
+
+/**
+ * The write both one-keystroke link paths make, and the two sentences that
+ * differ between them.
+ *
+ * Private, because what a caller chooses is *what to say*, never how to write:
+ * the counter, the toast and the never-rejects contract are the same for both,
+ * and two copies of them would be two chances for a refusal to surface in one
+ * surface and not the other. `conflict` is the only code either of them treats
+ * as something other than a failure, so it is the only one parameterised —
+ * `null` means "no special sentence", which is `linkTo`'s answer: a pair
+ * already linked under a relation is a state worth naming, and
+ * {@link linkFailureMessage} already names it.
+ */
+async function draw(
+  fromId: string,
+  toId: string,
+  done: string,
+  onConflict: string | null,
+): Promise<void> {
   try {
     await createLink(fromId, toId);
     linkChanges.count += 1;
-    push({ text: `Linked ${label}` });
+    push({ text: done });
   } catch (rejection) {
+    if (onConflict !== null && isIpcError(rejection) && rejection.code === "conflict") {
+      push({ text: onConflict });
+      return;
+    }
     push({ text: linkFailureMessage(rejection), tone: "err" });
   }
+}
+
+/**
+ * Put an entity in a stored context, and acknowledge it — the launcher's
+ * *Add to context* (#436, spec §4's action chain).
+ *
+ * **Not a command of its own.** ADR-0008 states the membership rule and says
+ * so in as many words: *"the seed is the explicit adds (every confirmed link
+ * touching the context's own `ctx:` entity — an* Add to context *is an
+ * ordinary link)"*. So this is {@link linkTo}'s write with the context's
+ * entity at one end — literally, through the same private `draw` — and the
+ * reason it is a second function rather than a second call site is the two
+ * sentences it says: what a reader is told when it lands, and what they are
+ * told when the entity is already in the room.
+ *
+ * `conflict` is that second sentence. From `createLink` it means *this pair is
+ * already linked*, and for a context that is not a failure at all — it is the
+ * state the reader was asking for. "Already linked — this pair already carries
+ * that relation" is true and describes a link nobody drew on purpose; *already
+ * in Payments* is what happened.
+ *
+ * Never rejects, for {@link linkTo}'s reason: the caller is a keyboard chain
+ * where the alternative to a toast is an unhandled rejection nobody sees.
+ */
+export async function addToContext(
+  ctxId: string,
+  targetId: string,
+  label: string,
+  contextLabel: string,
+): Promise<void> {
+  await draw(
+    ctxId,
+    targetId,
+    `Added ${label} to ${contextLabel}`,
+    `${label} is already in ${contextLabel}`,
+  );
 }
