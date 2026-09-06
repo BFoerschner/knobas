@@ -131,7 +131,7 @@ echo "$MARK_BEGIN" >> "$block"
 for role in $ROLES; do
   ip=$(hcloud server ip "knobas-$role")
   [ -n "$ip" ] || die "knobas-$role has no IPv4"
-  echo "KNOBAS_HETZNER_$(tr a-z A-Z <<<"$role")_IP=$ip" >> hosts.env.tmp
+  echo "KNOBAS_HETZNER_$(tr '[:lower:]' '[:upper:]' <<<"$role")_IP=$ip" >> hosts.env.tmp
   cat >> "$block" <<BLOCK
 Host knobas-$role
   HostName $ip
