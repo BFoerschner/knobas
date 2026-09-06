@@ -344,6 +344,8 @@ const ASSET_DETAIL = {
   properties: [],
   held_by: [],
   holds: [],
+  exposes: [],
+  reachable_via: [],
   history: [],
   effective_environment: null,
   effective_owner: null,

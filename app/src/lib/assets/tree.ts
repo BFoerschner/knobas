@@ -137,8 +137,17 @@ export function routeAddressOf(route: Pick<RouteRow, "id">): string {
  *   what makes that sentence checkable.
  */
 export interface Landing {
-  here: boolean;
+  /** What the pane writes beside the route. */
   note: string;
+  /**
+   * Where a click on that note goes, or `null` for the two cases with nowhere
+   * to send the reader: the route lands *here*, or on nothing at all.
+   *
+   * No `here` flag beside it, unlike {@link ValueSource}, and the difference
+   * is that this one has no caller for it: both the sentence and the link are
+   * answered above, so a boolean saying the same thing a third way would be a
+   * field nothing reads.
+   */
   goTo: string | null;
 }
 
@@ -147,13 +156,12 @@ export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
     // Not reachable from this list — a route with no target reaches nobody —
     // so this is the total function's honest answer rather than a case the
     // pane draws.
-    return { here: false, note: "lands on nothing", goTo: null };
+    return { note: "lands on nothing", goTo: null };
   }
-  if (route.target_id === detail.asset.id) return { here: true, note: "lands here", goTo: null };
+  if (route.target_id === detail.asset.id) return { note: "lands here", goTo: null };
   const above = detail.held_by.some((held) => held.id === route.target_id);
   const name = route.target_name ?? route.target_id;
   return {
-    here: false,
     note: above ? `through ${name}` : `inside, on ${name}`,
     goTo: addressOf({ id: route.target_id }),
   };

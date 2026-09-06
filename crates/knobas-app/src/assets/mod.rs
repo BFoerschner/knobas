@@ -743,6 +743,22 @@ const ROUTES_EXPOSED: &str = "select r.id, r.asset_id, r.target_id, r.name, r.ur
 /// direction. Nothing else changes; the direction it was reached from is read
 /// off the row by the pane, which has the held-by path already.
 ///
+/// **Why the descendants are the whole subtree and not one hop.** The
+/// criterion's own words -- *the VM that holds the container* -- read like one
+/// step, and in the real estate they are not: a container sits inside a
+/// `container_engine` which sits on the `vm`
+/// (`testenv/hetzner/estate.json`: `knobas-teamcity` the container, *Docker
+/// engine (knobas-teamcity)*, `knobas-teamcity` the VM). A one-hop rule would
+/// stop at the engine and answer nothing for the box, which is the question
+/// being asked. There is no honest depth between one and all of them.
+///
+/// The cost is that the estate's **root** reads every route the estate has.
+/// That is the reading taken deliberately rather than a case not thought of:
+/// it is true (everything under it is reached by those routes), it is ordered
+/// nearest-first so the useful rows are at the top, and a cap belongs to the
+/// surface that finds it too long rather than to the read -- the pane draws a
+/// list per asset, and the asset a person works on is never the root.
+///
 /// `up` is [`ANCESTORS`]' walk, starting at the asset **itself** rather than
 /// at its parent, and `down` is [`ROLLUP`]'s subtree walk. `union` rather than
 /// `union all` where they meet: the asset is depth 0 of both and is one row,
@@ -1705,9 +1721,9 @@ pub async fn create_route(
     let id = EntityRef::new(ROUTE_NAMESPACE, &Uuid::new_v4().to_string()).to_string();
     let mut tx = pool.begin().await?;
 
-    exists(&mut tx, asset_id, "to expose a route on").await?;
+    must_exist(&mut tx, asset_id, "to expose a route on").await?;
     if let Some(target) = target_id {
-        exists(&mut tx, target, "for a route to land on").await?;
+        must_exist(&mut tx, target, "for a route to land on").await?;
     }
 
     sqlx::query(
@@ -1808,7 +1824,7 @@ pub async fn edit_route(
                     continue;
                 }
                 if let Some(target) = target {
-                    exists(&mut tx, target, "for a route to land on").await?;
+                    must_exist(&mut tx, target, "for a route to land on").await?;
                 }
                 set_route_column(&mut tx, SET_ROUTE_TARGET, id, target).await?;
                 Some((
@@ -2185,11 +2201,16 @@ async fn one_route(pool: &PgPool, id: &str) -> Result<RouteRow, IpcError> {
 
 /// Refuse an asset id nothing answers to, saying what it was wanted **for**.
 ///
+/// Named for what it does rather than for what it asks: it *refuses*, and it
+/// takes a lock while it is at it, which is not what a reader expects of a
+/// function called `exists`. The neighbours it sits among are `vet_name_of`,
+/// `vet_url` and `no_such_asset`.
+///
 /// `for update`, for [`path_below`]'s reason one row over: a route created
 /// against an asset deleted in a transaction committing in between would leave
 /// the insert failing on the foreign key with Postgres' own sentence instead
 /// of this one. The lock is what makes the check and the insert one decision.
-async fn exists(
+async fn must_exist(
     tx: &mut Transaction<'_, Postgres>,
     asset_id: &str,
     wanted_for: &str,
@@ -2208,7 +2229,12 @@ const SET_ROUTE_NAME: &str = "update knobas.route set name = $2, updated_at = no
 const SET_ROUTE_URL: &str = "update knobas.route set url = $2, updated_at = now() where id = $1";
 const SET_ROUTE_TARGET: &str =
     "update knobas.route set target_id = $2, updated_at = now() where id = $1";
-const SET_ROUTE_VISIBILITY: &str = "update knobas.route set visibility = coalesce($2, 'internal'), updated_at = now() where id = $1";
+// No `coalesce` here, unlike `SET_STATUS`: a status edit carries an `Option`
+// and a cleared one means `none`, while a route's visibility is never cleared
+// -- `RouteEdit::Visibility` carries the value itself -- so a default in the
+// statement would be an arm no caller can reach.
+const SET_ROUTE_VISIBILITY: &str =
+    "update knobas.route set visibility = $2, updated_at = now() where id = $1";
 
 /// Run one of the four `SET_ROUTE_*` statements.
 async fn set_route_column(

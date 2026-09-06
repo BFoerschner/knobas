@@ -116,6 +116,10 @@ function assetNamed(id: string, name: string, monogram: string): AssetDetail {
     properties: [],
     held_by: [],
     holds: [],
+    // #432: this fixture is about the timer's target, and a target exposes
+    // nothing and is reached by nothing in it.
+    exposes: [],
+    reachable_via: [],
     history: [],
     effective_environment: null,
     effective_owner: null,

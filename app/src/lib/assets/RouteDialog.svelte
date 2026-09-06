@@ -26,10 +26,21 @@
   The **asset that exposes** the route. A route is the address of the thing
   that answers it, so re-exposing one elsewhere is a different route with a
   different history — `assets::edit_route` has no such edit and neither has
-  this. And the route's **properties**: `RouteEdit`'s property arm is on the
-  wire and the import writes through it, but the editor that draws a key, a
-  kind and a value is the pane's own and is built around an asset's schema;
-  generalising it is a ticket, not a paragraph.
+  this.
+
+  ## The properties are the reader's own, all of them
+
+  A route has no type, so it declares no keys and every property is a custom
+  one — which is what makes the editor here simpler than the pane's: there is
+  no schema to ask which kind an unfilled key takes, so a row is a key, a kind
+  and a value, and the four kinds come from `editing.ts` rather than from a
+  list of this file's own. It is where spec story 14's *certificate expiry*
+  goes: knobas does not own monitoring, so an expiry knobas **checks** is a
+  Kuma monitor (M4.1) and an expiry knobas **records** is one of these.
+
+  Emptying a value **clears** the property, which is `parseProperty`'s reading
+  and `assets::edit_route`'s: a blank text is refused with *clear the property
+  instead*, so a reader who empties a field means the key to go.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -39,12 +50,15 @@
     createRoute,
     deleteRoute,
     editRoute,
+    PropertyKind,
+    PropertyValue,
     RouteEdit,
     RouteRow,
     Visibility,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
+  import { inputTypeFor, parseProperty, propertyEdit, PROPERTY_KINDS } from "./editing";
 
   let {
     asset,
@@ -88,6 +102,35 @@
       ? null
       : { id: route.target_id, name: route.target_name ?? route.target_id },
   );
+
+  /**
+   * The route's properties, as rows a person edits: a key, the kind its value
+   * is entered as, and the value as text.
+   *
+   * Seeded from the route's own list, which is all custom — a route declares
+   * nothing — so the kind comes off the stored value and falls back to text
+   * for a value that could not be read back. A row whose value is emptied is
+   * a **clear**, and a row whose key is emptied is dropped before anything is
+   * sent, because a key with nothing in it is a property the backend would
+   * remove in the same breath it was added.
+   */
+  interface PropertyRow {
+    key: string;
+    kind: PropertyKind;
+    value: string;
+  }
+
+  // svelte-ignore state_referenced_locally
+  let properties = $state<PropertyRow[]>(
+    (route?.properties ?? []).map((property) => ({
+      key: property.key,
+      kind: property.value?.kind ?? "text",
+      value: property.value === null ? "" : String(property.value.value),
+    })),
+  );
+  // svelte-ignore state_referenced_locally
+  /** The keys the route arrived with — what a removed row has to clear. */
+  const had: string[] = (route?.properties ?? []).map((property) => property.key);
 
   // svelte-ignore state_referenced_locally
   // The picker opens where the route is exposed, which is where its target
@@ -149,24 +192,72 @@
    * comparison in the frontend is the copy that goes stale — it would have to
    * know that a name is trimmed and a URL is not.
    */
-  function edits(): RouteEdit[] {
+  function edits(): RouteEdit[] | { refused: string } {
+    const parsed = pairs();
+    if ("refused" in parsed) return parsed;
+    const kept = new Set(parsed.pairs.map(([key]) => key));
     return [
       { field: "name", value: name },
       { field: "url", value: url },
       { field: "target", value: target?.id ?? null },
       { field: "visibility", value: visibility },
+      // A key the route had and this dialog no longer lists is a clear, which
+      // is what `null` on the property arm means. Written from the keys rather
+      // than from a *remove* flag: the row is gone, and what the wire needs is
+      // its name.
+      ...had.filter((key) => !kept.has(key)).map((key) => propertyEdit(key, null)),
+      ...parsed.pairs.map(([key, value]) => propertyEdit(key, value)),
     ];
+  }
+
+  /**
+   * The property rows as the wire carries them, or the one refusal
+   * `parseProperty` makes: a number that is not a number.
+   *
+   * Everything else a value can be wrong about is the backend's to refuse, by
+   * name and in place — `editing.ts`' rule, and the reason this is the only
+   * check here.
+   */
+  function pairs(): { pairs: [string, PropertyValue | null][] } | { refused: string } {
+    const out: [string, PropertyValue | null][] = [];
+    for (const row of properties) {
+      const key = row.key.trim();
+      if (key === "") continue;
+      const parsed = parseProperty(row.kind, row.value);
+      if ("refused" in parsed) return parsed;
+      out.push([key, parsed.value]);
+    }
+    return { pairs: out };
   }
 
   async function submit() {
     if (writing || name.trim() === "" || url.trim() === "") return;
+    const list = edits();
+    if ("refused" in list) {
+      failure = list.refused;
+      return;
+    }
     writing = true;
     failure = null;
     try {
       const written =
         route === null
-          ? await create(asset.id, name, url, target?.id ?? null, visibility)
-          : await edit(route.id, edits());
+          ? await create(
+              asset.id,
+              name,
+              url,
+              target?.id ?? null,
+              visibility,
+              // A create carries the properties as pairs; `null` values have
+              // nothing to set, so they are dropped rather than sent as a
+              // clear of a key that does not exist yet.
+              list.flatMap((change) =>
+                change.field === "property" && change.value !== null
+                  ? [[change.key, change.value] as [string, PropertyValue]]
+                  : [],
+              ),
+            )
+          : await edit(route.id, list);
       onsaved(written);
     } catch (rejection) {
       // In place, and in the backend's own words: a URL with no scheme and a
@@ -289,6 +380,55 @@
         </div>
       </div>
 
+      <div class="fld">
+        <span class="l">Properties</span>
+        <p class="hint">
+          A route declares no keys, so these are yours — the certificate expiry among
+          them. Emptying a value clears the property.
+        </p>
+        {#each properties as property, index (index)}
+          <div class="prow">
+            <input
+              class="inp k"
+              type="text"
+              aria-label="Property key"
+              autocomplete="off"
+              placeholder="cert_expires"
+              bind:value={property.key}
+            />
+            <!-- The four kinds are enumerated once, in `editing.ts`. -->
+            <select class="inp" aria-label="Property kind" bind:value={property.kind}>
+              {#each PROPERTY_KINDS as offered (offered.kind)}
+                <option value={offered.kind}>{offered.label}</option>
+              {/each}
+            </select>
+            <!-- `value`/`oninput` rather than `bind:value`: Svelte refuses a
+                 two-way binding on an input whose `type` is dynamic. -->
+            <input
+              class="inp"
+              type={inputTypeFor(property.kind)}
+              aria-label="Property value"
+              autocomplete="off"
+              value={property.value}
+              oninput={(event) => (property.value = event.currentTarget.value)}
+            />
+            <button
+              class="btn sm"
+              title="Remove {property.key || 'this property'}"
+              onclick={() => properties.splice(index, 1)}
+            >
+              ×
+            </button>
+          </div>
+        {/each}
+        <button
+          class="btn sm"
+          onclick={() => properties.push({ key: "", kind: "text", value: "" })}
+        >
+          Add a property
+        </button>
+      </div>
+
       {#if failure}
         <p class="fail" role="alert">{failure}</p>
       {/if}
@@ -329,6 +469,13 @@
     margin-top: 6px;
     font-size: 11px;
     color: var(--muted);
+  }
+
+  .prow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+    gap: 6px;
+    margin-bottom: 6px;
   }
 
   .lands {

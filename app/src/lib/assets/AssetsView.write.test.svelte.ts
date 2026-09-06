@@ -116,6 +116,7 @@ interface StoredRoute {
   name: string;
   url: string;
   visibility: Visibility;
+  properties: Record<string, PropertyValue>;
 }
 
 /** One in-memory estate, answering the eleven commands the view calls. */
@@ -226,7 +227,11 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
       name: stored.name,
       url: stored.url,
       visibility: stored.visibility,
-      properties: [],
+      // `assets::custom_properties`: a route declares nothing, so every key is
+      // the reader's own and the list is by key.
+      properties: Object.keys(stored.properties)
+        .sort()
+        .map((key) => ({ key, label: key, value: stored.properties[key]!, custom: true })),
     };
   }
 
@@ -378,6 +383,7 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
       url: string,
       targetId?: string | null,
       visibility?: Visibility,
+      properties?: [string, PropertyValue][],
     ) => {
       // `assets::vet_url`'s rule, in the sentence it uses: what this witnesses
       // is that the view shows the backend's refusal in place, and the
@@ -396,6 +402,7 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
         name: name.trim(),
         url: url.trim(),
         visibility: visibility ?? "internal",
+        properties: Object.fromEntries(properties ?? []),
       };
       routes.push(stored);
       record(stored.id, "created", { route: { name: stored.name, url: stored.url } });
@@ -404,11 +411,38 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
     editRoute: (routeId: string, edits: RouteEdit[]) => {
       const stored = findRoute(routeId);
       for (const edit of edits) {
+        // `assets::edit_route`'s two rules, both of which the pane depends on:
+        // an edit that changes nothing writes no line, and one that does
+        // writes its **old and new** value.
+        const was = {
+          name: stored.name,
+          url: stored.url,
+          target: stored.target_id,
+          visibility: stored.visibility,
+          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
+        }[edit.field];
         if (edit.field === "name") stored.name = edit.value.trim();
         if (edit.field === "url") stored.url = edit.value.trim();
         if (edit.field === "target") stored.target_id = edit.value;
         if (edit.field === "visibility") stored.visibility = edit.value;
-        record(routeId, "edited", { field: edit.field });
+        if (edit.field === "property") {
+          if (edit.value === null) delete stored.properties[edit.key];
+          else stored.properties[edit.key] = edit.value;
+        }
+        const now = {
+          name: stored.name,
+          url: stored.url,
+          target: stored.target_id,
+          visibility: stored.visibility,
+          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
+        }[edit.field];
+        if (JSON.stringify(was) === JSON.stringify(now)) continue;
+        record(routeId, edit.field === "name" ? "renamed" : "edited", {
+          field: edit.field,
+          ...(edit.field === "property" ? { key: edit.key } : {}),
+          from: was,
+          to: now,
+        });
       }
       return Promise.resolve(routeRow(stored));
     },
@@ -1104,6 +1138,7 @@ test("a route is edited and then deleted from the pane", async () => {
       name: "Postgres UI",
       url: "https://pg.hel1.example/",
       visibility: "internal",
+      properties: {},
     },
   ]);
   const { router } = render("#/asset/asset:vm-db-01", store);
@@ -1137,4 +1172,95 @@ test("a route is edited and then deleted from the pane", async () => {
     tab: "tree",
     assetId: "asset:vm-db-01",
   });
+});
+
+/**
+ * **A property of the reader's own is written on a route, and cleared from
+ * it** — spec #427's *"the certificate expiry as a property"* (#432).
+ *
+ * A route declares no keys, so this is the whole of its property surface: a
+ * key, one of the four kinds, and a value. The date kind is the one this
+ * example needs, and it is also the one that would silently arrive as a string
+ * if the picker were ignored — which is why the assertion is on the stored
+ * shape and not only on what the pane draws.
+ */
+test("a certificate expiry is written on a route as a property and cleared again", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Edit…");
+  click("Add a property");
+  type("Property key", "cert_expires");
+  choose("Property kind", "date");
+  type("Property value", "2026-12-01");
+  click("Save");
+
+  await vi.waitFor(() => expect(text()).toContain("cert_expires 2026-12-01"));
+  expect(store.routes[0]?.properties).toEqual({
+    cert_expires: { kind: "date", value: "2026-12-01" },
+  });
+
+  // And emptying the value clears the key: a blank text is refused by the
+  // backend with *clear the property instead*, so that is what a blank means.
+  click("Edit…");
+  type("Property value", "");
+  click("Save");
+
+  // The chip is gone from the route's row, and the route's history says where
+  // it went — which is the difference between a cleared property and one that
+  // was never there.
+  await vi.waitFor(() => expect(text()).not.toContain("cert_expires 2026-12-01"));
+  expect(text()).toContain("cert_expires: 2026-12-01 → nothing");
+  expect(store.routes[0]?.properties).toEqual({});
+});
+
+/**
+ * **The route the address names shows its own history** — spec #427: routes
+ * *"are created and edited from the pane, have `#/route/<id>` addresses, and
+ * their own history"*.
+ *
+ * The asset's history is beside it and says nothing about the route, which is
+ * the point of the two lists: a route's line is written on the **route's**
+ * entity, so an asset whose route was renamed shows nothing and the route
+ * shows the rename.
+ */
+test("a route's own history is drawn when its address names it", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/route/route:pg", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI — history"));
+  expect(text()).toContain("Nothing recorded.");
+
+  click("Edit…");
+  type("Name", "Postgres console");
+  click("Save");
+
+  await vi.waitFor(() => expect(text()).toContain("Postgres console — history"));
+  // One line, with the old value and the new: the three fields the dialog also
+  // sent changed nothing, and an edit that changes nothing writes no line.
+  expect(text()).toContain("name: Postgres UI → Postgres console");
+  expect(text()).not.toContain("url:");
+  // The asset's own history is the other list on this pane, and the route's
+  // rename is not in it.
+  expect(text()).toContain("History Nothing recorded.");
 });

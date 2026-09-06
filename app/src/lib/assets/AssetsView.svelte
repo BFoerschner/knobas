@@ -329,8 +329,9 @@
     }
     void routeRead(() => io.getRoute(id), {
       ok: (answer) => {
+        // `failure` is left alone: it belongs to the pane's own read, and a
+        // route landing is no evidence that the asset read succeeded.
         routeDetail = answer;
-        failure = null;
       },
       fail: (cause) => {
         routeDetail = null;
@@ -1457,6 +1458,35 @@
           reached* are different questions, and the mockup's pane asks them
           under two headings ("N out · M in").
         -->
+        <!--
+          What every route row draws whichever list it is in: its name, whether
+          it is public, its URL as the *open URL* action, and the reader's own
+          properties. One snippet rather than two copies, the way `inForce`
+          above is one — the halves that differ are the line under it, and they
+          are what each list passes in.
+        -->
+        {#snippet routeRow(route: RouteRow, where: import("svelte").Snippet)}
+          <li class:on={route.id === routeId} aria-current={route.id === routeId ? "true" : undefined}>
+            <span class="rname">
+              <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
+              {#if route.visibility === "public"}
+                <span class="vis">public</span>
+              {/if}
+            </span>
+            <button
+              class="url mono"
+              title="Open {route.url}"
+              onclick={() => void openInBrowser(route.url)}
+            >
+              {route.url}
+            </button>
+            <span class="rto">{@render where()}</span>
+            {#each route.properties as property (property.key)}
+              <span class="rprop faint">{property.label} {reading(property)}</span>
+            {/each}
+          </li>
+        {/snippet}
+
         <section class="grp">
           <h3 class="lab">Exposes</h3>
           {#if detail.exposes.length === 0}
@@ -1464,36 +1494,19 @@
           {:else}
             <ul class="lst routes">
               {#each detail.exposes as route (route.id)}
-                <li class:on={route.id === routeId} aria-current={route.id === routeId ? "true" : undefined}>
-                  <span class="rname">
-                    <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
-                    {#if route.visibility === "public"}
-                      <span class="vis">public</span>
-                    {/if}
-                  </span>
-                  <button
-                    class="url mono"
-                    title="Open {route.url}"
-                    onclick={() => void openInBrowser(route.url)}
-                  >
-                    {route.url}
-                  </button>
-                  <span class="rto">
-                    {#if route.target_id !== null}
-                      {@const to = route.target_id}
-                      <span class="faint" aria-hidden="true">→</span>
-                      <button class="link" onclick={() => goToSource(addressOf({ id: to }))}>
-                        {route.target_name}
-                      </button>
-                    {:else}
-                      <span class="faint">lands on nothing knobas knows</span>
-                    {/if}
-                  </span>
-                  {#each route.properties as property (property.key)}
-                    <span class="rprop faint">{property.label} {reading(property)}</span>
-                  {/each}
+                {@render routeRow(route, lands)}
+                {#snippet lands()}
+                  {#if route.target_id !== null}
+                    {@const to = route.target_id}
+                    <span class="faint" aria-hidden="true">→</span>
+                    <button class="link" onclick={() => goToSource(addressOf({ id: to }))}>
+                      {route.target_name}
+                    </button>
+                  {:else}
+                    <span class="faint">lands on nothing knobas knows</span>
+                  {/if}
                   <button class="btn sm" onclick={() => (editingRoute = route)}>Edit…</button>
-                </li>
+                {/snippet}
               {/each}
             </ul>
           {/if}
@@ -1515,45 +1528,56 @@
           {:else}
             <ul class="lst routes">
               {#each detail.reachable_via as route (route.id)}
-                {@const landing = landingOf(detail, route)}
-                <li class:on={route.id === routeId} aria-current={route.id === routeId ? "true" : undefined}>
-                  <span class="rname">
-                    <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
-                    {#if route.visibility === "public"}
-                      <span class="vis">public</span>
-                    {/if}
-                  </span>
-                  <button
-                    class="url mono"
-                    title="Open {route.url}"
-                    onclick={() => void openInBrowser(route.url)}
-                  >
-                    {route.url}
-                  </button>
-                  <span class="rto">
-                    <!--
-                      Where it lands and who offers it — the two facts that
-                      make this list readable from the arriving end. `landing`
-                      is `tree.ts`' one answer to "here, through something
-                      above, or on something inside".
-                    -->
-                    {#if landing.goTo}
-                      <button class="link" onclick={() => goToSource(landing.goTo)}>
-                        {landing.note}
-                      </button>
-                    {:else}
-                      <span class="faint">{landing.note}</span>
-                    {/if}
-                    <span class="faint">· exposed by</span>
-                    <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
-                      {route.asset_name}
+                {@render routeRow(route, arrives)}
+                <!--
+                  Where it lands and who offers it — the two facts that make
+                  this list readable from the arriving end. `landing` is
+                  `tree.ts`' one answer to "here, through something above, or
+                  on something inside".
+                -->
+                {#snippet arrives()}
+                  {@const landing = landingOf(detail!, route)}
+                  {#if landing.goTo}
+                    <button class="link" onclick={() => goToSource(landing.goTo)}>
+                      {landing.note}
                     </button>
-                  </span>
-                </li>
+                  {:else}
+                    <span class="faint">{landing.note}</span>
+                  {/if}
+                  <span class="faint">· exposed by</span>
+                  <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
+                    {route.asset_name}
+                  </button>
+                {/snippet}
               {/each}
             </ul>
           {/if}
         </section>
+
+        <!--
+          The selected route's **own** history (spec #427: routes *"have their
+          own history"*), drawn only when the address names one. Beside the
+          asset's rather than inside the route rows: a line per route in the
+          list would be a wall of them, and what a reader who followed
+          `#/route/<id>` came for is the story of that one route.
+        -->
+        {#if routeDetail !== null && routeDetail.route.id === routeId}
+          <section class="grp">
+            <h3 class="lab">{routeDetail.route.name} — history</h3>
+            {#if routeDetail.history.length === 0}
+              <p class="empty">Nothing recorded.</p>
+            {:else}
+              <ol class="hist">
+                {#each routeDetail.history as entry (entry.id)}
+                  <li>
+                    <span class="hw">{line(entry.verb, entry.detail)}</span>
+                    <span class="ha faint">{ago(entry.at, now())}</span>
+                  </li>
+                {/each}
+              </ol>
+            {/if}
+          </section>
+        {/if}
 
         <section class="grp">
           <h3 class="lab">History</h3>

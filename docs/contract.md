@@ -5437,6 +5437,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   `assets::ROUTES_REACHABLE`, and the glossary entry is amended to say so with its old wording
   quoted. **That amendment is a vocabulary change and is flagged for Björn with this entry.**
 
+  The descendant half is the **whole subtree and not one hop**, and that is the same estate
+  deciding: the criterion's *"the VM that holds the container"* is two levels up in the real file
+  (`knobas-teamcity` the container sits in *Docker engine (knobas-teamcity)*, which sits on
+  `knobas-teamcity` the VM), so a one-hop rule would stop at the engine and answer nothing for the
+  box. The price, taken deliberately, is that the estate's **root** reads every route in it —
+  true, ordered nearest-first, and a cap belongs to a surface that finds the list too long rather
+  than to the read.
+
   **The navigation contract grows one address**, `#/route/<id>`, which spec §2 spelled and
   `shell/router.svelte.ts`'s `RESERVED` has held since M1. It is the **Tree**, at the asset
   exposing the route with the route selected — not a surface of its own, for the reason

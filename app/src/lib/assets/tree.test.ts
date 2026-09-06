@@ -592,29 +592,20 @@ test("a route lands here, through an ancestor, or on something inside", () => {
 
   // On the container: the route lands here.
   const here = landingOf(detail(container, [site, vm]), route(container));
-  expect(here).toEqual({ here: true, note: "lands here", goTo: null });
+  expect(here).toEqual({ note: "lands here", goTo: null });
 
   // On the container, a route landing on the VM above it: through it, and the
   // note links to the asset it names.
   const above = landingOf(detail(container, [site, vm]), route(vm));
-  expect(above).toEqual({
-    here: false,
-    note: "through vm-db-01",
-    goTo: addressOf(vm),
-  });
+  expect(above).toEqual({ note: "through vm-db-01", goTo: addressOf(vm) });
 
   // On the VM, the same route landing on the container it holds: inside.
   const inside = landingOf(detail(vm, [site]), route(container));
-  expect(inside).toEqual({
-    here: false,
-    note: "inside, on postgres",
-    goTo: addressOf(container),
-  });
+  expect(inside).toEqual({ note: "inside, on postgres", goTo: addressOf(container) });
 
   // A route with no target reaches nobody; the answer is total rather than a
   // throw, and it links nowhere.
   expect(landingOf(detail(vm, [site]), route(null))).toEqual({
-    here: false,
     note: "lands on nothing",
     goTo: null,
   });
