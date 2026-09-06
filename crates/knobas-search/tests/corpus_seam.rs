@@ -30,6 +30,21 @@ use knobas_search::query::EffectiveFilters;
 use knobas_search::sql::{query_as_with, search_sql};
 use knobas_search::{KindCatalog, RawHit, corpus, group};
 
+/// **Every corpus the launcher unions, and that is the point of the list.**
+///
+/// It was `[&LIVE_ITEM, &NOTE]` until #436, which is how `corpus::ASSET`
+/// shipped in #428 and `corpus::ROUTE` in #432 without one of their fragments
+/// ever passing through `search_sql` in this file -- the merge review of #458
+/// caught it and named this line. `corpus::ALL` is deliberately *not* spelled
+/// here: this file drives the builder directly, and a list that follows the
+/// product's would stop being a statement about what has been run.
+const CORPORA: &[&corpus::Corpus] = &[
+    &corpus::LIVE_ITEM,
+    &corpus::NOTE,
+    &corpus::ASSET,
+    &corpus::ROUTE,
+];
+
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
@@ -84,9 +99,63 @@ async fn seed_note(pool: &sqlx::PgPool, id: &str, title: &str, body: &str) {
         .unwrap();
 }
 
+/// An asset and its entity row, seeded by hand for [`seed_note`]'s reason.
+///
+/// `path_text` is passed in rather than derived, because deriving it is
+/// `knobas_app::assets`' job and this file is about the *corpus*: the store
+/// lives in a crate that depends on this one, and reaching for it here would
+/// make the seam test depend on the thing the seam exists to keep separate.
+/// The store's own maintenance of the column is witnessed at the wire, in
+/// `knobas-app`'s `search_ipc.rs`.
+async fn seed_asset(
+    pool: &sqlx::PgPool,
+    id: &str,
+    name: &str,
+    parent: Option<&str>,
+    path_text: &str,
+    properties: serde_json::Value,
+) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.asset (id, parent_id, type_id, name, properties, path_text)
+         values ($1,$2,'vm',$3,$4,$5)",
+    )
+    .bind(id)
+    .bind(parent)
+    .bind(name)
+    .bind(properties)
+    .bind(path_text)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A route on an asset, seeded by hand for [`seed_note`]'s reason.
+async fn seed_route(pool: &sqlx::PgPool, id: &str, asset_id: &str, name: &str, url: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'route',$2)")
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.route (id, asset_id, name, url) values ($1,$2,$3,$4)")
+        .bind(id)
+        .bind(asset_id)
+        .bind(name)
+        .bind(url)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 async fn run(pool: &sqlx::PgPool, text: &str, limit: u32) -> Vec<knobas_search::ResultGroup> {
     let built = search_sql(
-        &[&corpus::LIVE_ITEM, &corpus::NOTE],
+        CORPORA,
         Some(text),
         false,
         &EffectiveFilters::default(),
@@ -227,14 +296,7 @@ async fn a_second_corpus_adds_no_binds_and_still_executes() {
         identity_authors: Vec::new(),
     };
     let one = search_sql(&[&corpus::LIVE_ITEM], Some("sepa"), true, &filters, 10, 20);
-    let two = search_sql(
-        &[&corpus::LIVE_ITEM, &corpus::NOTE],
-        Some("sepa"),
-        true,
-        &filters,
-        10,
-        20,
-    );
+    let two = search_sql(CORPORA, Some("sepa"), true, &filters, 10, 20);
     assert_eq!(one.bind_count(), two.bind_count());
     assert!(two.sql().contains("union all"));
     // Executing it is the half a shape assertion cannot do: a placeholder that
@@ -242,4 +304,213 @@ async fn a_second_corpus_adds_no_binds_and_still_executes() {
     // set is beside the point here -- that the statement parsed, bound and
     // decoded into `RawHit` at all is the assertion.
     let _rows: Vec<RawHit> = query_as_with(two).fetch_all(&pool).await.unwrap();
+}
+
+/// **The estate goes through the builder too, path and properties and all**
+/// (#436).
+///
+/// The two corpora M4.0 added are the ones this file was written *for*: its
+/// module docs open with spec §4's *"asset search matches ancestor path
+/// names"*, and until now the claim rested on [`corpus::NOTE`] standing in for
+/// them. Now they are here, and each carries something no corpus above it has:
+///
+/// * [`corpus::ASSET`]'s `path` is a **column** rather than
+///   `ancestor_path_read!` over a payload -- the first corpus for which
+///   "where is this" is knobas' own answer;
+/// * [`corpus::ROUTE`]'s `relation` is a **join**, so its `path` is read off a
+///   *second* table's row, and its own `fts` deliberately does not carry it.
+///
+/// One query over four corpora, and every one of the four is asked. The
+/// mirror's ticket carries the token for the reason the one in
+/// `search_ipc.rs` does: without a row the union has to rank *against*, an
+/// estate-only answer is not evidence that the estate was searched.
+#[tokio::test]
+async fn the_estates_two_corpora_go_through_the_same_pipeline() {
+    let pool = pool().await;
+    let t = token("estate");
+
+    seed_item(
+        &pool,
+        &format!("jira:{t}-1"),
+        "ticket",
+        &format!("{t} certificate renewal"),
+        "nothing to do with the estate",
+    )
+    .await;
+    let site = format!("asset:{t}-site");
+    let vm = format!("asset:{t}-vm");
+    seed_asset(
+        &pool,
+        &site,
+        &format!("{t} hel1"),
+        None,
+        "",
+        serde_json::json!({}),
+    )
+    .await;
+    seed_asset(
+        &pool,
+        &vm,
+        &format!("{t} db"),
+        Some(&site),
+        &format!("{t} hel1"),
+        serde_json::json!({ "hostname": format!("{t}-db-01"), "os": "Debian 13" }),
+    )
+    .await;
+    let route = format!("route:{t}-kuma");
+    seed_route(
+        &pool,
+        &route,
+        &vm,
+        &format!("{t} kuma"),
+        &format!("https://{t}.example.test:3001/dashboard"),
+    )
+    .await;
+
+    // The token is on every seeded row, so one query asks all four corpora and
+    // the answer is the union's.
+    let groups = run(&pool, &t, 20).await;
+    let kinds: Vec<&str> = groups.iter().map(|g| g.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["ticket", "asset", "route"],
+        "one query, four corpora, and `group::group`'s fixed order over all of them"
+    );
+
+    let assets = &groups[1];
+    assert_eq!(assets.plural, "Assets");
+    let vm_hit = assets
+        .hits
+        .iter()
+        .find(|hit| hit.row.entity_id == vm)
+        .expect("the VM under the site");
+    // The path is the estate's own column, not the mirror's `null`, and a root
+    // asset's is `null` rather than an empty line under every site.
+    assert_eq!(vm_hit.row.path.as_deref(), Some(format!("{t} hel1").as_str()));
+    assert_eq!(
+        assets
+            .hits
+            .iter()
+            .find(|hit| hit.row.entity_id == site)
+            .expect("the site")
+            .row
+            .path,
+        None
+    );
+    assert_eq!(vm_hit.row.kind, "asset");
+    assert_eq!(vm_hit.row.source_id, "asset");
+
+    let routes = &groups[2];
+    assert_eq!(routes.plural, "Routes");
+    let route_hit = &routes.hits[0];
+    assert_eq!(route_hit.row.entity_id, route);
+    // A route sits **on** the asset exposing it, which is that asset's own path
+    // plus its name -- one level deeper than the asset's own answer.
+    assert_eq!(
+        route_hit.row.path.as_deref(),
+        Some(format!("{t} hel1 / {t} db").as_str())
+    );
+
+    // A property **value** finds the asset that carries it; the property
+    // **key** does not, which is `0019`'s decision run rather than asserted.
+    let by_hostname = run(&pool, &format!("{t}-db-01"), 20).await;
+    let found: Vec<&str> = by_hostname
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert_eq!(found, [vm.as_str()], "the hostname finds the VM");
+    // And the excerpt can quote the reason: `headline_text` carries the
+    // property text, so the hit is not a row with no visible cause.
+    let quoted: String = by_hostname[0].hits[0]
+        .snippet
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert!(quoted.contains(&format!("{t}-db-01")), "{quoted:?}");
+    assert!(
+        by_hostname[0].hits[0].snippet.iter().any(|s| s.hit),
+        "a property match is highlighted like any other"
+    );
+
+    // **A route is found by its URL, one word of it at a time**, which is what
+    // `0019`'s second half buys. Under `0018` alone PostgreSQL emits a URL's
+    // host *with its port* as one lexeme, so nothing short of the whole URL
+    // pasted back matched -- and every route in the real estate is
+    // `http://127.0.0.1:<port>/`, so nothing told the nine of them apart.
+    //
+    // **What is still one lexeme is a dotted host typed on its own**, and that
+    // is the query side rather than the index: `websearch_to_tsquery` lexes
+    // `db.example.test` as one host token, so it cannot meet the three words
+    // the index now holds. Recorded rather than worked around -- the half a
+    // reader needs is the part that *tells two routes apart*, which is the port
+    // and the words, and a whole host is what they paste when they have it.
+    for (typed, why) in [
+        ("3001", "the port, which is what tells two tunnels apart"),
+        ("dashboard", "a path segment"),
+    ] {
+        let by_url = run(&pool, typed, 20).await;
+        let urls: Vec<&str> = by_url
+            .iter()
+            .flat_map(|g| &g.hits)
+            .map(|hit| hit.row.entity_id.as_str())
+            .collect();
+        assert_eq!(urls, [route.as_str()], "{why}: {typed}");
+    }
+    // The negative, asserted rather than left to be discovered: a dotted host
+    // typed on its own is one lexeme on the *query* side too, so it meets
+    // neither the whole-URL lexemes nor the words. Nothing in `0019` can reach
+    // it -- it is `websearch_to_tsquery`'s parse, not the index's.
+    assert!(
+        run(&pool, &format!("{t}.example.test"), 20).await.is_empty(),
+        "a bare dotted host is one query lexeme; the port and the words are          what a reader can reach a route by"
+    );
+}
+
+/// **A name outranks an ancestor's name outranks a property**, which is the
+/// whole of what `0017`'s weights and `0019`'s last rung are for.
+///
+/// Three assets, one query, and the order is the assertion: the machine
+/// *called* `<token>` first, the machine *under* it second, the machine merely
+/// *mentioning* it in a property third. Without the ranking a search for a
+/// hostname would put every container beneath that host above the host itself.
+#[tokio::test]
+async fn a_name_outranks_a_path_outranks_a_property() {
+    let pool = pool().await;
+    let t = token("weight");
+
+    let named = format!("asset:{t}-named");
+    let under = format!("asset:{t}-under");
+    let mentions = format!("asset:{t}-mentions");
+    seed_asset(&pool, &named, t.as_str(), None, "", serde_json::json!({})).await;
+    seed_asset(
+        &pool,
+        &under,
+        &format!("child of {}", &t[..6]),
+        Some(&named),
+        t.as_str(),
+        serde_json::json!({}),
+    )
+    .await;
+    seed_asset(
+        &pool,
+        &mentions,
+        &format!("mentions {}", &t[..6]),
+        None,
+        "",
+        serde_json::json!({ "image": t.as_str() }),
+    )
+    .await;
+
+    let groups = run(&pool, &t, 20).await;
+    let order: Vec<&str> = groups[0]
+        .hits
+        .iter()
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        [named.as_str(), under.as_str(), mentions.as_str()],
+        "name (A) then ancestor path (B) then property (C)"
+    );
 }

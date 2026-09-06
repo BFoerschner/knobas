@@ -18,11 +18,17 @@
 
   ## The Tab action chain
 
-  §4's *"do it here"* rows, over the selected result. There are two:
+  §4's *"do it here"* rows, over the selected result, in §4's own order
+  (*… Link to… › Add to context › Start timer …*). There are three:
 
   * **Link to ⟨the open entity⟩** (M2), which exists only while a detail is
     open — an action chain that offered "link to nothing" would be a row that
     cannot be pressed;
+  * **Add to context ⟨the room the reader is standing in⟩** (M4.0, #436),
+    which exists only while they are standing in one, for the same reason. It
+    is an ordinary link to the context's own `ctx:` entity and not a command of
+    its own — ADR-0008, in as many words: *"an Add to context is an ordinary
+    link"* — so what the shell does with it is what it does with *Link to…*;
   * **Start timer** (M3, #278), which exists on any result that can be a timer
     target. A stored context cannot (`shell/timer.ts`), so the row is absent
     there rather than offered and then refused by the backend.
@@ -62,6 +68,8 @@
     onclose,
     openEntity,
     onlink,
+    context,
+    oncontext,
     ontimer,
     ports,
     now,
@@ -93,6 +101,31 @@
      * acknowledgement and the failure message are the shell's.
      */
     onlink?: ((targetId: string, targetTitle: string) => void) | undefined;
+    /**
+     * The stored context the reader is standing in, or `undefined`.
+     *
+     * The second end of *Add to context*, and `openEntity`'s shape for
+     * `openEntity`'s reason: the launcher says which result was chosen and the
+     * shell knows which room it is standing in. `label` is what the row says —
+     * the context's own title, which is the word the reader picked.
+     *
+     * `undefined` is the ordinary answer in a *derived* room — *All work*, a
+     * source, a project — which has no `ctx:` entity to link to, and it leaves
+     * the row out of the chain rather than offering a write with one end.
+     */
+    context: { ctxId: string; label: string } | undefined;
+    /**
+     * Add the chosen result to that context. The write, the acknowledgement
+     * and the failure message are the shell's, exactly as `onlink`'s are —
+     * and it *is* `onlink`'s write, drawn to a `ctx:` entity (ADR-0008).
+     *
+     * **Required, like `ontimer` and unlike `onlink`**, for the reason #238
+     * put on `ontimer`: this pair of props is the only join between the
+     * launcher's *Add to context* row and the shell that acts on it, and an
+     * optional one can be dropped from `App.svelte`, type-check clean, and
+     * take the row out of the product without failing a test.
+     */
+    oncontext: ((targetId: string, targetTitle: string) => void) | undefined;
     /**
      * Start the timer on the chosen result, **stopping whatever is running
      * first** (#278, story 11).
@@ -212,6 +245,22 @@
       });
     }
 
+    // The room the reader is standing in, and never the row itself: a context
+    // reaches this list like anything else (it is a row in `knobas.entity`),
+    // and a context added to itself is the self-link the backend refuses.
+    const room = context;
+    if (room && oncontext && entity.entityId !== room.ctxId) {
+      const add = oncontext;
+      actions.push({
+        id: "context",
+        label: `Add to ${room.label}`,
+        run: () => {
+          add(entity.entityId, entity.title);
+          chain = null;
+        },
+      });
+    }
+
     // Refused rather than absent: a context is a row in `knobas.entity` and
     // reaches this list like anything else, so the row has to be taken *out*
     // — see `shell/timer.ts`. Offering it would offer a row whose only
@@ -284,21 +333,36 @@
     onclose();
   }
 
+  /**
+   * Where an entity of this kind is read.
+   *
+   * **The estate is not a slide-over**, which is the one place this is not
+   * "the room, with a detail open": an asset opens the Tree at itself and a
+   * route opens the Tree at the asset exposing it (`#/asset/<id>`,
+   * `#/route/<id>`, `shell/router.svelte.ts`, story 35). Spelled through the
+   * router's own assets arm rather than left to the room arm — which today
+   * composes `#/<kind>/<id>` and so happens to produce the same two strings.
+   * Happening to agree is not the same as saying so: the day the room's detail
+   * address changes shape, an asset hit that rode on it would quietly start
+   * opening a room.
+   */
+  function addressForEntity(kind: string, entityId: string): string {
+    if (kind === "asset") {
+      return hashFor({ view: "assets", tab: "tree", assetId: entityId });
+    }
+    if (kind === "route") {
+      return hashFor({ view: "assets", tab: "tree", assetId: null, routeId: entityId });
+    }
+    return hashFor({ view: "room", ctx: "all", detail: { kind, entityId } });
+  }
+
   /** Where a row goes. Every M1 row is an address (spec §2). */
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
       case "hit":
-        return hashFor({
-          view: "room",
-          ctx: "all",
-          detail: { kind: row.hit.kind, entityId: row.hit.entity_id },
-        });
+        return addressForEntity(row.hit.kind, row.hit.entity_id);
       case "recent":
-        return hashFor({
-          view: "room",
-          ctx: "all",
-          detail: { kind: row.row.kind, entityId: row.row.entity_id },
-        });
+        return addressForEntity(row.row.kind, row.row.entity_id);
       case "action":
         return row.action.hash;
       // A list and a syntax row do not navigate: they rewrite the box, which

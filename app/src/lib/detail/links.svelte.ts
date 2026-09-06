@@ -61,3 +61,43 @@ export async function linkTo(fromId: string, toId: string, label: string): Promi
     push({ text: linkFailureMessage(rejection), tone: "err" });
   }
 }
+
+/**
+ * Put an entity in a stored context, and acknowledge it — the launcher's
+ * *Add to context* (#436, spec §4's action chain).
+ *
+ * **Not a command of its own.** ADR-0008 states the membership rule and says
+ * so in as many words: *"the seed is the explicit adds (every confirmed link
+ * touching the context's own `ctx:` entity — an* Add to context *is an
+ * ordinary link)"*. So this is {@link linkTo}'s write with the context's
+ * entity at one end, and the reason it is a second function rather than a
+ * second call site is the two sentences it says: what a reader is told when it
+ * lands, and what they are told when the entity is already in the room.
+ *
+ * `conflict` is that second sentence. From `createLink` it means *this pair is
+ * already linked*, and for a context that is not a failure at all — it is the
+ * state the reader was asking for. "Already linked — this pair already carries
+ * that relation" is true and describes a link nobody drew on purpose; *already
+ * in Payments* is what happened.
+ *
+ * Never rejects, for {@link linkTo}'s reason: the caller is a keyboard chain
+ * where the alternative to a toast is an unhandled rejection nobody sees.
+ */
+export async function addToContext(
+  ctxId: string,
+  targetId: string,
+  label: string,
+  contextLabel: string,
+): Promise<void> {
+  try {
+    await createLink(ctxId, targetId);
+    linkChanges.count += 1;
+    push({ text: `Added ${label} to ${contextLabel}` });
+  } catch (rejection) {
+    if (isIpcError(rejection) && rejection.code === "conflict") {
+      push({ text: `${label} is already in ${contextLabel}` });
+      return;
+    }
+    push({ text: linkFailureMessage(rejection), tone: "err" });
+  }
+}

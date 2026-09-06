@@ -42,7 +42,7 @@
     type Block,
     type Draft,
   } from "./lib/ipc/time";
-  import { linkTo } from "./lib/detail/links.svelte";
+  import { addToContext, linkTo } from "./lib/detail/links.svelte";
 
   /**
    * The rooms the switcher offers: *All work*, the stored contexts (#47), one
@@ -855,6 +855,18 @@
       // built while something is open, and this is where that stops being an
       // assumption.
       if (openEntity) void linkTo(openEntity.entityId, targetId, targetTitle);
+    }}
+    context={roomContext === null
+      ? undefined
+      : { ctxId: roomContext, label: standingIn?.label ?? "this context" }}
+    oncontext={(targetId, targetTitle) => {
+      // Guarded for `onlink`'s reason: the prop outlives one keystroke, and
+      // this is where "the reader is standing in a stored context" stops being
+      // an assumption. `roomContext` is null in every derived room — *All
+      // work*, a source, a project — which have no `ctx:` entity to link to.
+      if (roomContext) {
+        void addToContext(roomContext, targetId, targetTitle, standingIn?.label ?? "this context");
+      }
     }}
     ontimer={startTimerOn}
     onnavigate={(hash) => router.go(hash)}

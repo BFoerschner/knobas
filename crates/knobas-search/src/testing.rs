@@ -380,3 +380,160 @@ pub async fn dirty_the_pending_list(pool: &PgPool, rows: i64) -> Result<(), Sear
     sqlx::query("analyze sync.item").execute(pool).await?;
     Ok(())
 }
+
+/// How many assets one estate level holds, from the root down.
+///
+/// A **shape** rather than a count, because that is what the estate is: three
+/// sites, a hundred machines under each of them, and ten containers on every
+/// machine. Multiplied out it is 3 + 300 + 3,000 = 3,303 assets, which is
+/// larger than any real estate the launcher will meet and is chosen for that
+/// reason -- the number it is measured against has to be an upper bound rather
+/// than a plausible one.
+///
+/// Three levels and not two, because the depth is what `path_text` costs: a
+/// container's path carries its VM's name *and* its site's, and weight B is
+/// matched against the whole of it.
+const ESTATE_SHAPE: [i64; 3] = [3, 100, 10];
+
+/// One route per this many assets, on the deepest level only.
+///
+/// Routes hang off containers in the real estate -- every one of the nine in
+/// `testenv/hetzner/estate.json` does -- and one in two is a good deal denser
+/// than that file, which is again the point of an upper bound.
+const ROUTES_PER: i64 = 2;
+
+/// Fill the estate with a deterministic tree of assets and the routes they
+/// expose, and make it measurable.
+///
+/// The half of the launcher's corpus [`seed_corpus`] cannot reach: `asset:` and
+/// a plain query both union `corpus::ASSET` and `corpus::ROUTE`, and a mirror
+/// of 100 k rows beside an estate of nothing measures three of the four
+/// branches at zero. Property values and an ancestor path per row, because
+/// those are what migrations `0017` and `0019` put in the index and therefore
+/// what a keystroke actually matches against.
+///
+/// The names carry the same `w<n>` filler vocabulary the mirror's do, so a
+/// query written for one fixture is selective in the same way over the other
+/// and the two halves of a union are comparable.
+///
+/// Idempotent per `tag`: every id is `asset:<tag>-<n>`, so two calls with the
+/// same tag insert once. `vacuum (analyze)` outside the transaction, for
+/// [`prepare`]'s reason -- a GIN index whose pending list has not been merged
+/// is read linearly, and the measurement is then of the list.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if any statement fails.
+pub async fn seed_estate(pool: &PgPool, tag: &str) -> Result<(), SearchError> {
+    let [sites, per_site, per_vm] = ESTATE_SHAPE;
+
+    let mut tx = pool.begin().await?;
+    // Level by level, so a child can read its parent's `path_text` from the
+    // row that is already there -- the same order `knobas_app::assets::create`
+    // writes in, and the only order in which the column can be built by a
+    // statement rather than by a recursive CTE.
+    let mut parents: Vec<(String, String, String)> =
+        vec![(String::new(), String::new(), String::new())];
+    let mut counter: i64 = 0;
+    for (level, (width, type_id)) in [(sites, "site"), (per_site, "vm"), (per_vm, "container")]
+        .into_iter()
+        .enumerate()
+    {
+        let mut next = Vec::with_capacity(parents.len() * usize::try_from(width).unwrap_or(1));
+        for (parent_id, parent_name, parent_path) in &parents {
+            for _ in 0..width {
+                counter += 1;
+                let id = format!("asset:{tag}-{counter}");
+                let name = format!("{type_id}-{counter} w{}", (counter * 37 + 101) % 512);
+                let path = if level == 0 {
+                    String::new()
+                } else if parent_path.is_empty() {
+                    parent_name.clone()
+                } else {
+                    format!("{parent_path} / {parent_name}")
+                };
+                sqlx::query(
+                    "insert into knobas.entity (id, kind, title) values ($1, 'asset', $2)
+                     on conflict (id) do nothing",
+                )
+                .bind(&id)
+                .bind(&name)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "insert into knobas.asset
+                       (id, parent_id, type_id, name, properties, path_text)
+                     values ($1, $2, $3, $4,
+                             jsonb_build_object('hostname', $5::text,
+                                                'ip', '10.' || ($6::bigint % 250) || '.0.1',
+                                                'os', 'Debian 13'),
+                             $7)
+                     on conflict (id) do nothing",
+                )
+                .bind(&id)
+                .bind(if level == 0 {
+                    None
+                } else {
+                    Some(parent_id.as_str())
+                })
+                .bind(type_id)
+                .bind(&name)
+                .bind(format!("host-{counter}"))
+                .bind(counter)
+                .bind(&path)
+                .execute(&mut *tx)
+                .await?;
+                if level == 2 && counter % ROUTES_PER == 0 {
+                    let route = format!("route:{tag}-{counter}");
+                    sqlx::query(
+                        "insert into knobas.entity (id, kind, title) values ($1, 'route', $2)
+                         on conflict (id) do nothing",
+                    )
+                    .bind(&route)
+                    .bind(&name)
+                    .execute(&mut *tx)
+                    .await?;
+                    sqlx::query(
+                        "insert into knobas.route (id, asset_id, name, url)
+                         values ($1, $2, $3, 'http://127.0.0.1:' || (30000 + ($4::bigint % 9000)) || '/health')
+                         on conflict (id) do nothing",
+                    )
+                    .bind(&route)
+                    .bind(&id)
+                    .bind(&name)
+                    .bind(counter)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                next.push((id, name, path));
+            }
+        }
+        parents = next;
+    }
+    tx.commit().await?;
+
+    // Both GIN indexes, for `prepare`'s reason: a pending list that has not
+    // been merged is read linearly and the measurement is of the list.
+    sqlx::query("vacuum (analyze) knobas.asset")
+        .execute(pool)
+        .await?;
+    sqlx::query("vacuum (analyze) knobas.route")
+        .execute(pool)
+        .await?;
+    sqlx::query("analyze knobas.entity").execute(pool).await?;
+    Ok(())
+}
+
+/// How many assets and routes [`seed_estate`] writes.
+///
+/// Derived from [`ESTATE_SHAPE`] rather than restated, so the report a bench
+/// prints cannot disagree with the fixture it measured.
+#[must_use]
+pub fn estate_size() -> (i64, i64) {
+    let [sites, per_site, per_vm] = ESTATE_SHAPE;
+    let containers = sites * per_site * per_vm;
+    (
+        sites + sites * per_site + containers,
+        containers / ROUTES_PER,
+    )
+}

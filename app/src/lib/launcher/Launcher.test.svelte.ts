@@ -24,6 +24,7 @@ function hit(over: {
   source_id?: string;
   snippet?: Segment[];
   synced_at?: string;
+  path?: string | null;
 }) {
   return {
     entity_id: over.entity_id,
@@ -31,7 +32,7 @@ function hit(over: {
     source_id: over.source_id ?? "jira",
     updated_at: null,
     synced_at: over.synced_at ?? "2026-08-25T11:56:00Z",
-    path: null,
+    path: over.path ?? null,
     title: over.title,
     rank: 1,
     snippet: over.snippet ?? [],
@@ -121,9 +122,12 @@ function open(props: Record<string, unknown> = {}) {
       open: true,
       onnavigate: () => {},
       onclose: () => {},
-      // Spelled out rather than omitted: `ontimer` is required so a shell
-      // cannot drop it silently, and a fixture with no timer to offer says so.
+      // Spelled out rather than omitted: `ontimer` and `oncontext` are
+      // required so a shell cannot drop either silently, and a fixture with no
+      // timer and no room to offer says so.
       ontimer: undefined,
+      context: undefined,
+      oncontext: undefined,
       now: NOW,
       ports: {
         search: async () => response(),
@@ -766,6 +770,8 @@ test("⌘K opens the overlay from anywhere, and opening twice is not closing", a
       onnavigate: () => {},
       onclose: () => {},
       ontimer: undefined,
+      context: undefined,
+      oncontext: undefined,
       ports: { search: async () => response(), launcherHome: async () => HOME },
     },
   });
@@ -1104,4 +1110,206 @@ test("an author search every source could answer explains nothing", async () => 
   // The results are there, so this is not green because nothing rendered.
   expect(target.textContent).toContain("Retry failed SEPA payouts");
   expect(target.querySelector(".gap")).toBeNull();
+});
+
+/**
+ * **The estate, as a reader meets it in ⌘K** (#436, spec §4 story 40).
+ *
+ * One response with an Assets group and a Routes group, in the engine's own
+ * fixed order, and three things asserted about the rows: the monogram, the
+ * path from the root under the name, and the address `Enter` goes to.
+ *
+ * The path is the point of the ticket — *"⌘K finds a container by name and
+ * tells me which host it is on"* — and it is drawn by the same `Row.svelte`
+ * that draws a Confluence page's ancestors, which is why the assertion is on
+ * what is on screen rather than on a prop.
+ */
+const ESTATE = {
+  groups: [
+    {
+      kind: "asset",
+      label: "Asset",
+      plural: "Assets",
+      monogram: "AS",
+      total: 1,
+      hits: [
+        hit({
+          entity_id: "asset:9f1c",
+          kind: "asset",
+          source_id: "asset",
+          title: "postgres",
+          path: "hel1 › vm-db-01",
+        }),
+      ],
+    },
+    {
+      kind: "route",
+      label: "Route",
+      plural: "Routes",
+      monogram: "RO",
+      total: 1,
+      hits: [
+        hit({
+          entity_id: "route:2ab7",
+          kind: "route",
+          source_id: "route",
+          title: "Uptime Kuma",
+          path: "hel1 › vm-db-01 › kuma",
+        }),
+      ],
+    },
+  ],
+  total: 2,
+};
+
+/** Type a query and let the debounce and the injected search settle. */
+async function search(text: string) {
+  target.querySelector("input")!.value = text;
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+}
+
+test("an asset hit draws its monogram and the path from the root", async () => {
+  open({ ports: { search: async () => response(ESTATE), launcherHome: async () => HOME } });
+  await settle();
+  await search("kuma");
+
+  const rows = [...target.querySelectorAll(".res")].map((row) => row.textContent);
+  expect(rows[0]).toContain("AS");
+  expect(rows[0]).toContain("postgres");
+  // Where it sits, which is what tells two containers called `postgres` apart.
+  expect(target.querySelector(".res .pa")?.textContent).toBe("hel1 › vm-db-01");
+  expect(rows[1]).toContain("RO");
+  expect(rows[1]).toContain("Uptime Kuma");
+  // The group headings are the backend's plurals, so the estate reads as a
+  // section of the launcher rather than as unknown kinds at the bottom.
+  const headings = [...target.querySelectorAll(".secl .lab")].map((el) => el.textContent);
+  expect(headings).toEqual(["Assets", "Routes"]);
+});
+
+test("Enter on an asset opens the Tree at it, and on a route at its exposing asset", async () => {
+  const onnavigate = vi.fn();
+  open({
+    onnavigate,
+    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
+  });
+  await settle();
+  await search("kuma");
+
+  press("Enter");
+  await settle();
+  // Story 35: an asset's address *is* the Tree with a selection, not a room
+  // with a slide-over over it.
+  expect(onnavigate).toHaveBeenCalledWith("#/asset/asset:9f1c");
+
+  open({
+    onnavigate,
+    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
+  });
+  await settle();
+  await search("kuma");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  // A route is not a surface of its own (#432): its address is the Tree, at the
+  // asset that exposes it.
+  expect(onnavigate).toHaveBeenLastCalledWith("#/route/route:2ab7");
+});
+
+/** The room the reader is standing in, as the shell names it to the launcher. */
+const ROOM = { ctxId: "ctx:5b1c0f1e", label: "Payments" };
+
+/**
+ * **§4's third action row** (#436). *Add to context* exists only while the
+ * reader is standing in a stored context — a derived room (*All work*, a
+ * source, a project) has no `ctx:` entity to link to — and the launcher hands
+ * the chosen result back rather than writing, exactly as *Link to…* does.
+ */
+test("Tab offers Add to context on an asset, and hands the result to the shell", async () => {
+  const oncontext = vi.fn();
+  const onlink = vi.fn();
+  const ontimer = vi.fn();
+  open({
+    openEntity: OPEN,
+    onlink,
+    context: ROOM,
+    oncontext,
+    ontimer,
+    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
+  });
+  await settle();
+  await search("kuma");
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  // All three of the ticket's actions, in spec §4's order.
+  expect([...chain!.querySelectorAll(".chain-a")].map((el) => el.textContent?.trim())).toEqual([
+    "Link to PAY-999",
+    "Add to Payments",
+    "Start timer on postgres",
+  ]);
+
+  press("ArrowDown");
+  press("Enter");
+  expect(oncontext).toHaveBeenCalledWith("asset:9f1c", "postgres");
+  expect(onlink).not.toHaveBeenCalled();
+  expect(ontimer).not.toHaveBeenCalled();
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+});
+
+test("with no stored context to stand in, there is no Add to context row", async () => {
+  const oncontext = vi.fn();
+  open({
+    oncontext,
+    ontimer: vi.fn(),
+    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
+  });
+  await settle();
+  await search("kuma");
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  // The chain is not empty — the timer row is there — so this is not green
+  // because `Tab` opened nothing.
+  expect(chain?.textContent).toContain("Start timer on postgres");
+  expect(chain?.textContent).not.toContain("Add to");
+});
+
+/**
+ * A context cannot be added to itself: the backend refuses a self-link, so
+ * offering the row would be offering an error. The same shape as the open
+ * entity's own row having no *Link to…*.
+ */
+test("the standing room's own row is not offered Add to context", async () => {
+  const oncontext = vi.fn();
+  const withRoom = response({
+    groups: [
+      {
+        kind: "ctx",
+        label: "Context",
+        plural: "Contexts",
+        monogram: "CX",
+        total: 1,
+        hits: [hit({ entity_id: ROOM.ctxId, kind: "ctx", source_id: "ctx", title: "Payments" })],
+      },
+      ...ESTATE.groups,
+    ],
+    total: 3,
+  });
+  open({
+    context: ROOM,
+    oncontext,
+    openEntity: OPEN,
+    onlink: vi.fn(),
+    ontimer: vi.fn(),
+    ports: { search: async () => withRoom, launcherHome: async () => HOME },
+  });
+  await settle();
+  await search("payments");
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(chain?.textContent).toContain("Link to PAY-999");
+  expect(chain?.textContent).not.toContain("Add to Payments");
 });
