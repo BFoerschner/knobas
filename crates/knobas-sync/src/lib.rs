@@ -41,6 +41,7 @@ pub mod health;
 pub mod mirror;
 pub mod progress;
 pub mod run_log;
+pub mod samples;
 pub mod scheduler;
 pub mod stats;
 pub mod write_queue;
@@ -442,6 +443,10 @@ async fn run_inner(
 ) -> Result<SyncReport, SyncError> {
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
+    // Read before the descriptor is taken apart below. `None` is "this source
+    // emits no monitors"; `Some(paths)` carries the declaration a sample's
+    // state is read through (#277, ADR-0007).
+    let monitor_paths = samples::state_paths(&descriptor);
     let source_id = descriptor.id;
     // Two sets out of one list: everything the sink will accept, and the
     // subset the sweep may act on. Both are read here, before `entity_kinds`
@@ -474,7 +479,16 @@ async fn run_inner(
     // connection happened to be used again -- and the next run of the same
     // source would block on it for ever. Found by a test that failed one run
     // and then ran another on the same connection.
-    let locked = run_locked(&mut tx, source, &source_id, kinds, exhaustive, from).await;
+    let locked = run_locked(
+        &mut tx,
+        source,
+        &source_id,
+        kinds,
+        exhaustive,
+        monitor_paths.as_deref(),
+        from,
+    )
+    .await;
     let locked = match locked {
         Ok(locked) => locked,
         Err(error) => {
@@ -557,6 +571,7 @@ async fn run_locked(
     source_id: &str,
     kinds: HashSet<String>,
     exhaustive: HashSet<String>,
+    monitor_paths: Option<&[knobas_core::payload::PayloadPath]>,
     from: CursorSource,
 ) -> Result<Locked, SyncError> {
     // Held until this transaction ends, however it ends. Two runs of one source
@@ -660,6 +675,24 @@ async fn run_locked(
     } else {
         0
     };
+
+    // One sample per live monitor, for every run of a source that emits the
+    // `monitor` kind (spec #427, issue #443). Three things about where this
+    // sits, all of them load-bearing:
+    //
+    //  * **After the sweep**, so a monitor this run tombstoned -- by the
+    //    adapter, or by the reconcile above -- is already out of
+    //    `sync.live_item` and gets no sample. That is the whole of "a monitor
+    //    absent from this run gets no sample";
+    //  * **inside the transaction**, so a run that fails leaves behind no
+    //    samples claiming to have seen a state it never committed;
+    //  * **off the mirror and not off the emitted items**, because an adapter
+    //    whose cursor is a digest emits *nothing* on an unchanged source
+    //    (contract §4.2 E) and the roster is still exactly as up as it was.
+    //    `samples` records the argument in full.
+    if let Some(declared) = monitor_paths {
+        samples::append(tx, source_id, declared).await?;
+    }
 
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
         .bind(&cursor)
