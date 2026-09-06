@@ -135,8 +135,6 @@ pub enum ExportError {
     NoSuchArchive(String),
     #[error("a share export needs at least one part; every one of them is switched off")]
     NoParts,
-    #[error("the keychain could not be read: {0}")]
-    Secret(#[from] knobas_secrets::SecretError),
 }
 
 impl From<ExportError> for crate::IpcError {
@@ -446,8 +444,8 @@ async fn settle_credential_health(state: &BackupState) {
     if let Err(error) = settle_health(state).await {
         tracing::warn!(
             %error,
-            "the restore finished, but the sources it brought could not be checked against \
-             this machine's keychain"
+            "the restore finished, but the sources it brought could not all be settled \
+             against this machine's keychain"
         );
     }
 }
@@ -458,11 +456,24 @@ async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
             .fetch_all(&state.pool)
             .await?;
     for id in sources {
-        if knobas_secrets::spawn::get(&state.secrets, &id)
-            .await?
-            .is_some()
-        {
-            continue;
+        match knobas_secrets::spawn::get(&state.secrets, &id).await {
+            // This machine holds it; nothing about this source is missing.
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            // Per source, because the question is per source. A store that
+            // refuses one entry -- a locked keychain, a denied prompt -- must
+            // not end the loop and leave every source after it wearing the
+            // verdict the *other* machine reached. And a refusal is not
+            // `missing_secret` either: it is this machine having learned
+            // nothing, which the next sync run settles.
+            Err(error) => {
+                tracing::warn!(
+                    source_id = %id,
+                    %error,
+                    "the keychain would not say whether this machine holds this source's secret"
+                );
+                continue;
+            }
         }
         knobas_sync::config::set_health(
             &state.pool,
@@ -524,7 +535,15 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
             })
         })
         .collect();
-    found.sort_by(|a, b| b.file.cmp(&a.file));
+    // On the stamp, not on the whole name: `knobas-share-` sorts above every
+    // `knobas-<digit>`, so comparing file names would put every share export
+    // at the top of the list for ever, whatever day it was taken (#454). The
+    // whole name breaks a tie, so the order is total.
+    found.sort_by(|a, b| {
+        policy::stamp(&b.file)
+            .cmp(policy::stamp(&a.file))
+            .then_with(|| b.file.cmp(&a.file))
+    });
     found
 }
 

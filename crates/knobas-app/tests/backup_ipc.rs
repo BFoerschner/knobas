@@ -1219,6 +1219,135 @@ async fn a_nightly_export_never_prunes_a_share_export() {
     );
 }
 
+/// **The archive list is newest first, across both kinds of archive.**
+///
+/// `knobas-share-` sorts above `knobas-2026...` byte for byte -- `s` is not a
+/// digit -- so a list ordered on the whole file name shows a share export from
+/// last year above a backup taken this morning, under a heading that says
+/// newest first and a *Restore* button on the row a person reads first. Four
+/// files written by hand, because the assertion is about names and a real
+/// export cannot produce two dates a second apart.
+#[tokio::test]
+async fn the_archive_list_is_ordered_by_date_and_not_by_the_share_prefix() {
+    let (service, dir) = service("shareorder").await;
+    for name in [
+        "knobas-20260101-030000.knobas",
+        "knobas-share-20251231-090000.knobas",
+        "knobas-20260103-030000.knobas",
+        "knobas-share-20260102-090000.knobas",
+    ] {
+        std::fs::write(dir.path().join(name), b"x").expect("an archive on disk");
+    }
+
+    let listed: Vec<String> = backup::status(&service)
+        .await
+        .expect("status")
+        .archives
+        .into_iter()
+        .map(|archive| archive.file)
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            "knobas-20260103-030000.knobas".to_owned(),
+            "knobas-share-20260102-090000.knobas".to_owned(),
+            "knobas-20260101-030000.knobas".to_owned(),
+            "knobas-share-20251231-090000.knobas".to_owned(),
+        ],
+        "the settings view lists archives newest first, share exports among them"
+    );
+}
+
+/// A store that refuses one id and knows nothing about any other.
+///
+/// The keychain failures a person actually meets are not absence: a locked
+/// keychain, `errSecAuthFailed` and a *Deny* on the prompt all arrive as
+/// `SecretError::Backend` (`knobas_secrets`' own docs say so). Absence is
+/// `Ok(None)`, which is a different answer and already covered.
+struct RefusesOne {
+    id: String,
+}
+
+impl knobas_secrets::SecretStore for RefusesOne {
+    fn get(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<knobas_secrets::Secret>, knobas_secrets::SecretError> {
+        if source_id == self.id {
+            return Err(knobas_secrets::SecretError::Backend(
+                "the keychain is locked".to_owned(),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn put(
+        &self,
+        _source_id: &str,
+        _secret: &knobas_secrets::Secret,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        unreachable!("a restore never writes a credential")
+    }
+
+    fn delete(&self, _source_id: &str) -> Result<(), knobas_secrets::SecretError> {
+        unreachable!("a restore never deletes a credential")
+    }
+}
+
+/// **A keychain that refuses one source does not silence the verdict on the
+/// rest.**
+///
+/// The question the restore asks is per source, and a single shared `?` over
+/// the loop made it per *machine*: the first refusal ended the pass, and every
+/// source after it kept the `ok` the sharer's machine wrote -- the sources
+/// view that lies, arrived at from the other direction. The refused source is
+/// left alone on purpose: a refusal is this machine learning nothing, which is
+/// not the same as learning there is no credential, and the next sync run
+/// settles it.
+#[tokio::test]
+async fn a_keychain_that_refuses_one_source_still_settles_the_others() {
+    let (sharer, sharer_dir) = service("refusesource").await;
+    let estate = seed_corpus(&sharer.pool, "refuse").await;
+    // A second source, sorting *after* the first: the loop reads them in id
+    // order, so this is the one an aborted pass would never reach.
+    let second = format!("{}-zz", estate.source);
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, auth_state)
+         values ($1, 'gitea', 'Gitea', 'https://gitea.example', 'pat', 'ok')",
+    )
+    .bind(&second)
+    .execute(&sharer.pool)
+    .await
+    .expect("a second source configuration");
+
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+
+    let secrets: Arc<dyn knobas_secrets::SecretStore> = Arc::new(RefusesOne {
+        id: estate.source.clone(),
+    });
+    let (colleague, colleague_dir) = service_with("refusetarget", secrets).await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("a keychain that refuses must not fail the restore");
+
+    let states: Vec<(String, String)> =
+        sqlx::query_as("select id, auth_state from knobas.source_config order by id")
+            .fetch_all(&colleague.pool)
+            .await
+            .expect("the restored source configurations");
+    assert_eq!(
+        states,
+        vec![
+            (estate.source.clone(), "ok".to_owned()),
+            (second.clone(), "missing_secret".to_owned()),
+        ],
+        "the refused source keeps what it arrived with; the one after it is still asked"
+    );
+}
+
 /// One entity, run-unique, so a database can be *populated* in the sense the
 /// occupancy guard means. Returns its id.
 async fn seed_entity(pool: &sqlx::PgPool, tag: &str) -> String {

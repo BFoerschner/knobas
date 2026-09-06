@@ -191,7 +191,14 @@ pub async fn dump(connector: &Connector, archive: &Path) -> Result<u64, BackupEr
 /// The share export of spec #427 (M4.2): the same custom-format archive
 /// [`dump`] writes, restricted to `tables` -- unqualified names in
 /// [`OWNED_SCHEMA`] -- and carrying its own DDL for them, so the archive is
-/// still one `pg_restore` can read on its own.
+/// still one `pg_restore` can read with no knobas involved.
+///
+/// **One thing a whole-schema dump carries and this does not**: `--table` is
+/// documented to make no attempt at the objects the selected tables depend
+/// upon, and `create schema knobas` is one of them. It costs nothing here --
+/// [`restore`] loads `--data-only` into a database the migrations have
+/// already made -- but a by-hand `pg_restore` of a share export wants the
+/// schema to exist first, where a backup's would create it.
 ///
 /// Returns the archive's size in bytes.
 ///

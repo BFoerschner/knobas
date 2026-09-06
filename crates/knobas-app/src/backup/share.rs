@@ -41,7 +41,9 @@
 //! an asset, a route, a context anchor and a note all name one. `knobas.asset`
 //! and `knobas.route` go further and take their primary key from it
 //! (`asset_entity_fk`, `route_entity_fk`), so an asset restored without its
-//! entity is a row nothing can open.
+//! entity is a row nothing can open. *Time* is the exception and rides with no
+//! address book of its own -- see [`ENTITY`] for why that is a choice and not
+//! an oversight.
 //!
 //! **The whole table travels**, and this is the one consequence worth reading
 //! twice: `pg_dump` restricts an archive by table and never by row, so "the
@@ -95,7 +97,17 @@ impl Default for ShareParts {
     }
 }
 
-/// The address book every referencing part needs with it.
+/// The address book the four *referencing* parts need with them.
+///
+/// Four, not five: a timer, a block, a worklog and an observation all carry an
+/// `entity_id` too, and *time* still does not bring this table. Nothing breaks
+/// -- those columns carry no foreign key, by the deliberate decision recorded
+/// in the migration that added them -- and the alternative is worse: an export
+/// of somebody's hours and nothing else would hand over the title of every
+/// ticket, page, asset and note this knobas knows about, which is the leak the
+/// whole feature exists to prevent. A time-only archive is the hours, and what
+/// they were spent on is a question the recipient's own knobas answers once
+/// the same sources are configured.
 const ENTITY: &str = "entity";
 
 impl ShareParts {

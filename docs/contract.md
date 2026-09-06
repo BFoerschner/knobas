@@ -5909,7 +5909,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   import and the dialog's three groups. **Björn keeps the gate for frozen contracts and this entry is
   flagged for his review.**
 
-- **A sixth backup command and one new DTO, issue #454 (2026-09-07):** the **share export** — the
+- **A fifth backup command and one new DTO, issue #454 (2026-09-07):** the **share export** — the
   backup's archive restricted to parts, and a restore that accepts a partial archive. Ratified in
   advance by the spec (#427) Björn approved, whose M4.2 section reads "The export command grows a
   mode with parts; each part is a table list … the restore path accepts an archive missing tables

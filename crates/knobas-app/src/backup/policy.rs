@@ -201,6 +201,23 @@ pub fn is_backup_name(name: &str) -> bool {
     is_archive_name(name) && !name.starts_with(&format!("knobas-{SHARE_INFIX}"))
 }
 
+/// The timestamp a name sorts by, whichever kind of archive it is (#454).
+///
+/// A backup and a share export differ by an infix that sits *before* the
+/// stamp, and `share-` sorts after every digit -- so a byte comparison of
+/// whole names puts every share export above every backup, whatever day
+/// either was taken, and "newest first" quietly stops being true the moment
+/// one is in the directory. Comparing the stamp instead restores it, and the
+/// stamp is fixed-width and zero-padded, so byte order is still time order.
+///
+/// A name this cannot recognise comes back whole, which sorts it among the
+/// others rather than ahead of all of them.
+#[must_use]
+pub fn stamp(name: &str) -> &str {
+    let rest = name.strip_prefix("knobas-").unwrap_or(name);
+    rest.strip_prefix(SHARE_INFIX).unwrap_or(rest)
+}
+
 fn stamped_name<Tz: TimeZone>(infix: &str, local: &DateTime<Tz>) -> String
 where
     Tz::Offset: std::fmt::Display,
@@ -440,6 +457,35 @@ mod tests {
         assert_eq!(backup, "knobas-20260906-143015.knobas");
         assert!(is_backup_name(&backup));
         assert_ne!(backup, name, "the two must not collide on the same second");
+    }
+
+    /// A share export sorts among the backups by its **date**, not by the
+    /// infix in its name.
+    ///
+    /// The failure this is about is the archive list in the settings view:
+    /// `knobas-share-` sorts above `knobas-2026...` byte for byte, so a list
+    /// ordered on the whole file name shows a share export from last year
+    /// above a backup from this morning under a heading that says "newest
+    /// first".
+    #[test]
+    fn a_share_export_sorts_by_its_date_and_not_by_its_prefix() {
+        let mut names = vec![
+            "knobas-20260101-030000.knobas".to_owned(),
+            "knobas-share-20251231-090000.knobas".to_owned(),
+            "knobas-20260103-030000.knobas".to_owned(),
+            "knobas-share-20260102-090000.knobas".to_owned(),
+        ];
+        names.sort_by(|a, b| stamp(b).cmp(stamp(a)));
+        assert_eq!(
+            names,
+            vec![
+                "knobas-20260103-030000.knobas".to_owned(),
+                "knobas-share-20260102-090000.knobas".to_owned(),
+                "knobas-20260101-030000.knobas".to_owned(),
+                "knobas-share-20251231-090000.knobas".to_owned(),
+            ],
+            "newest first, across both kinds of archive"
+        );
     }
 
     /// **Retention never deletes a share export.**
