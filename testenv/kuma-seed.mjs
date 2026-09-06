@@ -162,17 +162,27 @@ const drift = (have, want) =>
 
 // `monitorList` is an object keyed by monitor id, not an array.
 const existing = await listen("monitorList", () => call("getMonitorList").then((r) => ok(r, "getMonitorList")));
-const byName = new Map(Object.values(existing ?? {}).map((m) => [m.name, m]));
-log(`${byName.size} monitor(s) already configured`);
+const rows = Object.values(existing ?? {});
+log(`${rows.length} monitor(s) already configured`);
 
 // Delete first, so a rename frees its old row before the new one is added and
 // the count in the UI never overshoots. `false` is `deleteChildren`: nothing
 // here is a group monitor, and unlinking is the safe answer if one ever is.
+//
+// The sweep walks the ROWS, and `byName` is filled from it rather than built
+// by `new Map(rows.map(...))`. A Map keyed by name collapses duplicates, and
+// Kuma's UI will happily hold two monitors called the same thing -- so a
+// name-keyed sweep would delete one of a duplicated pair and leave the other,
+// while this script printed that Kuma now holds exactly what monitors.json
+// names. Keeping the first row of a wanted name and deleting every other row
+// makes that sentence true whatever the instance was holding.
 const wanted = new Set(monitors.map((m) => m.name));
-for (const m of byName.values()) {
-  if (wanted.has(m.name)) continue;
+const byName = new Map();
+for (const m of rows) {
+  if (wanted.has(m.name) && !byName.has(m.name)) { byName.set(m.name, m); continue; }
   ok(await call("deleteMonitor", m.id, false), `deleteMonitor ${m.name}`);
-  log("deleted", JSON.stringify(m.name), "-- monitors.json no longer names it");
+  log("deleted", JSON.stringify(m.name),
+      wanted.has(m.name) ? "-- a second monitor of that name" : "-- monitors.json no longer names it");
 }
 
 for (const m of monitors) {

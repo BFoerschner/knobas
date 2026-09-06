@@ -14,9 +14,10 @@
 # TeamCity runs, the servers are the estate). Stopping any of those to make a
 # red is how one stream's live run becomes another's mystery failure. So the
 # estate gets one check that exists purely to be knocked over, whose whole
-# blast radius is a port nobody else binds. The live recipe releases the port,
-# waits for `canary` to read down, acks the alert, binds it again and waits for
-# the recovery -- and stops no container at all (M4 spec, issue #427).
+# blast radius is a port nobody else binds. M4.1's live recipe will release the
+# port, wait for `canary` to read down, ack the alert, bind it again and wait
+# for the recovery -- and will stop no container at all (M4 spec, issue #427).
+# No recipe uses this script yet; nothing in the justfile mentions 8299.
 #
 # WHY A HOST PROCESS AND NOT A CONTAINER. Kuma reaches it at
 # http://host.docker.internal:8299/, the same host alias the three tunnel
@@ -35,8 +36,8 @@ PIDFILE="$HOME/.knobas-canary-$PORT.pid"
 
 # Not in testenv/: `./reset` would have to learn to kill the process before
 # removing the file, and a stale pidfile in the repo is one more thing a
-# `git status` has to explain. $HOME matches where ./hetzner/tunnel keeps its
-# pids -- same shape of thing, same place.
+# `git status` has to explain. $HOME for the same reason ./hetzner/tunnel keeps
+# its own under ~/.ssh/ -- a different directory, the same argument.
 
 say() { echo "canary: $*"; }
 die() { echo "canary: $*" >&2; exit 1; }
@@ -104,9 +105,14 @@ up() {
   # the wall clock is nothing like 40 x 0.5. Saying "40 tries" is the thing
   # this loop actually counts. (`hetzner/tunnel` can honestly say 20 s because
   # its probe is `nc -z`, which returns at once.)
+  # Both failure paths KILL before removing the pidfile. Removing it first
+  # would disown a responder that is still holding the socket, and this
+  # script's whole ownership rule is "a port that answers with no pidfile is
+  # somebody else's" -- so `up` would then refuse the port and `down` would
+  # call it already down, and nothing here could ever release it again.
   until answers; do
     i=$((i + 1))
-    [ "$i" -lt 40 ] || { rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT after 40 tries"; }
+    [ "$i" -lt 40 ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT after 40 tries"; }
     kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { rm -f "$PIDFILE"; die "responder exited at once (is $PORT taken?)"; }
     sleep 0.5
   done
@@ -123,12 +129,17 @@ down() {
     return 0
   fi
   kill "$pid" 2>/dev/null || true
-  rm -f "$PIDFILE"
+  # The pidfile goes only once the port is actually free. Removing it up front
+  # -- or being interrupted during this wait -- would leave a live responder
+  # that no longer has a pidfile naming it, which by the rule above is
+  # somebody else's and is never killed again. Leaving it means a second
+  # `./canary.sh down` finishes the job.
   while answers; do
     i=$((i + 1))
     [ "$i" -lt 20 ] || die "killed pid $pid but 127.0.0.1:$PORT still answers"
     sleep 0.5
   done
+  rm -f "$PIDFILE"
   say "down (released 127.0.0.1:$PORT)"
 }
 

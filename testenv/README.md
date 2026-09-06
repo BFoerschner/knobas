@@ -14,9 +14,12 @@ docker compose up -d --build   # gitea, uptime-kuma, mockd
 **`./seed` needs `hetzner/hosts.env`** since 2026-09-06. Uptime Kuma's monitor
 list is now the real estate — a ping per Hetzner server among them — and those
 servers' IPs live in that gitignored file. `./seed-kuma.sh` refuses without it
-rather than seeding a Kuma missing half the estate, and `./seed` stops there,
-so a tree that has never run `./hetzner/provision.sh` gets no `./seed` at all.
-See "Monitors" below for why, and `hetzner/README.md` for the provisioning.
+rather than seeding a Kuma missing half the estate. `./seed` runs Gitea first,
+so on a tree that has never run `./hetzner/provision.sh` the Gitea half
+succeeds, the Kuma half refuses, and the run exits non-zero **before printing
+the adapter env vars** — which is the part that bites. `./seed --env` prints
+them for the Gitea half alone. See "Monitors" below for why, and
+`hetzner/README.md` for the provisioning.
 
 Two layers, and the difference is the point:
 
@@ -815,23 +818,25 @@ literal string `${KNOBAS_HETZNER_JIRA_IP}` is a permanent red that looks like
 an outage. **`./seed-kuma.sh` therefore fails without `hetzner/hosts.env`**,
 and says to run `./hetzner/provision.sh`.
 
-**Five of the eight check the host, not the compose network**, through
-`host.docker.internal` — the tunnel's forwards and the canary are host sockets
-bound to `127.0.0.1`. Docker Desktop and OrbStack define that alias themselves;
+**Four of the eight check the host, not the compose network**, through
+`host.docker.internal` — the three tunnel forwards and the canary are host
+sockets bound to `127.0.0.1`. (`gitea` is the fourth non-server check and it is
+*not* one of them: it reaches the container by its compose service name.) Docker Desktop and OrbStack define that alias themselves;
 the `extra_hosts: host.docker.internal:host-gateway` line on the `uptime-kuma`
 service is what makes the name *resolve* on a plain Linux engine, which defines
-nothing. It does not make those five monitors *work* there: `host-gateway` is
+nothing. It does not make those four monitors *work* there: `host-gateway` is
 the bridge gateway, and both the tunnel (`hetzner/tunnel`: `-L
 127.0.0.1:$port:...`) and the canary bind `127.0.0.1` only, deliberately, so a
 bridge-gateway client cannot reach them. Running this on Linux would also mean
-binding those five targets on the bridge address; nobody has needed that, and
+binding those four targets on the bridge address; nobody has needed that, and
 this environment is a laptop's. Measured on OrbStack: with and without the line
 the alias resolves to `0.250.250.254` and reaches a host socket bound to
 `127.0.0.1`, so it is a no-op here.
 
 **The seed owns the list.** `kuma-seed.mjs` deletes any monitor Kuma holds that
-`monitors.json` no longer names, deletes and re-adds one whose type, URL,
-hostname or interval drifted, and leaves a matching one alone — so a second
+`monitors.json` no longer names (and any second monitor sharing a name with one
+it does, which the UI will happily create), deletes and re-adds one whose type,
+URL, hostname or interval drifted, and leaves a matching one alone — so a second
 run changes nothing and an old list's leftovers do not linger. Everything else
 about a monitor (notifications, tags, a paused state a live run left behind) is
 the instance's business and is not touched.
@@ -853,10 +858,10 @@ live run stops a shared container** (M4 spec #427).
 
 Port 8299 is deliberately **outside** the §5 map above: it is a host port, not
 a published container port, so `check-ports.sh` neither knows nor should know
-about it. The pid lives in `~/.knobas-canary-8299.pid`, next to where
-`hetzner/tunnel` keeps its own — a process that outlives a shell does not
-belong in the repository directory, and `./reset` therefore does not have to
-learn to kill it.
+about it. The pid lives in `~/.knobas-canary-8299.pid` — in `$HOME`, for the same reason
+`hetzner/tunnel` keeps its own in `~/.ssh/`: a process that outlives a shell
+does not belong in the repository directory, and `./reset` therefore does not
+have to learn to kill it.
 
 Its interval is 20 s rather than the others' 60 s, so a live recipe's
 knock-down and recovery are seconds rather than minutes, and every leg lands
