@@ -3,11 +3,14 @@ knobas-app	lib/knobas_app	assets::tests::a_custom_asset_lists_only_what_was_type
 knobas-app	lib/knobas_app	assets::tests::a_property_value_is_vetted_for_the_kind_it_claims
 knobas-app	lib/knobas_app	assets::tests::a_type_no_table_declares_is_refused_by_name
 knobas-app	lib/knobas_app	assets::tests::a_typed_key_refuses_a_kind_its_type_did_not_declare
+knobas-app	lib/knobas_app	assets::tests::a_value_comes_from_the_nearest_asset_at_or_above_that_sets_it
 knobas-app	lib/knobas_app	assets::tests::an_unreadable_bag_yields_the_schema_and_nothing_else
 knobas-app	lib/knobas_app	assets::tests::every_environment_is_one_the_schema_accepts
 knobas-app	lib/knobas_app	assets::tests::every_status_is_one_the_schema_accepts
 knobas-app	lib/knobas_app	assets::tests::the_asset_namespace_is_one_knobas_core_reserves
 knobas-app	lib/knobas_app	assets::tests::the_pane_lists_declared_keys_in_schema_order_and_custom_keys_after
+knobas-app	lib/knobas_app	assets::tests::the_rollup_counts_only_what_is_underneath_and_only_the_two_bad_statuses
+knobas-app	lib/knobas_app	assets::tests::the_rollup_ranks_the_statuses_the_way_rust_does
 knobas-app	lib/knobas_app	backup::policy::tests::a_backup_taken_after_the_boundary_settles_the_night
 knobas-app	lib/knobas_app	backup::policy::tests::a_database_that_has_never_been_backed_up_is_due_at_once
 knobas-app	lib/knobas_app	backup::policy::tests::a_disabled_schedule_is_never_due
@@ -33,6 +36,7 @@ knobas-app	lib/knobas_app	commands::assets::tests::every_status_and_environment_
 knobas-app	lib/knobas_app	commands::assets::tests::the_asset_detail_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_asset_property_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_asset_row_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	commands::assets::tests::the_inherited_value_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_sends_the_argument_names_tauri_expects
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names
@@ -202,6 +206,7 @@ knobas-app	test/adapter_to_mirror	a_backfill_widens_the_stored_payload_of_an_iss
 knobas-app	test/adapter_to_mirror	a_classic_projects_epic_link_reaches_the_stored_payload
 knobas-app	test/adapter_to_mirror	a_teamcity_project_survives_its_builds_through_its_configurations
 knobas-app	test/assets_ipc	a_column_is_ordered_by_name_and_not_by_when_it_was_made
+knobas-app	test/assets_ipc	a_column_row_reports_its_effective_health_and_what_is_wrong_inside
 knobas-app	test/assets_ipc	a_custom_property_is_stored_beside_the_typed_ones_and_marked
 knobas-app	test/assets_ipc	a_leaf_is_deleted_and_its_entity_row_is_tombstoned
 knobas-app	test/assets_ipc	a_list_of_edits_writes_one_line_each_and_an_unchanged_field_writes_none
@@ -213,9 +218,11 @@ knobas-app	test/assets_ipc	an_argument_the_mirror_spells_differently_never_arriv
 knobas-app	test/assets_ipc	an_asset_can_be_moved_to_the_top_of_the_estate
 knobas-app	test/assets_ipc	an_asset_is_an_entity_in_the_namespace_knobas_reserves
 knobas-app	test/assets_ipc	an_edit_that_does_not_fit_the_schema_is_refused_by_name
+knobas-app	test/assets_ipc	clearing_a_childs_environment_falls_back_to_the_ancestors
 knobas-app	test/assets_ipc	clearing_a_property_removes_the_key_and_records_the_clear
 knobas-app	test/assets_ipc	deleting_an_asset_that_still_holds_something_is_refused
 knobas-app	test/assets_ipc	editing_a_property_writes_the_old_to_new_line
+knobas-app	test/assets_ipc	environment_and_owner_come_from_the_nearest_asset_at_or_above
 knobas-app	test/assets_ipc	every_asset_command_is_registered_and_its_arguments_decode
 knobas-app	test/assets_ipc	moving_an_asset_re_parents_it_and_writes_the_move
 knobas-app	test/assets_ipc	one_asset_reads_with_its_held_by_path_and_its_properties
