@@ -910,6 +910,23 @@ async fn switching_notes_and_time_on_brings_the_notes_and_the_hours() {
         0,
         "the activity stream is in no part, whatever is switched on"
     );
+
+    // **The identity sequences came with the tables that own them.** A block
+    // and a worklog have `bigint generated always as identity` primary keys,
+    // and the restore loads their ids verbatim; a sequence still sitting at 1
+    // on the far machine would make the reader's very next tracked block a
+    // duplicate-key failure -- days after the restore, and unattributable to
+    // it. `pg_dump --table` carries a table's owned sequences, and this is the
+    // assertion that says so at the seam rather than on the strength of the
+    // documentation.
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, label, kind)
+         values (now(), now() + interval '1 minute', 'the first block after the restore', 'manual')",
+    )
+    .execute(there)
+    .await
+    .expect("a block written after a restore must not collide with a restored id");
+    assert_eq!(rows(there, "block").await, 2);
 }
 
 /// **A share export carries no secret, and a source restored from one says so.**
