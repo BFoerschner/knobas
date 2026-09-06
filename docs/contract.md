@@ -5437,6 +5437,26 @@ From this commit on, each of the following requires an orchestrator decision **a
   `assets::ROUTES_REACHABLE`, and the glossary entry is amended to say so with its old wording
   quoted. **That amendment is a vocabulary change and is flagged for Björn with this entry.**
 
+  **How far the amendment reaches, stated so the gate sees all of it (merge-manager, #464).** The
+  narrower reading is in **three** documents, not one, and `CONTEXT.md` is the least of them:
+
+  - the **design doc**'s §12.1 routes row — *"an asset is reachable via routes that land on it or
+    on something that holds it"*, marked **Decided**, and it is the document this file's own
+    header says it obeys;
+  - **spec #427 story 13** — *"the routes that land on it **or on something that holds it**"* —
+    and **story 31**, which names two cases for a route's wire, the target asset or *"the spine
+    that holds it, dashed when the target is reached through an ancestor"*;
+  - `CONTEXT.md`'s **Route** entry, amended above.
+
+  The union adds a third case to story 31's two, which `assets/tree.ts`'s `landingOf` names
+  *inside*. Nothing any of those sentences says stops being true — the union is a superset, so
+  every route they promise is still read — but the surface is wider than all three documents'
+  words, and **only `CONTEXT.md` is amended by this PR**: the design doc and the spec issue are
+  left as written, because amending a *Decided* row is Björn's gate and not a merge-manager's.
+  So what is in front of him is one ruling with those three documents behind it. If it goes the
+  other way the change is small and localised: `ROUTES_REACHABLE`'s `path` CTE loses its `down`
+  arm, `landingOf` loses its *inside* case, and the two tests named above go with them.
+
   The descendant half is the **whole subtree and not one hop**, and that is the same estate
   deciding: the criterion's *"the VM that holds the container"* is two levels up in the real file
   (`knobas-teamcity` the container sits in *Docker engine (knobas-teamcity)*, which sits on

@@ -2449,11 +2449,16 @@ mod tests {
     }
 
     /// The `'a','b'` list on the line naming `constraint`.
+    ///
+    /// Two migrations are read through this now (`0017`'s two vocabularies and
+    /// `0018`'s), so the panics name the constraint rather than a file: a
+    /// message that said `0017` while reading `0018` would send the next
+    /// reader to the wrong file on the one day it fires.
     fn vocabulary<'m>(migration: &'m str, constraint: &str) -> Vec<&'m str> {
         let line = migration
             .lines()
             .find(|line| line.contains(constraint))
-            .unwrap_or_else(|| panic!("{constraint} is missing from 0017"));
+            .unwrap_or_else(|| panic!("{constraint} is missing from its migration"));
         let (_, rest) = line
             .rsplit_once(" in (")
             .unwrap_or_else(|| panic!("{constraint} does not list its values: {line}"));
