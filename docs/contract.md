@@ -5321,6 +5321,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   read is the one that will want more of the filter, and it may widen this argument or add a
   second command; either is a §10.8 conversation, and this entry does not pre-decide it.
 
+  **Two doc comments in `app/src/lib/ipc/entity.ts` are corrected in place** (ADR-0011), and named
+  here because that file is orchestrator-owned and append-only: `EntityFilter.context` and
+  `contextMembers` both described membership as *"the fixed one-hop rule"*, which this change makes
+  false. **No declaration in that file changed** — no type, no field, no function, no argument —
+  only the two sentences describing the rule the backend applies.
+
   **`knobas_core::link::Origin::Implied`'s doc comment is amended in place** (ADR-0011), because
   it named this very path as its example — *"linking an asset to a ticket adding the asset to
   that ticket's context"* — and this PR rules that path writes nothing. The variant, the column

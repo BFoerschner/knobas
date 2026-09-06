@@ -2,7 +2,8 @@
 //! real PostgreSQL.
 //!
 //! What is asserted here is **who is a member and who is not** -- the ratified
-//! rule is `seed + direct links + one hop`, and every positive case in this
+//! rule is `seed + direct links + one hop`, plus (since #434) every asset held
+//! by something those three reached, at any depth; and every positive case in this
 //! file is paired with the entity one step past the rule's edge, because a
 //! walk that reaches everything is as broken as one that reaches nothing and
 //! only the far edge catches the first.

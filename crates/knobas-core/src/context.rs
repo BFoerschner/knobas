@@ -310,9 +310,11 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 
 /// The membership rule, as one statement (§16.11, ADR-0008).
 ///
-/// Three layers, each a plain CTE rather than a recursion, because the rule is
-/// *fixed at* seed + direct + one hop and a recursive walk would be a knob
-/// this statement exists not to have:
+/// Four terms. The three **link** layers are plain CTEs rather than a
+/// recursion, because the link rule is *fixed at* seed + direct + one hop and
+/// a recursive walk there would be a knob this statement exists not to have;
+/// the fourth, `held`, is a recursion because containment is transitive
+/// without limit and that asymmetry is the rule (see below, and #434):
 ///
 /// * **`seed`** -- the explicit adds (every confirmed link touching the
 ///   context's own entity), the anchor, and the epic's children: mirrored
@@ -354,9 +356,11 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// the path does not fit contributes no seed, so the failure is an absent
 /// member, never a wrong one.
 ///
-/// Every expansion joins `knobas.entity` to refuse `ctx`-kind neighbours: a
-/// ticket shared by two contexts would otherwise walk *through* the second
-/// context and union the two memberships. The walk reads
+/// Every **link** expansion joins `knobas.entity` to refuse `ctx`-kind
+/// neighbours: a ticket shared by two contexts would otherwise walk *through*
+/// the second context and union the two memberships. `held` needs no such
+/// guard and has none -- it joins `knobas.asset`, and only an asset has a
+/// parent, so a context cannot enter through it. Those three steps read
 /// `knobas.confirmed_link` at every step -- see the module note for why that
 /// is load-bearing and not a style choice.
 const MEMBER_IDS: &str = "
