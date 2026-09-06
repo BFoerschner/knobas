@@ -117,8 +117,8 @@ function statusOf(over: Partial<BackupStatus> = {}): BackupStatus {
     },
     next_due_at: "2026-08-30T01:00:00Z",
     archives: [
-      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304 },
-      { file: "knobas-20260828-030000.knobas", bytes: 4_100_000 },
+      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304, share: false },
+      { file: "knobas-20260828-030000.knobas", bytes: 4_100_000, share: false },
     ],
     ...over,
   };
@@ -235,7 +235,7 @@ test("Export now names the file it wrote and where it went", async () => {
 
   status = statusOf({
     last: { taken_at: NOW.toISOString(), file: "knobas-20260829-091400.knobas", bytes: 4_194_304 },
-    archives: [{ file: "knobas-20260829-091400.knobas", bytes: 4_194_304 }],
+    archives: [{ file: "knobas-20260829-091400.knobas", bytes: 4_194_304, share: false }],
   });
   button("Export now")!.click();
   await settle();
@@ -466,6 +466,50 @@ test("every archive on disk is listed with its size", async () => {
 
   expect([...target.querySelectorAll(".arc[data-file]")].length).toBe(2);
   expect(archiveRow("knobas-20260828-030000.knobas")!.textContent).toContain("3.9 MB");
+});
+
+/**
+ * A share export is listed **apart** from the backups (#455, criterion 1).
+ *
+ * The two live in one directory and restore through one button, and a reader
+ * looking for the file they made to hand over should not have to read dates.
+ * They also do not obey the same rule — the retention sentence above this list
+ * is true of the backups and false of the share exports — so a single list
+ * under one heading says something wrong about half its rows.
+ *
+ * Both directions, because a grouping that put *everything* in one group would
+ * pass a one-sided assertion.
+ */
+test("a share export is listed apart from the backups, under its own heading", async () => {
+  status = statusOf({
+    archives: [
+      { file: "knobas-share-20260829-091400.knobas", bytes: 1_048_576, share: true },
+      { file: "knobas-20260829-030000.knobas", bytes: 4_194_304, share: false },
+    ],
+  });
+  render();
+  await settle();
+
+  const shared = archiveRow("knobas-share-20260829-091400.knobas")!;
+  const backup = archiveRow("knobas-20260829-030000.knobas")!;
+  expect(shared.closest("[data-group]")!.getAttribute("data-group")).toBe("share");
+  expect(backup.closest("[data-group]")!.getAttribute("data-group")).toBe("backup");
+  // Restorable either way: the archive a colleague is handed is the one they
+  // drop into their own directory and restore.
+  expect(shared.textContent).toContain("Restore");
+  // And the group says the thing the retention sentence above does not cover.
+  expect(text()).toMatch(/share exports/i);
+});
+
+/**
+ * ...and with no share export on disk there is no empty heading for one.
+ */
+test("the share heading appears only once there is a share export", async () => {
+  render();
+  await settle();
+
+  expect(target.querySelector('[data-group="share"]')).toBeNull();
+  expect(target.querySelectorAll('[data-group="backup"] .arc[data-file]').length).toBe(2);
 });
 
 test("no archives yet says so rather than showing an empty list", async () => {
