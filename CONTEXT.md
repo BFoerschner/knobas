@@ -9,7 +9,7 @@ Anything with exactly one stable in-app address — a synced item, a context, a 
 _Avoid_: object, record
 
 **Kind**:
-The type of an entity: ticket, pr, build, page, repo, branch, commit — and note from M2.
+The type of an entity: ticket, pr, build, page, repo, branch, commit — note from M2; asset, route and monitor from M4.
 _Avoid_: type, category
 
 **Note**:
@@ -156,7 +156,7 @@ Something a source made because knobas asked, that knobas has no record of. It h
 _Avoid_: orphan, leaked write, ghost ticket
 
 **Inbox**:
-The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.
+The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry, and from M4 [alerts](#alert) — with actions and snooze.
 _Avoid_: notifications, feed
 
 **Desktop notification**:
@@ -201,6 +201,32 @@ _Avoid_: beat. The heartbeat's tick is a beat and `BEAT_WINDOW_SECONDS` is its w
 The instant before which knobas has thrown its [observations](#observation) away: a fact about what was swept, not about how old a day is, so a profile nothing has ever been swept from has no horizon at all. A day reaching back past it is a day knobas has no record for, and what was open on it is **absent, not zero** — the day review and the timesheet say so rather than drawing it as a day with nothing on it. (#315, #337, #344)
 _Avoid_: retention cutoff, thirty days ago (both name a date arithmetic can reach; the horizon is only ever what a sweep actually took)
 
+## Estate
+
+**Estate**:
+Everything the Assets view holds — the whole tree of [assets](#asset), their [routes](#route) and the [monitors](#monitor) attached to them — the way the [mirror](#mirror) is the whole synced copy. Built by hand and by seed; from M4 it is the real test infrastructure (the Hetzner servers, the local Gitea and Uptime Kuma), never a fictional one.
+_Avoid_: inventory, topology, infrastructure (that is what the estate models, not the model)
+
+**Asset**:
+A knobas-owned entity — a server, a container, a service, a database, a runtime, a scenario — with a type, typed and custom properties, and a place in the estate's tree. Its place is its **parent**, a field of its own and never a [link](#link): the tree is structure, relations are links (ADR-0014). Never a mirrored [item](#item): a source may offer one through an [import](#import), and an accepted import makes an asset carrying an origin line, after which no sync overwrites what a person edited.
+_Avoid_: resource, node, host (that is one type of asset)
+
+**Import**:
+Loading assets from outside — an estate file, later an adapter — with a preview of what is already in the tree and what is new. What it makes are ordinary assets with an origin line; nothing imported is a mirrored item, and the file is data about a real estate, never a mock.
+_Avoid_: sync (that is the mirror's word), seed (that is what the test environment does to a source)
+
+**Route**:
+A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or without a target asset. An asset is *reachable via* the routes that land on it or on something that holds it.
+_Avoid_: URL (that is a route's property), ingress, endpoint (bare)
+
+**Monitor**:
+A mirrored [item](#item) of the Uptime Kuma [source](#source), kind `monitor`: one check as Uptime Kuma defines it, with its current state. Attached to an [asset](#asset) by a `monitored-by` [link](#link); never an asset itself, and never created or edited in the mirror by hand.
+_Avoid_: check (that is one heartbeat of a monitor), probe, healthcheck
+
+**Alert**:
+A [monitor](#monitor)'s transition to down or warn, open until the monitor recovers; at most one open per monitor. Every open alert shows in the Assets view and the top strip; it reaches the [inbox](#inbox) only when some [context](#context) holds the affected asset, directly or through an ancestor. **Ack** is knobas-local — Uptime Kuma has no ack — and clears the inbox item while the alert stays open.
+_Avoid_: incident, notification (bare), problem (that is the rolled-up count on a closed branch)
+
 ## Export
 
 **Backup export**:
@@ -229,6 +255,10 @@ _Avoid_: kanban, board (unqualified)
 
 **Maximised tile**:
 A viewing gesture on a [room](#room): one tile fills the tile grid for this visit, restored by its own button or by Escape, and never persisted — a room switch or a restart brings the grid back. (#250)
+
+**Tree**:
+The Assets view's first tab: the [estate](#estate) as Miller columns, one column per level. Its sibling tab is *Monitors*. Named so that "board" never appears unqualified (ADR-0009).
+_Avoid_: board, assets board, columns view
 
 **Tidewater**:
 The fictional company whose dataset seeds demos, fixtures, and the test environment.

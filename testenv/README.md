@@ -32,15 +32,15 @@ runs it, so the table and the file cannot drift.
 | 8200 | mockd — health + `/__mock/*` admin API | default |
 | 8210 | mockd — Jira Data Center REST v2 | default |
 | 8212 | mockd — TeamCity REST | default |
-| 8213 | **reserved** — Flowrun stub (M4) | *bound by nothing* |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
 
-8213 is reserved on purpose and bound by nothing — in the compose file *and*
-in the `mockd` binary. It was not forgotten: Flowrun is ADR-0013's single
-named exception. 8211, reserved for a Confluence mock until 2026-09-03, is
-unreserved by the same ADR; the real Confluence on 8090 is the witness.
+Two ports were once reserved here and both are free now. 8211, reserved for
+a Confluence mock until 2026-09-03, is unreserved by ADR-0013; the real
+Confluence on 8090 is the witness. 8213, reserved for a Flowrun stub until
+2026-09-06, is unreserved because the feature left the plan (the real system
+is Orchestra, a later feature; roadmap §2 M4).
 
 ## Credentials
 

@@ -127,10 +127,9 @@ services:
       - "127.0.0.1:8200:8200"   # health + /__mock/* admin API
       - "127.0.0.1:8210:8210"   # Jira Data Center REST v2
       - "127.0.0.1:8212:8212"   # TeamCity REST
-      # 8213 (Flowrun stub, M4) is RESERVED by interfaces §5: bound by nothing,
-      # here or in the binary, and check-ports.sh fails if that ever changes by
-      # accident. 8211 was the Confluence DC mock's until ADR-0013 (2026-09-03)
-      # ruled there will be no Confluence half; it is unreserved and free.
+      # 8211 (a Confluence DC mock, until ADR-0013 on 2026-09-03) and 8213 (a
+      # Flowrun stub, until the feature left the plan on 2026-09-06) were once
+      # reserved here; both are ordinary free ports now.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8200/__mock/health"]
       interval: 5s

@@ -543,7 +543,7 @@ crates/knobas-mockd/src/lib.rs        spawn API, MockServer, MockCluster, violat
                      src/validate.rs  request-validation middleware + violation log
                      src/admin.rs     /__mock/* fault injection and mutation
                      src/bin/mockd.rs the container binary (all APIs, fixed ports)
-                     src/confluence.rs  (M3)   src/flowrun.rs (M4 stub)
+                     src/confluence.rs  (M3, never built: ADR-0013)   src/flowrun.rs (M4 stub, never built: Flowrun left the plan 2026-09-06)
 ```
 
 **In-process test API** (this is the contract A and C write their integration tests against):
@@ -572,7 +572,7 @@ Returning a guard rather than a bare `SocketAddr` (as the brief sketched) is del
 | 8210 | Jira DC REST v2 | mockd |
 | 8211 | ~~Confluence DC v1 (M3)~~ — **unreserved 2026-09-03** (ADR-0013: mockd is deprecated and gets no Confluence half; the real container on 8090 is the witness) | — |
 | 8212 | TeamCity REST | mockd |
-| 8213 | Flowrun stub (M4) | mockd |
+| 8213 | ~~Flowrun stub (M4)~~ — **unreserved 2026-09-06** (the feature left the plan: the real system is Orchestra, a later feature certified against a reachable instance, never a stub; roadmap §2 M4) | — |
 | 3000 | Gitea (real, pinned image) | container |
 | 3001 | Uptime Kuma v2 (real, pinned image) | container |
 | 8111 | `--profile real-teamcity` (its own default port) | container |

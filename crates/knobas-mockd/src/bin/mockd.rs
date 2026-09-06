@@ -35,9 +35,9 @@ NOTE:
     and it is deleted once the live suites assert what its tests assert. The
     real container is the witness.
 
-    Port 8213 (Flowrun, M4) is *reserved* by interfaces doc §5 and deliberately
-    not bound: that API does not exist yet. 8211, once reserved for a Confluence
-    half, is unreserved: there will be none.
+    8211 (once reserved for a Confluence half) and 8213 (once reserved for a
+    Flowrun stub, until the feature left the plan on 2026-09-06) are ordinary
+    free ports: neither API will exist here.
 ";
 
 struct Args {
