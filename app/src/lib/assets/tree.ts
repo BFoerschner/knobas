@@ -18,7 +18,7 @@
  * The spine collapse of story 28 and the keyboard walk of story 29 are #430's;
  * this module is the shape they will collapse and walk.
  */
-import type { AssetDetail, AssetRow } from "../ipc/assets";
+import type { AssetDetail, AssetRow, AssetStatus, Inherited } from "../ipc/assets";
 import { hashFor } from "../shell/router.svelte";
 
 /** The top of the estate: the column whose parent is nobody. */
@@ -100,4 +100,56 @@ export function selectionIn(path: ColumnPath, column: number): string | null {
  */
 export function addressOf(row: Pick<AssetRow, "id">): string {
   return hashFor({ view: "assets", tab: "tree", assetId: row.id });
+}
+
+/**
+ * The "N problems inside" badge for one column row — story 32, issue #431.
+ *
+ * `null` is **no badge**, and it is the answer for every row holding nothing
+ * wrong. A badge reading zero would be a mark the eye stops on to learn there
+ * is nothing to learn, which is the opposite of what a badge on a *closed*
+ * branch is for.
+ *
+ * The tone comes from `inside` and not from `health`, and the difference shows
+ * the moment an asset is worse than what it holds: a `down` VM holding one
+ * `warn` container is a red row with an **amber** badge, because the badge
+ * counts and colours what is inside it. `inside` can only be `"warn"` or
+ * `"down"` when the count is above zero — the backend's count is over exactly
+ * those two statuses — so the fallback below is unreachable rather than a
+ * third tone.
+ */
+export interface ProblemBadge {
+  /** How many descendants carry `warn` or `down`. Always above zero. */
+  count: number;
+  /** Amber or red. */
+  tone: Extract<AssetStatus, "warn" | "down">;
+}
+
+export function problemBadge(row: AssetRow): ProblemBadge | null {
+  if (row.problems_inside <= 0) return null;
+  return { count: row.problems_inside, tone: row.inside === "down" ? "down" : "warn" };
+}
+
+/**
+ * Where a value in force on the asset comes from — story 10.
+ *
+ * One answer to the pane's whole question, rather than a boolean the view then
+ * re-derives a sentence and a link from: *is it set here*, *what do I write
+ * beside the value*, and *where does a click go*. `goTo` is `null` exactly
+ * when the value is set here, so there is never a link that leads back to the
+ * asset the reader is already looking at.
+ */
+export interface ValueSource {
+  here: boolean;
+  note: string;
+  goTo: string | null;
+}
+
+export function sourceOf(detail: AssetDetail, from: Inherited<unknown>): ValueSource {
+  const here = from.source_id === detail.asset.id;
+  return {
+    here,
+    note: here ? "set here" : `inherited from ${from.source_name}`,
+    goTo: here ? null : addressOf({ id: from.source_id }),
+  };
 }
