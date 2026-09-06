@@ -33,7 +33,10 @@ use tauri::{Emitter, State};
 
 use knobas_core::asset::AssetType;
 
-use crate::assets::{self, AssetDetail, AssetEdit, AssetRow, MemberAsset, PropertyValue};
+use crate::assets::{
+    self, AssetDetail, AssetEdit, AssetRow, MemberAsset, PropertyValue, RouteDetail, RouteEdit,
+    RouteRow, Visibility,
+};
 use crate::{IpcError, Lifecycle};
 
 /// Put the lines a mutation wrote on the wire, the way `commands::entity` and
@@ -228,6 +231,105 @@ pub async fn context_assets(
 ) -> Result<Vec<MemberAsset>, IpcError> {
     let pool = lifecycle.pool()?;
     assets::in_context(&pool, &ctx_id).await
+}
+
+/// One route, with its own history — what `#/route/<id>` opens on (#432).
+///
+/// The exposing asset is [`RouteRow::asset_id`] on the answer, which is where
+/// the Tree opens: a route is not a surface of its own, it is a line in the
+/// pane of the asset that exposes it.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no route carries.
+#[tauri::command]
+pub async fn get_route(
+    lifecycle: State<'_, Lifecycle>,
+    route_id: String,
+) -> Result<RouteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::get_route(&pool, &route_id).await
+}
+
+/// Expose a route on an asset, with or without a target.
+///
+/// `visibility` omitted is `internal`, which is the safe reading of a route
+/// nobody has classified — and the reason the argument is an `Option` rather
+/// than a required field on a dialog that would otherwise ask a question
+/// before it asks for the URL.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a blank name, a URL with no
+/// scheme or a property nothing could read back, and
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for an exposing asset or a
+/// target that is not there.
+#[tauri::command]
+pub async fn create_route<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    asset_id: String,
+    name: String,
+    url: String,
+    target_id: Option<String>,
+    visibility: Option<Visibility>,
+    properties: Option<Vec<(String, PropertyValue)>>,
+) -> Result<RouteRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::create_route(
+        &pool,
+        &asset_id,
+        &name,
+        &url,
+        target_id.as_deref(),
+        visibility.unwrap_or_default(),
+        &properties.unwrap_or_default(),
+    )
+    .await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
+/// Apply a list of edits to a route, each one a history line with its old and
+/// new value.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no route carries or a
+/// target that is not there, and [`Invalid`](crate::IpcErrorCode::Invalid) for
+/// a blank name, a URL with no scheme or a property nothing could read back.
+#[tauri::command]
+pub async fn edit_route<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    route_id: String,
+    edits: Vec<RouteEdit>,
+) -> Result<RouteRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::edit_route(&pool, &route_id, &edits).await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
+/// Delete a route.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no route carries.
+#[tauri::command]
+pub async fn delete_route<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    route_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::delete_route(&pool, &route_id).await?;
+    announce(&app, written.activity);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -468,7 +570,123 @@ mod tests {
         );
     }
 
-    /// The eight commands are invoked from the mirror by the names they are
+    fn route() -> RouteRow {
+        RouteRow {
+            id: "route:9a1b".to_owned(),
+            asset_id: "asset:traefik".to_owned(),
+            asset_name: "traefik".to_owned(),
+            target_id: Some("asset:7f2c".to_owned()),
+            target_name: Some("vm-db-01".to_owned()),
+            name: "Gitea".to_owned(),
+            url: "https://gitea.local/".to_owned(),
+            visibility: Visibility::Public,
+            properties: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_route_row_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "RouteRow",
+            &serde_json::to_value(route()).unwrap(),
+            &[
+                "id",
+                "asset_id",
+                "asset_name",
+                "target_id",
+                "target_name",
+                "name",
+                "url",
+                "visibility",
+                "properties",
+            ],
+        );
+        assert_eq!(
+            declared_union(MIRROR, "Visibility"),
+            Visibility::ALL
+                .iter()
+                .map(|visibility| visibility.as_str().to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// The route's carrier, asserted the way [`AssetDetail`]'s is and for the
+    /// same reason: the field *names* are what is under test, and they do not
+    /// depend on what is in the list this module does not own.
+    #[test]
+    fn the_route_detail_matches_its_typescript_mirror() {
+        let detail = RouteDetail {
+            route: route(),
+            history: Vec::new(),
+        };
+        assert_shape(
+            MIRROR,
+            "RouteDetail",
+            &serde_json::to_value(detail).unwrap(),
+            &["route", "history"],
+        );
+    }
+
+    /// The five route edits, every arm exercised — the tag is what the backend
+    /// matches on, and an arm the mirror spells differently is an edit that
+    /// never arrives.
+    ///
+    /// The interfaces are `Route…Edit` and not `…Edit`: `NameEdit` and
+    /// `PropertyEdit` are the asset's and carry different fields, and two
+    /// unions in one file cannot share a member name.
+    #[test]
+    fn every_route_edit_matches_its_typescript_mirror() {
+        for (interface, edit, fields) in [
+            (
+                "RouteNameEdit",
+                RouteEdit::Name {
+                    value: "Gitea (tunnel)".to_owned(),
+                },
+                &["field", "value"][..],
+            ),
+            (
+                "RouteUrlEdit",
+                RouteEdit::Url {
+                    value: "https://gitea.local/".to_owned(),
+                },
+                &["field", "value"][..],
+            ),
+            (
+                "RouteTargetEdit",
+                RouteEdit::Target {
+                    value: Some("asset:7f2c".to_owned()),
+                },
+                &["field", "value"][..],
+            ),
+            (
+                "RouteVisibilityEdit",
+                RouteEdit::Visibility {
+                    value: Visibility::Public,
+                },
+                &["field", "value"][..],
+            ),
+            (
+                "RoutePropertyEdit",
+                RouteEdit::Property {
+                    key: "cert_expires".to_owned(),
+                    value: Some(PropertyValue::Date {
+                        value: "2026-12-01".to_owned(),
+                    }),
+                },
+                &["field", "key", "value"][..],
+            ),
+        ] {
+            assert_shape(
+                MIRROR,
+                interface,
+                &serde_json::to_value(&edit).unwrap(),
+                fields,
+            );
+        }
+    }
+
+    /// The twelve commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -486,6 +704,10 @@ mod tests {
             "move_asset",
             "delete_asset",
             "asset_types",
+            "get_route",
+            "create_route",
+            "edit_route",
+            "delete_route",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -515,6 +737,12 @@ mod tests {
             ("edit_asset", "edits"),
             ("move_asset", "newParentId"),
             ("delete_asset", "assetId"),
+            ("get_route", "routeId"),
+            ("create_route", "assetId"),
+            ("create_route", "targetId"),
+            ("create_route", "visibility"),
+            ("edit_route", "edits"),
+            ("delete_route", "routeId"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -552,6 +780,12 @@ mod tests {
             effective_owner: None,
             held_by: Vec::new(),
             holds: Vec::new(),
+            // Not empty, unlike the two lists above: `RouteRow` is this
+            // module's own shape, so the carrier can hold a real one — and a
+            // populated list is what proves the field carries routes rather
+            // than being a name that happens to serialize.
+            exposes: vec![route()],
+            reachable_via: Vec::new(),
             history: Vec::new(),
         };
         assert_shape(
@@ -565,6 +799,8 @@ mod tests {
                 "effective_owner",
                 "held_by",
                 "holds",
+                "exposes",
+                "reachable_via",
                 "history",
             ],
         );

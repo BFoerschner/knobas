@@ -259,6 +259,53 @@ pub const ASSET: Corpus = Corpus {
     scope: None,
 };
 
+/// Routes: what an asset is reachable at, and the second corpus of the estate
+/// (#432).
+///
+/// **The relation is a join, and that is the whole design.** A route sits
+/// where the asset exposing it sits, and that path is already maintained on
+/// `knobas.asset.path_text` by one writer (`knobas_app::assets`). Reading it
+/// through this join rather than keeping a `path_text` of its own on
+/// `knobas.route` is what keeps the number of writers of "where is this" at
+/// one: a second copy would have to be rewritten by every asset rename and
+/// every move, and the day it was not, a route would report a host that no
+/// longer exists. [`Corpus`]' own docs allow it in as many words -- *"a corpus
+/// can be a view, a join, or a table with a computed title"*.
+///
+/// The consequence is deliberate rather than an oversight, and it is the one
+/// place this corpus differs from [`ASSET`]: a route is **shown** with its
+/// path and **matched** on its own name and URL. `0018`'s `fts` carries those
+/// two at weight A and nothing else, so "kuma" and "8111" find the routes that
+/// carry them, while "hel1" finds the *assets* under `hel1` and not every
+/// route exposed anywhere beneath it. That is the right answer for a launcher
+/// row: a query that named a host and came back with thirty routes it holds
+/// would have buried the host.
+///
+/// `path` is the exposing asset's own path **plus its name**, which is where
+/// the route sits -- one level deeper than the asset's own answer, for the
+/// reason `knobas_app::assets`' `path_below` composes the same two halves for
+/// a child. No `nullif`: a route exposed by a root asset still sits *on that
+/// asset*, so the path is never empty.
+///
+/// No `author` and no `scope`, for [`NOTE`]'s reasons: a route is knobas' own
+/// and holds nothing of anybody's, and a deleted route's row is gone rather
+/// than tombstoned in place.
+pub const ROUTE: Corpus = Corpus {
+    relation: "knobas.route r join knobas.asset ra on ra.id = r.asset_id",
+    entity_id: "r.id",
+    kind: "'route'",
+    source_id: "'route'",
+    title: "r.name",
+    fts: "r.fts",
+    headline_text: "r.name || ' — ' || r.url",
+    author: None,
+    updated_at: "r.updated_at",
+    // A local table is never behind itself: what knobas holds *is* the source.
+    synced_at: "r.updated_at",
+    path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
+    scope: None,
+};
+
 /// Every corpus the launcher searches.
 ///
 /// One list, so a corpus cannot be added to the crate and forgotten by the
@@ -268,7 +315,7 @@ pub const ASSET: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET];
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE];
 
 #[cfg(test)]
 mod tests {

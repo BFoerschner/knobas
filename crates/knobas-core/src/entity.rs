@@ -139,6 +139,14 @@ pub struct OwnedKind {
 /// and the chip a column row draws is the type's. `AS` is what the launcher
 /// and a room tile put on an asset, where the question is which kind of thing
 /// this is among tickets, pages and notes.
+///
+/// `route` joined it with the routes themselves (issue #432) and is an
+/// entity for the reason spec §12.1 gives: a route is "addressable in its own
+/// right -- searchable, linkable, chip-able, with its own `#/route/<id>`
+/// address". `RO` rather than `RT`: `RP` is already the *repository* chip on
+/// this list, and the estate's own type table (`crate::asset::TYPES`) spends
+/// both `RP` and `RT` on a reverse proxy and a runtime -- a route's chip has
+/// to be readable beside those without being one of them.
 pub const OWNED_KINDS: &[OwnedKind] = &[
     OwnedKind {
         id: "asset",
@@ -151,6 +159,12 @@ pub const OWNED_KINDS: &[OwnedKind] = &[
         label: "Note",
         plural: "Notes",
         monogram: "NT",
+    },
+    OwnedKind {
+        id: "route",
+        label: "Route",
+        plural: "Routes",
+        monogram: "RO",
     },
 ];
 

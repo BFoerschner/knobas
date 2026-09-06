@@ -10,6 +10,7 @@
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/assets/tree`        | the Assets view, on its Tree tab (#428)          |
  * | `#/asset/<entity_id>`  | the Tree, opened at one asset (#428)             |
+ * | `#/route/<entity_id>`  | the Tree, at the asset exposing one route (#432) |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
  * | `#/time/<YYYY-MM-DD>`  | the day review for one day (#279)                |
@@ -25,9 +26,10 @@
  * would otherwise collide on one key. `:` is legal in a URI fragment, so the
  * address stays readable.
  *
- * `#/route/*` and `#/monitor/*` are M4.0's routes (#432) and M4.1's monitors.
- * They parse to `unknown` rather than being mistaken for kinds, so the shell
- * can say which milestone they arrive in. `#/start-work/*` was one of them
+ * `#/monitor/*` is M4.1's. It parses to `unknown` rather than being mistaken
+ * for a kind, so the shell can say which milestone it arrives in;
+ * `#/route/*` graduated out of that group with #432 and opens the Tree at the
+ * asset exposing the route. `#/start-work/*` was one of them
  * until #44 and is now a view of its own — it stays in `RESERVED` so that an
  * adapter declaring a `start-work` *kind* could never take the address.
  * `#/inbox` graduated the same way with #45, `#/time` with #279, `#/standup`
@@ -63,7 +65,27 @@ export type Route =
    * its path* — is that sentence, and a separate detail view would have made
    * it a second surface to keep in step with the first.
    */
-  | { view: "assets"; tab: AssetsTab; assetId: string | null }
+  | {
+      view: "assets";
+      tab: AssetsTab;
+      assetId: string | null;
+      /**
+       * The route `#/route/<id>` names (#432), when the address is a route's.
+       *
+       * **Optional rather than `string | null`**, and that is the one place
+       * this union is not uniform. An assets address either names a route or
+       * has nothing to say about routes at all: `#/assets/tree` and
+       * `#/asset/<id>` are not "a route address with no route", they are
+       * addresses of a different thing. Writing it as an optional says that,
+       * and it keeps every existing construction of this variant — the top
+       * strip's button, the Tree's own `addressOf` — unchanged.
+       *
+       * The Tree resolves it to the exposing asset (`get_route`) and opens
+       * there with the route selected; `assetId` is `null` on the way in
+       * because the address does not carry one.
+       */
+      routeId?: string;
+    }
   | {
       view: "inbox";
       /** A stored context to pre-filter by (#47), or `null` for the whole stream. */
@@ -228,6 +250,17 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
       ? { view: "unknown", hash }
       : { view: "assets", tab: "tree", assetId: tail };
   }
+  // A route's address is the **Tree**, not a surface of its own (#432): a
+  // route sits on the asset that exposes it, and story 14's *a ticket about a
+  // certificate links to the route whose certificate it is* has to land
+  // somewhere a reader can see what the route belongs to. `assetId` is `null`
+  // because the address does not carry one; the view reads the route and
+  // finds it. `#/route` with no id is a typo for the same reason `#/asset` is.
+  if (head === "route") {
+    return tail === ""
+      ? { view: "unknown", hash }
+      : { view: "assets", tab: "tree", assetId: null, routeId: tail };
+  }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
@@ -278,6 +311,9 @@ export function hashFor(route: Route): string {
     case "standup":
       return "#/standup";
     case "assets":
+      // The route's address wins where there is one: it is the more specific
+      // of the two, and it is what a reader copies out of the pane.
+      if (route.routeId !== undefined) return `#/route/${encodeId(route.routeId)}`;
       return route.assetId === null
         ? `#/assets/${route.tab}`
         : `#/asset/${encodeId(route.assetId)}`;

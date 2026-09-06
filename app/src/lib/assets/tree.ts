@@ -23,7 +23,7 @@
  * touches a window or a bridge.
  */
 import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
-import type { AssetDetail, AssetRow, AssetStatus, Inherited } from "../ipc/assets";
+import type { AssetDetail, AssetRow, AssetStatus, Inherited, RouteRow } from "../ipc/assets";
 import { hashFor } from "../shell/router.svelte";
 
 /** The top of the estate: the column whose parent is nobody. */
@@ -105,6 +105,58 @@ export function selectionIn(path: ColumnPath, column: number): string | null {
  */
 export function addressOf(row: Pick<AssetRow, "id">): string {
   return hashFor({ view: "assets", tab: "tree", assetId: row.id });
+}
+
+/**
+ * Where a route's address lives — `#/route/<id>`, spec §2 (#432).
+ *
+ * {@link addressOf}'s twin, and it delegates to `hashFor` for the same reason:
+ * one encoder, so a link pasted into a ticket and a copy taken from the pane
+ * are the same string.
+ */
+export function routeAddressOf(route: Pick<RouteRow, "id">): string {
+  return hashFor({ view: "assets", tab: "tree", assetId: null, routeId: route.id });
+}
+
+/**
+ * How a route reaches the asset the pane is showing — story 31 in words.
+ *
+ * The backend answers *which* routes reach an asset and where each one lands
+ * ({@link AssetDetail.reachable_via}); this is the one place that reads the
+ * three cases off a row, so the pane's sentence and any wire drawn later
+ * cannot disagree about which is which:
+ *
+ * * **here** — the route's target is this asset. Nothing to link to: the
+ *   reader is already looking at it, which is {@link sourceOf}'s rule for the
+ *   same situation.
+ * * **through an ancestor** — the target is on the held-by path, so the route
+ *   arrives at something that *holds* this asset. Story 31's dashed wire.
+ * * **inside** — the target is neither, which by the read's own construction
+ *   leaves one possibility: something this asset holds. A URL landing on a
+ *   container is how the VM running it is reached, and naming the container is
+ *   what makes that sentence checkable.
+ */
+export interface Landing {
+  here: boolean;
+  note: string;
+  goTo: string | null;
+}
+
+export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
+  if (route.target_id === null) {
+    // Not reachable from this list — a route with no target reaches nobody —
+    // so this is the total function's honest answer rather than a case the
+    // pane draws.
+    return { here: false, note: "lands on nothing", goTo: null };
+  }
+  if (route.target_id === detail.asset.id) return { here: true, note: "lands here", goTo: null };
+  const above = detail.held_by.some((held) => held.id === route.target_id);
+  const name = route.target_name ?? route.target_id;
+  return {
+    here: false,
+    note: above ? `through ${name}` : `inside, on ${name}`,
+    goTo: addressOf({ id: route.target_id }),
+  };
 }
 
 /**

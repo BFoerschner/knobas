@@ -211,6 +211,56 @@ export interface MemberAsset {
   path: string | null;
 }
 
+/**
+ * Who can reach a route — `assets::Visibility`.
+ *
+ * Two values: *internal* is reachable from inside the estate, *public* from
+ * outside it. Every finer shade — which VPN, which network — is a property
+ * with a name of its own. `"internal"` is what an unclassified route reads as.
+ */
+export type Visibility = "internal" | "public";
+
+/**
+ * One route — `assets::RouteRow`.
+ *
+ * The same shape at both ends: in {@link AssetDetail.exposes} it is what this
+ * asset exposes, and in {@link AssetDetail.reachable_via} it is a route whose
+ * target is somewhere on this asset's containment path. **Where it lands** is
+ * `target_id`: equal to the asset's own id means it lands here, and anything
+ * else is named by `target_name` — an ancestor when `held_by` holds it, and
+ * something inside otherwise. That comparison is what story 31's dashed wire
+ * is drawn from.
+ */
+export interface RouteRow {
+  /** `route:<uuid>` — and the `#/route/<id>` address. */
+  id: string;
+  /** The asset that exposes it. Never null. */
+  asset_id: string;
+  asset_name: string;
+  /** The asset it lands on; `null` for an endpoint that lands on nothing. */
+  target_id: string | null;
+  target_name: string | null;
+  name: string;
+  /** The URL or endpoint, carrying its scheme. */
+  url: string;
+  /** Who can reach it. `"internal"` is what an unclassified route reads as. */
+  visibility: Visibility;
+  /** A route has no type, so every property is the reader's own. */
+  properties: AssetProperty[];
+}
+
+/**
+ * Everything the pane draws for one route — `assets::RouteDetail`.
+ *
+ * No held-by path of its own: a route sits on the asset that exposes it, and
+ * `route.asset_id` is where the Tree opens.
+ */
+export interface RouteDetail {
+  route: RouteRow;
+  /** This route's own activity lines, newest first. */
+  history: ActivityRow[];
+}
+
 /** Everything the fixed right pane draws — `assets::AssetDetail`. */
 export interface AssetDetail {
   asset: AssetRow;
@@ -223,6 +273,14 @@ export interface AssetDetail {
   /** Outermost first, **excluding the asset itself**. Empty at the top. */
   held_by: AssetRow[];
   holds: AssetRow[];
+  /** The routes this asset exposes, by name (#432). */
+  exposes: RouteRow[];
+  /**
+   * The routes whose target is on this asset's containment path — landing on
+   * it, on something that holds it, or on something it holds — nearest first
+   * (#432). See {@link RouteRow} for which is which.
+   */
+  reachable_via: RouteRow[];
   /** This asset's own activity lines, newest first. */
   history: ActivityRow[];
 }
@@ -269,6 +327,54 @@ export interface PropertyEdit {
  * "cleared" and "not mentioned" the same value on the wire.
  */
 export type AssetEdit = NameEdit | StatusEdit | EnvironmentEdit | OwnerEdit | PropertyEdit;
+
+/** Rename a route — `assets::RouteEdit::Name`. */
+export interface RouteNameEdit {
+  field: "name";
+  value: string;
+}
+
+/** Set the URL or endpoint — `assets::RouteEdit::Url`. */
+export interface RouteUrlEdit {
+  field: "url";
+  /** Carries a scheme; a bare host is refused. */
+  value: string;
+}
+
+/** Set or clear the asset a route lands on — `assets::RouteEdit::Target`. */
+export interface RouteTargetEdit {
+  field: "target";
+  /** `null` makes it an endpoint that lands on nothing knobas knows. */
+  value: string | null;
+}
+
+/** Set who can reach it — `assets::RouteEdit::Visibility`. */
+export interface RouteVisibilityEdit {
+  field: "visibility";
+  value: Visibility;
+}
+
+/** Set or clear one of the route's own properties — `assets::RouteEdit::Property`. */
+export interface RoutePropertyEdit {
+  field: "property";
+  key: string;
+  /** `null` removes the key. */
+  value: PropertyValue | null;
+}
+
+/**
+ * One field of a route changing — `assets::RouteEdit`.
+ *
+ * {@link AssetEdit}'s shape for its reason. The asset that **exposes** a route
+ * is not among them: a route is the address of the thing that answers it, so
+ * re-exposing one elsewhere is a different route with a different history.
+ */
+export type RouteEdit =
+  | RouteNameEdit
+  | RouteUrlEdit
+  | RouteTargetEdit
+  | RouteVisibilityEdit
+  | RoutePropertyEdit;
 
 /**
  * The built-in type table: what a type is called, its monogram, the properties
@@ -348,4 +454,43 @@ export function moveAsset(assetId: string, newParentId: string | null): Promise<
 /** Delete a leaf. An asset that still holds something rejects with `conflict`. */
 export function deleteAsset(assetId: string): Promise<void> {
   return invoke<void>("delete_asset", { assetId });
+}
+
+/** One route with its own history — what `#/route/<id>` opens on. */
+export function getRoute(routeId: string): Promise<RouteDetail> {
+  return invoke<RouteDetail>("get_route", { routeId });
+}
+
+/**
+ * Expose a route on an asset, with or without a target.
+ *
+ * `visibility` omitted is `"internal"`, which is what an unclassified route
+ * reads as. The id is minted by the backend, like an asset's.
+ */
+export function createRoute(
+  assetId: string,
+  name: string,
+  url: string,
+  targetId?: string | null,
+  visibility?: Visibility,
+  properties?: [string, PropertyValue][],
+): Promise<RouteRow> {
+  return invoke<RouteRow>("create_route", {
+    assetId,
+    name,
+    url,
+    targetId: targetId ?? null,
+    visibility: visibility ?? null,
+    properties: properties ?? null,
+  });
+}
+
+/** Apply a list of edits to a route, each one a history line. */
+export function editRoute(routeId: string, edits: RouteEdit[]): Promise<RouteRow> {
+  return invoke<RouteRow>("edit_route", { routeId, edits });
+}
+
+/** Delete a route. Nothing hangs off one, so nothing refuses. */
+export function deleteRoute(routeId: string): Promise<void> {
+  return invoke<void>("delete_route", { routeId });
 }

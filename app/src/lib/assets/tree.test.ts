@@ -15,13 +15,15 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import { noFilters } from "../ipc";
-import type { AssetDetail, AssetRow } from "../ipc/assets";
+import type { AssetDetail, AssetRow, RouteRow } from "../ipc/assets";
 import {
   addressOf,
   columnPathFor,
   emptyPath,
   heldByPath,
+  landingOf,
   problemBadge,
+  routeAddressOf,
   selectionIn,
   sourceOf,
   type ColumnPath,
@@ -52,7 +54,11 @@ function row(id: string, name: string, hasChildren = false): AssetRow {
   };
 }
 
-function detail(asset: AssetRow, ancestors: AssetRow[]): AssetDetail {
+function detail(
+  asset: AssetRow,
+  ancestors: AssetRow[],
+  reachableVia: RouteRow[] = [],
+): AssetDetail {
   return {
     asset,
     properties: [],
@@ -60,7 +66,24 @@ function detail(asset: AssetRow, ancestors: AssetRow[]): AssetDetail {
     effective_owner: null,
     held_by: ancestors,
     holds: [],
+    exposes: [],
+    reachable_via: reachableVia,
     history: [],
+  };
+}
+
+/** One route landing on `target`, exposed by whoever. */
+function route(target: AssetRow | null): RouteRow {
+  return {
+    id: "route:one",
+    asset_id: "asset:traefik",
+    asset_name: "traefik",
+    target_id: target?.id ?? null,
+    target_name: target?.name ?? null,
+    name: "Postgres UI",
+    url: "https://pg.hel1.internal/",
+    visibility: "internal",
+    properties: [],
   };
 }
 
@@ -550,4 +573,57 @@ test("revealing a match is opening its address", () => {
     answer([{ kind: "asset", hits: [{ id: "asset:ct", title: "postgres" }] }]),
   );
   expect(addressOf({ id: first!.id })).toBe("#/asset/asset:ct");
+});
+
+/**
+ * Where a route lands, said in the three ways it can be said — story 31's
+ * dashed wire in words (#432).
+ *
+ * The three cases are the whole of `reachable_via`'s shape: the route's target
+ * is this asset, something that holds it, or something it holds. The link is
+ * `null` for the first and an address for the other two, which is
+ * {@link sourceOf}'s rule applied here — there is never a link that leads back
+ * to the asset the reader is already looking at.
+ */
+test("a route lands here, through an ancestor, or on something inside", () => {
+  const site = row("asset:hel1", "hel1");
+  const vm = row("asset:vm-db-01", "vm-db-01");
+  const container = row("asset:postgres", "postgres");
+
+  // On the container: the route lands here.
+  const here = landingOf(detail(container, [site, vm]), route(container));
+  expect(here).toEqual({ here: true, note: "lands here", goTo: null });
+
+  // On the container, a route landing on the VM above it: through it, and the
+  // note links to the asset it names.
+  const above = landingOf(detail(container, [site, vm]), route(vm));
+  expect(above).toEqual({
+    here: false,
+    note: "through vm-db-01",
+    goTo: addressOf(vm),
+  });
+
+  // On the VM, the same route landing on the container it holds: inside.
+  const inside = landingOf(detail(vm, [site]), route(container));
+  expect(inside).toEqual({
+    here: false,
+    note: "inside, on postgres",
+    goTo: addressOf(container),
+  });
+
+  // A route with no target reaches nobody; the answer is total rather than a
+  // throw, and it links nowhere.
+  expect(landingOf(detail(vm, [site]), route(null))).toEqual({
+    here: false,
+    note: "lands on nothing",
+    goTo: null,
+  });
+});
+
+/** A route's address is its own, and it is `hashFor`'s spelling of it. */
+test("a route addresses itself", () => {
+  expect(routeAddressOf({ id: "route:9a1b" })).toBe("#/route/route:9a1b");
+  // The colon is left alone and everything else is encoded — `addressOf`'s
+  // rule, which is why both delegate to one encoder.
+  expect(routeAddressOf({ id: "route:a/b" })).toBe("#/route/route:a%2Fb");
 });
