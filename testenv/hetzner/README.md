@@ -56,10 +56,21 @@ carries a key the file does not define, since a misspelled `monitors` reads as
 an absent one. It also parses the host-list table above and the compose file's
 service list, so adding a fourth server or a new service and forgetting the
 estate file is a red gate rather than a discovery months later, and a server
-whose type or profile changes in one place and not the other is too. The one thing it cannot check is the addresses:
-`hosts.env` is gitignored, so the public IPs in `estate.json` are the only
-committed copy of them, and `hcloud server list` is what settles a
+whose type or profile changes in one place and not the other is too, as is a
+service recorded on the wrong host. The one thing it cannot check is the
+addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
+the only committed copy of them, and `hcloud server list` is what settles a
 disagreement.
+
+Two things in the file are still provisional and are named here so that nobody
+reads them as settled. The **type ids** are spec §12.1's list as #427 amends
+it, spelled the way this repository spells enumerated column values; the
+built-in table itself lands in code with #428, and the spellings move with it
+if #428 chooses others. The **monitor names** are a guess: `testenv/monitors.json`
+seeds Uptime Kuma with the two Tidewater checks only, so not one of the names
+`estate.json` lists exists yet. #441 creates the real monitors and is what
+settles the names; until it does, the `monitors` keys record what should watch
+each asset rather than what does, and nothing reads them.
 
 ## How it fits the existing scripts
 

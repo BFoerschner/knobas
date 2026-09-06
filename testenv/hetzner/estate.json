@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "knobas test estate",
-  "description": "The real test infrastructure knobas is developed against, as provisioned: the notebook with its OrbStack Docker engine, the three Hetzner servers with their containers and databases, and the SSH tunnel's forwards as routes. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. See README.md in this directory.",
+  "description": "The real test infrastructure knobas is developed against, as provisioned: the notebook with its OrbStack Docker engine, the three Hetzner servers with their containers and databases, and the SSH tunnel's forwards as routes. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the one exception in the making: Uptime Kuma does not hold them yet and #441 is what creates them. See README.md in this directory.",
   "assets": [
     {
       "id": "asset:knobas-estate",

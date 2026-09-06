@@ -293,7 +293,12 @@ fn the_environment_and_the_owner_are_set_at_the_root_and_nowhere_else() {
             );
         }
         if asset_id == "asset:knobas-estate" {
-            assert_eq!(own("environment"), Some("dev"));
+            assert_eq!(
+                own("environment"),
+                Some("dev"),
+                "the root sets the environment every asset inherits, and this \
+                 estate is the development one"
+            );
             assert!(
                 own("owner").is_some_and(|owner| !owner.is_empty()),
                 "the root sets the owner every asset inherits"
@@ -313,9 +318,12 @@ fn the_environment_and_the_owner_are_set_at_the_root_and_nowhere_else() {
 
 /// A row of this directory's README host-list table:
 /// `| `knobas-teamcity` | cx23 | teamcity, teamcity-agent | `real-teamcity` | 127.0.0.1:8111 |`
+#[derive(Debug)]
 struct HostRow {
     server: String,
     server_type: String,
+    /// The `runs` column: the compose services this server, and no other, runs.
+    runs: Vec<String>,
     compose_profile: String,
 }
 
@@ -337,26 +345,56 @@ fn host_list() -> Vec<HostRow> {
             HostRow {
                 server: cells[1].to_owned(),
                 server_type: cells[2].to_owned(),
+                runs: cells[3]
+                    .split(',')
+                    .map(|service| service.trim().to_owned())
+                    .filter(|service| !service.is_empty())
+                    .collect(),
                 compose_profile: cells[4].to_owned(),
             }
         })
         .collect();
-    assert_eq!(
-        rows.len(),
-        3,
-        "the host-list table in testenv/hetzner/README.md should have one row \
-         per server and this parse found {} of them; if the table moved, fix \
-         this parse rather than deleting the check",
-        rows.len()
+    // A floor, not an equality: a fourth server is a legitimate row and the
+    // test below is what has to notice it, with a message about the estate
+    // file. This assertion is only here so that a table which moved fails as a
+    // broken parse instead of silently checking nothing.
+    assert!(
+        rows.len() >= 3,
+        "this parse found {rows:?} in the host-list table of \
+         testenv/hetzner/README.md, which has never had fewer than three rows; \
+         if the table moved, fix this parse rather than deleting the check"
     );
     rows
+}
+
+/// Whether `descendant` is `ancestor`, or is held by it however deep.
+///
+/// The walk is bounded by the number of assets so that a cycle fails here as a
+/// wrong answer rather than hanging the gate;
+/// [`every_parent_exists_and_the_assets_form_one_tree`] is what reports it.
+fn is_held_by(assets: &[Value], ancestor: &str, descendant: &str) -> bool {
+    let mut at = descendant;
+    for _ in 0..=assets.len() {
+        if at == ancestor {
+            return true;
+        }
+        let Some(entry) = assets.iter().find(|asset| id(asset) == at) else {
+            return false;
+        };
+        match entry.get("parent").and_then(Value::as_str) {
+            Some(parent) => at = parent,
+            None => return false,
+        }
+    }
+    false
 }
 
 #[test]
 fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
     let estate = estate();
     let assets = assets(&estate);
-    for row in host_list() {
+    let rows = host_list();
+    for row in &rows {
         let server = &row.server;
         // By id and not by name: a server and the container on it share a name
         // (`knobas-jira` is both), which is why the README gives the server the
@@ -412,7 +450,46 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
         address.parse::<Ipv4Addr>().unwrap_or_else(|e| {
             panic!("`{server}`'s ipv4 property `{address}` is not an address: {e}")
         });
+
+        // The `runs` column, which is the fact the set-comparison in
+        // `every_compose_service_the_notebook_runs_is_recorded` cannot carry:
+        // that service runs on *this* server. Without it, a container hung off
+        // the wrong host's Docker engine is green in both tests.
+        for service in &row.runs {
+            let running = assets
+                .iter()
+                .find(|asset| {
+                    asset["properties"]["compose_service"].as_str() == Some(service.as_str())
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the host list says `{server}` runs `{service}` and no \
+                         asset in the estate file records that compose service"
+                    )
+                });
+            assert!(
+                is_held_by(assets, &server_id, id(running)),
+                "the host list runs `{service}` on `{server}`, and the estate \
+                 file's `{}` is not held by `{server_id}`",
+                id(running)
+            );
+        }
     }
+
+    // And the other direction, which the row loop cannot see: a server dropped
+    // from the host list but left in the estate file, or one added to the file
+    // that the table never grew a row for.
+    let under_nbg1 = assets
+        .iter()
+        .filter(|asset| asset.get("parent").and_then(Value::as_str) == Some("asset:hetzner-nbg1"))
+        .count();
+    assert_eq!(
+        under_nbg1,
+        rows.len(),
+        "the host list names {} servers and the estate file holds {under_nbg1} \
+         under `asset:hetzner-nbg1`",
+        rows.len()
+    );
 }
 
 /// The services `testenv/docker-compose.yml` declares, read out of the file.
@@ -489,6 +566,11 @@ const ASSET_KEYS: &[&str] = &[
     "properties",
     "monitors",
 ];
+// No `monitors` here: a monitor is "attached to an asset by a `monitored-by`
+// link" (`CONTEXT.md`, *Monitor*), so a route that grew one would name a
+// monitor the import has nowhere to hang. The tunnel routes share their names
+// with the monitors of the containers they land on, and it is those containers
+// that carry them.
 const ROUTE_KEYS: &[&str] = &[
     "id",
     "asset",
@@ -497,7 +579,6 @@ const ROUTE_KEYS: &[&str] = &[
     "url",
     "description",
     "properties",
-    "monitors",
 ];
 
 #[test]
@@ -529,7 +610,7 @@ fn no_entry_says_anything_in_a_key_the_file_does_not_define() {
 fn a_monitor_is_named_by_a_name() {
     let estate = estate();
     let mut named = 0;
-    for entry in assets(&estate).iter().chain(routes(&estate)) {
+    for entry in assets(&estate) {
         let Some(monitors) = entry.get("monitors") else {
             continue;
         };
