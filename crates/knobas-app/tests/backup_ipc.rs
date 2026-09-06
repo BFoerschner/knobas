@@ -367,6 +367,64 @@ async fn a_tick_sweeps_the_observations_retention_has_aged_out() {
     );
 }
 
+/// **One tick sweeps the samples retention has aged out** (#443), with the
+/// nightly export switched off, exactly as the observation sweep beside it.
+///
+/// The wire, not the rule: `knobas_sync::samples::prune` has its own tests in
+/// its own crate against a horizon of their choosing, and what nothing else
+/// can witness is that anything in a running knobas ever calls it. Samples are
+/// written by the sync engine at a rate no other table here comes near -- one
+/// row per monitor per minute -- so a sweep nothing calls is not a stale row,
+/// it is a table that never stops growing.
+#[tokio::test]
+async fn a_tick_sweeps_the_samples_retention_has_aged_out() {
+    let (service, _dir) = service("sample-sweep").await;
+    backup::save_schedule(
+        &service.pool,
+        BackupSchedule {
+            enabled: false,
+            ..BackupSchedule::default()
+        },
+    )
+    .await
+    .expect("a schedule that never comes due");
+
+    sqlx::query("insert into knobas.entity (id, kind, title) values ('kuma:8', 'monitor', 'canary')")
+        .execute(&service.pool)
+        .await
+        .expect("a monitor to have samples of");
+    let now = chrono::Utc::now();
+    let retention = chrono::Duration::days(knobas_sync::samples::DEFAULT_RETENTION_DAYS);
+    for at in [now - retention - chrono::Duration::days(1), now - chrono::Duration::days(1)] {
+        sqlx::query(
+            "insert into knobas.monitor_sample (entity_id, taken_at, state, response_time_ms)
+             values ('kuma:8', $1, 'up', 35)",
+        )
+        .bind(at)
+        .execute(&service.pool)
+        .await
+        .expect("a sample in the past");
+    }
+
+    backup::tick(&service).await;
+
+    let kept: Vec<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("select taken_at from knobas.monitor_sample order by taken_at")
+            .fetch_all(&service.pool)
+            .await
+            .expect("the samples are readable");
+    assert_eq!(
+        kept.len(),
+        1,
+        "the tick left the table exactly as it found it: nothing calls the sweep"
+    );
+    assert!(
+        kept[0] > now - retention,
+        "the tick swept the wrong side of the horizon: {:?}",
+        kept[0]
+    );
+}
+
 /// *Restore*, minimal: a name that is not an archive in this profile's
 /// directory is refused before anything touches the database.
 ///

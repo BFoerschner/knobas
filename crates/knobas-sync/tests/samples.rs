@@ -559,9 +559,13 @@ async fn a_sweep_with_nothing_past_the_horizon_takes_nothing() {
 async fn the_settings_default_and_survive_a_round_trip() {
     let pool = pool("the_settings_default_and").await;
 
-    // Read on a database nobody has written a setting to: the defaults spec
-    // #427 ratified. (The scratch database is shared, so this asserts the
-    // *stored* value only after writing one.)
+    // Read on a database nobody has written a setting to. No migration
+    // inserts either key -- the convention `knobas.setting` has had since
+    // `0002` -- so this is the whole of "the two settings keys exist with
+    // their defaults": a fresh profile and a profile whose row was deleted
+    // give the same answer, and the answer is the one spec #427 ratified.
+    assert_eq!(samples::threshold_ms(&pool).await.unwrap(), 1500);
+    assert_eq!(samples::retention_days(&pool).await.unwrap(), 90);
     assert_eq!(samples::DEFAULT_THRESHOLD_MS, 1500);
     assert_eq!(samples::DEFAULT_RETENTION_DAYS, 90);
 
@@ -575,12 +579,4 @@ async fn the_settings_default_and_survive_a_round_trip() {
     assert_eq!(samples::set_retention_days(&pool, 0).await.unwrap(), 1);
     assert_eq!(samples::set_threshold_ms(&pool, -5).await.unwrap(), 0);
 
-    // Put the defaults back: the database is shared with every other test in
-    // this binary, and two of them assert against the default threshold.
-    samples::set_threshold_ms(&pool, samples::DEFAULT_THRESHOLD_MS)
-        .await
-        .unwrap();
-    samples::set_retention_days(&pool, samples::DEFAULT_RETENTION_DAYS)
-        .await
-        .unwrap();
 }

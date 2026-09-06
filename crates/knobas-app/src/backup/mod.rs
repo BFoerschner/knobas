@@ -687,28 +687,35 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// One pass of the background task: back up if one is due, then sweep.
+/// One pass of the background task: back up if one is due, then sweep, twice.
 ///
 /// A function rather than the body of the loop so that
 /// `tests/backup_ipc.rs` can run one pass and read what it did; the loop
 /// around it decides only how often.
 ///
-/// **The sweep is not conditional on the export.** Observations age out on a
-/// clock of their own (`time::passive::RETENTION_DAYS`), and a person who
-/// turns nightly backups off has not asked knobas to keep a record of what
-/// they had open for ever -- if anything, the opposite.
+/// **Neither sweep is conditional on the export.** Observations age out on a
+/// clock of their own (`time::passive::RETENTION_DAYS`) and so do samples
+/// (`knobas_sync::samples::RETENTION_KEY`), and a person who turns nightly
+/// backups off has not asked knobas to keep a record of what they had open,
+/// or of every minute of every monitor, for ever -- if anything, the opposite.
 ///
-/// # Why the observation sweep is here at all
+/// # Why the sweeps are here at all
 ///
 /// Because this is the app's one wall-clock loop that is not per-source, and
 /// because retention is already this module's business -- the archives on disk
-/// have a `keep` and this is where it is spent. The rule and the constant stay
-/// in `time::passive`, which owns what an observation is; what this module
+/// have a `keep` and this is where it is spent. Each rule stays in the module
+/// that owns what the thing being swept *is* -- `time::passive` for an
+/// observation, `knobas_sync::samples` for a sample; what this module
 /// contributes is the clock. `time::passive::prune` records the rest of the
 /// reasoning, including why the day read is the wrong home for it.
 ///
-/// Neither half can stop the other: each is logged and the tick returns, for
-/// the reason the loop never breaks. A backup that cannot be written is not a
+/// The sample sweep matters more than its one line suggests: the sync engine
+/// writes one row per monitor per poll, which at M4.1's one-minute default
+/// interval is 1,440 rows per monitor per day. A sweep nothing called would
+/// not be a stale row, it would be a table that never stops growing.
+///
+/// No half can stop another: each is logged and the tick returns, for the
+/// reason the loop never breaks. A backup that cannot be written is not a
 /// reason to stop trying every night, and there is no window to report either
 /// failure in from here (the settings dialog reads `backup_status`, which
 /// shows the last export that *did* work).
@@ -722,6 +729,11 @@ pub async fn tick(state: &BackupState) {
         Ok(0) => {}
         Ok(taken) => tracing::info!(taken, "observations older than the horizon pruned"),
         Err(error) => tracing::error!(%error, "the observation sweep failed"),
+    }
+    match knobas_sync::samples::prune(&state.pool, Utc::now()).await {
+        Ok(0) => {}
+        Ok(taken) => tracing::info!(taken, "monitor samples older than retention pruned"),
+        Err(error) => tracing::error!(%error, "the sample sweep failed"),
     }
 }
 
