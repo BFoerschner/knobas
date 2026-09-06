@@ -126,9 +126,12 @@
     sourceOf,
     stripFor,
     walk,
+    wireKey,
+    wiresFor,
     workBadge,
     type ColumnPath,
     type Match,
+    type Wire,
   } from "./tree";
 
   /**
@@ -538,6 +541,200 @@
     const rows = columns[column] ?? [];
     return rows.find((row) => row.id === chosen) ?? rows[0] ?? null;
   }
+
+  // -- the wires (story 31) -------------------------------------------------
+
+  /** The pane, whose left edge is where every wire starts. */
+  let paneEl = $state<HTMLElement | null>(null);
+
+  /**
+   * Which route row is wired to which asset, and how — `tree.ts`' answer.
+   *
+   * Guarded the way {@link path} is: a pane read for the *previous* address
+   * would wire this address' route rows to the last one's columns for the
+   * frame between the two reads.
+   */
+  const wireEnds = $derived<Wire[]>(
+    detail === null || detail.asset.id !== selectedId ? [] : wiresFor(detail, columns, strip),
+  );
+
+  /** One wire, measured: where it lands and the curve that gets there. */
+  interface DrawnWire {
+    /** {@link wireKey}: which of the pane's lists, and which route. */
+    key: string;
+    /**
+     * Where it lands — an asset's id, or `spine:<column>`.
+     *
+     * On the element as `data-to`, which is how both halves of this ticket's
+     * fourth criterion read a wire: the component tests, where jsdom lays
+     * nothing out and a curve is all zeroes, and the browser pass, which reads
+     * the landing and the curve together over CDP.
+     */
+    to: string;
+    /** Drawn dashed, arithmetic and measurement together. */
+    dashed: boolean;
+    /** The curve. */
+    d: string;
+    /** The landing point, where the dot goes. */
+    x: number;
+    y: number;
+  }
+
+  /**
+   * The wires as they are drawn now, re-measured rather than kept.
+   *
+   * Every redraw builds the whole list from the elements on screen, which is
+   * what makes *no stale lines* structural: a column that changed under a
+   * wire cannot leave one behind, because the line is not stored anywhere
+   * between two measurements.
+   */
+  let drawnWires = $state<DrawnWire[]>([]);
+
+  /** One decimal is a tenth of a pixel; the rest is noise in a diff. */
+  function round(value: number): number {
+    return Math.round(value * 10) / 10;
+  }
+
+  /**
+   * Measure every wire the arithmetic asked for, in the tree's own pixels.
+   *
+   * **The only part of the wires that reads the DOM**, and it reads it rather
+   * than remembering it: a row's position is a fact about a scroll offset and
+   * a font, and the two elements it needs are found by the ids the arithmetic
+   * answered with.
+   *
+   * `laid` is what makes the same code honest before anything has been laid
+   * out — a first frame, and every frame under jsdom, measures every
+   * rectangle as zero. There is no geometry to clip against there, so nothing
+   * is clipped and nothing is dropped: the wires are drawn degenerate, which
+   * is what lets a component test assert *which* row is wired to *which*
+   * asset while a browser certifies where the curve actually goes.
+   */
+  function measureWires(): void {
+    const frame = tree;
+    const pane = paneEl;
+    const cols = stripEl;
+    if (frame === null || pane === null || cols === null) {
+      drawnWires = [];
+      return;
+    }
+    const box = frame.getBoundingClientRect();
+    const paneBox = pane.getBoundingClientRect();
+    const colsBox = cols.getBoundingClientRect();
+    const laid = box.width > 0 && box.height > 0;
+    // The pane's own edge: every wire leaves the strip at the same x, so the
+    // bundle reads as one thing arriving from the pane rather than as lines
+    // starting at whatever indent a route's name happens to have.
+    const startX = paneBox.left - box.left;
+
+    const next: DrawnWire[] = [];
+    for (const wire of wireEnds) {
+      // `CSS.escape` on both ids, the way `AssetsView.write.test.svelte.ts`
+      // reaches for a row by one: an id is minted as `asset:<uuid>` today and
+      // no selector metacharacter can reach one, but an import that took an
+      // id from a source system would turn a wire into a thrown
+      // `SyntaxError` inside an effect, which takes the whole Tree with it.
+      const from = pane.querySelector(`li[data-wire=${CSS.escape(wire.key)}]`);
+      const to =
+        wire.rowId === null
+          ? cols.querySelector(`button.spine[data-spine="${wire.column}"]`)
+          : cols.querySelector(`button.row[data-asset=${CSS.escape(wire.rowId)}]`);
+      if (from === null || to === null) continue;
+
+      const fromBox = from.getBoundingClientRect();
+      // A route row scrolled out of the pane draws nothing: a line leaving the
+      // pane's top edge would point at a row the reader cannot see.
+      if (laid && (fromBox.bottom < paneBox.top + 2 || fromBox.top > paneBox.bottom - 2)) continue;
+
+      const toBox = to.getBoundingClientRect();
+      // The band the far end may be drawn in: the column's own scrolling list,
+      // or the spine, which scrolls with nothing.
+      const band = (to.closest("ol.col") ?? to).getBoundingClientRect();
+      const wanted = {
+        x: toBox.right - box.left - 2,
+        y: toBox.top - box.top + toBox.height / 2,
+      };
+      // Held inside the band it may be drawn in: a row scrolled out of its own
+      // column, or a column scrolled out of the strip sideways, is pointed at
+      // where it *would* be rather than off the edge of the tree.
+      const held = laid
+        ? {
+            x: Math.max(wanted.x, colsBox.left - box.left + 2),
+            y: Math.min(
+              Math.max(wanted.y, band.top - box.top + 5),
+              band.bottom - box.top - 5,
+            ),
+          }
+        : wanted;
+      const clipped = held.x !== wanted.x || held.y !== wanted.y;
+      // Nowhere left to draw: the column is under the pane's own edge.
+      if (laid && held.x >= startX - 4) continue;
+
+      const startY = fromBox.top - box.top + fromBox.height / 2;
+      // Out of the pane level and into the column steeply, so the curve clears
+      // the spine labels it passes over -- `E1-miller-columns.html:728`.
+      const reach = Math.max(36, Math.min(130, (startX - held.x) / 2.2));
+      const dive = Math.min(reach, 52);
+      next.push({
+        key: wire.key,
+        to: wire.rowId ?? `spine:${wire.column}`,
+        // A landing that had to be held inside its band is not a direct one
+        // either -- the mockup's `exact && !clipped`
+        // (`E1-miller-columns.html:711`).
+        dashed: wire.dashed || clipped,
+        d:
+          `M ${round(startX)} ${round(startY)} ` +
+          `C ${round(startX - reach)} ${round(startY)}, ` +
+          `${round(held.x + dive)} ${round(held.y)}, ${round(held.x)} ${round(held.y)}`,
+        x: round(held.x),
+        y: round(held.y),
+      });
+    }
+    drawnWires = next;
+  }
+
+  /**
+   * Re-measure after every redraw that could have moved a wire's ends.
+   *
+   * `$effect` runs after the DOM is updated, so the rows and spines the
+   * measurement looks for are the ones this frame draws.
+   *
+   * {@link wireEnds} is the dependency that carries the *shape* of the
+   * drawing: it is derived from the pane's read, the columns and the strip,
+   * so a selection, a column and a spine collapsing each reach this through
+   * it. Read here as well as inside {@link measureWires} so that the day the
+   * measurement takes its list from somewhere else, the dependency does not
+   * quietly leave with it.
+   *
+   * It is not the *only* one, and the difference is worth naming rather than
+   * being discovered: {@link measureWires} also reads `tree`, `paneEl` and
+   * `stripEl`, which are `$state` too, so this effect re-runs when the three
+   * elements bind. That is what makes the first frame — where the bindings
+   * land after the effect's first pass — draw anything at all.
+   */
+  $effect(() => {
+    void wireEnds;
+    measureWires();
+  });
+
+  /**
+   * Scrolling and resizing move the ends without changing any of that.
+   *
+   * Capturing, because none of the three scrolls that matter bubble: the strip
+   * scrolls sideways, a column's rows scroll under its header, and the pane
+   * scrolls past the route lists themselves.
+   */
+  $effect(() => {
+    const frame = tree;
+    if (frame === null) return;
+    const redraw = () => measureWires();
+    frame.addEventListener("scroll", redraw, true);
+    window.addEventListener("resize", redraw);
+    return () => {
+      frame.removeEventListener("scroll", redraw, true);
+      window.removeEventListener("resize", redraw);
+    };
+  });
 
   /**
    * Bring a row into view, honouring *reduce motion*.
@@ -1161,6 +1358,7 @@
             {@const step = spineRow(index)}
             <button
               class="col spine"
+              data-spine={index}
               onclick={() => (anchored = { at: index, of: selectedId })}
               title="Show what {step?.name ?? 'the estate'} holds"
             >
@@ -1196,6 +1394,7 @@
                     <button
                       class="row {chosen === row.id ? 'on' : ''}"
                       aria-current={chosen === row.id ? "true" : undefined}
+                      data-asset={row.id}
                       title={addressOf(row)}
                       onclick={() => select(row)}
                     >
@@ -1244,7 +1443,34 @@
       {/if}
     </div>
 
-    <aside class="pane">
+    <!--
+      The wires (story 31, #433). One layer over the whole tree rather than a
+      line per column: a wire runs from the pane, across every column between,
+      to a row or to the spine standing in for it, so it belongs to neither
+      end. `aria-hidden`, and that is not an omission — every fact it draws is
+      already a link in the route's own row, and a screen reader following the
+      list has the whole of it in words.
+
+      Before the pane in document order and painted under it, so a wire that
+      arrives at the pane's edge stops there.
+    -->
+    <svg class="wires" aria-hidden="true">
+      {#each drawnWires as wire (wire.key)}
+        <!-- A halo in the columns' own background under the wire, so a line
+             crossing three columns of text stays a line. -->
+        <path class="halo" d={wire.d} />
+        <path
+          class="wire"
+          class:dashed={wire.dashed}
+          data-wire={wire.key}
+          data-to={wire.to}
+          d={wire.d}
+        />
+        <circle class="land" cx={wire.x} cy={wire.y} r="3" />
+      {/each}
+    </svg>
+
+    <aside class="pane" bind:this={paneEl}>
       {#if detail === null}
         <p class="empty">
           {loaded ? "Select an asset to see what it holds." : "Reading…"}
@@ -1537,8 +1763,18 @@
           above is one — the halves that differ are the line under it, and they
           are what each list passes in.
         -->
-        {#snippet routeRow(route: RouteRow, where: import("svelte").Snippet)}
-          <li class:on={route.id === routeId} aria-current={route.id === routeId ? "true" : undefined}>
+        {#snippet routeRow(key: string, route: RouteRow, where: import("svelte").Snippet)}
+          <!--
+            `data-wire` is the end of the wire this row leaves (#433): the
+            measurement finds the row by it, and the key says which of the two
+            lists it is in — a route exposed by an asset *and* landing on it
+            has a row in both.
+          -->
+          <li
+            data-wire={key}
+            class:on={route.id === routeId}
+            aria-current={route.id === routeId ? "true" : undefined}
+          >
             <span class="rname">
               <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
               {#if route.visibility === "public"}
@@ -1566,7 +1802,7 @@
           {:else}
             <ul class="lst routes">
               {#each detail.exposes as route (route.id)}
-                {@render routeRow(route, lands)}
+                {@render routeRow(wireKey("exposes", route.id), route, lands)}
                 {#snippet lands()}
                   {#if route.target_id !== null}
                     {@const to = route.target_id}
@@ -1612,7 +1848,7 @@
           {:else}
             <ul class="lst routes">
               {#each detail.reachable_via as route (route.id)}
-                {@render routeRow(route, arrives)}
+                {@render routeRow(wireKey("via", route.id), route, arrives)}
                 <!--
                   Where it lands and who offers it — the two facts that make
                   this list readable from the arriving end. `landing` is
@@ -1834,12 +2070,90 @@
     grid-template-rows: auto auto 1fr;
   }
 
-  /* Columns scroll on their own axis; the pane does not move. Story 33. */
+  /* Columns scroll on their own axis; the pane does not move. Story 33.
+     `relative` since #433: the wire layer is measured in this element's own
+     pixels and positioned in them. */
   .tree {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;
     min-height: 0;
     overflow: hidden;
+  }
+
+  /*
+    The wires (story 31). One transparent layer across the whole tree; the
+    curves are measured in `AssetsView`'s own `measureWires`, because where a
+    row sits is a fact about a scroll offset and a font and no stylesheet
+    knows it.
+
+    `pointer-events: none` is what keeps it a drawing: every wire lies over
+    rows and buttons a reader clicks, and a layer that took the click would
+    make the columns unusable to look at a line.
+  */
+  .wires {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .wires path {
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  .wires .halo {
+    stroke: var(--bg);
+    stroke-width: 3.2;
+    opacity: 0.92;
+  }
+
+  .wires .wire {
+    stroke: var(--amber);
+    stroke-width: 1;
+    opacity: 0.65;
+  }
+
+  /* Reached through something rather than pointed at: a spine standing in for
+     the row, or a route that arrives at an asset above this one. */
+  .wires .wire.dashed {
+    stroke-dasharray: 3 3;
+  }
+
+  .wires .land {
+    fill: var(--amber);
+    opacity: 0.8;
+  }
+
+  /*
+    The one piece of motion on this surface: a wire fades in when a selection
+    brings it, and never moves again on its own — the paths are keyed by their
+    route, so scrolling changes a `d` on an element that is already there.
+
+    Story 31's *off under reduced motion's no-animation rule*: the wires are
+    still drawn, and they arrive instead of appearing over 160ms.
+  */
+  .wires .halo,
+  .wires .wire,
+  .wires .land {
+    animation: wire-in 160ms ease-out both;
+  }
+
+  @keyframes wire-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wires .halo,
+    .wires .wire,
+    .wires .land {
+      animation: none;
+    }
   }
 
   .cols {
@@ -2111,7 +2425,11 @@
     border-color: var(--hair2);
   }
 
+  /* Positioned so that it paints over the wire layer, which is absolute and
+     would otherwise draw its last few pixels across the route rows. */
   .pane {
+    position: relative;
+    z-index: 1;
     border-left: 1px solid var(--hair);
     background: var(--panel);
     padding: 10px 12px 18px;
@@ -2296,8 +2614,14 @@
   }
 
   /* One route per row: what it is called, where it answers, and where it
-     lands — three lines at the width the pane has, not a table. */
-  .routes li {
+     lands — three lines at the width the pane has, not a table.
+
+     `.lst.routes` and not `.routes`, because `.lst li` below carries the same
+     specificity and comes later in the file, so it was winning: the route
+     rows were laid out as one flex line each and ran off the side of the pane
+     the moment a route carried a real property. Found by pointing a browser
+     at the estate file's own routes (#433). */
+  .lst.routes li {
     display: grid;
     gap: 2px;
     padding: 4px 0;
@@ -2344,6 +2668,11 @@
     align-items: baseline;
     gap: 4px;
     font-size: 11px;
+    /* A real route property is a command line (`testenv/hetzner/tunnel up`),
+       which wraps at no space there is: without this the pane scrolls
+       sideways and takes the route rows -- and the wires that leave them --
+       with it. Found by pointing a browser at the estate file's own routes. */
+    overflow-wrap: anywhere;
   }
 
   .lst,
