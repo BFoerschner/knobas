@@ -75,6 +75,14 @@ export const shareDefaults: ShareParts = {
 export interface ArchiveFile {
   file: string;
   bytes: number;
+  /**
+   * Whether this is a share export rather than a nightly backup.
+   *
+   * The name carries it too (`knobas-share-…`), and this is what the section
+   * lists on: the naming rule belongs to `backup::policy`, and a frontend
+   * that parsed the file name would be a second place to keep it right.
+   */
+  share: boolean;
 }
 
 /** Everything the backup settings dialog (#69) draws — `backup::BackupStatus`. */

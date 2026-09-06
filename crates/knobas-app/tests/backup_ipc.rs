@@ -1064,6 +1064,65 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
     );
 }
 
+/// **A restored source reads its system from the top** (#455, criterion 2).
+///
+/// `knobas.source_config.cursor` is where a source stood *against a mirror*,
+/// and **no archive carries the mirror** -- neither a backup nor a share
+/// export, because it re-syncs. So the position that rides across in the
+/// sources part describes a corpus that is not there, and a first sync
+/// resuming from it fetches only what changed upstream since somebody else's
+/// last run: on a clean machine that is nothing, and every link the archive
+/// brought stays an id nothing can open.
+///
+/// Cleared on the way in, then, which makes the recipient's first run a full
+/// sync -- the same run a source added by hand does, because a restored
+/// source is in the same position as a new one.
+///
+/// The negative is the load-bearing half and it is what makes this a rule
+/// about the *cursor*: everything else the archive said about the source is
+/// still there afterwards. A restore that cleared the row would pass the
+/// first assertion.
+#[tokio::test]
+async fn a_restored_source_starts_from_the_top_and_keeps_everything_else() {
+    let (sharer, sharer_dir) = service("sharecursorsource").await;
+    let estate = seed_corpus(&sharer.pool, "cursor").await;
+    sqlx::query("update knobas.source_config set cursor = $2 where id = $1")
+        .bind(&estate.source)
+        .bind(r#"{"v":1,"since":"2026-09-01T00:00:00Z"}"#)
+        .execute(&sharer.pool)
+        .await
+        .expect("the sharer has synced, so it stands somewhere");
+
+    let record = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+    let (colleague, colleague_dir) = service("sharecursortarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("restore");
+
+    let (cursor, base_url, interval, enabled): (Option<String>, String, i32, bool) = sqlx::query_as(
+        "select cursor, base_url, sync_interval_secs, enabled
+           from knobas.source_config where id = $1",
+    )
+    .bind(&estate.source)
+    .fetch_one(&colleague.pool)
+    .await
+    .expect("the restored source configuration");
+
+    assert_eq!(
+        cursor, None,
+        "the sharer's position is against a mirror this machine does not have; \
+         resuming from it fetches nothing and every link stays dangling"
+    );
+    assert_eq!(
+        (base_url.as_str(), interval, enabled),
+        ("https://jira.example", 300, true),
+        "only the position is dropped -- the source itself arrived intact"
+    );
+}
+
 /// **A restore never resets the settings of the knobas doing the restoring.**
 ///
 /// A share export carries no `knobas.setting`, and the restore used to clear
@@ -1255,6 +1314,46 @@ async fn the_archive_list_is_ordered_by_date_and_not_by_the_share_prefix() {
             "knobas-share-20251231-090000.knobas".to_owned(),
         ],
         "the settings view lists archives newest first, share exports among them"
+    );
+}
+
+/// **The list says which archives are share exports** (#455, criterion 1).
+///
+/// The file name carries it -- `knobas-share-` -- and a name is not a
+/// listing: the settings view draws share exports apart from the backups, and
+/// a frontend that told them apart by parsing the name would be a second
+/// place to keep `policy::share_name` right. So the answer travels with the
+/// row.
+///
+/// Both directions in one read, because a flag that is always false and a
+/// flag that is always true both pass a one-sided assertion.
+#[tokio::test]
+async fn the_archive_list_says_which_archives_are_share_exports() {
+    let (service, _dir) = service("sharelisted").await;
+    seed_corpus(&service.pool, "listed").await;
+
+    let backup_record = backup::export_now(&service).await.expect("a backup");
+    let shared = backup::share_export(&service, backup::ShareParts::default())
+        .await
+        .expect("a share export");
+
+    let listed: std::collections::BTreeMap<String, bool> = backup::status(&service)
+        .await
+        .expect("status")
+        .archives
+        .into_iter()
+        .map(|archive| (archive.file, archive.share))
+        .collect();
+
+    assert_eq!(
+        listed.get(&shared.file),
+        Some(&true),
+        "the share export is listed as one"
+    );
+    assert_eq!(
+        listed.get(&backup_record.file),
+        Some(&false),
+        "the nightly backup is not a share export"
     );
 }
 
