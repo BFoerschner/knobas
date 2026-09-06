@@ -649,7 +649,6 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
     .await
     .expect("the sharer's credential is accepted by the real Jira");
     live_digest::sync(&sharer_engine, JIRA).await;
-    sharer_engine.scheduler.shutdown().await;
 
     let stood_at: Option<String> =
         sqlx::query_scalar("select cursor from knobas.source_config where id = $1")
@@ -677,7 +676,9 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
         .expect("a share export with the ratified defaults");
-    sharer.pool.close().await;
+    // Last, because it closes the pool it was started over -- a `PgPool` is a
+    // handle onto one pool and every clone of it closes together.
+    sharer_engine.scheduler.shutdown().await;
 
     // ---- 3. The clean machine ----------------------------------------------
     let colleague_keys: Arc<dyn knobas_secrets::SecretStore> =
@@ -738,7 +739,6 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
 
     // ---- 5. ...and syncs ---------------------------------------------------
     live_digest::sync(&colleague_engine, JIRA).await;
-    colleague_engine.scheduler.shutdown().await;
 
     let opened = get_entity_inner(&colleague.pool, TICKET)
         .await
@@ -762,4 +762,6 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         after.asset.linked_work, 1,
         "the linked-work badge counts it now, which is the change a reader sees"
     );
+
+    colleague_engine.scheduler.shutdown().await;
 }
