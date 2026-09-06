@@ -35,34 +35,64 @@
   columns follow, so "search reveals the path" is the same derivation
   everything else here uses.
 
+  **The Tree is writable, and every write goes back through the address**
+  (#429). A plus on every column header creates at that level; the pane renames,
+  edits typed and custom properties, moves and deletes. What none of them do is
+  patch what is on screen: a write is followed by a **re-read**, so the columns,
+  the pane and the history are one answer from the backend rather than an
+  optimistic guess that a failed second write would leave standing.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
-  stubs.** Creating and editing from the pane is #429 — a `+` on a column
-  header with no dialog behind it is a promise the view cannot keep. The
-  *open URL* / *copy SSH* actions are #431's neighbours in spec §2 and arrive
-  with the routes that carry the URLs (#432). Wires, *Link to…*, the
+  stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
+  and arrive with the routes that carry the URLs (#432). Wires, *Link to…*, the
   linked-work badge and monitoring are #433, #435 and M4.1; monitors are also
-  the half of story 37's *own* health that is not here yet. The Monitors tab
-  is M4.1's, so the tab strip has one tab in it: a disabled sibling would
-  teach the reader only that the app is unfinished.
+  the half of story 37's *own* health that is not here yet. The Monitors tab is
+  M4.1's, so the tab strip has one tab in it: a disabled sibling would teach the
+  reader only that the app is unfinished. **Environment, owner and status are
+  editable fields on `AssetEdit` and this pane does not set them**: #431 owns
+  their *in force* half and draws it, and a control that wrote the stored value
+  beside a line reading "or inherited from vm-db-01" is a second ticket's
+  design, not this one's omission. **Dragging a row between columns** is the
+  create/move gesture this ticket's parenthetical allows and does not require;
+  the parent picker is the one that works with a keyboard, and it is what
+  landed.
 -->
 <script lang="ts">
   import { ipcErrorMessage, type SearchResponse } from "../ipc";
   import {
     assetTree as realAssetTree,
+    assetTypes as realAssetTypes,
+    createAsset as realCreateAsset,
+    deleteAsset as realDeleteAsset,
+    editAsset as realEditAsset,
     getAsset as realGetAsset,
+    moveAsset as realMoveAsset,
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
     type Environment,
     type Inherited,
+    type AssetType,
+    type PropertyKind,
   } from "../ipc/assets";
   import { search as realSearch } from "../ipc/search";
   // The launcher's own debounce, imported rather than copied: two search
   // boxes in one app that wait different amounts of time feel like two apps.
   import { DEBOUNCE_MS } from "../launcher";
   import { latestRead } from "../shell/latest-read";
+  import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
   import { hashFor, type Router } from "../shell/router.svelte";
+  import CreateDialog from "./CreateDialog.svelte";
+  import MoveDialog from "./MoveDialog.svelte";
+  import {
+    draftOf,
+    inputTypeFor,
+    kindFor,
+    parseProperty,
+    PROPERTY_KINDS,
+    propertyEdit,
+  } from "./editing";
   import {
     addressOf,
     columnPathFor,
@@ -88,6 +118,11 @@
     getAsset: typeof realGetAsset;
     /** The launcher's engine. The Tree narrows it to assets (`estateQuery`). */
     search: typeof realSearch;
+    assetTypes: typeof realAssetTypes;
+    createAsset: typeof realCreateAsset;
+    editAsset: typeof realEditAsset;
+    moveAsset: typeof realMoveAsset;
+    deleteAsset: typeof realDeleteAsset;
   }
 
   let {
@@ -121,6 +156,11 @@
     assetTree: realAssetTree,
     getAsset: realGetAsset,
     search: realSearch,
+    assetTypes: realAssetTypes,
+    createAsset: realCreateAsset,
+    editAsset: realEditAsset,
+    moveAsset: realMoveAsset,
+    deleteAsset: realDeleteAsset,
     ...ports,
   };
 
@@ -138,6 +178,68 @@
   let loaded = $state(false);
 
   /**
+   * The built-in type table, read once.
+   *
+   * A constant on the backend, so once is enough and a second read would ask
+   * the same question twice. Empty until it lands, which is what disables the
+   * pluses: a create dialog with no type to offer is a dialog that cannot
+   * create.
+   */
+  let types = $state<AssetType[]>([]);
+
+  /**
+   * Why the type table is not there, when it is not.
+   *
+   * Its **own** state and not `writeFailure`: that one is drawn inside the
+   * pane and is cleared whenever the selection moves, so a failed type read on
+   * the bare `#/assets/tree` — where there is no pane at all — would have left
+   * the reader with a disabled plus whose only explanation said the read had
+   * *not happened yet*, which is a different and untrue thing.
+   */
+  let typesFailure = $state<string | null>(null);
+
+  /**
+   * Bumped by every write, and read by the pane's effect.
+   *
+   * The pane re-reads on **the address changing or this changing**, and a
+   * write that leaves the address alone — an edit, a move — changes only this.
+   * A view that patched its own state instead would be showing an answer
+   * nobody gave it, and story 11's *every mutation is a line in the history*
+   * is precisely the part that cannot be patched: the line is written by the
+   * backend and arrives only by reading.
+   */
+  let revision = $state(0);
+
+  /**
+   * The level a plus was pressed on.
+   *
+   * A type rather than three loose fields, because the id, the name and the
+   * type conventions are one fact — *which asset the new one goes inside* —
+   * and they were travelling together from `openCreate` through three props on
+   * the dialog. `parent` is `null` at the top of the estate, where `id` is
+   * `null` too and there is no name and no convention.
+   */
+  let creating = $state<CreateAt | null>(null);
+  let moving = $state(false);
+  let deleting = $state(false);
+  /** The property row being edited, by key, and the text in its field. */
+  let editingKey = $state<string | null>(null);
+  let draft = $state("");
+  let renaming = $state(false);
+  let nameDraft = $state("");
+  /** The *add a property* form, open with a key, a kind and a value. */
+  let adding = $state(false);
+  let newKey = $state("");
+  let newKind = $state<PropertyKind>("text");
+  let newValue = $state("");
+  /**
+   * What the last write refused with — shown in the pane, beside what it
+   * refused, rather than as a toast over a surface the reader is working in.
+   */
+  let writeFailure = $state<string | null>(null);
+  let writing = $state(false);
+
+  /**
    * The layout, derived from the pane's read and from nothing else.
    *
    * Not from a click: a click sets the address, the address is read back, and
@@ -151,9 +253,47 @@
   const detailRead = latestRead<AssetDetail>();
   const columnsRead = latestRead<AssetRow[][]>();
 
+  /**
+   * The type table, once.
+   *
+   * No dependency is read, so this runs on mount and never again — which is
+   * the whole claim: `asset_types` answers a constant, and it answers before
+   * the database is up, so the pluses work on a cold start.
+   */
+  $effect(() => {
+    void io
+      .assetTypes()
+      .then((answer) => {
+        types = answer;
+      })
+      .catch((cause: unknown) => {
+        // Not `failure`: the columns and the pane still draw. What stops
+        // working is creating, and the line below the tab strip plus the
+        // plus's own title are where that is said.
+        typesFailure = ipcErrorMessage(cause);
+      });
+  });
+
+  /**
+   * Which asset the editors on screen belong to.
+   *
+   * Not `$state`: it is a note to the effect below and nothing draws from it.
+   * A half-typed IP has to go when the reader clicks another asset — a field
+   * left open over a different asset would save the first one's value onto the
+   * second — and it has to **stay** across a re-read of the same asset, which
+   * is why this is a comparison rather than a reset on every run.
+   */
+  let editorsFor: string | null = null;
+
   /** The address names an asset: read it, or clear the pane when it names none. */
   $effect(() => {
     const id = selectedId;
+    // A write bumps this; the read below is what puts its result on screen.
+    void revision;
+    if (id !== editorsFor) {
+      editorsFor = id;
+      closeEditors();
+    }
     if (id === null) {
       detail = null;
       failure = null;
@@ -473,6 +613,195 @@
     }
   }
 
+  /**
+   * Put every open editor and dialog away, and the failure with them.
+   *
+   * The dialogs go too, and that is not tidiness: *Move to…* and the delete
+   * confirmation are **about the selected asset**, so one still standing after
+   * the selection moved would be a dialog offering to move or delete something
+   * other than the asset it named — which is what a QA walk that changed the
+   * address with the picker open turned up.
+   */
+  function closeEditors() {
+    editingKey = null;
+    renaming = false;
+    adding = false;
+    creating = null;
+    moving = false;
+    deleting = false;
+    writeFailure = null;
+  }
+
+  /**
+   * Run one write and re-read what it changed.
+   *
+   * Every mutation in this view goes through here, for two reasons that are
+   * really one: a refusal is shown **in the pane, in the backend's own
+   * words** — the cycle refusal names the asset that closes the loop, the
+   * delete refusal names what the branch still holds, and neither is a
+   * sentence this view could write for itself — and a success is followed by a
+   * read rather than by a patch, so the history line the mutation wrote is on
+   * screen the moment the write lands.
+   *
+   * Answers `null` when the write was refused, which is how a caller knows
+   * whether to close the editor it was called from — and also, without a
+   * message, when one is **already in flight**. Both leave the editor open,
+   * which is the right outcome for each: a refusal has a sentence beside it,
+   * and a second `Enter` pressed during a save is answered by the save that is
+   * already running. Every control that calls this is `disabled={writing}`, so
+   * the second case is only reachable from the keyboard.
+   */
+  async function write<T>(action: () => Promise<T>, reread = true): Promise<T | null> {
+    if (writing) return null;
+    writing = true;
+    writeFailure = null;
+    try {
+      const answer = await action();
+      if (reread) revision += 1;
+      return answer;
+    } catch (cause) {
+      writeFailure = ipcErrorMessage(cause);
+      return null;
+    } finally {
+      writing = false;
+    }
+  }
+
+  /** The level a plus creates inside: an asset, or the top of the estate. */
+  interface CreateAt {
+    /** What `create_asset` is given as `parentId`. */
+    id: string | null;
+    /** The asset that id names, for the dialog's subtitle and conventions. */
+    parent: AssetRow | null;
+  }
+
+  /** The asset a column lists the children of — `null` for the first column. */
+  function parentOfColumn(index: number): AssetRow | null {
+    const parentId = path.parents[index] ?? null;
+    if (parentId === null) return null;
+    return columns[index - 1]?.find((row) => row.id === parentId) ?? null;
+  }
+
+  /** What a column's header calls it. */
+  function headingFor(index: number): string {
+    return parentOfColumn(index)?.name ?? "Estate";
+  }
+
+  /**
+   * What the plus says on hover — and what it says when it cannot work.
+   *
+   * A disabled control has to explain itself, and the two reasons are
+   * different: the table has not landed *yet*, or the read failed and it never
+   * will. Saying the first when the second is true is the plainest kind of lie
+   * a tooltip can tell.
+   */
+  function plusTitle(index: number): string {
+    if (typesFailure !== null) return `The type table could not be read: ${typesFailure}`;
+    if (types.length === 0) return "The type table has not been read yet";
+    return `New asset in ${headingFor(index)}`;
+  }
+
+  /** Story 34: the plus, at the level whose header it sits on. */
+  function openCreate(index: number) {
+    creating = { id: path.parents[index] ?? null, parent: parentOfColumn(index) };
+  }
+
+  /** The type table's entry for `typeId`, or nothing for a type this build lost. */
+  function schemaOf(typeId: string): AssetType | undefined {
+    return types.find((type) => type.id === typeId);
+  }
+
+  /** Which kind of input a property's editor is. */
+  function kindOf(property: AssetProperty): PropertyKind {
+    return kindFor(property, detail === null ? undefined : schemaOf(detail.asset.type_id));
+  }
+
+  function beginEdit(property: AssetProperty) {
+    editingKey = property.key;
+    draft = draftOf(property);
+    writeFailure = null;
+  }
+
+  /** Save one property, or clear it when the field was emptied. */
+  async function saveProperty(property: AssetProperty) {
+    const current = detail;
+    if (current === null) return;
+    const parsed = parseProperty(kindOf(property), draft);
+    if ("refused" in parsed) {
+      writeFailure = parsed.refused;
+      return;
+    }
+    const done = await write(() =>
+      io.editAsset(current.asset.id, [propertyEdit(property.key, parsed.value)]),
+    );
+    if (done !== null) editingKey = null;
+  }
+
+  /** Story 6: a key of the reader's own, of one of the four kinds. */
+  async function addProperty() {
+    const current = detail;
+    if (current === null) return;
+    const parsed = parseProperty(newKind, newValue);
+    if ("refused" in parsed) {
+      writeFailure = parsed.refused;
+      return;
+    }
+    // A key with nothing in it is not a property that reads as unset — it is a
+    // key `assets::edit` would remove in the same breath it was added, writing
+    // no line and changing nothing. That is a rule about *this form's* meaning
+    // rather than about a value, so it is the **Add** button's `disabled` and
+    // not a sentence composed here: what a value may be stays the backend's.
+    if (parsed.value === null) return;
+    const value = parsed.value;
+    const done = await write(() =>
+      io.editAsset(current.asset.id, [propertyEdit(newKey, value)]),
+    );
+    if (done !== null) {
+      adding = false;
+      newKey = "";
+      newValue = "";
+    }
+  }
+
+  function beginRename() {
+    if (detail === null) return;
+    renaming = true;
+    nameDraft = detail.asset.name;
+    writeFailure = null;
+  }
+
+  async function saveName() {
+    const current = detail;
+    if (current === null) return;
+    const done = await write(() =>
+      io.editAsset(current.asset.id, [{ field: "name", value: nameDraft }]),
+    );
+    if (done !== null) renaming = false;
+  }
+
+  /**
+   * Delete, and go where the asset was.
+   *
+   * No re-read of the id that has just gone: it would answer `not_found` and
+   * draw the deep-link failure over a deletion that worked. The parent's
+   * address is the honest place to land, and the top of the estate is where a
+   * root asset leaves from.
+   */
+  async function confirmDelete() {
+    const current = detail;
+    if (current === null) return;
+    const parent = current.held_by.at(-1) ?? null;
+    const done = await write(async () => {
+      await io.deleteAsset(current.asset.id);
+      return true;
+    }, false);
+    if (done === null) return;
+    deleting = false;
+    router.go(
+      parent === null ? hashFor({ view: "assets", tab: "tree", assetId: null }) : addressOf(parent),
+    );
+  }
+
   /** What a history line says, in one sentence. */
   function line(verb: string, raw: unknown): string {
     const said = (value: unknown): string => {
@@ -487,9 +816,25 @@
     const fields = (raw ?? {}) as Record<string, unknown>;
     if (verb === "created") return "Created";
     if (verb === "deleted") return "Deleted";
-    if (verb === "moved") return `Moved to ${said(fields.to)}`;
+    if (verb === "moved") return `Moved to ${nameOf(fields.to) ?? said(fields.to)}`;
     const field = fields.field === "property" ? said(fields.key) : said(fields.field);
     return `${field}: ${said(fields.from)} → ${said(fields.to)}`;
+  }
+
+  /**
+   * What an asset id is *called*, out of the rows the pane already has.
+   *
+   * A move's history line carries the new parent's **id**, which is the only
+   * thing the backend can honestly write down — the name at the moment of the
+   * move is not the name now. After the move that parent is on the held-by
+   * path, so the pane can say `Moved to knobas-jira` instead of `Moved to
+   * asset:knobas-jira`. `null` when it is not, and the id is then drawn as it
+   * is rather than guessed at.
+   */
+  function nameOf(value: unknown): string | null {
+    if (detail === null || typeof value !== "string") return null;
+    const known = [detail.asset, ...detail.held_by, ...detail.holds];
+    return known.find((row) => row.id === value)?.name ?? null;
   }
 
   /** A property's value as text. `null` is drawn as an em dash, not as "null". */
@@ -551,6 +896,15 @@
 
   </div>
 
+  {#if typesFailure}
+    <!--
+      Outside the pane on purpose: creating is a whole-view capability, and the
+      address that most needs this message (`#/assets/tree`, nothing selected)
+      has no pane to draw it in.
+    -->
+    <p class="fail tf" role="alert">Creating is unavailable: {typesFailure}</p>
+  {/if}
+
   <!--
     The estate's search (story 30), on a strip of its own between the room bar
     and the columns.
@@ -609,9 +963,16 @@
           The estate with nothing in it, which is what a fresh install has
           until the import (#439) or a hand-created asset. It says so in its
           own words rather than drawing an empty column the reader would take
-          for a failed read.
+          for a failed read — and it carries the one control that gets out of
+          this state, because a column header with no rows under it is not
+          somewhere a reader thinks to look.
         -->
-        <p class="empty">Nothing in the estate yet.</p>
+        <div class="none">
+          <p class="empty">Nothing in the estate yet.</p>
+          <button class="btn" disabled={types.length === 0} onclick={() => openCreate(0)}>
+            New asset
+          </button>
+        </div>
       {:else}
         {#each columns as column, index (index)}
           {@const chosen = selectionIn(path, index)}
@@ -632,43 +993,64 @@
               <span class="vn">{step?.name ?? "top level"}</span>
             </button>
           {:else}
-            <ol class="col">
-              {#each column as row (row.id)}
-                {@const badge = problemBadge(row)}
-                <li>
-                  <button
-                    class="row {chosen === row.id ? 'on' : ''}"
-                    aria-current={chosen === row.id ? "true" : undefined}
-                    title={addressOf(row)}
-                    onclick={() => select(row)}
-                  >
-                    <span class="mg" title={row.type_label}>{row.monogram}</span>
-                    <span class="nm">{row.name}</span>
-                    {#if badge}
-                      <!--
-                        Story 32: what a *closed* branch is hiding. The number is
-                        the count of descendants carrying warn or down, and the
-                        colour is the worst of them — so a row that is itself
-                        down while holding one warning container is a red row
-                        with an amber badge.
-                      -->
-                      <span
-                        class="badge {badge.tone}"
-                        title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
-                      >{badge.count}</span>
-                    {/if}
-                    {#if row.has_children}
-                      <!--
-                        The chevron is the only thing that says there is a next
-                        column, which is why an empty trailing column is never
-                        drawn: the absence here has already said it.
-                      -->
-                      <span class="chev" aria-hidden="true">›</span>
-                    {/if}
-                  </button>
-                </li>
-              {/each}
-            </ol>
+            <div class="colw">
+              <!--
+                Story 34: a plus on **every** column header, so creating at that
+                level is one click and not a click plus a selection. The header
+                also names the level, which is what makes the plus unambiguous —
+                a bare `+` over the third column says nothing about what it
+                creates inside.
+              -->
+              <header class="col-h">
+                <span class="col-t">{headingFor(index)}</span>
+                <button
+                  class="plus"
+                  disabled={types.length === 0}
+                  aria-label="New asset in {headingFor(index)}"
+                  title={plusTitle(index)}
+                  onclick={() => openCreate(index)}
+                >
+                  +
+                </button>
+              </header>
+              <ol class="col">
+                {#each column as row (row.id)}
+                  {@const badge = problemBadge(row)}
+                  <li>
+                    <button
+                      class="row {chosen === row.id ? 'on' : ''}"
+                      aria-current={chosen === row.id ? "true" : undefined}
+                      title={addressOf(row)}
+                      onclick={() => select(row)}
+                    >
+                      <span class="mg" title={row.type_label}>{row.monogram}</span>
+                      <span class="nm">{row.name}</span>
+                      {#if badge}
+                        <!--
+                          Story 32: what a *closed* branch is hiding. The number is
+                          the count of descendants carrying warn or down, and the
+                          colour is the worst of them — so a row that is itself
+                          down while holding one warning container is a red row
+                          with an amber badge.
+                        -->
+                        <span
+                          class="badge {badge.tone}"
+                          title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
+                        >{badge.count}</span>
+                      {/if}
+                      {#if row.has_children}
+                        <!--
+                          The chevron is the only thing that says there is a next
+                          column, which is why an empty trailing column is never
+                          drawn: the absence here has already said it.
+                        -->
+                        <span class="chev" aria-hidden="true">›</span>
+                      {/if}
+                    </button>
+                  </li>
+                {/each}
+              </ol>
+            </div>
           {/if}
         {/each}
       {/if}
@@ -682,8 +1064,26 @@
       {:else}
         <header class="pane-h">
           <span class="mg">{detail.asset.monogram}</span>
-          <h2>{detail.asset.name}</h2>
-          <span class="kind">{detail.asset.type_label}</span>
+          {#if renaming}
+            <input
+              class="inp"
+              type="text"
+              aria-label="Name"
+              autocomplete="off"
+              value={nameDraft}
+              oninput={(event) => (nameDraft = event.currentTarget.value)}
+              onkeydown={(event) => {
+                if (event.key === "Enter") void saveName();
+                if (event.key === "Escape") renaming = false;
+              }}
+            />
+            <button class="btn sm pri" disabled={writing} onclick={() => void saveName()}>
+              Save
+            </button>
+          {:else}
+            <h2>{detail.asset.name}</h2>
+            <span class="kind">{detail.asset.type_label}</span>
+          {/if}
         </header>
 
         <p class="crumb mono" title="Where this asset sits in the estate">
@@ -744,18 +1144,134 @@
           </dl>
         </section>
 
+        <!--
+          The three writes that are about the asset rather than about one of
+          its fields. Environment, owner and status are not among them: the
+          *In force* group above is #431's and draws where each value comes
+          from, and setting the stored half beside that is a design of its own.
+        -->
+        <div class="acts">
+          <button class="btn sm" onclick={beginRename}>Rename</button>
+          <button class="btn sm" onclick={() => (moving = true)}>Move…</button>
+          <button class="btn sm danger" onclick={() => (deleting = true)}>Delete</button>
+        </div>
+
+        {#if writeFailure}
+          <p class="fail wf" role="alert">{writeFailure}</p>
+        {/if}
+
         <section class="grp">
           <h3 class="lab">Properties</h3>
           <dl class="props">
             {#each detail.properties as property (property.key)}
               <div class="prop {property.custom ? 'own' : ''}">
                 <dt>{property.label}</dt>
-                <dd class={property.value === null ? "faint" : ""}>{reading(property)}</dd>
+                <dd>
+                  {#if editingKey === property.key}
+                    <!--
+                      The kind decides the control, and the kind of a
+                      *declared but unfilled* property can only come from the
+                      type table — which is why it is on the wire. `value` and
+                      `oninput` rather than `bind:value`: Svelte refuses a
+                      two-way binding on an input whose `type` is dynamic.
+                    -->
+                    <input
+                      class="inp"
+                      type={inputTypeFor(kindOf(property))}
+                      aria-label={property.label}
+                      autocomplete="off"
+                      value={draft}
+                      oninput={(event) => (draft = event.currentTarget.value)}
+                      onkeydown={(event) => {
+                        if (event.key === "Enter") void saveProperty(property);
+                        if (event.key === "Escape") editingKey = null;
+                      }}
+                    />
+                    <button
+                      class="btn sm pri"
+                      disabled={writing}
+                      onclick={() => void saveProperty(property)}
+                    >
+                      Save
+                    </button>
+                  {:else}
+                    <!--
+                      The value is the control. A declared property nobody has
+                      filled in draws an em dash and is still a button, because
+                      the empty one is exactly the property a reader has come
+                      to fill in.
+                    -->
+                    <button
+                      class="val {property.value === null ? 'faint' : ''}"
+                      title="Edit {property.label}"
+                      onclick={() => beginEdit(property)}
+                    >
+                      {reading(property)}
+                    </button>
+                  {/if}
+                </dd>
               </div>
             {/each}
           </dl>
           {#if detail.properties.length === 0}
             <p class="empty">This type declares no properties, and none were added.</p>
+          {/if}
+
+          {#if adding}
+            <!--
+              Story 6: a key of the reader's own, of one of the four kinds, on
+              any asset. The kind is asked for rather than guessed from the
+              text, because `"8080"` and `8080` are different properties and a
+              date read as a string cannot be ordered against another one.
+            -->
+            <div class="add">
+              <input
+                class="inp k"
+                type="text"
+                aria-label="New property key"
+                autocomplete="off"
+                placeholder="backup window"
+                bind:value={newKey}
+              />
+              <!-- The kinds are enumerated once, in `editing.ts`. -->
+              <select class="inp" aria-label="New property kind" bind:value={newKind}>
+                {#each PROPERTY_KINDS as offered (offered.kind)}
+                  <option value={offered.kind}>{offered.label}</option>
+                {/each}
+              </select>
+              <input
+                class="inp"
+                type={inputTypeFor(newKind)}
+                aria-label="New property value"
+                autocomplete="off"
+                value={newValue}
+                oninput={(event) => (newValue = event.currentTarget.value)}
+                onkeydown={(event) => {
+                  if (event.key === "Enter") void addProperty();
+                  if (event.key === "Escape") adding = false;
+                }}
+              />
+              <div class="add-f">
+                <button class="btn sm" onclick={() => (adding = false)}>Cancel</button>
+                <button
+                  class="btn sm pri"
+                  disabled={writing || newKey.trim() === "" || newValue.trim() === ""}
+                  onclick={() => void addProperty()}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          {:else}
+            <button
+              class="btn sm"
+              onclick={() => {
+                adding = true;
+                writeFailure = null;
+              }}
+            >
+              Add a property
+            </button>
           {/if}
         </section>
 
@@ -810,6 +1326,67 @@
   </div>
 </section>
 
+{#if creating}
+  <CreateDialog
+    at={creating}
+    {types}
+    create={io.createAsset}
+    onclose={() => (creating = null)}
+    oncreated={(row) => {
+      creating = null;
+      // The address, not a local insert: the new asset is selected in its own
+      // column because the Tree read it back, which is the same path a click
+      // takes and the reason a cold link lands in the same place.
+      router.go(addressOf(row));
+    }}
+  />
+{/if}
+
+{#if moving && detail}
+  <MoveDialog
+    asset={detail.asset}
+    heldBy={detail.held_by}
+    tree={io.assetTree}
+    move={io.moveAsset}
+    onclose={() => (moving = false)}
+    onmoved={() => {
+      moving = false;
+      // The address is unchanged — the asset kept its id — so the re-read is
+      // what redraws the columns at the new path.
+      revision += 1;
+    }}
+  />
+{/if}
+
+{#if deleting && detail}
+  <!-- Bound here: a `{#snippet}` is its own scope and the narrowing above does
+       not reach into it. -->
+  {@const doomed = detail.asset}
+  <Modal title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
+    {#snippet body()}
+      <p class="ask">
+        Delete <strong>{doomed.name}</strong>? Its history goes with it, and links drawn to it
+        stay visible and marked.
+      </p>
+      <!--
+        Nothing here counts what the asset holds. `assets::delete` refuses a
+        branch by name, with the count in the sentence, and a second copy of
+        that rule in the frontend is the copy that goes stale — so the refusal
+        below is the backend's own.
+      -->
+      {#if writeFailure}
+        <p class="fail" role="alert">{writeFailure}</p>
+      {/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (deleting = false)}>Cancel</button>
+      <button class="btn danger" disabled={writing} onclick={() => void confirmDelete()}>
+        {writing ? "Deleting…" : "Delete"}
+      </button>
+    {/snippet}
+  </Modal>
+{/if}
+
 <style>
   /* Three rows now: the room bar, the search strip, and the tree under both.
      `app.css` gives `.view` two, and the strip is this view's own. */
@@ -831,6 +1408,64 @@
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+  }
+
+  /*
+    The column and its header travel together; the rows scroll under it.
+
+    Its 220px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
+    The width moved here from `.col` when the header arrived (#429): what the
+    strip lays out is this wrapper, so this is the number the arithmetic has
+    to be told.
+  */
+  .colw {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    flex: none;
+    min-height: 0;
+    border-right: 1px solid var(--hair);
+  }
+
+  .col-h {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    flex: none;
+    padding: 0 4px 0 10px;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .col-h .col-t {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 600 10px/1 var(--disp);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .col-h .plus {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 2px;
+    color: var(--muted);
+    font: 400 14px/1 var(--sans);
+  }
+
+  .col-h .plus:hover:not(:disabled) {
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .col-h .plus:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   /*
@@ -904,18 +1539,15 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
-    /* `tree.ts`'s `COLUMN_WIDTH`; see the spine's rule below. */
-    width: 220px;
-    flex: none;
+    flex: 1;
     margin: 0;
     padding: 6px 0;
     list-style: none;
-    border-right: 1px solid var(--hair);
     overflow-y: auto;
   }
 
   /*
-    A spine (story 28). Its 30px, and `.col`'s 220px above, are `tree.ts`'s
+    A spine (story 28). Its 30px, and `.colw`'s 220px above, are `tree.ts`'s
     `SPINE_WIDTH` and `COLUMN_WIDTH`: the arithmetic that decides *which*
     columns collapse is pure, so it has to be told how wide the things it
     arranges are drawn. `the strip's arithmetic measures the widths this view
@@ -960,6 +1592,14 @@
 
   .col.spine:hover .vn {
     color: var(--muted);
+  }
+
+  .none {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
   }
 
   .row {
@@ -1086,6 +1726,9 @@
   }
 
   .prop dd {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin: 0;
     font-family: var(--mono);
     overflow-wrap: anywhere;
@@ -1138,6 +1781,66 @@
 
   .prop .hl.none {
     color: var(--faint);
+  }
+
+  /* The value reads as the value it is until it is hovered: a pane of boxes
+     would be a form, and this is a record that can be edited. */
+  .prop dd .val {
+    flex: 1;
+    min-width: 0;
+    padding: 0 3px;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    border-radius: 2px;
+    overflow-wrap: anywhere;
+  }
+
+  .prop dd .val:hover {
+    background: var(--raised);
+  }
+
+  .prop dd .inp {
+    height: 22px;
+    font: inherit;
+  }
+
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 12px;
+  }
+
+  .wf {
+    margin: -6px 0 12px;
+    font-size: 12px;
+  }
+
+  .tf {
+    margin: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .add {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 88px;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .add .add-f {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .ask {
+    margin: 0;
+    font-size: 13px;
   }
 
   .lst,

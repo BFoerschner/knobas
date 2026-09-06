@@ -7,8 +7,9 @@
  *
  * A §10.8-ratified module pair on the `time` module's precedent (issue #428).
  * **Every** asset command belongs here — the route commands #432 adds, the
- * import #439 adds and M4.1's alert reads as well as these six — so the bridge
- * grows one module rather than one more section of `entity.ts` per ticket.
+ * import #439 adds and M4.1's alert reads as well as these seven — so the
+ * bridge grows one module rather than one more section of `entity.ts` per
+ * ticket. #429's `assetTypes` is the first to have arrived that way.
  *
  * There is no asset *event*. Every mutation writes a line to the activity
  * stream and the shell learns from the signal it already watches
@@ -94,6 +95,45 @@ export interface Inherited<T> {
   /** The asset the value is set on — the asset itself when it is set here. */
   source_id: string;
   source_name: string;
+}
+
+/**
+ * One property a type declares — `knobas_core::asset::TypedProperty`.
+ *
+ * The `kind` is what a pane's editor needs and what an {@link AssetProperty}
+ * cannot carry: a declared key nobody has filled in arrives with `value: null`,
+ * and there is no kind in a `null`.
+ */
+export interface TypedProperty {
+  /** The key it is stored under in the properties bag. */
+  key: string;
+  /** What the pane calls it. */
+  label: string;
+  kind: PropertyKind;
+}
+
+/**
+ * One built-in asset type — `knobas_core::asset::AssetType`.
+ *
+ * Read off the backend rather than declared here, so the nineteen types are
+ * one list. The **ids are wire values and never change**; the labels are
+ * display and may be reworded.
+ */
+export interface AssetType {
+  id: string;
+  label: string;
+  /** Two characters — the chip a column row draws. */
+  monogram: string;
+  /** In the order the pane shows them. `custom` declares none. */
+  properties: TypedProperty[];
+  /**
+   * The child types conventionally suggested under one of these, by id —
+   * story 17's *usual here*.
+   *
+   * A suggestion and not a constraint: the create dialog offers all nineteen
+   * whatever is in here, and an empty list is a real answer.
+   */
+  suggests: string[];
 }
 
 /**
@@ -214,6 +254,18 @@ export interface PropertyEdit {
  * "cleared" and "not mentioned" the same value on the wire.
  */
 export type AssetEdit = NameEdit | StatusEdit | EnvironmentEdit | OwnerEdit | PropertyEdit;
+
+/**
+ * The built-in type table: what a type is called, its monogram, the properties
+ * it declares and the children usually held inside one.
+ *
+ * A constant on the backend, so the answer never changes within a build and a
+ * caller may read it once. It needs no database, which is why it is the one
+ * command here that answers before bring-up.
+ */
+export function assetTypes(): Promise<AssetType[]> {
+  return invoke<AssetType[]>("asset_types");
+}
 
 /**
  * One Miller column: what `parentId` holds.

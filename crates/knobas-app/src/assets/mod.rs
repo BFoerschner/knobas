@@ -1,5 +1,8 @@
-//! The estate: assets, the tree they sit in, and the six commands that read
-//! and edit it (spec #427 "M4.0 Estate", issue #428).
+//! The estate: assets, the tree they sit in, and the seven commands that read
+//! and edit it (spec #427 "M4.0 Estate", issues #428 and #429).
+//!
+//! Six of the seven landed with #428; `asset_types` joined them with #429,
+//! when the create dialog gave the built-in table a reader.
 //!
 //! `commands/assets.rs` is a set of shims over this module; every decision
 //! lives here, with tests, because a `#[tauri::command]` cannot be called from
@@ -654,6 +657,32 @@ fn inherited<T>(
                 source_name: row.name.clone(),
             })
         })
+}
+
+/// The built-in type table, as the create dialog and the pane's editor read
+/// it.
+///
+/// A read with no database under it: the table is a `const` in
+/// `knobas_core::asset`, because the half of a type that matters -- the
+/// monogram, the *ordered* property schema, and the child types conventionally
+/// suggested -- cannot be written in SQL. It is put on the wire rather than
+/// copied into TypeScript so that the nineteen types are one list, and because
+/// the surface #429 builds needs two things nothing else on this bridge
+/// carries:
+///
+/// * **which types are usual under the asset the plus was pressed on** (story
+///   17), which is `AssetType::suggests`; and
+/// * **which kind an unfilled typed property takes**. [`AssetProperty`] hands
+///   the pane a declared key with `value: null`, and there is no kind in a
+///   `null` -- so without the schema a reader filling in a VM's `ip` would be
+///   guessing whether the backend wants text or a number.
+///
+/// `Vec` and not `&'static [AssetType]` because a command's answer is
+/// serialized and owned; the copy is nineteen structs of pointers, once per
+/// window.
+#[must_use]
+pub fn types() -> Vec<AssetType> {
+    asset::TYPES.to_vec()
 }
 
 /// The children of `parent_id`, or the estate's top level when it is `None`.

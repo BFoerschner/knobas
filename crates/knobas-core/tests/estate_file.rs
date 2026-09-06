@@ -251,6 +251,55 @@ fn every_type_is_in_the_type_table() {
     }
 }
 
+/// Every parent-and-child pair the real estate uses is a pair the type table
+/// **suggests**.
+///
+/// The conventions `AssetType::suggests` carries are what the create dialog
+/// offers as *usual here* (story 17, #429), and the only estate there is to
+/// answer to is this one (ADR-0013: the real container is the witness). So the
+/// two are checked against each other here rather than against a diagram: a
+/// shape that occurs in provisioned infrastructure and is not offered is a
+/// convention that has drifted from the thing it describes.
+///
+/// It runs on **types**, not on assets, so the six distinct pairs this file
+/// holds are six assertions and not twenty-odd. It is one-directional on
+/// purpose: a type may suggest a pair the estate has no instance of -- the
+/// design draws chains this infrastructure does not reach into -- and only the
+/// other direction is a drift.
+#[test]
+fn every_pair_the_real_estate_holds_is_a_pair_the_type_table_suggests() {
+    let estate = estate();
+    let assets = assets(&estate);
+    let type_of: HashMap<&str, &str> = assets
+        .iter()
+        .map(|asset| (id(asset), field(asset, "type")))
+        .collect();
+
+    let mut pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for asset in assets {
+        let Some(parent) = asset.get("parent").and_then(Value::as_str) else {
+            continue;
+        };
+        let holder = type_of[parent];
+        pairs.insert((holder, field(asset, "type")));
+    }
+    assert!(
+        pairs.len() >= 5,
+        "the estate has stopped describing a tree of more than one shape: {pairs:?}"
+    );
+
+    for (holder, held) in pairs {
+        let declared = knobas_core::asset::find(holder).expect("a type in the table");
+        assert!(
+            declared.suggests.contains(&held),
+            "the estate holds a {held:?} inside a {holder:?} and the type table \
+             does not suggest it, so creating that pair in the Tree means \
+             hunting for the type: {:?}",
+            declared.suggests
+        );
+    }
+}
+
 #[test]
 fn the_environment_and_the_owner_are_set_at_the_root_and_nowhere_else() {
     let estate = estate();

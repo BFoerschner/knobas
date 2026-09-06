@@ -1334,12 +1334,14 @@ async fn a_column_row_reports_its_effective_health_and_what_is_wrong_inside() {
 
 /// Invoke `cmd` on a mock app that manages a `Lifecycle` with no pool.
 ///
-/// Every asset command asks `lifecycle.pool()?` first, so a call with nothing
-/// ready reaches the *body* and answers `not_ready`. That is the marker for
-/// "registered and dispatched", as distinct from "no such command" -- and it
-/// is only reachable because none of them declares the state as an argument
-/// (carry-over §10.6(a)).
-fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
+/// Every asset command *that reads or writes* asks `lifecycle.pool()?` first,
+/// so a call with nothing ready reaches the *body* and answers `not_ready`.
+/// That is the marker for "registered and dispatched", as distinct from "no
+/// such command" -- and it is only reachable because none of them declares the
+/// state as an argument (carry-over §10.6(a)). `asset_types` is the one that
+/// needs no pool and therefore **answers**, which is why the success value is
+/// the response body rather than a placeholder.
+fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
             knobas_app::commands::assets::asset_tree,
@@ -1348,6 +1350,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
             knobas_app::commands::assets::edit_asset,
             knobas_app::commands::assets::move_asset,
             knobas_app::commands::assets::delete_asset,
+            knobas_app::commands::assets::asset_types,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -1378,7 +1381,11 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
              so this proves nothing about decoding: {rejection}"
         );
     }
-    outcome.map(|_| String::new())
+    outcome.and_then(|answered| {
+        answered
+            .deserialize::<serde_json::Value>()
+            .map_err(|error| format!("the answer is not JSON: {error}"))
+    })
 }
 
 use tauri::Manager;
@@ -1454,6 +1461,66 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
              {rejection}"
         );
     }
+}
+
+/// **The type table answers before there is a database**, and the answer is the
+/// whole table.
+///
+/// The command every other one here is unlike: it takes no state, so the loop
+/// above's `not_ready` marker cannot say anything about it, and what stands in
+/// its place is the answer itself. A create dialog that could not offer a type
+/// until the pool came up would be a dialog that draws empty on a cold start.
+///
+/// The three assertions are the three things the dialog reads: the **count**
+/// (spec #427's nineteen), the **schema in its declared order** -- which is
+/// what tells a reader filling in a VM's `ip` that the backend wants text --
+/// and the **suggestions**, which are story 17's *usual here*.
+#[test]
+fn the_type_table_answers_with_no_pool_and_carries_the_schema_and_the_suggestions() {
+    let answered = invoke("asset_types", serde_json::json!({}))
+        .expect("`asset_types` needs no pool and answers before bring-up");
+    let types = answered.as_array().expect("a list of types");
+    assert_eq!(types.len(), 19, "spec #427 names nineteen types");
+
+    let vm = types
+        .iter()
+        .find(|entry| entry["id"] == "vm")
+        .expect("`vm` is one of them");
+    assert_eq!(vm["monogram"], "VM");
+    assert_eq!(
+        vm["properties"]
+            .as_array()
+            .expect("a schema")
+            .iter()
+            .map(|property| (
+                property["key"].as_str().expect("a key"),
+                property["kind"].as_str().expect("a kind")
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("hostname", "text"),
+            ("ip", "text"),
+            ("os", "text"),
+            ("size", "text")
+        ],
+        "the schema arrives in its declared order, with the kind an editor needs"
+    );
+    assert!(
+        vm["suggests"]
+            .as_array()
+            .expect("a suggestion list")
+            .contains(&serde_json::json!("container_engine")),
+        "a VM usually holds a container engine: {}",
+        vm["suggests"]
+    );
+    // The escape hatch is the negative control: a table that answered with the
+    // same list for every type would pass everything above.
+    let custom = types
+        .iter()
+        .find(|entry| entry["id"] == "custom")
+        .expect("`custom` is one of them");
+    assert_eq!(custom["properties"], serde_json::json!([]));
+    assert_eq!(custom["suggests"], serde_json::json!([]));
 }
 
 /// The control for the loop above: without it, that loop would pass just as

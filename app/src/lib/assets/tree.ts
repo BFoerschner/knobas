@@ -257,13 +257,15 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step
 }
 
 /**
- * How wide the Tree draws one full column, in pixels — `.col`'s own width.
+ * How wide the Tree draws one full column, in pixels — `.colw`'s own width.
  *
  * A copy of a CSS number, and the one place it is copied. The collapse is a
  * question about *layout* — does the next column still fit beside the fixed
  * pane — and the only honest way to answer it in a pure function is with the
- * width the stylesheet uses. `AssetsView.svelte` sets `.col` and `.spine` from
- * these two constants' values and says so beside them.
+ * width the stylesheet uses. `AssetsView.svelte` sets `.colw` and `.spine` from
+ * these two constants' values and says so beside them. It is the *wrapper*
+ * and not the `ol` inside it because #429 gave the column a header: what the
+ * strip lays out is the wrapper, and the rows scroll under it.
  */
 export const COLUMN_WIDTH = 220;
 

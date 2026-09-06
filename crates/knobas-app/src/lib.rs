@@ -296,6 +296,7 @@ pub fn run() {
             commands::assets::edit_asset,
             commands::assets::move_asset,
             commands::assets::delete_asset,
+            commands::assets::asset_types,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -12,7 +12,7 @@
 //! AppState>`: carry-over §10.6(a), the rule `commands/mod.rs`'s own test
 //! enforces for the whole directory.
 //!
-//! # Why the four writers take an `AppHandle` and the two reads do not
+//! # Why the four writers take an `AppHandle` and the three reads do not
 //!
 //! Because they announce. Every mutation of an asset is a line in the activity
 //! stream (story 11), and the way the shell learns is the `activity:new` event
@@ -20,8 +20,18 @@
 //! use. **No event of the estate's own**: a channel of its own would be a
 //! second thing to keep in step with the first and would carry no fact the
 //! line does not already hold.
+//!
+//! # And why one of the three takes no state at all
+//!
+//! `asset_types` (#429) reads a `const`, not a database, so it has no
+//! `Lifecycle` to ask and no `Result` to answer with -- the shape `app::ping`
+//! and `app_status` already have. It is the reason `tests/assets_ipc.rs` has a
+//! test of its own beside the registration loop, whose `not_ready` marker only
+//! means anything for a command that asks for a pool.
 
 use tauri::{Emitter, State};
+
+use knobas_core::asset::AssetType;
 
 use crate::assets::{self, AssetDetail, AssetEdit, AssetRow, PropertyValue};
 use crate::{IpcError, Lifecycle};
@@ -40,6 +50,26 @@ fn announce<R: tauri::Runtime>(
             tracing::warn!(%error, verb = %line.verb, "an asset activity line was not announced");
         }
     }
+}
+
+/// The built-in asset types: id, label, monogram, the ordered typed-property
+/// schema, and the child types conventionally suggested under one.
+///
+/// **The one command here that takes no state**, because there is nothing to
+/// read: the table is a `const` in `knobas_core::asset` and the answer is the
+/// same before bring-up as after it. Everything the create dialog and the
+/// pane's property editor need to offer a type or an input is in it, and
+/// putting it on the wire is what keeps the nineteen types one list rather
+/// than one list and a TypeScript copy of it.
+///
+/// **Answers without a `Result`**, which `app::ping` and `app_status` already
+/// do: there is no read to fail and no argument to refuse, and a `Result` that
+/// is always `Ok` is an error branch every caller has to write and no test can
+/// reach.
+#[tauri::command]
+#[must_use]
+pub fn asset_types() -> Vec<AssetType> {
+    assets::types()
 }
 
 /// One Miller column: what `parentId` holds, or the top of the estate.
@@ -180,7 +210,7 @@ pub async fn delete_asset<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use crate::assets::{AssetProperty, AssetStatus, Environment};
-    use knobas_core::asset::PropertyKind;
+    use knobas_core::asset::{self, PropertyKind};
     use knobas_sync::mirror::{assert_shape, declared_union};
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
@@ -393,7 +423,28 @@ mod tests {
         }
     }
 
-    /// The six commands are invoked from the mirror by the names they are
+    /// The type table's two shapes, exercised on a **type that declares
+    /// properties and suggests children** -- `custom` declares and suggests
+    /// nothing, so it would let both lists go missing without a word.
+    #[test]
+    fn the_type_table_matches_its_typescript_mirror() {
+        let vm = asset::find("vm").expect("`vm` is in the table");
+        assert!(!vm.properties.is_empty() && !vm.suggests.is_empty());
+        assert_shape(
+            MIRROR,
+            "AssetType",
+            &serde_json::to_value(vm).unwrap(),
+            &["id", "label", "monogram", "properties", "suggests"],
+        );
+        assert_shape(
+            MIRROR,
+            "TypedProperty",
+            &serde_json::to_value(vm.properties[0]).unwrap(),
+            &["key", "label", "kind"],
+        );
+    }
+
+    /// The seven commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -409,6 +460,7 @@ mod tests {
             "edit_asset",
             "move_asset",
             "delete_asset",
+            "asset_types",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),

@@ -36,13 +36,21 @@
 //! [`tests::custom_declares_no_typed_properties`] pins it, because an empty
 //! slice is exactly what a careless edit adds a field to.
 //!
-//! # What is not here yet
+//! # The third column: what usually goes here
 //!
-//! The **child types conventionally suggested** (spec #427's type table, the
-//! third column). Nothing in #428 creates through the UI -- #429 owns the
-//! create dialog and the suggestion list it draws -- and a table of
-//! suggestions with no reader would be untested prose. The ids above are what
-//! it will be written against.
+//! Each type carries [`AssetType::suggests`], the **child types
+//! conventionally suggested** under it -- spec #427's type table, the third
+//! column, and story 17's *"the type conventions suggesting what usually goes
+//! here and any type allowed"*. #428 left it out because a table of
+//! suggestions with no reader would have been untested prose; #429's create
+//! dialog is that reader, and it draws the list as *usual here: ...* above a
+//! picker that still offers all nineteen.
+//!
+//! **A suggestion is never a constraint.** [`crate::asset`] does not enforce
+//! it and neither does `knobas_app::assets::create`: the estate is somebody's
+//! real infrastructure, and a container held under a compose project that runs
+//! on a VM elsewhere (story 16) is exactly the shape a constraint here would
+//! have refused. What the list buys is the common case costing one click.
 //!
 //! *runtime* and *scenario* are generic on purpose: spec #427 replaced the
 //! Flowrun-branded types with them so the tree can hold an Orchestra instance
@@ -90,7 +98,12 @@ impl PropertyKind {
 }
 
 /// One declared property of a type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Serialized as it stands: `asset_types` puts the table on the wire so the
+/// create dialog and the pane's property editor read *one* list. Without it
+/// the frontend would carry a second copy of nineteen types -- and, worse,
+/// would have to guess which kind an unfilled typed property takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct TypedProperty {
     /// The key it is stored under in `knobas.asset.properties`.
     pub key: &'static str,
@@ -101,7 +114,7 @@ pub struct TypedProperty {
 }
 
 /// One built-in asset type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct AssetType {
     /// The `knobas.asset.type_id` value. A wire value -- see the module docs.
     pub id: &'static str,
@@ -112,6 +125,19 @@ pub struct AssetType {
     /// The typed properties, **in the order the pane shows them**. The order is
     /// the declaration's; it is not sorted anywhere.
     pub properties: &'static [TypedProperty],
+    /// The child types conventionally suggested under one of these, by id, in
+    /// the order the create dialog offers them.
+    ///
+    /// A **suggestion and not a constraint** -- see the module docs. Empty is
+    /// a real answer: nothing usually goes inside a table, a network or a
+    /// `custom`, and an empty list is what makes the dialog say *any type*
+    /// rather than name one at random.
+    ///
+    /// Every id here is one [`TYPES`] declares, which
+    /// [`tests::every_suggestion_is_a_type_that_exists`] holds it to: a typo
+    /// would be a chip in the dialog that creates a type
+    /// `knobas_app::assets::create` refuses.
+    pub suggests: &'static [&'static str],
 }
 
 /// A shorthand so the table below reads as a table.
@@ -126,12 +152,35 @@ use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
 /// The order is the one story 4 lists them in -- outermost thing first, down to
 /// the smallest -- so a reader scanning the list reads the estate top to
 /// bottom. `custom` is last because it is the escape hatch rather than a level.
+///
+/// # Where the `suggests` lists come from
+///
+/// Two sources, and nothing invented beyond them:
+///
+/// * **Design §12.1's two chains** -- *site > hypervisor > VM > engine >
+///   container > runtime > scenario > step > connector* and *database server >
+///   database > schema > table*. Every link in both is a suggestion here, and
+///   [`tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time`] reads
+///   them back.
+/// * **What the real estate actually holds.** `testenv/hetzner/estate.json`
+///   describes provisioned infrastructure, and it holds three pairs the chains
+///   do not draw -- a site under a site, a VM directly under a site, and a
+///   database inside a container. `knobas-core`'s own `tests/estate_file.rs`
+///   asserts that every parent-and-child pair in that file is suggested here,
+///   so the conventions answer to an estate that exists (ADR-0013) rather than
+///   to a diagram.
+///
+/// The remaining few -- a service or a database server on a VM, a middleware
+/// behind a reverse proxy, a module or a connector under a service -- are the
+/// neighbouring types §12.1's own prose names, and they are suggestions: the
+/// dialog offers all nineteen whatever is listed here.
 pub const TYPES: &[AssetType] = &[
     AssetType {
         id: "site",
         label: "Site",
         monogram: "SI",
         properties: &[p("location", "Location", T), p("provider", "Provider", T)],
+        suggests: &["site", "hypervisor", "vm", "network"],
     },
     AssetType {
         id: "hypervisor",
@@ -142,6 +191,7 @@ pub const TYPES: &[AssetType] = &[
             p("ip", "IP", T),
             p("os", "OS", T),
         ],
+        suggests: &["vm"],
     },
     AssetType {
         id: "vm",
@@ -153,12 +203,19 @@ pub const TYPES: &[AssetType] = &[
             p("os", "OS", T),
             p("size", "Size", T),
         ],
+        suggests: &[
+            "container_engine",
+            "service",
+            "database_server",
+            "reverse_proxy",
+        ],
     },
     AssetType {
         id: "container_engine",
         label: "Container engine",
         monogram: "CE",
         properties: &[p("version", "Version", T), p("socket", "Socket", T)],
+        suggests: &["container"],
     },
     AssetType {
         id: "container",
@@ -169,6 +226,7 @@ pub const TYPES: &[AssetType] = &[
             p("ports", "Ports", T),
             p("restart_policy", "Restart policy", T),
         ],
+        suggests: &["service", "database", "runtime"],
     },
     AssetType {
         id: "service",
@@ -179,36 +237,42 @@ pub const TYPES: &[AssetType] = &[
             p("port", "Port", N),
             p("health_path", "Health path", T),
         ],
+        suggests: &["module", "connector"],
     },
     AssetType {
         id: "module",
         label: "Module",
         monogram: "MD",
         properties: &[p("version", "Version", T), p("repository", "Repository", U)],
+        suggests: &[],
     },
     AssetType {
         id: "runtime",
         label: "Runtime",
         monogram: "RT",
         properties: &[p("url", "URL", U), p("version", "Version", T)],
+        suggests: &["scenario"],
     },
     AssetType {
         id: "scenario",
         label: "Scenario",
         monogram: "SC",
         properties: &[p("path", "Path", T), p("last_run", "Last run", D)],
+        suggests: &["step"],
     },
     AssetType {
         id: "step",
         label: "Step",
         monogram: "SP",
         properties: &[p("position", "Position", N), p("action", "Action", T)],
+        suggests: &["connector"],
     },
     AssetType {
         id: "connector",
         label: "Connector",
         monogram: "CN",
         properties: &[p("protocol", "Protocol", T), p("target", "Target", T)],
+        suggests: &[],
     },
     AssetType {
         id: "database_server",
@@ -220,24 +284,28 @@ pub const TYPES: &[AssetType] = &[
             p("host", "Host", T),
             p("port", "Port", N),
         ],
+        suggests: &["database"],
     },
     AssetType {
         id: "database",
         label: "Database",
         monogram: "DB",
         properties: &[p("engine", "Engine", T), p("size_mb", "Size (MB)", N)],
+        suggests: &["schema"],
     },
     AssetType {
         id: "schema",
         label: "Schema",
         monogram: "SM",
         properties: &[p("owner", "Owner", T)],
+        suggests: &["table"],
     },
     AssetType {
         id: "table",
         label: "Table",
         monogram: "TB",
         properties: &[p("rows", "Rows", N)],
+        suggests: &[],
     },
     AssetType {
         id: "reverse_proxy",
@@ -247,6 +315,7 @@ pub const TYPES: &[AssetType] = &[
             p("config_path", "Config path", T),
             p("upstreams", "Upstreams", T),
         ],
+        suggests: &["middleware", "service"],
     },
     AssetType {
         id: "middleware",
@@ -256,12 +325,14 @@ pub const TYPES: &[AssetType] = &[
             p("protocol", "Protocol", T),
             p("config_path", "Config path", T),
         ],
+        suggests: &[],
     },
     AssetType {
         id: "network",
         label: "Network",
         monogram: "NW",
         properties: &[p("cidr", "CIDR", T), p("gateway", "Gateway", T)],
+        suggests: &[],
     },
     AssetType {
         id: "custom",
@@ -269,6 +340,7 @@ pub const TYPES: &[AssetType] = &[
         monogram: "CU",
         // Story 7: the escape hatch declares nothing. See the module docs.
         properties: &[],
+        suggests: &[],
     },
 ];
 
@@ -374,6 +446,84 @@ mod tests {
         assert!(
             TYPES.iter().filter(|t| t.properties.is_empty()).count() == 1,
             "`custom` is the only type with no typed properties"
+        );
+    }
+
+    /// A suggestion nothing declares is a chip in the create dialog that
+    /// mints a type `knobas_app::assets::create` refuses -- a failure the
+    /// reader meets after choosing, with a message about a word they never
+    /// typed.
+    #[test]
+    fn every_suggestion_is_a_type_that_exists() {
+        let declared: BTreeSet<&str> = TYPES.iter().map(|t| t.id).collect();
+        for asset_type in TYPES {
+            let mut seen = BTreeSet::new();
+            for suggestion in asset_type.suggests {
+                assert!(
+                    declared.contains(suggestion),
+                    "{:?} suggests {suggestion:?}, which is not a type",
+                    asset_type.id
+                );
+                assert!(
+                    seen.insert(suggestion),
+                    "{:?} suggests {suggestion:?} twice",
+                    asset_type.id
+                );
+            }
+        }
+    }
+
+    /// Design §12.1's two chains, read back a link at a time.
+    ///
+    /// The pairs and not the count: a table that suggested every type under
+    /// every type would satisfy a count and would tell a reader nothing, and
+    /// `custom` below is the other half of that -- the escape hatch suggests
+    /// nothing, the way it declares no properties.
+    #[test]
+    fn the_two_chains_the_design_draws_are_each_a_link_at_a_time() {
+        let chains = [
+            // site > hypervisor > VM > engine > container > runtime >
+            // scenario > step > connector
+            [
+                "site",
+                "hypervisor",
+                "vm",
+                "container_engine",
+                "container",
+                "runtime",
+                "scenario",
+                "step",
+                "connector",
+            ]
+            .as_slice(),
+            // database server > database > schema > table
+            ["database_server", "database", "schema", "table"].as_slice(),
+        ];
+        for chain in chains {
+            for pair in chain.windows(2) {
+                let (holder, held) = (pair[0], pair[1]);
+                let declared = find(holder).expect("a type in the chain");
+                assert!(
+                    declared.suggests.contains(&held),
+                    "{holder:?} does not suggest {held:?}, which §12.1's chain \
+                     puts directly inside it: {:?}",
+                    declared.suggests
+                );
+            }
+        }
+        assert!(
+            find("custom")
+                .expect("`custom` is in the table")
+                .suggests
+                .is_empty(),
+            "the escape hatch suggests nothing, the way it declares nothing"
+        );
+        assert!(
+            find("table")
+                .expect("`table` is in the table")
+                .suggests
+                .is_empty(),
+            "the chain ends at a table and the list says so"
         );
     }
 
