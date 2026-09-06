@@ -18,6 +18,8 @@ Pass the copy's path in every dispatch. Never pass the memory path.
 
 ## Ceiling (the machine's, not the plan's)
 
+**Every subagent runs on Opus** (Björn, 2026-09-06): pass `model: "opus"` on every Agent call, implementer and merge-manager alike. The session model is Fable; an unspecified model inherits it and burns Fable credit.
+
 Three Rust agents at once, and a merge-manager counts as one. At most two gates run at once; the recipe enforces it. Keep the mix at **two implementers plus one merge-manager** whenever a PR is open, so tickets close and the frontier keeps moving; three implementers only when no PR is open.
 
 ## Step 1 — read the state (jq only; never print issue bodies into context)
@@ -37,7 +39,7 @@ A candidate is **free** when every number in its blocked-by list is a closed iss
 
 ## Step 2 — merge before dispatching
 
-For every open PR that has no merge-manager running, in ascending PR number and **one at a time**: dispatch one merge-manager (background) with the merge-manager brief path, the PR number, the originating issue number, the worktree path `.worktrees/issue-<N>`, and the instruction to squash-merge against an explicit SHA it records first. If a previous merge-manager died mid-turn (a Fable credit exhaustion), dispatch a fresh one on the Opus model; never message the dead one.
+For every open PR that has no merge-manager running, in ascending PR number and **one at a time**: dispatch one merge-manager (background, `model: "opus"`) with the merge-manager brief path, the PR number, the originating issue number, the worktree path `.worktrees/issue-<N>`, and the instruction to squash-merge against an explicit SHA it records first. If a previous merge-manager died mid-turn, dispatch a fresh one; never message the dead one.
 
 After a merge-manager reports a merge: if the PR changed `app/package-lock.json`, run `npm ci` in the root `app/` before creating any further worktree (stale root `node_modules` propagates into every clone). Confirm the issue closed; if not, close it with a comment naming the PR.
 
@@ -48,7 +50,7 @@ Take free candidates in ascending issue number until the ceiling is reached. For
 1. Claim: `gh issue edit N --remove-label ready-for-agent --add-label in-progress`.
 2. Record the branch point: `SHA=$(git -C /Users/dev/Projects/knobas rev-parse origin/main)` after a `git fetch`.
 3. Worktree: `git -C /Users/dev/Projects/knobas worktree add .worktrees/issue-N -b issue-N "$SHA"`, then `cmp app/package-lock.json .worktrees/issue-N/app/package-lock.json && cp -Rpc app/node_modules .worktrees/issue-N/app/node_modules`.
-4. Dispatch one implementer (Agent tool, background, general-purpose) whose prompt names: the brief path, the issue number, the worktree path, the branch-point SHA, the scratchpad directory, and these three sentences verbatim: "Run the full `just check` once at the end, in the foreground, with the Bash timeout at its maximum; never background it. The PR body's `Closes #N` line goes outside backticks; verify with `gh pr view --json closingIssuesReferences`. Stop when the PR is open; you never merge."
+4. Dispatch one implementer (Agent tool, background, general-purpose, `model: "opus"`) whose prompt names: the brief path, the issue number, the worktree path, the branch-point SHA, the scratchpad directory, and these three sentences verbatim: "Run the full `just check` once at the end, in the foreground, with the Bash timeout at its maximum; never background it. The PR body's `Closes #N` line goes outside backticks; verify with `gh pr view --json closingIssuesReferences`. Stop when the PR is open; you never merge."
 
 A ticket whose title says **droppable** is dispatched only when nothing else is free in its milestone.
 
