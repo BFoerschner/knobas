@@ -47,6 +47,9 @@ struct Monitor {
     key: &'static str,
     state: Option<&'static str>,
     response_time_ms: Option<f64>,
+    /// The kind this item is emitted under. `"monitor"` unless a test is
+    /// about a source that emits more than one kind.
+    kind: &'static str,
 }
 
 impl Monitor {
@@ -55,7 +58,13 @@ impl Monitor {
             key,
             state: Some("up"),
             response_time_ms: Some(response_time_ms),
+            kind: samples::KIND,
         }
+    }
+
+    fn of_kind(mut self, kind: &'static str) -> Self {
+        self.kind = kind;
+        self
     }
 }
 
@@ -64,9 +73,9 @@ impl Monitor {
 struct Monitors {
     id: String,
     corpus: Arc<Mutex<Vec<Monitor>>>,
-    /// The kind these items are emitted under, and the kind the descriptor
-    /// declares. `"monitor"` in every test but the negative control.
-    kind: &'static str,
+    /// The kinds the descriptor declares. `["monitor"]` in every test but the
+    /// negative control and the one about a source that emits two kinds.
+    kinds: Vec<&'static str>,
     /// Whether the descriptor declares where a monitor's state lives. Kuma
     /// declares `state`; an adapter that declares nothing is a miss (#277).
     declares_state: bool,
@@ -87,20 +96,27 @@ impl Source for Monitors {
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
             write_ops: Vec::new(),
-            entity_kinds: vec![KindInfo {
-                id: self.kind.to_owned(),
-                label: self.kind.to_owned(),
-                plural: self.kind.to_owned(),
-                monogram: "MO".into(),
-                full_sync_exhaustive: true,
-            }],
+            entity_kinds: self
+                .kinds
+                .iter()
+                .map(|kind| KindInfo {
+                    id: (*kind).to_owned(),
+                    label: (*kind).to_owned(),
+                    plural: (*kind).to_owned(),
+                    monogram: "MO".into(),
+                    full_sync_exhaustive: true,
+                })
+                .collect(),
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: if self.declares_state {
-                vec![knobas_source::KindPaths {
-                    kind: self.kind.to_owned(),
-                    status_name: vec![knobas_source::PayloadPath::of(["state"])],
-                    ..knobas_source::KindPaths::default()
-                }]
+                self.kinds
+                    .iter()
+                    .map(|kind| knobas_source::KindPaths {
+                        kind: (*kind).to_owned(),
+                        status_name: vec![knobas_source::PayloadPath::of(["state"])],
+                        ..knobas_source::KindPaths::default()
+                    })
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -125,7 +141,7 @@ impl Source for Monitors {
         for monitor in &corpus {
             sink.item(SyncItem {
                 entity: knobas_core::entity::EntityRef::new(&self.id, monitor.key),
-                kind: self.kind.to_owned(),
+                kind: monitor.kind.to_owned(),
                 title: monitor.key.to_owned(),
                 body_text: String::new(),
                 author: None,
@@ -151,14 +167,14 @@ impl Source for Monitors {
 type Corpus = Arc<Mutex<Vec<Monitor>>>;
 type Idle = Arc<Mutex<bool>>;
 
-fn source_of(id: &str, kind: &'static str, monitors: &[Monitor]) -> (Monitors, Corpus, Idle) {
+fn source_of(id: &str, kinds: &[&'static str], monitors: &[Monitor]) -> (Monitors, Corpus, Idle) {
     let corpus: Corpus = Arc::new(Mutex::new(monitors.to_vec()));
     let idle: Idle = Arc::new(Mutex::new(false));
     (
         Monitors {
             id: id.to_owned(),
             corpus: Arc::clone(&corpus),
-            kind,
+            kinds: kinds.to_vec(),
             declares_state: true,
             idle: Arc::clone(&idle),
         },
@@ -168,7 +184,7 @@ fn source_of(id: &str, kind: &'static str, monitors: &[Monitor]) -> (Monitors, C
 }
 
 fn source(id: &str, monitors: &[Monitor]) -> (Monitors, Corpus, Idle) {
-    source_of(id, samples::KIND, monitors)
+    source_of(id, &[samples::KIND], monitors)
 }
 
 /// A migrated database this test shares with nobody. See the module header.
@@ -327,7 +343,11 @@ async fn a_monitor_the_second_run_does_not_publish_gets_no_second_sample() {
 async fn a_source_that_emits_no_monitor_kind_writes_no_samples() {
     let pool = pool("a_source_that_emits_no_m").await;
     let id = "kuma".to_owned();
-    let (src, _corpus, _idle) = source_of(&id, "ticket", &[Monitor::up("PAY-231", 35.0)]);
+    let (src, _corpus, _idle) = source_of(
+        &id,
+        &["ticket"],
+        &[Monitor::up("PAY-231", 35.0).of_kind("ticket")],
+    );
 
     let report = knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
@@ -336,6 +356,42 @@ async fn a_source_that_emits_no_monitor_kind_writes_no_samples() {
         count(&pool, &id).await,
         0,
         "a ticket is not a monitor and has no timeseries"
+    );
+}
+
+/// The other half of the negative control, and the half a source emitting one
+/// kind cannot witness: **only the monitors are sampled**, not everything the
+/// source mirrored.
+///
+/// Uptime Kuma emits one kind, so a fixture shaped like it leaves the roster
+/// read's `kind = 'monitor'` filter unwitnessed -- the descriptor gate above
+/// would keep the test green with the filter gone, and the filter would keep
+/// it green with the gate gone. Each masks the other exactly until a source
+/// emits both, which spec #427's "a source that emits `monitor`" leaves open
+/// and which is the only shape that tells them apart.
+#[tokio::test]
+async fn a_source_that_emits_two_kinds_samples_only_its_monitors() {
+    let pool = pool("a_source_that_emits_two_k").await;
+    let id = "kuma".to_owned();
+    let (src, _corpus, _idle) = source_of(
+        &id,
+        &[samples::KIND, "ticket"],
+        &[
+            Monitor::up("gitea", 35.0),
+            Monitor::up("PAY-231", 12.0).of_kind("ticket"),
+        ],
+    );
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(
+        taken(&pool, &format!("{id}:gitea")).await.len(),
+        1,
+        "the monitor was sampled"
+    );
+    assert!(
+        taken(&pool, &format!("{id}:PAY-231")).await.is_empty(),
+        "and the ticket beside it was not"
     );
 }
 
@@ -406,6 +462,7 @@ async fn a_down_monitor_is_never_softened_to_warn() {
             key: "gitea",
             state: Some("down"),
             response_time_ms: Some(9000.0),
+            kind: samples::KIND,
         }],
     );
 
@@ -432,11 +489,13 @@ async fn a_monitor_whose_state_does_not_resolve_is_sampled_as_a_miss() {
                 key: "unlit",
                 state: None,
                 response_time_ms: None,
+                kind: samples::KIND,
             },
             Monitor {
                 key: "unknown",
                 state: Some("bewildered"),
                 response_time_ms: Some(35.0),
+                kind: samples::KIND,
             },
         ],
     );
@@ -467,7 +526,7 @@ async fn a_source_declaring_no_state_path_samples_no_state() {
     let src = Monitors {
         id: id.clone(),
         corpus,
-        kind: samples::KIND,
+        kinds: vec![samples::KIND],
         declares_state: false,
         idle: Arc::new(Mutex::new(false)),
     };

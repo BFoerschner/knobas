@@ -186,10 +186,22 @@ fn response_time_of(payload: &Value) -> Option<i32> {
 /// The candidate paths `descriptor` declares for a monitor's state, when it
 /// declares the [`KIND`] at all.
 ///
-/// `None` is *this source emits no monitors* and is what stops [`append`] from
-/// running; `Some(vec![])` is *this source emits monitors and says nothing
-/// about where their state lives*, which is a miss per monitor and still a
-/// row per monitor. The two are deliberately different answers.
+/// `Some(vec![])` is *this source emits monitors and says nothing about where
+/// their state lives*, which is a miss per monitor and still a row per
+/// monitor. `None` is *this source emits no monitors*, and it is a **saved
+/// round trip rather than a safety check** -- the rule
+/// `run_locked`'s `!sweep_kinds.is_empty()` comment states about itself, and
+/// stated here for the same reason. [`append`]'s roster read is filtered on
+/// `kind = 'monitor'`, so a source with no monitors would read an empty
+/// roster and write nothing anyway; what this saves is the query.
+///
+/// Measured, not assumed: breaking *either* guard alone leaves
+/// `tests/samples.rs`' `a_source_that_emits_no_monitor_kind_writes_no_samples`
+/// green, because each is sufficient on its own. The read's filter is the one
+/// that is load-bearing in general -- spec #427 says "a source that emits
+/// `monitor`", not "a source that emits only monitors" -- and
+/// `a_source_that_emits_two_kinds_samples_only_its_monitors` is the fixture
+/// that can tell the two apart.
 #[must_use]
 pub(crate) fn state_paths(
     descriptor: &knobas_source::SourceDescriptor,
