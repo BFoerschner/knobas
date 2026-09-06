@@ -358,14 +358,11 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
     )
     .await;
     let route = format!("route:{t}-kuma");
-    seed_route(
-        &pool,
-        &route,
-        &vm,
-        &format!("{t} kuma"),
-        &format!("https://{t}.example.test:3001/dashboard"),
-    )
-    .await;
+    // The shape every route in `testenv/hetzner/estate.json` has -- a loopback
+    // host and the port that is the only thing telling the nine of them apart
+    // (ADR-0013: the real container is the witness). The port is unique to this
+    // file, so no other test in this binary can match it.
+    seed_route(&pool, &route, &vm, &format!("{t} kuma"), "http://127.0.0.1:53001/").await;
 
     // The token is on every seeded row, so one query asks all four corpora and
     // the answer is the union's.
@@ -433,38 +430,66 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
         "a property match is highlighted like any other"
     );
 
-    // **A route is found by its URL, one word of it at a time**, which is what
-    // `0019`'s second half buys. Under `0018` alone PostgreSQL emits a URL's
-    // host *with its port* as one lexeme, so nothing short of the whole URL
-    // pasted back matched -- and every route in the real estate is
-    // `http://127.0.0.1:<port>/`, so nothing told the nine of them apart.
-    //
-    // **What is still one lexeme is a dotted host typed on its own**, and that
-    // is the query side rather than the index: `websearch_to_tsquery` lexes
-    // `db.example.test` as one host token, so it cannot meet the three words
-    // the index now holds. Recorded rather than worked around -- the half a
-    // reader needs is the part that *tells two routes apart*, which is the port
-    // and the words, and a whole host is what they paste when they have it.
-    for (typed, why) in [
-        ("3001", "the port, which is what tells two tunnels apart"),
-        ("dashboard", "a path segment"),
-    ] {
-        let by_url = run(&pool, typed, 20).await;
-        let urls: Vec<&str> = by_url
+    // **A route is found by its URL** -- by the port, which on the estate that
+    // exists is the only thing telling nine otherwise identical loopback URLs
+    // apart. `to_tsvector` gives a port a lexeme of its own when the URL ends
+    // at `/`, so this is an exact match and not a prefix one: `run` asks with
+    // `prefix_last_term` false, so nothing here rests on the reader still
+    // typing.
+    let by_port = run(&pool, "53001", 20).await;
+    let ports: Vec<&str> = by_port
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert_eq!(ports, [route.as_str()], "the port finds the route");
+}
+
+/// **Where a URL stops being reachable**, measured rather than assumed (#436).
+///
+/// `corpus::ROUTE`'s docs carry the table this asserts. It is a test and not
+/// only prose because the boundary is not where anybody would guess -- it is
+/// the **path** that fuses a URL's parts together, not the port -- and because
+/// the next reader to widen `0018`'s `fts` needs a red test to work against
+/// rather than a paragraph to measure again.
+///
+/// Both negatives are of the *index*, asked with `prefix_last_term` false.
+/// While the last word is still being typed the first is reachable as a
+/// prefix, which is a hit that vanishes when the reader presses space; the
+/// second is out of reach at every stage.
+#[tokio::test]
+async fn a_path_in_a_url_takes_its_port_and_its_segments_out_of_reach() {
+    let pool = pool().await;
+    let t = token("url");
+
+    let vm = format!("asset:{t}-vm");
+    seed_asset(&pool, &vm, &format!("{t} vm"), None, "", serde_json::json!({})).await;
+    let route = format!("route:{t}-r");
+    seed_route(
+        &pool,
+        &route,
+        &vm,
+        &format!("{t} kuma"),
+        "http://127.0.0.1:54002/dashboard",
+    )
+    .await;
+
+    // The route exists and is findable -- by its name -- so neither assertion
+    // below is green because the fixture is missing.
+    let by_name = run(&pool, &format!("{t} kuma"), 20).await;
+    assert!(
+        by_name
             .iter()
             .flat_map(|g| &g.hits)
-            .map(|hit| hit.row.entity_id.as_str())
-            .collect();
-        assert_eq!(urls, [route.as_str()], "{why}: {typed}");
-    }
-    // The negative, asserted rather than left to be discovered: a dotted host
-    // typed on its own is one lexeme on the *query* side too, so it meets
-    // neither the whole-URL lexemes nor the words. Nothing in `0019` can reach
-    // it -- it is `websearch_to_tsquery`'s parse, not the index's.
-    assert!(
-        run(&pool, &format!("{t}.example.test"), 20).await.is_empty(),
-        "a bare dotted host is one query lexeme; the port and the words are          what a reader can reach a route by"
+            .any(|hit| hit.row.entity_id == route),
+        "the route is in the corpus"
     );
+
+    // The port, fused to the path: the lexeme is `54002/dashboard`.
+    assert!(run(&pool, "54002", 20).await.is_empty());
+    // The path segment, which heads no lexeme and so is out of reach even
+    // mid-typing.
+    assert!(run(&pool, "dashboard", 20).await.is_empty());
 }
 
 /// **A name outranks an ancestor's name outranks a property**, which is the

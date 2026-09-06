@@ -1,11 +1,9 @@
--- 0019_what_the_estate_is_findable_by.sql -- the two halves of the launcher's
--- answer over the estate (#436): an asset's property *values*, indexed, and a
--- route's URL, in words.
+-- 0019_what_the_estate_is_findable_by.sql -- the column `0017` deferred: an
+-- asset's property *values*, indexed.
 --
--- Both are index text and nothing else -- no table, no constraint, no column
--- anything reads but the search. That is why they are one migration: they are
--- one question, asked of the two tables the estate has, by the one ticket that
--- draws an estate row in the launcher.
+-- Index text and nothing else -- no table, no constraint, no column any command
+-- reads. `knobas.route` is deliberately untouched; what was found out about its
+-- URL while writing this is recorded on `knobas_search::corpus::ROUTE`.
 --
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests 0020 and never edits this file or its predecessors -- sqlx
@@ -23,10 +21,8 @@
 -- column; nothing below depends on its absence."*
 --
 -- Issue #436 is what asks the question, in one acceptance criterion:
--- *"searching a hostname property finds the VM"*. So the decision is made here
+-- *"searching a hostname property finds the VM"*. So the decision is made here,
 -- and it has two halves.
-
--- ## Part one: an asset's property values
 --
 -- **Values, never keys.** `$.*` takes the object's member values and drops its
 -- member names. A key is *schema* -- `hostname`, `ip`, `ports` come out of
@@ -109,39 +105,4 @@ alter table knobas.asset
       ),
       'C'
     )
-  );
-
--- ## The second half: a route's URL, in words
---
--- `0018` weights a route's `url` at A through `to_tsvector('english', url)`,
--- and its own docs claim the consequence: *"`to_tsvector` lexes a URL into its
--- host and path, so 'kuma' and '8111' find the routes that carry them"*. On a
--- real URL it does not. PostgreSQL's parser emits a URL's **host with its
--- port** as one lexeme, so `http://127.0.0.1:8111/` indexes as
--- `127.0.0.1:8111`, `127.0.0.1:8111/`, `/` -- and `8111` matches none of them.
---
--- ADR-0013 says the real container is the witness, so this is checked against
--- it: **every** route in `testenv/hetzner/estate.json` is
--- `http://127.0.0.1:<port>/`, so under `0018` alone not one of the nine is
--- findable by the port that is the only thing telling them apart, and the
--- launcher's answer to "what is on 8111" is nothing. #436's acceptance
--- criterion is *"a route is found by its URL"*; found by pasting the whole URL
--- back is not what a reader means by it.
---
--- So the URL is indexed a second time with its punctuation replaced by spaces,
--- at weight **B** -- the whole-URL lexemes keep weight A, so an exact URL still
--- ranks above a route that merely carries the port, and a route's **name**
--- (also A) is not displaced by any of it. `translate` and nothing cleverer:
--- the seven characters that separate the parts of a URL become spaces, the
--- ordinary word parser takes it from there, and hyphens need no help --
--- `to_tsvector` already splits `knobas-teamcity` into its parts and the whole.
---
--- `0018` is not edited (migrations are append-only and sqlx checksums them);
--- this replaces its expression the way the block above replaces `0017`'s.
-
-alter table knobas.route
-  alter column fts set expression as (
-    setweight(to_tsvector('english', coalesce(name, '')), 'A') ||
-    setweight(to_tsvector('english', coalesce(url, '')), 'A') ||
-    setweight(to_tsvector('english', translate(coalesce(url, ''), ':/.?&=#', '       ')), 'B')
   );

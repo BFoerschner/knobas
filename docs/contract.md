@@ -5492,9 +5492,7 @@ From this commit on, each of the following requires an orchestrator decision **a
 
 - **Migration `0019`, and no IPC change at all, issue #436 (2026-09-06):** the launcher's answer over
   the estate. `0019_what_the_estate_is_findable_by.sql` is **index text and nothing else** — no
-  table, no constraint, no column any command reads — which is why two tables are in one migration:
-  they are one question, asked of both halves of the estate, by the one ticket that draws an estate
-  row in ⌘K.
+  table, no constraint, no column any command reads, no TypeScript mirror.
 
   **`knobas.asset` gains `props_text`, generated and stored, and `fts` gains it at weight C.**
   `0017` deferred exactly this and said so: *"property values are a jsonb bag whose keys are half
@@ -5513,24 +5511,23 @@ From this commit on, each of the following requires an orchestrator decision **a
   PostgreSQL forbids a generated column from referencing another, so `fts` recomputes the
   expression; the two copies are adjacent in one file and
   `knobas-db`'s `the_assets_property_text_is_the_same_expression_the_index_matches` reads them back
-  against each other out of the live catalog.
+  against each other out of the live catalog. `corpus::ASSET.headline_text` grows
+  `|| ' — ' || a.props_text` with it, which is `Corpus::headline_text`'s own rule rather than a
+  second decision: a hit matched on a property with nothing quotable in the excerpt is a row whose
+  reason for being there is invisible.
 
-  **`knobas.route.fts` is replaced, and `0018`'s claim about it was wrong.** That claim read
-  *"`to_tsvector` lexes a URL into its host and path, so 'kuma' and '8111' find the routes that carry
-  them"*. It does not: PostgreSQL emits a URL's host **with its port** as one lexeme, so
-  `http://127.0.0.1:8111/` indexes as `127.0.0.1:8111`, `127.0.0.1:8111/` and `/`, and `8111`
-  matches none of them. ADR-0013 settles how much that matters — **every** route in
-  `testenv/hetzner/estate.json` is `http://127.0.0.1:<port>/`, so under `0018` alone not one of the
-  nine was findable by the only thing telling them apart. `0019` indexes the URL a second time with
-  its separators replaced by spaces, at weight **B**: the whole-URL lexemes keep A, so an exact URL
-  still outranks a route that merely carries the port, and a route's *name* is not displaced.
-  `0018` itself is not edited — migrations are append-only and sqlx checksums them. What is still out
-  of reach is a **dotted host typed on its own**: that is one lexeme on the *query* side, which no
-  index can meet, and `corpus_seam.rs` asserts the negative beside the two positives.
-
-  `corpus::ASSET.headline_text` grows `|| ' — ' || a.props_text` with it, which is
-  `Corpus::headline_text`'s own rule rather than a second decision: a hit matched on a property with
-  nothing quotable in the excerpt is a row whose reason for being there is invisible.
+  **`knobas.route` is deliberately untouched, and the measurement behind that is on
+  `corpus::ROUTE`.** This entry began as a second `alter` widening `0018`'s `fts`, on the premise
+  that PostgreSQL fuses a URL's host and port into one lexeme and that therefore none of the nine
+  routes in `testenv/hetzner/estate.json` was findable by its port. **The premise was wrong, and the
+  estate is what said so** (ADR-0013): a URL that ends at `/` gives the port a lexeme of its own, so
+  `http://127.0.0.1:8111/` indexes as `127.0.0.1`, `8111` and every one of the nine *is* findable by
+  the port that tells it apart. What actually fuses is a **path** — `http://127.0.0.1:33001/dashboard`
+  indexes as `127.0.0.1`, `33001/dashboard` — and a *named* host with a port is one lexeme whole. So
+  #436's *"a route is found by its URL"* holds on the estate that exists, the change was dropped, and
+  what is left is the table of lexemes on `corpus::ROUTE` plus
+  `a_path_in_a_url_takes_its_port_and_its_segments_out_of_reach`, which asserts the two negatives so
+  a later ticket that wants to widen `0018` has a red test rather than a paragraph to re-measure.
 
   **The `asset:` short-circuit is removed** — `knobas_search::empty_corpus` loses `Prefix::Asset`, the
   way #46 took `Prefix::Note` off the same list. The rows had existed since #428 and the prefix was
@@ -5550,10 +5547,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   ordinary link"*, so the shell's handler is `createLink` to the room's own `ctx:` entity, wrapped in
   `detail/links.svelte`'s new `addToContext` for the one thing that is not `linkTo`'s — a `conflict`
   from a pair already linked is *already in ⟨room⟩*, a state the reader asked for and not a failure.
-  The launcher also stops composing an estate hit's address out of the room's detail arm: an asset
-  opens `#/asset/<id>` and a route `#/route/<id>` through the router's **assets** arm, which today
-  produces the same two strings and would stop doing so the day a room detail's address changed
-  shape.
+  The row is absent in every derived room (*All work*, a source, a project), which has no `ctx:`
+  entity to link to. The launcher also stops composing an estate hit's address out of the room's
+  detail arm: an asset opens `#/asset/<id>` and a route `#/route/<id>` through the router's **assets**
+  arm, which today produces the same two strings and would stop doing so the day a room detail's
+  address changed shape.
 
   **What did not change.** No new command, no command's arguments, no DTO field on the wire, no new
   event, no settings key, nothing under `crates/knobas-source/src/**`, `crates/knobas-http/**` or
@@ -5566,8 +5564,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   Ratified by the orchestrator as spec #427 and issue #436, whose acceptance criteria specify the
   search-seam tests, the path, the hit rendering and the budget. **Björn keeps the gate for frozen
   contracts and this entry is flagged for his review** — in particular the `props_text` decision
-  (values, not keys) and the correction of `0018`'s URL claim, which are the two judgement calls the
-  ticket left to the implementer.
+  (values, not keys), which is the judgement call the ticket left to the implementer.
 
 
 - **A thirteenth `assets` command, `source_assets`, and two computed fields on the shapes the

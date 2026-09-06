@@ -293,17 +293,36 @@ pub const ASSET: Corpus = Corpus {
 /// is the right answer for a launcher row: a query that named a host and came
 /// back with thirty routes it holds would have buried the host.
 ///
-/// **The URL is matched in words since `0019` (#436), and `0018`'s claim about
-/// it was wrong.** That claim read *"`to_tsvector` lexes a URL into its host
-/// and path, so 'kuma' and '8111' find the routes that carry them"*; it does
-/// not. PostgreSQL emits a URL's host **with its port** as one lexeme, so
-/// `http://127.0.0.1:8111/` was matchable only by pasting it back -- and every
-/// route in `testenv/hetzner/estate.json` is exactly that shape, so nothing
-/// told the nine of them apart. `0019` indexes the URL a second time with its
-/// separators replaced by spaces, at weight B, which is what makes `8111` and
-/// `dashboard` queries. What is still out of reach is a dotted host typed on
-/// its own -- one lexeme on the *query* side, which no index can meet -- and
-/// `tests/corpus_seam.rs` asserts that negative beside the two positives.
+/// **How much of a URL is actually reachable, measured (#436).** `0018` says
+/// *"`to_tsvector` lexes a URL into its host and path, so 'kuma' and '8111'
+/// find the routes that carry them"*. That is true of the estate's own URLs
+/// and not true in general, and the line between the two is worth having
+/// written down, because it is not where anybody would guess:
+///
+/// | URL | lexemes |
+/// |---|---|
+/// | `http://127.0.0.1:8111/` | `127.0.0.1`, `8111` |
+/// | `http://gitea:3000/` | `gitea`, `3000` |
+/// | `http://127.0.0.1:33001/dashboard` | `127.0.0.1`, `33001/dashboard` |
+/// | `https://kuma.example.test:3001/dashboard` | `kuma.example.test:3001/dashboard`, `kuma.example.test:3001`, `/dashboard` |
+///
+/// So it is the **path** that fuses things together, not the port: a URL that
+/// ends at `/` gives the port as a lexeme of its own, which is why every one
+/// of the nine routes in `testenv/hetzner/estate.json` is findable by the port
+/// that tells it apart (ADR-0013 -- the real container is the witness, and it
+/// was asked). A URL with a path folds the port into `33001/dashboard`, and a
+/// *named* host with a port is one lexeme whole. Those two are reachable only
+/// while the last word is still being typed, when
+/// [`Parsed::prefix_last_term`](crate::Parsed) makes the query a prefix --
+/// which means a hit that vanishes on the space bar -- and a path segment
+/// (`dashboard`) is not reachable at any stage.
+///
+/// **Not fixed here, deliberately.** #436 asks that a route be found by its
+/// URL, and on the estate that exists it is. Widening what `0018`'s `fts`
+/// indexes is a change to a surface ratified the day before and it belongs to
+/// a ticket that says so; `tests/corpus_seam.rs` runs both the positive and
+/// the two negatives, so the boundary is a fact the next reader inherits
+/// rather than one they have to measure again.
 ///
 /// `path` is the exposing asset's own path **plus its name**, which is where
 /// the route sits -- one level deeper than the asset's own answer, for the

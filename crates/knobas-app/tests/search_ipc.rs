@@ -591,15 +591,17 @@ async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
     assert_eq!(by_prefix.groups.len(), by_kind.groups.len());
 }
 
-/// **A hostname finds the VM, and a URL finds the route** (#436, migration
+/// **A hostname finds the VM, and a port finds the route** (#436, migration
 /// `0019`).
 ///
-/// The two acceptance criteria the estate's index had no answer for until this
-/// ticket, at the wire and through the real store. `0017` left an asset's
+/// The ticket's two "find it by what it *is*" criteria, at the wire and through
+/// the real store. The hostname is the half `0019` adds: `0017` left an asset's
 /// property values out of `fts` because *"what a search for '8080' should mean
-/// is a decision"*; `0018`'s claim that a URL lexes into words was wrong on any
-/// URL with a port in it. Both are settled in `0019` and both are read back
-/// here on a database that ran the migration.
+/// is a decision"*, and this is that decision read back on a database that ran
+/// the migration. The port is the half that already worked, asserted here
+/// because nothing at the wire said so and because the URL shape is the real
+/// estate's rather than an invented one -- `corpus::ROUTE`'s docs carry where
+/// that stops, and `corpus_seam.rs` carries the negatives.
 ///
 /// The mirror's ticket and PR carry the same token, so an estate-only answer
 /// is evidence that the estate was searched rather than evidence that nothing
@@ -671,13 +673,13 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     );
 
     // The route, at the shape every route in `testenv/hetzner/estate.json`
-    // actually has -- a loopback host and the port that is the only thing
-    // telling nine of them apart.
+    // actually has -- a loopback host, no path, and the port that is the only
+    // thing telling nine of them apart (ADR-0013).
     let route = knobas_app::assets::create_route(
         &pool,
         &vm.id,
         &format!("Uptime Kuma {t}"),
-        "http://127.0.0.1:33001/dashboard",
+        "http://127.0.0.1:53002/",
         None,
         Visibility::Internal,
         &[],
@@ -686,7 +688,7 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     .unwrap()
     .value;
 
-    let by_port = search_inner(&pool, query("33001")).await.unwrap();
+    let by_port = search_inner(&pool, query("53002")).await.unwrap();
     let ports: Vec<_> = by_port
         .groups
         .iter()
