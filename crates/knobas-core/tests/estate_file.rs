@@ -662,8 +662,8 @@ fn a_monitor_is_named_by_a_name() {
 /// nothing and belongs to no asset.
 #[test]
 fn every_monitor_the_estate_names_is_one_the_seed_creates() {
-    let seeded: Value =
-        serde_json::from_str(&read("testenv/monitors.json")).expect("testenv/monitors.json is JSON");
+    let seeded: Value = serde_json::from_str(&read("testenv/monitors.json"))
+        .expect("testenv/monitors.json is JSON");
     let seeded: BTreeSet<&str> = seeded
         .as_array()
         .expect("testenv/monitors.json is an array of monitors")
