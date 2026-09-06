@@ -266,6 +266,13 @@ pub async fn get_route(
 /// scheme or a property nothing could read back, and
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for an exposing asset or a
 /// target that is not there.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a route's own fields, flat on the wire like every other command \
+              on this surface: `create_asset` takes four of them the same way, \
+              and a struct here would be a nested object invented for a lint \
+              rather than for a caller"
+)]
 #[tauri::command]
 pub async fn create_route<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
