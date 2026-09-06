@@ -364,6 +364,62 @@ mod tests {
         }
     }
 
+    /// The six commands are invoked from the mirror by the names they are
+    /// registered under, and registered under the names they are declared with.
+    ///
+    /// `tests/wiring.rs` proves every declared command is in the handler list;
+    /// this proves the *frontend* calls them by those names. A typo on either
+    /// side is a call that fails only at run time, with "command not found"
+    /// and nothing else in the tree noticing.
+    #[test]
+    fn the_mirror_invokes_the_commands_by_their_registered_names() {
+        for command in [
+            "asset_tree",
+            "get_asset",
+            "create_asset",
+            "edit_asset",
+            "move_asset",
+            "delete_asset",
+        ] {
+            assert!(
+                MIRROR.contains(&format!("\"{command}\"")),
+                "{command} is not invoked from app/src/lib/ipc/assets.ts"
+            );
+            let registry = include_str!("../lib.rs");
+            assert!(
+                registry.contains(&format!("commands::assets::{command}")),
+                "{command} is not in the generate_handler! list"
+            );
+        }
+    }
+
+    /// Tauri renames a command's *arguments* to camelCase and leaves struct
+    /// fields alone. Both spellings are on this surface at once -- the
+    /// `assetId` argument and the `parent_id` field inside the node it answers
+    /// with -- and getting either wrong is a call that arrives with the value
+    /// missing and no error anywhere.
+    #[test]
+    fn the_mirror_sends_the_argument_names_tauri_expects() {
+        for (call, argument) in [
+            ("asset_tree", "parentId"),
+            ("get_asset", "assetId"),
+            ("create_asset", "typeId"),
+            ("create_asset", "parentId"),
+            ("edit_asset", "edits"),
+            ("move_asset", "newParentId"),
+            ("delete_asset", "assetId"),
+        ] {
+            let at = MIRROR
+                .find(&format!("\"{call}\""))
+                .unwrap_or_else(|| panic!("{call} is not invoked from the mirror"));
+            let body = &MIRROR[at..MIRROR[at..].find(");").map_or(MIRROR.len(), |end| at + end)];
+            assert!(
+                body.contains(argument),
+                "{call} does not send {argument}: {body}"
+            );
+        }
+    }
+
     /// The detail is a carrier of shapes pinned above plus one list this
     /// module does not own -- `ActivityRow`, whose mirror lives in
     /// `entity.ts`. What is asserted here is the carrier's own field list.
