@@ -302,6 +302,179 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // row stops being listed -- because that is all a QA pass can witness.
     accept_suggestion: (args) => answerSuggestion(args),
     dismiss_suggestion: (args) => answerSuggestion(args),
+
+    // The estate (#428). Read-only here: this ticket's UI reads and nothing
+    // else, so there is nothing for a create or a move to be a fixture *of*.
+    // #429 brings both, and the writes to answer them with.
+    asset_tree: (args) => assetColumn(args),
+    get_asset: (args) => assetDetail(args),
+  };
+}
+
+// -- the estate -------------------------------------------------------------
+
+/**
+ * A slice of the **real** test infrastructure, three levels deep (#428).
+ *
+ * Deliberately not Tidewater-shaped: spec #427 rules that the estate is the
+ * real thing -- the Hetzner servers, their containers and databases -- and
+ * that *"nothing Tidewater-shaped is added for assets"*. The checked-in estate
+ * file (#438) is the description this fixture is a hand-copied corner of; when
+ * that file lands, this can read it instead.
+ *
+ * Small on purpose. It exists so a browser can be pointed at the Tree, not so
+ * that it can stand in for PostgreSQL: three levels is what makes a path a
+ * path, and a fourth would only make the screenshot wider.
+ */
+const FIXTURE_ESTATE: {
+  id: string;
+  parent_id: string | null;
+  type_id: string;
+  type_label: string;
+  monogram: string;
+  name: string;
+  status: "up" | "warn" | "down" | "none";
+  environment: "dev" | "stage" | "prod" | "shared" | null;
+  owner: string | null;
+  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+}[] = [
+  {
+    id: "asset:hel1",
+    parent_id: null,
+    type_id: "site",
+    type_label: "Site",
+    monogram: "SI",
+    name: "hel1",
+    status: "none",
+    environment: "dev",
+    owner: "Björn",
+    properties: [
+      { key: "location", label: "Location", value: { kind: "text", value: "Helsinki" }, custom: false },
+      { key: "provider", label: "Provider", value: { kind: "text", value: "Hetzner" }, custom: false },
+    ],
+  },
+  {
+    id: "asset:knobas-teamcity",
+    parent_id: "asset:hel1",
+    type_id: "vm",
+    type_label: "VM",
+    monogram: "VM",
+    name: "knobas-teamcity",
+    status: "up",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "hostname", label: "Hostname", value: { kind: "text", value: "knobas-teamcity" }, custom: false },
+      { key: "ip", label: "IP", value: null, custom: false },
+      { key: "os", label: "OS", value: { kind: "text", value: "Debian 13" }, custom: false },
+      { key: "size", label: "Size", value: { kind: "text", value: "cx23" }, custom: false },
+      { key: "renewed", label: "renewed", value: { kind: "date", value: "2026-09-05" }, custom: true },
+    ],
+  },
+  {
+    id: "asset:knobas-jira",
+    parent_id: "asset:hel1",
+    type_id: "vm",
+    type_label: "VM",
+    monogram: "VM",
+    name: "knobas-jira",
+    status: "warn",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "hostname", label: "Hostname", value: { kind: "text", value: "knobas-jira" }, custom: false },
+      { key: "ip", label: "IP", value: null, custom: false },
+      { key: "os", label: "OS", value: { kind: "text", value: "Debian 13" }, custom: false },
+      { key: "size", label: "Size", value: { kind: "text", value: "cpx22" }, custom: false },
+    ],
+  },
+  {
+    id: "asset:teamcity",
+    parent_id: "asset:knobas-teamcity",
+    type_id: "container",
+    type_label: "Container",
+    monogram: "CT",
+    name: "teamcity",
+    status: "up",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "image", label: "Image", value: { kind: "text", value: "jetbrains/teamcity-server" }, custom: false },
+      { key: "ports", label: "Ports", value: { kind: "text", value: "8111" }, custom: false },
+      { key: "restart_policy", label: "Restart policy", value: null, custom: false },
+    ],
+  },
+  {
+    id: "asset:teamcity-agent",
+    parent_id: "asset:knobas-teamcity",
+    type_id: "container",
+    type_label: "Container",
+    monogram: "CT",
+    name: "teamcity-agent",
+    status: "up",
+    environment: null,
+    owner: null,
+    properties: [
+      { key: "image", label: "Image", value: { kind: "text", value: "jetbrains/teamcity-agent" }, custom: false },
+      { key: "ports", label: "Ports", value: null, custom: false },
+      { key: "restart_policy", label: "Restart policy", value: null, custom: false },
+    ],
+  },
+];
+
+/** One asset as a column row -- everything but its properties and its path. */
+function assetNode(asset: (typeof FIXTURE_ESTATE)[number]) {
+  const { properties: _properties, ...node } = asset;
+  return {
+    ...node,
+    has_children: FIXTURE_ESTATE.some((other) => other.parent_id === asset.id),
+  };
+}
+
+/** `asset_tree`: what one asset holds, or the top of the estate. */
+function assetColumn(args: Record<string, unknown>) {
+  const parent = (args.parentId as string | null) ?? null;
+  return FIXTURE_ESTATE.filter((asset) => asset.parent_id === parent)
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(assetNode);
+}
+
+/** `get_asset`: the pane's read, ancestors walked over the parent field. */
+function assetDetail(args: Record<string, unknown>) {
+  const id = args.assetId as string;
+  const asset = FIXTURE_ESTATE.find((row) => row.id === id);
+  if (!asset) throw { code: "not_found", message: `no asset ${id}`, source_id: null };
+
+  const heldBy: (typeof FIXTURE_ESTATE)[number][] = [];
+  let walk = asset.parent_id;
+  while (walk !== null) {
+    const held = FIXTURE_ESTATE.find((row) => row.id === walk);
+    if (!held) break;
+    heldBy.unshift(held);
+    walk = held.parent_id;
+  }
+
+  return {
+    asset: assetNode(asset),
+    properties: asset.properties,
+    held_by: heldBy.map(assetNode),
+    holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetNode),
+    history: [
+      {
+        id: 2,
+        at: SYNCED_AT,
+        actor: "user",
+        verb: "edited",
+        entity_id: asset.id,
+        detail: {
+          field: "property",
+          key: "os",
+          from: { kind: "text", value: "Debian 12" },
+          to: { kind: "text", value: "Debian 13" },
+        },
+      },
+      { id: 1, at: SYNCED_AT, actor: "user", verb: "created", entity_id: asset.id, detail: {} },
+    ],
   };
 }
 

@@ -74,14 +74,44 @@ test("#/entity/<id> is a detail whose kind is not known yet", () => {
 });
 
 /** M4 addresses parse, so the shell can say "arrives in M<n>" rather than
- * rendering a blank screen or, worse, treating `assets` as a kind.
+ * rendering a blank screen or, worse, treating `monitor` as a kind.
  *
- * `#/time` left this list with #279 and `#/standup` with #288; each has a view
- * of its own now, and the tests around this one are where they went. */
+ * `#/time` left this list with #279, `#/standup` with #288 and `#/assets` and
+ * `#/asset` with #428; each has a view of its own now, and the tests around
+ * this one are where they went. `#/asset` bare is here rather than there
+ * deliberately: an address that sets out to name an asset and names none is a
+ * typo, not the estate. */
 test("a later milestone's address is known-unknown, not a kind", () => {
-  for (const hash of ["#/assets/board", "#/monitor/db-1", "#/route/edge"]) {
+  for (const hash of ["#/monitor/db-1", "#/route/edge", "#/asset/", "#/asset"]) {
     expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
+});
+
+/**
+ * The Assets view has an address of its own (#428), and `#/asset/<id>` is the
+ * same view with a selection rather than a second one.
+ *
+ * The head owns the whole address, the rule `#/sources/x` and `#/time/whenever`
+ * already follow: `#/assets/anything` is the Tree, because "arrives in a later
+ * milestone" is the one thing it must not say now that it does not.
+ */
+test("the assets addresses reach the Tree, with and without a selection", () => {
+  expect(parseHash("#/assets/tree")).toEqual({ view: "assets", tab: "tree", assetId: null });
+  expect(parseHash("#/assets")).toEqual({ view: "assets", tab: "tree", assetId: null });
+  expect(parseHash("#/assets/monitors")).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: null,
+  });
+  expect(parseHash("#/asset/asset:7f2c")).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: "asset:7f2c",
+  });
+  // Round trip: the id keeps its namespace colon and everything else is
+  // encoded, the rule every entity address in this module follows.
+  expect(hashFor(parseHash("#/asset/asset:7f2c"))).toBe("#/asset/asset:7f2c");
+  expect(hashFor({ view: "assets", tab: "tree", assetId: null })).toBe("#/assets/tree");
 });
 
 /**

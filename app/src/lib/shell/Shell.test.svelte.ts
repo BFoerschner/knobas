@@ -67,15 +67,17 @@ test("the search field opens the launcher rather than navigating", () => {
  * slot reserved for a button that cannot work is dead chrome that teaches the
  * reader the app is unfinished and nothing else.
  *
- * **Today landed with #279** and is drawn unconditionally, because it is a
- * destination rather than a reading -- the rule the sources and settings
- * buttons follow. So it moved from the first list to the second, and the
- * second is what keeps this test about the rule rather than about a shrinking
- * list of words.
+ * **Today landed with #279** and **Assets with #428**, both drawn
+ * unconditionally, because they are destinations rather than readings -- the
+ * rule the sources and settings buttons follow. Each moved from the first list
+ * to the second as it landed, and the second is what keeps this test about the
+ * rule rather than about a shrinking list of words.
  *
- * The inbox count and the timer are absent *here* for a different reason
- * again: this fixture has neither, and both are drawn only when there is
- * something to say (`TopStrip.test.svelte.ts` owns that rule).
+ * *Monitors* is the word still waiting: M4.1's tab, which has no control here
+ * and must not grow a disabled one. The inbox count and the timer are absent
+ * *here* for a different reason again: this fixture has neither, and both are
+ * drawn only when there is something to say (`TopStrip.test.svelte.ts` owns
+ * that rule).
  */
 test("carries no control for a milestone that has not landed", () => {
   const screen = render();
@@ -83,10 +85,10 @@ test("carries no control for a milestone that has not landed", () => {
     (button) => `${button.textContent ?? ""} ${button.getAttribute("aria-label") ?? ""}`.trim(),
   );
 
-  for (const absent of ["Assets", "Inbox", "timer"]) {
+  for (const absent of ["Monitors", "Inbox", "timer"]) {
     expect(labels.join(" | ")).not.toContain(absent);
   }
-  for (const present of ["Today", "Sources", "Settings"]) {
+  for (const present of ["Today", "Assets", "Sources", "Settings"]) {
     expect(labels.join(" | ")).toContain(present);
   }
 

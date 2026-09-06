@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
+  import AssetsView from "./lib/assets/AssetsView.svelte";
   import InboxView from "./lib/inbox/InboxView.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
   import { notifications } from "./lib/inbox/notify.svelte";
@@ -786,6 +787,14 @@
           revision={timeRevision}
           onchanged={() => (timeRevision += 1)}
         />
+      {:else if router.route.view === "assets"}
+        <!--
+          The Assets view (#428): the estate as Miller columns with a fixed
+          pane. One branch for `#/assets/tree` and `#/asset/<id>` alike — they
+          are the same surface, one of them with a selection — so the view
+          reads the address itself rather than being handed an id.
+        -->
+        <AssetsView {router} />
       {:else if router.route.view === "standup"}
         <!--
           The standup digest (#288): three lists at their own address, drawn
