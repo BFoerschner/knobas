@@ -312,10 +312,13 @@
           onkeydown={onfieldkeydown}
         />
         <!--
-          The schemes are named without their separator: `house-rules.test.ts`
-          reads every `https?://` in this directory as a network reference, and
-          a hint that spelled one in full would be an offence against a rule
-          worth keeping for the sake of three characters.
+          The schemes are named without their separator, and the reason is
+          narrower than "no URLs here": `house-rules.test.ts` offends on a
+          `https?://` whose captured **host** is not loopback or reserved, so
+          the `https://gitea.example/` placeholder four lines up is fine. What
+          would offend is `https://` inside a tag -- the capture runs on into
+          the markup and lands on `<`, which is no reserved host. The rule is
+          worth keeping either way, and it costs three characters here.
         -->
         <p class="hint">Any scheme — <code>https</code>, <code>postgres</code>, <code>ssh</code>; a bare host is refused.</p>
       </div>

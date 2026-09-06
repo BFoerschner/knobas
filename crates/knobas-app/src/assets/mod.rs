@@ -1721,6 +1721,13 @@ pub async fn create_route(
     let id = EntityRef::new(ROUTE_NAMESPACE, &Uuid::new_v4().to_string()).to_string();
     let mut tx = pool.begin().await?;
 
+    // Normalised the way `RouteEdit::Target` normalises it: a blank string is
+    // the wire's other spelling of "no target", and the two commands reading
+    // one value two ways -- a clear on the edit, `no asset  for a route to
+    // land on` on the create -- is the kind of disagreement nobody finds
+    // until a dialog sends an empty field.
+    let target_id = target_id.map(str::trim).filter(|value| !value.is_empty());
+
     must_exist(&mut tx, asset_id, "to expose a route on").await?;
     if let Some(target) = target_id {
         must_exist(&mut tx, target, "for a route to land on").await?;

@@ -1661,11 +1661,30 @@ async fn a_route_with_no_target_reads_under_exposes_only() {
     assert_eq!(endpoint.target_id, None);
     assert_eq!(endpoint.target_name, None);
 
+    // A blank target is the wire's other spelling of "no target", and the two
+    // commands agree about it: `RouteEdit::Target` has always trimmed and
+    // dropped an empty one, and `create_route` does now -- before, the same
+    // value cleared the target on an edit and answered `not_found` on a
+    // create.
+    let blank_target = assets::create_route(
+        &pool,
+        &proxy.id,
+        "Kuma",
+        "https://kuma.hel1.internal/",
+        Some("   "),
+        assets::Visibility::Internal,
+        &[],
+    )
+    .await
+    .expect("a blank target is no target, not a missing asset")
+    .value;
+    assert_eq!(blank_target.target_id, None);
+
     let (exposes, reachable) = both_ends(&pool, &proxy.id).await;
     assert_eq!(
         exposes,
-        ["Postgres UI", "Traefik dashboard"],
-        "both, by name"
+        ["Kuma", "Postgres UI", "Traefik dashboard"],
+        "all three, by name"
     );
     assert!(reachable.is_empty(), "{reachable:?}");
 

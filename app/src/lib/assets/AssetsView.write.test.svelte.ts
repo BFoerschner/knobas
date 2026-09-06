@@ -124,6 +124,8 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
   const rows = [...seed];
   const routes = [...seedRoutes];
   const lines: ActivityRow[] = [];
+  const opened: string[] = [];
+  let openRefusal: { code: string; message: string } | null = null;
   let minted = 0;
   let at = 0;
 
@@ -261,6 +263,31 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
     rows,
     /** And what it exposes — the same, for the routes. */
     routes,
+    /** Every URL the view handed to the OS browser, in order. */
+    opened,
+    /**
+     * Make the next open fail, the way `shell/open-external` fails a scheme
+     * it will not hand to a browser.
+     *
+     * A knob rather than a second fixture: a route is *a URL or an endpoint*,
+     * so `postgres://…` is a legal route the browser cannot take, and the
+     * view's job is to say so rather than to leave a dead button.
+     */
+    refuseToOpen(refusal: { code: string; message: string }) {
+      openRefusal = refusal;
+    },
+    /**
+     * The OS browser.
+     *
+     * A port with a fake here for `assetTypes`' reason in
+     * `AssetsView.test.svelte.ts`: one left out falls through to the real
+     * `openExternal`, and the first test to press a route's URL would hand it
+     * to `@tauri-apps/plugin-opener` for real.
+     */
+    openExternal: (url: string) => {
+      opened.push(url);
+      return openRefusal === null ? Promise.resolve() : Promise.reject(openRefusal);
+    },
     assetTypes: () => Promise.resolve(TYPES),
     assetTree: (parentId?: string | null) => Promise.resolve(children(parentId ?? null)),
     getAsset: (assetId: string): Promise<AssetDetail> => {
@@ -1226,6 +1253,59 @@ test("a certificate expiry is written on a route as a property and cleared again
 });
 
 /**
+ * **A route's URL is handed to the OS browser** — spec §12.2's *open URL*
+ * action, which #432 is the ticket that finally gives this view a URL for.
+ *
+ * Both halves, because only one of them is the happy one: a route is *a URL
+ * or an endpoint*, so `postgres://10.0.0.20:5432` is a route the model holds
+ * on purpose and no browser can take. The refusal is the view's own claim —
+ * it is **shown rather than swallowed** — and without this the button had no
+ * test at all: the port existed, its doc said a test must be able to press it
+ * without a Tauri backend, and nothing pressed it.
+ */
+test("a route's URL opens in the browser, and a scheme no browser takes is said out loud", async () => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+    {
+      id: "route:sql",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres wire",
+      url: "postgres://pg.hel1.example:5432/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Open https://pg.hel1.example/");
+  await vi.waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
+  expect(text()).not.toContain("Could not open the link");
+
+  // `shell/open-external`'s own sentence for a scheme it will not hand over.
+  store.refuseToOpen({
+    code: "invalid",
+    message: "refused to open postgres://pg.hel1.example:5432/ — only http and https",
+  });
+  click("Open postgres://pg.hel1.example:5432/");
+  await vi.waitFor(() =>
+    expect(text()).toContain("Could not open the link: refused to open"),
+  );
+  expect(store.opened).toHaveLength(2);
+  // And the route is still on the pane: a refused open changes nothing.
+  expect(store.routes).toHaveLength(2);
+});
+
+/**
  * **The route the address names shows its own history** — spec #427: routes
  * *"are created and edited from the pane, have `#/route/<id>` addresses, and
  * their own history"*.
@@ -1263,4 +1343,14 @@ test("a route's own history is drawn when its address names it", async () => {
   // The asset's own history is the other list on this pane, and the route's
   // rename is not in it.
   expect(text()).toContain("History Nothing recorded.");
+
+  // A target change carries asset **ids** on the wire, for the reason a move's
+  // line does — so the pane names them, the way it names a move's new parent.
+  // Without this the reader would get `target: asset:postgres → nothing` with
+  // the word *postgres* three lines above it on the same pane.
+  click("Edit…");
+  click("Clear");
+  click("Save");
+  await vi.waitFor(() => expect(text()).toContain("target: postgres → nothing"));
+  expect(text()).not.toContain("asset:postgres");
 });

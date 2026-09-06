@@ -927,7 +927,14 @@
     if (verb === "deleted") return "Deleted";
     if (verb === "moved") return `Moved to ${nameOf(fields.to) ?? said(fields.to)}`;
     const field = fields.field === "property" ? said(fields.key) : said(fields.field);
-    return `${field}: ${said(fields.from)} → ${said(fields.to)}`;
+    // A route's `target` edit carries asset **ids** on both sides, for the
+    // reason a move's line does: the name at the moment of the edit is not
+    // the name now. So it gets a move's treatment too, rather than putting
+    // `target: asset:postgres → nothing` in front of a reader who has the
+    // word *postgres* on the same pane.
+    const shown = (value: unknown): string =>
+      fields.field === "target" ? (nameOf(value) ?? said(value)) : said(value);
+    return `${field}: ${shown(fields.from)} → ${shown(fields.to)}`;
   }
 
   /**
@@ -1505,7 +1512,19 @@
                   {:else}
                     <span class="faint">lands on nothing knobas knows</span>
                   {/if}
-                  <button class="btn sm" onclick={() => (editingRoute = route)}>Edit…</button>
+                  <button
+                    class="btn sm"
+                    onclick={() => {
+                      editingRoute = route;
+                      // The same clean slate `Add a route` opens on: a failure
+                      // from the last write, or from a link that would not
+                      // open, is drawn above *Properties* and far from here,
+                      // and one left behind the dialog reads as this edit's.
+                      writeFailure = null;
+                    }}
+                  >
+                    Edit…
+                  </button>
                 {/snippet}
               {/each}
             </ul>

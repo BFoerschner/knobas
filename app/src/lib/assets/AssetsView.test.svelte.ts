@@ -305,6 +305,7 @@ let scrolled: ScrollIntoViewOptions[] = [];
 function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
   const searched: SearchQuery[] = [];
+  const opened: string[] = [];
   location.hash = hash;
   const router = createRouter();
   app = mount(AssetsView, {
@@ -356,11 +357,20 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
             ? Promise.reject({ code: "not_found", message: `no route ${routeId}` })
             : Promise.resolve({ route, history: [] });
         },
+        // The OS browser, for `assetTypes`' reason above: this file is about
+        // the read and presses no route's URL, but a port left out falls
+        // through to the real `openExternal` and the first test that ever did
+        // would hand the URL to `@tauri-apps/plugin-opener`. Pressing it is
+        // `AssetsView.write.test.svelte.ts`' claim.
+        openExternal: (url: string) => {
+          opened.push(url);
+          return Promise.resolve();
+        },
       },
     },
   });
   flushSync();
-  return { router, asked, searched };
+  return { router, asked, searched, opened };
 }
 
 /** What a test may put in front of the view besides the estate. */
