@@ -58,6 +58,11 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_confluence::descriptor_template,
         build: knobas_source_confluence::build,
     },
+    Adapter {
+        kind: "kuma",
+        template: knobas_source_kuma::descriptor_template,
+        build: knobas_source_kuma::build,
+    },
 ];
 
 /// Turns stored configurations into live adapters.

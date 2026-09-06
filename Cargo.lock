@@ -2788,6 +2788,7 @@ dependencies = [
  "knobas-source-confluence",
  "knobas-source-gitea",
  "knobas-source-jira",
+ "knobas-source-kuma",
  "knobas-source-mock",
  "knobas-source-teamcity",
  "knobas-sync",

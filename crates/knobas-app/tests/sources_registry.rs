@@ -13,13 +13,19 @@ use knobas_sync::scheduler::AdapterRegistry;
 /// Jira's `build` returns `Unauthorized` for `secret: None`, deliberately, so a
 /// scheduled run never discovers a missing credential mid-sync. Nothing here
 /// reaches a network: `build` only constructs.
-fn instance(instance_id: &str, kind: &str) -> SourceInstance {
+///
+/// `auth` is a parameter rather than one method for everybody, because an
+/// adapter is entitled to refuse a method it does not declare: Uptime Kuma's
+/// `/metrics` takes an API key and nothing else (#442), and `Pat` there is a
+/// misconfiguration the adapter is right to name. The caller that builds every
+/// compiled-in kind therefore hands each one a method from its own descriptor.
+fn instance(instance_id: &str, kind: &str, auth: AuthMethod) -> SourceInstance {
     SourceInstance {
         id: instance_id.to_owned(),
         kind: kind.to_owned(),
         display_name: "X".to_owned(),
         base_url: "https://example.invalid".to_owned(),
-        auth: Some(AuthMethod::Pat),
+        auth: Some(auth),
         secret: Some("not-a-real-token".to_owned()),
         config: serde_json::json!({}),
     }
@@ -118,6 +124,7 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
         knobas_source_teamcity::descriptor_template().adapter_kind,
         knobas_source_gitea::descriptor_template().adapter_kind,
         knobas_source_confluence::descriptor_template().adapter_kind,
+        knobas_source_kuma::descriptor_template().adapter_kind,
     ] {
         assert!(
             kinds.contains(&expected),
@@ -172,6 +179,12 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
         // the same act as a reply on a ticket, so it is the same op rather
         // than an adapter-shaped variant of one.
         ("confluence", vec!["comment", "update_page", "create_page"]),
+        // Uptime Kuma reads and does not write (#442). Its pause, resume and
+        // create are socket.io and are their own ticket, so the empty list is
+        // a **declaration** and not a gap: an entry appearing here without a
+        // §10.8 ratification under ADR-0006 is the diff this table exists to
+        // put in front of a reviewer.
+        ("kuma", vec![]),
     ]
     .into_iter()
     .collect();
@@ -211,7 +224,14 @@ fn building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_i
     let registry = Registry::builtin();
     for template in registry.descriptors() {
         let built = registry
-            .build(instance("my-instance", &template.adapter_kind))
+            .build(instance(
+                "my-instance",
+                &template.adapter_kind,
+                *template
+                    .auth_methods
+                    .first()
+                    .unwrap_or(&AuthMethod::Pat),
+            ))
             .unwrap_or_else(|e| panic!("{} should build: {e}", template.adapter_kind));
         assert_eq!(
             built.descriptor().id,
@@ -226,7 +246,7 @@ fn building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_i
 fn an_unknown_kind_is_refused_by_name() {
     // `Box<dyn Source>` is not `Debug`, so the success arm is matched rather
     // than unwrapped.
-    match Registry::builtin().build(instance("whatever", "nope")) {
+    match Registry::builtin().build(instance("whatever", "nope", AuthMethod::Pat)) {
         Err(knobas_source::SourceError::Protocol { message, .. }) => {
             assert!(message.contains("nope"), "{message}");
         }
@@ -242,7 +262,7 @@ fn an_unknown_kind_is_refused_by_name() {
 fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
     let registry = Registry::builtin();
     let built = registry
-        .build(instance("jira-eu", "jira"))
+        .build(instance("jira-eu", "jira", AuthMethod::Pat))
         .expect("a second instance of a known kind builds");
     assert_eq!(built.descriptor().id, "jira-eu");
     assert_eq!(built.descriptor().adapter_kind, "jira");
@@ -250,7 +270,7 @@ fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
     // ...and an instance id that happens to *be* a kind name is not what routes.
     assert!(
         registry
-            .build(instance("jira", "not-a-compiled-in-kind"))
+            .build(instance("jira", "not-a-compiled-in-kind", AuthMethod::Pat))
             .is_err(),
         "an unknown kind must be refused however the instance is named"
     );

@@ -40,6 +40,7 @@ knobas-source = { path = "../knobas-source" }
 knobas-source-confluence = { path = "../knobas-source-confluence" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 knobas-source-jira = { path = "../knobas-source-jira" }
+knobas-source-kuma = { path = "../knobas-source-kuma" }
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-source-teamcity = { path = "../knobas-source-teamcity" }
 knobas-sync = { path = "../knobas-sync" }
