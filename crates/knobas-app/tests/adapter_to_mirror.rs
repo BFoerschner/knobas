@@ -797,7 +797,10 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
 
     let kuma = spawn_mock_kuma().await;
     let scratch = knobas_db::test_util::scratch_database("kuma-estate-import").await;
-    let pool = scratch.pool(2).await.expect("a pool on the scratch database");
+    let pool = scratch
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
     let id = unique_id();
     configure(&pool, &id, "kuma", &kuma.uri()).await;
 

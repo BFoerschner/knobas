@@ -1324,7 +1324,10 @@ async fn attached_monitors(
     let mut out: Vec<AttachedMonitor> = attached
         .iter()
         .map(|entry| {
-            let (state, web_url) = readings.get(&entry.other.entity_id).cloned().unwrap_or_default();
+            let (state, web_url) = readings
+                .get(&entry.other.entity_id)
+                .cloned()
+                .unwrap_or_default();
             AttachedMonitor {
                 entity_id: entry.other.entity_id.clone(),
                 name: entry.other.title.clone(),
@@ -3214,8 +3217,7 @@ async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, Ip
         });
     }
 
-    let MonitorPlan { links, unresolved } =
-        monitor_plan(tx, &wanted, &stored, &inserts).await?;
+    let MonitorPlan { links, unresolved } = monitor_plan(tx, &wanted, &stored, &inserts).await?;
 
     Ok(Plan {
         preview: ImportPreview {
