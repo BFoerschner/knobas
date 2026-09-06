@@ -302,10 +302,7 @@ async fn a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart(
     assert_eq!(
         hits,
         vec![
-            (
-                CONTAINER.to_owned(),
-                Some(CONTAINER_PATH.to_owned())
-            ),
+            (CONTAINER.to_owned(), Some(CONTAINER_PATH.to_owned())),
             (
                 SERVER.to_owned(),
                 Some("knobas test estate / Hetzner Cloud nbg1".to_owned())
@@ -562,7 +559,11 @@ async fn a_re_import_previews_every_entry_as_already_in_the_tree() {
         .expect("the preview");
 
     assert_eq!(preview.name, "knobas test estate");
-    let known: Vec<&str> = preview.known.iter().map(|entry| entry.id.as_str()).collect();
+    let known: Vec<&str> = preview
+        .known
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
     let mut expected = file_ids("assets");
     expected.extend(file_ids("routes"));
     assert_eq!(
