@@ -303,11 +303,18 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     accept_suggestion: (args) => answerSuggestion(args),
     dismiss_suggestion: (args) => answerSuggestion(args),
 
-    // The estate (#428). Read-only here: this ticket's UI reads and nothing
-    // else, so there is nothing for a create or a move to be a fixture *of*.
-    // #429 brings both, and the writes to answer them with.
+    // The estate (#428, writable since #429). Stateful within the session,
+    // like the contexts above: an asset created, renamed, moved or deleted
+    // here stays that way for as long as the page lives, so the whole create /
+    // edit / move walk can be driven in a browser. Nothing is persisted --
+    // reload and the estate is the fixture again.
     asset_tree: (args) => assetColumn(args),
     get_asset: (args) => assetDetail(args),
+    asset_types: () => ASSET_TYPES,
+    create_asset: (args) => createAsset(args),
+    edit_asset: (args) => editAsset(args),
+    move_asset: (args) => moveAsset(args),
+    delete_asset: (args) => deleteAsset(args),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -486,6 +493,263 @@ function worst(statuses: FixtureAsset["status"][]): FixtureAsset["status"] {
 }
 
 /**
+ * A corner of the built-in type table -- `asset_types`' answer here.
+ *
+ * The types the fixture estate uses and the ones they suggest, with the ids,
+ * monograms, schemas and `suggests` lists `knobas_core::asset` declares.
+ * **Not all nineteen**, for the estate's own reason one paragraph up: this is a
+ * fixture a browser is pointed at, and nine types is what it takes to see a
+ * *usual here* line and a typed-property editor. The `suggests` lists are
+ * nonetheless the **whole** lists the real table declares, so one of them names
+ * a type this subset omits (`container` suggests `runtime`). That is on
+ * purpose: `typeChoices` drops ids the list it is given does not carry, so a
+ * full copy costs nothing and a trimmed one would be a second list disagreeing
+ * with the first -- which is the drift this fixture already had once. When
+ * #439's import can read `testenv/hetzner/estate.json` directly, this can read
+ * the table with it.
+ */
+const ASSET_TYPES: {
+  id: string;
+  label: string;
+  monogram: string;
+  properties: { key: string; label: string; kind: "text" | "number" | "date" | "url" }[];
+  suggests: string[];
+}[] = [
+  {
+    id: "site",
+    label: "Site",
+    monogram: "SI",
+    properties: [
+      { key: "location", label: "Location", kind: "text" },
+      { key: "provider", label: "Provider", kind: "text" },
+    ],
+    suggests: ["site", "hypervisor", "vm", "network"],
+  },
+  {
+    id: "hypervisor",
+    label: "Hypervisor",
+    monogram: "HV",
+    properties: [
+      { key: "hostname", label: "Hostname", kind: "text" },
+      { key: "ip", label: "IP", kind: "text" },
+      { key: "os", label: "OS", kind: "text" },
+    ],
+    suggests: ["vm"],
+  },
+  {
+    id: "vm",
+    label: "VM",
+    monogram: "VM",
+    properties: [
+      { key: "hostname", label: "Hostname", kind: "text" },
+      { key: "ip", label: "IP", kind: "text" },
+      { key: "os", label: "OS", kind: "text" },
+      { key: "size", label: "Size", kind: "text" },
+    ],
+    suggests: ["container_engine", "service", "database_server", "reverse_proxy"],
+  },
+  {
+    id: "container_engine",
+    label: "Container engine",
+    monogram: "CE",
+    properties: [
+      { key: "version", label: "Version", kind: "text" },
+      { key: "socket", label: "Socket", kind: "text" },
+    ],
+    suggests: ["container"],
+  },
+  {
+    id: "container",
+    label: "Container",
+    monogram: "CT",
+    properties: [
+      { key: "image", label: "Image", kind: "text" },
+      { key: "ports", label: "Ports", kind: "text" },
+      { key: "restart_policy", label: "Restart policy", kind: "text" },
+    ],
+    suggests: ["service", "database", "runtime"],
+  },
+  {
+    id: "service",
+    label: "Service",
+    monogram: "SV",
+    properties: [
+      { key: "url", label: "URL", kind: "url" },
+      { key: "port", label: "Port", kind: "number" },
+      { key: "health_path", label: "Health path", kind: "text" },
+    ],
+    suggests: ["module", "connector"],
+  },
+  {
+    id: "database_server",
+    label: "Database server",
+    monogram: "DS",
+    properties: [
+      { key: "engine", label: "Engine", kind: "text" },
+      { key: "version", label: "Version", kind: "text" },
+      { key: "host", label: "Host", kind: "text" },
+      { key: "port", label: "Port", kind: "number" },
+    ],
+    suggests: ["database"],
+  },
+  {
+    id: "database",
+    label: "Database",
+    monogram: "DB",
+    properties: [
+      { key: "engine", label: "Engine", kind: "text" },
+      { key: "size_mb", label: "Size (MB)", kind: "number" },
+    ],
+    suggests: ["schema"],
+  },
+  { id: "custom", label: "Custom", monogram: "CU", properties: [], suggests: [] },
+];
+
+/** The activity lines this session's writes have appended, newest last. */
+const ASSET_HISTORY: { entity_id: string; verb: string; detail: unknown }[] = [];
+
+/** Ids for the assets a QA walk creates. `assets::create` mints a UUID. */
+let mintedAssets = 0;
+
+/** The stored asset, or a `not_found` in the shape `IpcError` puts on the wire. */
+function assetOr404(id: string): (typeof FIXTURE_ESTATE)[number] {
+  const found = FIXTURE_ESTATE.find((row) => row.id === id);
+  if (!found) throw { code: "not_found", message: `no asset ${id}`, source_id: null };
+  return found;
+}
+
+/**
+ * `create_asset`: a new asset under `parentId`, with the type's schema drawn
+ * as unfilled rows.
+ *
+ * The id is minted here, the way `assets::create` mints one: the caller names
+ * the thing and never its address (story 18).
+ */
+function createAsset(args: Record<string, unknown>) {
+  const typeId = args.typeId as string;
+  const name = String(args.name ?? "").trim();
+  if (name === "") throw { code: "invalid", message: "an asset needs a name", source_id: null };
+  const declared = ASSET_TYPES.find((type) => type.id === typeId);
+  if (!declared) {
+    throw {
+      code: "invalid",
+      message: `"${typeId}" is not one of the built-in asset types`,
+      source_id: null,
+    };
+  }
+  mintedAssets += 1;
+  const created = {
+    id: `asset:new-${mintedAssets}`,
+    parent_id: (args.parentId as string | null) ?? null,
+    type_id: typeId,
+    type_label: declared.label,
+    monogram: declared.monogram,
+    name,
+    status: "none" as const,
+    environment: null,
+    owner: null,
+    properties: declared.properties.map((property) => ({
+      key: property.key,
+      label: property.label,
+      value: null,
+      custom: false,
+    })),
+  };
+  FIXTURE_ESTATE.push(created);
+  ASSET_HISTORY.push({ entity_id: created.id, verb: "created", detail: {} });
+  return assetRow(created);
+}
+
+/** `edit_asset`: the two edits this fixture's surface can make. */
+function editAsset(args: Record<string, unknown>) {
+  const asset = assetOr404(args.assetId as string);
+  const edits = (args.edits ?? []) as Record<string, unknown>[];
+  for (const edit of edits) {
+    if (edit.field === "name") {
+      const from = asset.name;
+      asset.name = String(edit.value ?? "").trim();
+      ASSET_HISTORY.push({
+        entity_id: asset.id,
+        verb: "renamed",
+        detail: { field: "name", from, to: asset.name },
+      });
+      continue;
+    }
+    if (edit.field !== "property") continue;
+    const key = String(edit.key);
+    const at = asset.properties.findIndex((property) => property.key === key);
+    const from = at === -1 ? null : asset.properties[at]!.value;
+    if (edit.value === null) {
+      // A declared key keeps its row and loses its value; a custom key goes.
+      if (at !== -1 && asset.properties[at]!.custom) asset.properties.splice(at, 1);
+      else if (at !== -1) asset.properties[at]!.value = null;
+    } else if (at === -1) {
+      asset.properties.push({ key, label: key, value: edit.value, custom: true });
+    } else {
+      asset.properties[at]!.value = edit.value;
+    }
+    ASSET_HISTORY.push({
+      entity_id: asset.id,
+      verb: "edited",
+      detail: { field: "property", key, from, to: edit.value ?? null },
+    });
+  }
+  return assetRow(asset);
+}
+
+/**
+ * `move_asset`, cycle refusal included.
+ *
+ * The refusal is in `assets::move_to`'s own words, naming both ends and the
+ * asset that closes the loop -- so a QA walk that tries the move a person
+ * would try sees the sentence the app really answers with.
+ */
+function moveAsset(args: Record<string, unknown>) {
+  const asset = assetOr404(args.assetId as string);
+  const parentId = (args.newParentId as string | null) ?? null;
+  if (parentId !== null) {
+    let below: string | null = null;
+    for (let walk: string | null = parentId; walk !== null; ) {
+      const step = FIXTURE_ESTATE.find((row) => row.id === walk);
+      if (!step) break;
+      if (step.id === asset.id) {
+        throw {
+          code: "invalid",
+          message:
+            `moving "${asset.name}" under "${assetOr404(parentId).name}" would make a cycle: ` +
+            `"${below ?? step.name}" is already held by "${asset.name}"`,
+          source_id: null,
+        };
+      }
+      below = step.name;
+      walk = step.parent_id;
+    }
+  }
+  asset.parent_id = parentId;
+  ASSET_HISTORY.push({
+    entity_id: asset.id,
+    verb: "moved",
+    detail: { field: "parent", to: parentId },
+  });
+  return assetRow(asset);
+}
+
+/** `delete_asset`: a leaf goes, a branch is refused by name. */
+function deleteAsset(args: Record<string, unknown>) {
+  const asset = assetOr404(args.assetId as string);
+  const held = FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).length;
+  if (held > 0) {
+    throw {
+      code: "conflict",
+      message: `"${asset.name}" still holds ${held} asset(s) -- move or delete them first`,
+      source_id: null,
+    };
+  }
+  FIXTURE_ESTATE.splice(FIXTURE_ESTATE.indexOf(asset), 1);
+  return null;
+}
+
+/**
  * One asset as a column row -- everything but its properties and its path,
  * plus the rollup `assets::ROLLUP` computes (#431).
  */
@@ -564,6 +828,12 @@ function assetDetail(args: Record<string, unknown>) {
     held_by: heldBy.map(assetRow),
     holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
     history: [
+      // This session's own writes first, newest first, which is what makes
+      // *every mutation appears in the pane's history immediately* (#429)
+      // something a QA walk can see rather than take on trust.
+      ...ASSET_HISTORY.filter((line) => line.entity_id === asset.id)
+        .map((line, index) => ({ id: 1000 + index, at: SYNCED_AT, actor: "user", ...line }))
+        .reverse(),
       {
         id: 2,
         at: SYNCED_AT,

@@ -256,6 +256,12 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
       // about the collapse leaves it in.
       ...(over.stripWidth === undefined ? {} : { stripWidth: () => over.stripWidth ?? 0 }),
       ports: {
+        // #429's type table. This file is about the *read*, and nothing here
+        // creates -- but the view asks for the table on mount, so a port left
+        // out here falls through to the real `invoke` and every test in the
+        // file would render behind a "Creating is unavailable" line and a
+        // dead plus. Empty is the honest fixture: no test here presses one.
+        assetTypes: () => Promise.resolve([]),
         search: (query: SearchQuery) => {
           searched.push(query);
           return Promise.resolve(over.answer ?? matchesFor(query, estate));

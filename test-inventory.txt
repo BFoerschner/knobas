@@ -39,6 +39,7 @@ knobas-app	lib/knobas_app	commands::assets::tests::the_asset_row_matches_its_typ
 knobas-app	lib/knobas_app	commands::assets::tests::the_inherited_value_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_sends_the_argument_names_tauri_expects
+knobas-app	lib/knobas_app	commands::assets::tests::the_type_table_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_decodes_from_the_dialogs_shape
 knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_serialises_the_keys_the_mirror_declares
@@ -227,6 +228,7 @@ knobas-app	test/assets_ipc	environment_and_owner_come_from_the_nearest_asset_at_
 knobas-app	test/assets_ipc	every_asset_command_is_registered_and_its_arguments_decode
 knobas-app	test/assets_ipc	moving_an_asset_re_parents_it_and_writes_the_move
 knobas-app	test/assets_ipc	one_asset_reads_with_its_held_by_path_and_its_properties
+knobas-app	test/assets_ipc	the_type_table_answers_with_no_pool_and_carries_the_schema_and_the_suggestions
 knobas-app	test/atlassian_live	a_comment_that_mentions_me_becomes_an_inbox_mention
 knobas-app	test/atlassian_live	a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror
 knobas-app	test/atlassian_live	a_page_edited_through_knobas_is_on_the_digest_under_yesterday
@@ -595,9 +597,11 @@ knobas-app	test/worklog_ipc	stopping_the_timer_on_a_ticket_is_what_there_is_to_d
 knobas-core	lib/knobas_core	asset::tests::custom_declares_no_typed_properties
 knobas-core	lib/knobas_core	asset::tests::every_monogram_is_two_characters_and_no_two_types_share_one
 knobas-core	lib/knobas_core	asset::tests::every_property_kind_spells_itself_the_way_serde_does
+knobas-core	lib/knobas_core	asset::tests::every_suggestion_is_a_type_that_exists
 knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_misses_for_anything_else
 knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
 knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_nineteen_types_the_spec_names
+knobas-core	lib/knobas_core	asset::tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time
 knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	context::tests::kind_serializes_as_its_column_value
@@ -684,6 +688,7 @@ knobas-core	test/estate_file	every_hetzner_server_in_the_host_list_is_here_with_
 knobas-core	test/estate_file	every_id_is_a_slug_in_its_own_namespace
 knobas-core	test/estate_file	every_id_is_unique
 knobas-core	test/estate_file	every_monitor_the_estate_names_is_one_the_seed_creates
+knobas-core	test/estate_file	every_pair_the_real_estate_holds_is_a_pair_the_type_table_suggests
 knobas-core	test/estate_file	every_parent_exists_and_the_assets_form_one_tree
 knobas-core	test/estate_file	every_route_is_exposed_by_an_asset_and_lands_on_one
 knobas-core	test/estate_file	every_type_is_in_the_type_table

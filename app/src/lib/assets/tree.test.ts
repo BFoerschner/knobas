@@ -412,7 +412,7 @@ test("the strip's arithmetic measures the widths this view actually draws", () =
     return Number(rule[1]);
   };
 
-  expect(widthOf(".col")).toBe(COLUMN_WIDTH);
+  expect(widthOf(".colw")).toBe(COLUMN_WIDTH);
   expect(widthOf(".col.spine")).toBe(SPINE_WIDTH);
 });
 

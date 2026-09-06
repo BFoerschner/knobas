@@ -284,6 +284,7 @@ const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
 const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
@@ -587,7 +588,44 @@ const CASES: Case[] = [
           ports: {
             assetTree: () => deferred([]),
             getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
+            assetTypes: () => deferred([]),
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The move picker (#429). One effect -- the level it is standing on --
+     * and it re-reads on every step down, so a walk unmounted mid-step is the
+     * case this covers.
+     */
+    name: "MoveDialog",
+    source: "lib/assets/MoveDialog.svelte",
+    open: (target) => ({
+      app: mount(MoveDialog, {
+        target,
+        props: {
+          asset: {
+            id: "asset:postgres",
+            parent_id: null,
+            type_id: "container",
+            type_label: "Container",
+            monogram: "CT",
+            name: "postgres",
+            status: "none",
+            environment: null,
+            owner: null,
+            has_children: false,
+            health: "none",
+            inside: "none",
+            problems_inside: 0,
+          },
+          heldBy: [],
+          tree: () => deferred([]),
+          move: () => Promise.reject(new Error("no write in this test")),
+          onclose: () => {},
+          onmoved: () => {},
         },
       }),
     }),
