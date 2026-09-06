@@ -254,11 +254,27 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
     );
 }
 
+/// Scoped to the `mock` source, for the same class of reason
+/// [`lists_the_newest_first_and_reports_the_unpaged_total`] is, and for one
+/// worth naming because it is not about freshness.
+///
+/// The oracle below is Rust's `sort()`, which is **byte order**, and the
+/// database's is its own collation -- and the two disagree the moment a title
+/// starts with a lowercase letter. Every title in the mock corpus happens to
+/// start with a capital, so the disagreement never showed; the first test in
+/// this binary to write a lowercase title made it fail here, in a test that has
+/// nothing to do with that test's subject (#442, whose monitors really are
+/// called `gitea` and `canary`). Scoping is the fix the file's own header asks
+/// for -- "written to survive another test running beside it" -- and it costs
+/// this test nothing: what it asserts is that `TitleAsc` is a *second SQL
+/// statement* rather than an interpolated column name, and one source's rows
+/// answer that as well as the whole corpus does.
 #[tokio::test]
 async fn title_order_is_a_second_statement_not_string_interpolation() {
     let pool = seeded().await;
     let filter = EntityFilter {
         order: EntityOrder::TitleAsc,
+        sources: vec!["mock".to_owned()],
         ..all()
     };
     let page = list_entities_inner(&pool, &filter, 500, 0, &no_paths())
@@ -275,10 +291,21 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
     assert_eq!(titles, sorted);
 
     // ...and it is a different order from the default, or the assertion above
-    // would hold for a `match` that returned the same statement twice.
-    let by_date = list_entities_inner(&pool, &all(), 500, 0, &no_paths())
-        .await
-        .unwrap();
+    // would hold for a `match` that returned the same statement twice. **The
+    // same scope**, or the two lists would differ because they cover different
+    // rows and this would pass however `TitleAsc` was implemented.
+    let by_date = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec!["mock".to_owned()],
+            ..all()
+        },
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert_ne!(
         by_date
             .rows
