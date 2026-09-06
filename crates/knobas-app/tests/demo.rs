@@ -437,3 +437,135 @@ async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
         "the demo profile has to show a room for each project its fixture names"
     );
 }
+
+/// **The demo profile carries the real estate, and a second start changes
+/// nothing** (#440, criterion 1).
+///
+/// `--demo` loads `testenv/hetzner/estate.json` beside the Tidewater work, and
+/// the reason it is *that* file rather than a Tidewater-shaped one is
+/// ADR-0013: a made-up estate would show that the Tree draws a tree, and what
+/// M4.0 has to show is that a real estate fits the model. The counts below are
+/// the file's own and are read off it here rather than written down, so a file
+/// that grows a server moves this test with it instead of failing it.
+///
+/// The idempotence half is `demo_load_registers_once_and_syncs_the_same_rows_every_time`'s
+/// for the estate: a person double-clicking *Load demo data*, and a demo
+/// profile that is started again tomorrow, must not get a second copy of the
+/// estate. The import's own idempotence is `assets_ipc`'s
+/// (`a_second_import_of_the_same_file_is_all_known_and_changes_nothing`);
+/// what this asserts is that the **demo load** is the caller that inherits it.
+#[tokio::test]
+async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    let file: serde_json::Value =
+        serde_json::from_str(include_str!("../../../testenv/hetzner/estate.json"))
+            .expect("the estate file parses");
+    let ids = |key: &str| -> Vec<String> {
+        file[key]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|entry| entry["id"].as_str().expect("an id").to_owned())
+            .collect()
+    };
+    let (assets, routes) = (ids("assets"), ids("routes"));
+
+    let report = demo::demo_load_inner(&pool).await.unwrap();
+    assert_eq!(
+        report.upserted, 21,
+        "the work half is unchanged: the estate rides beside the fixture, not instead of it"
+    );
+
+    let stored = |pool: sqlx::PgPool, statement: &'static str| async move {
+        sqlx::query_scalar::<_, String>(statement)
+            .fetch_all(&pool)
+            .await
+            .expect("the stored ids")
+    };
+    let after_one = (
+        stored(pool.clone(), "select id from knobas.asset order by id").await,
+        stored(pool.clone(), "select id from knobas.route order by id").await,
+    );
+
+    let mut expected = (assets.clone(), routes.clone());
+    expected.0.sort();
+    expected.1.sort();
+    assert_eq!(
+        after_one, expected,
+        "the demo estate is the checked-in file, id for id"
+    );
+
+    // A second start of the demo profile. The whole file is known, so the
+    // preview has nothing new and nothing to change -- which is the claim
+    // criterion 3 makes about a re-import, made here about a restart.
+    demo::demo_load_inner(&pool).await.unwrap();
+    let preview = knobas_app::assets::preview_import(
+        &pool,
+        include_str!("../../../testenv/hetzner/estate.json"),
+    )
+    .await
+    .expect("the preview");
+    assert_eq!(
+        (
+            preview.known.len(),
+            preview.new.len(),
+            preview.changes.len()
+        ),
+        (assets.len() + routes.len(), 0, 0),
+        "a restarted demo profile previews the whole estate as already in the tree"
+    );
+
+    let after_two = (
+        stored(pool.clone(), "select id from knobas.asset order by id").await,
+        stored(pool.clone(), "select id from knobas.route order by id").await,
+    );
+    assert_eq!(
+        after_two, after_one,
+        "a second demo load changed the estate"
+    );
+
+    // The ids alone cannot carry that sentence, and it is worth saying why:
+    // `knobas.asset.id` is the primary key, so a load that inserted the file
+    // twice would fail on the conflict rather than appear here as a longer
+    // list. What a re-import *can* get wrong is a column -- `ADD_MONITORS` is
+    // an `array_cat`, so a plan that thought the names were missing would
+    // double every one of them -- and one line per asset in the stream, where
+    // the file is authoritative and nothing happened.
+    let monitors: Vec<Vec<String>> =
+        sqlx::query_scalar("select monitors from knobas.asset order by id")
+            .fetch_all(&pool)
+            .await
+            .expect("the kept names");
+    assert_eq!(
+        monitors.concat().len(),
+        7,
+        "a second load appended the file's monitor names again"
+    );
+
+    let origins: Vec<(String, i64)> = sqlx::query_as(
+        "select entity_id, count(*) from knobas.activity
+          where actor = 'import' and entity_id is not null
+          group by entity_id order by entity_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the origin lines the imports wrote");
+    // Per entity and not an absolute count of the table: this binary's
+    // database is shared and several of its tests call `demo_load_inner`, so
+    // how many *summary* lines there are depends on which of them have run.
+    // How many origin lines one asset has does not -- it is one, for every
+    // entry in the file, however many times the demo has been loaded.
+    assert_eq!(
+        origins.len(),
+        assets.len() + routes.len(),
+        "one origin line per entry the file names"
+    );
+    let twice: Vec<&(String, i64)> = origins.iter().filter(|(_, n)| *n != 1).collect();
+    assert!(
+        twice.is_empty(),
+        "a second load wrote a second origin line: {twice:?}"
+    );
+}

@@ -13,7 +13,13 @@
  * `App.svelte`, exempting only files inside the harness directory itself;
  * a test one level up would be a second door into the fixture.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "vitest";
+
+import type { AssetDetail, AssetRow } from "../../ipc/assets";
+import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
 import type { SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
@@ -107,4 +113,238 @@ test("accepting or dismissing removes the row from the next read and drops the c
   expect(() => handlers["dismiss_suggestion"]!({ linkId: "link:fake-none" })).toThrow(
     expect.objectContaining({ code: "not_found" }),
   );
+});
+
+/**
+ * The estate the fixture answers with is `testenv/hetzner/estate.json` (#440).
+ *
+ * Read here off the **file on disk**, not off the same import the fixture
+ * uses: an assertion that compared the fixture to its own input would agree
+ * with itself. What is under test is the mapping the fixture does on the way
+ * — `assets::properties_of` and `assets::property_of` in TypeScript — because
+ * that is the half a browser screenshot is evidence about. If it is wrong, a
+ * QA pass photographs a pane the app would never draw.
+ */
+const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8");
+const ESTATE_ON_DISK = JSON.parse(ESTATE_TEXT) as {
+  name: string;
+  assets: {
+    id: string;
+    type: string;
+    name: string;
+    parent?: string;
+    description?: string;
+    properties?: Record<string, string | number>;
+  }[];
+  routes: { id: string; asset: string; target?: string }[];
+};
+
+/** One column of the Tree, as `asset_tree` answers it. */
+function column(handlers: ReturnType<typeof demoHandlers>, parentId: string | null) {
+  return handlers["asset_tree"]!({ parentId }) as { id: string; name: string }[];
+}
+
+test("the estate is the checked-in file, and every type it names has a chip", () => {
+  const handlers = demoHandlers();
+
+  // The top of the estate: the file has exactly one asset with no parent, and
+  // a fixture that lost the `parent` mapping would draw all twenty-three here.
+  const roots = ESTATE_ON_DISK.assets.filter((asset) => asset.parent === undefined);
+  expect(column(handlers, null).map((row) => row.id)).toEqual(roots.map((asset) => asset.id));
+
+  // Every type the estate uses is in the table, with a two-character monogram
+  // — `typeOf`'s fallback draws `??`, which is a chip that says the table has
+  // drifted from the estate it serves.
+  const types = handlers["asset_types"]!({}) as { id: string; monogram: string }[];
+  for (const asset of ESTATE_ON_DISK.assets) {
+    const declared = types.find((type) => type.id === asset.type);
+    expect(declared, `no type ${asset.type} for ${asset.id}`).toBeDefined();
+    expect(declared!.monogram).toHaveLength(2);
+  }
+
+  // Every route has both its ends in the estate, which is what a wire needs:
+  // one row to leave and one row to land on.
+  const ids = new Set(ESTATE_ON_DISK.assets.map((asset) => asset.id));
+  for (const route of ESTATE_ON_DISK.routes) {
+    expect(ids.has(route.asset), `${route.id} is exposed by nothing`).toBe(true);
+    expect(ids.has(route.target ?? ""), `${route.id} lands on nothing`).toBe(true);
+    expect(() => handlers["get_route"]!({ routeId: route.id })).not.toThrow();
+  }
+});
+
+/**
+ * The three servers and their containers — criterion 1's own words — and the
+ * property mapping, on the pane of a machine that exercises every branch of
+ * it: a declared key the file fills, a declared key it does not, a custom
+ * string, a custom **number**, and the `description` that has no column.
+ */
+test("a server's pane draws the file's properties at the kinds the type declares", () => {
+  const handlers = demoHandlers();
+
+  const nbg1 = column(handlers, "asset:hetzner-nbg1");
+  expect(nbg1.map((row) => row.name)).toEqual([
+    "knobas-confluence",
+    "knobas-jira",
+    "knobas-teamcity",
+  ]);
+  // Each of the three holds a Docker engine, and each engine holds containers.
+  for (const server of nbg1) {
+    const engines = column(handlers, server.id);
+    expect(engines).toHaveLength(1);
+    expect(column(handlers, engines[0]!.id).length).toBeGreaterThan(0);
+  }
+
+  const detail = handlers["get_asset"]!({ assetId: "asset:hetzner-teamcity" }) as {
+    properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  };
+  const file = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:hetzner-teamcity")!;
+  const at = (key: string) => detail.properties.find((property) => property.key === key);
+
+  // Declared by `vm`, in the type's order, and labelled by the type.
+  expect(detail.properties.slice(0, 4).map((property) => property.key)).toEqual([
+    "hostname",
+    "ip",
+    "os",
+    "size",
+  ]);
+  expect(at("os")).toEqual({
+    key: "os",
+    label: "OS",
+    value: { kind: "text", value: file.properties!.os },
+    custom: false,
+  });
+  // Declared and unfilled: `null`, which is the em dash the pane draws.
+  expect(at("hostname")!.value).toBeNull();
+  // Custom, labelled by its own key, and a number stays a number — the one
+  // place `valueOf` reads the JSON's type rather than the schema's.
+  expect(at("vcpu")).toEqual({
+    key: "vcpu",
+    label: "vcpu",
+    value: { kind: "number", value: file.properties!.vcpu },
+    custom: true,
+  });
+  // The description has no column in this model, so it is a property.
+  expect(at("description")!.value).toEqual({ kind: "text", value: file.description });
+
+  // And the custom rows are in key order, after the declared ones.
+  const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
+  expect(custom).toEqual([...custom].sort());
+});
+
+/**
+ * **A route's row draws its wire, over the real estate** (#440, criterion 2).
+ *
+ * The geometry is `tree.ts`'s and has its own tests over a fixture built to
+ * exercise it; what this asserts is that the **real** estate feeds it a wire
+ * at all — that the file's routes and the file's containment put a far end in
+ * a column the Tree has open. Composed from the fixture's own answers, so the
+ * chain is the one a browser walks: `get_asset` → `columnPathFor` →
+ * `asset_tree` per column → `wiresFor`.
+ *
+ * `knobas-gitea` is the asset to stand on because both of the estate's ways of
+ * reaching a container meet on it: the notebook's published port, whose
+ * exposer is four columns to the left and **is** in the layout, and the
+ * tunnel's `-R` forward, whose exposer is a Hetzner server in another branch
+ * entirely and is in no open column — so one wire is drawn and one is not,
+ * which is #433's rule rather than an absence of routes.
+ */
+test("a route in the real estate draws a wire to the asset that exposes it", () => {
+  const handlers = demoHandlers();
+  const detail = handlers["get_asset"]!({ assetId: "asset:knobas-gitea" }) as AssetDetail;
+  const columns = columnPathFor(detail).parents.map(
+    (parent) => handlers["asset_tree"]!({ parentId: parent }) as AssetRow[],
+  );
+  expect(columns).toHaveLength(5);
+
+  // A window wide enough for every column, so what comes back is about the
+  // routes rather than about the collapse.
+  const wide = stripFor(columns.length, 5000, null);
+  expect(wiresFor(detail, columns, wide)).toEqual([
+    {
+      key: wireKey("via", "route:notebook-gitea"),
+      column: 1,
+      rowId: "asset:notebook",
+      dashed: false,
+    },
+  ]);
+
+  // The same wire at a window too narrow for five columns: the row is behind a
+  // spine, so it lands on the spine and is dashed.
+  const narrow = stripFor(columns.length, 400, null);
+  expect(wiresFor(detail, columns, narrow)).toEqual([
+    { key: wireKey("via", "route:notebook-gitea"), column: 1, rowId: null, dashed: true },
+  ]);
+});
+
+/**
+ * The Import dialog under `?fake-ipc` (#440).
+ *
+ * The estate this fixture draws **is** the file `--demo` imports, so choosing
+ * that file is the one Import gesture a reader will make here, and what it has
+ * to answer is criterion 3's sentence: every entry already in the tree.
+ *
+ * Last in the file, and the two tests are ordered: the second one deletes an
+ * asset, and the fixture's estate is session state that a fresh
+ * `demoHandlers()` does not reset — the same rule the suggestion tests above
+ * are written under.
+ */
+test("importing the estate file previews every entry as already in the tree", () => {
+  const handlers = demoHandlers();
+  const preview = handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as {
+    name: string;
+    known: { id: string; kind: string }[];
+    new: unknown[];
+    changes: unknown[];
+  };
+
+  expect(preview.name).toBe(ESTATE_ON_DISK.name);
+  expect(preview.known.map((entry) => entry.id)).toEqual([
+    ...ESTATE_ON_DISK.assets.map((asset) => asset.id),
+    ...ESTATE_ON_DISK.routes.map((route) => route.id),
+  ]);
+  expect(preview.new).toEqual([]);
+  // Applying an all-known import writes nothing, and says six zeroes.
+  expect(handlers["apply_estate_import"]!({ file: ESTATE_TEXT })).toEqual({
+    assets_created: 0,
+    routes_created: 0,
+    properties_set: 0,
+    properties_kept: 0,
+    monitors_kept: 0,
+    monitors_linked: 0,
+  });
+
+  // Any other file is the real command's to parse, and is refused by name
+  // rather than answered from this estate.
+  expect(() => handlers["preview_estate_import"]!({ file: '{"name":"somewhere else"}' })).toThrow(
+    expect.objectContaining({ code: "invalid" }),
+  );
+  expect(() => handlers["preview_estate_import"]!({ file: "not json" })).toThrow(
+    expect.objectContaining({ code: "invalid" }),
+  );
+});
+
+test("an asset deleted here comes back as new, and the import brings it back", () => {
+  const handlers = demoHandlers();
+  // A leaf, so the delete is not refused for what it holds.
+  handlers["delete_asset"]!({ assetId: "asset:db-confluence" });
+
+  const gone = handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as {
+    new: { id: string; name: string; type_label: string | null }[];
+  };
+  expect(gone.new).toEqual([
+    { id: "asset:db-confluence", kind: "asset", name: "confluence", type_label: "Database", parent_id: "asset:knobas-confluence-db" },
+  ]);
+
+  expect(handlers["apply_estate_import"]!({ file: ESTATE_TEXT })).toMatchObject({
+    assets_created: 1,
+    routes_created: 0,
+  });
+  // And it is in the tree again, with the origin line the real import writes.
+  const detail = handlers["get_asset"]!({ assetId: "asset:db-confluence" }) as {
+    history: { actor: string; verb: string }[];
+  };
+  expect(detail.history[0]).toMatchObject({ actor: "import", verb: "imported" });
+  expect(
+    (handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as { new: unknown[] }).new,
+  ).toEqual([]);
 });

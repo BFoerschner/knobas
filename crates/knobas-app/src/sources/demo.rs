@@ -1,4 +1,5 @@
-//! Demo mode: register the compiled-in mock and load the Tidewater fixture.
+//! Demo mode: register the compiled-in mock, load the Tidewater fixture, and
+//! import the checked-in estate beside it.
 //!
 //! M0 had a second job here -- a one-entry source registry, because the mock
 //! was the only adapter there was. That is [`super::registry`]'s now, and the
@@ -13,6 +14,25 @@
 //! be called from a test. [`demo_load_inner`] is the load over a pool alone;
 //! [`demo_load_announced`] is the same load followed by the `sync:state` its
 //! run owes (#240), for a caller that has a window to tell.
+//!
+//! ## Why the estate is here and not in the fixture (#440)
+//!
+//! The work half is fiction: `fixtures/tidewater/work.json` is twenty-one
+//! invented tickets, because a demo corpus of somebody's real Jira is a demo
+//! nobody can ship. The estate half is the opposite and deliberately so --
+//! ADR-0013, *the real container is the witness*: `testenv/hetzner/estate.json`
+//! describes the machines this repo is actually developed and tested on, so
+//! what the demo's Tree shows is an estate that exists rather than one drawn
+//! to fit the model. Spec #427 says it in as many words -- *nothing
+//! Tidewater-shaped is invented for assets*.
+//!
+//! It goes through [`crate::assets::apply_import`] and not through a loader of
+//! its own, and that is the decision worth reading. `assets::HAND_EDITED`
+//! tells an import's writes from a person's by their `actor`, and a second
+//! loader writing `actor = 'user'` would freeze every property it touched
+//! against every later import -- the demo profile would be the one profile in
+//! which the merge rule is wrong. One writer, one merge rule, and the demo
+//! inherits the import's idempotence for free.
 
 use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
@@ -20,12 +40,33 @@ use knobas_sync::scheduler::{SyncEvents, status_for};
 use knobas_sync::{SyncError, SyncReport};
 use sqlx::PgPool;
 
+/// The estate the demo profile draws, embedded.
+///
+/// `include_str!` rather than a path read at run time, for
+/// `knobas_source_mock`'s reason one crate over: a bundled `knobas --demo` has
+/// no repository under it, and a file the binary went looking for would be a
+/// demo that works from a checkout and nowhere else. It is the same bytes
+/// `crates/knobas-app/tests/assets_ipc.rs` and `knobas-core`'s
+/// `tests/estate_file.rs` embed, so the three fail together the day the file
+/// stops being an estate file.
+const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+
 /// Why a demo load did not happen.
 #[derive(Debug, thiserror::Error)]
 pub enum DemoError {
     /// Registering the source failed.
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
+
+    /// Importing the estate failed.
+    ///
+    /// Its own variant rather than a flattened `Internal`, because the two
+    /// halves of a demo load fail for unrelated reasons and a reader who is
+    /// told *"the demo failed"* cannot tell a broken fixture from a broken
+    /// estate file. The [`crate::IpcError`] underneath keeps the import's own
+    /// classification and its own sentence.
+    #[error("the estate: {0}")]
+    Estate(#[from] crate::IpcError),
 
     /// The sync run itself failed, for this source.
     ///
@@ -56,34 +97,65 @@ impl From<DemoError> for crate::IpcError {
             DemoError::Sync { source_id, error } => {
                 crate::IpcError::from_sync_error(&error, Some(&source_id))
             }
+            // Already an `IpcError`: the import classified its own failure
+            // (`invalid` for a file that is not an estate file, `conflict` for
+            // a lost race), and re-coding it here would throw that away.
+            DemoError::Estate(error) => error,
         }
     }
 }
 
-/// Register the demo source if it is not registered yet, then sync it in full.
+/// Register the demo source if it is not registered yet, sync it in full, and
+/// import the estate.
 ///
-/// Idempotent in both halves: the registration refreshes the descriptor's own
-/// columns and leaves the rest of an existing configuration alone (the cursor
-/// a previous run stored included), and a full sync upserts the same rows
-/// rather than adding to them. Double-clicking the button is therefore
-/// harmless, which is the whole reason this is one function.
+/// Idempotent in all three halves: the registration refreshes the descriptor's
+/// own columns and leaves the rest of an existing configuration alone (the
+/// cursor a previous run stored included), a full sync upserts the same rows
+/// rather than adding to them, and a second import of an unchanged file is
+/// all-known and writes one summary line. Double-clicking the button is
+/// therefore harmless, and so is starting the demo profile again tomorrow,
+/// which is the whole reason this is one function.
+///
+/// **The work first, then the estate**, and the order is not arbitrary: the
+/// run is what the answer is about, and a caller that got a `SyncReport` back
+/// from a load whose sync had not happened would be reading a number about
+/// nothing. The two halves share no rows -- the mirror is `sync.*`, the estate
+/// is `knobas.asset` and `knobas.route` -- so neither can spoil the other, and
+/// an estate that will not import leaves a demo profile with its work in it
+/// and says why.
 ///
 /// # Errors
 ///
 /// [`DemoError::Db`] if the registration fails, [`DemoError::Sync`] if the run
-/// does.
+/// does, [`DemoError::Estate`] if the estate will not import.
 pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     let source = MockSource::new();
     register(pool, &source.descriptor()).await?;
     // `None`: demo mode means "give me the whole fixture", regardless of what
     // a previous run recorded. The run is idempotent, so this costs rows
     // rewritten, not rows duplicated.
-    knobas_sync::run_once(pool, &source, None)
+    let report = knobas_sync::run_once(pool, &source, None)
         .await
         .map_err(|error| DemoError::Sync {
             source_id: source.descriptor().id,
             error,
-        })
+        })?;
+
+    let estate = crate::assets::apply_import(pool, ESTATE_FILE).await?;
+    // Logged rather than returned: `SyncReport` is a frozen wire shape and
+    // this is a second load's counts, not the run's. `Load demo data` reports
+    // the mirror it can count; what the estate did is in the app log and in
+    // every imported asset's own history.
+    tracing::info!(
+        assets = estate.value.assets_created,
+        routes = estate.value.routes_created,
+        properties_set = estate.value.properties_set,
+        properties_kept = estate.value.properties_kept,
+        monitors_kept = estate.value.monitors_kept,
+        "the demo estate is loaded"
+    );
+
+    Ok(report)
 }
 
 /// [`demo_load_inner`], followed by the `sync:state` its run owes (#240).
@@ -124,8 +196,10 @@ pub async fn demo_load_announced(
 ) -> Result<SyncReport, DemoError> {
     let result = demo_load_inner(pool).await;
     // A `Db` error is the registration failing, so there was no run to
-    // announce; a `Sync` error is a run that ended, and its ending is a
-    // transition too.
+    // announce. Every other variant means the run happened: a `Sync` error is
+    // a run that ended, and its ending is a transition too, and an `Estate`
+    // error is raised *after* the run returned, so its status is as worth
+    // announcing as a clean load's.
     if !matches!(result, Err(DemoError::Db(_))) {
         let source_id = MockSource::new().descriptor().id;
         match status_for(pool, &source_id).await {

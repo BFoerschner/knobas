@@ -46,6 +46,9 @@
  */
 import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
+// The estate itself. See `FIXTURE_ESTATE` below for why it is read and not
+// copied, and for the check that it reaches no production bundle.
+import ESTATE_FILE from "../../../../../testenv/hetzner/estate.json";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -320,6 +323,13 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // from the dialog would need a minted id and a history of its own, and
     // what this fixture exists for is the two reads a browser looks at.
     get_route: (args) => routeDetail(args),
+    // The Import (#439), as a **replay** and not as a second implementation of
+    // the merge rule -- see `estatePreview`. It exists because the estate this
+    // fixture draws *is* the file `--demo` imports (#440), so pressing Import
+    // and choosing that file is the one gesture a reader will actually make
+    // here, and until now it answered "command not found" in red.
+    preview_estate_import: (args) => estatePreview(args),
+    apply_estate_import: (args) => estateApply(args),
     // The room's Assets tile (#434). Empty for `context_members`' reason: the
     // fixture has no link graph, so no context holds anything and membership
     // -- assets included -- is honestly nothing. A stored room under
@@ -338,336 +348,32 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
 // -- the estate -------------------------------------------------------------
 
 /**
- * A slice of the **real** test infrastructure, five levels deep (#428, #430).
- *
- * Deliberately not Tidewater-shaped: spec #427 rules that the estate is the
- * real thing -- the Hetzner servers, their containers and databases -- and
- * that *"nothing Tidewater-shaped is added for assets"*. The checked-in estate
- * file (#438) is the description this fixture is a hand-copied corner of; when
- * that file lands, this can read it instead.
- *
- * Small on purpose. It exists so a browser can be pointed at the Tree, not so
- * that it can stand in for PostgreSQL. #428 stopped at three levels, which is
- * what makes a path a path; #430 needs the two the real estate actually has
- * under a VM — the container engine and the container's database — because a
- * strip that fits every column cannot show a column *collapsing*, and the
- * spine is the thing a browser has to photograph. The chain is
- * `testenv/hetzner/estate.json`'s own: site → VM → container engine →
- * container → database.
- */
-const FIXTURE_ESTATE: {
-  id: string;
-  parent_id: string | null;
-  type_id: string;
-  type_label: string;
-  monogram: string;
-  name: string;
-  status: "up" | "warn" | "down" | "none";
-  environment: "dev" | "stage" | "prod" | "shared" | null;
-  owner: string | null;
-  properties: { key: string; label: string; value: unknown; custom: boolean }[];
-  /**
-   * The Uptime Kuma names an import kept on the asset (#439).
-   *
-   * Declared on every entry rather than on the two that have one, for
-   * `links`' reason below: `AssetDetail.monitors` is a `string[]` and the pane
-   * reads `.length`, so an entry short of the key hands it `undefined`. The
-   * two names are `testenv/hetzner/estate.json`'s own for these machines --
-   * nothing here is invented.
-   */
-  monitors: string[];
-}[] = [
-  {
-    id: "asset:hel1",
-    parent_id: null,
-    type_id: "site",
-    type_label: "Site",
-    monogram: "SI",
-    name: "hel1",
-    status: "none",
-    environment: "dev",
-    owner: "Björn",
-    properties: [
-      { key: "location", label: "Location", value: { kind: "text", value: "Helsinki" }, custom: false },
-      { key: "provider", label: "Provider", value: { kind: "text", value: "Hetzner" }, custom: false },
-    ],
-    monitors: [],
-  },
-  {
-    // The notebook the tunnel's forwards are exposed *from* (#433). The
-    // estate file has it as a hypervisor holding OrbStack, its Docker engine
-    // and three containers; this stops at the machine, so the two routes that
-    // land inside it land on it.
-    id: "asset:notebook",
-    parent_id: null,
-    type_id: "hypervisor",
-    type_label: "Hypervisor",
-    monogram: "HV",
-    name: "devs-MacBook-Pro",
-    status: "up",
-    environment: "dev",
-    owner: "Björn",
-    properties: [
-      { key: "hostname", label: "Hostname", value: { kind: "text", value: "devs-MacBook-Pro" }, custom: false },
-      { key: "ip", label: "IP", value: null, custom: false },
-      { key: "os", label: "OS", value: { kind: "text", value: "macOS 26" }, custom: false },
-    ],
-    monitors: [],
-  },
-  {
-    id: "asset:knobas-teamcity",
-    parent_id: "asset:hel1",
-    type_id: "vm",
-    type_label: "VM",
-    monogram: "VM",
-    name: "knobas-teamcity",
-    status: "up",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "hostname", label: "Hostname", value: { kind: "text", value: "knobas-teamcity" }, custom: false },
-      { key: "ip", label: "IP", value: null, custom: false },
-      { key: "os", label: "OS", value: { kind: "text", value: "Debian 13" }, custom: false },
-      { key: "size", label: "Size", value: { kind: "text", value: "cx23" }, custom: false },
-      { key: "renewed", label: "renewed", value: { kind: "date", value: "2026-09-05" }, custom: true },
-    ],
-    monitors: ["knobas-teamcity"],
-  },
-  {
-    id: "asset:knobas-jira",
-    parent_id: "asset:hel1",
-    type_id: "vm",
-    type_label: "VM",
-    monogram: "VM",
-    name: "knobas-jira",
-    status: "warn",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "hostname", label: "Hostname", value: { kind: "text", value: "knobas-jira" }, custom: false },
-      { key: "ip", label: "IP", value: null, custom: false },
-      { key: "os", label: "OS", value: { kind: "text", value: "Debian 13" }, custom: false },
-      { key: "size", label: "Size", value: { kind: "text", value: "cpx22" }, custom: false },
-    ],
-    monitors: ["knobas-jira"],
-  },
-  {
-    id: "asset:teamcity-docker",
-    parent_id: "asset:knobas-teamcity",
-    type_id: "container_engine",
-    type_label: "Container engine",
-    monogram: "CE",
-    name: "Docker engine (knobas-teamcity)",
-    status: "up",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "socket", label: "Socket", value: null, custom: false },
-      { key: "version", label: "Version", value: { kind: "text", value: "27.3" }, custom: false },
-    ],
-    monitors: [],
-  },
-  {
-    id: "asset:teamcity",
-    parent_id: "asset:teamcity-docker",
-    type_id: "container",
-    type_label: "Container",
-    monogram: "CT",
-    name: "teamcity",
-    status: "up",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "image", label: "Image", value: { kind: "text", value: "jetbrains/teamcity-server" }, custom: false },
-      { key: "ports", label: "Ports", value: { kind: "text", value: "8111" }, custom: false },
-      { key: "restart_policy", label: "Restart policy", value: null, custom: false },
-    ],
-    monitors: [],
-  },
-  {
-    id: "asset:teamcity-db",
-    parent_id: "asset:teamcity",
-    type_id: "database",
-    type_label: "Database",
-    monogram: "DB",
-    name: "teamcity",
-    status: "up",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "engine", label: "Engine", value: { kind: "text", value: "PostgreSQL 18" }, custom: false },
-      { key: "port", label: "Port", value: { kind: "number", value: 5432 }, custom: false },
-    ],
-    monitors: [],
-  },
-  {
-    id: "asset:teamcity-agent",
-    parent_id: "asset:teamcity-docker",
-    type_id: "container",
-    type_label: "Container",
-    monogram: "CT",
-    name: "teamcity-agent",
-    status: "up",
-    environment: null,
-    owner: null,
-    properties: [
-      { key: "image", label: "Image", value: { kind: "text", value: "jetbrains/teamcity-agent" }, custom: false },
-      { key: "ports", label: "Ports", value: null, custom: false },
-      { key: "restart_policy", label: "Restart policy", value: null, custom: false },
-    ],
-    monitors: [],
-  },
-];
-
-type FixtureAsset = (typeof FIXTURE_ESTATE)[number];
-
-/**
- * The routes this corner of the estate exposes (#432, drawn as wires by #433).
- *
- * `testenv/hetzner/estate.json`'s own, mapped onto the ids above: the two
- * tunnel forwards a person opens the servers through, and the one that runs
- * the other way. Nothing is invented -- the file's routes are the tunnel's,
- * and the fixture's shortening of the estate is what moves two of the targets
- * up a level: the notebook's own containers are not modelled here, so the
- * reverse forward lands on the notebook.
- *
- * They are what makes the Tree's wires visible in a browser at all: a wire
- * runs from a route's row to the row (or the spine) of the asset at its far
- * end, so a fixture with no routes draws none, whatever the code does.
- */
-const FIXTURE_ROUTES: {
-  id: string;
-  asset_id: string;
-  target_id: string | null;
-  name: string;
-  url: string;
-  visibility: "internal" | "public";
-  properties: { key: string; label: string; value: unknown; custom: boolean }[];
-}[] = [
-  {
-    id: "route:tunnel-teamcity",
-    asset_id: "asset:notebook",
-    target_id: "asset:teamcity",
-    name: "TeamCity (tunnel)",
-    url: "http://127.0.0.1:8111/",
-    visibility: "internal",
-    properties: [
-      {
-        key: "opened_by",
-        label: "opened_by",
-        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
-        custom: true,
-      },
-      {
-        key: "forward",
-        label: "forward",
-        value: { kind: "text", value: "ssh -N -L 127.0.0.1:8111:127.0.0.1:8111 knobas-teamcity" },
-        custom: true,
-      },
-    ],
-  },
-  {
-    id: "route:tunnel-jira",
-    asset_id: "asset:notebook",
-    target_id: "asset:knobas-jira",
-    name: "Jira (tunnel)",
-    url: "http://127.0.0.1:8080/",
-    visibility: "internal",
-    properties: [
-      {
-        key: "opened_by",
-        label: "opened_by",
-        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
-        custom: true,
-      },
-    ],
-  },
-  {
-    id: "route:tunnel-gitea-reverse",
-    asset_id: "asset:knobas-teamcity",
-    target_id: "asset:notebook",
-    name: "gitea (reverse tunnel)",
-    // The file spells this one with the docker network name the TeamCity
-    // containers resolve; `house-rules.test.ts` refuses any hostname that
-    // could answer, so the fixture carries the loopback address the same
-    // forward lands on instead.
-    url: "http://127.0.0.1:3000/",
-    visibility: "internal",
-    properties: [
-      {
-        key: "opened_by",
-        label: "opened_by",
-        value: { kind: "text", value: "testenv/hetzner/tunnel up" },
-        custom: true,
-      },
-    ],
-  },
-];
-
-type FixtureRoute = (typeof FIXTURE_ROUTES)[number];
-
-/** One route on the wire -- the exposing and target names read off the estate. */
-function routeRow(route: FixtureRoute) {
-  const named = (id: string | null) =>
-    id === null ? null : (FIXTURE_ESTATE.find((asset) => asset.id === id)?.name ?? null);
-  return {
-    ...route,
-    asset_name: named(route.asset_id) ?? route.asset_id,
-    target_name: named(route.target_id),
-  };
-}
-
-/**
- * `assets::ROUTES_REACHABLE`'s rule: every route whose target is on this
- * asset's containment path, above it or below.
- *
- * The **rule** and not one of its answers, like `inForce` below: a hard-coded
- * list would draw the right route on the wrong pane, and the pane is what a
- * QA walk is looking at.
- */
-function routesReaching(asset: FixtureAsset, heldBy: FixtureAsset[]) {
-  const under = new Set(descendants(asset).map((held) => held.id));
-  const path = new Set([asset.id, ...heldBy.map((held) => held.id)]);
-  return FIXTURE_ROUTES.filter(
-    (route) => route.target_id !== null && (path.has(route.target_id) || under.has(route.target_id)),
-  ).map(routeRow);
-}
-
-/** The two statuses `assets::ROLLUP` counts as a problem inside. */
-const PROBLEM: FixtureAsset["status"][] = ["warn", "down"];
-
-/** `AssetStatus::severity` -- down over warn over up over none, worst first. */
-const SEVERITY: Record<FixtureAsset["status"], number> = { down: 0, warn: 1, up: 2, none: 3 };
-
-/** Everything under `asset`, over the parent field. */
-function descendants(asset: FixtureAsset): FixtureAsset[] {
-  const held = FIXTURE_ESTATE.filter((other) => other.parent_id === asset.id);
-  return held.flatMap((child) => [child, ...descendants(child)]);
-}
-
-/** The worst of a set of statuses, `"none"` for an empty one. */
-function worst(statuses: FixtureAsset["status"][]): FixtureAsset["status"] {
-  return statuses.reduce(
-    (so_far, next) => (SEVERITY[next] < SEVERITY[so_far] ? next : so_far),
-    "none",
-  );
-}
-
-/**
  * A corner of the built-in type table -- `asset_types`' answer here.
  *
- * The types the fixture estate uses and the ones they suggest, with the ids,
+ * The types the estate below uses and the ones they suggest, with the ids,
  * monograms, schemas and `suggests` lists `knobas_core::asset` declares.
- * **Not all nineteen**, for the estate's own reason one paragraph up: this is a
- * fixture a browser is pointed at, and nine types is what it takes to see a
- * *usual here* line and a typed-property editor. The `suggests` lists are
- * nonetheless the **whole** lists the real table declares, so one of them names
- * a type this subset omits (`container` suggests `runtime`). That is on
- * purpose: `typeChoices` drops ids the list it is given does not carry, so a
- * full copy costs nothing and a trimmed one would be a second list disagreeing
- * with the first -- which is the drift this fixture already had once. When
- * #439's import can read `testenv/hetzner/estate.json` directly, this can read
- * the table with it.
+ * **Not all nineteen**: this is a fixture a browser is pointed at, and nine
+ * types is what it takes to see a *usual here* line and a typed-property
+ * editor. The `suggests` lists are nonetheless the **whole** lists the real
+ * table declares, so one of them names a type this subset omits (`container`
+ * suggests `runtime`). That is on purpose: `typeChoices` drops ids the list it
+ * is given does not carry, so a full copy costs nothing and a trimmed one
+ * would be a second list disagreeing with the first -- which is the drift this
+ * fixture already had once.
+ *
+ * It stays a copy where the estate below stopped being one (#440). The estate
+ * is a **file**, and a file can be imported; the table is a `const` in Rust,
+ * and the only way for TypeScript to have it is for something to write it
+ * down. What holds this copy to the real one is
+ * `the fixture answers the estate file, entry for entry` in
+ * `fake-tauri.test.ts`: every type the file names has to be here, with the
+ * monogram and the property schema the pane draws off it -- so a table that
+ * drifted from the estate it serves fails rather than draws a `??` chip.
+ *
+ * It has to be declared **before** the estate, because the estate is built by
+ * reading it at module load rather than written out beside it: a `const` read
+ * during its own file's initialisation is a temporal-dead-zone error, not a
+ * `undefined`.
  */
 const ASSET_TYPES: {
   id: string;
@@ -766,8 +472,329 @@ const ASSET_TYPES: {
   { id: "custom", label: "Custom", monogram: "CU", properties: [], suggests: [] },
 ];
 
+/**
+ * One asset in the estate file, at the shape `assets::EstateFile` parses.
+ *
+ * The section below is the fixture's estate, and it is the **real** one, read
+ * out of the file rather than copied into this one.
+ *
+ * `testenv/hetzner/estate.json` is the estate as provisioned (#438), and since
+ * #440 it is the file `--demo` imports -- so a browser pointed at `?fake-ipc`
+ * and a person looking at `just demo` are looking at the same twenty-three
+ * assets and the same nine routes. This module's own docs have said since #428
+ * that *"when that file lands, this can read it instead"*, and this is that.
+ *
+ * The hand-copied corner it replaces is why: five levels of the estate written
+ * out by hand had already drifted into a machine the estate does not have
+ * (`hel1`, a site holding two VMs) and a container typed as a VM. A copy of a
+ * file that is checked in beside it earns nothing and goes stale, and the
+ * shortening it needed -- routes re-pointed at the assets the copy stopped
+ * short of -- is exactly the kind of quiet difference a QA screenshot then
+ * reports as the app's behaviour.
+ *
+ * Vite resolves the import and Rollup drops it together with this module in a
+ * production build, where `import.meta.env.DEV` is `false` and the only door
+ * to this file is behind it (`house-rules.test.ts` holds that door). Checked:
+ * `grep -c "knobas test estate" dist/assets/*.js` is `0`.
+ *
+ * What is **not** read off the file is a **status**, because the file carries
+ * none and `assets::apply_import` writes none: every row here is `"none"`, and
+ * the *N problems inside* badge is therefore absent -- which is what the demo
+ * profile actually shows. #431's badge has its own fixtures in
+ * `AssetsView.test.svelte.ts`.
+ */
+interface EstateFileAsset {
+  id: string;
+  type: string;
+  name: string;
+  parent?: string;
+  environment?: string;
+  owner?: string;
+  description?: string;
+  properties?: Record<string, string | number>;
+  monitors?: string[];
+}
+
+/** One route in the file: what exposes it, and what it lands on. */
+interface EstateFileRoute {
+  id: string;
+  asset: string;
+  target?: string;
+  name: string;
+  url: string;
+  description?: string;
+  properties?: Record<string, string | number>;
+}
+
+/**
+ * The file, at the shape `assets::EstateFile` parses it into.
+ *
+ * Declared here rather than inferred. TypeScript's inference over an imported
+ * JSON array is a union of one object type per *distinct set of keys* the file
+ * happens to use, so `entry.parent` is a compile error on the one asset that
+ * has no parent and the union's shape changes the day somebody gives a second
+ * asset an owner. The cast is the seam, and it is narrow on purpose: the
+ * authority on this file is the Rust parser, and what holds the file to a
+ * shape is `knobas-core`'s `tests/estate_file.rs` -- eleven tests over the
+ * checked-in bytes, in `just check`.
+ */
+const ESTATE = ESTATE_FILE as unknown as {
+  name: string;
+  assets: EstateFileAsset[];
+  routes: EstateFileRoute[];
+};
+
+/** One asset as this fixture holds it: the wire's row, plus its properties. */
+interface FixtureAsset {
+  id: string;
+  parent_id: string | null;
+  type_id: string;
+  type_label: string;
+  monogram: string;
+  name: string;
+  status: "up" | "warn" | "down" | "none";
+  environment: "dev" | "stage" | "prod" | "shared" | null;
+  owner: string | null;
+  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  /** The Uptime Kuma names an import kept on the asset (#439). */
+  monitors: string[];
+}
+
+/** One route as this fixture holds it. */
+interface FixtureRoute {
+  id: string;
+  asset_id: string;
+  target_id: string | null;
+  name: string;
+  url: string;
+  visibility: "internal" | "public";
+  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+}
+
+/**
+ * The file's property bag: its `properties`, plus its `description`.
+ *
+ * `assets::bag_of`'s rule. A description has no column of its own in this
+ * model, so where it goes is the property bag -- and every asset in the real
+ * estate has one, which is why the pane's first custom row is `description`
+ * on nearly every asset the demo draws.
+ */
+function bagOf(entry: {
+  description?: string;
+  properties?: Record<string, string | number>;
+}): Record<string, string | number> {
+  const bag: Record<string, string | number> = { ...(entry.properties ?? {}) };
+  if (entry.description !== undefined) bag.description = entry.description;
+  return bag;
+}
+
+/**
+ * One plain scalar as the tagged value the pane draws.
+ *
+ * `assets::property_of`'s rule: a **declared** key takes the kind its type
+ * declares, an **undeclared** one takes the kind JSON already gave it. A rule
+ * and not a table, for this module's stated reason -- a fixture that answered
+ * with values somebody typed out would draw the right words over a pane
+ * reading the wrong field.
+ */
+function valueOf(kind: string | null, raw: string | number | undefined) {
+  if (raw === undefined) return null;
+  return { kind: kind ?? (typeof raw === "number" ? "number" : "text"), value: raw };
+}
+
+/** The bag's keys, as the pane's custom rows: by key, labelled by the key. */
+function customPropertiesOf(bag: Record<string, string | number>) {
+  return Object.keys(bag)
+    .sort()
+    .map((key) => ({ key, label: key, value: valueOf(null, bag[key]), custom: true }));
+}
+
+/**
+ * `assets::properties_of`: the type's declared keys in the type's own order,
+ * unfilled ones included, then whatever else the bag holds, by key.
+ */
+function propertiesOf(typeId: string, bag: Record<string, string | number>) {
+  const declared = typeOf(typeId).properties;
+  const claimed = new Set(declared.map((property) => property.key));
+  const rest = Object.fromEntries(
+    Object.entries(bag).filter(([key]) => !claimed.has(key)),
+  );
+  return [
+    ...declared.map((property) => ({
+      key: property.key,
+      label: property.label,
+      value: valueOf(property.kind, bag[property.key]),
+      custom: false,
+    })),
+    ...customPropertiesOf(rest),
+  ];
+}
+
+/**
+ * The table's entry for `typeId`.
+ *
+ * A type the table does not carry falls back to its own id rather than
+ * throwing: the fixture's table is a subset, and a file naming a type it omits
+ * should draw an unfamiliar chip rather than a blank screen.
+ */
+function typeOf(typeId: string) {
+  return (
+    ASSET_TYPES.find((type) => type.id === typeId) ?? {
+      id: typeId,
+      label: typeId,
+      monogram: "??",
+      properties: [] as { key: string; label: string; kind: string }[],
+      suggests: [] as string[],
+    }
+  );
+}
+
+/** The four environments `0017` accepts. Anything else is left unset. */
+const ENVIRONMENTS = ["dev", "stage", "prod", "shared"] as const;
+
+/** One of the file's assets as the fixture holds it. */
+function assetFromFile(entry: EstateFileAsset): FixtureAsset {
+  const declared = typeOf(entry.type);
+  return {
+    id: entry.id,
+    parent_id: entry.parent ?? null,
+    type_id: entry.type,
+    type_label: declared.label,
+    monogram: declared.monogram,
+    name: entry.name,
+    status: "none",
+    environment: ENVIRONMENTS.find((name) => name === entry.environment) ?? null,
+    owner: entry.owner ?? null,
+    properties: propertiesOf(entry.type, bagOf(entry)),
+    monitors: entry.monitors ?? [],
+  };
+}
+
+/**
+ * The estate the Tree draws: twenty-three assets, five levels at the deepest.
+ *
+ * Stateful within the session, like the contexts: an asset created, renamed,
+ * moved or deleted here stays that way for as long as the page lives, so the
+ * whole create / edit / move walk can be driven in a browser. Nothing is
+ * persisted -- reload and the estate is the file again.
+ */
+const FIXTURE_ESTATE: FixtureAsset[] = ESTATE.assets.map(assetFromFile);
+
+/**
+ * The ids the file itself names.
+ *
+ * What it is for is the history: an asset that arrived by import carries an
+ * origin line and an asset somebody made in this session does not, and after
+ * a `create_asset` the two live in the same array.
+ */
+const FILE_ASSET_IDS = new Set(ESTATE.assets.map((entry) => entry.id));
+
+/**
+ * One of the file's routes as the fixture holds it.
+ *
+ * A route declares no schema, so every property is a custom row --
+ * `assets::route_row_of` calls `custom_properties` and not `properties_of`.
+ *
+ * **The URL is the file's, verbatim, and one of the nine does not name a
+ * loopback address.** `route:tunnel-gitea-reverse` is the reverse forward, and
+ * the host in its URL is `gitea` -- the docker network name the TeamCity
+ * containers resolve, which is why the estate spells it that way and why it
+ * resolves nowhere else. The hand-copy this replaces substituted a loopback
+ * address for it, citing `house-rules.test.ts`'s *no runtime network
+ * references* rule, and dropping that substitution is a deliberate change
+ * rather than an oversight.
+ *
+ * That rule scans `.ts` and `.svelte` under `app/src/` -- **raw text,
+ * comments included, which is why this paragraph does not spell the URL with
+ * its scheme** -- and it exists so that a *bundle* reaches nothing but the
+ * IPC. The estate file is in no bundle: `import.meta.env.DEV` is the only door
+ * to this module, and `grep -c "knobas test estate" dist/assets/*.js` is `0`.
+ * More to the point, a route's URL is **data**. In the running app it arrives
+ * over the bridge out of `knobas.route` and is whatever a person typed or an
+ * import wrote, and this fixture stands in for that table -- so a harness that
+ * quietly improved one URL would be drawing a screen the app does not draw.
+ */
+function routeFromFile(route: EstateFileRoute): FixtureRoute {
+  return {
+    id: route.id,
+    asset_id: route.asset,
+    target_id: route.target ?? null,
+    name: route.name,
+    url: route.url,
+    visibility: "internal",
+    properties: customPropertiesOf(bagOf(route)),
+  };
+}
+
+/**
+ * The nine routes the estate exposes (#432, drawn as wires by #433): the five
+ * ports the notebook publishes, and the four forwards
+ * `testenv/hetzner/tunnel` opens -- three `-L` and the one `-R` that runs the
+ * other way, from a Hetzner server back to the notebook's Gitea.
+ *
+ * They are what makes the Tree's wires visible in a browser at all: a wire
+ * runs from a route's row to the row (or the spine) of the asset at its far
+ * end, so a fixture with no routes draws none, whatever the code does. Every
+ * one of these lands on an asset three or four columns away, which is the case
+ * a same-machine route could not photograph.
+ */
+const FIXTURE_ROUTES: FixtureRoute[] = ESTATE.routes.map(routeFromFile);
+
+/** One route on the wire -- the exposing and target names read off the estate. */
+function routeRow(route: FixtureRoute) {
+  const named = (id: string | null) =>
+    id === null ? null : (FIXTURE_ESTATE.find((asset) => asset.id === id)?.name ?? null);
+  return {
+    ...route,
+    asset_name: named(route.asset_id) ?? route.asset_id,
+    target_name: named(route.target_id),
+  };
+}
+
+/**
+ * `assets::ROUTES_REACHABLE`'s rule: every route whose target is on this
+ * asset's containment path, above it or below.
+ *
+ * The **rule** and not one of its answers, like `inForce` below: a hard-coded
+ * list would draw the right route on the wrong pane, and the pane is what a
+ * QA walk is looking at.
+ */
+function routesReaching(asset: FixtureAsset, heldBy: FixtureAsset[]) {
+  const under = new Set(descendants(asset).map((held) => held.id));
+  const path = new Set([asset.id, ...heldBy.map((held) => held.id)]);
+  return FIXTURE_ROUTES.filter(
+    (route) => route.target_id !== null && (path.has(route.target_id) || under.has(route.target_id)),
+  ).map(routeRow);
+}
+
+/** The two statuses `assets::ROLLUP` counts as a problem inside. */
+const PROBLEM: FixtureAsset["status"][] = ["warn", "down"];
+
+/** `AssetStatus::severity` -- down over warn over up over none, worst first. */
+const SEVERITY: Record<FixtureAsset["status"], number> = { down: 0, warn: 1, up: 2, none: 3 };
+
+/** Everything under `asset`, over the parent field. */
+function descendants(asset: FixtureAsset): FixtureAsset[] {
+  const held = FIXTURE_ESTATE.filter((other) => other.parent_id === asset.id);
+  return held.flatMap((child) => [child, ...descendants(child)]);
+}
+
+/** The worst of a set of statuses, `"none"` for an empty one. */
+function worst(statuses: FixtureAsset["status"][]): FixtureAsset["status"] {
+  return statuses.reduce(
+    (so_far, next) => (SEVERITY[next] < SEVERITY[so_far] ? next : so_far),
+    "none",
+  );
+}
+
 /** The activity lines this session's writes have appended, newest last. */
-const ASSET_HISTORY: { entity_id: string; verb: string; detail: unknown }[] = [];
+const ASSET_HISTORY: {
+  entity_id: string;
+  verb: string;
+  detail: unknown;
+  /** `"user"` unless the line was written by an import. */
+  actor?: string;
+}[] = [];
 
 /** Ids for the assets a QA walk creates. `assets::create` mints a UUID. */
 let mintedAssets = 0;
@@ -1028,20 +1055,27 @@ function assetDetail(args: Record<string, unknown>) {
       ...ASSET_HISTORY.filter((line) => line.entity_id === asset.id)
         .map((line, index) => ({ id: 1000 + index, at: SYNCED_AT, actor: "user", ...line }))
         .reverse(),
-      {
-        id: 2,
-        at: SYNCED_AT,
-        actor: "user",
-        verb: "edited",
-        entity_id: asset.id,
-        detail: {
-          field: "property",
-          key: "os",
-          from: { kind: "text", value: "Debian 12" },
-          to: { kind: "text", value: "Debian 13" },
-        },
-      },
-      { id: 1, at: SYNCED_AT, actor: "user", verb: "created", entity_id: asset.id, detail: {} },
+      // The line every asset **the file names** carries, and the only one: it
+      // arrived by import, and `assets::insert_asset` writes no `created` line
+      // beside the origin line (#439, story 23). The actor is `import` and not
+      // `user`, which is the whole of `assets::HAND_EDITED`'s question -- a
+      // fixture that said `user` here would draw a pane in which every
+      // property is hand-edited and frozen against the next import. An asset
+      // made in this session by hand has a `created` line of its own instead,
+      // pushed by `createAsset`, and no origin line, because nothing imported
+      // it.
+      ...(FILE_ASSET_IDS.has(asset.id)
+        ? [
+            {
+              id: 1,
+              at: SYNCED_AT,
+              actor: "import",
+              verb: "imported",
+              entity_id: asset.id,
+              detail: { estate: ESTATE.name },
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -1054,6 +1088,131 @@ function routeDetail(args: Record<string, unknown>) {
   // Empty rather than invented: every line in a route's history is written by
   // a write, and this fixture answers none of the three that write one.
   return { route: routeRow(route), history: [] };
+}
+
+/**
+ * The file an import was handed, or a refusal.
+ *
+ * **One file and no other.** The parse is `JSON.parse` and a shape check and
+ * nothing else, where `assets::plan` is a versioned parser with a closed key
+ * vocabulary, an id namespace check, a cycle check and a property-kind rule.
+ * Re-implementing any of that here would be a second answer to *is this file
+ * legal*, and the second answer is the one that goes stale -- so anything that
+ * is not the estate this fixture was built from is refused by name.
+ */
+function estateFileOf(args: Record<string, unknown>) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(args.file ?? ""));
+  } catch {
+    throw { code: "invalid", message: "that file is not JSON", source_id: null };
+  }
+  const file = parsed as { name?: string; assets?: EstateFileAsset[]; routes?: EstateFileRoute[] };
+  if (file.name !== ESTATE.name || !Array.isArray(file.assets) || !Array.isArray(file.routes)) {
+    throw {
+      code: "invalid",
+      message:
+        `this harness replays one import — "${ESTATE.name}", the estate file it ` +
+        `draws its own Tree from. Any other file is the real command's to parse.`,
+      source_id: null,
+    };
+  }
+  return { assets: file.assets, routes: file.routes };
+}
+
+/** The file's entries as the dialog's rows, assets before routes. */
+function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRoute[] }) {
+  return [
+    ...file.assets.map((entry) => ({
+      id: entry.id,
+      kind: "asset",
+      name: entry.name,
+      type_label: typeOf(entry.type).label,
+      parent_id: entry.parent ?? null,
+    })),
+    ...file.routes.map((route) => ({
+      id: route.id,
+      kind: "route",
+      name: route.name,
+      type_label: null,
+      parent_id: route.asset,
+    })),
+  ];
+}
+
+/**
+ * `preview_estate_import`: what an import of this file would do here.
+ *
+ * **A replay of one recorded answer, and it says so.** Against the estate as
+ * loaded, every one of the file's thirty-two entries is already in the tree —
+ * which is criterion 3 of #440 and the state a demo profile is in after its
+ * first start. Delete an asset in the harness and the entry moves to *new*,
+ * because that much is a set membership and not a rule.
+ *
+ * **`changes` is always empty, and that is the honest answer here rather than
+ * a shortcut.** What belongs in it is decided by `assets::HAND_EDITED` —
+ * *"a hand edit is any activity line by the user on that property"* — over
+ * `knobas.activity`. This fixture has no activity table and no actor on a
+ * property, so it cannot tell a value the file wrote from a value a person
+ * typed, and a group composed by guessing would put the dialog's most
+ * consequential sentence in front of a reader with nothing behind it. What
+ * answers that group is `crates/knobas-app/tests/assets_ipc.rs`, over a real
+ * PostgreSQL, and the dialog's rendering of all three groups is
+ * `AssetsView.import.test.svelte.ts`.
+ */
+function estatePreview(args: Record<string, unknown>) {
+  const file = estateFileOf(args);
+  const held = (id: string) =>
+    FIXTURE_ESTATE.some((asset) => asset.id === id) ||
+    FIXTURE_ROUTES.some((route) => route.id === id);
+  const entries = importEntries(file);
+  return {
+    name: ESTATE.name,
+    known: entries.filter((entry) => held(entry.id)),
+    new: entries.filter((entry) => !held(entry.id)),
+    changes: [],
+    monitor_links: [],
+  };
+}
+
+/**
+ * `apply_estate_import`: create what the preview called new, and nothing else.
+ *
+ * The plan is the preview's, which is the property `assets::apply_import`
+ * makes structural -- an entry the preview did not list cannot be written. On
+ * an untouched estate that is nothing at all, and the dialog reports six
+ * zeroes; after a delete it is the row coming back, with the origin line the
+ * real import writes.
+ */
+function estateApply(args: Record<string, unknown>) {
+  const file = estateFileOf(args);
+  const wanted = new Set(estatePreview(args).new.map((entry) => entry.id));
+  const outcome = {
+    assets_created: 0,
+    routes_created: 0,
+    properties_set: 0,
+    properties_kept: 0,
+    monitors_kept: 0,
+    monitors_linked: 0,
+  };
+  for (const entry of file.assets) {
+    if (!wanted.has(entry.id)) continue;
+    FIXTURE_ESTATE.push(assetFromFile(entry));
+    ASSET_HISTORY.push({
+      entity_id: entry.id,
+      verb: "imported",
+      detail: { estate: ESTATE.name },
+      actor: "import",
+    });
+    outcome.assets_created += 1;
+    outcome.monitors_kept += (entry.monitors ?? []).length;
+  }
+  for (const route of file.routes) {
+    if (!wanted.has(route.id)) continue;
+    FIXTURE_ROUTES.push(routeFromFile(route));
+    outcome.routes_created += 1;
+  }
+  return outcome;
 }
 
 /**

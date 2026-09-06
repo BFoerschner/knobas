@@ -287,6 +287,29 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
               entity_id: asset.id,
               detail: {},
             },
+            // The two lines an **import** writes (#439), which nothing drew
+            // until #440 put an imported estate in front of a reader: the
+            // origin line every created asset carries, and the edit that keeps
+            // a monitor name the mirror does not hold yet. Both are `imported`
+            // and `edited` with details no other writer produces, so both fell
+            // through `line()`'s last branch and rendered as
+            // `nothing: nothing → nothing`.
+            {
+              id: 0,
+              at: new Date(2026, 8, 4, 9, 0, 0, 0).toISOString(),
+              actor: "import",
+              verb: "edited",
+              entity_id: asset.id,
+              detail: { field: "monitors", added: ["teamcity (tunnel)"], estate: "knobas test estate" },
+            },
+            {
+              id: -1,
+              at: new Date(2026, 8, 4, 9, 0, 0, 0).toISOString(),
+              actor: "import",
+              verb: "imported",
+              entity_id: asset.id,
+              detail: { estate: "knobas test estate" },
+            },
           ]
         : [],
     monitors: [],
@@ -586,6 +609,11 @@ test("an asset's address draws its whole path and its pane", async () => {
   // A property edit's line reads as the change it was, old value included.
   expect(pane).toContain("os: Debian 12 → Debian 13");
   expect(pane).toContain("Created");
+  // An imported asset's own two lines say what happened to it, and name the
+  // estate the file called itself. Every asset in the demo profile carries the
+  // first of them and nothing else (#440).
+  expect(pane).toContain("Imported from knobas test estate");
+  expect(pane).toContain("monitors: kept teamcity (tunnel)");
 });
 
 /**
