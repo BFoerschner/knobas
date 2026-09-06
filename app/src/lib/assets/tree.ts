@@ -196,6 +196,28 @@ export function problemBadge(row: AssetRow): ProblemBadge | null {
 }
 
 /**
+ * The linked-work badge for one column row — story 32's *other* badge, issue
+ * #435.
+ *
+ * `null` is **no badge**, for `problemBadge`'s reason: a row linked to no work
+ * is the ordinary case, and a badge reading zero on nine rows out of ten is
+ * noise the eye has to learn to skip.
+ *
+ * Deliberately not a second `ProblemBadge`. It carries no tone, because a
+ * linked ticket is neither good nor bad — it is *how much this asset is
+ * spoken about*, and colouring it would make the column look as though
+ * something were wrong with the busiest asset in the estate.
+ *
+ * What is counted is the backend's (`AssetRow.linked_work`): confirmed links
+ * to entities the mirror holds, so a link to another asset, to a context or to
+ * a note is not work. This function is the *rendering* rule and does not
+ * recount anything.
+ */
+export function workBadge(row: AssetRow): number | null {
+  return row.linked_work > 0 ? row.linked_work : null;
+}
+
+/**
  * Where a value in force on the asset comes from — story 10.
  *
  * One answer to the pane's whole question, rather than a boolean the view then

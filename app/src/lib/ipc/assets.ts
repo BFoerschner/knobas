@@ -18,7 +18,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ActivityRow } from "./entity";
+import type { ActivityRow, LinkEntry } from "./entity";
 
 /**
  * What a property value may be — `knobas_core::asset::PropertyKind`.
@@ -178,6 +178,16 @@ export interface AssetRow {
   inside: AssetStatus;
   /** How many descendants carry `warn` or `down` — the *N* in the badge. */
   problems_inside: number;
+  /**
+   * How many **work items** this asset is linked to — story 32's other badge
+   * (#435).
+   *
+   * A work item is an entity the mirror holds: a ticket, a build, a page, a
+   * commit. Contexts, notes and other assets are knobas' own and are not
+   * counted, which is what makes the badge *linked work* rather than a count
+   * of links. Confirmed links only, either direction, one per link.
+   */
+  linked_work: number;
 }
 
 /**
@@ -283,6 +293,15 @@ export interface AssetDetail {
   reachable_via: RouteRow[];
   /** This asset's own activity lines, newest first. */
   history: ActivityRow[];
+  /**
+   * Every confirmed link this asset takes part in, either end, newest first
+   * (#435).
+   *
+   * The same shape a ticket's detail carries, drawn by the same panel: linking
+   * an asset is the same gesture as linking a ticket (story 36), so the pane
+   * has no link list of its own.
+   */
+  links: LinkEntry[];
 }
 
 /** Rename — `assets::AssetEdit::Name`. */
@@ -415,6 +434,22 @@ export function getAsset(assetId: string): Promise<AssetDetail> {
  */
 export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
   return invoke<MemberAsset[]>("context_assets", { ctxId });
+}
+
+/**
+ * The assets a **source** room's Assets tile draws (#435): the ones this
+ * source's monitors are attached to, by a `monitored-by` link, worst health
+ * first.
+ *
+ * **Empty until M4.1.** No adapter emits a `monitor` yet, so the backend's
+ * statement matches nothing — which is the read answering honestly rather than
+ * a stub, and the tile fills itself the day the Kuma adapter lands.
+ *
+ * A source nothing was synced under answers with an empty list, not a
+ * rejection.
+ */
+export function sourceAssets(sourceId: string): Promise<MemberAsset[]> {
+  return invoke<MemberAsset[]>("source_assets", { sourceId });
 }
 
 /**

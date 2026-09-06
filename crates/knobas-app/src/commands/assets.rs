@@ -339,6 +339,31 @@ pub async fn delete_route<R: tauri::Runtime>(
     Ok(())
 }
 
+/// The assets a **source** room's Assets tile draws: the ones this source's
+/// monitors are attached to, worst health first (#435).
+///
+/// The rule is spec #427's *"a source room lists assets with a monitored-by
+/// link to that source's monitors"*, and it is [`assets::monitored_by`]'s one
+/// statement. It answers with nothing until the Kuma adapter lands in M4.1 --
+/// no source emits a `monitor` yet -- which is the read working rather than a
+/// stub standing in for it.
+///
+/// A source id nothing was ever synced under answers with no assets rather
+/// than an error, like [`context_assets`]: a room can outlive its source.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
+/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn source_assets(
+    lifecycle: State<'_, Lifecycle>,
+    source_id: String,
+) -> Result<Vec<MemberAsset>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::monitored_by(&pool, &source_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +388,7 @@ mod tests {
             health: AssetStatus::Down,
             inside: AssetStatus::Down,
             problems_inside: 3,
+            linked_work: 2,
         }
     }
 
@@ -386,6 +412,7 @@ mod tests {
                 "health",
                 "inside",
                 "problems_inside",
+                "linked_work",
             ],
         );
     }
@@ -693,7 +720,7 @@ mod tests {
         }
     }
 
-    /// The twelve commands are invoked from the mirror by the names they are
+    /// The thirteen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -706,6 +733,7 @@ mod tests {
             "asset_tree",
             "get_asset",
             "context_assets",
+            "source_assets",
             "create_asset",
             "edit_asset",
             "move_asset",
@@ -739,6 +767,7 @@ mod tests {
             ("asset_tree", "parentId"),
             ("get_asset", "assetId"),
             ("context_assets", "ctxId"),
+            ("source_assets", "sourceId"),
             ("create_asset", "typeId"),
             ("create_asset", "parentId"),
             ("edit_asset", "edits"),
@@ -794,6 +823,7 @@ mod tests {
             exposes: vec![route()],
             reachable_via: Vec::new(),
             history: Vec::new(),
+            links: Vec::new(),
         };
         assert_shape(
             MIRROR,
@@ -809,7 +839,29 @@ mod tests {
                 "exposes",
                 "reachable_via",
                 "history",
+                "links",
             ],
+        );
+    }
+
+    /// The relation a source room's tile reads is one the dialog can draw
+    /// (#435).
+    ///
+    /// `assets::MONITORED_BY` is the word `assets::MONITORED_ASSETS` filters
+    /// on, and the estate file's monitor names become links carrying it
+    /// (#439). If `relations.ts` did not curate it, the reader could still
+    /// type it -- relations are open -- but the link would read `monitored-by`
+    /// from **both** ends, since an unknown relation has no inverse to give.
+    /// So the two lists are one list, and this is the pin: the frontend table
+    /// is where the sentence lives, the backend const is where the key lives,
+    /// and neither may lose the other.
+    #[test]
+    fn the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary() {
+        const RELATIONS: &str = include_str!("../../../../app/src/lib/detail/relations.ts");
+        assert!(
+            RELATIONS.contains(&format!("id: \"{}\"", assets::MONITORED_BY)),
+            "{} is not a curated relation, so it would read the same from both ends",
+            assets::MONITORED_BY
         );
     }
 

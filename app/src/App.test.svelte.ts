@@ -161,6 +161,9 @@ vi.mock("./lib/ipc/sources", () => ({
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // The Tree's pane withdraws a link through this (#435). Nothing here does,
+  // so it refuses rather than answering.
+  unlink: () => Promise.reject(new Error("no unlink in this test")),
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve(contextRows),
@@ -304,6 +307,7 @@ const SITE: AssetRow = {
   health: "none",
   inside: "none",
   problems_inside: 0,
+  linked_work: 0,
 };
 
 const VM: AssetRow = {
@@ -332,6 +336,9 @@ vi.mock("./lib/ipc/assets", () => ({
       exposes: [],
       reachable_via: [],
       history: [],
+      // The pane's links panel (#435). Nothing in this suite links an asset,
+      // and an absent list is a `{#each}` over `undefined` at mount.
+      links: [],
       effective_environment: null,
       effective_owner: null,
     });
@@ -345,6 +352,10 @@ vi.mock("./lib/ipc/assets", () => ({
   // but the export has to be here, because the tile imports it at module
   // scope and a mock short of it throws inside the tile's effect.
   contextAssets: () => Promise.resolve([]),
+  // A source room's tile reads what that source's monitors watch (#435). No
+  // monitor exists until M4.1 and none is invented here, so the honest answer
+  // is the empty one the real command gives.
+  sourceAssets: () => Promise.resolve([]),
   createAsset: () => Promise.reject(new Error("no estate writes in this test")),
   editAsset: () => Promise.reject(new Error("no estate writes in this test")),
   moveAsset: () => Promise.reject(new Error("no estate writes in this test")),
@@ -1241,8 +1252,8 @@ test("a sync run ending with the room still in the census is not announced", asy
  * `bind:this`, and the room draws its grid again. Both ends are tested where
  * they live (`keys.test.svelte.ts`, `Room.test.svelte.ts`); the wire between
  * them is a few lines of this component and, like the census wire before it
- * (#238), nothing else could see it missing. Two tiles, because a room of one
- * cannot tell a maximised tile from a grid.
+ * (#238), nothing else could see it missing. More than one tile, because a
+ * room of one cannot tell a maximised tile from a grid.
  */
 test("Escape in a room restores the maximised tile", async () => {
   dbReady = true;
@@ -1250,7 +1261,8 @@ test("Escape in a room restores the maximised tile", async () => {
   entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
 
   app = mount(App, { target, props: {} });
-  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+  // Two kind tiles and the room's own Assets tile (#435).
+  await until(() => tileLabels().length === 3, "the room never drew its three tiles");
   const [first] = tileLabels();
 
   press("Maximise");
@@ -1259,7 +1271,7 @@ test("Escape in a room restores the maximised tile", async () => {
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
   );
-  await until(() => tileLabels().length === 2, "Escape never reached the room");
+  await until(() => tileLabels().length === 3, "Escape never reached the room");
   expect(location.hash, "restoring a tile is not a navigation").toBe("#/ctx/all");
 });
 
@@ -1276,7 +1288,7 @@ test("a non-room view and back finds the grid, not the maximised tile", async ()
   entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
 
   app = mount(App, { target, props: {} });
-  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+  await until(() => tileLabels().length === 3, "the room never drew its three tiles");
 
   press("Maximise");
   expect(tileLabels()).toHaveLength(1);
@@ -1285,7 +1297,7 @@ test("a non-room view and back finds the grid, not the maximised tile", async ()
   await until(() => tileLabels().length === 0, "the Sources view never replaced the room");
 
   location.hash = "#/ctx/all";
-  await until(() => tileLabels().length === 2, "the room never drew its grid again");
+  await until(() => tileLabels().length === 3, "the room never drew its grid again");
 });
 
 /**

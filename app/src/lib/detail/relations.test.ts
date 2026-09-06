@@ -50,6 +50,42 @@ test("a curated relation reads forwards from the end it was drawn from and inver
   expect(readingOf("runs-on", false)).toBe("hosts");
 });
 
+/**
+ * The four relations an asset draws beyond containment (spec #427 story 15,
+ * issue #435), each asserted as literal words from both ends.
+ *
+ * The pair that matters most is `runs-on` / `hosts`: it is the acceptance
+ * criterion's own example, and it is the one where the two ends read as
+ * different *verbs* rather than as a word and its passive, so a table that had
+ * them the wrong way round would still look like English.
+ */
+test("an asset's relations read as sentences from both of their ends", () => {
+  expect(readingOf("depends-on", true)).toBe("depends on");
+  expect(readingOf("depends-on", false)).toBe("depended on by");
+  expect(readingOf("runs-on", true)).toBe("runs on");
+  expect(readingOf("runs-on", false)).toBe("hosts");
+  expect(readingOf("deployed-from", true)).toBe("deployed from");
+  expect(readingOf("deployed-from", false)).toBe("deploys");
+  expect(readingOf("documented-in", true)).toBe("documented in");
+  expect(readingOf("documented-in", false)).toBe("documents");
+  expect(readingOf("monitored-by", true)).toBe("monitored by");
+  expect(readingOf("monitored-by", false)).toBe("monitors");
+});
+
+/**
+ * A container linked to a VM with `runs-on` is *hosted* from the VM's side —
+ * the acceptance criterion read at the grouping level, which is what the pane
+ * actually draws.
+ */
+test("the pane on each end of one runs-on link reads the opposite heading", () => {
+  const container = "asset:postgres";
+  const vm = "asset:vm-db-01";
+  const runsOn = entry({ id: "r", relation: "runs-on", from: container, to: vm });
+
+  expect(groupLinks([runsOn], container).map((group) => group.reading)).toEqual(["runs on"]);
+  expect(groupLinks([runsOn], vm).map((group) => group.reading)).toEqual(["hosts"]);
+});
+
 /** A symmetric relation reads the same both ways — and still reads as words. */
 test("related reads the same from both ends", () => {
   expect(readingOf(DEFAULT_RELATION, true)).toBe("related to");

@@ -34,6 +34,7 @@ import {
   estateQuery,
   matchesIn,
   walk,
+  workBadge,
 } from "./tree";
 
 function row(id: string, name: string, hasChildren = false): AssetRow {
@@ -51,6 +52,7 @@ function row(id: string, name: string, hasChildren = false): AssetRow {
     health: "none",
     inside: "none",
     problems_inside: 0,
+    linked_work: 0,
   };
 }
 
@@ -62,6 +64,7 @@ function detail(
   return {
     asset,
     properties: [],
+    links: [],
     effective_environment: null,
     effective_owner: null,
     held_by: ancestors,
@@ -216,6 +219,7 @@ test("the badge counts what is inside and is coloured by the worst of it", () =>
     health: "down",
     inside: "warn",
     problems_inside: 1,
+    linked_work: 0,
   } as AssetRow;
   expect(problemBadge(worseThanInside)).toEqual({ count: 1, tone: "warn" });
 });
@@ -233,6 +237,21 @@ test("a bad row that holds nothing wrong carries no badge", () => {
   expect(
     problemBadge({ ...leaf, status: "down", health: "down" } as AssetRow),
   ).toBe(null);
+});
+
+/**
+ * Story 32's other badge (#435): the count the backend gave, and **nothing**
+ * where there is none.
+ *
+ * Zero is the ordinary case for most of an estate, and a badge reading `0` on
+ * nine rows in ten is a mark the eye has to learn to skip — the same reading
+ * that makes `problemBadge` answer `null`.
+ */
+test("the linked-work badge is the count, and absent when nothing is linked", () => {
+  const leaf = row("asset:ct", "postgres");
+  expect(workBadge(leaf)).toBe(null);
+  expect(workBadge({ ...leaf, linked_work: 1 } as AssetRow)).toBe(1);
+  expect(workBadge({ ...leaf, linked_work: 12 } as AssetRow)).toBe(12);
 });
 
 /**

@@ -47,6 +47,7 @@ const SITE = row({
   health: "warn",
   inside: "warn",
   problems_inside: 1,
+  linked_work: 0,
 });
 const VM = row({
   id: "asset:vm-db-01",
@@ -57,6 +58,7 @@ const VM = row({
   health: "warn",
   inside: "warn",
   problems_inside: 1,
+  linked_work: 0,
 });
 const SIBLING = row({
   id: "asset:vm-app-02",
@@ -180,6 +182,7 @@ function row(over: Partial<AssetRow> & Pick<AssetRow, "id" | "name">): AssetRow 
     health: "none",
     inside: "none",
     problems_inside: 0,
+    linked_work: 0,
     ...over,
   } as AssetRow;
 }
@@ -258,6 +261,10 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
     holds: estate.filter((candidate) => candidate.parent_id === asset.id),
     exposes: ROUTES.filter((route) => route.asset_id === asset.id),
     reachable_via: reachableVia(asset, heldBy, estate),
+    // #435's surface has a file of its own (`AssetsView.links.test.svelte.ts`),
+    // and this fixture stays about the read: an asset with no links draws the
+    // panel's empty state, which is what every test here was written over.
+    links: [],
     history:
       asset.id === CONTAINER.id
         ? [
@@ -732,6 +739,7 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
       health: "down",
       inside: "down",
       problems_inside: 2,
+      linked_work: 0,
     }),
     row({
       id: "asset:amber",
@@ -739,6 +747,7 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
       health: "warn",
       inside: "warn",
       problems_inside: 1,
+      linked_work: 0,
     }),
     row({
       id: "asset:clean",
@@ -746,6 +755,7 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
       health: "up",
       inside: "none",
       problems_inside: 0,
+      linked_work: 0,
     }),
     row({
       id: "asset:worse",
@@ -754,6 +764,7 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
       health: "down",
       inside: "warn",
       problems_inside: 1,
+      linked_work: 0,
     }),
   ];
   render("#/assets/tree", estate);

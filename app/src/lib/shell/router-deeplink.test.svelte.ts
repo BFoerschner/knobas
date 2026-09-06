@@ -46,6 +46,9 @@ const DETAIL: EntityDetail = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // The Tree's pane withdraws a link through this (#435). Nothing here does,
+  // so it refuses rather than answering.
+  unlink: () => Promise.reject(new Error("no unlink in this test")),
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
