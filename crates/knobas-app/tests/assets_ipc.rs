@@ -849,6 +849,15 @@ async fn env_of(pool: &PgPool, id: &str) -> Option<(Environment, String)> {
         .map(|from| (from.value, from.source_name))
 }
 
+/// The owner in force on `id`, and the name of the asset that sets it.
+async fn owner_of(pool: &PgPool, id: &str) -> Option<(String, String)> {
+    assets::get(pool, id)
+        .await
+        .expect("the pane")
+        .effective_owner
+        .map(|from| (from.value, from.source_name))
+}
+
 /// Stories 8, 9 and 10: the value in force is the nearest one at or above, and
 /// the read says **which asset** set it.
 ///
@@ -1039,6 +1048,99 @@ async fn clearing_a_childs_environment_falls_back_to_the_ancestors() {
         Some((Environment::Prod, "hel1".to_owned())),
         "the sibling subtree never moved"
     );
+
+    // Owner clears the same way, and it is asserted rather than assumed: the
+    // two fields share `inherited`'s walk but not the write, and
+    // `AssetEdit::Owner { value: None }` is a different statement from
+    // `AssetEdit::Environment { value: None }`.
+    for (id, owner) in [(&estate.site.id, "Björn"), (&estate.db.id, "Platform")] {
+        edit_one(
+            &pool,
+            id,
+            AssetEdit::Owner {
+                value: Some(owner.to_owned()),
+            },
+        )
+        .await;
+    }
+    assert_eq!(
+        owner_of(&pool, &estate.postgres.id).await,
+        Some(("Platform".to_owned(), "vm-db-01".to_owned()))
+    );
+    edit_one(&pool, &estate.db.id, AssetEdit::Owner { value: None }).await;
+    assert_eq!(
+        owner_of(&pool, &estate.postgres.id).await,
+        Some(("Björn".to_owned(), "hel1".to_owned())),
+        "clearing the VM's owner falls back to the site's"
+    );
+    assert_eq!(
+        owner_of(&pool, &estate.nginx.id).await,
+        Some(("Björn".to_owned(), "hel1".to_owned())),
+        "and the sibling subtree, which never had the VM's, is where it was"
+    );
+}
+
+/// A **move** changes what an asset inherits and what rolls up, without any
+/// edit to either.
+///
+/// The negative for the two tests above, which prove "for that subtree"
+/// against *writes* only: both answers are read-time walks over `parent_id`,
+/// so re-parenting has to move them, and an implementation that cached either
+/// on the row would pass every other test in this file and fail here.
+#[tokio::test]
+async fn a_move_carries_the_inherited_value_and_the_rollup_with_it() {
+    let pool = pool("assets-move-rollup").await;
+    let estate = two_branches(&pool).await;
+
+    edit_one(
+        &pool,
+        &estate.db.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Dev),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.app.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Prod),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned()))
+    );
+
+    assets::move_to(&pool, &estate.postgres.id, Some(&estate.app.id))
+        .await
+        .expect("the move");
+
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Prod, "vm-app-02".to_owned())),
+        "the container inherits from where it is now, not from where it was"
+    );
+
+    let vms = assets::tree(&pool, Some(&estate.site.id))
+        .await
+        .expect("the VMs");
+    let moved_to = vms.iter().find(|row| row.name == "vm-app-02").expect("app");
+    let moved_from = vms.iter().find(|row| row.name == "vm-db-01").expect("db");
+    assert_eq!(moved_to.problems_inside, 1, "the problem moved in");
+    assert_eq!(moved_to.health, AssetStatus::Down);
+    assert_eq!(moved_from.problems_inside, 0, "and out");
+    assert_eq!(moved_from.health, AssetStatus::None);
 }
 
 /// Story 37 and story 32: effective health is the worst of an asset and
@@ -1174,21 +1276,31 @@ async fn a_column_row_reports_its_effective_health_and_what_is_wrong_inside() {
         "the VM's own trouble is not a problem *inside* it"
     );
 
-    // An `up` under a `none` is still the worst of the two, because story 37
-    // orders `up` above `none`. Read literally, and asserted so a later
-    // reading of "worst" cannot change it silently.
+    // Story 37 orders `up` **above** `none`, so an asset nobody has rated
+    // reads `up` when the only thing under it is up. A fresh branch of its
+    // own, because every asset in the estate above is now rated or holds
+    // something that is: a leaf whose own status is `up` reads `up` under any
+    // ordering, and would witness nothing.
+    let spare = make(&pool, None, "site", "spare", &[]).await;
+    let lone = make(&pool, Some(&spare.id), "vm", "vm-spare-01", &[]).await;
     edit_one(
         &pool,
-        &estate.redis.id,
+        &lone.id,
         AssetEdit::Status {
             value: AssetStatus::Up,
         },
     )
     .await;
-    let containers = assets::tree(&pool, Some(&estate.db.id))
-        .await
-        .expect("the containers");
-    assert_eq!(find(&containers, "redis").health, AssetStatus::Up);
+    let top = assets::tree(&pool, None).await.expect("the top");
+    let unrated = find(&top, "spare");
+    assert_eq!(unrated.status, AssetStatus::None, "nobody rated the site");
+    assert_eq!(
+        unrated.health,
+        AssetStatus::Up,
+        "and `up` is worse than nobody-has-said, so the rollup reports it"
+    );
+    assert_eq!(unrated.inside, AssetStatus::Up);
+    assert_eq!(unrated.problems_inside, 0, "`up` is not a problem");
 
     // And the pane's own row carries the same numbers as the column's, so the
     // reader is never told two different things about one asset.

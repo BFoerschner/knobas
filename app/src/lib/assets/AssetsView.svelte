@@ -43,6 +43,8 @@
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
+    type Environment,
+    type Inherited,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import { ago } from "../shell/time";
@@ -302,46 +304,37 @@
           (story 37) — three values that can each come from somewhere else, so
           each one says where.
         -->
+        <!--
+          Environment and owner draw the same three lines from the same shape,
+          so they are one snippet: two copies differing only in which field
+          they read is the pane's own version of the duplication the backend
+          avoids with one `inherited` walk.
+        -->
+        {#snippet inForce(label: string, held: Inherited<string | Environment> | null)}
+          <div class="prop force">
+            <dt>{label}</dt>
+            <dd>
+              {#if held}
+                {@const from = sourceOf(detail!, held)}
+                <span>{held.value}</span>
+                {#if from.goTo}
+                  <button class="link src" onclick={() => goToSource(from.goTo)}>{from.note}</button>
+                {:else}
+                  <span class="src faint">{from.note}</span>
+                {/if}
+              {:else}
+                <span class="faint">Not set anywhere</span>
+              {/if}
+            </dd>
+          </div>
+        {/snippet}
+
         <section class="grp">
           <h3 class="lab">In force</h3>
           <dl class="props">
-            <div class="prop">
-              <dt>Environment</dt>
-              <dd>
-                {#if detail.effective_environment}
-                  {@const from = sourceOf(detail, detail.effective_environment)}
-                  {detail.effective_environment.value}
-                  {#if from.goTo}
-                    <button class="link src" onclick={() => goToSource(from.goTo)}>
-                      {from.note}
-                    </button>
-                  {:else}
-                    <span class="src faint">{from.note}</span>
-                  {/if}
-                {:else}
-                  <span class="faint">Not set anywhere</span>
-                {/if}
-              </dd>
-            </div>
-            <div class="prop">
-              <dt>Owner</dt>
-              <dd>
-                {#if detail.effective_owner}
-                  {@const from = sourceOf(detail, detail.effective_owner)}
-                  {detail.effective_owner.value}
-                  {#if from.goTo}
-                    <button class="link src" onclick={() => goToSource(from.goTo)}>
-                      {from.note}
-                    </button>
-                  {:else}
-                    <span class="src faint">{from.note}</span>
-                  {/if}
-                {:else}
-                  <span class="faint">Not set anywhere</span>
-                {/if}
-              </dd>
-            </div>
-            <div class="prop">
+            {@render inForce("Environment", detail.effective_environment)}
+            {@render inForce("Owner", detail.effective_owner)}
+            <div class="prop force">
               <dt>Health</dt>
               <dd>
                 <span class="hl {detail.asset.health}">{detail.asset.health}</span>
@@ -583,10 +576,33 @@
     overflow-wrap: anywhere;
   }
 
-  /* Where a value came from, beside the value and never instead of it. */
+  /*
+     The *In force* rows stack their value and the note about where it came
+     from, rather than sharing one line: the note is a sentence, and `.prop
+     dd`'s `overflow-wrap: anywhere` -- right for an IP or an image tag --
+     breaks a sentence one character at a time in a 200px pane.
+  */
+  .prop.force dd {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  /*
+     Where a value came from, under the value and never instead of it. One
+     line, elided if the ancestor's name is long -- the treatment `.row .nm`
+     gets one section up, and the reason is the same: this is a sentence, and
+     a sentence broken across three lines in a 200px column reads as three.
+  */
   .prop .src {
+    max-width: 100%;
     font-family: var(--sans);
     font-size: 11px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .prop button.src {

@@ -5099,8 +5099,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   **No migration, and `0018` is still the next free number.** Nothing here is stored. Both
   computations are answers about a *path*, and a stored copy of either would be a second writer of
   `parent_id` — the column ADR-0014 made the whole tree — that could disagree with it the first
-  time a move failed halfway. `create`, `edit`, `move_to` and `delete` are untouched; this is a
-  read-side entry.
+  time a move failed halfway. **What the four writers write is unchanged**; what changed for them
+  is the row they answer *with*, because `assets::one` now goes through `rows_of` like every other
+  read, so a created or edited asset comes back carrying its rollup rather than three fields the
+  caller would have to re-read for. `a_move_carries_the_inherited_value_and_the_rollup_with_it` is
+  the witness that a re-parenting moves both answers with no edit to either — which is what
+  "computed at read time" has to mean if it means anything.
 
   **Three fields on `AssetRow`, two on `AssetDetail`, and one new shape.**
 
@@ -5126,8 +5130,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `mirror::assert_shape` matches on, and asserts the field list in both directions like every
   other shape on this surface. **No existing field changes meaning**: `AssetRow.status`,
   `AssetRow.environment` and `AssetRow.owner` are still the values set *on that asset*, and the new
-  fields sit beside them rather than replacing them — the pane draws both, under *Properties* and
-  under *In force*.
+  fields sit beside them rather than replacing them. What the **pane** draws of each is the
+  effective value, under a new *In force* group; the stored value is what the *note* beside it
+  reports on (*set here* against *inherited from `hel1`*), and editing either is #429's surface.
 
   **`Inherited` carries a whole source, not an `inherited: bool`.** Story 10 is *"see whether a
   shown environment or owner is set here or inherited from which ancestor, so that I know where to
@@ -5148,17 +5153,24 @@ From this commit on, each of the following requires an orchestrator decision **a
   into the three column statements `CHILDREN`/`ANCESTORS`/`ONE` — which is what that module's
   "three statements rather than one spliced constant" rule is for, and which keeps spec #427's
   ordering (**down over warn over up over none**) in one place instead of three. The price is one
-  extra round trip per read. `AssetStatus::severity` is that ordering in Rust, smaller-is-worse so
+  extra round trip **per statement**: one for a column, three for the pane's read, which already
+  issues three (the asset, its ancestors, and what it holds) and now pairs each with a rollup.
+  `AssetStatus::severity` is that ordering in Rust, smaller-is-worse so
   that "the worst of a set" is a plain `min`, and `the_rollup_ranks_the_statuses_the_way_rust_does`
   reads the `case` arms back out of the SQL string so the two cannot drift. **No depth cap**, for
   `move_to`'s reason: `parent_id` has one writer and it refuses cycles before it writes, with
   `asset_no_self_parent_chk` under it.
 
   **The `none` ordering is read literally and asserted.** `up` is *worse* than `none`, so an asset
-  nobody has rated reads as `up` when something under it is up. That is spec #427's list read as
-  written, it is what makes a branch of healthy things read as healthy, and
-  `a_column_row_reports_its_effective_health_and_what_is_wrong_inside` pins it so a later reading
-  of "worst" cannot change it quietly.
+  nobody has rated reads as `up` when something under it is up — the pane prints that as
+  *"Health up · own status none"*. That is spec #427's list read as written and it is what makes a
+  branch of healthy things read as healthy, but it is the one consequence of the ordering a reader
+  might not have pictured, so it is pinned twice rather than left to follow: in Rust by
+  `the_rollup_ranks_the_statuses_the_way_rust_does` (`Up.severity() < None.severity()`, and the
+  same four `case` arms read back out of the SQL string), and over a real database by the *spare*
+  branch at the foot of `a_column_row_reports_its_effective_health_and_what_is_wrong_inside` — an
+  unrated site holding one `up` VM, which is the shallowest fixture that can tell the two orderings
+  apart, since a leaf's own `up` reads `up` under either.
 
   **What did not change.** No command, no argument, no event, no settings key, no migration, no
   `Kind`, no reserved namespace. `crates/knobas-source/**`, `crates/knobas-http/**` and

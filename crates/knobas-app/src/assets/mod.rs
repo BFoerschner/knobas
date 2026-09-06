@@ -115,8 +115,9 @@ const PATH_SEPARATOR: &str = " / ";
 ///
 /// Not its health: story 37's health is the worst of this and its monitors'
 /// states, and its *effective* health also takes the worst descendant. Both
-/// are computed at read time and both are #431's and M4.1's; this is the
-/// stored fact they read.
+/// are computed at read time, by [`ROLLUP`] over this column -- the monitors'
+/// half is M4.1's and the only part of story 37 not here. This is the stored
+/// fact those reads are built on, and [`AssetRow`] carries all three.
 ///
 /// `none` is the default and means *nobody has said*, which is a different
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
@@ -403,6 +404,8 @@ pub struct AssetProperty {
 /// which the pane compares rather than being told twice.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Inherited<T> {
+    /// The value in force -- an [`Environment`] for one field of
+    /// [`AssetDetail`], an owner's name for the other.
     pub value: T,
     /// The asset the value is set on -- this asset itself when it is set here.
     pub source_id: String,
@@ -545,11 +548,13 @@ const ROLLUP: &str = "with recursive under (root, id, depth) as (
 
 /// What [`ROLLUP`] answers about one asset.
 ///
-/// [`Default`] is the answer for an asset the rollup did not cover, which is
-/// only ever an asset that was deleted between the two reads: nothing under
-/// it, nothing wrong under it, and a health [`row_of`] fills in from the row's
-/// own status rather than leaving at `none`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Every id handed to [`rollup`] comes back, because the statement's anchor
+/// row is the asset itself -- so the only way [`row_of`] finds no entry is an
+/// asset deleted between its read and the rollup's. There is no `Default` for
+/// that case on purpose: the honest answer is the row's **own** status, which
+/// `row_of` reads off the row it already has, and a `Default` would have made
+/// a live `up` asset report `none` for the one frame it took to vanish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rollup {
     health: AssetStatus,
     inside: AssetStatus,

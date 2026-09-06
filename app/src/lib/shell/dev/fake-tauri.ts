@@ -464,6 +464,12 @@ function assetRow(asset: FixtureAsset) {
 /**
  * `assets::inherited`: the nearest asset at or above that sets a value.
  *
+ * A copy of the store's **rule**, not of one of its answers, for this module's
+ * stated reason: a fixture that returned "hel1" as the source because someone
+ * typed it would draw the right words over a pane reading the wrong field.
+ * Answering the way the store answers is what makes a `?fake-ipc` screenshot
+ * evidence about the view.
+ *
  * `heldBy` arrives outermost first, so the walk is the asset and then that
  * list reversed -- nearest ancestor first.
  */
