@@ -55,6 +55,12 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
   build: { label: "Build", plural: "Builds", monogram: "BU" },
   page: { label: "Page", plural: "Pages", monogram: "PG" },
   note: { label: "Note", plural: "Notes", monogram: "NT" },
+  // M4.0 (#428). The chip a *launcher row* or a room tile puts on an asset,
+  // which is a different question from the one the Tree's columns answer: a
+  // column row draws the asset's **type** monogram (VM, CT, DB), resolved by
+  // the backend out of `assets::types`. This one says "an asset, as against a
+  // ticket or a page", and matches `knobas_core::entity::OWNED_KINDS`.
+  asset: { label: "Asset", plural: "Assets", monogram: "AS" },
 };
 
 /**

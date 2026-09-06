@@ -25,7 +25,14 @@
 //! makes that structural: the builder only ever emits the fragments listed
 //! below, and `fts` is only ever *matched against*, never selected.
 //!
-//! # M4: the asset corpus (designed here, built there)
+//! # M4: the asset corpus (designed here, built in #428)
+//!
+//! **Built.** [`ASSET`] is below and is in [`ALL`]; migration `0017` carries
+//! the column and the index this section sketched. The sketch is left as
+//! written -- it is the argument for the shape, and two of its details did not
+//! survive contact, both recorded on [`ASSET`] itself: there is no
+//! `props_text`, and `source_id` is the constant `'asset'` rather than an
+//! `imported_from` column the import (#439) has not yet asked for.
 //!
 //! Assets are a tree, and spec §4 requires "pve-02" to find the containers
 //! *under* pve-02. The path therefore has to be part of the indexed text, and
@@ -201,6 +208,44 @@ pub const NOTE: Corpus = Corpus {
     scope: None,
 };
 
+/// Assets: the estate, and the corpus this module's own docs designed (#428).
+///
+/// The design above is built here almost verbatim, and the two places it is
+/// *not* are worth naming.
+///
+/// **`path` is a column, not a payload read.** [`Corpus::path`] says the only
+/// expression allowed there is `ancestor_path_read!`, and that rule is about
+/// records whose ancestry is buried in an adapter's payload (ADR-0007). An
+/// asset's ancestry is `knobas.asset.parent_id` -- knobas' own tree, kept by
+/// knobas' own store -- so `path_text` *is* the answer that read approximates
+/// elsewhere, maintained on create, rename and move by
+/// `knobas_app::assets`. `nullif` because a root asset sits nowhere, and
+/// absence is the miss ADR-0007 asks for: an empty string would draw an empty
+/// path line under every site in the launcher.
+///
+/// **No `props_text`.** Migration `0017` records why: what a search for
+/// "8080" should mean is a decision, and it is not this ticket's.
+///
+/// No `scope`, for [`NOTE`]'s reason: a deleted asset's row is gone, so there
+/// is nothing to filter out. No `author` either -- an asset's `owner` is who is
+/// responsible for a machine, not who wrote a sentence, and folding it into
+/// `author:` would make `author:me` answer with somebody's servers.
+pub const ASSET: Corpus = Corpus {
+    relation: "knobas.asset a",
+    entity_id: "a.id",
+    kind: "'asset'",
+    source_id: "'asset'",
+    title: "a.name",
+    fts: "a.fts",
+    headline_text: "a.name || ' — ' || a.path_text",
+    author: None,
+    updated_at: "a.updated_at",
+    // A local table is never behind itself: what knobas holds *is* the source.
+    synced_at: "a.updated_at",
+    path: "nullif(a.path_text, '')",
+    scope: None,
+};
+
 /// Every corpus the launcher searches.
 ///
 /// One list, so a corpus cannot be added to the crate and forgotten by the
@@ -210,7 +255,7 @@ pub const NOTE: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE];
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET];
 
 #[cfg(test)]
 mod tests {

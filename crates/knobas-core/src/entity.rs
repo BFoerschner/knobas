@@ -132,12 +132,27 @@ pub struct OwnedKind {
 /// The monograms are knobas' own words and are deliberately the ones the shell
 /// already uses (`app/src/lib/shell/kinds.ts`): a kind whose chip said `NO` in
 /// the launcher and `NT` in a room tile would be two kinds to a reader.
-pub const OWNED_KINDS: &[OwnedKind] = &[OwnedKind {
-    id: "note",
-    label: "Note",
-    plural: "Notes",
-    monogram: "NT",
-}];
+///
+/// `asset` joined in M4.0 (issue #428) and is **the kind, not the type**: an
+/// asset's *type* -- VM, container, database -- is
+/// `knobas_app::assets::types`, nineteen of them with monograms of their own,
+/// and the chip a column row draws is the type's. `AS` is what the launcher
+/// and a room tile put on an asset, where the question is which kind of thing
+/// this is among tickets, pages and notes.
+pub const OWNED_KINDS: &[OwnedKind] = &[
+    OwnedKind {
+        id: "asset",
+        label: "Asset",
+        plural: "Assets",
+        monogram: "AS",
+    },
+    OwnedKind {
+        id: "note",
+        label: "Note",
+        plural: "Notes",
+        monogram: "NT",
+    },
+];
 
 /// Whether `kind` is one knobas owns rather than mirrors.
 #[must_use]
