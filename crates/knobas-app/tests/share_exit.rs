@@ -323,9 +323,14 @@ async fn shared() -> PgPool {
 async fn the_estate_is_in_the_tree_on_the_clean_machine() {
     let pool = &shared().await;
 
-    let roots = assets::tree(pool, None).await.expect("the Tree's top level");
+    let roots = assets::tree(pool, None)
+        .await
+        .expect("the Tree's top level");
     assert_eq!(
-        roots.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        roots
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
         ["knobas test estate"],
         "the estate's own root, and nothing beside it"
     );
@@ -561,13 +566,16 @@ struct Jira {
 
 fn jira() -> Jira {
     let need = |key: &str| {
-        std::env::var(key).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| {
-            panic!(
-                "{key} is not set -- this test needs testenv's seeded Jira. From the \
+        std::env::var(key)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                panic!(
+                    "{key} is not set -- this test needs testenv's seeded Jira. From the \
                  repo root: `just atlassian-live`; or, inside a window already open, \
                  `eval \"$(cd testenv && ./seed --env)\"`"
-            )
-        })
+                )
+            })
     };
     Jira {
         url: need("KNOBAS_JIRA_URL").trim_end_matches('/').to_owned(),
@@ -582,16 +590,17 @@ async fn engine(
     state: &Arc<backup::BackupState>,
     secrets: Arc<dyn knobas_secrets::SecretStore>,
 ) -> knobas_app::sources::SourcesState {
-    let scheduler = knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
-        pool: state.pool.clone(),
-        connections: Arc::new(live_digest::Connections(state.connector.clone())),
-        registry: Arc::new(knobas_app::sources::Registry::builtin()),
-        secrets: Arc::clone(&secrets),
-        events: Arc::new(live_digest::Quiet),
-        timing: knobas_sync::scheduler::SchedulerTiming::default(),
-    })
-    .await
-    .expect("a scheduler over the profile");
+    let scheduler =
+        knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
+            pool: state.pool.clone(),
+            connections: Arc::new(live_digest::Connections(state.connector.clone())),
+            registry: Arc::new(knobas_app::sources::Registry::builtin()),
+            secrets: Arc::clone(&secrets),
+            events: Arc::new(live_digest::Quiet),
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        })
+        .await
+        .expect("a scheduler over the profile");
     knobas_app::sources::SourcesState {
         pool: state.pool.clone(),
         scheduler,
@@ -653,7 +662,9 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
             adapter_kind: "jira".to_owned(),
             display_name: "Tidewater Jira (seeded)".to_owned(),
             base_url: env.url.clone(),
-            auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::UserPassword),
+            auth_kind: knobas_sync::config::AuthKind::Method(
+                knobas_source::AuthMethod::UserPassword,
+            ),
             // The username is half of the pair and what `@me` matches on; the
             // Add-source dialog fills it in from *Test connection*.
             config: serde_json::json!({ "username": env.user }),

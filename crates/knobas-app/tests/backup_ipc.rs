@@ -1102,14 +1102,15 @@ async fn a_restored_source_starts_from_the_top_and_keeps_everything_else() {
         .await
         .expect("restore");
 
-    let (cursor, base_url, interval, enabled): (Option<String>, String, i32, bool) = sqlx::query_as(
-        "select cursor, base_url, sync_interval_secs, enabled
+    let (cursor, base_url, interval, enabled): (Option<String>, String, i32, bool) =
+        sqlx::query_as(
+            "select cursor, base_url, sync_interval_secs, enabled
            from knobas.source_config where id = $1",
-    )
-    .bind(&estate.source)
-    .fetch_one(&colleague.pool)
-    .await
-    .expect("the restored source configuration");
+        )
+        .bind(&estate.source)
+        .fetch_one(&colleague.pool)
+        .await
+        .expect("the restored source configuration");
 
     assert_eq!(
         cursor, None,
