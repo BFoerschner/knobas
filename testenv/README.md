@@ -817,11 +817,17 @@ and says to run `./hetzner/provision.sh`.
 
 **Five of the eight check the host, not the compose network**, through
 `host.docker.internal` — the tunnel's forwards and the canary are host sockets
-bound to `127.0.0.1`. Docker Desktop and OrbStack define that alias
-themselves; the `extra_hosts: host.docker.internal:host-gateway` line on the
-`uptime-kuma` service is what makes the same file work on a plain Linux
-engine. Measured on OrbStack: with and without the line the alias resolves to
-`0.250.250.254` and reaches a host socket bound to `127.0.0.1`.
+bound to `127.0.0.1`. Docker Desktop and OrbStack define that alias themselves;
+the `extra_hosts: host.docker.internal:host-gateway` line on the `uptime-kuma`
+service is what makes the name *resolve* on a plain Linux engine, which defines
+nothing. It does not make those five monitors *work* there: `host-gateway` is
+the bridge gateway, and both the tunnel (`hetzner/tunnel`: `-L
+127.0.0.1:$port:...`) and the canary bind `127.0.0.1` only, deliberately, so a
+bridge-gateway client cannot reach them. Running this on Linux would also mean
+binding those five targets on the bridge address; nobody has needed that, and
+this environment is a laptop's. Measured on OrbStack: with and without the line
+the alias resolves to `0.250.250.254` and reaches a host socket bound to
+`127.0.0.1`, so it is a no-op here.
 
 **The seed owns the list.** `kuma-seed.mjs` deletes any monitor Kuma holds that
 `monitors.json` no longer names, deletes and re-adds one whose type, URL,
