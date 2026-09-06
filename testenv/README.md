@@ -884,9 +884,10 @@ have to learn to kill it.
 Its interval is 20 s rather than the others' 60 s, so a live recipe's
 knock-down and recovery are seconds rather than minutes, and every leg lands
 inside one interval. Measured 2026-09-06 over two cycles, polling `/metrics` at
-1 s: released, `monitor_status` read `0` after 5 s and 18 s; rebound, it read
-`1` after 18 s and 17 s. Where in the interval the release falls is what makes
-the 5 s -- a recipe should wait for the state, not for a duration.
+1 s: released, `monitor_status` read `0` after 14 s and 17 s; rebound, it read
+`1` after 17 s and 17 s. An earlier pair of cycles saw a 5 s -- where in the
+interval the release falls is what varies, so a recipe waits for the state and
+not for a duration.
 
 ### Reading the state back
 
