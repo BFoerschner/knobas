@@ -200,6 +200,7 @@ function detailOf(assetId: string): AssetDetail {
     reachable_via: [],
     history: [],
     links: linksFor(assetId),
+    monitors: [],
   };
 }
 

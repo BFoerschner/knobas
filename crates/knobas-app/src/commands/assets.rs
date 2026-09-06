@@ -34,8 +34,8 @@ use tauri::{Emitter, State};
 use knobas_core::asset::AssetType;
 
 use crate::assets::{
-    self, AssetDetail, AssetEdit, AssetRow, MemberAsset, PropertyValue, RouteDetail, RouteEdit,
-    RouteRow, Visibility,
+    self, AssetDetail, AssetEdit, AssetRow, ImportOutcome, ImportPreview, MemberAsset,
+    PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
 };
 use crate::{IpcError, Lifecycle};
 
@@ -364,10 +364,66 @@ pub async fn source_assets(
     assets::monitored_by(&pool, &source_id).await
 }
 
+/// What importing `file` would do, having written nothing.
+///
+/// The argument is the file's **text**, not a path: reading a file off the
+/// disk is the webview's own `<input type="file">` and the browser's `File`
+/// API, so the Import needs neither the dialog plugin nor a filesystem
+/// capability, and the harness a frontend test runs in can open a file the
+/// same way a person can. The parse is Rust's all the same -- one refusal
+/// story, in one place, for a file that is not an estate file.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a file that is not JSON,
+/// carries a key the format does not define, names a type nobody declares,
+/// names a parent or a target that is nowhere, or whose assets hold each
+/// other.
+#[tauri::command]
+pub async fn preview_estate_import(
+    lifecycle: State<'_, Lifecycle>,
+    file: String,
+) -> Result<ImportPreview, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::preview_import(&pool, &file).await
+}
+
+/// Apply the import [`preview_estate_import`] previewed.
+///
+/// The file is sent again rather than a plan being sent back: the plan is
+/// recomputed inside the write's own transaction, so what is applied is what
+/// the file says at the moment it is applied and no caller can hand over a
+/// plan the reader never saw.
+///
+/// **One line is announced**, the per-run summary, though every created asset
+/// and every property set writes a line of its own -- the first import of the
+/// checked-in estate writes thirty-three, and the status bar's latest-change
+/// line wants one sentence about what just happened.
+///
+/// # Errors
+///
+/// [`preview_estate_import`]'s, plus
+/// [`Internal`](crate::IpcErrorCode::Internal) if a write fails.
+#[tauri::command]
+pub async fn apply_estate_import<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    file: String,
+) -> Result<ImportOutcome, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::apply_import(&pool, &file).await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetProperty, AssetStatus, Environment};
+    use crate::assets::{
+        AssetChange, AssetProperty, AssetStatus, Environment, ImportEntry, MonitorLink,
+        PropertyChange, PropertyPlan,
+    };
     use knobas_core::asset::{self, PropertyKind};
     use knobas_sync::mirror::{assert_shape, declared_union};
 
@@ -720,7 +776,7 @@ mod tests {
         }
     }
 
-    /// The thirteen commands are invoked from the mirror by the names they are
+    /// The fifteen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -743,6 +799,8 @@ mod tests {
             "create_route",
             "edit_route",
             "delete_route",
+            "preview_estate_import",
+            "apply_estate_import",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -779,6 +837,8 @@ mod tests {
             ("create_route", "visibility"),
             ("edit_route", "edits"),
             ("delete_route", "routeId"),
+            ("preview_estate_import", "file"),
+            ("apply_estate_import", "file"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -824,6 +884,12 @@ mod tests {
             reachable_via: Vec::new(),
             history: Vec::new(),
             links: Vec::new(),
+            // Populated for the reason `exposes` is: a `Vec<String>` that is
+            // empty serializes to the same `[]` a missing field never
+            // produces, but a name in it is what proves the field carries the
+            // estate file's monitor names rather than being a spelling that
+            // happens to serialize.
+            monitors: vec!["knobas-jira".to_owned()],
         };
         assert_shape(
             MIRROR,
@@ -840,7 +906,117 @@ mod tests {
                 "reachable_via",
                 "history",
                 "links",
+                "monitors",
             ],
+        );
+    }
+
+    /// The Import's six shapes, every one exercised **populated** (#439).
+    ///
+    /// The rule `the_asset_property_matches_its_typescript_mirror` states,
+    /// applied to a preview: an `Option` and an empty `Vec` serialize to keys
+    /// a declared `T | null` and `T[]` accept whatever is really behind them,
+    /// so the populated shape is the one that tells the two languages apart.
+    /// `PropertyChange::from` is `Some` here for exactly that reason -- it is
+    /// the field a preview draws the *old* value from, and a `null` in this
+    /// fixture would let the mirror declare it anything at all.
+    #[test]
+    fn the_import_preview_matches_its_typescript_mirror() {
+        let entry = ImportEntry {
+            id: "asset:knobas-jira".to_owned(),
+            kind: assets::NAMESPACE.to_owned(),
+            name: "knobas-jira".to_owned(),
+            type_label: Some("Container".to_owned()),
+            parent_id: Some("asset:hetzner-jira-docker".to_owned()),
+        };
+        let change = AssetChange {
+            id: "asset:hetzner-jira".to_owned(),
+            name: "knobas-jira".to_owned(),
+            properties: vec![PropertyChange {
+                key: "server_type".to_owned(),
+                label: "server_type".to_owned(),
+                from: Some(PropertyValue::Text {
+                    value: "cx23".to_owned(),
+                }),
+                to: PropertyValue::Text {
+                    value: "cpx22".to_owned(),
+                },
+                plan: PropertyPlan::Kept,
+            }],
+            monitors: vec!["knobas-jira".to_owned()],
+        };
+        let link = MonitorLink {
+            asset_id: "asset:knobas-gitea".to_owned(),
+            asset_name: "knobas-gitea".to_owned(),
+            monitor_name: "gitea".to_owned(),
+            monitor_id: "monitor:kuma:3".to_owned(),
+        };
+        let preview = ImportPreview {
+            name: "knobas test estate".to_owned(),
+            known: vec![entry.clone()],
+            new: vec![entry.clone()],
+            changes: vec![change.clone()],
+            monitor_links: vec![link.clone()],
+        };
+
+        assert_shape(
+            MIRROR,
+            "ImportEntry",
+            &serde_json::to_value(&entry).unwrap(),
+            &["id", "kind", "name", "type_label", "parent_id"],
+        );
+        assert_shape(
+            MIRROR,
+            "PropertyChange",
+            &serde_json::to_value(&change.properties[0]).unwrap(),
+            &["key", "label", "from", "to", "plan"],
+        );
+        assert_shape(
+            MIRROR,
+            "AssetChange",
+            &serde_json::to_value(&change).unwrap(),
+            &["id", "name", "properties", "monitors"],
+        );
+        assert_shape(
+            MIRROR,
+            "MonitorLink",
+            &serde_json::to_value(&link).unwrap(),
+            &["asset_id", "asset_name", "monitor_name", "monitor_id"],
+        );
+        assert_shape(
+            MIRROR,
+            "ImportPreview",
+            &serde_json::to_value(&preview).unwrap(),
+            &["name", "known", "new", "changes", "monitor_links"],
+        );
+        assert_shape(
+            MIRROR,
+            "ImportOutcome",
+            &serde_json::to_value(assets::ImportOutcome {
+                assets_created: 23,
+                routes_created: 9,
+                properties_set: 4,
+                properties_kept: 1,
+                monitors_kept: 7,
+                monitors_linked: 0,
+            })
+            .unwrap(),
+            &[
+                "assets_created",
+                "routes_created",
+                "properties_set",
+                "properties_kept",
+                "monitors_kept",
+                "monitors_linked",
+            ],
+        );
+        // And the two fates, read out of the mirror rather than listed here --
+        // a third one added on the Rust side has to fail here rather than fall
+        // through as a value the dialog draws nothing for.
+        assert_eq!(
+            declared_union(MIRROR, "PropertyPlan"),
+            ["set", "kept"].map(str::to_owned).to_vec(),
+            "PropertyPlan and its mirror disagree"
         );
     }
 

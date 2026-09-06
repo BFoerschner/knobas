@@ -289,6 +289,7 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
             },
           ]
         : [],
+    monitors: [],
   };
 }
 

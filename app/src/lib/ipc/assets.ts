@@ -6,10 +6,10 @@
  * one side only fails `cargo test`, not merely `svelte-check`.
  *
  * A §10.8-ratified module pair on the `time` module's precedent (issue #428).
- * **Every** asset command belongs here — the route commands #432 adds, the
- * import #439 adds and M4.1's alert reads as well as these seven — so the
- * bridge grows one module rather than one more section of `entity.ts` per
- * ticket. #429's `assetTypes` is the first to have arrived that way.
+ * **Every** asset command belongs here — #432's routes, #439's import and
+ * M4.1's alert reads as well as #428's original seven — so the bridge grows
+ * one module rather than one more section of `entity.ts` per ticket. #429's
+ * `assetTypes` was the first to arrive that way.
  *
  * There is no asset *event*. Every mutation writes a line to the activity
  * stream and the shell learns from the signal it already watches
@@ -302,6 +302,129 @@ export interface AssetDetail {
    * has no link list of its own.
    */
   links: LinkEntry[];
+  /**
+   * The Uptime Kuma names of the monitors watching this asset, as an import
+   * kept them (#439).
+   *
+   * **Names, not monitors.** A name becomes a `monitored-by` link the moment
+   * the mirror holds a monitor called that; until then it is all knobas has,
+   * because no adapter emits the `monitor` kind before M4.1. So this is what
+   * the estate file said, and {@link links} is what has been resolved out of
+   * it.
+   */
+  monitors: string[];
+}
+
+/**
+ * One entry of an import preview's *already in the tree* or *new* group —
+ * `assets::ImportEntry`.
+ *
+ * Assets and routes in one shape, because the question a group answers is
+ * about the **file**: what of it does knobas already hold. `kind` is which.
+ */
+export interface ImportEntry {
+  /** The file's own id, which is the id the asset or route carries. */
+  id: string;
+  /** `"asset"` or `"route"` — the word `knobas.entity.kind` holds. */
+  kind: string;
+  name: string;
+  /** The type's label for an asset; `null` for a route, which has no type. */
+  type_label: string | null;
+  /** The parent for an asset, the exposing asset for a route. */
+  parent_id: string | null;
+}
+
+/**
+ * What an apply would do with one property the file names —
+ * `assets::PropertyPlan`.
+ *
+ * `"kept"` is the reader's own value surviving: a property edited by hand is
+ * never overwritten by a later import of the same file (story 24).
+ */
+export type PropertyPlan = "set" | "kept";
+
+/**
+ * One property whose file value differs from the stored one —
+ * `assets::PropertyChange`.
+ *
+ * Only the ones that differ, and both fates in one list: *the file says `cx23`
+ * and it stays `cx33` because you typed that* is the sentence the preview
+ * exists to say.
+ */
+export interface PropertyChange {
+  key: string;
+  /** The type's label for a declared key, the key itself for a custom one. */
+  label: string;
+  /** What the asset carries now; `null` for a key it does not carry yet. */
+  from: PropertyValue | null;
+  /** What the file says. */
+  to: PropertyValue;
+  plan: PropertyPlan;
+}
+
+/**
+ * One asset already in the tree that an apply would change —
+ * `assets::AssetChange`.
+ *
+ * An asset with nothing to change is in {@link ImportPreview.known} instead,
+ * so the length of this list is the honest answer to *what would this do*.
+ */
+export interface AssetChange {
+  id: string;
+  /** The name **in the tree**: an import never renames. */
+  name: string;
+  properties: PropertyChange[];
+  /** Monitor names the file lists that this asset does not carry yet. */
+  monitors: string[];
+}
+
+/**
+ * One `monitored-by` link an apply would draw — `assets::MonitorLink`.
+ *
+ * Only the names the mirror actually holds. A name it does not hold is kept on
+ * the asset and resolved by the next import or by the M4.1 sync, so this list
+ * is empty until the Kuma adapter lands.
+ */
+export interface MonitorLink {
+  asset_id: string;
+  asset_name: string;
+  /** The Uptime Kuma name, as the file spells it and the mirror holds it. */
+  monitor_name: string;
+  /** The mirrored monitor's entity id — the other end of the link. */
+  monitor_id: string;
+}
+
+/**
+ * What an import would do, before it has done any of it —
+ * `assets::ImportPreview`.
+ *
+ * The three groups the Import dialog draws, plus the monitor links, which are
+ * a write and therefore have to be announced by the same read.
+ */
+export interface ImportPreview {
+  /** What the file calls the estate. */
+  name: string;
+  /** Entries whose id knobas already holds. */
+  known: ImportEntry[];
+  /** Entries an apply would create, in the order it would create them. */
+  new: ImportEntry[];
+  /** The known assets with something to change, and what. */
+  changes: AssetChange[];
+  monitor_links: MonitorLink[];
+}
+
+/** What an import did — `assets::ImportOutcome`. */
+export interface ImportOutcome {
+  assets_created: number;
+  routes_created: number;
+  /** Properties the file's value was written to. */
+  properties_set: number;
+  /** Properties left as they were because a hand edit claimed them. */
+  properties_kept: number;
+  /** Monitor names newly kept on an asset. */
+  monitors_kept: number;
+  /** `monitored-by` links drawn. */
+  monitors_linked: number;
 }
 
 /** Rename — `assets::AssetEdit::Name`. */
@@ -528,4 +651,31 @@ export function editRoute(routeId: string, edits: RouteEdit[]): Promise<RouteRow
 /** Delete a route. Nothing hangs off one, so nothing refuses. */
 export function deleteRoute(routeId: string): Promise<void> {
   return invoke<void>("delete_route", { routeId });
+}
+
+/**
+ * What importing this estate file would do, having written nothing (#439).
+ *
+ * The **text** of the file, not a path: the dialog reads it with the browser's
+ * own `File` API, so the Import needs no Tauri dialog plugin and no filesystem
+ * capability. The parse is the backend's, so a file that is not an estate file
+ * is refused once, in one voice.
+ *
+ * Rejects with `invalid` for a file that is not JSON, carries a key the format
+ * does not define, names a type nobody declares, names a parent or a target
+ * that is nowhere, or whose assets hold each other.
+ */
+export function previewEstateImport(file: string): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_estate_import", { file });
+}
+
+/**
+ * Apply the import {@link previewEstateImport} previewed.
+ *
+ * The file is sent again rather than the preview being sent back: the plan is
+ * recomputed inside the write's own transaction, which is what makes what is
+ * written and what was shown two runs of one rule.
+ */
+export function applyEstateImport(file: string): Promise<ImportOutcome> {
+  return invoke<ImportOutcome>("apply_estate_import", { file });
 }

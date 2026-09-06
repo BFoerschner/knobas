@@ -220,7 +220,7 @@ A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or wit
 _Avoid_: URL (that is a route's property), ingress, endpoint (bare)
 
 **Monitor**:
-A mirrored [item](#item) of the Uptime Kuma [source](#source), kind `monitor`: one check as Uptime Kuma defines it, with its current state. Attached to an [asset](#asset) by a `monitored-by` [link](#link); never an asset itself, and never created or edited in the mirror by hand.
+A mirrored [item](#item) of the Uptime Kuma [source](#source), kind `monitor`: one check as Uptime Kuma defines it, with its current state. Attached to an [asset](#asset) by a `monitored-by` [link](#link); never an asset itself, and never created or edited in the mirror by hand. A **monitor name** an [import](#import) has kept on an asset is not one of these — it is the Uptime Kuma name the estate file gave, waiting for a monitor of that name to be mirrored; the import draws the link the moment there is one, and until then the name is all knobas has. (Added 2026-09-06, #439, from spec #427's *"a name the mirror does not hold yet is kept on the asset and resolved by the next import or the M4.1 sync"*.)
 _Avoid_: check (that is one heartbeat of a monitor), probe, healthcheck
 
 **Alert**:

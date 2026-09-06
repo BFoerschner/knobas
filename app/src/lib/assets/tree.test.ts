@@ -74,6 +74,7 @@ function detail(
     exposes,
     reachable_via: reachableVia,
     history: [],
+    monitors: [],
   };
 }
 
