@@ -38,7 +38,14 @@
   import { latestRead } from "../shell/latest-read";
   import { ago } from "../shell/time";
   import { hashFor, type Router } from "../shell/router.svelte";
-  import { addressOf, columnPathFor, emptyPath, heldByPath, type ColumnPath } from "./tree";
+  import {
+    addressOf,
+    columnPathFor,
+    emptyPath,
+    heldByPath,
+    selectionIn,
+    type ColumnPath,
+  } from "./tree";
 
   /**
    * The bridge this view needs, injectable so a test needs no Tauri — the
@@ -208,12 +215,13 @@
         <p class="empty">Nothing in the estate yet.</p>
       {:else}
         {#each columns as column, index (index)}
+          {@const chosen = selectionIn(path, index)}
           <ol class="col">
             {#each column as row (row.id)}
               <li>
                 <button
-                  class="row {path.selected[index] === row.id ? 'on' : ''}"
-                  aria-current={path.selected[index] === row.id ? "true" : undefined}
+                  class="row {chosen === row.id ? 'on' : ''}"
+                  aria-current={chosen === row.id ? "true" : undefined}
                   title={addressOf(row)}
                   onclick={() => select(row)}
                 >

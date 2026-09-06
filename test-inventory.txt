@@ -31,8 +31,8 @@ knobas-app	lib/knobas_app	commands::assets::tests::every_edit_matches_its_typesc
 knobas-app	lib/knobas_app	commands::assets::tests::every_property_value_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::every_status_and_environment_is_in_the_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_asset_detail_matches_its_typescript_mirror
-knobas-app	lib/knobas_app	commands::assets::tests::the_asset_node_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_asset_property_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	commands::assets::tests::the_asset_row_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_sends_the_argument_names_tauri_expects
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names

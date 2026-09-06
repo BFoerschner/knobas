@@ -4905,6 +4905,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   route table takes it. The old sentence is left as history rather than rewritten, the treatment
   #53 gives the #52 sentences it supersedes and #278 gives #204's and #208's.
 
+  **And one sentence in the #284 entry above** — "It is expanded eight times and nowhere else",
+  written of `knobas_core::ancestor_path_read!` while every corpus was a *mirror* corpus. The macro
+  is still expanded exactly eight times, and is still the only spelling of a path read out of a
+  **payload**; what changed is that `Corpus.path` now has a second case behind it. `corpus::ASSET`
+  fills it with `nullif(a.path_text, '')` — a column the asset store maintains on create, rename and
+  move, not a payload to read: there are no `ancestors` to miss to `null`, so the macro has nothing
+  to expand there, and what its rule protects — *one* answer to "where is this" — is protected
+  instead by that column having one writer. The field's own doc carried the old single-case rule and
+  is **corrected in place** (ADR-0011) to state both; the #284 sentence is left as history, like
+  #281's.
+
   **The migration.** `0017_the_estate_and_its_assets.sql` adds one table and edits nothing.
 
   ```sql
@@ -4939,11 +4950,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   **`asset_no_self_parent_chk` closes the one-step cycle and nothing longer.** A CHECK cannot see
   an ancestor, and a trigger would be a second copy of a rule the command already owns, so
   `assets::move_to` walks the proposed parent's ancestors before it writes and refuses **by name**
-  — naming both ends, because "under itself" is not a sentence a reader can act on when the loop is
-  four levels long. Pinned by `tests/assets_ipc.rs`'s
+  — naming both ends *and the asset that closes the loop*, because "under itself" is not a sentence
+  a reader can act on when the loop is four levels long. That third name is the one step **below**
+  the moved asset on the walk — what it already holds on the way down to the proposed parent — and
+  it is the only interpolation in the message no other argument already supplies: naming the moved
+  asset there instead would render *"hel1 is already held by hel1"*, which is the sentence the
+  message exists to avoid. Pinned by `tests/assets_ipc.rs`'s
   `a_move_that_would_make_a_cycle_is_refused_by_name`, which uses a **two-hop** loop (the site
   under the container it transitively holds) precisely so that the check constraint cannot be what
-  makes it pass.
+  makes it pass, and which asserts all three names — the middle one appears nowhere else in the
+  sentence, so a guard that answered with the moved asset's own name fails it.
 
   **`status` and `environment` are closed vocabularies; `type_id` deliberately is not.** The first
   two get the CHECK treatment `link_origin_chk` (0003) and the run log's vocabularies (0002, 0004)
@@ -4980,7 +4996,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   (#439) has not asked for. `path_text` is maintained by the store on create, rename and **move**
   — one recursive statement over the subtree, so a container never claims to live under a site its
   VM has left (`a_move_rewrites_the_ancestor_path_of_everything_underneath` asserts the
-  *container*, not the node that moved).
+  *container*, not the asset that moved).
 
   **`Kind` gains `asset`, and that is a growth with a consequence the guard chose.**
   `knobas_core::entity::OWNED_KINDS` gains `{ id: "asset", label: "Asset", plural: "Assets",

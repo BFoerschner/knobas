@@ -181,11 +181,11 @@ mod tests {
     use super::*;
     use crate::assets::{AssetProperty, AssetStatus, Environment};
     use knobas_core::asset::PropertyKind;
-    use knobas_sync::mirror::{assert_shape, declared_union, interface_body};
+    use knobas_sync::mirror::{assert_shape, declared_union};
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
 
-    fn node() -> AssetRow {
+    fn row() -> AssetRow {
         AssetRow {
             id: "asset:7f2c".to_owned(),
             parent_id: Some("asset:site".to_owned()),
@@ -201,11 +201,11 @@ mod tests {
     }
 
     #[test]
-    fn the_asset_node_matches_its_typescript_mirror() {
+    fn the_asset_row_matches_its_typescript_mirror() {
         assert_shape(
             MIRROR,
             "AssetRow",
-            &serde_json::to_value(node()).unwrap(),
+            &serde_json::to_value(row()).unwrap(),
             &[
                 "id",
                 "parent_id",
@@ -395,7 +395,7 @@ mod tests {
 
     /// Tauri renames a command's *arguments* to camelCase and leaves struct
     /// fields alone. Both spellings are on this surface at once -- the
-    /// `assetId` argument and the `parent_id` field inside the node it answers
+    /// `assetId` argument and the `parent_id` field inside the row it answers
     /// with -- and getting either wrong is a call that arrives with the value
     /// missing and no error anywhere.
     #[test]
@@ -422,12 +422,30 @@ mod tests {
 
     /// The detail is a carrier of shapes pinned above plus one list this
     /// module does not own -- `ActivityRow`, whose mirror lives in
-    /// `entity.ts`. What is asserted here is the carrier's own field list.
+    /// `entity.ts`. What is asserted here is the carrier's own field list, and
+    /// it gets [`assert_shape`] like every other shape in this file rather
+    /// than a `contains` per name: `body.contains("asset")` cannot fail -- the
+    /// body reads `asset: AssetRow;` and `properties: AssetProperty[];`, so
+    /// the substring is there several times over whatever the field is called
+    /// -- and a substring check is one-directional besides, so a field the
+    /// mirror declares and Rust does not would pass it. The empty lists are
+    /// what let the carrier be built without owning `ActivityRow`'s fixture;
+    /// the field *names* are what is under test here, and those do not depend
+    /// on what is in the lists.
     #[test]
     fn the_asset_detail_matches_its_typescript_mirror() {
-        let body = interface_body(MIRROR, "AssetDetail");
-        for field in ["asset", "properties", "held_by", "holds", "history"] {
-            assert!(body.contains(field), "AssetDetail has no {field}: {body}");
-        }
+        let detail = AssetDetail {
+            asset: row(),
+            properties: Vec::new(),
+            held_by: Vec::new(),
+            holds: Vec::new(),
+            history: Vec::new(),
+        };
+        assert_shape(
+            MIRROR,
+            "AssetDetail",
+            &serde_json::to_value(detail).unwrap(),
+            &["asset", "properties", "held_by", "holds", "history"],
+        );
     }
 }

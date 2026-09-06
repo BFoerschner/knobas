@@ -487,10 +487,31 @@ async fn moving_an_asset_re_parents_it_and_writes_the_move() {
         .expect("the move");
     assert_eq!(moved.value.parent_id.as_deref(), Some(other.id.as_str()));
 
+    // One line, not two: the count is asserted as well as the content, because
+    // a writer that recorded its move twice would pass every assertion about
+    // what the line *says*.
+    assert_eq!(moved.activity.len(), 1);
+    let verbs: Vec<String> = history(&pool, &container.id)
+        .await
+        .into_iter()
+        .map(|(verb, _)| verb)
+        .collect();
+    assert_eq!(verbs, ["moved", "created"]);
     let (verb, detail) = history(&pool, &container.id).await.remove(0);
     assert_eq!(verb, "moved");
     assert_eq!(detail["from"], serde_json::json!(vm.id));
     assert_eq!(detail["to"], serde_json::json!(other.id));
+
+    // Moving it where it already is changes nothing and writes nothing -- the
+    // edit path's twin, and the branch a reader of `move_to` has to trust.
+    let again = assets::move_to(&pool, &container.id, Some(&other.id))
+        .await
+        .expect("a no-op move");
+    assert!(
+        again.activity.is_empty(),
+        "a move to the same parent is not a move"
+    );
+    assert_eq!(history(&pool, &container.id).await.len(), 2);
 
     // The columns agree: the old parent has lost it and the new one has it.
     assert!(assets::tree(&pool, Some(&vm.id)).await.unwrap().is_empty());
@@ -559,6 +580,17 @@ async fn a_move_that_would_make_a_cycle_is_refused_by_name() {
         "the refusal must name both ends: {}",
         refused.message
     );
+    // And the asset that **closes** the loop, which is the one step below the
+    // moved asset on the walk: `hel1` already holds `vm-db-01` on the way down
+    // to `postgres`. Asserted separately because it is the only name in the
+    // sentence no other argument supplies -- a guard answering with the moved
+    // asset's own name would render "hel1 is already held by hel1", pass the
+    // two assertions above, and say nothing.
+    assert!(
+        refused.message.contains("vm-db-01"),
+        "the refusal must name the asset that closes the loop: {}",
+        refused.message
+    );
 
     // The one-hop case, which the schema also forbids, refused here first so
     // the reader gets a sentence rather than a constraint violation.
@@ -592,7 +624,7 @@ async fn a_move_that_would_make_a_cycle_is_refused_by_name() {
 /// launcher matches ancestor names against.
 ///
 /// The **container** is what is asserted, not the VM that moved: a subtree
-/// update that only fixed the node it was handed would leave the container
+/// update that only fixed the asset it was handed would leave the container
 /// still claiming to live under a site it has left, and nothing else in this
 /// file would notice.
 #[tokio::test]
@@ -667,6 +699,22 @@ async fn a_leaf_is_deleted_and_its_entity_row_is_tombstoned() {
 
     // The parent stops claiming a child, which is what the chevron reads.
     assert!(!assets::get(&pool, &vm.id).await.unwrap().asset.has_children);
+
+    // The delete is a line in the stream too, and it is the one mutation whose
+    // line `get` can never read back -- the asset is gone. Read from
+    // `knobas.activity` directly, so that dropping the `record_with` call does
+    // not leave this file green.
+    let (verb, detail): (String, serde_json::Value) = sqlx::query_as(
+        "select verb, detail from knobas.activity
+          where entity_id = $1 order by id desc limit 1",
+    )
+    .bind(&container.id)
+    .fetch_one(&pool)
+    .await
+    .expect("the delete's own line");
+    assert_eq!(verb, "deleted");
+    assert_eq!(detail["asset"]["name"], serde_json::json!("postgres"));
+    assert_eq!(detail["asset"]["type"], serde_json::json!("container"));
 }
 
 /// An asset that still holds something is refused, and the refusal says how
@@ -718,17 +766,24 @@ async fn an_asset_is_an_entity_in_the_namespace_knobas_reserves() {
     // The launcher's corpus reads the asset table, so the estate is findable
     // by name and by the name of anything above it (`knobas_search`'s
     // `corpus::ASSET`).
-    let matched: i64 = sqlx::query_scalar(
-        "select count(*) from knobas.asset
+    let matched: Vec<String> = sqlx::query_scalar(
+        "select name from knobas.asset
           where fts @@ websearch_to_tsquery('english', $1)",
     )
     .bind("hel1")
-    .fetch_one(&pool)
+    .fetch_all(&pool)
     .await
     .expect("the index");
-    assert!(
-        matched >= 2,
-        "the site and everything under it match its name, got {matched}"
+    // The *names*, not the count: `>= 2` passes whether or not the container
+    // matched, and the container is the whole claim -- it carries `hel1`
+    // nowhere but in `path_text`, which is the weight-B ancestor match the
+    // column exists for.
+    let mut matched = matched;
+    matched.sort();
+    assert_eq!(
+        matched,
+        ["hel1", "postgres", "vm-db-01"],
+        "the site matches its own name and everything under it matches through `path_text`"
     );
 }
 

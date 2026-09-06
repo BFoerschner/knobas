@@ -128,12 +128,25 @@ pub struct Corpus {
     /// Where a row sits **inside its source**, as one line, or `null::text`
     /// for a corpus whose rows sit nowhere (#284).
     ///
-    /// One SQL expression, and the only one allowed here is
-    /// [`ancestor_path_read!`](knobas_core::ancestor_path_read) -- a second
-    /// spelling would be a second answer to "where is this", and the launcher
-    /// row and the detail panel both draw it. ADR-0007: it misses to `null`
-    /// for every kind whose records carry no `ancestors`, which is every kind
-    /// but a Confluence page today.
+    /// One SQL expression, and which one is settled by where the answer lives
+    /// -- there are two cases and no third (amended by #428; it read "the only
+    /// one allowed here is `ancestor_path_read!`" while every corpus was a
+    /// mirror corpus):
+    ///
+    /// 1. **A row mirrored from a source**: the path is a *payload* read, and
+    ///    the only spelling allowed is
+    ///    [`ancestor_path_read!`](knobas_core::ancestor_path_read) -- a second
+    ///    spelling would be a second answer to "where is this", and the
+    ///    launcher row and the detail panel both draw it. ADR-0007: it misses
+    ///    to `null` for every kind whose records carry no `ancestors`, which
+    ///    is every kind but a Confluence page today.
+    /// 2. **A row in a tree knobas owns**: the path is a *column* the store
+    ///    maintains on create, rename and move, and the expression reads it.
+    ///    [`ASSET`] is the first, over `knobas.asset.path_text`. There is no
+    ///    payload to read and no `ancestors` to miss to `null`, so the macro
+    ///    has nothing to expand here; what the macro's rule is protecting --
+    ///    one answer to "where is this" -- is protected instead by the column
+    ///    having one writer.
     pub(crate) path: &'static str,
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].

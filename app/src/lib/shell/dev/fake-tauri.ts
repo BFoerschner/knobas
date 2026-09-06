@@ -423,20 +423,27 @@ const FIXTURE_ESTATE: {
 ];
 
 /** One asset as a column row -- everything but its properties and its path. */
-function assetNode(asset: (typeof FIXTURE_ESTATE)[number]) {
-  const { properties: _properties, ...node } = asset;
+function assetRow(asset: (typeof FIXTURE_ESTATE)[number]) {
+  const { properties: _properties, ...row } = asset;
   return {
-    ...node,
+    ...row,
     has_children: FIXTURE_ESTATE.some((other) => other.parent_id === asset.id),
   };
 }
 
-/** `asset_tree`: what one asset holds, or the top of the estate. */
+/**
+ * `asset_tree`: what one asset holds, or the top of the estate.
+ *
+ * `name` then `id`, which is `assets::CHILDREN`'s `order by a.name asc, a.id
+ * asc`: without the tiebreak two siblings sharing a name would come back in
+ * whichever order the array happened to hold them, and a QA screenshot would
+ * disagree with the app for a reason nobody would look for.
+ */
 function assetColumn(args: Record<string, unknown>) {
   const parent = (args.parentId as string | null) ?? null;
   return FIXTURE_ESTATE.filter((asset) => asset.parent_id === parent)
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map(assetNode);
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+    .map(assetRow);
 }
 
 /** `get_asset`: the pane's read, ancestors walked over the parent field. */
@@ -455,10 +462,10 @@ function assetDetail(args: Record<string, unknown>) {
   }
 
   return {
-    asset: assetNode(asset),
+    asset: assetRow(asset),
     properties: asset.properties,
-    held_by: heldBy.map(assetNode),
-    holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetNode),
+    held_by: heldBy.map(assetRow),
+    holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
     history: [
       {
         id: 2,

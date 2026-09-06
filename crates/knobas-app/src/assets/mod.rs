@@ -917,7 +917,7 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<Written<()>, IpcError> {
 // The plumbing the four writers share
 // ---------------------------------------------------------------------------
 
-/// The stored row, as the writers need it: the wire node plus the two columns
+/// The stored row, as the writers need it: the wire row plus the two columns
 /// no reader draws.
 struct Stored {
     parent_id: Option<String>,
@@ -999,8 +999,16 @@ async fn set_column(
 }
 
 /// The `path_text` a child of `parent` would carry.
+///
+/// `for update`, for [`locked`]'s reason applied one row over: `create` reads
+/// the parent's name here, decides a `path_text` from it and writes that into
+/// the child. A rename of the parent committing in between would leave the new
+/// child carrying the old name for good -- the rename's own
+/// [`recompute_paths`] walks only the descendants its transaction can see, and
+/// a child inserted after it is not one. The insert's own `for key share` on
+/// the foreign key does not close this: a rename does not touch the key.
 async fn path_below(tx: &mut Transaction<'_, Postgres>, parent: &str) -> Result<String, IpcError> {
-    let row = sqlx::query("select name, path_text from knobas.asset where id = $1")
+    let row = sqlx::query("select name, path_text from knobas.asset where id = $1 for update")
         .bind(parent)
         .fetch_optional(&mut **tx)
         .await?
@@ -1016,7 +1024,7 @@ async fn path_below(tx: &mut Transaction<'_, Postgres>, parent: &str) -> Result<
 
 /// Rewrite `path_text` for an asset and everything under it.
 ///
-/// One statement, because a subtree walked in Rust is a round trip per node
+/// One statement, because a subtree walked in Rust is a round trip per asset
 /// and a window in which half the estate says where it used to be.
 async fn recompute_paths(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<(), IpcError> {
     sqlx::query(
@@ -1044,12 +1052,22 @@ async fn recompute_paths(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result
     Ok(())
 }
 
-/// The name of the asset `moved` would have run into, or `None` for a legal
-/// move.
+/// The name of the asset that **closes the loop**, or `None` for a legal move.
 ///
 /// Walks up from `parent`: if `id` is anywhere above it, `id` would end up
-/// holding itself. The answer is the *name* rather than a bare `true`, so the
-/// refusal can say which asset closed the loop.
+/// holding itself. The answer is a *name* rather than a bare `true` so the
+/// refusal can say where the loop runs, and the name is the one step below
+/// `id` on that walk -- the asset `id` already holds on the way down to
+/// `parent`. Returning `id`'s own name instead would make the refusal read
+/// *"hel1 is already held by hel1"*, which is the "under itself" sentence the
+/// whole message exists to avoid; `below` is what makes it a fact a reader can
+/// act on, and it is the only interpolation in that message no other argument
+/// already supplies.
+///
+/// `below` is `null` only on the walk's first row, which is `parent` itself --
+/// the one-step case `move_to` has already refused above and
+/// `asset_no_self_parent_chk` forbids underneath. The `coalesce` is the floor
+/// under that, not a route.
 async fn cycle_through(
     tx: &mut Transaction<'_, Postgres>,
     id: &str,
@@ -1057,12 +1075,13 @@ async fn cycle_through(
 ) -> Result<Option<String>, IpcError> {
     let row = sqlx::query(
         "with recursive up as (
-             select a.id, a.parent_id, a.name from knobas.asset a where a.id = $2
+             select a.id, a.parent_id, a.name, null::text as below
+               from knobas.asset a where a.id = $2
              union all
-             select p.id, p.parent_id, p.name
+             select p.id, p.parent_id, p.name, up.name
                from knobas.asset p join up on p.id = up.parent_id
          )
-         select name from up where id = $1",
+         select coalesce(below, name) as name from up where id = $1",
     )
     .bind(id)
     .bind(parent)
