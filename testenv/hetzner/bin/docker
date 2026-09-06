@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# The routing shim `source testenv/hetzner/env` puts in front of docker.
+#
+# A call that names a remote product's container or service runs under that
+# product's docker context (knobas-teamcity, knobas-jira, knobas-confluence,
+# created by provision.sh). A call that names none runs on the local engine,
+# exactly as typed. So `docker inspect knobas-jira` in seed-atlassian.sh, and
+# `docker compose --profile real-teamcity up -d teamcity teamcity-agent` in the
+# README, both land on the right server, while `docker compose exec gitea ...`
+# and `docker ps` stay on the notebook.
+#
+# `docker compose` calls get the compose file and the product's override
+# (../<role>.override.yml, when there is one) as explicit -f arguments, and a
+# call that names services of TWO products -- the recipe's `down -v jira jira-db
+# confluence confluence-db` -- runs once per product with only that product's
+# services. Anything else is passed through verbatim; no flag is interpreted.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+hetzner=$(cd "$here/.." && pwd)
+compose_file=$(cd "$hetzner/.." && pwd)/docker-compose.yml
+
+# The real docker: the first one on PATH that is not this file.
+real=
+while IFS= read -r dir; do
+  [ -n "$dir" ] && [ "$dir" != "$here" ] && [ -x "$dir/docker" ] && { real=$dir/docker; break; }
+done < <(tr ':' '\n' <<<"$PATH")
+[ -n "$real" ] || { echo "docker (knobas shim): no other docker on PATH" >&2; exit 127; }
+
+role_of() {
+  case "$1" in
+    knobas-jira|knobas-jira-db|jira|jira-db) echo jira ;;
+    knobas-confluence|knobas-confluence-db|confluence|confluence-db) echo confluence ;;
+    knobas-teamcity|knobas-teamcity-agent|teamcity|teamcity-agent) echo teamcity ;;
+    *) echo "" ;;
+  esac
+}
+
+# Which products does this call name?
+roles=()
+for a in "$@"; do
+  r=$(role_of "$a")
+  [ -n "$r" ] && [[ ! " ${roles[*]-} " == *" $r "* ]] && roles+=("$r")
+done
+[ ${#roles[@]} -gt 0 ] || exec "$real" "$@"
+
+# Is this a compose call? (`docker [global opts] compose ...`)
+is_compose=0
+for a in "$@"; do
+  case "$a" in
+    compose) is_compose=1; break ;;
+    -*) continue ;;
+    *) break ;;
+  esac
+done
+
+if [ "$is_compose" -eq 0 ]; then
+  [ ${#roles[@]} -eq 1 ] || { echo "docker (knobas shim): '$*' names containers on ${#roles[@]} servers; one call per server" >&2; exit 2; }
+  export DOCKER_CONTEXT=knobas-${roles[0]}
+  exec "$real" "$@"
+fi
+
+status=0
+for role in "${roles[@]}"; do
+  args=()
+  seen_compose=0
+  for a in "$@"; do
+    if [ "$seen_compose" -eq 0 ]; then
+      args+=("$a")
+      if [ "$a" = compose ]; then
+        seen_compose=1
+        args+=(-f "$compose_file")
+        [ -r "$hetzner/$role.override.yml" ] && args+=(-f "$hetzner/$role.override.yml")
+      fi
+      continue
+    fi
+    r=$(role_of "$a")
+    if [ -n "$r" ] && [ "$r" != "$role" ]; then continue; fi   # another server's service
+    args+=("$a")
+  done
+  [ ${#roles[@]} -gt 1 ] && echo "docker (knobas shim): -> knobas-$role: ${args[*]}" >&2
+  DOCKER_CONTEXT=knobas-$role "$real" "${args[@]}" || status=$?
+done
+exit $status

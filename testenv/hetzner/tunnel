@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# The SSH forwards between the notebook and the three servers.
+#
+#   ./tunnel up       open what is not already open (idempotent)
+#   ./tunnel down     close all
+#   ./tunnel status   one line per server
+#
+# Forward, so that the seeds, the live suites and a browser reach each product
+# at the 127.0.0.1 port the compose file has always used:
+#   127.0.0.1:8111 -> knobas-teamcity     127.0.0.1:8111
+#   127.0.0.1:8080 -> knobas-jira         127.0.0.1:8080
+#   127.0.0.1:8090 -> knobas-confluence   127.0.0.1:8090
+# Reverse, on the TeamCity server only: its docker bridge gateway :3000 -> the
+# notebook's 127.0.0.1:3000, which is Gitea. The teamcity.override.yml maps
+# `gitea` to that gateway, so the VCS roots seed-teamcity-builds.sh writes as
+# http://gitea:3000/... resolve. A build clones through this tunnel, so it fails
+# while the tunnel is down; nothing else on the server depends on the notebook.
+#
+# Each tunnel is its own ssh process (no ControlMaster: sharing the multiplexed
+# connection with docker would tie the tunnel's life to `docker context`'s idle
+# timeout). Pid files live in ~/.ssh/knobas-tunnel-<role>.pid. The tunnel dies
+# with the network (sleep, Wi-Fi change); `./tunnel up` again puts it back.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+say() { echo "tunnel: $*"; }
+die() { echo "tunnel: $*" >&2; exit 1; }
+
+[ -r hosts.env ] || die "hosts.env not found; run ./provision.sh first"
+
+port_of() { case "$1" in teamcity) echo 8111 ;; jira) echo 8080 ;; confluence) echo 8090 ;; esac; }
+pidfile() { echo "$HOME/.ssh/knobas-tunnel-$1.pid"; }
+alive() { [ -r "$(pidfile "$1")" ] && kill -0 "$(cat "$(pidfile "$1")")" 2>/dev/null; }
+listening() { nc -z 127.0.0.1 "$1" 2>/dev/null; }
+
+up_one() {
+  local role=$1 port; port=$(port_of "$role")
+  if alive "$role"; then say "knobas-$role: up (pid $(cat "$(pidfile "$role")"), 127.0.0.1:$port)"; return 0; fi
+  if listening "$port"; then
+    die "127.0.0.1:$port is taken and it is not our tunnel. If the local knobas-$role container is still up:
+    (cd .. && docker compose --profile real-$([ "$role" = teamcity ] && echo teamcity || echo atlassian) stop knobas-$role) -- or plainly docker stop knobas-$role"
+  fi
+  # bash 3.2 (macOS) treats an empty array as unset under `set -u`, so the
+  # optional reverse forward is a string, and its absence a no-op flag.
+  local reverse='' rflag=-o rval=IPQoS=none
+  if [ "$role" = teamcity ]; then
+    local gw
+    gw=$(ssh knobas-teamcity "docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'") \
+      || die "knobas-teamcity: cannot read the docker bridge gateway"
+    reverse="$gw:3000:127.0.0.1:3000"; rflag=-R; rval=$reverse
+  fi
+  nohup ssh -N -o ControlMaster=no -o ControlPath=none -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+    -L "127.0.0.1:$port:127.0.0.1:$port" "$rflag" "$rval" "knobas-$role" >/dev/null 2>&1 &
+  echo $! > "$(pidfile "$role")"
+  local i=0
+  until listening "$port"; do
+    i=$((i + 1)); [ "$i" -lt 40 ] || { rm -f "$(pidfile "$role")"; die "knobas-$role: tunnel did not come up in 20s"; }
+    kill -0 "$(cat "$(pidfile "$role")")" 2>/dev/null || { rm -f "$(pidfile "$role")"; die "knobas-$role: ssh exited (forward refused? host unreachable?)"; }
+    sleep 0.5
+  done
+  say "knobas-$role: up (pid $(cat "$(pidfile "$role")"), 127.0.0.1:$port${reverse:+, reverse $reverse})"
+}
+
+down_one() {
+  local role=$1
+  if alive "$role"; then kill "$(cat "$(pidfile "$role")")"; say "knobas-$role: closed"; fi
+  rm -f "$(pidfile "$role")"
+}
+
+status_one() {
+  local role=$1 port; port=$(port_of "$role")
+  if alive "$role"; then
+    if curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:$port/" 2>/dev/null || [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$port/")" != 000 ]; then
+      say "knobas-$role: up, 127.0.0.1:$port answers"
+      [ "$role" = teamcity ] || say "knobas-$role: licence renewer: $(ssh -o ConnectTimeout=5 "knobas-$role" cat /opt/knobas/renew-status 2>/dev/null || echo 'not installed (./hetzner/install-renewer.sh)')"
+    else
+      say "knobas-$role: up, but nothing answers on 127.0.0.1:$port (is the container running there?)"
+    fi
+  else
+    say "knobas-$role: down"; return 1
+  fi
+}
+
+case "${1:-}" in
+  up)     for r in teamcity jira confluence; do up_one "$r"; done ;;
+  down)   for r in teamcity jira confluence; do down_one "$r"; done ;;
+  status) s=0; for r in teamcity jira confluence; do status_one "$r" || s=1; done; exit $s ;;
+  *) die "usage: ./tunnel up|down|status" ;;
+esac

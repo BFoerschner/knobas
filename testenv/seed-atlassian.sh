@@ -607,11 +607,28 @@ wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
 
 # Merge one product's block into seed-state.json rather than rewriting it:
 # seed-gitea.sh owns its own keys in the same file.
+#
+# UNDER A LOCK, because two of these can run at once: `just atlassian-live`
+# starts Jira's seed and Confluence's together when each product has a server
+# of its own (testenv/hetzner/README.md), and this is a read-modify-write of one
+# file -- the loser of an unguarded race would silently drop the other product's
+# block, and the recipe's `_require-live-env` would then refuse a pair that was
+# in fact seeded. `mkdir` is the atomic primitive every sh has; the lock is held
+# for one jq and one mv, so a wait here is milliseconds and a 10 s one means a
+# dead seed left the directory behind.
 record() {  # record <key> <json>
+  _i=0
+  until mkdir "$STATE.lock" 2>/dev/null; do
+    _i=$((_i + 1))
+    [ "$_i" -lt 100 ] || die "$STATE.lock has been held for 10 s; if no other seed is running, rmdir it"
+    sleep 0.1
+  done
   _old='{}'
   [ -r "$STATE" ] && _old=$(cat "$STATE" 2>/dev/null) && [ -n "$_old" ] || _old='{}'
-  printf '%s' "$_old" | jq --arg k "$1" --argjson v "$2" '. + {($k): $v}' > "$STATE.tmp"
+  printf '%s' "$_old" | jq --arg k "$1" --argjson v "$2" '. + {($k): $v}' > "$STATE.tmp" \
+    || { rmdir "$STATE.lock"; die "jq could not merge the $1 block into $STATE"; }
   mv "$STATE.tmp" "$STATE"
+  rmdir "$STATE.lock"
 }
 
 # --------------------------------------------------------------------------

@@ -1,0 +1,16 @@
+# source testenv/hetzner/env
+#
+# Puts bin/ first on PATH so that `docker` calls naming one of the three remote
+# products -- knobas-jira, jira-db, knobas-teamcity, confluence, ... -- go to
+# that product's docker context, and every other call reaches the local engine
+# untouched. The seed scripts and the `just *-live` recipes then run against the
+# Hetzner servers without a change. See README.md.
+export PATH="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)/bin:$PATH"
+# Read by `just atlassian-live`: with a server per product it starts and seeds
+# Jira and Confluence at once instead of one after the other.
+export KNOBAS_TESTENV_HETZNER=1
+# Read by `just atlassian-live` too: the pair lives on its servers between runs
+# (renew-licence.sh re-applies the timebomb keys on a timer there), so the
+# recipe does not `down -v` at the end. `KNOBAS_ATLASSIAN_KEEP=0 just
+# atlassian-live` is the old shape, torn down at the end.
+export KNOBAS_ATLASSIAN_KEEP=1

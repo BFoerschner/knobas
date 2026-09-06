@@ -2,3 +2,7 @@
 # person's local containers, and `./reset` deletes them.
 kuma-api-key
 seed-state.json
+seed-state.json.lock
+
+# Written by hetzner/provision.sh: the current servers' addresses, one person's account.
+hetzner/hosts.env

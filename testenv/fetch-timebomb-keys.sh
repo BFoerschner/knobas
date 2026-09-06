@@ -78,10 +78,16 @@ for var, (heading, product) in wanted.items():
 
 write=0; [ "${1:-}" = "--write" ] && write=1
 [ $write -eq 1 ] && : > "$OUT"
+# `if`, not `[ ] && ...`: as the last command in the loop body the `&&` list
+# made the loop -- and so the pipeline, and under `set -e` the script -- exit 1
+# whenever --write was NOT given. Nothing noticed while every caller was an
+# `eval "$(./fetch-timebomb-keys.sh)"`, which ignores the status; the licence
+# renewer on the Hetzner servers (testenv/hetzner/renew-licence.sh) runs under
+# `pipefail` and saw an empty key from a fetch that had printed both.
 printf '%s\n' "$pairs" | while read -r var key; do
   line="export $var='$key'"
   echo "$line"
-  [ $write -eq 1 ] && echo "$line" >> "$OUT"
+  if [ $write -eq 1 ]; then echo "$line" >> "$OUT"; fi
 done
 [ $write -eq 1 ] && echo "fetch-timebomb-keys: wrote $OUT" >&2
 exit 0

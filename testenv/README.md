@@ -80,6 +80,14 @@ export KNOBAS_GITEA_REPO=payout-service
 `testenv/seed-state.json` relative to the crate unless
 `KNOBAS_TEAMCITY_SEED_STATE` names another path.
 
+## On Hetzner instead of the laptop
+
+Since 2026-09-06 the three opt-in real products run on Hetzner servers, one
+product each, and the Atlassian pair is kept up between runs with its timebomb
+licences renewed on a timer. `hetzner/README.md` has the whole of it; the short
+form is `source hetzner/env` and `./hetzner/tunnel up` before any seed or `just
+*-live` recipe, and nothing else in this directory changes.
+
 ## The live recipes
 
 Every live suite has a `just` recipe, and the recipe is how it is run — a suite

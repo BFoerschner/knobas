@@ -1250,6 +1250,33 @@ teamcity-live-seeded:
 # over two and a half hours of margin either way; the number to re-measure is
 # the one in this header, whenever a suite is added below or the order changes.
 #
+#   2026-09-06, the products on three Hetzner servers (testenv/hetzner/), one
+#     per server, and the recipe still one product at a time: **986 s in all**,
+#     seeded and verified at 883 -- Jira 147 s to FIRST_RUN and 176 s to its
+#     first wizard form on a 2-vCPU cx23, every JVM start CPU-bound, the four
+#     suites 76 s over the tunnel. Which is why, under `KNOBAS_TESTENV_HETZNER=1`
+#     (what `source testenv/hetzner/env` sets), the recipe now starts and seeds
+#     both products AT ONCE -- each has a server of its own, so the 8 GB reason
+#     below does not apply. The local branch is unchanged.
+#
+#   2026-09-06, the parallel shape, Jira and Confluence on cx33s (4 vCPU, 8 GB):
+#     **851 s in all**, seeded and verified at 754. Confluence was FIRST_RUN at
+#     24 s and seeded at 141 s, entirely inside Jira's wait; Jira was FIRST_RUN
+#     at 174 s, served its first form at 350 s, was RUNNING at 576 s -- NO
+#     FASTER than on the cx23 (147 s / 176 s), with the host reporting zero
+#     steal. Jira's start is single-threaded and the cx line is a 2.1 GHz
+#     Skylake, so the 130 s saved is all overlap and none of it the resize.
+#     The content seed pays ~90 ms of tunnel round trip per request on top.
+#     The four suites: 80 s.
+#
+#   2026-09-06, KNOBAS_ATLASSIAN_KEEP=1 on cpx22s (AMD): the pair set up from
+#     empty in 243 s (Jira FIRST_RUN at 72 s, its first form at 141 s, RUNNING at
+#     233 s; Confluence seeded inside that) and then KEPT, its licences renewed
+#     on the servers (testenv/hetzner/renew-licence.sh). Runs after that skip
+#     the wizards and the content seed and are the suites: **226 s** for the
+#     first run after set-up (the content seed from empty), **60 s** for every
+#     run after (seeded and verified at 10 s, four suites in 46 s).
+#
 # THE SEQUENCING IS THE FIX; THE WIDER CAP IN seed-atlassian.sh IS INSURANCE.
 # No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s, and
 # the 392 s and 327 s ones above, all with TeamCity stopped -- and what has kept
@@ -1334,9 +1361,36 @@ atlassian-live:
       docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
       echo "atlassian-live: pair torn down; $(( $(date +%s) - t0 ))s wall clock in all"
     }
-    trap 'teardown' EXIT
-    trap 'trap - EXIT INT; teardown; kill -INT $$' INT
-    trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
+    if [ "${KNOBAS_ATLASSIAN_KEEP:-}" = 1 ]; then
+      # THE PAIR STAYS UP. On the Hetzner servers the products live between
+      # runs and testenv/hetzner/renew-licence.sh re-applies the timebomb key
+      # on a timer, so there is no three-hour window to fit inside and no
+      # `down -v` at the end: the next run finds both RUNNING, both seeds say
+      # "already set up", the content seed skips everything, and the run is
+      # the suites. Every step below is idempotent, which is what makes this
+      # a flag and not a second recipe. A wipe is explicit, from testenv/
+      # under the shim: `docker compose --profile real-atlassian down -v jira
+      # jira-db confluence confluence-db`.
+      echo "atlassian-live: KNOBAS_ATLASSIAN_KEEP=1 -- the pair is kept, not torn down"
+      # TWO WORDS WITH THE RENEWER ON EACH SERVER (testenv/hetzner/renew-licence.sh).
+      # First: if it last ran more than 120 minutes ago, run it now and wait --
+      # a restart in the middle of a suite is a connection refused, and a
+      # licence with under 30 minutes left is one a slow run could outlive.
+      # Then: leave a run-in-progress marker for this run's duration, which the
+      # renewer's timer waits on before it restarts anything. The marker is
+      # removed from the EXIT trap, so a failed run does not hold the renewer.
+      for _r in jira confluence; do
+        ssh -o ConnectTimeout=10 "knobas-$_r" 'age=$(( $(date +%s) - $(stat -c %Y /opt/knobas/renew-status 2>/dev/null || echo 0) ))
+          if [ "$age" -gt 7200 ]; then echo "atlassian-live: '"$_r"': licence last renewed ${age}s ago; renewing first"; systemctl start knobas-renew-licence.service; fi
+          mkdir -p /opt/knobas && touch /opt/knobas/run-in-progress' &
+      done
+      wait
+      trap 'for _r in jira confluence; do ssh -o ConnectTimeout=10 "knobas-$_r" rm -f /opt/knobas/run-in-progress || true; done' EXIT
+    else
+      trap 'teardown' EXIT
+      trap 'trap - EXIT INT; teardown; kill -INT $$' INT
+      trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
+    fi
     # ONE PRODUCT AT A TIME, JIRA FIRST. Both JVMs starting together on the 8 GB
     # VM is what stretched Jira's post-wizard restart past its old 300s cap and
     # killed two windows before a suite ran (#313 -> #314). Jira now has the VM
@@ -1350,10 +1404,36 @@ atlassian-live:
     # created -- which is now the second `up`, not the first. Moving the fetch
     # down between the two would still work today and would break the moment the
     # order changed again, so it stays where nothing can get in front of it.
-    docker compose --profile real-atlassian up -d --wait jira-db jira
-    ./seed-atlassian.sh jira              # waits for FIRST_RUN, walks Jira's wizard
-    docker compose --profile real-atlassian up -d --wait confluence-db confluence
-    ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
+    if [ "${KNOBAS_TESTENV_HETZNER:-}" = 1 ]; then
+      # ONE SERVER PER PRODUCT (testenv/hetzner/README.md, set by `source
+      # testenv/hetzner/env`): the 8 GB reason for the sequence in the other
+      # branch is gone, so Confluence's whole start and wizard overlap Jira's.
+      # Each product is an `up` then its seed, in a subshell; a failure in
+      # either is this recipe's failure, after the other has finished -- a
+      # half-started pair is what the teardown trap exists for, and it runs on
+      # the exit below. seed-atlassian.sh's `record` locks seed-state.json, so
+      # the two writers cannot lose each other's block.
+      # `--no-recreate`: a container that exists is left as it is, even when
+      # this shell's environment differs from the one it was created with --
+      # which is exactly what happens to a KEPT pair the day Atlassian rotates
+      # the key on its page and CONFLUENCE_LICENSE_KEY changes (measured on a
+      # smaller drift, 2026-09-06: compose rebuilt a healthy Confluence under
+      # the first kept run, and the seed waited 80 s for it to come back). A
+      # config change to a running product is a hand-run `up -d` under the shim.
+      ( docker compose --profile real-atlassian up -d --wait --no-recreate jira-db jira && ./seed-atlassian.sh jira ) &
+      jira_pid=$!
+      ( docker compose --profile real-atlassian up -d --wait --no-recreate confluence-db confluence && ./seed-atlassian.sh confluence ) &
+      confluence_pid=$!
+      status=0
+      wait "$jira_pid" || { status=1; echo "atlassian-live: jira's up or seed failed" >&2; }
+      wait "$confluence_pid" || { status=1; echo "atlassian-live: confluence's up or seed failed" >&2; }
+      [ "$status" -eq 0 ] || exit 1
+    else
+      docker compose --profile real-atlassian up -d --wait jira-db jira
+      ./seed-atlassian.sh jira              # waits for FIRST_RUN, walks Jira's wizard
+      docker compose --profile real-atlassian up -d --wait confluence-db confluence
+      ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
+    fi
     ./seed-atlassian-content.sh           # the Tidewater content
     # AND AGAIN, DELIBERATELY. Every step of that script is find-then-skip, and
     # the skip branch is the only one that reads where a page already sits off
@@ -1380,4 +1460,4 @@ atlassian-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test confluence_live -- --ignored --nocapture --test-threads=1
-    echo "atlassian-live: every Atlassian-gated live suite green (4 suites)"
+    echo "atlassian-live: every Atlassian-gated live suite green (4 suites); $(( $(date +%s) - t0 ))s so far"

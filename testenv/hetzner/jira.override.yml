@@ -1,0 +1,15 @@
+# Layered over ../docker-compose.yml by the `docker` shim for every compose call
+# routed to the knobas-jira server. The image is unchanged, so seed-atlassian.sh's
+# digest guard is unaffected.
+services:
+  jira:
+    environment:
+      # No secure-administrator-session (websudo) re-confirmation. The licence
+      # renewer (renew-licence.sh) re-applies the timebomb key every 150 min
+      # through the applications REST, and that resource answers a basic-auth
+      # call with `upm.applications.websudo.error` unless websudo is off; the
+      # alternative, a cookie login plus the websudo form, breaks the moment a
+      # live suite's wrong-password test trips Jira's CAPTCHA on the same
+      # account. This Jira is reachable only through an SSH tunnel and holds
+      # developer credentials; there is nothing here websudo would protect.
+      JVM_SUPPORT_RECOMMENDED_ARGS: -Djira.websudo.is.disabled=true

@@ -1,0 +1,35 @@
+#cloud-config
+# First boot of a knobas testenv server (testenv/hetzner/provision.sh). The
+# engine is all the notebook needs from it: `docker compose` itself runs on the
+# notebook against a docker context that dials this host over SSH.
+package_update: true
+package_upgrade: false
+packages:
+  - ca-certificates
+  - curl
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-knobas.conf
+    content: |
+      # The TeamCity host's tunnel binds a reverse forward on the docker
+      # bridge gateway so its containers reach the notebook's Gitea as
+      # gitea:3000 (testenv/hetzner/tunnel). sshd's default forces every
+      # remote forward onto loopback, which the containers cannot see.
+      GatewayPorts clientspecified
+      ClientAliveInterval 30
+      ClientAliveCountMax 3
+  - path: /etc/sysctl.d/60-knobas.conf
+    content: |
+      vm.swappiness = 10
+# A cx23 has 4 GB. One product's JVM plus its database (or the TeamCity agent)
+# fits, but not with margin; the swap is the margin, not the plan.
+swap:
+  filename: /swapfile
+  size: 4294967296
+  maxsize: 4294967296
+runcmd:
+  - sysctl --system
+  - systemctl restart ssh
+  - curl -fsSL https://get.docker.com -o /root/get-docker.sh
+  - sh /root/get-docker.sh
+  - systemctl enable --now docker
+  - touch /var/lib/knobas-provisioned

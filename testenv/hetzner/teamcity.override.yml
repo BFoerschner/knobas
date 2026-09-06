@@ -1,0 +1,19 @@
+# Layered over ../docker-compose.yml by the `docker` shim (bin/docker) for every
+# compose call routed to the knobas-teamcity server. Nothing here changes the
+# image, so seed-teamcity.sh's digest guard is unaffected.
+services:
+  teamcity:
+    environment:
+      # The server's default heap is sized for a machine of its own; on a 4 GB
+      # cx23 it shares with the agent's JVM and the OS.
+      TEAMCITY_SERVER_MEM_OPTS: -Xmx1536m -XX:ReservedCodeCacheSize=350m
+    extra_hosts:
+      # seed-teamcity-builds.sh writes every VCS root as http://gitea:3000/...,
+      # the compose-network name Gitea has on the notebook. Here `gitea` is the
+      # host's docker bridge gateway, where `tunnel up` binds a reverse forward
+      # to the notebook's 127.0.0.1:3000. The server fetches, the agent clones,
+      # so both need it.
+      - "gitea:host-gateway"
+  teamcity-agent:
+    extra_hosts:
+      - "gitea:host-gateway"

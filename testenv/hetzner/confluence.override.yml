@@ -1,0 +1,11 @@
+# Layered over ../docker-compose.yml by the `docker` shim for every compose call
+# routed to the knobas-confluence server. The image is unchanged, so
+# seed-atlassian.sh's digest guard is unaffected.
+services:
+  confluence:
+    environment:
+      # Confluence's spelling of "no websudo": the licence form at
+      # /admin/license.action sits behind the secure-administrator-session
+      # re-confirmation, and renew-licence.sh drives that form over basic auth
+      # every 150 minutes. Same reasoning as jira.override.yml.
+      JVM_SUPPORT_RECOMMENDED_ARGS: -Dpassword.confirmation.disabled=true
