@@ -2034,9 +2034,9 @@ knobas-sync	lib/knobas_sync	run_log::tests::the_sync_status_shape_matches_its_ty
 knobas-sync	lib/knobas_sync	run_log::tests::the_vocabularies_are_exactly_what_the_migration_allows
 knobas-sync	lib/knobas_sync	run_log::tests::the_wire_spellings_are_the_stored_spellings
 knobas-sync	lib/knobas_sync	samples::tests::a_reading_is_rounded_and_the_threshold_reads_the_rounded_number
+knobas-sync	lib/knobas_sync	samples::tests::a_setting_out_of_range_is_brought_back_into_it
 knobas-sync	lib/knobas_sync	samples::tests::a_slow_up_monitor_is_warn_and_a_quick_one_is_up
 knobas-sync	lib/knobas_sync	samples::tests::a_source_with_no_monitor_kind_has_no_state_paths
-knobas-sync	lib/knobas_sync	samples::tests::a_stored_setting_out_of_range_is_brought_back_into_it
 knobas-sync	lib/knobas_sync	samples::tests::every_unusable_shape_is_a_miss
 knobas-sync	lib/knobas_sync	samples::tests::only_an_up_monitor_becomes_warn
 knobas-sync	lib/knobas_sync	samples::tests::the_declared_path_is_what_is_read

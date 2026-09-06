@@ -438,10 +438,14 @@ pub struct MonitoringSettings {
     pub response_time_warn_ms: u32,
 }
 
-/// A stored setting as the wire carries it. Both are clamped into a range no
-/// `u32` conversion can fail from before they reach here.
-fn as_wire(value: i64, fallback: i64) -> u32 {
-    u32::try_from(value).unwrap_or_else(|_| u32::try_from(fallback).unwrap_or(0))
+/// A stored setting as the wire carries it.
+///
+/// `knobas_sync::samples` clamps both into ranges no `u32` conversion can fail
+/// from, so the saturation is **unreachable** and is written rather than
+/// unwrapped because a panic is the wrong way for a settings *read* to say
+/// that a number was out of range.
+fn wire(value: i64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 /// What monitoring is set to today.
@@ -498,14 +502,8 @@ pub async fn set_monitoring_settings(
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
-        sample_retention_days: as_wire(
-            samples::retention_days(pool).await?,
-            samples::DEFAULT_RETENTION_DAYS,
-        ),
-        response_time_warn_ms: as_wire(
-            samples::threshold_ms(pool).await?,
-            samples::DEFAULT_THRESHOLD_MS,
-        ),
+        sample_retention_days: wire(samples::retention_days(pool).await?),
+        response_time_warn_ms: wire(samples::threshold_ms(pool).await?),
     })
 }
 
@@ -868,28 +866,29 @@ mod tests {
         }
     }
 
-    /// The fifteen commands are invoked from the mirror by the names they are
     /// The two numbers monitoring is shaped by, in both directions, with the
     /// ratified defaults asserted as values.
     ///
     /// The values and not only the shape: two `u32` fields decode from each
     /// other's positions without complaint, and "the default retention is
     /// ninety days" is the sentence spec #427 ratified rather than "there is a
-    /// number here".
+    /// number here". The literals are checked against the crate's own
+    /// constants too, so moving a default in one place and not the other is a
+    /// failure here rather than a surprise on a fresh profile.
     #[test]
     fn the_monitoring_settings_match_their_typescript_mirror() {
         let settings = MonitoringSettings {
-            sample_retention_days: as_wire(
-                knobas_sync::samples::DEFAULT_RETENTION_DAYS,
-                knobas_sync::samples::DEFAULT_RETENTION_DAYS,
-            ),
-            response_time_warn_ms: as_wire(
-                knobas_sync::samples::DEFAULT_THRESHOLD_MS,
-                knobas_sync::samples::DEFAULT_THRESHOLD_MS,
-            ),
+            sample_retention_days: 90,
+            response_time_warn_ms: 1500,
         };
-        assert_eq!(settings.sample_retention_days, 90);
-        assert_eq!(settings.response_time_warn_ms, 1500);
+        assert_eq!(
+            i64::from(settings.sample_retention_days),
+            knobas_sync::samples::DEFAULT_RETENTION_DAYS
+        );
+        assert_eq!(
+            i64::from(settings.response_time_warn_ms),
+            knobas_sync::samples::DEFAULT_THRESHOLD_MS
+        );
         let json = serde_json::to_value(settings).expect("MonitoringSettings serializes");
         assert_shape(
             MIRROR,
@@ -904,6 +903,7 @@ mod tests {
         );
     }
 
+    /// The seventeen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;

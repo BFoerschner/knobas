@@ -6317,11 +6317,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   loop that is not per-source. `prune` takes `now` as a parameter rather than reading a clock, so a
   fixture can place the horizon.
 
-  Pinned by: `crates/knobas-sync/tests/samples.rs` (thirteen tests — two runs two samples, an idle
+  Pinned by: `crates/knobas-sync/tests/samples.rs` (fourteen tests — two runs two samples, an idle
   poll that emits nothing still sampling, a monitor absent from the second run getting no second
-  sample, a source with no `monitor` kind writing none, warn at and over the threshold, a stored
-  threshold moving it, a down monitor never softened, both directions of the ADR-0007 miss, the
-  sweep taking what is past the horizon and nothing younger, and the defaults);
+  sample, a source with no `monitor` kind writing none, `a_source_that_emits_two_kinds_samples_only_its_monitors`,
+  warn at and over the threshold, a stored threshold moving it, a down monitor never softened, both
+  directions of the ADR-0007 miss, the sweep taking what is past the horizon and nothing younger,
+  and the defaults on a database nobody has written a setting to);
+  `crates/knobas-app/tests/adapter_to_mirror.rs`'
+  `a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_threshold`, which is the
+  same engine driven by the **real** adapter over the recording, and the only place the declared
+  `status_name` read is checked against the payload `knobas-source-kuma` actually writes;
   `knobas_sync::samples`'s own unit tests including
   `the_state_words_are_the_ones_the_column_accepts`, which reads the migration's CHECK;
   `commands::assets::tests::the_monitoring_settings_match_their_typescript_mirror` and the
@@ -6329,6 +6334,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   list; `tests/backup_ipc.rs`' `a_tick_sweeps_the_samples_retention_has_aged_out`;
   `backup::share::tests::nothing_carries_the_activity_stream_the_queue_or_the_mirror`; and six tests
   in `MonitoringSection.test.svelte.ts` plus `monitoring.test.ts`.
+
+  **And the backup half is pinned too, by a test nobody had to edit**:
+  `crates/knobas-db/tests/backup.rs`' `the_archive_carries_the_owned_schema_and_leaves_the_mirror_out`
+  reads the
+  expected table set out of `pg_class` rather than from a list, precisely so "a table any later
+  migration adds is in the archive without anyone remembering". `knobas.monitor_sample` is in that
+  set from this migration on, which is what makes "in the backup" a witnessed claim rather than an
+  argument about `--schema`.
 
   **Björn keeps the gate for frozen contracts and this entry is flagged for his review**, and in
   particular the migration and the two commands.

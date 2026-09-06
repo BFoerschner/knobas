@@ -50,8 +50,9 @@
 //!    *warn*. The same applies to the state: a declaration that resolves to
 //!    nothing, or to a word [`STATES`] does not hold, is `None` rather than a
 //!    new state word.
-//! 2. **One named place**, [`sample_of`], expanded by [`append`] and nowhere
-//!    else.
+//! 2. **One named place**, [`sample_of`] -- with `response_time_of`, its one
+//!    private helper and its only caller -- reached from [`append`] and from
+//!    nowhere else.
 //! 3. **The failure direction is absence**, pinned by this module's own tests
 //!    and by `tests/samples.rs`'
 //!    `a_monitor_whose_state_does_not_resolve_is_sampled_as_a_miss` and
@@ -109,19 +110,82 @@ pub const UP: &str = "up";
 /// The state knobas derives, and Uptime Kuma does not have.
 pub const WARN: &str = "warn";
 
-/// The widest a threshold may be set: ten minutes.
+/// One whole-number `knobas.setting` row: where it lives, what it is when
+/// nothing is stored, and the range it is held to.
 ///
-/// Not a preference -- a bound. A threshold read back from a hand-edited row
-/// or written by a settings dialog is clamped into this range on both sides,
-/// so nothing downstream has to ask whether the number it was handed is one.
-const THRESHOLD_RANGE: std::ops::RangeInclusive<i64> = 0..=600_000;
+/// A type rather than two triples of constants and four near-identical
+/// accessors, which is what this was before the code review: "read this key,
+/// default it, clamp it" and "clamp this, store it, answer with it" are one
+/// rule each, and a second copy of either is a second place for the clamp to
+/// stop matching the default.
+struct Bounded {
+    key: &'static str,
+    default: i64,
+    range: std::ops::RangeInclusive<i64>,
+}
 
-/// The narrowest and widest retention may be: one day to ten years.
+/// Where *warn* begins, and the widest it may be set: ten minutes.
+///
+/// The bound is not a preference. A threshold read back from a hand-edited row
+/// or written by a settings dialog is clamped on both sides, so nothing
+/// downstream has to ask whether the number it was handed is in range.
+const THRESHOLD: Bounded = Bounded {
+    key: THRESHOLD_KEY,
+    default: DEFAULT_THRESHOLD_MS,
+    range: 0..=600_000,
+};
+
+/// How long samples are kept, between one day and ten years.
 ///
 /// The floor is one and not zero for [`prune`]'s sake: a retention of zero
 /// would put the horizon at *now* and take every sample the poll a second ago
 /// wrote, which is a table that is always empty rather than a retention rule.
-const RETENTION_RANGE: std::ops::RangeInclusive<i64> = 1..=3650;
+const RETENTION: Bounded = Bounded {
+    key: RETENTION_KEY,
+    default: DEFAULT_RETENTION_DAYS,
+    range: 1..=3650,
+};
+
+impl Bounded {
+    /// The stored value brought into range, or the default when nothing is
+    /// stored.
+    ///
+    /// Absent and *unreadable* are the same answer on purpose, the rule
+    /// `backup::read_setting` records: a value that has stopped parsing is a
+    /// thing this feature cannot read, and the response to "I cannot read your
+    /// threshold" is the ratified default, not a failed sync.
+    async fn read<'e, E>(&self, db: E) -> Result<i64, sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = Postgres>,
+    {
+        let stored: Option<Value> =
+            sqlx::query_scalar("select value from knobas.setting where key = $1")
+                .bind(self.key)
+                .fetch_optional(db)
+                .await?;
+        Ok(stored
+            .and_then(|value| value.as_i64())
+            .map_or(self.default, |value| self.held(value)))
+    }
+
+    /// Store `value`, clamped, and answer with what is now stored.
+    async fn write(&self, pool: &PgPool, value: i64) -> Result<i64, sqlx::Error> {
+        let value = self.held(value);
+        sqlx::query(
+            "insert into knobas.setting (key, value) values ($1, $2)
+             on conflict (key) do update set value = excluded.value, updated_at = now()",
+        )
+        .bind(self.key)
+        .bind(Value::from(value))
+        .execute(pool)
+        .await?;
+        Ok(value)
+    }
+
+    fn held(&self, value: i64) -> i64 {
+        value.clamp(*self.range.start(), *self.range.end())
+    }
+}
 
 /// What one poll saw of one monitor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,11 +302,7 @@ pub(crate) async fn append(
     source_id: &str,
     declared: &[PayloadPath],
 ) -> Result<u64, sqlx::Error> {
-    let threshold = clamped(
-        setting(&mut **tx, THRESHOLD_KEY).await?,
-        DEFAULT_THRESHOLD_MS,
-        THRESHOLD_RANGE,
-    );
+    let threshold = THRESHOLD.read(&mut **tx).await?;
 
     let live: Vec<(String, Value)> = sqlx::query_as(
         "select entity_id, payload from sync.live_item where source_id = $1 and kind = $2",
@@ -309,11 +369,7 @@ pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, sqlx::Error
 /// # Errors
 /// [`sqlx::Error`] if the read fails.
 pub async fn threshold_ms(pool: &PgPool) -> Result<i64, sqlx::Error> {
-    Ok(clamped(
-        setting(pool, THRESHOLD_KEY).await?,
-        DEFAULT_THRESHOLD_MS,
-        THRESHOLD_RANGE,
-    ))
+    THRESHOLD.read(pool).await
 }
 
 /// Move where *warn* begins, and answer with what is now stored.
@@ -325,9 +381,7 @@ pub async fn threshold_ms(pool: &PgPool) -> Result<i64, sqlx::Error> {
 /// # Errors
 /// [`sqlx::Error`] if the write fails.
 pub async fn set_threshold_ms(pool: &PgPool, ms: i64) -> Result<i64, sqlx::Error> {
-    let ms = ms.clamp(*THRESHOLD_RANGE.start(), *THRESHOLD_RANGE.end());
-    store(pool, THRESHOLD_KEY, ms).await?;
-    Ok(ms)
+    THRESHOLD.write(pool, ms).await
 }
 
 /// How many days of samples knobas keeps today.
@@ -335,11 +389,7 @@ pub async fn set_threshold_ms(pool: &PgPool, ms: i64) -> Result<i64, sqlx::Error
 /// # Errors
 /// [`sqlx::Error`] if the read fails.
 pub async fn retention_days(pool: &PgPool) -> Result<i64, sqlx::Error> {
-    Ok(clamped(
-        setting(pool, RETENTION_KEY).await?,
-        DEFAULT_RETENTION_DAYS,
-        RETENTION_RANGE,
-    ))
+    RETENTION.read(pool).await
 }
 
 /// Change how long samples are kept, and answer with what is now stored.
@@ -347,45 +397,7 @@ pub async fn retention_days(pool: &PgPool) -> Result<i64, sqlx::Error> {
 /// # Errors
 /// [`sqlx::Error`] if the write fails.
 pub async fn set_retention_days(pool: &PgPool, days: i64) -> Result<i64, sqlx::Error> {
-    let days = days.clamp(*RETENTION_RANGE.start(), *RETENTION_RANGE.end());
-    store(pool, RETENTION_KEY, days).await?;
-    Ok(days)
-}
-
-/// One `knobas.setting` row as a whole number, or `None` when it is absent or
-/// no longer decodes as one.
-///
-/// Absent and unreadable are the same answer on purpose, the rule
-/// `backup::read_setting` records: a value that has stopped parsing is a thing
-/// this feature cannot read, and the response to "I cannot read your
-/// threshold" is the ratified default, not a failed sync.
-async fn setting<'e, E>(db: E, key: &str) -> Result<Option<i64>, sqlx::Error>
-where
-    E: sqlx::Executor<'e, Database = Postgres>,
-{
-    let stored: Option<Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(key)
-            .fetch_optional(db)
-            .await?;
-    Ok(stored.and_then(|value| value.as_i64()))
-}
-
-async fn store(pool: &PgPool, key: &str, value: i64) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "insert into knobas.setting (key, value) values ($1, $2)
-         on conflict (key) do update set value = excluded.value, updated_at = now()",
-    )
-    .bind(key)
-    .bind(Value::from(value))
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-/// The stored number brought into range, or the default when there is none.
-fn clamped(stored: Option<i64>, default: i64, range: std::ops::RangeInclusive<i64>) -> i64 {
-    stored.map_or(default, |value| value.clamp(*range.start(), *range.end()))
+    RETENTION.write(pool, days).await
 }
 
 #[cfg(test)]
@@ -540,12 +552,27 @@ mod tests {
         );
     }
 
+    /// The clamp, on both sides of both settings, without a database.
+    ///
+    /// `held` is what `read` applies to a stored row and `write` applies to
+    /// what a dialog posts, so this is the one rule and not a copy of it.
     #[test]
-    fn a_stored_setting_out_of_range_is_brought_back_into_it() {
-        assert_eq!(clamped(None, 1500, THRESHOLD_RANGE), 1500);
-        assert_eq!(clamped(Some(-9), 1500, THRESHOLD_RANGE), 0);
-        assert_eq!(clamped(Some(i64::MAX), 1500, THRESHOLD_RANGE), 600_000);
-        assert_eq!(clamped(Some(0), 90, RETENTION_RANGE), 1, "never zero days");
+    fn a_setting_out_of_range_is_brought_back_into_it() {
+        assert_eq!(THRESHOLD.held(-9), 0);
+        assert_eq!(THRESHOLD.held(i64::MAX), 600_000);
+        assert_eq!(THRESHOLD.held(1500), 1500);
+        assert_eq!(RETENTION.held(0), 1, "never zero days");
+        assert_eq!(RETENTION.held(i64::MIN), 1);
+        assert_eq!(RETENTION.held(90), 90);
+        assert_eq!(
+            (THRESHOLD.default, RETENTION.default),
+            (DEFAULT_THRESHOLD_MS, DEFAULT_RETENTION_DAYS),
+            "the constants the settings surface reads are these two"
+        );
+        assert_eq!(
+            (THRESHOLD.key, RETENTION.key),
+            (THRESHOLD_KEY, RETENTION_KEY)
+        );
     }
 
     /// A descriptor's kinds decide whether a source is sampled at all, and its
