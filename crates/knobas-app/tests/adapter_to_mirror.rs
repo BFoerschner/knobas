@@ -649,6 +649,147 @@ async fn spawn_mock_kuma() -> wiremock::MockServer {
     server
 }
 
+/// **A monitor, from `/metrics` to the timeseries** (issue #443).
+///
+/// The other join this recording can answer, and the one no seam answers
+/// alone: `knobas-sync`'s own battery drives a *fake* source whose payload
+/// this file's author chose, so it cannot say that the engine's declared
+/// `status_name` read resolves against the shape the real adapter actually
+/// writes. A `payload_paths` entry pointing one key wide would leave every
+/// sample stateless, and every test in both crates green.
+///
+/// Two runs, and the second one is the point. The recording never changes, so
+/// the real cursor -- a digest of the last corpus (contract §4.2 E) -- makes
+/// the second run emit **nothing at all**, which is precisely the run a
+/// timeseries built from emitted items would have no row for. Under a
+/// threshold moved between the runs, it is also where *warn* is witnessed on
+/// numbers Uptime Kuma really published rather than on a literal.
+///
+/// A database of its own: the threshold is one `knobas.setting` row for the
+/// whole profile, so a test that moved it on the shared database would be
+/// every other test's fixture.
+#[tokio::test]
+async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_threshold() {
+    let kuma = spawn_mock_kuma().await;
+    let pool = knobas_db::test_util::scratch_database("kuma-samples")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    let id = unique_id();
+
+    let instance = SourceInstance {
+        id: id.clone(),
+        kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+        display_name: "Uptime Kuma".to_owned(),
+        base_url: kuma.uri(),
+        auth: Some(AuthMethod::ApiToken),
+        secret: Some(KUMA_KEY.to_owned()),
+        config: serde_json::json!({}),
+    };
+    let real = Registry::builtin()
+        .build(instance)
+        .expect("the registry must build a kuma instance");
+
+    let first = knobas_sync::run_once(&pool, real.as_ref(), None)
+        .await
+        .unwrap();
+    assert_eq!(first.upserted, 8, "the recording holds eight monitors");
+
+    // The recording's own numbers: five monitors up with readings of 16 to
+    // 32.8 ms, and the three tunnel checks down with Kuma's `-1` sentinel,
+    // which the adapter carries as an absence and the sample keeps as one.
+    let after_first = samples_of(&pool, &id).await;
+    assert_eq!(
+        after_first.len(),
+        8,
+        "one sample per monitor: {after_first:?}"
+    );
+    assert_eq!(
+        after_first.get("8").unwrap(),
+        &(Some("up".to_owned()), Some(27)),
+        "the canary, at the ratified 1500 ms threshold"
+    );
+    assert_eq!(
+        after_first.get("5").unwrap(),
+        &(Some("down".to_owned()), None),
+        "a check that did not answer has a state and no reading"
+    );
+
+    // Move the threshold under four of the five readings, and poll again. The
+    // corpus is byte-identical, so the adapter emits nothing and hands its
+    // cursor straight back -- and every live monitor is sampled all the same.
+    knobas_sync::samples::set_threshold_ms(&pool, 20)
+        .await
+        .unwrap();
+    let second = knobas_sync::run_once(&pool, real.as_ref(), Some(first.cursor.clone()))
+        .await
+        .unwrap();
+    assert_eq!(second.upserted, 0, "an unchanged Kuma emits nothing");
+    assert_eq!(second.cursor, first.cursor, "and hands its cursor back");
+
+    let newest = samples_of(&pool, &id).await;
+    assert_eq!(
+        newest.get("7").unwrap(),
+        &(Some("up".to_owned()), Some(16)),
+        "gitea answered in 16 ms and is still up under a 20 ms threshold"
+    );
+    assert_eq!(
+        newest.get("8").unwrap(),
+        &(Some("warn".to_owned()), Some(27)),
+        "the canary answered in 27 ms and is now warn"
+    );
+    assert_eq!(
+        newest.get("1").unwrap(),
+        &(Some("warn".to_owned()), Some(33)),
+        "32.8 ms rounds to 33, and the threshold reads the rounded number"
+    );
+    assert_eq!(
+        newest.get("5").unwrap(),
+        &(Some("down".to_owned()), None),
+        "a monitor that is down is not softened to warn by a threshold"
+    );
+
+    let (rows,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.monitor_sample s
+           join sync.item i on i.entity_id = s.entity_id where i.source_id = $1",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows, 16, "two polls, eight monitors, sixteen rows");
+}
+
+/// The newest sample of each of one source's monitors, by the monitor's key in
+/// Kuma (`8` is the canary).
+async fn samples_of(
+    pool: &PgPool,
+    source_id: &str,
+) -> std::collections::HashMap<String, (Option<String>, Option<i32>)> {
+    let rows: Vec<(String, Option<String>, Option<i32>)> = sqlx::query_as(
+        "select distinct on (s.entity_id) s.entity_id, s.state, s.response_time_ms
+           from knobas.monitor_sample s
+           join sync.item i on i.entity_id = s.entity_id
+          where i.source_id = $1
+          order by s.entity_id, s.taken_at desc, s.id desc",
+    )
+    .bind(source_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(|(entity_id, state, ms)| {
+            let key = entity_id
+                .split_once(':')
+                .expect("an entity id is namespace:key")
+                .1
+                .to_owned();
+            (key, (state, ms))
+        })
+        .collect()
+}
+
 /// **A monitor, from `/metrics` to the launcher's own read.**
 ///
 /// The join this file exists for, on the one criterion of issue #442 that no

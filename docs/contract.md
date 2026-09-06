@@ -6216,6 +6216,7 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **Björn keeps the gate for frozen contracts and this entry is flagged for his review**, and in
   particular the restore's new behaviour on a *backup*, which is a change to a path M1 shipped.
+
 - **Migration `0021` and a sixteenth and seventeenth `assets` command, issue #443 (2026-09-07):**
   one sample per poll per monitor, a retention setting and the response-time threshold that makes
   *warn*. **Ratified in advance by the spec (#427) Björn approved** — "Migrations from the next free
