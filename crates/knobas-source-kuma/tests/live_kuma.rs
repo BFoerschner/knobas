@@ -502,6 +502,20 @@ async fn test_connection_reports_the_real_kumas_version_and_roster() {
         "the pinned image is Uptime Kuma v2, got {version:?}"
     );
     let detail = info.detail.expect("the roster size is worth one line");
+    // The **count**, not just the noun. `detail.ends_with("monitors")` is
+    // satisfied by `"0 monitors"`, so a key pointed at a Kuma watching nothing
+    // -- or at the wrong Kuma -- would have been green here, which is the one
+    // thing this line exists to tell apart (`roster_note`'s own doc).
+    let counted: usize = detail
+        .split_whitespace()
+        .next()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("the roster note leads with a count: {detail:?}"));
+    assert!(
+        counted >= SEEDED.len(),
+        "the seeded estate is {} monitors and this run saw {counted}: {detail:?}",
+        SEEDED.len()
+    );
     assert!(detail.ends_with("monitors"), "{detail:?}");
     assert_eq!(info.account, None);
     assert_eq!(info.secret_expires_at, None);

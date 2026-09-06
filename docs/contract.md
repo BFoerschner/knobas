@@ -521,6 +521,30 @@ Added after the M1 table above rather than as a fifth column, because the table'
 
 **Frozen surfaces, #287: none.** The mention walk is one more call on a crate-private adapter trait, one more CQL string and one more `expand` field; the inbox gained Confluence items without `knobas-core` changing. No migration, no `crates/knobas-source/src/**` change, no IPC command, event, module-layout or barrel line, and nothing in `crates/knobas-http/**` — so no §10.8 entry is owed. What it does change beyond this crate is `updated_at` for **every** Confluence page, which the row above states and which the M3.2 exit gate is the place to weigh.
 
+#### E — Uptime Kuma (M4.1, issue #442, read half)
+
+A fifth block for the same reason D is one. **The departures are the substance here** and they are argued in §9, *Amendments from the Uptime Kuma adapter, read half* — this table is the reference row a reader of §4.2 comes looking for, not the argument.
+
+| | **E — Uptime Kuma** |
+|---|---|
+| `adapter_kind` | `kuma` |
+| kinds (`KindInfo.id`) | `monitor` (MO), `full_sync_exhaustive: true`, and it is the only one. No project kind: Kuma's only container is a monitor group and groups are out of scope (spec #427), so there are no project rooms |
+| key form | the **monitor id**: `kuma:8`. `monitor_id` is a label on every series a v2 Kuma publishes, and it is the only stable identity `/metrics` carries — a monitor renamed keeps it |
+| auth | **API key only** (`AuthMethod::ApiToken`), sent as HTTP Basic with an empty username, which is what Uptime Kuma's `/metrics` accepts. There is no account password to offer and `Pat` is refused by name at `build` |
+| test_connection | `GET /metrics` — the same and only request a sync makes. `server_version` from the `app_version` gauge's `version` label; `account` is `None` (an API key belongs to the instance, and `/metrics` never says whose it is); `detail` is the roster size; `discovered` is empty |
+| read endpoints | `GET /metrics`, and nothing else. **Uptime Kuma v2 has no other door an API key opens**: the dashboard is socket.io, and a key authenticates exactly this one HTTP endpoint. So the read path is a Prometheus exposition parse, not a REST walk, and the four `monitor_*` gauge families that carry fields are folded by `monitor_id` into one monitor each (`model.rs` names the two that are not read and why) |
+| write endpoints | none. `write_ops` is empty and `Source::write` refuses every op by name. Pause, resume and create are socket.io and are their own ticket (spec #427, story 81) |
+| paging | none — `/metrics` is one document with no continuation, so every run reads the whole roster |
+| cursor | `{"version":1,"monitors":{"<id>":{"name":"…","digest":"…"}}}` — **a digest of the last corpus, not a position.** `/metrics` carries no timestamp, no paging and no "changed since", so there is nothing to resume from; the cursor exists because battery clause 2 requires an idle incremental run to emit nothing and hand its cursor back. An unchanged Kuma emits nothing; any difference re-emits **every** monitor, which is what keeps "every run is full" and `full_sync_exhaustive` honest. Departs from #442's and spec #427's literal "the cursor is none" — argued in §9 |
+| deletion | **the adapter tombstones**, as `SyncItem::deleted`, for every monitor in the cursor that the new document does not publish; the stored names are what a tombstone renders with. The engine's sweep is gated on a cursor-less run (`knobas_sync`, limitation 3) and a scheduled poll always resumes, so the sweep alone would leave spec #427's story 54 unmet in every running installation. Both stay in place and agree. Gitea's cursor is the precedent. **A paused monitor is tombstoned too**: pausing removes every one of its series from `/metrics`, measured on the pinned image, so through this channel *paused* and *deleted* are one observation |
+| §4.1 departures | all three — `payload` is synthesized rather than a raw record, `body_text` is `name state type address`, `updated_at` is always `None` — because `/metrics` has no records and no clock in it. Each is argued in §9 |
+| `payload_paths` | exactly one, `state` (#277, ADR-0007), written at the top level of every monitor and `null` where Kuma answered a state code this adapter has no word for. `blocked_statuses` is empty by decision: a monitor that is down is broken, not blocked |
+| config (`config_schema`) | four transport-tuning properties and **nothing that names the key** — the base URL is `SourceInstance::base_url` and the key is the keychain secret, so neither is a schema property |
+| contract source | **the real pinned container, and nothing else** (ADR-0013). `crates/knobas-source-kuma/tests/live_kuma.rs`, run by `just kuma-live`, is the witness; `tests/contract.rs` runs the battery against a *recording* of that server's `/metrics` so `just check` stays docker-free, and if the two disagree the recording is what is wrong |
+| client | hand-rolled reqwest through `knobas-http` (1 read, 0 writes). No `chrono`: there is no instant to parse |
+
+**Frozen surfaces, #442: none.** A new crate, plus the registry row and the app manifest line §3a licenses. No migration, no IPC command, event, DTO or layout change, neither barrel, nothing in `crates/knobas-source/src/**` and nothing in `crates/knobas-http/**` — #284's Confluence shape exactly. §10.8 carries a pointer rather than an entry, and says so.
+
 **Adapter construction** (needed by the scheduler and by `test_source`): each adapter crate exposes exactly
 ```rust
 pub fn descriptor_template() -> knobas_source::SourceDescriptor;   // id == adapter_kind
@@ -1513,7 +1537,9 @@ one registry line" describes, and #284's Confluence entry is the precedent for b
 no IPC command, no event, no DTO shape, no `commands/` + `ipc/` layout change, neither append-only
 barrel, nothing in `crates/knobas-source/src/**` and nothing in `crates/knobas-http/**`. So **no
 §10.8 exception is owed**, and §10.8's list carries a pointer here rather than an entry of its own.
-What follows is the descriptor and the kind as M4.1's remaining tickets will find them.
+What follows is the descriptor and the kind as M4.1's remaining tickets will find them. The reference
+row a reader of §4.2 comes looking for is **§4.2 E — Uptime Kuma**; this section is the argument
+behind it.
 
 **The descriptor** (`knobas_source_kuma::descriptor_template`): `adapter_kind` and template `id`
 **`kuma`** — the namespace of every entity this source emits (`kuma:8`), and the spelling already
@@ -1783,7 +1809,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   nothing in `crates/knobas-http/**` — exactly #284's Confluence shape. The descriptor, the
   `monitor` kind, the single `state` declaration, the digest cursor, the adapter-side tombstone and
   three §4.1 departures are recorded in **§9's *Amendments from the Uptime Kuma adapter, read
-  half*** above, together
+  half*** above, with the reference row in **§4.2 E**, together
   with a measured fact that bears on spec #427's story 38. A reader sent here by that criterion
   should read that section; a reader looking for a *changed frozen surface* will not find one,
   which is the point of this line. The Kuma **write** ops and the two-secret keychain envelope are

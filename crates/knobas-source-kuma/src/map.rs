@@ -173,7 +173,10 @@ monitor_status{monitor_id=\"99\",monitor_name=\"future\",monitor_type=\"http\",m
 
     /// *The launcher finds a monitor and its state* (story 52): the name and
     /// the state are the first thing the indexed text says, so a launcher row
-    /// shows the state under the title and `kuma down` finds what is down.
+    /// shows the state under the title. It does **not** make the state a search
+    /// term -- see [`body_text`]'s own doc, and
+    /// `crates/knobas-app/tests/adapter_to_mirror.rs`, which measures `down`
+    /// lexing to the empty tsquery and finding nothing.
     #[test]
     fn the_indexed_text_leads_with_the_name_and_the_state() {
         assert_eq!(
