@@ -1187,7 +1187,7 @@
     if (verb === "imported") {
       return fields.estate === undefined ? "Imported" : `Imported from ${said(fields.estate)}`;
     }
-    if (fields.field === "monitors" && Array.isArray(fields.added)) {
+    if (verb === "edited" && fields.field === "monitors" && Array.isArray(fields.added)) {
       // *Kept*, not *added*: a name is written down on the asset precisely
       // because no monitor answers to it yet, and the line says which names
       // are now waiting for one (spec #427).

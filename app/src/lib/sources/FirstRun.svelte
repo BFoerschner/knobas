@@ -412,7 +412,14 @@
               -->
               <button class="mod" disabled={starting} onclick={() => void loadDemo()}>
                 <span class="nm">Load the Tidewater dataset</span>
-                <span class="sub">21 fixture items · no network, no credential</span>
+                <!--
+                  Both halves, since #440: the button loads the Tidewater work
+                  *and* imports `testenv/hetzner/estate.json`, so a subtitle
+                  that enumerates one of them undercounts what the press does.
+                  The name keeps naming the work, which is what a person
+                  opening a demo build came for.
+                -->
+                <span class="sub">21 fixture items · a 23-asset estate · no network, no credential</span>
               </button>
             {/if}
             <button class="mod" onclick={() => (adding = true)}>

@@ -196,8 +196,10 @@ pub async fn demo_load_announced(
 ) -> Result<SyncReport, DemoError> {
     let result = demo_load_inner(pool).await;
     // A `Db` error is the registration failing, so there was no run to
-    // announce; a `Sync` error is a run that ended, and its ending is a
-    // transition too.
+    // announce. Every other variant means the run happened: a `Sync` error is
+    // a run that ended, and its ending is a transition too, and an `Estate`
+    // error is raised *after* the run returned, so its status is as worth
+    // announcing as a clean load's.
     if !matches!(result, Err(DemoError::Db(_))) {
         let source_id = MockSource::new().descriptor().id;
         match status_for(pool, &source_id).await {

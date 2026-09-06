@@ -473,7 +473,10 @@ const ASSET_TYPES: {
 ];
 
 /**
- * The **real** estate, read out of the file rather than copied into this one.
+ * One asset in the estate file, at the shape `assets::EstateFile` parses.
+ *
+ * The section below is the fixture's estate, and it is the **real** one, read
+ * out of the file rather than copied into this one.
  *
  * `testenv/hetzner/estate.json` is the estate as provisioned (#438), and since
  * #440 it is the file `--demo` imports -- so a browser pointed at `?fake-ipc`
@@ -649,14 +652,7 @@ function typeOf(typeId: string) {
 /** The four environments `0017` accepts. Anything else is left unset. */
 const ENVIRONMENTS = ["dev", "stage", "prod", "shared"] as const;
 
-/**
- * The estate the Tree draws: twenty-three assets, five levels at the deepest.
- *
- * Stateful within the session, like the contexts: an asset created, renamed,
- * moved or deleted here stays that way for as long as the page lives, so the
- * whole create / edit / move walk can be driven in a browser. Nothing is
- * persisted -- reload and the estate is the file again.
- */
+/** One of the file's assets as the fixture holds it. */
 function assetFromFile(entry: EstateFileAsset): FixtureAsset {
   const declared = typeOf(entry.type);
   return {
@@ -674,6 +670,14 @@ function assetFromFile(entry: EstateFileAsset): FixtureAsset {
   };
 }
 
+/**
+ * The estate the Tree draws: twenty-three assets, five levels at the deepest.
+ *
+ * Stateful within the session, like the contexts: an asset created, renamed,
+ * moved or deleted here stays that way for as long as the page lives, so the
+ * whole create / edit / move walk can be driven in a browser. Nothing is
+ * persisted -- reload and the estate is the file again.
+ */
 const FIXTURE_ESTATE: FixtureAsset[] = ESTATE.assets.map(assetFromFile);
 
 /**
@@ -686,19 +690,25 @@ const FIXTURE_ESTATE: FixtureAsset[] = ESTATE.assets.map(assetFromFile);
 const FILE_ASSET_IDS = new Set(ESTATE.assets.map((entry) => entry.id));
 
 /**
- * The nine routes the estate exposes (#432, drawn as wires by #433): the five
- * ports the notebook publishes, and the four forwards
- * `testenv/hetzner/tunnel` opens -- three `-L` and the one `-R` that runs the
- * other way, from a Hetzner server back to the notebook's Gitea.
- *
- * They are what makes the Tree's wires visible in a browser at all: a wire
- * runs from a route's row to the row (or the spine) of the asset at its far
- * end, so a fixture with no routes draws none, whatever the code does. Every
- * one of these lands on an asset three or four columns away, which is the case
- * a same-machine route could not photograph.
+ * One of the file's routes as the fixture holds it.
  *
  * A route declares no schema, so every property is a custom row --
  * `assets::route_row_of` calls `custom_properties` and not `properties_of`.
+ *
+ * **The URL is the file's, verbatim, and one of the nine is not a loopback
+ * address.** The hand-copy this replaces substituted `127.0.0.1` into
+ * `route:tunnel-gitea-reverse`'s `http://gitea:3000/`, citing
+ * `house-rules.test.ts`'s *no runtime network references* rule, and dropping
+ * that substitution is a deliberate change rather than an oversight. That
+ * rule scans `.ts` and `.svelte` under `app/src/` and exists so that a
+ * **bundle** reaches nothing but the IPC; the estate file is in no bundle
+ * (`import.meta.env.DEV` is the only door to this module, and
+ * `grep -c "knobas test estate" dist/assets/*.js` is `0`). More to the point,
+ * a route's URL is *data*: in the running app it arrives over the bridge out
+ * of `knobas.route` and can be anything a person typed, and a fixture that
+ * quietly improved one would be a harness drawing a screen the app does not
+ * draw. `gitea` is the docker network name the TeamCity containers resolve,
+ * which is why the estate spells it that way and why it cannot resolve here.
  */
 function routeFromFile(route: EstateFileRoute): FixtureRoute {
   return {
@@ -712,6 +722,18 @@ function routeFromFile(route: EstateFileRoute): FixtureRoute {
   };
 }
 
+/**
+ * The nine routes the estate exposes (#432, drawn as wires by #433): the five
+ * ports the notebook publishes, and the four forwards
+ * `testenv/hetzner/tunnel` opens -- three `-L` and the one `-R` that runs the
+ * other way, from a Hetzner server back to the notebook's Gitea.
+ *
+ * They are what makes the Tree's wires visible in a browser at all: a wire
+ * runs from a route's row to the row (or the spine) of the asset at its far
+ * end, so a fixture with no routes draws none, whatever the code does. Every
+ * one of these lands on an asset three or four columns away, which is the case
+ * a same-machine route could not photograph.
+ */
 const FIXTURE_ROUTES: FixtureRoute[] = ESTATE.routes.map(routeFromFile);
 
 /** One route on the wire -- the exposing and target names read off the estate. */

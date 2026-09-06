@@ -18,6 +18,9 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
+import type { AssetDetail, AssetRow } from "../../ipc/assets";
+import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
+
 import type { SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
 
@@ -122,9 +125,8 @@ test("accepting or dismissing removes the row from the next read and drops the c
  * that is the half a browser screenshot is evidence about. If it is wrong, a
  * QA pass photographs a pane the app would never draw.
  */
-const ESTATE_ON_DISK = JSON.parse(
-  readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8"),
-) as {
+const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8");
+const ESTATE_ON_DISK = JSON.parse(ESTATE_TEXT) as {
   name: string;
   assets: {
     id: string;
@@ -230,6 +232,51 @@ test("a server's pane draws the file's properties at the kinds the type declares
 });
 
 /**
+ * **A route's row draws its wire, over the real estate** (#440, criterion 2).
+ *
+ * The geometry is `tree.ts`'s and has its own tests over a fixture built to
+ * exercise it; what this asserts is that the **real** estate feeds it a wire
+ * at all — that the file's routes and the file's containment put a far end in
+ * a column the Tree has open. Composed from the fixture's own answers, so the
+ * chain is the one a browser walks: `get_asset` → `columnPathFor` →
+ * `asset_tree` per column → `wiresFor`.
+ *
+ * `knobas-gitea` is the asset to stand on because both of the estate's ways of
+ * reaching a container meet on it: the notebook's published port, whose
+ * exposer is four columns to the left and **is** in the layout, and the
+ * tunnel's `-R` forward, whose exposer is a Hetzner server in another branch
+ * entirely and is in no open column — so one wire is drawn and one is not,
+ * which is #433's rule rather than an absence of routes.
+ */
+test("a route in the real estate draws a wire to the asset that exposes it", () => {
+  const handlers = demoHandlers();
+  const detail = handlers["get_asset"]!({ assetId: "asset:knobas-gitea" }) as AssetDetail;
+  const columns = columnPathFor(detail).parents.map(
+    (parent) => handlers["asset_tree"]!({ parentId: parent }) as AssetRow[],
+  );
+  expect(columns).toHaveLength(5);
+
+  // A window wide enough for every column, so what comes back is about the
+  // routes rather than about the collapse.
+  const wide = stripFor(columns.length, 5000, null);
+  expect(wiresFor(detail, columns, wide)).toEqual([
+    {
+      key: wireKey("via", "route:notebook-gitea"),
+      column: 1,
+      rowId: "asset:notebook",
+      dashed: false,
+    },
+  ]);
+
+  // The same wire at a window too narrow for five columns: the row is behind a
+  // spine, so it lands on the spine and is dashed.
+  const narrow = stripFor(columns.length, 400, null);
+  expect(wiresFor(detail, columns, narrow)).toEqual([
+    { key: wireKey("via", "route:notebook-gitea"), column: 1, rowId: null, dashed: true },
+  ]);
+});
+
+/**
  * The Import dialog under `?fake-ipc` (#440).
  *
  * The estate this fixture draws **is** the file `--demo` imports, so choosing
@@ -241,8 +288,6 @@ test("a server's pane draws the file's properties at the kinds the type declares
  * `demoHandlers()` does not reset — the same rule the suggestion tests above
  * are written under.
  */
-const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8");
-
 test("importing the estate file previews every entry as already in the tree", () => {
   const handlers = demoHandlers();
   const preview = handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as {

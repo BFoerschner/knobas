@@ -31,12 +31,14 @@
 //! # What this cannot witness, and where that half lives
 //!
 //! The pixels. `just demo` opens a Tauri window and headless Chrome cannot
-//! attach to one (#428 established that and #429 and #439 re-established it),
-//! so the drawing is witnessed by `app/src/lib/assets/*.test*.ts` over the
-//! same shapes and photographed through `?fake-ipc`, whose fixture is this
-//! same file (`fake-tauri.ts`). What *this* covers is everything between the
-//! two: the store, the merge rule, the corpus, the membership walk and the
-//! wire's two ends.
+//! attach to one (#428 established that and #429 and #439 re-established it).
+//! What stands in for them is two things, and neither is in this file: the
+//! frontend suites over the same shapes (`app/src/lib/assets/*.test*.ts`, and
+//! `app/src/lib/shell/dev/fake-tauri.test.ts`, whose fixture reads this same
+//! estate file), and a `?fake-ipc` browser pass recorded on the pull request
+//! the way this repo has recorded every one since #428. What *this* covers is
+//! everything between the two: the store, the merge rule, the corpus, the
+//! membership walk and the wire's two ends.
 
 use knobas_app::assets;
 use knobas_app::commands::search::search_inner;
@@ -363,10 +365,22 @@ async fn cmd_t_on_the_container_times_it_and_the_day_review_names_it() {
     .await
     .expect("the day is readable")
     .blocks;
-    let [drawn] = day.as_slice() else {
-        panic!("one block on this profile's day, not {}", day.len())
+    // Selected by target rather than taken as the day's only block: the
+    // profile is shared with every other test in this file, and an assertion
+    // that reads "there is one block" is one about which tests have run.
+    let mine: Vec<_> = day
+        .iter()
+        .filter(|drawn| drawn.block.target == on)
+        .collect();
+    let [drawn] = mine.as_slice() else {
+        panic!("one block on the container, not {}", mine.len())
     };
-    assert_eq!(drawn.title.as_deref(), Some("knobas-teamcity"));
+    assert_eq!(
+        drawn.title.as_deref(),
+        Some("knobas-teamcity"),
+        "the day review draws the container's own name, joined out of the \
+         `knobas.entity` row the import wrote"
+    );
 }
 
 // ---------------------------------------------------------------------------

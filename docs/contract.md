@@ -280,6 +280,8 @@ Rule (roadmap §4: events are not for throughput): **events carry coarse state, 
 
 Note (issue #240, 2026-09-02, ruled at triage under the maintainer's delegation): as of #240 `demo_load` is an emitter of `sync:state` too — one terminal status for the mock source after its run returns, read through `status_for` and sent through the same `SyncEvents` the scheduler uses, which is the P3 grant ("all runs emit coarse `sync:state`") applied to the one run that had stayed silent; not an amendment — no new event, no payload change, no new command, no migration.
 
+Note (issue #440, 2026-09-06): as of #440 `demo_load` loads **two** things — the Tidewater fixture through the mock adapter, and `testenv/hetzner/estate.json` through `assets::apply_import`, which is spec #427's estate arriving in the demo profile (ADR-0013: the real container is the witness). Not an amendment — no new command, no argument, no new event, no migration, and the answer is still the mock run's `SyncReport`; the estate's counts are logged, because a second load's counts are not the run's. What *is* new is a failure class: a `demo_load` can now reject with the import's own code (`invalid` for a file that is not an estate file, `conflict` for a lost race) where before it could only be the sync's. The wizard shows the message either way, so no caller branches on the difference; it is written down because the set of codes a frozen command can answer with is part of what §2 pins.
+
 ### 2.4 Search and the launcher — stream E
 
 ```rust
