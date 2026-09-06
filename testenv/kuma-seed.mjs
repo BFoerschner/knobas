@@ -14,15 +14,24 @@
 //   login({username, password}, cb)-> cb({ok, token})
 //   getMonitorList(cb)             -> cb({ok}) + pushes `monitorList`
 //   add(monitor, cb)               -> cb({ok, msg, monitorID})
+//   deleteMonitor(id, children, cb)-> cb({ok, msg})           // three args!
 //   getAPIKeyList(cb)              -> cb({ok}) + pushes `apiKeyList`
 //   addAPIKey(key, cb)             -> cb({ok, key: "uk<id>_<secret>", keyID})
 //   deleteAPIKey(keyID, cb)        -> cb({ok, msg})
 //
-// Two of those are traps worth naming: `needSetup` answers with a plain
-// boolean rather than the `{ok, msg}` every other handler uses, and the list
+// Three of those are traps worth naming: `needSetup` answers with a plain
+// boolean rather than the `{ok, msg}` every other handler uses; the list
 // handlers answer `{ok:true}` while the actual list arrives as a separate
 // pushed event -- so a script that reads the callback for its data sees
-// nothing and concludes the instance is empty.
+// nothing and concludes the instance is empty; and `deleteMonitor` takes a
+// `deleteChildren` flag BETWEEN the id and the callback (2.5.3 still accepts
+// the two-argument form by sniffing for a function, but the three-argument
+// call is the one the handler is written for).
+//
+// THIS SCRIPT OWNS THE MONITOR LIST. `monitors.json` is the whole truth: an
+// entry it no longer names is deleted, an entry whose definition drifted is
+// deleted and re-added, and a matching one is left alone so that a second run
+// changes nothing. See README.md, "Monitors".
 //
 // PROTOCOL WITH THE HOST: stderr carries all progress; stdout carries exactly
 // one line, either `KEY=<api key>` or `KEEP`. seed-kuma.sh parses that. The
@@ -46,7 +55,23 @@ const HOST_HAS_KEY = process.env.KNOBAS_HAVE_KEY === "1";
 const log = (...a) => console.error("kuma-seed:", ...a);
 const die = (msg) => { log("FAILED:", msg); process.exit(1); };
 
-const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"));
+// The estate's three servers are addressed by IP, and the IPs live in
+// hetzner/hosts.env, which provision.sh writes and .gitignore keeps out of the
+// repo. So monitors.json carries `${VAR}` placeholders and seed-kuma.sh passes
+// the values in. An unresolved placeholder is fatal: a ping monitor on the
+// literal string "${KNOBAS_HETZNER_JIRA_IP}" is a permanent red in the UI that
+// looks like an outage.
+const expand = (s, where) =>
+  s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => {
+    const v = process.env[name];
+    if (!v) die(`${where}: \${${name}} is not set -- run hetzner/provision.sh, or see README.md "Monitors"`);
+    return v;
+  });
+
+const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"))
+  .map((m) => Object.fromEntries(
+    Object.entries(m).map(([k, v]) => [k, typeof v === "string" ? expand(v, `monitors.json: ${m.name}`) : v]),
+  ));
 
 // Transports are left to negotiation (polling, then an upgrade) rather than
 // pinned to "websocket". Kuma 2.5.3 refuses a websocket-only client outright
@@ -93,35 +118,75 @@ ok(await call("login", { username: USER, password: PASS }), "login");
 log("logged in as", USER);
 
 // -- monitors ---------------------------------------------------------------
+/**
+ * The `add` payload for one monitors.json entry: the defaults the Kuma
+ * frontend sends, plus the per-type fields. The ping defaults (count 3,
+ * numeric, 56-byte packets, 2 s per request) are EditMonitor.vue's own.
+ *
+ * `accepted_statuscodes` is in the BASE, not in the http branch, and it MUST
+ * be strings. server.js:752 runs `monitor.accepted_statuscodes.every(...)` on
+ * the way in with no type check first, so a ping monitor without the field --
+ * which needs no status codes at all -- is refused with `Cannot read
+ * properties of undefined (reading 'every')`, an error that names neither the
+ * field nor the monitor. (Hit on 2.5.3, 2026-09-06, adding the first ping.)
+ */
+const payload = (m) => ({
+  type: m.type,
+  name: m.name,
+  interval: m.interval,
+  retryInterval: m.interval,
+  resendInterval: 0,
+  maxretries: 0,
+  timeout: 16,
+  accepted_statuscodes: ["200-299"],
+  active: true,
+  expiryNotification: false,
+  ignoreTls: false,
+  upsideDown: false,
+  notificationIDList: {},
+  conditions: [],
+  ...(m.type === "ping"
+    ? { hostname: m.hostname, ping_count: 3, ping_numeric: true, packetSize: 56, ping_per_request_timeout: 2 }
+    : { url: m.url, method: "GET", maxredirects: 10 }),
+});
+
+/**
+ * The fields monitors.json is allowed to decide. Anything else about a monitor
+ * -- notifications, tags, a paused state a live run left behind -- is the
+ * instance's business and is not drift.
+ */
+const OWNED = ["type", "url", "hostname", "interval"];
+const drift = (have, want) =>
+  OWNED.filter((k) => want[k] !== undefined && String(have[k] ?? "") !== String(want[k]))
+       .map((k) => `${k}: ${JSON.stringify(have[k] ?? null)} -> ${JSON.stringify(want[k])}`);
+
 // `monitorList` is an object keyed by monitor id, not an array.
 const existing = await listen("monitorList", () => call("getMonitorList").then((r) => ok(r, "getMonitorList")));
-const present = new Set(Object.values(existing ?? {}).map((m) => m.name));
-log(`${present.size} monitor(s) already configured`);
+const byName = new Map(Object.values(existing ?? {}).map((m) => [m.name, m]));
+log(`${byName.size} monitor(s) already configured`);
+
+// Delete first, so a rename frees its old row before the new one is added and
+// the count in the UI never overshoots. `false` is `deleteChildren`: nothing
+// here is a group monitor, and unlinking is the safe answer if one ever is.
+const wanted = new Set(monitors.map((m) => m.name));
+for (const m of byName.values()) {
+  if (wanted.has(m.name)) continue;
+  ok(await call("deleteMonitor", m.id, false), `deleteMonitor ${m.name}`);
+  log("deleted", JSON.stringify(m.name), "-- monitors.json no longer names it");
+}
 
 for (const m of monitors) {
-  if (present.has(m.name)) { log("keeping", JSON.stringify(m.name)); continue; }
-  // The defaults the Kuma frontend sends with every http monitor.
-  // accepted_statuscodes MUST be strings -- `add` rejects numbers explicitly.
-  const res = await call("add", {
-    type: m.type,
-    name: m.name,
-    url: m.url,
-    interval: m.interval,
-    retryInterval: m.interval,
-    resendInterval: 0,
-    maxretries: 0,
-    timeout: 16,
-    method: "GET",
-    accepted_statuscodes: ["200-299"],
-    active: true,
-    maxredirects: 10,
-    expiryNotification: false,
-    ignoreTls: false,
-    upsideDown: false,
-    notificationIDList: {},
-    conditions: [],
-  });
-  ok(res, `add ${m.name}`);
+  const have = byName.get(m.name);
+  const changed = have ? drift(have, m) : null;
+  if (have && changed.length === 0) { log("keeping", JSON.stringify(m.name)); continue; }
+  if (have) {
+    // Kuma has `editMonitor`, but it wants the whole stored row back and a
+    // partial one silently blanks fields. A testenv monitor's history is worth
+    // nothing, so drift is repaired by delete-and-add, which cannot half-apply.
+    log("redefining", JSON.stringify(m.name), `(${changed.join("; ")})`);
+    ok(await call("deleteMonitor", have.id, false), `deleteMonitor ${m.name}`);
+  }
+  const res = ok(await call("add", payload(m)), `add ${m.name}`);
   log("added", JSON.stringify(m.name), "as monitor", res.monitorID);
 }
 

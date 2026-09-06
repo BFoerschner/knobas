@@ -11,6 +11,13 @@ docker compose up -d --build   # gitea, uptime-kuma, mockd
 ./seed                         # the Tidewater content, idempotent
 ```
 
+**`./seed` needs `hetzner/hosts.env`** since 2026-09-06. Uptime Kuma's monitor
+list is now the real estate — a ping per Hetzner server among them — and those
+servers' IPs live in that gitignored file. `./seed-kuma.sh` refuses without it
+rather than seeding a Kuma missing half the estate, and `./seed` stops there,
+so a tree that has never run `./hetzner/provision.sh` gets no `./seed` at all.
+See "Monitors" below for why, and `hetzner/README.md` for the provisioning.
+
 Two layers, and the difference is the point:
 
 | Layer | What | Why |
@@ -35,6 +42,11 @@ runs it, so the table and the file cannot drift.
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
+
+One host port is used here that is **not** in that table and must not be:
+`127.0.0.1:8299`, the canary (below). It is a host socket a helper script
+binds, not a published container port, so `check-ports.sh` has nothing to
+assert about it.
 
 Two ports were once reserved here and both are free now. 8211, reserved for
 a Confluence mock until 2026-09-03, is unreserved by ADR-0013; the real
@@ -86,7 +98,13 @@ Since 2026-09-06 the three opt-in real products run on Hetzner servers, one
 product each, and the Atlassian pair is kept up between runs with its timebomb
 licences renewed on a timer. `hetzner/README.md` has the whole of it; the short
 form is `source hetzner/env` and `./hetzner/tunnel up` before any seed or `just
-*-live` recipe, and nothing else in this directory changes.
+*-live` recipe.
+
+One thing in this directory does change with them: **Uptime Kuma's monitors are
+the estate**, so `./seed-kuma.sh` reads `hetzner/hosts.env` for the three
+servers' IPs and refuses without it, and three of the eight monitors check the
+products through the tunnel's forwards and go red when the tunnel does. See
+"Monitors" below. Nothing else here knows about the servers.
 
 ## The live recipes
 
@@ -733,18 +751,113 @@ unpinned `rust:1-slim` would make the mockd container unreproducible.
 
 ## Network access
 
-The environment runs offline once the images are pulled, with **one
-exception**: `kuma-seed` runs `npm i socket.io-client@4` into a scratch prefix
-at seed time, because Uptime Kuma v2 has no REST API for configuration and the
-client has to come from somewhere.
+The environment's **containers and seeds** run offline once the images are
+pulled, with **one exception**: `kuma-seed` runs `npm i socket.io-client@4`
+into a scratch prefix at seed time, because Uptime Kuma v2 has no REST API for
+configuration and the client has to come from somewhere.
+
+Uptime Kuma itself does not, and since 2026-09-06 it deliberately does not: six
+of its eight monitors leave the laptop, three pinging the Hetzner servers and
+three reaching the products through the SSH tunnel. That is the point of them —
+they watch an estate that is elsewhere. Off the network, those six read down
+and the two local ones (`gitea`, `canary`) stay green.
 
 ## Monitors
 
-`monitors.json` is a **baseline of this stream's own**, not fixture content:
-`fixtures/tidewater/work.json` contains no monitors, because assets and
-monitors are M4 (interfaces §1). The four entries point at containers on the
-compose network, so they are genuinely up rather than four permanent outages.
-**M4 carry-over:** fold this file into the asset fixture when assets land.
+`monitors.json` is **the estate**, not fixture content. Since 2026-09-06
+(issue #441, M4 spec #427) the list is the real infrastructure this repository
+runs on: one ping per Hetzner server, one HTTP check per product through the
+tunnel, one on the local Gitea, and a canary that exists to be knocked over.
+`fixtures/tidewater/work.json` still contains no monitors — a monitor is a
+*mirrored item of the Kuma source*, never fixture work (M4 spec, "Assets are
+knobas-owned; monitors are mirrored").
+
+| Monitor | Type | Checks | Goes red when |
+|---|---|---|---|
+| `knobas-teamcity` | ping | `${KNOBAS_HETZNER_TEAMCITY_IP}` | the server is down or off the network |
+| `knobas-jira` | ping | `${KNOBAS_HETZNER_JIRA_IP}` | ditto |
+| `knobas-confluence` | ping | `${KNOBAS_HETZNER_CONFLUENCE_IP}` | ditto |
+| `teamcity (tunnel)` | http | `http://host.docker.internal:8111/login.html` | TeamCity is down **or the tunnel is** |
+| `jira (tunnel)` | http | `http://host.docker.internal:8080/status` | ditto |
+| `confluence (tunnel)` | http | `http://host.docker.internal:8090/status` | ditto |
+| `gitea` | http | `http://gitea:3000/api/healthz` | the local Gitea container is down |
+| `canary` | http | `http://host.docker.internal:8299/` | `./canary.sh down` released the port |
+
+The three tunnel checks are **named `(tunnel)` because they fall with the
+tunnel**, which is not the same fact as the product being down — the ping on
+the same server stays green and says so. Read the two together: all three
+`(tunnel)` checks red with all three pings green is a dead tunnel (`./hetzner/tunnel
+up`); one ping red with its own `(tunnel)` check is a dead server.
+
+The endpoints are the unauthenticated ones each product answers `200` on
+(`/login.html`, `/status`, `/status`); the obvious REST paths answer `401`,
+which `accepted_statuscodes: ["200-299"]` reads as down.
+
+**Can the Kuma container send ICMP?** Yes, and the per-server checks are
+therefore real pings rather than TCP on 22. Measured on the pinned image
+(2.5.3) under OrbStack on 2026-09-06: the container runs as `uid=0(root)`,
+`/proc/sys/net/ipv4/ping_group_range` is `0 2147483647`, `/usr/bin/ping` is
+present, and `docker exec knobas-uptime-kuma ping -c 2 46.224.117.158` came
+back `2 packets transmitted, 2 received, 0% packet loss` for all three servers.
+This matters because `hetzner/firewall-rules.json` opens **only** TCP 22 and
+ICMP: with no ICMP the only honest per-server check would have been TCP on 22,
+which measures sshd rather than the machine. Re-measure the `ping -c 2` above
+if this environment ever moves off OrbStack; if it comes back with 100% loss,
+change the three entries to `"type": "port", "hostname": ..., "port": 22` and
+say here that ICMP was the reason.
+
+**The three IPs come from `hetzner/hosts.env`**, which `hetzner/provision.sh`
+writes and `.gitignore` keeps out of the repo (one person's account). So
+`monitors.json` carries `${KNOBAS_HETZNER_*_IP}` placeholders, `seed-kuma.sh`
+sources that file and passes the values into the seed container, and
+`kuma-seed.mjs` refuses an unresolved placeholder — a ping monitor on the
+literal string `${KNOBAS_HETZNER_JIRA_IP}` is a permanent red that looks like
+an outage. **`./seed-kuma.sh` therefore fails without `hetzner/hosts.env`**,
+and says to run `./hetzner/provision.sh`.
+
+**Five of the eight check the host, not the compose network**, through
+`host.docker.internal` — the tunnel's forwards and the canary are host sockets
+bound to `127.0.0.1`. Docker Desktop and OrbStack define that alias
+themselves; the `extra_hosts: host.docker.internal:host-gateway` line on the
+`uptime-kuma` service is what makes the same file work on a plain Linux
+engine. Measured on OrbStack: with and without the line the alias resolves to
+`0.250.250.254` and reaches a host socket bound to `127.0.0.1`.
+
+**The seed owns the list.** `kuma-seed.mjs` deletes any monitor Kuma holds that
+`monitors.json` no longer names, deletes and re-adds one whose type, URL,
+hostname or interval drifted, and leaves a matching one alone — so a second
+run changes nothing and an old list's leftovers do not linger. Everything else
+about a monitor (notifications, tags, a paused state a live run left behind) is
+the instance's business and is not touched.
+
+### The canary
+
+`./canary.sh up` binds `127.0.0.1:8299` with a one-line responder (`canary`,
+200); `./canary.sh down` releases it; `./canary.sh status` says which. Both are
+idempotent, and `up` waits until the port actually answers.
+
+It exists because M4.1's alert chain has to be proven against the real Kuma —
+a monitor goes down, an alert opens, it is acked, the thing recovers, the
+alert closes — and **every other thing Kuma watches here is shared**. Gitea
+serves the live suites, the three products serve the Atlassian and TeamCity
+runs, the servers are the estate. Stopping one of those to manufacture a red
+is how one stream's live run becomes another's mystery failure, so the estate
+carries one check whose entire blast radius is a port nobody else binds. **No
+live run stops a shared container** (M4 spec #427).
+
+Port 8299 is deliberately **outside** the §5 map above: it is a host port, not
+a published container port, so `check-ports.sh` neither knows nor should know
+about it. The pid lives in `~/.knobas-canary-8299.pid`, next to where
+`hetzner/tunnel` keeps its own — a process that outlives a shell does not
+belong in the repository directory, and `./reset` therefore does not have to
+learn to kill it.
+
+Its interval is 20 s rather than the others' 60 s, so a live recipe's
+knock-down and recovery are seconds rather than minutes. Measured 2026-09-06:
+released, `monitor_status` read `0` after 15 s; rebound, it read `1` after
+21 s.
+
+### Reading the state back
 
 Verify through the channel the adapter will actually use — `/metrics`, not the
 UI:
@@ -757,6 +870,13 @@ Uptime Kuma v2 prunes raw heartbeats to ~24 h, **absence of a metric means
 *unknown* rather than down**, and a response time of `-1` is a sentinel. The
 seed asserts presence, never a particular value, and never waits for heartbeat
 history.
+
+A gotcha of the `add` event, hit while adding the first ping monitor:
+`server.js` runs `monitor.accepted_statuscodes.every(...)` on **every** monitor
+on the way in, with no type check first. A ping monitor needs no status codes
+at all, and one sent without the field is refused with `Cannot read properties
+of undefined (reading 'every')` — an error naming neither the field nor the
+monitor. `kuma-seed.mjs` therefore sends `accepted_statuscodes` for every type.
 
 ## Signed dev build (macOS)
 
@@ -928,9 +1048,10 @@ either platform -- disclosed here, in `notify.rs`'s and
 
 | Script | Does |
 |---|---|
-| `./seed` | Everything below, in order. Idempotent — re-running is a no-op that exits 0. |
+| `./seed` | Gitea and Kuma, in order. Idempotent — re-running is a no-op that exits 0. Needs `hetzner/hosts.env`, because `./seed-kuma.sh` does. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
-| `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
+| `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted. Needs `hetzner/hosts.env` for the three server IPs. |
+| `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back. `just atlassian-live` runs the whole window. |

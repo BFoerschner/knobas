@@ -103,6 +103,15 @@ pieces make them run against the servers:
   and a build clones through the tunnel. **A build queued while the tunnel is
   down fails at checkout**; the server itself is fine.
 
+  Since 2026-09-06 the local Uptime Kuma watches both halves of this: a **ping
+  per server** by the IP in `hosts.env` (the firewall opens only 22 and ICMP,
+  and the Kuma container can send ICMP — `../README.md`, "Monitors", has the
+  measurement), and an **HTTP check per product through the forward**, named
+  `(tunnel)` because it falls with the tunnel. So a tunnel that died with the
+  Wi-Fi shows up as the three `(tunnel)` checks red and the three pings green,
+  which is a different picture from a server being down. `./seed-kuma.sh` reads
+  `hosts.env` for those IPs and refuses to run without it.
+
 `source hetzner/env` also exports two flags `just atlassian-live` reads:
 
 - `KNOBAS_TESTENV_HETZNER=1`: with a server per product the recipe starts and

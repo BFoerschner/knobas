@@ -13,10 +13,30 @@ KEY_FILE=kuma-api-key
 HAVE=0
 [ -s "$KEY_FILE" ] && HAVE=1
 
+# Three of the monitors ping the Hetzner servers by IP, and the IPs are in
+# hetzner/hosts.env -- gitignored, one person's account, written by
+# provision.sh. monitors.json carries `${KNOBAS_HETZNER_*_IP}` placeholders and
+# they are resolved here, in the container's environment.
+#
+# Refusing without the file beats seeding a partial list: the monitor list IS
+# the estate (M4 spec, issue #427), and a Kuma missing the servers is one whose
+# green means less than it looks. `hosts.env` is `VAR=value` lines only, so a
+# plain `.` is safe; shellcheck cannot follow a path that exists on one machine.
+HOSTS=hetzner/hosts.env
+[ -r "$HOSTS" ] || {
+  echo "seed-kuma: $HOSTS not found -- monitors.json pings the three Hetzner servers by IP." >&2
+  echo "seed-kuma: run ./hetzner/provision.sh (README.md, 'On Hetzner instead of the laptop')." >&2
+  exit 1; }
+# shellcheck source=/dev/null
+. "./$HOSTS"
+
 # stdout is the protocol channel (one line: KEY=... or KEEP); the container's
 # progress goes to stderr and straight through to the terminal.
 out=$(docker compose --profile seed run --rm -T \
         -e KNOBAS_HAVE_KEY="$HAVE" \
+        -e KNOBAS_HETZNER_TEAMCITY_IP="${KNOBAS_HETZNER_TEAMCITY_IP:-}" \
+        -e KNOBAS_HETZNER_JIRA_IP="${KNOBAS_HETZNER_JIRA_IP:-}" \
+        -e KNOBAS_HETZNER_CONFLUENCE_IP="${KNOBAS_HETZNER_CONFLUENCE_IP:-}" \
         kuma-seed)
 
 case "$out" in
@@ -38,4 +58,4 @@ case "$out" in
     ;;
 esac
 
-echo "seed-kuma: monitors from monitors.json are configured"
+echo "seed-kuma: Kuma now holds exactly the monitors monitors.json names"

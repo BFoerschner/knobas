@@ -1,14 +1,50 @@
 [
   {
-    "name": "payout-service (git)",
+    "name": "knobas-teamcity",
+    "type": "ping",
+    "hostname": "${KNOBAS_HETZNER_TEAMCITY_IP}",
+    "interval": 60
+  },
+  {
+    "name": "knobas-jira",
+    "type": "ping",
+    "hostname": "${KNOBAS_HETZNER_JIRA_IP}",
+    "interval": 60
+  },
+  {
+    "name": "knobas-confluence",
+    "type": "ping",
+    "hostname": "${KNOBAS_HETZNER_CONFLUENCE_IP}",
+    "interval": 60
+  },
+  {
+    "name": "teamcity (tunnel)",
+    "type": "http",
+    "url": "http://host.docker.internal:8111/login.html",
+    "interval": 60
+  },
+  {
+    "name": "jira (tunnel)",
+    "type": "http",
+    "url": "http://host.docker.internal:8080/status",
+    "interval": 60
+  },
+  {
+    "name": "confluence (tunnel)",
+    "type": "http",
+    "url": "http://host.docker.internal:8090/status",
+    "interval": 60
+  },
+  {
+    "name": "gitea",
     "type": "http",
     "url": "http://gitea:3000/api/healthz",
     "interval": 60
   },
   {
-    "name": "ledger-api (git)",
+    "name": "canary",
     "type": "http",
-    "url": "http://gitea:3000/api/healthz",
-    "interval": 60
+    "url": "http://host.docker.internal:8299/",
+    "interval": 20
   }
 ]
