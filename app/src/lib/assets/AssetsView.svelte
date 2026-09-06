@@ -716,6 +716,23 @@
     return kindFor(property, detail === null ? undefined : schemaOf(detail.asset.type_id));
   }
 
+  /**
+   * `Esc` in an inline editor: put it away, and **consume the press**.
+   *
+   * Rung 1 of the `Esc` ladder, the rung `Modal`'s own handler occupies for a
+   * dialog. The view answers `Escape` from anywhere inside itself -- that is
+   * #430's walk, and it is deliberate, because a reader in the pane means the
+   * same thing by the key as one standing in a column. So an editor that
+   * closed and let the press through would cancel the edit *and* walk the
+   * selection out of the asset being edited, which is two unwinds for one
+   * keypress.
+   */
+  function cancelEditor(event: KeyboardEvent, close: () => void) {
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  }
+
   function beginEdit(property: AssetProperty) {
     editingKey = property.key;
     draft = draftOf(property);
@@ -1074,7 +1091,7 @@
               oninput={(event) => (nameDraft = event.currentTarget.value)}
               onkeydown={(event) => {
                 if (event.key === "Enter") void saveName();
-                if (event.key === "Escape") renaming = false;
+                if (event.key === "Escape") cancelEditor(event, () => (renaming = false));
               }}
             />
             <button class="btn sm pri" disabled={writing} onclick={() => void saveName()}>
@@ -1184,7 +1201,7 @@
                       oninput={(event) => (draft = event.currentTarget.value)}
                       onkeydown={(event) => {
                         if (event.key === "Enter") void saveProperty(property);
-                        if (event.key === "Escape") editingKey = null;
+                        if (event.key === "Escape") cancelEditor(event, () => (editingKey = null));
                       }}
                     />
                     <button
@@ -1248,7 +1265,7 @@
                 oninput={(event) => (newValue = event.currentTarget.value)}
                 onkeydown={(event) => {
                   if (event.key === "Enter") void addProperty();
-                  if (event.key === "Escape") adding = false;
+                  if (event.key === "Escape") cancelEditor(event, () => (adding = false));
                 }}
               />
               <div class="add-f">

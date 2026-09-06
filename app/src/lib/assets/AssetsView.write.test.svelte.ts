@@ -764,3 +764,36 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres-18"]]);
   expect(text()).toContain("hel1 / vm-db-01 / postgres-18");
 });
+
+/**
+ * **`Esc` in an inline editor closes the editor and nothing else.**
+ *
+ * The two mechanisms this merge put beside each other: #430's walk answers
+ * `Escape` from anywhere in the view (a reader in the pane means the same
+ * thing by it as one in a column), and #429's editors close on it. One press
+ * must not do both -- cancelling the edit *and* walking the selection out of
+ * the asset being edited is the rung-skipping `Modal` stops for a dialog.
+ *
+ * The witness is the **address**, which is what a walk changes and what a
+ * cancelled edit leaves alone, plus the draft that was never written.
+ */
+test("Esc in a property editor cancels the edit and does not walk the selection", async () => {
+  const store = estate(seed());
+  render("#/asset/asset:postgres", store);
+  await vi.waitFor(() => expect(text()).toContain("Image postgres:18"));
+
+  click("Edit Ports");
+  type("Ports", "5432");
+  const editor = field("Ports");
+  editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+
+  // The editor is gone and the property is untouched...
+  expect(text()).toContain("Ports —");
+  expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
+    image: { kind: "text", value: "postgres:18" },
+  });
+  // ...and the reader is still on the asset they were editing.
+  expect(location.hash).toBe("#/asset/asset:postgres");
+  expect(text()).toContain("hel1 / vm-db-01 / postgres");
+});
