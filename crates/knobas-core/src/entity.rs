@@ -134,8 +134,8 @@ pub struct OwnedKind {
 /// the launcher and `NT` in a room tile would be two kinds to a reader.
 ///
 /// `asset` joined in M4.0 (issue #428) and is **the kind, not the type**: an
-/// asset's *type* -- VM, container, database -- is
-/// `knobas_app::assets::types`, nineteen of them with monograms of their own,
+/// asset's *type* -- VM, container, database -- is [`crate::asset::TYPES`],
+/// nineteen of them with monograms of their own,
 /// and the chip a column row draws is the type's. `AS` is what the launcher
 /// and a room tile put on an asset, where the question is which kind of thing
 /// this is among tickets, pages and notes.

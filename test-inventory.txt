@@ -8,12 +8,6 @@ knobas-app	lib/knobas_app	assets::tests::every_environment_is_one_the_schema_acc
 knobas-app	lib/knobas_app	assets::tests::every_status_is_one_the_schema_accepts
 knobas-app	lib/knobas_app	assets::tests::the_asset_namespace_is_one_knobas_core_reserves
 knobas-app	lib/knobas_app	assets::tests::the_pane_lists_declared_keys_in_schema_order_and_custom_keys_after
-knobas-app	lib/knobas_app	assets::types::tests::custom_declares_no_typed_properties
-knobas-app	lib/knobas_app	assets::types::tests::every_monogram_is_two_characters_and_no_two_types_share_one
-knobas-app	lib/knobas_app	assets::types::tests::every_property_kind_spells_itself_the_way_serde_does
-knobas-app	lib/knobas_app	assets::types::tests::find_answers_for_a_declared_type_and_misses_for_anything_else
-knobas-app	lib/knobas_app	assets::types::tests::no_type_declares_one_key_twice
-knobas-app	lib/knobas_app	assets::types::tests::the_table_holds_the_nineteen_types_the_spec_names
 knobas-app	lib/knobas_app	backup::policy::tests::a_backup_taken_after_the_boundary_settles_the_night
 knobas-app	lib/knobas_app	backup::policy::tests::a_database_that_has_never_been_backed_up_is_due_at_once
 knobas-app	lib/knobas_app	backup::policy::tests::a_disabled_schedule_is_never_due
@@ -589,6 +583,12 @@ knobas-app	test/worklog_ipc	a_days_blocks_become_one_worklog_and_a_copy_that_nam
 knobas-app	test/worklog_ipc	a_settle_that_beat_the_copy_still_gives_it_the_id
 knobas-app	test/worklog_ipc	a_worklog_the_source_never_took_still_has_a_copy_and_still_spends_its_blocks
 knobas-app	test/worklog_ipc	stopping_the_timer_on_a_ticket_is_what_there_is_to_draft
+knobas-core	lib/knobas_core	asset::tests::custom_declares_no_typed_properties
+knobas-core	lib/knobas_core	asset::tests::every_monogram_is_two_characters_and_no_two_types_share_one
+knobas-core	lib/knobas_core	asset::tests::every_property_kind_spells_itself_the_way_serde_does
+knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_misses_for_anything_else
+knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
+knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_nineteen_types_the_spec_names
 knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	context::tests::kind_serializes_as_its_column_value

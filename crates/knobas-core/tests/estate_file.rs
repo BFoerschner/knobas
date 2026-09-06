@@ -42,44 +42,18 @@
 //!
 //! # The type table
 //!
-//! [`TYPES`] is spec §12.1's built-in list as the M4 spec amends it (*runtime*
-//! and *scenario* in place of the Flowrun-branded pair), spelled the way this
-//! repository spells every other enumerated column value: lower case, snake
-//! case, one word per part. The table itself lands in code with the asset model
-//! (#428); when it does, this constant is the copy to delete, and the test
-//! should read the types off it instead.
+//! Read off [`knobas_core::asset::TYPES`], which is where the built-in table
+//! landed with the asset model (#428). This file carried a hand-written copy
+//! of the list until then and said in its place that the copy was to be
+//! deleted the moment there was a table to read; it was. So a type the estate
+//! file names and the table does not is now a red gate rather than agreement
+//! between two lists nobody diffs.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-
-/// The built-in asset types, by their id.
-///
-/// See the module docs: this is a copy of a table that does not exist in code
-/// yet, and it goes when the table does.
-const TYPES: &[&str] = &[
-    "site",
-    "hypervisor",
-    "vm",
-    "container_engine",
-    "container",
-    "service",
-    "module",
-    "runtime",
-    "scenario",
-    "step",
-    "connector",
-    "database_server",
-    "database",
-    "schema",
-    "table",
-    "reverse_proxy",
-    "middleware",
-    "network",
-    "custom",
-];
 
 /// The four environments an asset may be in (spec §12.1).
 const ENVIRONMENTS: &[&str] = &["dev", "stage", "prod", "shared"];
@@ -261,13 +235,16 @@ fn every_route_is_exposed_by_an_asset_and_lands_on_one() {
 #[test]
 fn every_type_is_in_the_type_table() {
     let estate = estate();
-    let table: HashSet<&str> = TYPES.iter().copied().collect();
+    let table: HashSet<&str> = knobas_core::asset::TYPES
+        .iter()
+        .map(|declared| declared.id)
+        .collect();
     for asset in assets(&estate) {
         let asset_type = field(asset, "type");
         assert!(
             table.contains(asset_type),
             "`{}` is of type `{asset_type}`, which is not one of the built-in \
-             types {TYPES:?}; user-defined types are deferred and `custom` is \
+             types {table:?}; user-defined types are deferred and `custom` is \
              what a thing the list has no name for gets",
             id(asset)
         );

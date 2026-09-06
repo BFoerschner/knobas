@@ -4954,6 +4954,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   second, partial copy of a table whose useful part lived elsewhere. `assets::create` is the one
   door and refuses a type it does not know.
 
+  **The type table is `knobas_core::asset`, not part of the module pair, and that is deliberate.**
+  It has a second reader: `knobas-core`'s `tests/estate_file.rs`, which checks that every type
+  `testenv/hetzner/estate.json` names exists, and `knobas-core` cannot depend on `knobas-app`.
+  That test shipped with #438 carrying a hand-written copy of the list and said in its place that
+  the copy was to be deleted the moment there was a table to read; it now reads
+  `knobas_core::asset::TYPES`. Same move `closed_vocabulary!` made from `knobas-sync`: to the crate
+  both sides depend on, so the list is one list. The **ids are lower snake case**
+  (`container_engine`, `database_server`, `reverse_proxy`) — #438 chose that spelling for the
+  checked-in estate and left the table to this ticket, so a hyphen here would have made the real
+  estate unimportable.
+
   **No `on delete cascade` on `parent_id`.** Deleting a subtree by deleting its root is the one
   destructive action nobody asks for twice; `assets::delete` refuses anything but a leaf with a
   `conflict` naming what it still holds, and the default `no action` is the floor under that rather
@@ -4985,9 +4996,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   monogram (VM, CT, DB), not this one: `AS` answers "an asset, as against a ticket or a page",
   which is a launcher's and a room tile's question.
 
-  **The module pair.** `crates/knobas-app/src/assets/mod.rs` holds the decisions,
-  `crates/knobas-app/src/assets/types.rs` the built-in type table, and
-  `crates/knobas-app/src/commands/assets.rs` is shims over them — the arrangement `backup/` set
+  **The module pair.** `crates/knobas-app/src/assets/mod.rs` holds the decisions and
+  `crates/knobas-app/src/commands/assets.rs` is shims over it — the arrangement `backup/` set
   and `time/` followed, for the same reason: a `#[tauri::command]` cannot be called from a test.
   Its mirror is `app/src/lib/ipc/assets.ts`. **Every** asset command lives there, including #432's
   routes, #439's import preview and apply, and M4.1's alert reads and ack. The mirror tests live

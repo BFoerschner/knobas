@@ -48,15 +48,13 @@
 //! what that walk will read. Routes are **#432**, the create/edit surface is
 //! **#429**, and the keyboard walk and spines are **#430**.
 
-pub mod types;
-
 use knobas_core::activity::ActivityRow;
+use knobas_core::asset::{self, AssetType, PropertyKind};
 use knobas_core::entity::EntityRef;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::IpcError;
-use types::{AssetType, PropertyKind};
 
 /// The activity actor for everything a person does to the estate.
 const ACTOR: &str = "user";
@@ -278,7 +276,7 @@ pub struct AssetNode {
     pub id: String,
     /// The asset that holds this one; `null` at the top of the estate.
     pub parent_id: Option<String>,
-    /// One of [`types::TYPES`].
+    /// One of [`knobas_core::asset::TYPES`].
     pub type_id: String,
     /// What that type is called -- resolved here so no surface keeps a copy of
     /// the table.
@@ -408,7 +406,7 @@ const PROPERTIES: &str = "select properties from knobas.asset where id = $1";
 
 fn node_of(row: &sqlx::postgres::PgRow) -> Result<AssetNode, IpcError> {
     let type_id: String = row.try_get("type_id")?;
-    let declared = types::find(&type_id);
+    let declared = asset::find(&type_id);
     let status: String = row.try_get("status")?;
     let environment: Option<String> = row.try_get("environment")?;
     Ok(AssetNode {
@@ -493,7 +491,7 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
 #[must_use]
 pub fn properties_of(type_id: &str, stored: &serde_json::Value) -> Vec<AssetProperty> {
     let bag = stored.as_object();
-    let declared = types::find(type_id);
+    let declared = asset::find(type_id);
     let mut out = Vec::new();
     let mut claimed: Vec<&str> = Vec::new();
 
@@ -638,7 +636,7 @@ pub async fn edit(
 ) -> Result<Written<AssetNode>, IpcError> {
     let mut tx = pool.begin().await?;
     let current = locked(&mut tx, id).await?;
-    let declared = types::find(&current.type_id);
+    let declared = asset::find(&current.type_id);
     let mut lines = Vec::new();
     let mut renamed = false;
 
@@ -1071,10 +1069,10 @@ async fn cycle_through(
 }
 
 fn vet_type(type_id: &str) -> Result<&'static AssetType, IpcError> {
-    types::find(type_id).ok_or_else(|| {
+    asset::find(type_id).ok_or_else(|| {
         IpcError::invalid(format!(
             "{type_id:?} is not one of the {} built-in asset types",
-            types::TYPES.len()
+            asset::TYPES.len()
         ))
     })
 }
@@ -1317,7 +1315,7 @@ mod tests {
     /// rather than a second schema.
     #[test]
     fn a_typed_key_refuses_a_kind_its_type_did_not_declare() {
-        let service = types::find("service").unwrap();
+        let service = asset::find("service").unwrap();
         assert!(
             vet_against_schema(
                 Some(service),

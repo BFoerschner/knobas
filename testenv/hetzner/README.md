@@ -62,11 +62,12 @@ addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
 the only committed copy of them, and `hcloud server list` is what settles a
 disagreement.
 
-One thing in the file is still provisional and is named here so that nobody
-reads it as settled: the **type ids** are spec §12.1's list as #427 amends it,
-spelled the way this repository spells enumerated column values; the built-in
-table itself lands in code with #428, and the spellings move with it if #428
-chooses others.
+Nothing in the file is provisional any more, and the two things that were are
+named here because their settling is what the surrounding tests now rest on.
+The **type ids** are settled: #428 landed the built-in table as
+`knobas_core::asset::TYPES`, took this file's spellings verbatim, and
+`estate_file.rs` reads the types off that table instead of keeping a copy of
+the list.
 
 The **monitor names** were a guess until #441 and are not one any more. That
 ticket replaced `testenv/monitors.json`'s two Tidewater checks with the estate's

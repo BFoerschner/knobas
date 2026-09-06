@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod asset;
 pub mod context;
 pub mod entity;
 mod error;

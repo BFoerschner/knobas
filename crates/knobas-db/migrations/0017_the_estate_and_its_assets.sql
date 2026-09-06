@@ -52,7 +52,7 @@
 -- neither list can grow on one side without the other.
 --
 -- `type_id` is deliberately *not* a closed vocabulary here. The built-in type
--- table is code (`knobas_app::assets::types`) because each type carries a
+-- table is code (`knobas_core::asset::TYPES`) because each type carries a
 -- monogram and an ordered property schema that no CHECK can hold, and the
 -- share export carries type ids across machines; a constraint would be a
 -- second, partial copy of a table whose interesting half cannot be written in
@@ -83,7 +83,7 @@
 create table knobas.asset (
   id          text primary key,             -- 'asset:<uuid>', or the estate file's id
   parent_id   text references knobas.asset (id),
-  type_id     text not null,                -- knobas_app::assets::types::TYPES
+  type_id     text not null,                -- knobas_core::asset::TYPES
   name        text not null,
   properties  jsonb not null default '{}'::jsonb,
   status      text not null default 'none', -- the asset's *own* status; monitors are M4.1

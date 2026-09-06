@@ -1,11 +1,25 @@
-//! The built-in asset types (spec #427, story 4 and 5; issue #428).
+//! The built-in asset types (spec #427, stories 4 and 5; issue #428).
 //!
 //! Nineteen of them, in code and not in the database, and the reason is the
 //! half of a type that SQL cannot hold: each one carries a **monogram** the
 //! column rows draw and an **ordered typed-property schema** the pane shows
 //! first. A `check (type_id in (…))` would be a second, partial copy of this
 //! list -- the half that goes stale -- so `knobas.asset.type_id` is open text
-//! and [`super::create`] is the one door that refuses a type nobody declared.
+//! and `knobas_app::assets::create` is the one door that refuses a type nobody
+//! declared.
+//!
+//! # Why this is in `knobas-core` and not beside the store
+//!
+//! Everything else about an asset lives in `knobas_app::assets`, under the
+//! §10.8 module-pair exception. This table does not, because it has a **second
+//! reader**: `knobas-core`'s own `tests/estate_file.rs` checks that every type
+//! the checked-in estate file names is one that exists, and `knobas-core`
+//! cannot depend on `knobas-app`. That test shipped with #438 carrying a
+//! hand-written copy of this list and said so in as many words -- *"this
+//! constant is the copy to delete, and the test should read the types off it
+//! instead"* -- which is what landing it here makes possible. It is the same
+//! move `closed_vocabulary!` made from `knobas-sync`: to the crate both sides
+//! depend on, so the list is one list.
 //!
 //! # The ids are wire values and never change
 //!
@@ -141,7 +155,7 @@ pub const TYPES: &[AssetType] = &[
         ],
     },
     AssetType {
-        id: "container-engine",
+        id: "container_engine",
         label: "Container engine",
         monogram: "CE",
         properties: &[p("version", "Version", T), p("socket", "Socket", T)],
@@ -197,7 +211,7 @@ pub const TYPES: &[AssetType] = &[
         properties: &[p("protocol", "Protocol", T), p("target", "Target", T)],
     },
     AssetType {
-        id: "database-server",
+        id: "database_server",
         label: "Database server",
         monogram: "DS",
         properties: &[
@@ -226,7 +240,7 @@ pub const TYPES: &[AssetType] = &[
         properties: &[p("rows", "Rows", N)],
     },
     AssetType {
-        id: "reverse-proxy",
+        id: "reverse_proxy",
         label: "Reverse proxy",
         monogram: "RP",
         properties: &[
@@ -270,6 +284,12 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// Story 4 names nineteen types, and this is the list.
+    ///
+    /// Spelled lower snake case, the way this repository spells every other
+    /// enumerated column value, and the way `testenv/hetzner/estate.json`
+    /// already spells them -- #438 chose the spelling and left the table to
+    /// this ticket, so a hyphen here would have made the checked-in estate
+    /// unimportable.
     #[test]
     fn the_table_holds_the_nineteen_types_the_spec_names() {
         let ids: Vec<&str> = TYPES.iter().map(|t| t.id).collect();
@@ -279,7 +299,7 @@ mod tests {
                 "site",
                 "hypervisor",
                 "vm",
-                "container-engine",
+                "container_engine",
                 "container",
                 "service",
                 "module",
@@ -287,11 +307,11 @@ mod tests {
                 "scenario",
                 "step",
                 "connector",
-                "database-server",
+                "database_server",
                 "database",
                 "schema",
                 "table",
-                "reverse-proxy",
+                "reverse_proxy",
                 "middleware",
                 "network",
                 "custom",

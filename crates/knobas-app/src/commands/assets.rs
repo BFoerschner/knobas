@@ -179,8 +179,8 @@ pub async fn delete_asset<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::types::PropertyKind;
     use crate::assets::{AssetProperty, AssetStatus, Environment};
+    use knobas_core::asset::PropertyKind;
     use knobas_sync::mirror::{assert_shape, declared_union, interface_body};
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
