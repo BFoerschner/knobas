@@ -480,29 +480,41 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 /// round a loop whose second attempt is refused as a `conflict` -- against the
 /// data the first attempt put there.
 ///
-/// What the two halves cost if they are skipped is **not** the same, and the
-/// log line says so. A health verdict the keychain would not give is settled
-/// by the next sync run anyway. A position that was not cleared is settled by
-/// nothing: the source resumes from a machine it has never been on, every run
-/// after it reports success, and the mirror stays empty until somebody orders
-/// a backfill. So the warning names that outcome and the escape
-/// (`backfill_source`), because it is the one a reader has to act on.
+/// What the two halves cost if they are skipped is **not** the same, so they
+/// are two steps with a warning each and neither is skipped because the other
+/// failed. A health verdict the keychain would not give is settled by the next
+/// sync run anyway. A position that was not cleared is settled by nothing: the
+/// source resumes from a machine it has never been on, every run after it
+/// reports success, and the mirror stays empty until somebody orders a
+/// backfill -- so that warning names the outcome and the escape
+/// (`backfill_source`), because it is the one a reader has to act on. One
+/// warning for both would be false about three of the four ways this fails:
+/// the position is cleared first, so every later failure leaves it cleared.
 async fn settle_restored_sources(state: &BackupState) {
-    if let Err(error) = settle_position_and_health(state).await {
+    if let Err(error) = restart_restored_sources(state).await {
+        tracing::warn!(
+            %error,
+            "the restore finished, but the sources it brought may still be standing where the \
+             archive's machine stood: their syncs will report success and mirror nothing until \
+             a backfill is ordered for each"
+        );
+    }
+    if let Err(error) = settle_health(state).await {
         tracing::warn!(
             %error,
             "the restore finished, but the sources it brought could not all be settled \
-             against this machine: one may still be standing where the archive's machine \
-             stood, in which case its syncs will report success and mirror nothing until \
-             a backfill is ordered for it"
+             against this machine's keychain: one may read as reachable here because the \
+             archive's machine found it so, until its next run says otherwise"
         );
     }
 }
 
-async fn settle_position_and_health(state: &BackupState) -> Result<(), ExportError> {
-    // Before the keychain is asked anything, because this half needs no
-    // keychain: a store that refuses every question must not also leave the
-    // restored sources resuming from somebody else's position.
+/// The position half: clear every restored source's `cursor`.
+///
+/// First, and on its own, because it needs no keychain -- a store that refuses
+/// every question must not also leave the restored sources resuming from
+/// somebody else's position.
+async fn restart_restored_sources(state: &BackupState) -> Result<(), ExportError> {
     let restarted = sqlx::query("update knobas.source_config set cursor = null")
         .execute(&state.pool)
         .await?
@@ -513,7 +525,12 @@ async fn settle_position_and_health(state: &BackupState) -> Result<(), ExportErr
             "restored sources will read their systems from the top: no archive carries the mirror"
         );
     }
+    Ok(())
+}
 
+/// The credential half: say `missing_secret` about every source this machine
+/// has no secret for.
+async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
     let sources: Vec<String> =
         sqlx::query_scalar("select id from knobas.source_config order by id")
             .fetch_all(&state.pool)

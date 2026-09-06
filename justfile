@@ -1522,6 +1522,6 @@ atlassian-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test confluence_live -- --ignored --nocapture --test-threads=1
     # M4.2's exit witness (#455): one test, the share export's Jira clause --
-    # it reads this Jira twice and writes nothing to it.
+    # every call it makes to this Jira is a read, and it writes nothing.
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test share_exit -- --ignored --nocapture --test-threads=1
     echo "atlassian-live: every Atlassian-gated live suite green (5 suites); $(( $(date +%s) - t0 ))s so far"

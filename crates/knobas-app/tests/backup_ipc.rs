@@ -1082,21 +1082,39 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
 /// about the *cursor*: everything else the archive said about the source is
 /// still there afterwards. A restore that cleared the row would pass the
 /// first assertion.
+///
+/// # Why the archive here is a **backup**
+///
+/// Because that is the half of the rule nothing else witnesses. The share
+/// export's side is asserted twice in `tests/share_exit.rs` -- once offline
+/// and once against the real Jira -- so an implementation that cleared the
+/// position only for a file named `knobas-share-…` would pass every other
+/// test in this repository, and the widening to a backup's restore is the
+/// deliberate part of #455 that Björn's gate is asked to rule on. It is the
+/// same rule for the same reason: a backup carries no mirror either, and the
+/// machine restoring one is standing in front of an empty `sync.item` with a
+/// position that describes a corpus it does not have.
 #[tokio::test]
 async fn a_restored_source_starts_from_the_top_and_keeps_everything_else() {
-    let (sharer, sharer_dir) = service("sharecursorsource").await;
+    let (sharer, sharer_dir) = service("backupcursorsource").await;
     let estate = seed_corpus(&sharer.pool, "cursor").await;
-    sqlx::query("update knobas.source_config set cursor = $2 where id = $1")
-        .bind(&estate.source)
-        .bind(r#"{"v":1,"since":"2026-09-01T00:00:00Z"}"#)
-        .execute(&sharer.pool)
-        .await
-        .expect("the sharer has synced, so it stands somewhere");
+    // A position -- and two other columns moved off their defaults, so that
+    // "the source itself arrived intact" below is an assertion about what the
+    // archive carried rather than about what the schema writes for a row
+    // nobody filled in.
+    sqlx::query(
+        "update knobas.source_config
+            set cursor = $2, sync_interval_secs = 900, enabled = false
+          where id = $1",
+    )
+    .bind(&estate.source)
+    .bind(r#"{"v":1,"since":"2026-09-01T00:00:00Z"}"#)
+    .execute(&sharer.pool)
+    .await
+    .expect("the sharer has synced, so it stands somewhere");
 
-    let record = backup::share_export(&sharer, backup::ShareParts::default())
-        .await
-        .expect("a share export");
-    let (colleague, colleague_dir) = service("sharecursortarget").await;
+    let record = backup::export_now(&sharer).await.expect("a backup");
+    let (colleague, colleague_dir) = service("backupcursortarget").await;
     hand_over(&sharer_dir, &colleague_dir, &record.file);
     backup::restore(&colleague, &record.file)
         .await
@@ -1119,7 +1137,7 @@ async fn a_restored_source_starts_from_the_top_and_keeps_everything_else() {
     );
     assert_eq!(
         (base_url.as_str(), interval, enabled),
-        ("https://jira.example", 300, true),
+        ("https://jira.example", 900, false),
         "only the position is dropped -- the source itself arrived intact"
     );
 }

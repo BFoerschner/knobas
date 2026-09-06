@@ -220,9 +220,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
 /// standing at a position. The live test at the bottom does not call this; it
 /// has a real Jira write all three.
 async fn stand_in_for_a_sync(pool: &PgPool) {
-    // A ticket the sharer's knobas knows about, and the link that says the
-    // work happens on that container. The entity row here is what a sync
-    // would have written; the live test at the bottom has a real one write it.
+    // The ticket's address, which is what a sync would have written.
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
         .bind(TICKET)
         .bind("Retry failed SEPA payouts")
@@ -638,8 +636,9 @@ async fn engine(
 ///
 /// # What it writes at the far end
 ///
-/// Nothing. It reads Jira twice and authenticates as the seeded admin with the
-/// password `seed-state.json` records -- **the right one**, deliberately: this
+/// Nothing. Every call it makes is a read -- two connection tests and two
+/// syncs -- and it authenticates as the seeded admin with the password
+/// `seed-state.json` records -- **the right one**, deliberately: this
 /// server's elevated-security check locks the account out after wrong ones
 /// (`testenv/README.md`), so no test here ever offers a wrong password. No
 /// ticket, comment, worklog or token is created, so there is nothing to clean
