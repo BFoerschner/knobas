@@ -645,3 +645,54 @@ fn a_monitor_is_named_by_a_name() {
         "only {named} monitors are named in the estate file"
     );
 }
+
+/// The estate file's monitor names and `testenv/monitors.json`'s must agree,
+/// because a name is the only thing joining them.
+///
+/// `monitors.json` is what `seed-kuma.sh` puts in the local Uptime Kuma, and
+/// the import (#445) resolves an asset's `monitors` entry against a *live*
+/// monitor by its name. So a rename on either side draws no `monitored-by`
+/// link and reports an unresolved name -- which looks like a monitor that has
+/// not synced yet, not like a typo, and is therefore the kind of thing nobody
+/// chases. It has already happened once: #438 wrote these names before #441
+/// created the monitors, and all seven disagreed.
+///
+/// One direction only. Every name the estate uses must be seeded; the reverse
+/// is false by design, because the `canary` (`testenv/canary.sh`) watches
+/// nothing and belongs to no asset.
+#[test]
+fn every_monitor_the_estate_names_is_one_the_seed_creates() {
+    let seeded: Value =
+        serde_json::from_str(&read("testenv/monitors.json")).expect("testenv/monitors.json is JSON");
+    let seeded: BTreeSet<&str> = seeded
+        .as_array()
+        .expect("testenv/monitors.json is an array of monitors")
+        .iter()
+        .map(|m| field(m, "name"))
+        .collect();
+    // A narrow parse that found nothing would pass every assertion below
+    // without checking anything.
+    assert!(
+        seeded.len() >= 2,
+        "testenv/monitors.json seeds only {} monitor(s); has it moved?",
+        seeded.len()
+    );
+
+    let estate = estate();
+    for entry in assets(&estate) {
+        let Some(monitors) = entry.get("monitors").and_then(Value::as_array) else {
+            continue;
+        };
+        for monitor in monitors {
+            let name = monitor.as_str().unwrap_or_default();
+            assert!(
+                seeded.contains(name),
+                "`{}` names the monitor {name:?}, which testenv/monitors.json does \
+                 not seed. The seeded names are {seeded:?}. A name is all that \
+                 joins the two files (../README.md, \"Monitors\"); rename in both \
+                 or the import resolves nothing.",
+                id(entry)
+            );
+        }
+    }
+}

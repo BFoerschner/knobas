@@ -14,9 +14,12 @@ HAVE=0
 [ -s "$KEY_FILE" ] && HAVE=1
 
 # Three of the monitors ping the Hetzner servers by IP, and the IPs are in
-# hetzner/hosts.env -- gitignored, one person's account, written by
-# provision.sh. monitors.json carries `${KNOBAS_HETZNER_*_IP}` placeholders and
-# they are resolved here, in the container's environment.
+# hetzner/hosts.env, which provision.sh writes and .gitignore keeps out of the
+# repo. Not because the addresses are secret -- hetzner/estate.json commits the
+# same three, and the M4 spec (#427) says plainly that it carries no secret --
+# but because the file is one account's provisioning output and belongs to
+# whoever ran provision.sh. monitors.json carries `${KNOBAS_HETZNER_*_IP}`
+# placeholders and they are resolved here, in the container's environment.
 #
 # Refusing without the file beats seeding a partial list: the monitor list IS
 # the estate (M4 spec, issue #427), and a Kuma missing the servers is one whose

@@ -347,7 +347,7 @@
       "id": "route:tunnel-teamcity",
       "asset": "asset:notebook",
       "target": "asset:knobas-teamcity",
-      "name": "teamcity (tunnel)",
+      "name": "TeamCity (tunnel)",
       "url": "http://127.0.0.1:8111/",
       "description": "The forward that makes the server's TeamCity answer on the port the seeds, the live suites and seed-state.json's URLs have always used. It falls with the tunnel, and so does its monitor.",
       "properties": {
@@ -359,7 +359,7 @@
       "id": "route:tunnel-jira",
       "asset": "asset:notebook",
       "target": "asset:knobas-jira",
-      "name": "jira (tunnel)",
+      "name": "Jira (tunnel)",
       "url": "http://127.0.0.1:8080/",
       "properties": {
         "opened_by": "testenv/hetzner/tunnel up",
@@ -370,7 +370,7 @@
       "id": "route:tunnel-confluence",
       "asset": "asset:notebook",
       "target": "asset:knobas-confluence",
-      "name": "confluence (tunnel)",
+      "name": "Confluence (tunnel)",
       "url": "http://127.0.0.1:8090/",
       "properties": {
         "opened_by": "testenv/hetzner/tunnel up",

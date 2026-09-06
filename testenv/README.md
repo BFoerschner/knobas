@@ -152,7 +152,7 @@ directory, in either direction. That is `teamcity-live-seeded`.
 The repo's standing rule is that a worktree has exactly one owner. **This
 Docker environment is not covered by it**: there is one of it, shared by every
 worktree on the machine, and two agents seeding or running live suites against
-it at the same time will break each other. Three ways:
+it at the same time will break each other. Four ways:
 
 - **The seed re-mints the Gitea token.** `seed-gitea.sh` reuses the token
   recorded in `seed-state.json` while it still authenticates, but
@@ -173,6 +173,12 @@ it at the same time will break each other. Three ways:
   the length of that run every other reader of this environment is talking to a
   server that answers one record per page. A concurrent `just gitea-live` fails
   on missing records, which reads as an adapter defect and is not one.
+- **`./seed-kuma.sh` deletes every monitor `monitors.json` does not name**
+  (since 2026-09-06, #441). That is what makes the seed idempotent, and it is
+  also a sweep: a monitor a sibling added by hand, or that knobas itself
+  created through the Kuma source once M4.1 lands *Create monitor for this
+  asset*, is gone on anyone's next `./seed`, silently and with no way back.
+  Add a monitor that has to survive to `monitors.json`, not to the UI.
 
 So: **claim the environment before running `./seed`, `just gitea-live`,
 `just gitea-live-capped` or `just start-work-live`, and say when you release
@@ -806,8 +812,12 @@ This matters because `hetzner/firewall-rules.json` opens **only** TCP 22 and
 ICMP: with no ICMP the only honest per-server check would have been TCP on 22,
 which measures sshd rather than the machine. Re-measure the `ping -c 2` above
 if this environment ever moves off OrbStack; if it comes back with 100% loss,
-change the three entries to `"type": "port", "hostname": ..., "port": 22` and
-say here that ICMP was the reason.
+switch the three
+entries to Kuma's `port` type on 22 and say here that ICMP was the reason. That
+is not only a `monitors.json` edit: `kuma-seed.mjs`'s `payload()` branches on
+`ping` against everything-else-is-http, and `OWNED` (what counts as drift) has
+no `port`, so both need a third case first. The check would also be a weaker
+one — it measures sshd, not the machine.
 
 **The three IPs come from `hetzner/hosts.env`**, which `hetzner/provision.sh`
 writes and `.gitignore` keeps out of the repo (one person's account). So
@@ -832,6 +842,14 @@ binding those four targets on the bridge address; nobody has needed that, and
 this environment is a laptop's. Measured on OrbStack: with and without the line
 the alias resolves to `0.250.250.254` and reaches a host socket bound to
 `127.0.0.1`, so it is a no-op here.
+
+Adding it did cost one thing, once: a compose service whose definition changes
+is **recreated** on the next `docker compose up -d`, so the shared Kuma was
+stopped and replaced the first time anyone ran that after 2026-09-06. Its data
+is in the `kuma-data` volume and survived; the cost is the seconds of downtime
+and any live run reading Kuma across them. It is paid once per machine, and it
+is the reason a compose edit belongs in the list under *One environment, one
+owner at a time* rather than in a stream's own head.
 
 **The seed owns the list.** `kuma-seed.mjs` deletes any monitor Kuma holds that
 `monitors.json` no longer names (and any second monitor sharing a name with one
