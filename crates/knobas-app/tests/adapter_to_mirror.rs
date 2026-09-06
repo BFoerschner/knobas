@@ -615,3 +615,156 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
     );
     teamcity.assert_no_violations();
 }
+
+// -- Uptime Kuma (#442) ------------------------------------------------------
+
+/// The recording `knobas-source-kuma`'s own contract suite serves, read from
+/// **its** file rather than transcribed into this one.
+///
+/// One recording with two readers cannot disagree about what the server said;
+/// two transcriptions of it can, and the way that goes wrong is invisible --
+/// each suite is green about its own copy. It is `/metrics` as the pinned image
+/// (2.5.3) answered on 2026-09-06, and `crates/knobas-source-kuma/tests/live_kuma.rs`
+/// is what keeps it current.
+const KUMA_METRICS: &str = include_str!("../../knobas-source-kuma/tests/support/metrics.txt");
+
+/// The API key the fake below accepts, and the `Authorization` it arrives as:
+/// HTTP Basic with an empty username, which is how Kuma authenticates
+/// `/metrics`.
+const KUMA_KEY: &str = "uk1_recorded-for-the-contract-battery";
+const KUMA_AUTHORIZATION: &str = "Basic OnVrMV9yZWNvcmRlZC1mb3ItdGhlLWNvbnRyYWN0LWJhdHRlcnk=";
+
+/// A Kuma answering the recording, in process.
+async fn spawn_mock_kuma() -> wiremock::MockServer {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let server = wiremock::MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/metrics"))
+        .and(header("authorization", KUMA_AUTHORIZATION))
+        .respond_with(ResponseTemplate::new(200).set_body_string(KUMA_METRICS))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// **A monitor, from `/metrics` to the launcher's own read.**
+///
+/// The join this file exists for, on the one criterion of issue #442 that no
+/// seam can answer alone: *"monitors are found in the launcher by name with
+/// their state"*. `knobas-source-kuma`'s own tests pin what the adapter puts
+/// **into** a `SyncItem`; `knobas-app`'s `search_ipc.rs` pins what the launcher
+/// gets **out of** a row. Both are green while the join between them is broken,
+/// and the join is the whole of the criterion.
+///
+/// So: the real adapter, over real HTTP against the recording, through
+/// `knobas-sync` and the registry, into `sync.item` -- and then out again
+/// through `search_inner`, which is the function the launcher calls.
+#[tokio::test]
+async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
+    let kuma = spawn_mock_kuma().await;
+    let pool = pool().await;
+    let id = unique_id();
+    configure(&pool, &id, "kuma", &kuma.uri()).await;
+
+    let instance = SourceInstance {
+        id: id.clone(),
+        kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+        display_name: "Uptime Kuma".to_owned(),
+        base_url: kuma.uri(),
+        auth: Some(AuthMethod::ApiToken),
+        secret: Some(KUMA_KEY.to_owned()),
+        config: serde_json::json!({}),
+    };
+    let real = match Registry::builtin().build(instance) {
+        Ok(source) => source,
+        Err(e) => panic!("the registry must build a kuma instance: {e:?}"),
+    };
+
+    let mut conn = dedicated().await;
+    let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, real.as_ref())
+        .await
+        .unwrap();
+    assert_eq!(run.upserted, 8, "the recording holds eight monitors");
+
+    // The stored row, every column the adapter decided. `8` is the canary's own
+    // monitor id in Kuma, which is the key half of its entity id.
+    let row = stored(&pool, &id, "8").await;
+    assert_eq!(row.kind, "monitor");
+    assert_eq!(row.title, "canary");
+    assert_eq!(
+        row.body_text, "canary up http http://host.docker.internal:8299/",
+        "the indexed text leads with the name and the state"
+    );
+    assert_eq!(row.payload["state"], "up");
+    assert_eq!(row.payload["id"], "8");
+    // `/metrics` carries no timestamp of any kind, so a monitor is undated and
+    // the mirror keeps the hole rather than filling it with `now()`.
+    assert_eq!(row.item_updated_at, None);
+    assert_eq!(row.author, None);
+    assert_eq!(
+        row.web_url.as_deref(),
+        Some(format!("{}/dashboard/8", kuma.uri()).as_str())
+    );
+
+    // ...and out again through the launcher's own read. Scoped by the source id
+    // this test minted, because the database is shared with every other test in
+    // this binary.
+    let found = knobas_app::commands::search::search_inner(
+        &pool,
+        knobas_search::SearchQuery {
+            raw: "canary".to_owned(),
+            limit: 20,
+            filters: knobas_search::SearchFilters {
+                sources: vec![id.clone()],
+                ..knobas_search::SearchFilters::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.total, 1, "{found:?}");
+    let group = &found.groups[0];
+    assert_eq!(group.kind, "monitor");
+    assert_eq!(group.plural, "Monitors");
+    assert_eq!(group.hits[0].row.title, "canary");
+    let excerpt: String = group.hits[0]
+        .snippet
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect();
+    assert!(
+        excerpt.contains("up"),
+        "the launcher row shows the monitor's state under its title: {excerpt:?}"
+    );
+
+    // **A state word is not a search term, and this is where that is written
+    // down.** `websearch_to_tsquery('english', …)` drops `up` and `down` as
+    // stopwords, so a query that is only a state lexes to the empty tsquery and
+    // finds nothing -- measured here rather than assumed, because the obvious
+    // reading of "found by name with their state" is that `kuma down` is a
+    // query, and it is not. What the criterion asks for is delivered by the row
+    // above: the state is in the indexed text, so it is in the excerpt the
+    // launcher draws under the title.
+    let by_state = |raw: &str| {
+        knobas_app::commands::search::search_inner(
+            &pool,
+            knobas_search::SearchQuery {
+                raw: raw.to_owned(),
+                limit: 20,
+                filters: knobas_search::SearchFilters {
+                    sources: vec![id.clone()],
+                    ..knobas_search::SearchFilters::default()
+                },
+            },
+        )
+    };
+    for stopword in ["up", "down"] {
+        let answer = by_state(stopword).await.unwrap();
+        assert_eq!(
+            answer.total, 0,
+            "{stopword:?} is an English stopword, so it is no query at all: {answer:?}"
+        );
+    }
+}

@@ -416,6 +416,13 @@ async fn a_monitor_deleted_through_the_seeds_helper_is_swept() {
 
     // The deletion is Kuma's to apply, and `/metrics` stops carrying the
     // monitor as soon as it has. Poll for the state, not for a duration.
+    //
+    // Its own loop rather than `until` above, and the difference is the sync it
+    // makes: this one is **incremental**, because a tombstone only exists on a
+    // run that has a previous corpus to compare against, and what it waits for
+    // is a property of the emitted items rather than of the corpus. `until`
+    // takes neither a cursor nor the sink, so widening it to carry both would
+    // make one helper with two shapes for two callers.
     let deadline = Instant::now() + Duration::from_secs(60);
     let tombstones = loop {
         let mut sink = VecSink(Vec::new());

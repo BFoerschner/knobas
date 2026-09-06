@@ -1,12 +1,37 @@
 //! One monitor, folded out of the sample lines that mention it.
 //!
-//! `/metrics` is not a list of monitors: it is four families of gauges, each
-//! carrying the monitor's identity in its labels. `monitor_status` says what a
-//! monitor is doing, `monitor_response_time` how long its last check took,
-//! `monitor_uptime_ratio` three sliding windows, and
-//! `monitor_cert_days_remaining` the certificate countdown of a TLS check. So a
-//! monitor is what a *set* of samples sharing a `monitor_id` adds up to, and
-//! this module does the adding up.
+//! `/metrics` is not a list of monitors: it is families of gauges, each sample
+//! carrying the monitor's identity in its labels. So a monitor is what a *set*
+//! of samples sharing a `monitor_id` adds up to, and this module does the
+//! adding up.
+//!
+//! # Which families, and which two are left
+//!
+//! Kuma 2.5.3 publishes **six** `monitor_*` families. This adapter reads four,
+//! and they are the four issue #442's payload list names -- "id, name, type,
+//! URL, state, response time, uptime ratios and certificate days remaining":
+//!
+//! * `monitor_status`, what a monitor is doing;
+//! * `monitor_response_time`, how long its last check took, in milliseconds;
+//! * `monitor_uptime_ratio`, three sliding windows on a `window` label;
+//! * `monitor_cert_days_remaining`, the certificate countdown of a TLS check.
+//!
+//! The two it does not read are in `tests/support/metrics.txt` beside them, so
+//! this is a decision rather than an oversight:
+//!
+//! * `monitor_cert_is_valid` says whether the certificate is still good, which
+//!   is what `monitor_cert_days_remaining` already answers for the one reader
+//!   there is -- a countdown that exists at all is a certificate Kuma could
+//!   read, and a monitor past expiry has a days-remaining of zero or less.
+//! * `monitor_response_time_seconds` is the same fact as
+//!   `monitor_response_time` averaged over the same three windows, in seconds.
+//!   The payload carries the *current* response time, and knobas keeps its own
+//!   timeseries from M4.1's samples ticket rather than mirroring Kuma's
+//!   averages.
+//!
+//! Neither is hard to add: a constant here and a key in [`crate::map`]. Both
+//! stay out until a reader asks for them, because a payload field nothing reads
+//! is a field the next person has to decide whether to trust.
 //!
 //! # What Kuma's exposition means, measured rather than assumed
 //!
@@ -36,8 +61,10 @@ use std::collections::BTreeMap;
 
 use crate::metrics::Sample;
 
-/// The families this adapter reads. Everything else in the body -- the node.js
-/// runtime gauges, the express histograms -- is another program's business.
+/// The four families this adapter reads. The two `monitor_*` families it does
+/// not, and why, are in this module's header; everything else in the body --
+/// the node.js runtime gauges, the express histograms -- is another program's
+/// business.
 pub(crate) const STATUS: &str = "monitor_status";
 pub(crate) const RESPONSE_TIME: &str = "monitor_response_time";
 pub(crate) const UPTIME_RATIO: &str = "monitor_uptime_ratio";

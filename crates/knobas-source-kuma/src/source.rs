@@ -22,6 +22,19 @@ pub struct KumaSource {
     http: KumaHttp,
 }
 
+/// The connection note (#326): how much this Kuma is watching, in one line.
+///
+/// A function rather than an inline `match`, so the singular arm is reachable
+/// from a test: *Test connection* against any real instance answers a plural,
+/// and an assertion on that answer alone would go on passing if the singular
+/// were spelled "1 monitors".
+fn roster_note(count: usize) -> String {
+    match count {
+        1 => "1 monitor".to_owned(),
+        other => format!("{other} monitors"),
+    }
+}
+
 /// The base URL as `SyncItem::web_url` is built from it: trimmed of
 /// surrounding whitespace and of the trailing slash a paste usually carries.
 fn trimmed_base_url(raw: &str) -> String {
@@ -97,10 +110,7 @@ impl Source for KumaSource {
             // publish it and this adapter has no other channel. The
             // credential-health strip shows a countdown the day one exists.
             secret_expires_at: None,
-            detail: Some(match count {
-                1 => "1 monitor".to_owned(),
-                other => format!("{other} monitors"),
-            }),
+            detail: Some(roster_note(count)),
             // Nothing per-instance for the dialog to fill: this adapter's
             // config keys are transport tuning, all of them the reader's own
             // choices rather than ids the server mints (#297).
@@ -228,6 +238,14 @@ mod tests {
         assert_eq!(d.name, "Kuma EU");
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.entity_kinds[0].id, crate::KIND_MONITOR);
+    }
+
+    /// The one arm no live instance reaches: a Kuma watching exactly one thing.
+    #[test]
+    fn the_roster_note_counts_in_english() {
+        assert_eq!(roster_note(0), "0 monitors");
+        assert_eq!(roster_note(1), "1 monitor");
+        assert_eq!(roster_note(8), "8 monitors");
     }
 
     /// The base URL a monitor's link is composed onto: the trailing slash a

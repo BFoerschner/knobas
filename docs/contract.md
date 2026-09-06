@@ -1561,9 +1561,43 @@ not deliverable from the read half. Recorded in `testenv/README.md` (*Monitors*)
 `crates/knobas-source-kuma/src/cursor.rs`, flagged here because it is a spec story the read half
 cannot meet.
 
+**Three §4.1 departures, each argued and each recorded here rather than only in the crate.** §4.1
+defines `payload` as "the raw record verbatim", `body_text` as "title + description + comment
+texts joined by blank lines", and `updated_at` as the source's own timestamp. This adapter departs
+on all three, and the reason is one fact about the channel: **`/metrics` has no records in it.** It
+is a Prometheus exposition, and a monitor is what a set of gauge samples sharing a `monitor_id`
+adds up to, so a "raw record" for one monitor does not exist to be kept.
+
+- **`payload` is a synthesized object**, not a document Kuma would recognise: `id`, `name`, `type`,
+  `url`, `hostname`, `port`, `state`, `state_code`, `response_time_ms`, `uptime` (a window-to-ratio
+  map) and `cert_days_remaining`, every key present on every item and `null` where the monitor has
+  nothing. §3a's re-mapping guarantee still holds in the sense that matters — everything the
+  adapter read is in there, and a later mapping change can be re-run over the stored payload
+  without a re-sync — but the shape is this adapter's and not the server's.
+- **`body_text` is `name state type address`** (`canary up http http://host.docker.internal:8299/`)
+  rather than a description and comments, because a monitor has neither. Spec #427's story 52 asks
+  that "the launcher finds a monitor and its state", and a launcher row is a title plus an excerpt
+  of this string. **The state is shown, not searched**: `websearch_to_tsquery('english', …)` drops
+  `up` and `down` as stopwords, so a query that is only a state matches nothing. Measured, pinned
+  by `crates/knobas-app/tests/adapter_to_mirror.rs`'s
+  `a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name`, and stated because the
+  obvious reading of the story is that `kuma down` is a query.
+- **`updated_at` is always `None`.** `/metrics` carries no timestamp of any kind — not the last
+  check, not the last change — so there is no instant to report and stamping the poll's own clock
+  would make every monitor look freshly modified on every run. The row's provenance is `synced_at`,
+  which the engine writes. This is §4.1's own normalization rule ("the mirror keeps the hole")
+  applied to a source that dates nothing at all.
+
+The precedent for recording rather than assuming is Confluence's `body_text` row and TeamCity's
+authorship amendment; this is the same move for a source whose departure is larger.
+
 **The live run is the witness** (ADR-0013): `just kuma-live`, `crates/knobas-source-kuma/tests/
 live_kuma.rs`, five tests against the seeded container, and the recipe is now in the working
-model's list. Two directions it does **not** witness, both stated in the suite's own header: the
+model's list. The docker-free join is `crates/knobas-app/tests/adapter_to_mirror.rs` (#93's file):
+the real adapter over real HTTP against the recording, through `knobas-sync` into `sync.item`, and
+back out through `search_inner` — which is the only place issue #442's launcher criterion can be
+answered, since the adapter's own tests pin what goes into a `SyncItem` and the search tests pin
+what comes out of a row. Two directions it does **not** witness, both stated in the suite's own header: the
 contract battery's clause 2 against a server that rewrites a response time on every heartbeat
 (asserted here with a retry instead, and by the battery against a recording), and
 `monitor_cert_days_remaining` in its *present* direction, since no monitor on this estate is a TLS
@@ -1747,8 +1781,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   adapter is a new crate, plus the registry row and manifest line §3a licenses, and it touches no
   migration, no IPC schema or layout, neither barrel, nothing in `crates/knobas-source/src/**` and
   nothing in `crates/knobas-http/**` — exactly #284's Confluence shape. The descriptor, the
-  `monitor` kind, the single `state` declaration, the digest cursor and the adapter-side tombstone
-  are recorded in **§9's *Amendments from the Uptime Kuma adapter, read half*** above, together
+  `monitor` kind, the single `state` declaration, the digest cursor, the adapter-side tombstone and
+  three §4.1 departures are recorded in **§9's *Amendments from the Uptime Kuma adapter, read
+  half*** above, together
   with a measured fact that bears on spec #427's story 38. A reader sent here by that criterion
   should read that section; a reader looking for a *changed frozen surface* will not find one,
   which is the point of this line. The Kuma **write** ops and the two-secret keychain envelope are

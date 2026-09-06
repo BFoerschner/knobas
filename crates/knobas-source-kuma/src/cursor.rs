@@ -19,6 +19,17 @@
 //! monitor**, which is what "every run is full" means here and what keeps the
 //! kind honestly `full_sync_exhaustive`.
 //!
+//! **How often that is actually quiet: not often.** The digest covers the
+//! response time, and Kuma writes a new one on every heartbeat, so against a
+//! live instance polled every minute most runs do find a difference and do
+//! re-emit the roster. Spec #427 says so in as many words -- "Response time
+//! changes every poll, so nearly every monitor upserts every run; *upserted*
+//! stays honest and small only because the corpus is small". This is therefore
+//! not a saving to lean on: what it is for is the contract's clause 2, which an
+//! adapter must satisfy whatever its server happens to be doing, and the
+//! genuinely quiet case (a Kuma whose monitors are all paused, or one polled
+//! faster than it beats).
+//!
 //! # Why it also carries the names, and why a vanished monitor is tombstoned
 //!
 //! A monitor deleted in Kuma must leave the mirror on the next run (spec #427,
@@ -100,7 +111,20 @@ impl Position {
     /// Unreadable is not an error: a cursor written by another version, or by
     /// something that is not this adapter at all, means only that this run has
     /// no idea what the last one saw. It emits everything and stores a cursor
-    /// it *can* read, which is self-healing and costs one poll.
+    /// it *can* read.
+    ///
+    /// **What that costs is one poll for the upserts and, for deletions, more
+    /// than that.** A run with no readable previous corpus has nothing to
+    /// compare against, so it emits no tombstone -- and it is not a cursor-less
+    /// run either, so the engine does not sweep for it. A monitor deleted in
+    /// the window between the last readable cursor and this run is therefore
+    /// **not retired at all**, and stays in the mirror until something runs
+    /// that source cursor-less (a first sync, a backfill, or a cleared cursor).
+    /// The window is one run per cursor-format change, and there is no cheaper
+    /// honest answer: an adapter that tombstoned on an unreadable cursor would
+    /// be tombstoning the whole mirror on the strength of not knowing anything.
+    /// Recorded because "self-healing" is what this looked like before the
+    /// deletion half was thought through.
     pub(crate) fn parse(raw: &str) -> Option<Self> {
         let parsed: Self = serde_json::from_str(raw).ok()?;
         (parsed.version == VERSION).then_some(parsed)

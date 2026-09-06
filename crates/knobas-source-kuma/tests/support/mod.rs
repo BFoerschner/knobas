@@ -12,8 +12,11 @@
 //! re-asserts them against it. If the two ever disagree, the recording is what
 //! is out of date.
 
-// Compiled separately into every test binary that declares `mod support;`, and
-// each uses a different part of it.
+// One test binary declares `mod support;` today (`contract.rs`), and it does not
+// call every item here -- `Fake::start` and `Fake::serving` are both used, but a
+// helper added for the next binary would be dead until that binary exists. The
+// allow is what keeps `clippy --all-targets -- -D warnings` from deciding that
+// for us, and it is the same one the Gitea suite's support module carries.
 #![allow(dead_code)]
 
 use knobas_source::instance::SourceInstance;

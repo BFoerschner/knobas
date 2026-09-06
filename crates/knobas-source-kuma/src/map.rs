@@ -86,6 +86,16 @@ pub(crate) fn tombstone(source_id: &str, id: &str, name: &str) -> SyncItem {
 /// title and an excerpt of this. Then the type and the address, so that
 /// searching for a host or a port finds the check watching it -- which is also
 /// what makes `to_tsvector`'s lexing of a URL into host and path useful here.
+///
+/// **The state is here to be *shown*, not to be searched for**, and the
+/// difference is worth knowing before somebody types `kuma down` and files a
+/// bug. `websearch_to_tsquery('english', …)` drops `up` and `down` as
+/// stopwords, so a query that is only a state lexes to the empty tsquery and
+/// matches nothing. Measured, and pinned by
+/// `crates/knobas-app/tests/adapter_to_mirror.rs`'s
+/// `a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name`. The
+/// state still belongs in this string: it is the excerpt the launcher draws
+/// under the title, which is the half of story 52 that is deliverable.
 fn body_text(name: &str, state: Option<&str>, monitor: &Monitor) -> String {
     [
         Some(name),
