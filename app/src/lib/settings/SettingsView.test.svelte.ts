@@ -6,7 +6,7 @@
  * So what is worth pinning here is small and blunt: the view is one scrollable
  * pane, it says what it is, and both sections are in it. The second one
  * arrived with #282 and cost what the ruling said it would — one component and
- * one import — which is the shape this test is protecting; a test that pinned
+ * one import, as did the fifth (#443) — which is the shape this test is protecting; a test that pinned
  * a registry or a tab strip would be pinning the thing the ruling forbade.
  *
  * Each section's own behaviour is its own file.
@@ -39,6 +39,13 @@ vi.mock("../ipc/time", () => ({
   setPassiveAttribution: () => Promise.reject(new Error("not used here")),
 }));
 
+/** And the fifth section's is `MonitoringSection.test.svelte.ts`. */
+vi.mock("../ipc/assets", () => ({
+  monitoringSettings: () =>
+    Promise.resolve({ sample_retention_days: 90, response_time_warn_ms: 1500 }),
+  setMonitoringSettings: () => Promise.reject(new Error("not used here")),
+}));
+
 const { default: SettingsView } = await import("./SettingsView.svelte");
 
 let target: HTMLDivElement;
@@ -68,6 +75,8 @@ test("the view names itself and carries its sections", async () => {
   expect(target.querySelector("h1")?.textContent).toContain("Settings");
   expect(target.textContent).toContain("Backup");
   expect(target.textContent).toContain("after 03:00");
+  expect(target.textContent).toContain("Monitoring");
+  expect(target.textContent).toContain("90 days");
   expect(target.textContent).toContain("Passive attribution");
   expect(
     target.querySelector('input[type="checkbox"]'),
