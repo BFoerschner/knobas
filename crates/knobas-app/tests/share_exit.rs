@@ -175,7 +175,11 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
     .await
     .expect("the server is in the room");
 
-    // The two private things.
+    // The private things -- one row in **every** table the two off-by-default
+    // parts name, and not only the two the criterion says out loud. A table
+    // the sharer never had is a table the assertion on the far side cannot
+    // fail on, so "no worklog crossed" would be a sentence about a fixture
+    // rather than about the archive.
     knobas_core::note::create(pool, NOTE_TITLE, NOTE_BODY, "user")
         .await
         .expect("a note");
@@ -187,6 +191,26 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("an afternoon on the container");
+    sqlx::query(
+        "insert into knobas.worklog (entity_id, started_at, seconds, comment, block_ids)
+         select $1, now() - interval '3 hours', 7200, 'moved the runner off the box',
+                array[b.id]
+           from knobas.block b where b.entity_id = $1",
+    )
+    .bind(CONTAINER)
+    .execute(pool)
+    .await
+    .expect("the hours that afternoon became");
+    sqlx::query("insert into knobas.timer (entity_id, label, started_at) values ($1, null, now())")
+        .bind(CONTAINER)
+        .execute(pool)
+        .await
+        .expect("a running timer");
+    sqlx::query("insert into knobas.heartbeat (at, entity_id) values (now(), $1)")
+        .bind(CONTAINER)
+        .execute(pool)
+        .await
+        .expect("an observation behind it");
 }
 
 /// The ticket, the link to it, and the source it came from -- **stood in for**.
@@ -400,10 +424,15 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
 
 /// **Nothing personal came along** (#455, criterion 2).
 ///
-/// The four tables the two off-by-default parts name, plus the two that are in
-/// no part at all -- the activity stream and the mirror. Counted over the
-/// whole database rather than by id, which is the stronger reading: an archive
-/// that had brought *some other* note would pass an assertion about this one.
+/// Every table the two off-by-default parts name -- the note, and the timer,
+/// its block, the worklog it became and the observation behind it -- plus the
+/// two that are in no part at all, the activity stream and the mirror. The
+/// sharer holds a row in each of them, which is what makes the count on this
+/// side an assertion about the archive and not about a table nobody filled.
+///
+/// Counted over the whole database rather than by id, which is the stronger
+/// reading: an archive that had brought *some other* note would pass an
+/// assertion about this one.
 ///
 /// The last assertion is the narrowing #454 recorded and Björn has yet to
 /// rule on, asserted rather than described: `knobas.entity` travels whole

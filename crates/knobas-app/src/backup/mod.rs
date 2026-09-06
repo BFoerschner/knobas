@@ -474,23 +474,32 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 /// is no second spelling of `missing_secret` and no second `update` to keep in
 /// step with that one.
 ///
-/// **Best-effort.** By the time this runs the archive is already in the
-/// database and there is no undoing it, so reporting a locked keychain as a
-/// failed restore would send a person round a loop whose second attempt is
-/// refused as a `conflict` -- against the data the first attempt put there.
-/// What is at stake is a verdict the next sync run settles anyway, and a
-/// warning in the log is the honest weight for it.
+/// **Best-effort**, and for one reason that covers both halves: by the time
+/// this runs the archive is already in the database and there is no undoing
+/// it, so reporting either failure as a failed restore would send a person
+/// round a loop whose second attempt is refused as a `conflict` -- against the
+/// data the first attempt put there.
+///
+/// What the two halves cost if they are skipped is **not** the same, and the
+/// log line says so. A health verdict the keychain would not give is settled
+/// by the next sync run anyway. A position that was not cleared is settled by
+/// nothing: the source resumes from a machine it has never been on, every run
+/// after it reports success, and the mirror stays empty until somebody orders
+/// a backfill. So the warning names that outcome and the escape
+/// (`backfill_source`), because it is the one a reader has to act on.
 async fn settle_restored_sources(state: &BackupState) {
-    if let Err(error) = settle_health(state).await {
+    if let Err(error) = settle_position_and_health(state).await {
         tracing::warn!(
             %error,
             "the restore finished, but the sources it brought could not all be settled \
-             against this machine's keychain"
+             against this machine: one may still be standing where the archive's machine \
+             stood, in which case its syncs will report success and mirror nothing until \
+             a backfill is ordered for it"
         );
     }
 }
 
-async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
+async fn settle_position_and_health(state: &BackupState) -> Result<(), ExportError> {
     // Before the keychain is asked anything, because this half needs no
     // keychain: a store that refuses every question must not also leave the
     // restored sources resuming from somebody else's position.
@@ -585,8 +594,9 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
             }
             Some(ArchiveFile {
                 bytes: i64::try_from(meta.len()).unwrap_or(i64::MAX),
-                // The complement of the question retention asks, and asked of
-                // the same function, so "not aged out" and "listed apart"
+                // Among the names already known to be archives of ours,
+                // the complement of the question retention asks -- and asked
+                // of the same function, so "not aged out" and "listed apart"
                 // cannot come to mean different sets of files.
                 share: !policy::is_backup_name(&name),
                 file: name,
