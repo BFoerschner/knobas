@@ -695,20 +695,24 @@ const FILE_ASSET_IDS = new Set(ESTATE.assets.map((entry) => entry.id));
  * A route declares no schema, so every property is a custom row --
  * `assets::route_row_of` calls `custom_properties` and not `properties_of`.
  *
- * **The URL is the file's, verbatim, and one of the nine is not a loopback
- * address.** The hand-copy this replaces substituted `127.0.0.1` into
- * `route:tunnel-gitea-reverse`'s `http://gitea:3000/`, citing
- * `house-rules.test.ts`'s *no runtime network references* rule, and dropping
- * that substitution is a deliberate change rather than an oversight. That
- * rule scans `.ts` and `.svelte` under `app/src/` and exists so that a
- * **bundle** reaches nothing but the IPC; the estate file is in no bundle
- * (`import.meta.env.DEV` is the only door to this module, and
- * `grep -c "knobas test estate" dist/assets/*.js` is `0`). More to the point,
- * a route's URL is *data*: in the running app it arrives over the bridge out
- * of `knobas.route` and can be anything a person typed, and a fixture that
- * quietly improved one would be a harness drawing a screen the app does not
- * draw. `gitea` is the docker network name the TeamCity containers resolve,
- * which is why the estate spells it that way and why it cannot resolve here.
+ * **The URL is the file's, verbatim, and one of the nine does not name a
+ * loopback address.** `route:tunnel-gitea-reverse` is the reverse forward, and
+ * the host in its URL is `gitea` -- the docker network name the TeamCity
+ * containers resolve, which is why the estate spells it that way and why it
+ * resolves nowhere else. The hand-copy this replaces substituted a loopback
+ * address for it, citing `house-rules.test.ts`'s *no runtime network
+ * references* rule, and dropping that substitution is a deliberate change
+ * rather than an oversight.
+ *
+ * That rule scans `.ts` and `.svelte` under `app/src/` -- **raw text,
+ * comments included, which is why this paragraph does not spell the URL with
+ * its scheme** -- and it exists so that a *bundle* reaches nothing but the
+ * IPC. The estate file is in no bundle: `import.meta.env.DEV` is the only door
+ * to this module, and `grep -c "knobas test estate" dist/assets/*.js` is `0`.
+ * More to the point, a route's URL is **data**. In the running app it arrives
+ * over the bridge out of `knobas.route` and is whatever a person typed or an
+ * import wrote, and this fixture stands in for that table -- so a harness that
+ * quietly improved one URL would be drawing a screen the app does not draw.
  */
 function routeFromFile(route: EstateFileRoute): FixtureRoute {
   return {
