@@ -329,8 +329,8 @@ async fn a_source_that_has_synced_nothing_gets_no_verdict() {
 /// `note:` searches knobas' own notes and nothing else. A build source
 /// contributes no row to that query because of the *kind* filter, so naming it
 /// here would explain an absence authorship had nothing to do with -- which is
-/// the very failure `Searcher::search`'s `asset:` short-circuit refuses, arrived
-/// at through the other scoping dimension.
+/// the very failure `Searcher::search`'s short-circuits refuse, arrived at
+/// through the other scoping dimension.
 #[tokio::test]
 async fn a_source_the_kind_scope_excluded_is_not_accused() {
     let pool = pool().await;

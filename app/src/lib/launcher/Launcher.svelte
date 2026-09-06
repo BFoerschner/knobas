@@ -28,7 +28,12 @@
     which exists only while they are standing in one, for the same reason. It
     is an ordinary link to the context's own `ctx:` entity and not a command of
     its own — ADR-0008, in as many words: *"an Add to context is an ordinary
-    link"* — so what the shell does with it is what it does with *Link to…*;
+    link"* — so what the shell does with it is what it does with *Link to…*.
+    **On every entity row and not only on an asset**, though #436 is what asks
+    for it: the chain acts on *the selected result* and its other two rows have
+    never been per-kind, ADR-0008's membership rule is not per-kind either, and
+    a row that appeared for a container and vanished for the ticket about it
+    would be a rule the reader has to learn from its absences;
   * **Start timer** (M3, #278), which exists on any result that can be a timer
     target. A stored context cannot (`shell/timer.ts`), so the row is absent
     there rather than offered and then refused by the backend.
@@ -49,6 +54,7 @@
 
   import { launcherHome as defaultHome, search as defaultSearch } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
+  import { addressOf as assetAddress, routeAddressOf as routeAddress } from "../assets/tree";
   import { hashFor } from "../shell/router.svelte";
   import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
@@ -338,21 +344,22 @@
    *
    * **The estate is not a slide-over**, which is the one place this is not
    * "the room, with a detail open": an asset opens the Tree at itself and a
-   * route opens the Tree at the asset exposing it (`#/asset/<id>`,
-   * `#/route/<id>`, `shell/router.svelte.ts`, story 35). Spelled through the
-   * router's own assets arm rather than left to the room arm — which today
-   * composes `#/<kind>/<id>` and so happens to produce the same two strings.
-   * Happening to agree is not the same as saying so: the day the room's detail
-   * address changes shape, an asset hit that rode on it would quietly start
-   * opening a room.
+   * route opens the Tree at the asset exposing it (story 35). Those two
+   * addresses are `assets/tree.ts`' `assetAddress` and `routeAddress`, not a
+   * third spelling here — that module's own docs give the reason, *"there is
+   * still exactly one encoder and a link from a ticket and a click in a column
+   * cannot end up in different places"*, and a launcher row is a third place
+   * that link can come from.
+   *
+   * Left to the room arm it would work today, because that arm composes
+   * `#/<kind>/<id>` and so happens to produce the same two strings. Happening
+   * to agree is not the same as saying so: the day a room detail's address
+   * changes shape, an asset hit riding on it would quietly start opening a
+   * room.
    */
   function addressForEntity(kind: string, entityId: string): string {
-    if (kind === "asset") {
-      return hashFor({ view: "assets", tab: "tree", assetId: entityId });
-    }
-    if (kind === "route") {
-      return hashFor({ view: "assets", tab: "tree", assetId: null, routeId: entityId });
-    }
+    if (kind === "asset") return assetAddress({ id: entityId });
+    if (kind === "route") return routeAddress({ id: entityId });
     return hashFor({ view: "room", ctx: "all", detail: { kind, entityId } });
   }
 

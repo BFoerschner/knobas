@@ -268,6 +268,21 @@
    */
   const roomContext = $derived(standingIn?.filter.context ?? null);
 
+  /**
+   * **The room the launcher's *Add to context* row acts on**, or `undefined`.
+   *
+   * One value for the row's label and for the write, because they name the
+   * same room and two derivations of it are two chances to disagree. `null`
+   * `roomContext` is every *derived* room — *All work*, a source, a project —
+   * which has no `ctx:` entity to link to, and that is the row's absence
+   * rather than a write with one end.
+   */
+  const launcherContext = $derived(
+    roomContext === null
+      ? undefined
+      : { ctxId: roomContext, label: standingIn?.label ?? "this context" },
+  );
+
   $effect(() => {
     timer.roomContext = roomContext;
   });
@@ -856,17 +871,14 @@
       // assumption.
       if (openEntity) void linkTo(openEntity.entityId, targetId, targetTitle);
     }}
-    context={roomContext === null
-      ? undefined
-      : { ctxId: roomContext, label: standingIn?.label ?? "this context" }}
+    context={launcherContext}
     oncontext={(targetId, targetTitle) => {
       // Guarded for `onlink`'s reason: the prop outlives one keystroke, and
       // this is where "the reader is standing in a stored context" stops being
-      // an assumption. `roomContext` is null in every derived room — *All
-      // work*, a source, a project — which have no `ctx:` entity to link to.
-      if (roomContext) {
-        void addToContext(roomContext, targetId, targetTitle, standingIn?.label ?? "this context");
-      }
+      // an assumption. The same value the chain was built from, so the row's
+      // label and the toast's cannot name two different rooms.
+      const room = launcherContext;
+      if (room) void addToContext(room.ctxId, targetId, targetTitle, room.label);
     }}
     ontimer={startTimerOn}
     onnavigate={(hash) => router.go(hash)}

@@ -493,9 +493,15 @@ pub async fn seed_estate(pool: &PgPool, tag: &str) -> Result<(), SearchError> {
                     .bind(&name)
                     .execute(&mut *tx)
                     .await?;
+                    // `http://127.0.0.1:<port>/`, which is the shape every
+                    // route in `testenv/hetzner/estate.json` has -- and the
+                    // shape a port is *reachable* in: a path fuses the port
+                    // into one lexeme with it (`corpus::ROUTE`'s table), so a
+                    // fixture with one would measure a query that matches
+                    // nothing while looking like it had found a route.
                     sqlx::query(
                         "insert into knobas.route (id, asset_id, name, url)
-                         values ($1, $2, $3, 'http://127.0.0.1:' || (30000 + ($4::bigint % 9000)) || '/health')
+                         values ($1, $2, $3, 'http://127.0.0.1:' || (30000 + ($4::bigint % 9000)) || '/')
                          on conflict (id) do nothing",
                     )
                     .bind(&route)

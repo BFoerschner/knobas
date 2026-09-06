@@ -548,13 +548,37 @@ fn total_buffers(plan: &str) -> i64 {
 ///
 /// * a container **by name**, the ticket's own sentence;
 /// * a **hostname property**, which is `0019`'s weight-C rung;
-/// * a **port**, which is `0019`'s de-punctuated URL;
+/// * a **port**, which on the estate's own URL shape is a lexeme of its own;
 /// * a **site name**, the spec §4 case -- one query whose weight-B path match
 ///   is every machine under it, so it is the widest of the four by construction;
 /// * `asset:`, the prefix this ticket turns on, which pins the union to the
 ///   estate;
 /// * and the same mirror query the gate above runs, unfiltered, so the two
 ///   numbers are comparable and a regression can be attributed.
+///
+/// # The reading, 2026-09-06 (#436)
+///
+/// Recorded here rather than only in the PR that took it, for the reason
+/// `coverage.rs`' own table is: an `#[ignore]`d benchmark whose result lives
+/// in a review thread is a claim the next reader has to re-earn before they can
+/// tell a regression from a slow machine.
+///
+/// ```text
+/// estate: 3303 assets, 1500 routes, beside 100000 mirror items
+/// container by name       2 drawn  p50    1 ms  p90    2 ms  max    2 ms
+/// hostname property       1 drawn  p50    1 ms  p90    1 ms  max    1 ms
+/// route port              1 drawn  p50    1 ms  p90    1 ms  max    1 ms
+/// site name, wide        10 drawn  p50    8 ms  p90    9 ms  max    9 ms
+/// asset: prefix           1 drawn  p50    1 ms  p90    1 ms  max    1 ms
+/// mirror, for scale      10 drawn  p50   47 ms  p90   49 ms  max   49 ms
+/// ```
+///
+/// The estate costs **single-digit milliseconds** and the mirror is the whole
+/// budget: `site name, wide` at 9 ms is the widest of the four estate cases by
+/// construction (its weight-B path match is every machine under the site), and
+/// it is still five times inside the budget. The same run's mirror gate,
+/// unchanged by the union growing to four corpora, was worst p90 **77 ms at
+/// 100,000 items**.
 #[tokio::test]
 #[ignore = "seeds a 100k corpus and an estate and asserts on wall-clock time; run it deliberately"]
 async fn the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items() {
@@ -594,6 +618,16 @@ async fn the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         println!(
             "{name:<20} {hits:>4} drawn  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
             timing.p50, timing.p90, timing.max
+        );
+        // **Asserted, not merely printed.** Every case above names a row of
+        // `seed_estate`'s fixture by arithmetic on `ESTATE_SHAPE`, so a change
+        // to that shape turns each of them into a query that matches nothing
+        // -- and a query that matches nothing is comfortably inside any
+        // budget. This is the line that stops the report reading "under 100 ms"
+        // about six searches for a row that is not there.
+        assert!(
+            hits > 0,
+            "{name} ({raw}) matched nothing: the fixture moved"
         );
         assert!(
             timing.p90 < BUDGET_MS,

@@ -442,10 +442,11 @@ async fn the_trees_search_answers_with_assets_and_their_paths() {
 /// path -- which is what the picker draws under the name so two containers
 /// called `postgres` are told apart.
 ///
-/// Deliberately **not** the `asset:` prefix, which parses to the same filter
-/// and is short-circuited to nothing until #436 draws an asset hit in the
-/// launcher: the picker sets the filter itself, which is the mechanism that
-/// exists today.
+/// Deliberately **not** the `asset:` prefix, which parses to the same filter:
+/// the picker sets the filter itself, and that is the mechanism under test. The
+/// prefix was short-circuited to nothing when this was written and answers from
+/// the estate since #436; `the_asset_prefix_answers_from_the_estate_with_its_path`
+/// below is where the two are held to the same answer.
 #[tokio::test]
 async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
     let pool = pool().await;
@@ -538,7 +539,8 @@ async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
     assert_eq!(response.interpreted.filters.kinds, ["asset"]);
     let kinds: Vec<_> = response.groups.iter().map(|g| g.kind.as_str()).collect();
     assert_eq!(
-        kinds, ["asset"],
+        kinds,
+        ["asset"],
         "`asset:` reaches the estate and keeps the mirror's rows out: {kinds:?}"
     );
     let hit = response.groups[0]

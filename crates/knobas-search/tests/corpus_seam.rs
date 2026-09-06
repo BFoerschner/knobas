@@ -362,7 +362,14 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
     // host and the port that is the only thing telling the nine of them apart
     // (ADR-0013: the real container is the witness). The port is unique to this
     // file, so no other test in this binary can match it.
-    seed_route(&pool, &route, &vm, &format!("{t} kuma"), "http://127.0.0.1:53001/").await;
+    seed_route(
+        &pool,
+        &route,
+        &vm,
+        &format!("{t} kuma"),
+        "http://127.0.0.1:53001/",
+    )
+    .await;
 
     // The token is on every seeded row, so one query asks all four corpora and
     // the answer is the union's.
@@ -383,7 +390,10 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
         .expect("the VM under the site");
     // The path is the estate's own column, not the mirror's `null`, and a root
     // asset's is `null` rather than an empty line under every site.
-    assert_eq!(vm_hit.row.path.as_deref(), Some(format!("{t} hel1").as_str()));
+    assert_eq!(
+        vm_hit.row.path.as_deref(),
+        Some(format!("{t} hel1").as_str())
+    );
     assert_eq!(
         assets
             .hits
@@ -463,7 +473,15 @@ async fn a_path_in_a_url_takes_its_port_and_its_segments_out_of_reach() {
     let t = token("url");
 
     let vm = format!("asset:{t}-vm");
-    seed_asset(&pool, &vm, &format!("{t} vm"), None, "", serde_json::json!({})).await;
+    seed_asset(
+        &pool,
+        &vm,
+        &format!("{t} vm"),
+        None,
+        "",
+        serde_json::json!({}),
+    )
+    .await;
     let route = format!("route:{t}-r");
     seed_route(
         &pool,

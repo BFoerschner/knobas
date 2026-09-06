@@ -1792,10 +1792,18 @@ async fn the_assets_property_text_is_the_same_expression_the_index_matches() {
          props_text: {props_expr}\n\
          fts:        {fts_expr}"
     );
-    // And at weight C -- below the name (A) and the ancestor path (B), which is
-    // the ranking `0017` designed and `0019` fills the last rung of.
+    // And at weight **C on that expression** -- below the name (A) and the
+    // ancestor path (B), which is the ranking `0017` designed and `0019` fills
+    // the last rung of. The weight is read off the `setweight` wrapping the
+    // property text, not off the first `'C'` anywhere in the statement: a
+    // property bag weighted A and some other term weighted C would satisfy the
+    // looser reading and invert the launcher's whole ranking.
+    let weighted = fts_expr
+        .split("setweight(")
+        .find(|term| term.contains(&props_expr))
+        .unwrap_or_else(|| panic!("no setweight carries the property text: {fts_expr}"));
     assert!(
-        fts_expr.contains("'C'::\"char\"") || fts_expr.contains("'C'"),
-        "the property text is weighted below the name and the path: {fts_expr}"
+        weighted.contains("'C'"),
+        "the property text must be weighted C, below the name and the path: {weighted}"
     );
 }

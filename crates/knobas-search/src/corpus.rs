@@ -33,7 +33,10 @@
 //! survive contact, recorded on [`ASSET`] itself: `source_id` is the constant
 //! `'asset'` rather than an `imported_from` column the import (#439) has not
 //! yet asked for. The sketch's `props_text` was deferred by `0017` and landed
-//! with `0019` (#436), values-only and at the weight sketched here.
+//! with `0019` (#436), values-only and at the weight sketched here -- but not
+//! in the two lines below: PostgreSQL forbids a generated column from
+//! referencing another, so the real `fts` cannot read `props_text` and
+//! recomputes its expression instead. `0019` carries that and the mitigation.
 //!
 //! Assets are a tree, and spec §4 requires "pve-02" to find the containers
 //! *under* pve-02. The path therefore has to be part of the indexed text, and
