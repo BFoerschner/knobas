@@ -145,3 +145,45 @@ test("a declared kind that already has a bucket keeps the bucket's heading", () 
   expect(tilesFor(["ticket"], declared)[0]?.label).toBe("Tickets");
 });
 
+
+/**
+ * The Kuma room, drawn from nothing but the descriptor (#442).
+ *
+ * `monitor` is deliberately absent from both the bucket map and knobas' own
+ * vocabulary above: it is a kind one adapter emits, and §3a's promise is that
+ * such a kind gets grouped, chipped and labelled with no UI work at all. So
+ * this is the promise, spelled with the values `knobas-source-kuma`'s
+ * descriptor actually declares — a tile of its own, the adapter's plural on it,
+ * and the adapter's monogram on the chip.
+ *
+ * The failure it guards is the tempting one: adding `monitor` to `VOCABULARY`
+ * above "so the Kuma room reads well". That is the per-adapter table §3a
+ * forbids, and it would pass every test here while making the *next* source's
+ * kind the thing nobody remembered to add.
+ */
+test("a monitor is tiled, labelled and chipped from the Kuma descriptor alone", () => {
+  const declared = (kind: string) =>
+    kind === "monitor"
+      ? {
+          id: "monitor",
+          label: "Monitor",
+          plural: "Monitors",
+          monogram: "MO",
+          full_sync_exhaustive: true,
+        }
+      : null;
+
+  const [tile] = tilesFor(["monitor"], declared);
+  expect(tile).toEqual({ id: "monitor", label: "Monitors", kinds: ["monitor"] });
+  expect(kindSingular("monitor", declared("monitor"))).toBe("Monitor");
+  expect(kindMonogram("monitor", declared("monitor"))).toBe("MO");
+
+  // **These two prove nothing about the declaration, and are here so that
+  // nobody mistakes them for proof.** With no resolver the generic layer
+  // answers `MO` (the first two letters) and `Monitors` (the humaniser), which
+  // is the same answer — so a `kindMonogram("monitor")` in some other test
+  // would go on passing after the descriptor stopped declaring anything. The
+  // assertions above, with `declared` handed in, are the ones that can fail.
+  expect(kindMonogram("monitor")).toBe("MO");
+  expect(kindLabel("monitor")).toBe("Monitors");
+});

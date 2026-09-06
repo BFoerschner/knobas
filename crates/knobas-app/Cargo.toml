@@ -40,6 +40,7 @@ knobas-source = { path = "../knobas-source" }
 knobas-source-confluence = { path = "../knobas-source-confluence" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 knobas-source-jira = { path = "../knobas-source-jira" }
+knobas-source-kuma = { path = "../knobas-source-kuma" }
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-source-teamcity = { path = "../knobas-source-teamcity" }
 knobas-sync = { path = "../knobas-sync" }
@@ -120,6 +121,12 @@ tauri = { version = "2", features = ["test"] }
 reqwest.workspace = true
 # `tests/backup.rs` writes archives somewhere that goes away with the test.
 tempfile = "3"
+# The docker-free stand-in `tests/adapter_to_mirror.rs` points the real Uptime
+# Kuma adapter at, serving the recording that crate's own suite serves (#442).
+# mockd would have been the place for it, but mockd is frozen (ADR-0013) and
+# nothing new goes in. It brings no `reqwest` of its own; `cargo tree -i
+# reqwest` must stay at one.
+wiremock = "0.6"
 tokio.workspace = true
 # Per-test source ids: the database is shared across a test binary, and a
 # hardcoded id would make two tests each other's fixture. For the same reason a

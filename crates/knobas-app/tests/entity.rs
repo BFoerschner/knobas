@@ -254,11 +254,27 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
     );
 }
 
+/// Scoped to the `mock` source, for the same class of reason
+/// [`lists_the_newest_first_and_reports_the_unpaged_total`] is, and for one
+/// worth naming because it is not about freshness.
+///
+/// The oracle below is Rust's `sort()`, which is **byte order**, and the
+/// database's is its own collation -- and the two disagree the moment a title
+/// starts with a lowercase letter. Every title in the mock corpus happens to
+/// start with a capital, so the disagreement never showed; the first test in
+/// this binary to write a lowercase title made it fail here, in a test that has
+/// nothing to do with that test's subject (#442, whose monitors really are
+/// called `gitea` and `canary`). Scoping is the fix the file's own header asks
+/// for -- "written to survive another test running beside it" -- and it costs
+/// this test nothing: what it asserts is that `TitleAsc` is a *second SQL
+/// statement* rather than an interpolated column name, and one source's rows
+/// answer that as well as the whole corpus does.
 #[tokio::test]
 async fn title_order_is_a_second_statement_not_string_interpolation() {
     let pool = seeded().await;
     let filter = EntityFilter {
         order: EntityOrder::TitleAsc,
+        sources: vec!["mock".to_owned()],
         ..all()
     };
     let page = list_entities_inner(&pool, &filter, 500, 0, &no_paths())
@@ -275,10 +291,21 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
     assert_eq!(titles, sorted);
 
     // ...and it is a different order from the default, or the assertion above
-    // would hold for a `match` that returned the same statement twice.
-    let by_date = list_entities_inner(&pool, &all(), 500, 0, &no_paths())
-        .await
-        .unwrap();
+    // would hold for a `match` that returned the same statement twice. **The
+    // same scope**, or the two lists would differ because they cover different
+    // rows and this would pass however `TitleAsc` was implemented.
+    let by_date = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec!["mock".to_owned()],
+            ..all()
+        },
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert_ne!(
         by_date
             .rows
@@ -1981,4 +2008,122 @@ async fn a_malformed_note_id_is_invalid_and_an_unknown_one_is_not_found() {
     );
     // ...but deleting one that is not there is not an error at all.
     assert!(!delete_note_inner(&pool, &nobody).await.unwrap());
+}
+
+/// **The Kuma source has its room, and it has no project rooms** (spec #427,
+/// *The Kuma room and tiles*: "No switcher exception: the Kuma source has its
+/// room; it declares no projects").
+///
+/// The sibling of `a_confluence_space_is_a_project_room_and_a_jira_project_is_another`,
+/// and it asserts the *other* direction of the same one read. That test shows
+/// two adapters whose declarations produce rooms; this one shows an adapter
+/// whose declaration produces none, which is the direction a hardcoded
+/// per-source table would get wrong by omission and nothing else here would
+/// catch: the census is built from `payload_paths`, so a source declaring no
+/// `project_key` contributes nothing to it and the switcher offers its room
+/// alone.
+///
+/// The declarations come out of `declared_paths` over the real registry, the
+/// way the running binary's `list_projects` gets them -- so a `project_key`
+/// added to the Kuma descriptor fails this test and not only the descriptor's
+/// own.
+#[tokio::test]
+async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
+    let pool = seeded().await;
+    let watchtower = format!("kuma-{}", unique());
+
+    sqlx::query(
+        "insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind)
+         values ($1, $2, $1, 'http://127.0.0.1:3001', 'api_token')",
+    )
+    .bind(&watchtower)
+    .bind(knobas_source_kuma::ADAPTER_KIND)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The payload shape `knobas_source_kuma::map` writes: the state at the top
+    // level, which is where the descriptor declares it, and nothing that looks
+    // like a project anywhere.
+    for (key, title, payload) in [
+        (
+            "7",
+            "gitea",
+            serde_json::json!({ "id": "7", "name": "gitea", "type": "http", "state": "up" }),
+        ),
+        (
+            "8",
+            "canary",
+            serde_json::json!({ "id": "8", "name": "canary", "type": "http", "state": "down" }),
+        ),
+    ] {
+        let id = format!("{watchtower}:{key}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+            .bind(&id)
+            .bind(knobas_source_kuma::KIND_MONITOR)
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(&id)
+        .bind(&watchtower)
+        .bind(knobas_source_kuma::KIND_MONITOR)
+        .bind(title)
+        .bind(format!("{title} {}", payload["state"].as_str().unwrap()))
+        .bind(&payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let census = list_projects_inner(&pool)
+        .await
+        .expect("the census `list_projects` answers with");
+    assert!(
+        census.iter().all(|p| p.source_id != watchtower),
+        "a source that declares no project_key offers no project rooms: {:?}",
+        census
+            .iter()
+            .filter(|p| p.source_id == watchtower)
+            .collect::<Vec<_>>()
+    );
+
+    let declarations = knobas_app::sources::paths::declared_paths(
+        &pool,
+        &knobas_app::sources::Registry::builtin(),
+    )
+    .await
+    .expect("what the configured sources declare");
+
+    // The source room itself: both monitors, under the one filter the room
+    // hands every tile.
+    let room = EntityFilter {
+        sources: vec![watchtower.clone()],
+        ..all()
+    };
+    let rows = list_entities_inner(&pool, &room, 500, 0, &declarations)
+        .await
+        .unwrap();
+    let ids: std::collections::BTreeSet<String> =
+        rows.rows.into_iter().map(|row| row.entity_id).collect();
+    assert_eq!(
+        ids,
+        std::collections::BTreeSet::from([format!("{watchtower}:7"), format!("{watchtower}:8")]),
+        "the Kuma room holds this source's monitors"
+    );
+
+    // And the tile the room draws for them is the adapter's own -- `monitor`
+    // is not one of the buckets `app/src/lib/shell/kinds.ts` names, so what
+    // labels it is the `KindInfo` this descriptor declares (§3a).
+    let kind = knobas_source_kuma::descriptor_template()
+        .entity_kinds
+        .into_iter()
+        .find(|k| k.id == knobas_source_kuma::KIND_MONITOR)
+        .expect("the descriptor declares the kind its items carry");
+    assert_eq!(kind.plural, "Monitors");
 }

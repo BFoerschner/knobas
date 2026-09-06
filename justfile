@@ -1110,6 +1110,67 @@ start-work-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1
 
+# Where the Uptime Kuma live recipe gets its gate variables. Kuma's own two,
+# not the whole seed's: `./seed --env` refuses without `seed-state.json`, which
+# is Gitea's, and seeding Gitea to run a Kuma suite would re-mint the Gitea
+# token under whatever agent is mid-run against it (testenv/README.md, "One
+# environment, one owner at a time"). `--env-kuma` is that half.
+kuma_live_env := "testenv/, which is what the lines above this one do:
+  docker compose up -d --wait uptime-kuma
+  ./seed-kuma.sh
+  eval \"$(./seed --env-kuma)\"
+
+  `seed-kuma.sh` also needs `testenv/hetzner/hosts.env`, which is gitignored --
+  three of the monitors ping the Hetzner servers by IP. It refuses without it
+  rather than seeding an estate missing half of itself; copy the file into this
+  worktree or run ./hetzner/provision.sh."
+
+# The Uptime Kuma adapter against the REAL pinned container in `testenv/`
+# (issue #442, M4.1). ADR-0013: the real container is the witness.
+#
+# WHICH RECIPE CERTIFIES WHAT. `tests/contract.rs` runs the contract battery
+# against a *recording* of this server's `/metrics`, so that `just check` stays
+# docker-free (roadmap §3). This one certifies the same shapes against the
+# server that decides them -- the four gauge families and their labels, `"null"`
+# for a field a monitor has not got, `-1` for a response time that did not
+# happen, `app_version`, a wrong key's 401 -- plus the one thing no recording
+# can witness: that a monitor really deleted in Kuma really leaves the mirror.
+# The suite's own header says what it deliberately does not run, and why.
+#
+# WHAT IT CREATES AND WHAT IT REMOVES. One monitor, `knobas-live-scratch`,
+# added and deleted through `testenv/kuma-monitor.sh` -- the same socket.io
+# channel the seed uses. It is removed however the test ends, and anything a
+# killed run leaves behind is removed by the `./seed-kuma.sh` above, which
+# deletes every monitor `monitors.json` does not name. **No shared container is
+# stopped by anything here** (M4 spec, issue #427).
+#
+# THE TUNNEL DOES NOT HAVE TO BE UP. Three of the seeded monitors check the
+# products through `hetzner/tunnel` and are red without it. The suite asserts
+# that every monitor carries *a* state Kuma published, never that a particular
+# one is up, so a dead tunnel is not a red run here -- it is a red monitor,
+# which is what a monitor is for.
+#
+# Serial and unparallelised: the runs share one server, and one test asserts
+# how many monitors of each type the estate holds while another is adding one
+# of its own.
+#
+# ONE ENVIRONMENT, ONE OWNER. `seed-kuma.sh` re-mints the API key when the
+# worktree it runs from has no `kuma-api-key`, so a second agent seeding
+# mid-run makes the first agent's `/metrics` requests answer 401. Claim the
+# environment before you run this. testenv/README.md, "One environment, one
+# owner at a time".
+kuma-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    docker compose up -d --wait uptime-kuma
+    ./seed-kuma.sh
+    eval "$(./seed --env-kuma)"
+    just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY
+    cd ..
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
+      -- --ignored --nocapture --test-threads=1
+
 # TeamCity's live certification: the adapter against a **real** TeamCity.
 #
 # The same contract as `gitea-live` -- the fake is wrong when it disagrees with
