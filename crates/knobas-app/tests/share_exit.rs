@@ -142,11 +142,11 @@ async fn service_with(
 
 /// Everything the sharer has, written into `pool`.
 ///
-/// Returns the room's id. Everything else in it is addressed by a constant
-/// above, because a fixture that handed back the ids it made would let an
-/// assertion pass on a row this function invented rather than on the estate
-/// file's own.
-async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) -> String {
+/// It hands nothing back, deliberately: every row below is addressed by a
+/// constant at the top of this file or found by the read under test, and a
+/// fixture that returned the ids it made would let an assertion pass on a row
+/// this function invented rather than on the estate file's own.
+async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
     let outcome = assets::apply_import(pool, ESTATE_FILE)
         .await
         .expect("the estate file imports into an empty profile")
@@ -187,8 +187,6 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) -> Strin
     .execute(pool)
     .await
     .expect("an afternoon on the container");
-
-    room.id
 }
 
 /// The ticket, the link to it, and the source it came from -- **stood in for**.
