@@ -788,6 +788,547 @@ async fn an_asset_is_an_entity_in_the_namespace_knobas_reserves() {
 }
 
 // ---------------------------------------------------------------------------
+// What is inherited, and what rolls up (#431)
+// ---------------------------------------------------------------------------
+
+/// The estate the three #431 rules are read over, and the shape their
+/// **negatives** need: a site holding two VMs, each holding containers.
+///
+/// `three_levels` above cannot witness any of this. It is a single chain, so
+/// "a sibling subtree is unaffected" has no sibling to be unaffected, and
+/// "the nearest ancestor" and "any ancestor" name the same row for every asset
+/// in it. This one branches at the VM and again below it:
+///
+/// ```text
+/// hel1                       site, environment prod, owner Björn
+///   vm-db-01                 vm
+///     postgres               container
+///     redis                  container
+///   vm-app-02                vm
+///     nginx                  container
+/// ```
+struct Estate {
+    site: AssetRow,
+    db: AssetRow,
+    postgres: AssetRow,
+    redis: AssetRow,
+    app: AssetRow,
+    nginx: AssetRow,
+}
+
+async fn two_branches(pool: &PgPool) -> Estate {
+    let site = make(pool, None, "site", "hel1", &[]).await;
+    let db = make(pool, Some(&site.id), "vm", "vm-db-01", &[]).await;
+    let postgres = make(pool, Some(&db.id), "container", "postgres", &[]).await;
+    let redis = make(pool, Some(&db.id), "container", "redis", &[]).await;
+    let app = make(pool, Some(&site.id), "vm", "vm-app-02", &[]).await;
+    let nginx = make(pool, Some(&app.id), "container", "nginx", &[]).await;
+    Estate {
+        site,
+        db,
+        postgres,
+        redis,
+        app,
+        nginx,
+    }
+}
+
+/// Apply one edit, failing loudly.
+async fn edit_one(pool: &PgPool, id: &str, edit: AssetEdit) {
+    assets::edit(pool, id, &[edit])
+        .await
+        .unwrap_or_else(|error| panic!("edit {id}: {}", error.message));
+}
+
+/// The environment in force on `id`, and the name of the asset that sets it.
+async fn env_of(pool: &PgPool, id: &str) -> Option<(Environment, String)> {
+    assets::get(pool, id)
+        .await
+        .expect("the pane")
+        .effective_environment
+        .map(|from| (from.value, from.source_name))
+}
+
+/// The owner in force on `id`, and the name of the asset that sets it.
+async fn owner_of(pool: &PgPool, id: &str) -> Option<(String, String)> {
+    assets::get(pool, id)
+        .await
+        .expect("the pane")
+        .effective_owner
+        .map(|from| (from.value, from.source_name))
+}
+
+/// Stories 8, 9 and 10: the value in force is the nearest one at or above, and
+/// the read says **which asset** set it.
+///
+/// The negative is the second VM's subtree, which is checked after every
+/// override: an implementation that read the environment off the whole estate
+/// -- or off the outermost setter -- would pass the positive half of each
+/// step and fail here.
+#[tokio::test]
+async fn environment_and_owner_come_from_the_nearest_asset_at_or_above() {
+    let pool = pool("assets-inherit").await;
+    let estate = two_branches(&pool).await;
+
+    edit_one(
+        &pool,
+        &estate.site.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Prod),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.site.id,
+        AssetEdit::Owner {
+            value: Some("Björn".to_owned()),
+        },
+    )
+    .await;
+
+    // Two levels down, with nothing set in between: the site is the source,
+    // and the read names it so the pane can link to it.
+    let deep = assets::get(&pool, &estate.postgres.id).await.expect("pane");
+    let from = deep.effective_environment.expect("the site's environment");
+    assert_eq!(from.value, Environment::Prod);
+    assert_eq!(from.source_id, estate.site.id);
+    assert_eq!(from.source_name, "hel1");
+    assert!(
+        deep.asset.environment.is_none(),
+        "nothing is set *on* the container -- the stored field and the \
+         effective one are different facts"
+    );
+    let owner = deep.effective_owner.expect("the site's owner");
+    assert_eq!(owner.value, "Björn");
+    assert_eq!(owner.source_id, estate.site.id);
+
+    // The middle VM overrides it. Everything under that VM takes the new
+    // value; the other VM's subtree does not hear about it.
+    edit_one(
+        &pool,
+        &estate.db.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Dev),
+        },
+    )
+    .await;
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned())),
+        "the nearest setter wins, and it is the VM now"
+    );
+    assert_eq!(
+        env_of(&pool, &estate.redis.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned())),
+        "the override is for the whole subtree, not one child"
+    );
+    assert_eq!(
+        env_of(&pool, &estate.nginx.id).await,
+        Some((Environment::Prod, "hel1".to_owned())),
+        "the sibling subtree is unaffected"
+    );
+
+    // Set on the asset itself: the source is the asset, which is how the pane
+    // tells "set here" from "inherited from".
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Stage),
+        },
+    )
+    .await;
+    let own = assets::get(&pool, &estate.postgres.id).await.expect("pane");
+    let from = own.effective_environment.expect("its own environment");
+    assert_eq!(from.value, Environment::Stage);
+    assert_eq!(from.source_id, estate.postgres.id, "set here");
+    assert_eq!(
+        env_of(&pool, &estate.redis.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned())),
+        "a sibling *asset* is unaffected too, not only a sibling subtree"
+    );
+
+    // Owner walks the same field, and overriding one does not move the other:
+    // the two are read independently or the pane would show a team that never
+    // owned the thing.
+    edit_one(
+        &pool,
+        &estate.db.id,
+        AssetEdit::Owner {
+            value: Some("Platform".to_owned()),
+        },
+    )
+    .await;
+    let deep = assets::get(&pool, &estate.postgres.id).await.expect("pane");
+    assert_eq!(
+        deep.effective_owner.expect("the VM's owner").value,
+        "Platform"
+    );
+    assert_eq!(
+        deep.effective_environment.expect("still its own").source_id,
+        estate.postgres.id,
+        "the owner override left the environment where it was"
+    );
+    assert_eq!(
+        assets::get(&pool, &estate.nginx.id)
+            .await
+            .expect("pane")
+            .effective_owner
+            .expect("the site's owner")
+            .source_name,
+        "hel1",
+        "the sibling subtree still has the site's owner"
+    );
+}
+
+/// Clearing a child's own environment falls back to the ancestor's again.
+///
+/// `null` is an unambiguous clear on this wire (`AssetEdit` is a tagged
+/// union), so this is the one rule of the three that has a *write* in the
+/// middle of it. The negative is the same read on an estate where nothing is
+/// set anywhere: the answer there is `None`, not the first value the walk
+/// happens to meet.
+#[tokio::test]
+async fn clearing_a_childs_environment_falls_back_to_the_ancestors() {
+    let pool = pool("assets-clear").await;
+    let estate = two_branches(&pool).await;
+
+    // Nothing set anywhere: nothing is in force, and that is a `null` rather
+    // than a default.
+    assert_eq!(env_of(&pool, &estate.postgres.id).await, None);
+    assert!(
+        assets::get(&pool, &estate.postgres.id)
+            .await
+            .expect("pane")
+            .effective_owner
+            .is_none()
+    );
+
+    edit_one(
+        &pool,
+        &estate.site.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Prod),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.db.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Dev),
+        },
+    )
+    .await;
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned()))
+    );
+
+    edit_one(&pool, &estate.db.id, AssetEdit::Environment { value: None }).await;
+
+    let cleared = assets::get(&pool, &estate.db.id).await.expect("pane");
+    assert!(
+        cleared.asset.environment.is_none(),
+        "the stored value is gone"
+    );
+    let from = cleared
+        .effective_environment
+        .expect("the site's value is in force again");
+    assert_eq!(from.value, Environment::Prod);
+    assert_eq!(from.source_id, estate.site.id);
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Prod, "hel1".to_owned())),
+        "and everything under it falls back with it"
+    );
+    assert_eq!(
+        env_of(&pool, &estate.nginx.id).await,
+        Some((Environment::Prod, "hel1".to_owned())),
+        "the sibling subtree never moved"
+    );
+
+    // Owner clears the same way, and it is asserted rather than assumed: the
+    // two fields share `inherited`'s walk but not the write, and
+    // `AssetEdit::Owner { value: None }` is a different statement from
+    // `AssetEdit::Environment { value: None }`.
+    for (id, owner) in [(&estate.site.id, "Björn"), (&estate.db.id, "Platform")] {
+        edit_one(
+            &pool,
+            id,
+            AssetEdit::Owner {
+                value: Some(owner.to_owned()),
+            },
+        )
+        .await;
+    }
+    assert_eq!(
+        owner_of(&pool, &estate.postgres.id).await,
+        Some(("Platform".to_owned(), "vm-db-01".to_owned()))
+    );
+    edit_one(&pool, &estate.db.id, AssetEdit::Owner { value: None }).await;
+    assert_eq!(
+        owner_of(&pool, &estate.postgres.id).await,
+        Some(("Björn".to_owned(), "hel1".to_owned())),
+        "clearing the VM's owner falls back to the site's"
+    );
+    assert_eq!(
+        owner_of(&pool, &estate.nginx.id).await,
+        Some(("Björn".to_owned(), "hel1".to_owned())),
+        "and the sibling subtree, which never had the VM's, is where it was"
+    );
+}
+
+/// A **move** changes what an asset inherits and what rolls up, without any
+/// edit to either.
+///
+/// The negative for the two tests above, which prove "for that subtree"
+/// against *writes* only: both answers are read-time walks over `parent_id`,
+/// so re-parenting has to move them, and an implementation that cached either
+/// on the row would pass every other test in this file and fail here.
+#[tokio::test]
+async fn a_move_carries_the_inherited_value_and_the_rollup_with_it() {
+    let pool = pool("assets-move-rollup").await;
+    let estate = two_branches(&pool).await;
+
+    edit_one(
+        &pool,
+        &estate.db.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Dev),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.app.id,
+        AssetEdit::Environment {
+            value: Some(Environment::Prod),
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Dev, "vm-db-01".to_owned()))
+    );
+
+    assets::move_to(&pool, &estate.postgres.id, Some(&estate.app.id))
+        .await
+        .expect("the move");
+
+    assert_eq!(
+        env_of(&pool, &estate.postgres.id).await,
+        Some((Environment::Prod, "vm-app-02".to_owned())),
+        "the container inherits from where it is now, not from where it was"
+    );
+
+    let vms = assets::tree(&pool, Some(&estate.site.id))
+        .await
+        .expect("the VMs");
+    let moved_to = vms.iter().find(|row| row.name == "vm-app-02").expect("app");
+    let moved_from = vms.iter().find(|row| row.name == "vm-db-01").expect("db");
+    assert_eq!(moved_to.problems_inside, 1, "the problem moved in");
+    assert_eq!(moved_to.health, AssetStatus::Down);
+    assert_eq!(moved_from.problems_inside, 0, "and out");
+    assert_eq!(moved_from.health, AssetStatus::None);
+}
+
+/// Story 37 and story 32: effective health is the worst of an asset and
+/// everything under it, and `problems_inside` counts the descendants carrying
+/// one.
+///
+/// Read through `assets::tree`, which is the read a **column** makes -- the
+/// badge is drawn on a column row, so a rollup that only worked in the pane
+/// would be a rollup nobody sees.
+#[tokio::test]
+async fn a_column_row_reports_its_effective_health_and_what_is_wrong_inside() {
+    let pool = pool("assets-rollup").await;
+    let estate = two_branches(&pool).await;
+
+    /// One column row by name, or a panic naming what the column held.
+    fn find<'c>(column: &'c [AssetRow], name: &str) -> &'c AssetRow {
+        column
+            .iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} is not in the column: {:?}",
+                    column.iter().map(|row| &row.name).collect::<Vec<_>>()
+                )
+            })
+    }
+
+    // Nothing rated: no badge anywhere, and health is `none` rather than `up`
+    // -- "nobody has said" is not "it is fine".
+    let top = assets::tree(&pool, None).await.expect("the top");
+    assert_eq!(find(&top, "hel1").problems_inside, 0);
+    assert_eq!(find(&top, "hel1").health, AssetStatus::None);
+    assert_eq!(find(&top, "hel1").inside, AssetStatus::None);
+
+    // One container down, two levels below the site.
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+
+    let top = assets::tree(&pool, None).await.expect("the top");
+    let site = find(&top, "hel1");
+    assert_eq!(site.problems_inside, 1, "a red badge of 1");
+    assert_eq!(site.inside, AssetStatus::Down, "and it is red, not amber");
+    assert_eq!(
+        site.health,
+        AssetStatus::Down,
+        "the problem rolls all the way up"
+    );
+    assert_eq!(
+        site.status,
+        AssetStatus::None,
+        "nobody rated the site itself -- the rollup is not a write"
+    );
+
+    let vms = assets::tree(&pool, Some(&estate.site.id))
+        .await
+        .expect("the VMs");
+    assert_eq!(find(&vms, "vm-db-01").problems_inside, 1);
+    assert_eq!(find(&vms, "vm-db-01").health, AssetStatus::Down);
+    assert_eq!(
+        find(&vms, "vm-app-02").problems_inside,
+        0,
+        "the sibling subtree holds nothing wrong"
+    );
+    assert_eq!(find(&vms, "vm-app-02").health, AssetStatus::None);
+    assert_eq!(find(&vms, "vm-app-02").inside, AssetStatus::None);
+
+    // The container itself: it *is* the problem, and an asset is never a
+    // problem inside itself.
+    let containers = assets::tree(&pool, Some(&estate.db.id))
+        .await
+        .expect("the containers");
+    assert_eq!(find(&containers, "postgres").health, AssetStatus::Down);
+    assert_eq!(find(&containers, "postgres").problems_inside, 0);
+    assert_eq!(find(&containers, "postgres").inside, AssetStatus::None);
+    assert_eq!(find(&containers, "redis").health, AssetStatus::None);
+
+    // A warn in the other branch: an amber badge of 1 there, and the site's
+    // count grows to two while staying red -- the worst wins, the count adds.
+    edit_one(
+        &pool,
+        &estate.nginx.id,
+        AssetEdit::Status {
+            value: AssetStatus::Warn,
+        },
+    )
+    .await;
+    let vms = assets::tree(&pool, Some(&estate.site.id))
+        .await
+        .expect("the VMs");
+    assert_eq!(
+        find(&vms, "vm-app-02").problems_inside,
+        1,
+        "an amber badge of 1"
+    );
+    assert_eq!(find(&vms, "vm-app-02").inside, AssetStatus::Warn);
+    assert_eq!(find(&vms, "vm-app-02").health, AssetStatus::Warn);
+
+    let top = assets::tree(&pool, None).await.expect("the top");
+    assert_eq!(find(&top, "hel1").problems_inside, 2);
+    assert_eq!(
+        find(&top, "hel1").inside,
+        AssetStatus::Down,
+        "two problems, the worse of them red"
+    );
+
+    // The case that makes `inside` a field of its own: an asset worse than
+    // what it holds. The VM goes down while its one container is only
+    // warning, so the row is `down` and the badge is **amber** -- the badge is
+    // about what is inside.
+    edit_one(
+        &pool,
+        &estate.app.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+    let vms = assets::tree(&pool, Some(&estate.site.id))
+        .await
+        .expect("the VMs");
+    let app = find(&vms, "vm-app-02");
+    assert_eq!(app.health, AssetStatus::Down);
+    assert_eq!(app.problems_inside, 1);
+    assert_eq!(
+        app.inside,
+        AssetStatus::Warn,
+        "the VM's own trouble is not a problem *inside* it"
+    );
+
+    // Story 37 orders `up` **above** `none`, so an asset nobody has rated
+    // reads `up` when the only thing under it is up. A fresh branch of its
+    // own, because every asset in the estate above is now rated or holds
+    // something that is: a leaf whose own status is `up` reads `up` under any
+    // ordering, and would witness nothing.
+    let spare = make(&pool, None, "site", "spare", &[]).await;
+    let lone = make(&pool, Some(&spare.id), "vm", "vm-spare-01", &[]).await;
+    edit_one(
+        &pool,
+        &lone.id,
+        AssetEdit::Status {
+            value: AssetStatus::Up,
+        },
+    )
+    .await;
+    let top = assets::tree(&pool, None).await.expect("the top");
+    let unrated = find(&top, "spare");
+    assert_eq!(unrated.status, AssetStatus::None, "nobody rated the site");
+    assert_eq!(
+        unrated.health,
+        AssetStatus::Up,
+        "and `up` is worse than nobody-has-said, so the rollup reports it"
+    );
+    assert_eq!(unrated.inside, AssetStatus::Up);
+    assert_eq!(unrated.problems_inside, 0, "`up` is not a problem");
+
+    // And the pane's own row carries the same numbers as the column's, so the
+    // reader is never told two different things about one asset.
+    // Three by now, not two: the VM that went down is itself a problem inside
+    // the site, on top of the two containers.
+    let pane = assets::get(&pool, &estate.site.id).await.expect("pane");
+    assert_eq!(pane.asset.problems_inside, 3);
+    assert_eq!(pane.asset.health, AssetStatus::Down);
+    assert_eq!(
+        pane.holds
+            .iter()
+            .map(|row| (row.name.as_str(), row.problems_inside))
+            .collect::<Vec<_>>(),
+        [("vm-app-02", 1), ("vm-db-01", 1)],
+        "what it holds carries its own counts"
+    );
+    let deep = assets::get(&pool, &estate.nginx.id).await.expect("pane");
+    assert_eq!(
+        deep.held_by
+            .iter()
+            .map(|row| (row.name.as_str(), row.problems_inside))
+            .collect::<Vec<_>>(),
+        [("hel1", 3), ("vm-app-02", 1)],
+        "and so does every ancestor on the path"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The wiring: registered, named, and decoding.
 // ---------------------------------------------------------------------------
 

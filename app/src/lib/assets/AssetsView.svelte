@@ -15,16 +15,25 @@
   **The pane is fixed and the columns scroll under it** (story 33): the whole
   point of the layout is that the path stays visible while the reader reads.
 
+  **What is in force, and what is wrong inside** (#431). The pane's *In force*
+  group is the value the asset actually has — environment, owner, health —
+  against the *Properties* group, which is what is stored on it. Where a value
+  comes from an ancestor the note says which, and it is a link: story 10's
+  point is that a reader who sees `prod` needs one click to the place `prod`
+  can be changed. The column badge counts what is **inside** a row and is
+  coloured by the worst of it, which is why a row can be red with an amber
+  badge — the row's colour is about the row, the badge is about its contents.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** Creating and editing from the pane is #429 — a `+` on a column
   header with no dialog behind it is a promise the view cannot keep. The
   keyboard walk, the spine collapse and the search that reveals a path are
-  #430. Inherited environment and owner, the *N problems inside* badge and the
-  *open URL* / *copy SSH* actions are #431; the pane shows the value **set on
-  this asset**, which is what that walk will read. Routes, wires, *Link to…*,
-  the linked-work badge and monitoring are #432, #433, #435 and M4.1. The
-  Monitors tab is M4.1's, so the tab strip has one tab in it: a disabled
-  sibling would teach the reader only that the app is unfinished.
+  #430. The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
+  and arrive with the routes that carry the URLs (#432). Wires, *Link to…*,
+  the linked-work badge and monitoring are #433, #435 and M4.1; monitors are
+  also the half of story 37's *own* health that is not here yet. The Monitors
+  tab is M4.1's, so the tab strip has one tab in it: a disabled sibling would
+  teach the reader only that the app is unfinished.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -34,6 +43,8 @@
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
+    type Environment,
+    type Inherited,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import { ago } from "../shell/time";
@@ -43,7 +54,9 @@
     columnPathFor,
     emptyPath,
     heldByPath,
+    problemBadge,
     selectionIn,
+    sourceOf,
     type ColumnPath,
   } from "./tree";
 
@@ -174,6 +187,17 @@
     if (property.value === null) return "—";
     return String(property.value.value);
   }
+
+  /**
+   * Follow a `ValueSource`'s link, where it has one.
+   *
+   * A function rather than a `!` in the template: `goTo` is `null` exactly
+   * when the value is set on this asset, and the branch that must never
+   * happen is a click leading back to the asset the reader is looking at.
+   */
+  function goToSource(hash: string | null) {
+    if (hash !== null) router.go(hash);
+  }
 </script>
 
 <section class="view">
@@ -218,6 +242,7 @@
           {@const chosen = selectionIn(path, index)}
           <ol class="col">
             {#each column as row (row.id)}
+              {@const badge = problemBadge(row)}
               <li>
                 <button
                   class="row {chosen === row.id ? 'on' : ''}"
@@ -227,6 +252,19 @@
                 >
                   <span class="mg" title={row.type_label}>{row.monogram}</span>
                   <span class="nm">{row.name}</span>
+                  {#if badge}
+                    <!--
+                      Story 32: what a *closed* branch is hiding. The number is
+                      the count of descendants carrying warn or down, and the
+                      colour is the worst of them — so a row that is itself
+                      down while holding one warning container is a red row
+                      with an amber badge.
+                    -->
+                    <span
+                      class="badge {badge.tone}"
+                      title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
+                    >{badge.count}</span>
+                  {/if}
                   {#if row.has_children}
                     <!--
                       The chevron is the only thing that says there is a next
@@ -258,6 +296,60 @@
         <p class="crumb mono" title="Where this asset sits in the estate">
           {heldByPath(detail).join(" / ")}
         </p>
+
+        <!--
+          What the asset *has*, as against what is stored on it. Environment
+          and owner walk up to the nearest asset that sets them (stories 8 and
+          9) and health is the worst of this asset and everything under it
+          (story 37) — three values that can each come from somewhere else, so
+          each one says where.
+        -->
+        <!--
+          Environment and owner draw the same three lines from the same shape,
+          so they are one snippet: two copies differing only in which field
+          they read is the pane's own version of the duplication the backend
+          avoids with one `inherited` walk.
+        -->
+        {#snippet inForce(label: string, held: Inherited<string | Environment> | null)}
+          <div class="prop force">
+            <dt>{label}</dt>
+            <dd>
+              {#if held}
+                {@const from = sourceOf(detail!, held)}
+                <span>{held.value}</span>
+                {#if from.goTo}
+                  <button class="link src" onclick={() => goToSource(from.goTo)}>{from.note}</button>
+                {:else}
+                  <span class="src faint">{from.note}</span>
+                {/if}
+              {:else}
+                <span class="faint">Not set anywhere</span>
+              {/if}
+            </dd>
+          </div>
+        {/snippet}
+
+        <section class="grp">
+          <h3 class="lab">In force</h3>
+          <dl class="props">
+            {@render inForce("Environment", detail.effective_environment)}
+            {@render inForce("Owner", detail.effective_owner)}
+            <div class="prop force">
+              <dt>Health</dt>
+              <dd>
+                <span class="hl {detail.asset.health}">{detail.asset.health}</span>
+                {#if detail.asset.health !== detail.asset.status}
+                  <!--
+                    Only when the two differ: repeating "own status: down"
+                    under a health of "down" is a line that never says
+                    anything.
+                  -->
+                  <span class="src faint">own status {detail.asset.status}</span>
+                {/if}
+              </dd>
+            </div>
+          </dl>
+        </section>
 
         <section class="grp">
           <h3 class="lab">Properties</h3>
@@ -389,6 +481,29 @@
     flex: none;
   }
 
+  /* Story 32's badge. Amber and red are the app's own two alarm colours
+     (`--amber`, `--fail`), and the number is monospaced so a column of them
+     lines up at one glance rather than being read one row at a time. */
+  .row .badge {
+    flex: none;
+    min-width: 16px;
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 14px;
+    text-align: center;
+  }
+
+  .row .badge.warn {
+    color: var(--amber);
+  }
+
+  .row .badge.down {
+    color: var(--fail);
+  }
+
   .pane {
     border-left: 1px solid var(--hair);
     background: var(--panel);
@@ -459,6 +574,55 @@
     margin: 0;
     font-family: var(--mono);
     overflow-wrap: anywhere;
+  }
+
+  /*
+     The *In force* rows stack their value and the note about where it came
+     from, rather than sharing one line: the note is a sentence, and `.prop
+     dd`'s `overflow-wrap: anywhere` -- right for an IP or an image tag --
+     breaks a sentence one character at a time in a 200px pane.
+  */
+  .prop.force dd {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  /*
+     Where a value came from, under the value and never instead of it. One
+     line, elided if the ancestor's name is long -- the treatment `.row .nm`
+     gets one section up, and the reason is the same: this is a sentence, and
+     a sentence broken across three lines in a 200px column reads as three.
+  */
+  .prop .src {
+    max-width: 100%;
+    font-family: var(--sans);
+    font-size: 11px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .prop button.src {
+    text-decoration: underline;
+  }
+
+  .prop .hl.warn {
+    color: var(--amber);
+  }
+
+  .prop .hl.down {
+    color: var(--fail);
+  }
+
+  .prop .hl.up {
+    color: var(--ok);
+  }
+
+  .prop .hl.none {
+    color: var(--faint);
   }
 
   .lst,

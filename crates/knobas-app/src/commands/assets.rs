@@ -197,6 +197,9 @@ mod tests {
             environment: Some(Environment::Prod),
             owner: Some("Björn".to_owned()),
             has_children: true,
+            health: AssetStatus::Down,
+            inside: AssetStatus::Down,
+            problems_inside: 3,
         }
     }
 
@@ -217,7 +220,33 @@ mod tests {
                 "environment",
                 "owner",
                 "has_children",
+                "health",
+                "inside",
+                "problems_inside",
             ],
+        );
+    }
+
+    /// The inherited value's carrier (#431), whose mirror is **generic**.
+    ///
+    /// `"Inherited<T>"` and not `"Inherited"`: [`assert_shape`] finds an
+    /// interface by the text of its header, and the mirror's header is
+    /// `export interface Inherited<T> {` because the value it carries is an
+    /// `Environment` in one field of `AssetDetail` and a `string` in the
+    /// other. One generic interface rather than two concrete ones, so a fourth
+    /// inherited field later grows nothing.
+    #[test]
+    fn the_inherited_value_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "Inherited<T>",
+            &serde_json::to_value(assets::Inherited {
+                value: Environment::Prod,
+                source_id: "asset:hel1".to_owned(),
+                source_name: "hel1".to_owned(),
+            })
+            .unwrap(),
+            &["value", "source_id", "source_name"],
         );
     }
 
@@ -437,6 +466,12 @@ mod tests {
         let detail = AssetDetail {
             asset: row(),
             properties: Vec::new(),
+            effective_environment: Some(assets::Inherited {
+                value: Environment::Prod,
+                source_id: "asset:hel1".to_owned(),
+                source_name: "hel1".to_owned(),
+            }),
+            effective_owner: None,
             held_by: Vec::new(),
             holds: Vec::new(),
             history: Vec::new(),
@@ -445,7 +480,15 @@ mod tests {
             MIRROR,
             "AssetDetail",
             &serde_json::to_value(detail).unwrap(),
-            &["asset", "properties", "held_by", "holds", "history"],
+            &[
+                "asset",
+                "properties",
+                "effective_environment",
+                "effective_owner",
+                "held_by",
+                "holds",
+                "history",
+            ],
         );
     }
 }

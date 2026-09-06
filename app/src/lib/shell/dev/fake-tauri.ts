@@ -422,13 +422,67 @@ const FIXTURE_ESTATE: {
   },
 ];
 
-/** One asset as a column row -- everything but its properties and its path. */
-function assetRow(asset: (typeof FIXTURE_ESTATE)[number]) {
+type FixtureAsset = (typeof FIXTURE_ESTATE)[number];
+
+/** The two statuses `assets::ROLLUP` counts as a problem inside. */
+const PROBLEM: FixtureAsset["status"][] = ["warn", "down"];
+
+/** `AssetStatus::severity` -- down over warn over up over none, worst first. */
+const SEVERITY: Record<FixtureAsset["status"], number> = { down: 0, warn: 1, up: 2, none: 3 };
+
+/** Everything under `asset`, over the parent field. */
+function descendants(asset: FixtureAsset): FixtureAsset[] {
+  const held = FIXTURE_ESTATE.filter((other) => other.parent_id === asset.id);
+  return held.flatMap((child) => [child, ...descendants(child)]);
+}
+
+/** The worst of a set of statuses, `"none"` for an empty one. */
+function worst(statuses: FixtureAsset["status"][]): FixtureAsset["status"] {
+  return statuses.reduce(
+    (so_far, next) => (SEVERITY[next] < SEVERITY[so_far] ? next : so_far),
+    "none",
+  );
+}
+
+/**
+ * One asset as a column row -- everything but its properties and its path,
+ * plus the rollup `assets::ROLLUP` computes (#431).
+ */
+function assetRow(asset: FixtureAsset) {
   const { properties: _properties, ...row } = asset;
+  const under = descendants(asset);
+  const inside = worst(under.map((held) => held.status));
   return {
     ...row,
     has_children: FIXTURE_ESTATE.some((other) => other.parent_id === asset.id),
+    health: worst([asset.status, inside]),
+    inside,
+    problems_inside: under.filter((held) => PROBLEM.includes(held.status)).length,
   };
+}
+
+/**
+ * `assets::inherited`: the nearest asset at or above that sets a value.
+ *
+ * A copy of the store's **rule**, not of one of its answers, for this module's
+ * stated reason: a fixture that returned "hel1" as the source because someone
+ * typed it would draw the right words over a pane reading the wrong field.
+ * Answering the way the store answers is what makes a `?fake-ipc` screenshot
+ * evidence about the view.
+ *
+ * `heldBy` arrives outermost first, so the walk is the asset and then that
+ * list reversed -- nearest ancestor first.
+ */
+function inForce<T>(
+  asset: FixtureAsset,
+  heldBy: FixtureAsset[],
+  of: (row: FixtureAsset) => T | null,
+) {
+  for (const at of [asset, ...[...heldBy].reverse()]) {
+    const value = of(at);
+    if (value !== null) return { value, source_id: at.id, source_name: at.name };
+  }
+  return null;
 }
 
 /**
@@ -452,7 +506,7 @@ function assetDetail(args: Record<string, unknown>) {
   const asset = FIXTURE_ESTATE.find((row) => row.id === id);
   if (!asset) throw { code: "not_found", message: `no asset ${id}`, source_id: null };
 
-  const heldBy: (typeof FIXTURE_ESTATE)[number][] = [];
+  const heldBy: FixtureAsset[] = [];
   let walk = asset.parent_id;
   while (walk !== null) {
     const held = FIXTURE_ESTATE.find((row) => row.id === walk);
@@ -464,6 +518,8 @@ function assetDetail(args: Record<string, unknown>) {
   return {
     asset: assetRow(asset),
     properties: asset.properties,
+    effective_environment: inForce(asset, heldBy, (row) => row.environment),
+    effective_owner: inForce(asset, heldBy, (row) => row.owner),
     held_by: heldBy.map(assetRow),
     holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
     history: [

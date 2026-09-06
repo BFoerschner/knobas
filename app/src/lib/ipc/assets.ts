@@ -65,19 +65,36 @@ export type PropertyValue = TextProperty | NumberProperty | DateProperty | UrlPr
 /**
  * An asset's **own** status — `assets::AssetStatus`.
  *
- * Not its health: that is the worst of this and its monitors' states, and it
- * arrives with #431 and M4.1. `"none"` means *nobody has said*, which is a
- * different thing from `"up"`.
+ * What a person recorded, and not the same thing as `AssetRow.health`, which
+ * is the worst of this and everything underneath. `"none"` means *nobody has
+ * said*, which is a different thing from `"up"`. Its monitors' states join the
+ * health in M4.1.
  */
 export type AssetStatus = "up" | "warn" | "down" | "none";
 
 /**
  * Which environment an asset belongs to — `assets::Environment`.
  *
- * Stored on the asset. The inheritance from the nearest ancestor that sets it
- * is #431's; until then a `null` here means only *not set here*.
+ * Stored on the asset, and `null` here means *not set here* — what is in force
+ * is `AssetDetail.effective_environment`, the nearest asset at or above that
+ * sets one.
  */
 export type Environment = "dev" | "stage" | "prod" | "shared";
+
+/**
+ * A value **in force** on an asset, and the asset that sets it —
+ * `assets::Inherited`.
+ *
+ * Stories 8, 9 and 10 in one shape: what the value is, and where to go to
+ * change it. `source_id` equal to the asset's own id is *set here*; anything
+ * else is inherited from that ancestor, and the pane links to it.
+ */
+export interface Inherited<T> {
+  value: T;
+  /** The asset the value is set on — the asset itself when it is set here. */
+  source_id: string;
+  source_name: string;
+}
 
 /**
  * One row of a Miller column — `assets::AssetRow`.
@@ -107,6 +124,20 @@ export interface AssetRow {
   /** Whether anything sits under it — what the chevron and the next column
    * are drawn from. */
   has_children: boolean;
+  /**
+   * The worst of {@link status} and every descendant's own status, down over
+   * warn over up over none (story 37). Monitors join the "own" half in M4.1.
+   */
+  health: AssetStatus;
+  /**
+   * The worst status **strictly underneath**; `"none"` when nothing under it
+   * has been rated. What colours the badge — a `down` asset holding one `warn`
+   * container has `health: "down"` and `inside: "warn"`, and the badge is
+   * about what is inside.
+   */
+  inside: AssetStatus;
+  /** How many descendants carry `warn` or `down` — the *N* in the badge. */
+  problems_inside: number;
 }
 
 /**
@@ -129,6 +160,11 @@ export interface AssetProperty {
 export interface AssetDetail {
   asset: AssetRow;
   properties: AssetProperty[];
+  /** The environment in force and the asset that sets it; `null` when nothing
+   * at or above this asset sets one. */
+  effective_environment: Inherited<Environment> | null;
+  /** The owner in force and the asset that sets it. */
+  effective_owner: Inherited<string> | null;
   /** Outermost first, **excluding the asset itself**. Empty at the top. */
   held_by: AssetRow[];
   holds: AssetRow[];

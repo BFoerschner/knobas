@@ -40,13 +40,35 @@
 //! because "who changed the IP" is only answerable if the old value was
 //! written down at the moment it stopped being true.
 //!
+//! # What is inherited, and what rolls up (#431)
+//!
+//! Two read-time computations, neither of them a stored column, because both
+//! are answers about a *path* and a stored copy would be a second writer of
+//! the parent field:
+//!
+//! * **Environment and owner are inherited** (stories 8, 9, 10). The value in
+//!   force on an asset is the one set on the nearest asset at or above it, and
+//!   the read hands back **which asset that was** -- so the pane can say *set
+//!   here* or *inherited from `hel1`* and give the reader one click to the
+//!   place the value can be changed. Setting a value on a child overrides the
+//!   ancestor's for that child's whole subtree, and clearing it falls back to
+//!   the ancestor again; both fall out of "nearest wins" and neither is a rule
+//!   of its own. [`inherited`] is that walk, and it is pure over rows the
+//!   reads already fetched.
+//! * **Health rolls up** (story 37). An asset's health is the worst of its own
+//!   status and every descendant's, **down over warn over up over none**, and
+//!   `problems_inside` counts the descendants carrying `warn` or `down` --
+//!   what story 32's amber-or-red badge draws. [`ROLLUP`] is the one statement
+//!   that answers both, plus the worst status *strictly underneath*, which is
+//!   what colours the badge. Monitors join the "own health" half in M4.1; that
+//!   is the only part of story 37 not here.
+//!
 //! # What this module deliberately does not do yet
 //!
-//! *Effective* environment and owner -- the walk up the parent field to the
-//! nearest ancestor that sets them -- and the "N problems inside" rollup are
-//! **#431**. What is here is the stored value on the asset itself, which is
-//! what that walk will read. Routes are **#432**, the create/edit surface is
-//! **#429**, and the keyboard walk and spines are **#430**.
+//! Routes are **#432**, the create/edit surface is **#429**, and the keyboard
+//! walk and spines are **#430**.
+
+use std::collections::HashMap;
 
 use knobas_core::activity::ActivityRow;
 use knobas_core::asset::{self, AssetType, PropertyKind};
@@ -93,8 +115,9 @@ const PATH_SEPARATOR: &str = " / ";
 ///
 /// Not its health: story 37's health is the worst of this and its monitors'
 /// states, and its *effective* health also takes the worst descendant. Both
-/// are computed at read time and both are #431's and M4.1's; this is the
-/// stored fact they read.
+/// are computed at read time, by [`ROLLUP`] over this column -- the monitors'
+/// half is M4.1's and the only part of story 37 not here. This is the stored
+/// fact those reads are built on, and [`AssetRow`] carries all three.
 ///
 /// `none` is the default and means *nobody has said*, which is a different
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
@@ -135,6 +158,42 @@ impl AssetStatus {
             .into_iter()
             .find(|status| status.as_str() == value)
             .ok_or_else(|| IpcError::internal(format!("unknown asset status {value:?}")))
+    }
+
+    /// Where this status sits in story 37's order -- **down over warn over up
+    /// over none** -- as a number whose *smaller* value is the worse one.
+    ///
+    /// Smaller-is-worse so that "the worst of a set" is a plain `min`, which
+    /// is what [`ROLLUP`] takes over a subtree. That `case` expression is this
+    /// function written in SQL, and
+    /// [`tests::the_rollup_ranks_the_statuses_the_way_rust_does`] reads the
+    /// statement out of this file to keep the two in step -- the discipline
+    /// [`tests::every_status_is_one_the_schema_accepts`] applies to `0017`.
+    ///
+    /// Note what the order says about `none`: an asset nobody has rated shows
+    /// its children's `up`, because `up` is *worse* than "nobody has said".
+    /// That is spec #427's ordering read literally, and it is the reading that
+    /// makes a branch of healthy things read as healthy.
+    #[must_use]
+    pub fn severity(self) -> i32 {
+        match self {
+            AssetStatus::Down => 0,
+            AssetStatus::Warn => 1,
+            AssetStatus::Up => 2,
+            AssetStatus::None => 3,
+        }
+    }
+
+    /// The status a [`severity`](Self::severity) belongs to.
+    ///
+    /// Anything outside the four is `none` rather than an error: the only
+    /// producer is [`ROLLUP`]'s `case`, whose `else` arm is `none` already.
+    #[must_use]
+    fn of_severity(rank: i32) -> Self {
+        AssetStatus::ALL
+            .into_iter()
+            .find(|status| status.severity() == rank)
+            .unwrap_or(AssetStatus::None)
     }
 }
 
@@ -297,6 +356,22 @@ pub struct AssetRow {
     pub owner: Option<String>,
     /// Whether anything sits under it.
     pub has_children: bool,
+    /// The asset's **effective health**: the worst of [`status`](Self::status)
+    /// and every descendant's own status, down over warn over up over none
+    /// (story 37). Monitors join the "own" half in M4.1.
+    pub health: AssetStatus,
+    /// The worst status **strictly underneath** this asset; `none` when it
+    /// holds nothing, or nothing under it has been rated.
+    ///
+    /// A field of its own rather than something the badge reads off
+    /// [`health`](Self::health), because those two answer different questions
+    /// the moment an asset is worse than what it holds: a `down` VM holding
+    /// one `warn` container has `health = down` and `inside = warn`, and the
+    /// badge is about what is *inside*, so it is amber.
+    pub inside: AssetStatus,
+    /// How many descendants carry `warn` or `down` -- the *N* in story 32's
+    /// "N problems inside" badge. `0` draws no badge.
+    pub problems_inside: i64,
 }
 
 /// One row of the pane's property list.
@@ -318,12 +393,37 @@ pub struct AssetProperty {
     pub custom: bool,
 }
 
+/// A value **in force** on an asset, and the asset that sets it.
+///
+/// Stories 8, 9 and 10 in one shape: what the value is, and *where to go to
+/// change it*. The source is a whole asset's id and name rather than a bare
+/// `inherited: bool`, because "inherited" without a name leaves the reader
+/// hunting up the path for the ancestor that decided it -- and the pane's one
+/// click to that ancestor is exactly what story 10 asks for. Whether it was
+/// set *here* is [`source_id`](Self::source_id) equalling the asset's own id,
+/// which the pane compares rather than being told twice.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Inherited<T> {
+    /// The value in force -- an [`Environment`] for one field of
+    /// [`AssetDetail`], an owner's name for the other.
+    pub value: T,
+    /// The asset the value is set on -- this asset itself when it is set here.
+    pub source_id: String,
+    /// That asset's name, so the pane needs no second read to label the link.
+    pub source_name: String,
+}
+
 /// Everything the fixed right pane draws for one asset.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct AssetDetail {
     pub asset: AssetRow,
     /// Known keys first, custom after. See [`AssetProperty`].
     pub properties: Vec<AssetProperty>,
+    /// The environment in force here and the asset that sets it (story 8);
+    /// `null` when nothing at or above this asset sets one.
+    pub effective_environment: Option<Inherited<Environment>>,
+    /// The owner in force here and the asset that sets it (story 9).
+    pub effective_owner: Option<Inherited<String>>,
     /// The path down to this asset, **outermost first and excluding itself**.
     /// Empty for an asset at the top of the estate.
     pub held_by: Vec<AssetRow>,
@@ -409,13 +509,90 @@ const ONE: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.envi
 /// row has no use for.
 const PROPERTIES: &str = "select properties from knobas.asset where id = $1";
 
-fn row_of(row: &sqlx::postgres::PgRow) -> Result<AssetRow, IpcError> {
+/// The health rollup for a set of assets: the worst status at or under each
+/// one, the worst status strictly under it, and how many descendants carry a
+/// problem (stories 32 and 37).
+///
+/// **One statement, run once per read**, rather than the same recursive block
+/// spliced into all three of the statements above. It is still a whole
+/// literal a reader checks by reading -- which is what that rule is for -- and
+/// it keeps spec #427's ordering, *"down over warn over up over none"*, in one
+/// place instead of three; the price is one round trip per column, against
+/// three copies of a rule that would drift.
+///
+/// `depth` is what separates the two answers. The anchor row is the asset
+/// itself at depth 0, so `health`'s `min` sees the asset's own status and
+/// `inside`'s does not -- and `problems_inside` counts only what is
+/// underneath, which is the whole meaning of the badge. The `case` arms are
+/// [`AssetStatus::severity`] in SQL, and a test reads them back out of this
+/// string.
+///
+/// No depth cap, for [`move_to`]'s reason: `parent_id` has one writer and it
+/// refuses cycles before it writes, with `asset_no_self_parent_chk` under it.
+const ROLLUP: &str = "with recursive under (root, id, depth) as (
+         select a.id, a.id, 0 from knobas.asset a where a.id = any($1::text[])
+         union all
+         select u.root, c.id, u.depth + 1
+           from under u join knobas.asset c on c.parent_id = u.id
+     )
+     select u.root,
+            min(case d.status when 'down' then 0 when 'warn' then 1
+                              when 'up' then 2 else 3 end) as health,
+            min(case when u.depth = 0 then 3
+                     else case d.status when 'down' then 0 when 'warn' then 1
+                                        when 'up' then 2 else 3 end end) as inside,
+            count(*) filter (where u.depth > 0 and d.status in ('warn','down'))
+              as problems_inside
+       from under u join knobas.asset d on d.id = u.id
+      group by u.root";
+
+/// What [`ROLLUP`] answers about one asset.
+///
+/// Every id handed to [`rollup`] comes back, because the statement's anchor
+/// row is the asset itself -- so the only way [`row_of`] finds no entry is an
+/// asset deleted between its read and the rollup's. There is no `Default` for
+/// that case on purpose: the honest answer is the row's **own** status, which
+/// `row_of` reads off the row it already has, and a `Default` would have made
+/// a live `up` asset report `none` for the one frame it took to vanish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rollup {
+    health: AssetStatus,
+    inside: AssetStatus,
+    problems_inside: i64,
+}
+
+/// [`ROLLUP`] for `ids`, keyed by asset id.
+async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>, IpcError> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(ROLLUP).bind(ids).fetch_all(pool).await?;
+    let mut out = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        out.insert(
+            row.try_get::<String, _>("root")?,
+            Rollup {
+                health: AssetStatus::of_severity(row.try_get("health")?),
+                inside: AssetStatus::of_severity(row.try_get("inside")?),
+                problems_inside: row.try_get("problems_inside")?,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn row_of(
+    row: &sqlx::postgres::PgRow,
+    rollups: &HashMap<String, Rollup>,
+) -> Result<AssetRow, IpcError> {
+    let id: String = row.try_get("id")?;
     let type_id: String = row.try_get("type_id")?;
     let declared = asset::find(&type_id);
-    let status: String = row.try_get("status")?;
+    let status = AssetStatus::parse(&row.try_get::<String, _>("status")?)?;
     let environment: Option<String> = row.try_get("environment")?;
+    let rolled = rollups.get(&id).copied();
     Ok(AssetRow {
-        id: row.try_get("id")?,
+        id,
         parent_id: row.try_get("parent_id")?,
         type_label: declared.map_or_else(|| type_id.clone(), |t| t.label.to_owned()),
         // A type the table has lost is drawn as `??` rather than refused: the
@@ -425,11 +602,58 @@ fn row_of(row: &sqlx::postgres::PgRow) -> Result<AssetRow, IpcError> {
         monogram: declared.map_or("??", |t| t.monogram).to_owned(),
         type_id,
         name: row.try_get("name")?,
-        status: AssetStatus::parse(&status)?,
+        status,
         environment: environment.as_deref().map(Environment::parse).transpose()?,
         owner: row.try_get("owner")?,
         has_children: row.try_get("has_children")?,
+        health: rolled.map_or(status, |r| r.health),
+        inside: rolled.map_or(AssetStatus::None, |r| r.inside),
+        problems_inside: rolled.map_or(0, |r| r.problems_inside),
     })
+}
+
+/// Every row of one read, with [`ROLLUP`] run once for the lot.
+///
+/// The rollup is a read of its own rather than a join in the three statements
+/// above, so this is where a `Vec<PgRow>` becomes a `Vec<AssetRow>`: one
+/// round trip per read, whatever the column holds.
+async fn rows_of(pool: &PgPool, rows: &[sqlx::postgres::PgRow]) -> Result<Vec<AssetRow>, IpcError> {
+    let ids = rows
+        .iter()
+        .map(|row| row.try_get::<String, _>("id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let rollups = rollup(pool, &ids).await?;
+    rows.iter().map(|row| row_of(row, &rollups)).collect()
+}
+
+/// The nearest asset that sets a value: this one, then up the held-by path.
+///
+/// Pure, and separately tested, because it is stories 8, 9 and 10's whole
+/// rule and it needs no database to be got wrong. `held_by` arrives
+/// **outermost first** ([`AssetDetail::held_by`]), so the walk is `rev()` --
+/// nearest ancestor last in that list, first here. Reversing it the other way
+/// would answer with the *outermost* setter, which is the value a child was
+/// meant to override.
+///
+/// A child that sets its own value therefore wins for its whole subtree
+/// (nothing above it is ever consulted), and clearing that value falls back to
+/// the ancestor again (there is nothing else for the walk to find). Both are
+/// consequences of "nearest wins" rather than rules of their own, which is why
+/// there is one function here and not three.
+fn inherited<T>(
+    asset: &AssetRow,
+    held_by: &[AssetRow],
+    of: impl Fn(&AssetRow) -> Option<T>,
+) -> Option<Inherited<T>> {
+    std::iter::once(asset)
+        .chain(held_by.iter().rev())
+        .find_map(|row| {
+            of(row).map(|value| Inherited {
+                value,
+                source_id: row.id.clone(),
+                source_name: row.name.clone(),
+            })
+        })
 }
 
 /// The children of `parent_id`, or the estate's top level when it is `None`.
@@ -446,7 +670,7 @@ pub async fn tree(pool: &PgPool, parent_id: Option<&str>) -> Result<Vec<AssetRow
         .bind(parent_id)
         .fetch_all(pool)
         .await?;
-    rows.iter().map(row_of).collect()
+    rows_of(pool, &rows).await
 }
 
 /// One asset, with everything the pane draws.
@@ -461,13 +685,13 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| no_such_asset(id))?;
-    let asset = row_of(&row)?;
+    let asset = rows_of(pool, std::slice::from_ref(&row))
+        .await?
+        .pop()
+        .ok_or_else(|| no_such_asset(id))?;
 
     let ancestors = sqlx::query(ANCESTORS).bind(id).fetch_all(pool).await?;
-    let held_by = ancestors
-        .iter()
-        .map(row_of)
-        .collect::<Result<Vec<_>, _>>()?;
+    let held_by = rows_of(pool, &ancestors).await?;
     let holds = tree(pool, Some(id)).await?;
 
     let stored: serde_json::Value = sqlx::query(PROPERTIES)
@@ -481,6 +705,8 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
 
     Ok(AssetDetail {
         properties: properties_of(&asset.type_id, &stored),
+        effective_environment: inherited(&asset, &held_by, |row| row.environment),
+        effective_owner: inherited(&asset, &held_by, |row| row.owner.clone()),
         asset,
         held_by,
         holds,
@@ -968,7 +1194,10 @@ async fn one(pool: &PgPool, id: &str) -> Result<AssetRow, IpcError> {
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| no_such_asset(id))?;
-    row_of(&row)
+    rows_of(pool, std::slice::from_ref(&row))
+        .await?
+        .pop()
+        .ok_or_else(|| no_such_asset(id))
 }
 
 /// The three statements that set a single column, each named where it is used.
@@ -1398,5 +1627,147 @@ mod tests {
     fn a_blank_name_is_refused_and_a_padded_one_is_trimmed() {
         assert!(vet_name("  \t ").is_err());
         assert_eq!(vet_name("  vm-db-01 ").unwrap(), "vm-db-01");
+    }
+
+    // -----------------------------------------------------------------
+    // #431: what is inherited, and what rolls up
+    // -----------------------------------------------------------------
+
+    /// A column row with nothing on it but the fields the walk reads.
+    fn walked(id: &str, environment: Option<Environment>, owner: Option<&str>) -> AssetRow {
+        AssetRow {
+            id: format!("asset:{id}"),
+            parent_id: None,
+            type_id: "vm".to_owned(),
+            type_label: "VM".to_owned(),
+            monogram: "VM".to_owned(),
+            name: id.to_owned(),
+            status: AssetStatus::None,
+            environment,
+            owner: owner.map(str::to_owned),
+            has_children: false,
+            health: AssetStatus::None,
+            inside: AssetStatus::None,
+            problems_inside: 0,
+        }
+    }
+
+    /// Story 8's three sentences over one path, and the negative under each.
+    ///
+    /// The path is **site → VM → container**, outermost first, which is the
+    /// order `AssetDetail::held_by` arrives in -- and three levels rather than
+    /// two because a two-level path cannot tell "nearest ancestor" from "any
+    /// ancestor": both answers are the same row.
+    #[test]
+    fn a_value_comes_from_the_nearest_asset_at_or_above_that_sets_it() {
+        let site = walked("hel1", Some(Environment::Prod), Some("Björn"));
+        let vm = walked("vm-db-01", None, None);
+        let path = [site.clone(), vm.clone()];
+
+        // Nothing set on the container: the *nearest* setter is the site,
+        // because the VM sets nothing.
+        let container = walked("postgres", None, None);
+        let from = inherited(&container, &path, |row| row.environment).expect("inherited");
+        assert_eq!(from.value, Environment::Prod);
+        assert_eq!(from.source_id, site.id, "the site is where it is set");
+        assert_eq!(from.source_name, "hel1");
+
+        // The VM overriding it wins for everything under the VM, and the
+        // site's value is never consulted -- which is what makes this
+        // "nearest", not "outermost".
+        let overridden = [
+            site.clone(),
+            walked("vm-db-01", Some(Environment::Dev), None),
+        ];
+        let from = inherited(&container, &overridden, |row| row.environment).expect("inherited");
+        assert_eq!(from.value, Environment::Dev);
+        assert_eq!(from.source_id, vm.id);
+
+        // Set on the asset itself: the source is the asset, which is how the
+        // pane tells "set here" from "inherited from".
+        let own = walked("postgres", Some(Environment::Stage), None);
+        let from = inherited(&own, &overridden, |row| row.environment).expect("inherited");
+        assert_eq!(from.value, Environment::Stage);
+        assert_eq!(from.source_id, own.id);
+
+        // Owner walks the same field and answers with a name, not an enum.
+        let from = inherited(&container, &path, |row| row.owner.clone()).expect("inherited");
+        assert_eq!(from.value, "Björn");
+        assert_eq!(from.source_id, site.id);
+
+        // Nobody up the path sets one, which is a `null` on the wire rather
+        // than a default: "not set anywhere" is a fact the pane draws.
+        let nowhere = [walked("hel1", None, None)];
+        assert!(inherited(&container, &nowhere, |row| row.environment).is_none());
+        assert!(inherited(&container, &[], |row| row.owner.clone()).is_none());
+    }
+
+    /// [`ROLLUP`]'s `case` arms and [`AssetStatus::severity`] are one ordering
+    /// in two languages.
+    ///
+    /// The statement is read out of this file rather than the numbers being
+    /// listed here: a hand-written copy is the remembered-list trap, and the
+    /// thing that can silently go wrong is exactly that somebody edits the SQL
+    /// and not the enum. Both `case` expressions are checked, because the
+    /// second one -- the `inside` half -- carries the same four arms and could
+    /// be edited on its own.
+    #[test]
+    fn the_rollup_ranks_the_statuses_the_way_rust_does() {
+        let mut seen = 0;
+        let mut rest = ROLLUP;
+        while let Some(at) = rest.find("case d.status") {
+            rest = &rest[at + "case d.status".len()..];
+            let arms = rest
+                .split_once(" end")
+                .unwrap_or_else(|| panic!("a `case d.status` in ROLLUP never ends"))
+                .0;
+            for status in AssetStatus::ALL {
+                if status == AssetStatus::None {
+                    // `none` is the `else` arm; there is no `when` for it.
+                    continue;
+                }
+                assert!(
+                    arms.contains(&format!(
+                        "when '{}' then {}",
+                        status.as_str(),
+                        status.severity()
+                    )),
+                    "ROLLUP ranks {:?} differently from AssetStatus::severity: {arms}",
+                    status.as_str()
+                );
+            }
+            assert!(
+                arms.contains(&format!("else {}", AssetStatus::None.severity())),
+                "ROLLUP's else arm is not `none`'s severity: {arms}"
+            );
+            seen += 1;
+        }
+        assert_eq!(seen, 2, "ROLLUP has a `health` case and an `inside` case");
+        // And the trip back, which is what turns the statement's answer into a
+        // status again.
+        for status in AssetStatus::ALL {
+            assert_eq!(AssetStatus::of_severity(status.severity()), status);
+        }
+        // Worse is smaller, which is what makes `min` the worst-of.
+        assert!(AssetStatus::Down.severity() < AssetStatus::Warn.severity());
+        assert!(AssetStatus::Warn.severity() < AssetStatus::Up.severity());
+        assert!(AssetStatus::Up.severity() < AssetStatus::None.severity());
+    }
+
+    /// The badge counts only what the statement counts.
+    ///
+    /// Pinned as prose because the count lives in SQL: `problems_inside` is
+    /// `warn` and `down` and neither of the other two, and it is over `depth >
+    /// 0` so an asset is never a problem inside itself.
+    #[test]
+    fn the_rollup_counts_only_what_is_underneath_and_only_the_two_bad_statuses() {
+        assert!(
+            ROLLUP.contains("count(*) filter (where u.depth > 0 and d.status in ('warn','down'))"),
+            "ROLLUP no longer counts warn and down strictly underneath: {ROLLUP}"
+        );
+        assert!(
+            ROLLUP.contains("min(case when u.depth = 0 then 3"),
+            "ROLLUP's `inside` no longer excludes the asset itself: {ROLLUP}"
+        );
     }
 }

@@ -33,13 +33,28 @@ const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
  * Two VMs under the site so that a column has more than one row — a
  * one-row column cannot witness which row is marked.
  */
-const SITE = row({ id: "asset:hel1", type_id: "site", monogram: "SI", name: "hel1" });
+const SITE = row({
+  id: "asset:hel1",
+  type_id: "site",
+  monogram: "SI",
+  name: "hel1",
+  // The only asset in this fixture that sets either — so every value the pane
+  // shows further down is one that had to be walked up to.
+  environment: "prod",
+  owner: "Björn",
+  health: "warn",
+  inside: "warn",
+  problems_inside: 1,
+});
 const VM = row({
   id: "asset:vm-db-01",
   parent_id: SITE.id,
   type_id: "vm",
   monogram: "VM",
   name: "vm-db-01",
+  health: "warn",
+  inside: "warn",
+  problems_inside: 1,
 });
 const SIBLING = row({
   id: "asset:vm-app-02",
@@ -57,6 +72,10 @@ const CONTAINER = row({
   monogram: "CT",
   name: "postgres",
   has_children: false,
+  // The one thing actually wrong in this estate; everything above it is warn
+  // because of this row and not on its own account.
+  status: "warn",
+  health: "warn",
 });
 const ESTATE = [SITE, VM, SIBLING, CONTAINER];
 
@@ -70,21 +89,52 @@ function row(over: Partial<AssetRow> & Pick<AssetRow, "id" | "name">): AssetRow 
     environment: null,
     owner: null,
     has_children: true,
+    health: "none",
+    inside: "none",
+    problems_inside: 0,
     ...over,
   } as AssetRow;
+}
+
+/**
+ * The backend's inheritance walk, as the fake bridge answers it — nearest
+ * setter at or above, innermost first.
+ *
+ * A copy of `assets::inherited`'s rule rather than of its answer: the seam
+ * under test here is the *pane*, and a fixture that hard-coded "hel1" as the
+ * source would still draw the right words if the pane read the wrong field.
+ */
+function inForce<T>(
+  asset: AssetRow,
+  heldBy: AssetRow[],
+  of: (row: AssetRow) => T | null,
+): { value: T; source_id: string; source_name: string } | null {
+  for (const at of [asset, ...[...heldBy].reverse()]) {
+    const value = of(at);
+    if (value !== null)
+      return { value, source_id: at.id, source_name: at.name };
+  }
+  return null;
 }
 
 function property(over: Partial<AssetProperty> & Pick<AssetProperty, "key">): AssetProperty {
   return { label: over.key, value: null, custom: false, ...over };
 }
 
-/** The pane's read for one asset, ancestors walked over the parent field. */
-function detailOf(id: string): AssetDetail {
-  const asset = ESTATE.find((candidate) => candidate.id === id);
+/**
+ * The pane's read for one asset, ancestors walked over the parent field.
+ *
+ * Takes the estate it is reading, so a test can hand {@link render} an estate
+ * of its own and have the *pane* answer from it too — without that, a bespoke
+ * estate draws its columns and then fails every deep read against the default
+ * one.
+ */
+function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
+  const asset = estate.find((candidate) => candidate.id === id);
   if (asset === undefined) throw { code: "not_found", message: `no asset ${id}` };
   const heldBy: AssetRow[] = [];
   for (let at = asset; at.parent_id !== null; ) {
-    const parent = ESTATE.find((candidate) => candidate.id === at.parent_id);
+    const parent = estate.find((candidate) => candidate.id === at.parent_id);
     if (parent === undefined) break;
     heldBy.unshift(parent);
     at = parent;
@@ -110,8 +160,14 @@ function detailOf(id: string): AssetDetail {
             }),
           ]
         : [],
+    effective_environment: inForce(
+      asset,
+      heldBy,
+      (candidate) => candidate.environment,
+    ),
+    effective_owner: inForce(asset, heldBy, (candidate) => candidate.owner),
     held_by: heldBy,
-    holds: ESTATE.filter((candidate) => candidate.parent_id === asset.id),
+    holds: estate.filter((candidate) => candidate.parent_id === asset.id),
     history:
       asset.id === CONTAINER.id
         ? [
@@ -174,7 +230,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE) {
         },
         getAsset: (assetId: string) => {
           try {
-            return Promise.resolve(detailOf(assetId));
+            return Promise.resolve(detailOf(assetId, estate));
           } catch (cause) {
             return Promise.reject(cause);
           }
@@ -332,4 +388,149 @@ test("a deep link to an asset that is gone says so instead of showing the last o
   await vi.waitFor(() => expect(text()).toContain("no asset asset:nobody"));
   expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
   expect(columns()).toEqual([]);
+});
+
+/**
+ * **The pane says where an inherited value came from, and the note is a link
+ * to the asset that set it** — stories 8, 9 and 10 (#431).
+ *
+ * Nothing sets an environment or an owner between the container and the site,
+ * so both values in the pane are the site's; the note names it, and one click
+ * on that note opens the site's own address. A pane that drew the value
+ * without its source would pass a `toContain("prod")` and leave the reader
+ * with no way to find the place `prod` can be changed.
+ */
+test("an inherited value names the ancestor it came from and links to it", async () => {
+  const { router } = render("#/asset/asset:postgres");
+  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+
+  const pane = text();
+  expect(pane).toContain("Environment prod inherited from hel1");
+  expect(pane).toContain("Owner Björn inherited from hel1");
+  // Health is the worst of this asset and everything under it. Here they are
+  // the same, so the pane does not repeat the own status.
+  expect(pane).toContain("Health warn");
+  expect(pane).not.toContain("own status");
+
+  const note = [
+    ...target.querySelectorAll<HTMLButtonElement>("aside.pane button.src"),
+  ].find((button) => button.textContent?.includes("inherited from hel1"));
+  expect(note).toBeDefined();
+  note?.click();
+  flushSync();
+  expect(router.route).toEqual({
+    view: "assets",
+    tab: "tree",
+    assetId: SITE.id,
+  });
+});
+
+/**
+ * **A value set on the asset itself reads *set here* and is not a link.**
+ *
+ * The negative for the test above, and the one that matters: a link that led
+ * back to the asset the reader is already looking at would be a click that
+ * does nothing, which is worse than no link at all. The site is where both
+ * values are set, so its own pane is the case.
+ */
+test("a value set on the asset itself says so and offers no link", async () => {
+  render("#/asset/asset:hel1");
+  await vi.waitFor(() => expect(text()).toContain("Environment prod set here"));
+
+  expect(text()).toContain("Owner Björn set here");
+  expect(text()).not.toContain("inherited from");
+  expect(target.querySelectorAll("aside.pane button.src")).toHaveLength(0);
+  // The site is rated by nobody and still reads `warn`, because the container
+  // two levels down is — that is the rollup, in the pane.
+  expect(text()).toContain("Health warn own status none");
+});
+
+/**
+ * **An asset with nothing set above it says so, rather than defaulting.**
+ *
+ * "Not set anywhere" and `dev` are different facts, and an estate whose top
+ * has no environment is the state every fresh import starts in.
+ */
+test("an asset with no environment anywhere above it says nothing is set", async () => {
+  const bare = row({ id: "asset:lonely", name: "lonely", has_children: false });
+  render("#/assets/tree", [bare]);
+  await vi.waitFor(() => expect(columns()).toEqual([["lonely"]]));
+
+  const button = target.querySelector<HTMLButtonElement>("button.row");
+  button?.click();
+  flushSync();
+  await vi.waitFor(() =>
+    expect(text()).toContain("Environment Not set anywhere"),
+  );
+  expect(text()).toContain("Owner Not set anywhere");
+});
+
+/**
+ * **The badge counts what is inside a row and takes its colour from the worst
+ * of it** — story 32.
+ *
+ * Three roots in one column, which is what makes this a test rather than a
+ * screenshot: the red one, the amber one, and the one holding nothing wrong,
+ * side by side. The third is the negative — a badge reading `0` is a mark the
+ * eye stops on to learn there is nothing to learn.
+ *
+ * The **fourth** row is the case that decides whether the tone is read off
+ * `inside` or off `health`: an asset that is itself down while holding one
+ * warning. It is a red row with an *amber* badge, and an implementation
+ * colouring the badge from `health` draws it red.
+ */
+test("a column row badges what is wrong inside it, in the worst tone inside", async () => {
+  const estate = [
+    row({
+      id: "asset:red",
+      name: "red",
+      health: "down",
+      inside: "down",
+      problems_inside: 2,
+    }),
+    row({
+      id: "asset:amber",
+      name: "amber",
+      health: "warn",
+      inside: "warn",
+      problems_inside: 1,
+    }),
+    row({
+      id: "asset:clean",
+      name: "clean",
+      health: "up",
+      inside: "none",
+      problems_inside: 0,
+    }),
+    row({
+      id: "asset:worse",
+      name: "worse",
+      status: "down",
+      health: "down",
+      inside: "warn",
+      problems_inside: 1,
+    }),
+  ];
+  render("#/assets/tree", estate);
+  await vi.waitFor(() =>
+    expect(columns()).toEqual([["amber", "clean", "red", "worse"]]),
+  );
+
+  const badges = [...target.querySelectorAll("ol.col li")].map((item) => {
+    const badge = item.querySelector("span.badge");
+    return badge === null
+      ? null
+      : {
+          name: (item.querySelector("span.nm")?.textContent ?? "").trim(),
+          count: (badge.textContent ?? "").trim(),
+          tone: badge.classList.contains("down") ? "down" : "warn",
+          title: badge.getAttribute("title"),
+        };
+  });
+  expect(badges).toEqual([
+    { name: "amber", count: "1", tone: "warn", title: "1 problem inside" },
+    null,
+    { name: "red", count: "2", tone: "down", title: "2 problems inside" },
+    { name: "worse", count: "1", tone: "warn", title: "1 problem inside" },
+  ]);
 });

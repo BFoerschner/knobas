@@ -12,7 +12,15 @@
 import { expect, test } from "vitest";
 
 import type { AssetDetail, AssetRow } from "../ipc/assets";
-import { addressOf, columnPathFor, emptyPath, heldByPath, selectionIn } from "./tree";
+import {
+  addressOf,
+  columnPathFor,
+  emptyPath,
+  heldByPath,
+  problemBadge,
+  selectionIn,
+  sourceOf,
+} from "./tree";
 
 function row(id: string, name: string, hasChildren = false): AssetRow {
   return {
@@ -26,11 +34,22 @@ function row(id: string, name: string, hasChildren = false): AssetRow {
     environment: null,
     owner: null,
     has_children: hasChildren,
+    health: "none",
+    inside: "none",
+    problems_inside: 0,
   };
 }
 
 function detail(asset: AssetRow, ancestors: AssetRow[]): AssetDetail {
-  return { asset, properties: [], held_by: ancestors, holds: [], history: [] };
+  return {
+    asset,
+    properties: [],
+    effective_environment: null,
+    effective_owner: null,
+    held_by: ancestors,
+    holds: [],
+    history: [],
+  };
 }
 
 /** Nothing selected is one column — the estate's top level. */
@@ -132,4 +151,81 @@ test("the held-by line ends at the asset and held_by does not", () => {
 test("a row's address is the asset's own, encoded once", () => {
   expect(addressOf({ id: "asset:7f2c" })).toBe("#/asset/asset:7f2c");
   expect(addressOf({ id: "asset:knobas/jira#1" })).toBe("#/asset/asset:knobas%2Fjira%231");
+});
+
+/**
+ * The badge counts what is inside and takes its colour from the *worst* thing
+ * inside — story 32, issue #431.
+ *
+ * The four cases are the ones the tone can get wrong: nothing wrong (no
+ * badge), a warn (amber), a down (red), and the case that makes `inside` a
+ * separate field — an asset **worse than what it holds**, which is a red row
+ * with an amber badge. A badge coloured from `health` would pass the first
+ * three and fail the fourth.
+ */
+test("the badge counts what is inside and is coloured by the worst of it", () => {
+  const clean = row("asset:vm", "vm-app-02", true);
+  expect(problemBadge(clean)).toBe(null);
+
+  const warning = { ...clean, health: "warn", inside: "warn", problems_inside: 1 } as AssetRow;
+  expect(problemBadge(warning)).toEqual({ count: 1, tone: "warn" });
+
+  const broken = { ...clean, health: "down", inside: "down", problems_inside: 3 } as AssetRow;
+  expect(problemBadge(broken)).toEqual({ count: 3, tone: "down" });
+
+  // Down itself, holding one warning container: the row is red and the badge
+  // is amber, because the badge is about what is inside it.
+  const worseThanInside = {
+    ...clean,
+    status: "down",
+    health: "down",
+    inside: "warn",
+    problems_inside: 1,
+  } as AssetRow;
+  expect(problemBadge(worseThanInside)).toEqual({ count: 1, tone: "warn" });
+});
+
+/**
+ * A row whose own status is bad but which holds nothing wrong carries **no**
+ * badge.
+ *
+ * The negative for the test above: it is the count that decides whether there
+ * is a badge at all, and an implementation keyed on `health` would put a red
+ * "0" on every broken leaf in the estate.
+ */
+test("a bad row that holds nothing wrong carries no badge", () => {
+  const leaf = row("asset:ct", "postgres");
+  expect(
+    problemBadge({ ...leaf, status: "down", health: "down" } as AssetRow),
+  ).toBe(null);
+});
+
+/**
+ * Where a value in force came from, as the pane says it — story 10.
+ *
+ * Both directions, because they differ in all three fields: set here is a
+ * note with no name and **no link**, and inherited names the ancestor and
+ * links to it. A link back to the asset the reader is already looking at is
+ * the failure this pins.
+ */
+test("a value set here has no link and an inherited one names its ancestor", () => {
+  const site = row("asset:hel1", "hel1", true);
+  const container = row("asset:postgres", "postgres");
+  const asset = detail(container, [site]);
+
+  expect(
+    sourceOf(asset, { value: "prod", source_id: site.id, source_name: "hel1" }),
+  ).toEqual({
+    here: false,
+    note: "inherited from hel1",
+    goTo: "#/asset/asset:hel1",
+  });
+
+  expect(
+    sourceOf(asset, {
+      value: "prod",
+      source_id: container.id,
+      source_name: "postgres",
+    }),
+  ).toEqual({ here: true, note: "set here", goTo: null });
 });
