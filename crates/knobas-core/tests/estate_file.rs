@@ -36,6 +36,10 @@
 //! assert that they found something, so a rewrite that moves the table or the
 //! services elsewhere fails loudly instead of silently checking nothing.
 //!
+//! A closed key vocabulary ([`ASSET_KEYS`], [`ROUTE_KEYS`]) covers the one
+//! mistake none of the referential checks can see: a misspelled key reads as an
+//! absent optional field, and an absent optional field is legal everywhere.
+//!
 //! # The type table
 //!
 //! [`TYPES`] is spec §12.1's built-in list as the M4 spec amends it (*runtime*
@@ -106,22 +110,22 @@ fn estate() -> Value {
         .expect("testenv/hetzner/estate.json is JSON")
 }
 
-/// The `assets` array, which the file must have and which must not be empty --
+/// One of the file's two arrays, which must be there and must not be empty --
 /// so that every test below is a claim about something.
-fn assets(estate: &Value) -> &Vec<Value> {
-    let assets = estate["assets"]
+fn array<'a>(estate: &'a Value, key: &str) -> &'a Vec<Value> {
+    let entries = estate[key]
         .as_array()
-        .expect("the estate file has an `assets` array");
-    assert!(!assets.is_empty(), "the estate file describes no assets");
-    assets
+        .unwrap_or_else(|| panic!("the estate file has an `{key}` array"));
+    assert!(!entries.is_empty(), "the estate file describes no {key}");
+    entries
+}
+
+fn assets(estate: &Value) -> &Vec<Value> {
+    array(estate, "assets")
 }
 
 fn routes(estate: &Value) -> &Vec<Value> {
-    let routes = estate["routes"]
-        .as_array()
-        .expect("the estate file has a `routes` array");
-    assert!(!routes.is_empty(), "the estate file describes no routes");
-    routes
+    array(estate, "routes")
 }
 
 /// A required string field, named in the panic when it is missing so that a
@@ -144,11 +148,11 @@ fn every_id_is_unique() {
     let estate = estate();
     let mut seen: HashSet<&str> = HashSet::new();
     for entry in assets(&estate).iter().chain(routes(&estate)) {
-        let id = id(entry);
+        let entry_id = id(entry);
         assert!(
-            seen.insert(id),
-            "`{id}` is the id of two entries in the estate file; an id is an \
-             address and two things cannot share one"
+            seen.insert(entry_id),
+            "`{entry_id}` is the id of two entries in the estate file; an id is \
+             an address and two things cannot share one"
         );
     }
 }
@@ -157,9 +161,9 @@ fn every_id_is_unique() {
 fn every_id_is_a_slug_in_its_own_namespace() {
     let estate = estate();
     let slug = |id: &str, prefix: &str| {
-        let rest = id.strip_prefix(prefix).unwrap_or_else(|| {
-            panic!("`{id}` should be addressed as `{prefix}<slug>` (spec §2)")
-        });
+        let rest = id
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("`{id}` should be addressed as `{prefix}<slug>` (spec §2)"));
         assert!(
             !rest.is_empty()
                 && rest
@@ -231,25 +235,25 @@ fn every_route_is_exposed_by_an_asset_and_lands_on_one() {
     let estate = estate();
     let ids: HashSet<&str> = assets(&estate).iter().map(id).collect();
     for route in routes(&estate) {
-        let id = id(route);
+        let route_id = id(route);
         let exposed_by = field(route, "asset");
         assert!(
             ids.contains(exposed_by),
-            "`{id}` is exposed by `{exposed_by}`, which is not an asset in this file"
+            "`{route_id}` is exposed by `{exposed_by}`, which is not an asset in this file"
         );
         // A route may have no target -- an endpoint that lands on nothing
         // knobas knows is still a route -- but a named one has to resolve.
         if let Some(target) = route.get("target").and_then(Value::as_str) {
             assert!(
                 ids.contains(target),
-                "`{id}` targets `{target}`, which is not an asset in this file; \
-                 `reachable via` is computed from the target end and reads \
+                "`{route_id}` targets `{target}`, which is not an asset in this \
+                 file; `reachable via` is computed from the target end and reads \
                  nothing at all when it dangles"
             );
         }
         assert!(
             field(route, "url").contains("://"),
-            "`{id}` needs a url with a scheme"
+            "`{route_id}` needs a url with a scheme"
         );
     }
 }
@@ -274,67 +278,129 @@ fn every_type_is_in_the_type_table() {
 fn the_environment_and_the_owner_are_set_at_the_root_and_nowhere_else() {
     let estate = estate();
     for asset in assets(&estate) {
-        let id = id(asset);
-        let inherited = |key: &str| asset.get(key).and_then(Value::as_str);
-        if id == "asset:knobas-estate" {
-            assert_eq!(inherited("environment"), Some("dev"));
+        let asset_id = id(asset);
+        // `own`, not `inherited`: this reads the asset's own field and walks no
+        // parent. Which ancestor an asset inherits from is the model's job
+        // (ADR-0014) and is not what this file records.
+        let own = |key: &str| asset.get(key).and_then(Value::as_str);
+        // First, so that a typo is what this assertion sees. Behind the
+        // placement rule below it could never fail: the root's environment is
+        // asserted equal to `dev` and every other asset's to nothing.
+        if let Some(environment) = own("environment") {
             assert!(
-                inherited("owner").is_some_and(|owner| !owner.is_empty()),
+                ENVIRONMENTS.contains(&environment),
+                "`{asset_id}`'s environment `{environment}` is not one of {ENVIRONMENTS:?}"
+            );
+        }
+        if asset_id == "asset:knobas-estate" {
+            assert_eq!(own("environment"), Some("dev"));
+            assert!(
+                own("owner").is_some_and(|owner| !owner.is_empty()),
                 "the root sets the owner every asset inherits"
             );
         } else {
             assert_eq!(
-                (inherited("environment"), inherited("owner")),
+                (own("environment"), own("owner")),
                 (None, None),
-                "`{id}` sets an environment or an owner of its own. That is \
-                 allowed by the model and wrong here: this estate is one \
+                "`{asset_id}` sets an environment or an owner of its own. That \
+                 is allowed by the model and wrong here: this estate is one \
                  environment with one owner, and setting either again is how \
                  the inheritance stops being witnessed by the file."
-            );
-        }
-        if let Some(environment) = inherited("environment") {
-            assert!(
-                ENVIRONMENTS.contains(&environment),
-                "`{id}`'s environment `{environment}` is not one of {ENVIRONMENTS:?}"
             );
         }
     }
 }
 
-/// The servers named in this directory's README, read out of its host-list
-/// table: `| `knobas-teamcity` | cx23 | ... |`.
-fn host_list() -> Vec<String> {
+/// A row of this directory's README host-list table:
+/// `| `knobas-teamcity` | cx23 | teamcity, teamcity-agent | `real-teamcity` | 127.0.0.1:8111 |`
+struct HostRow {
+    server: String,
+    server_type: String,
+    compose_profile: String,
+}
+
+/// The servers the README's host-list table names, read out of the table.
+fn host_list() -> Vec<HostRow> {
     let readme = read("testenv/hetzner/README.md");
-    let names: Vec<String> = readme
+    let rows: Vec<HostRow> = readme
         .lines()
-        .filter_map(|line| line.strip_prefix("| `knobas-"))
-        .filter_map(|rest| rest.split_once('`'))
-        .map(|(name, _)| format!("knobas-{name}"))
+        .filter(|line| line.starts_with("| `knobas-"))
+        .map(|line| {
+            let cells: Vec<&str> = line
+                .split('|')
+                .map(|cell| cell.trim().trim_matches('`'))
+                .collect();
+            assert!(
+                cells.len() >= 6,
+                "a host-list row has five columns and this one reads {cells:?}"
+            );
+            HostRow {
+                server: cells[1].to_owned(),
+                server_type: cells[2].to_owned(),
+                compose_profile: cells[4].to_owned(),
+            }
+        })
         .collect();
     assert_eq!(
-        names.len(),
+        rows.len(),
         3,
         "the host-list table in testenv/hetzner/README.md should have one row \
-         per server and this parse found {names:?}; if the table moved, fix \
-         this parse rather than deleting the check"
+         per server and this parse found {} of them; if the table moved, fix \
+         this parse rather than deleting the check",
+        rows.len()
     );
-    names
+    rows
 }
 
 #[test]
 fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
     let estate = estate();
     let assets = assets(&estate);
-    for server in host_list() {
+    for row in host_list() {
+        let server = &row.server;
+        // By id and not by name: a server and the container on it share a name
+        // (`knobas-jira` is both), which is why the README gives the server the
+        // `hetzner-` id. Finding by name would take whichever of the two comes
+        // first in the file and go green or red on the order of an array.
+        let server_id = format!(
+            "asset:hetzner-{}",
+            server
+                .strip_prefix("knobas-")
+                .expect("the host list names every server `knobas-<role>`")
+        );
         let asset = assets
             .iter()
-            .find(|asset| field(asset, "name") == server)
+            .find(|asset| id(asset) == server_id)
             .unwrap_or_else(|| {
                 panic!(
-                    "the README's host list names the server `{server}` and no \
-                     asset in the estate file is called that"
+                    "the README's host list names the server `{server}` and the \
+                     estate file has no `{server_id}`"
                 )
             });
+        assert_eq!(
+            field(asset, "name"),
+            server,
+            "`{server_id}` is the host list's `{server}` and should be called that"
+        );
+        assert_eq!(
+            asset["properties"]["server_type"].as_str(),
+            Some(row.server_type.as_str()),
+            "the host list says `{server}` is a {} and the estate file does not",
+            row.server_type
+        );
+        assert_eq!(
+            asset["properties"]["compose_profile"].as_str(),
+            Some(row.compose_profile.as_str()),
+            "the host list runs `{server}` under the profile `{}` and the \
+             estate file does not",
+            row.compose_profile
+        );
+        assert!(
+            asset["properties"]["role"]
+                .as_str()
+                .is_some_and(|role| !role.is_empty()),
+            "`{server}` needs the `role` provision.sh labels it with"
+        );
         assert_eq!(
             field(asset, "type"),
             "vm",
@@ -346,10 +412,6 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
         address.parse::<Ipv4Addr>().unwrap_or_else(|e| {
             panic!("`{server}`'s ipv4 property `{address}` is not an address: {e}")
         });
-        assert!(
-            asset["properties"]["server_type"].is_string(),
-            "`{server}` needs its Hetzner `server_type`"
-        );
     }
 }
 
@@ -404,5 +466,101 @@ fn every_compose_service_the_notebook_runs_is_recorded() {
         "the estate file's `compose_service` properties and the compose file's \
          services have drifted apart. A service that runs is an asset; one that \
          is a job rather than a thing goes in NOT_ASSETS with its reason."
+    );
+}
+
+/// What an asset entry may say, and what a route entry may say.
+///
+/// A closed vocabulary is the only thing that catches the mistake none of the
+/// tests above can see: a **misspelled key**. `"monitor"` for `"monitors"`,
+/// `"parnet"` for `"parent"`, `"targets"` for `"target"` -- every one of those
+/// reads as an absent optional field, and an absent optional field is legal
+/// everywhere it appears. The import would then draw no `monitored-by` link,
+/// hang the asset off the root and land the route on nothing, all without a
+/// word from the gate.
+const ASSET_KEYS: &[&str] = &[
+    "id",
+    "type",
+    "name",
+    "parent",
+    "description",
+    "environment",
+    "owner",
+    "properties",
+    "monitors",
+];
+const ROUTE_KEYS: &[&str] = &[
+    "id",
+    "asset",
+    "target",
+    "name",
+    "url",
+    "description",
+    "properties",
+    "monitors",
+];
+
+#[test]
+fn no_entry_says_anything_in_a_key_the_file_does_not_define() {
+    let estate = estate();
+    let check = |entry: &Value, allowed: &[&str]| {
+        let object = entry
+            .as_object()
+            .unwrap_or_else(|| panic!("every entry is an object; this is {entry}"));
+        for key in object.keys() {
+            assert!(
+                allowed.contains(&key.as_str()),
+                "`{}` carries a key `{key}`, which is not one of {allowed:?}. A \
+                 key nothing reads is a fact nobody gets: if it is a typo, fix \
+                 it; if it is new, add it here and teach the import about it.",
+                id(entry)
+            );
+        }
+    };
+    for asset in assets(&estate) {
+        check(asset, ASSET_KEYS);
+    }
+    for route in routes(&estate) {
+        check(route, ROUTE_KEYS);
+    }
+}
+
+#[test]
+fn a_monitor_is_named_by_a_name() {
+    let estate = estate();
+    let mut named = 0;
+    for entry in assets(&estate).iter().chain(routes(&estate)) {
+        let Some(monitors) = entry.get("monitors") else {
+            continue;
+        };
+        let monitors = monitors.as_array().unwrap_or_else(|| {
+            panic!(
+                "`{}`'s `monitors` is a list of Uptime Kuma monitor names, and \
+                 this is {monitors}",
+                id(entry)
+            )
+        });
+        assert!(
+            !monitors.is_empty(),
+            "`{}` has an empty `monitors`; leave the key out instead, so that \
+             \"nothing watches this\" and \"somebody meant to fill this in\" do \
+             not read alike",
+            id(entry)
+        );
+        for monitor in monitors {
+            assert!(
+                monitor.as_str().is_some_and(|name| !name.trim().is_empty()),
+                "`{}` names the monitor {monitor}; a monitor is named by its \
+                 Uptime Kuma name, which is what the import resolves it by",
+                id(entry)
+            );
+            named += 1;
+        }
+    }
+    // The file exists partly to carry these; none at all means the key was
+    // renamed and every assertion above skipped.
+    assert!(
+        named >= 7,
+        "only {named} monitors are named in the estate file"
     );
 }

@@ -84,19 +84,6 @@
       }
     },
     {
-      "id": "asset:canary",
-      "type": "service",
-      "name": "alert-chain canary",
-      "parent": "asset:notebook",
-      "description": "A one-line HTTP responder on a throwaway localhost port, bound and released by the alert-chain live recipe so that a monitor can be knocked down on purpose. Not a compose service: it is bound on the notebook itself.",
-      "properties": {
-        "port": "127.0.0.1:8213",
-        "note": "8213 was the Flowrun stub's reservation until 2026-09-06 and is a free port now"
-      },
-      "monitors": ["canary (local)"]
-    },
-
-    {
       "id": "asset:hetzner-nbg1",
       "type": "site",
       "name": "Hetzner Cloud nbg1",
@@ -122,6 +109,7 @@
         "memory_gb": 4,
         "disk_gb": 40,
         "os": "ubuntu-24.04",
+        "role": "teamcity",
         "ssh_host": "knobas-teamcity",
         "docker_context": "knobas-teamcity",
         "compose_profile": "real-teamcity"
@@ -190,6 +178,7 @@
         "memory_gb": 4,
         "disk_gb": 80,
         "os": "ubuntu-24.04",
+        "role": "jira",
         "ssh_host": "knobas-jira",
         "docker_context": "knobas-jira",
         "compose_profile": "real-atlassian"
@@ -258,6 +247,7 @@
         "memory_gb": 4,
         "disk_gb": 80,
         "os": "ubuntu-24.04",
+        "role": "confluence",
         "ssh_host": "knobas-confluence",
         "docker_context": "knobas-confluence",
         "compose_profile": "real-atlassian"
@@ -353,15 +343,6 @@
       "url": "http://127.0.0.1:8212/",
       "properties": { "opened_by": "docker compose up (published port)" }
     },
-    {
-      "id": "route:notebook-canary",
-      "asset": "asset:notebook",
-      "target": "asset:canary",
-      "name": "alert-chain canary",
-      "url": "http://127.0.0.1:8213/",
-      "properties": { "opened_by": "the alert-chain live recipe's canary helper" }
-    },
-
     {
       "id": "route:tunnel-teamcity",
       "asset": "asset:notebook",

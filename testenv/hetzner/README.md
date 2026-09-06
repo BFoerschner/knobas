@@ -51,10 +51,12 @@ the server and a node for each would be the same fact twice.
 `crates/knobas-core/tests/estate_file.rs` keeps it honest in `just check` --
 with no container and no database. It asserts that every id is unique, that
 every parent and every route target resolves, that the assets form one tree
-with one root, and that every type is in the built-in table; and it reads the
-host-list table above and the compose file's service list, so adding a fourth
-server or a new service and forgetting the estate file is a red gate rather
-than a discovery months later. The one thing it cannot check is the addresses:
+with one root, that every type is in the built-in table, and that no entry
+carries a key the file does not define, since a misspelled `monitors` reads as
+an absent one. It also parses the host-list table above and the compose file's
+service list, so adding a fourth server or a new service and forgetting the
+estate file is a red gate rather than a discovery months later, and a server
+whose type or profile changes in one place and not the other is too. The one thing it cannot check is the addresses:
 `hosts.env` is gitignored, so the public IPs in `estate.json` are the only
 committed copy of them, and `hcloud server list` is what settles a
 disagreement.
