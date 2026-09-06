@@ -84,6 +84,31 @@ services:
       # answer, `Database.writeDBConfig` persists it, and the real server
       # starts unattended. (Verified on the pinned image, 2.5.3.)
       UPTIME_KUMA_DB_TYPE: sqlite
+    # Four of the eight seeded monitors check something on the HOST rather than
+    # on this network: the three products through the SSH tunnel's
+    # 127.0.0.1:8111/8080/8090 forwards, and the canary on 8299. (`gitea` is
+    # local too, but reaches its container by compose service name.) Docker Desktop
+    # and OrbStack define `host.docker.internal` themselves; a plain Linux
+    # engine defines nothing at all, and this line is what makes the name
+    # RESOLVE there.
+    #
+    # It does not make those four monitors WORK on Linux, and this comment does
+    # not claim it does. `host-gateway` is the bridge gateway (172.17.0.1 or
+    # so), and both the tunnel (`hetzner/tunnel`: -L 127.0.0.1:$port:...) and
+    # the canary bind 127.0.0.1 only -- deliberately, so this environment's
+    # developer credentials are never off-host. A bridge-gateway client cannot
+    # reach a loopback-only socket, so running this on a Linux engine would also
+    # mean binding those four targets on the bridge address. Nobody has needed
+    # that; the environment is a laptop's (README.md, "One environment, one
+    # owner at a time"). What the line buys is a resolvable name and an
+    # explicit record of what the container reaches out to.
+    #
+    # Measured on OrbStack 2026-09-06: with and without the line the alias
+    # resolves to 0.250.250.254 and reaches a host socket bound to 127.0.0.1
+    # (`curl http://host.docker.internal:8111/` -> 401 from the tunnelled
+    # TeamCity), so it changes nothing here.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:3001:3001"
     volumes:

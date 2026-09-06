@@ -62,15 +62,20 @@ addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
 the only committed copy of them, and `hcloud server list` is what settles a
 disagreement.
 
-Two things in the file are still provisional and are named here so that nobody
-reads them as settled. The **type ids** are spec §12.1's list as #427 amends
-it, spelled the way this repository spells enumerated column values; the
-built-in table itself lands in code with #428, and the spellings move with it
-if #428 chooses others. The **monitor names** are a guess: `testenv/monitors.json`
-seeds Uptime Kuma with the two Tidewater checks only, so not one of the names
-`estate.json` lists exists yet. #441 creates the real monitors and is what
-settles the names; until it does, the `monitors` keys record what should watch
-each asset rather than what does, and nothing reads them.
+One thing in the file is still provisional and is named here so that nobody
+reads it as settled: the **type ids** are spec §12.1's list as #427 amends it,
+spelled the way this repository spells enumerated column values; the built-in
+table itself lands in code with #428, and the spellings move with it if #428
+chooses others.
+
+The **monitor names** were a guess until #441 and are not one any more. That
+ticket replaced `testenv/monitors.json`'s two Tidewater checks with the estate's
+own eight, so every name a `monitors` key here lists is a monitor the local
+Uptime Kuma actually holds after `./seed-kuma.sh` -- the seven the assets here
+name, plus the `canary`, which watches nothing and so appears in no asset. The two files are
+each other's only check: `estate.json` names monitors by their Kuma name because
+that is what the import resolves them by (#445), so renaming one without the
+other silently unresolves a link. `../README.md`, "Monitors", is the list.
 
 ## How it fits the existing scripts
 
@@ -102,6 +107,15 @@ pieces make them run against the servers:
   `seed-teamcity-builds.sh` writes as `http://gitea:3000/...` therefore resolve,
   and a build clones through the tunnel. **A build queued while the tunnel is
   down fails at checkout**; the server itself is fine.
+
+  Since 2026-09-06 the local Uptime Kuma watches both halves of this: a **ping
+  per server** by the IP in `hosts.env` (the firewall opens only 22 and ICMP,
+  and the Kuma container can send ICMP — `../README.md`, "Monitors", has the
+  measurement), and an **HTTP check per product through the forward**, named
+  `(tunnel)` because it falls with the tunnel. So a tunnel that died with the
+  Wi-Fi shows up as the three `(tunnel)` checks red and the three pings green,
+  which is a different picture from a server being down. `./seed-kuma.sh` reads
+  `hosts.env` for those IPs and refuses to run without it.
 
 `source hetzner/env` also exports two flags `just atlassian-live` reads:
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "knobas test estate",
-  "description": "The real test infrastructure knobas is developed against, as provisioned: the notebook with its OrbStack Docker engine, the three Hetzner servers with their containers and databases, and the SSH tunnel's forwards as routes. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the one exception in the making: Uptime Kuma does not hold them yet and #441 is what creates them. See README.md in this directory.",
+  "description": "The real test infrastructure knobas is developed against, as provisioned: the notebook with its OrbStack Docker engine, the three Hetzner servers with their containers and databases, and the SSH tunnel's forwards as routes. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the names the local Uptime Kuma actually holds, seeded from `../monitors.json` (#441). See README.md in this directory.",
   "assets": [
     {
       "id": "asset:knobas-estate",
@@ -57,7 +57,7 @@
         "compose_service": "gitea",
         "published_port": "127.0.0.1:3000"
       },
-      "monitors": ["Gitea (local)"]
+      "monitors": ["gitea"]
     },
     {
       "id": "asset:knobas-uptime-kuma",
@@ -114,7 +114,7 @@
         "docker_context": "knobas-teamcity",
         "compose_profile": "real-teamcity"
       },
-      "monitors": ["knobas-teamcity (ping)"]
+      "monitors": ["knobas-teamcity"]
     },
     {
       "id": "asset:hetzner-teamcity-docker",
@@ -138,7 +138,7 @@
         "compose_profile": "real-teamcity",
         "published_port": "127.0.0.1:8111 on knobas-teamcity"
       },
-      "monitors": ["TeamCity (tunnel)"]
+      "monitors": ["teamcity (tunnel)"]
     },
     {
       "id": "asset:db-teamcity",
@@ -183,7 +183,7 @@
         "docker_context": "knobas-jira",
         "compose_profile": "real-atlassian"
       },
-      "monitors": ["knobas-jira (ping)"]
+      "monitors": ["knobas-jira"]
     },
     {
       "id": "asset:hetzner-jira-docker",
@@ -207,7 +207,7 @@
         "compose_profile": "real-atlassian",
         "published_port": "127.0.0.1:8080 on knobas-jira"
       },
-      "monitors": ["Jira (tunnel)"]
+      "monitors": ["jira (tunnel)"]
     },
     {
       "id": "asset:knobas-jira-db",
@@ -252,7 +252,7 @@
         "docker_context": "knobas-confluence",
         "compose_profile": "real-atlassian"
       },
-      "monitors": ["knobas-confluence (ping)"]
+      "monitors": ["knobas-confluence"]
     },
     {
       "id": "asset:hetzner-confluence-docker",
@@ -276,7 +276,7 @@
         "compose_profile": "real-atlassian",
         "published_port": "127.0.0.1:8090 on knobas-confluence"
       },
-      "monitors": ["Confluence (tunnel)"]
+      "monitors": ["confluence (tunnel)"]
     },
     {
       "id": "asset:knobas-confluence-db",
