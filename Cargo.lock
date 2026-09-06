@@ -2970,6 +2970,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "knobas-source-kuma"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "knobas-core",
+ "knobas-http",
+ "knobas-source",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "knobas-source-mock"
 version = "0.1.0"
 dependencies = [

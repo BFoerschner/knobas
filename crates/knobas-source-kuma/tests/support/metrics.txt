@@ -1,0 +1,120 @@
+# RECORDED, NOT WRITTEN. `curl -u ":$(cat testenv/kuma-api-key)"
+# http://127.0.0.1:3001/metrics` against the pinned Uptime Kuma image
+# (louislam/uptime-kuma 2.5.3) on 2026-09-06, holding the eight monitors
+# `testenv/monitors.json` names -- three pings on the Hetzner servers, three
+# HTTP checks through the tunnel, one on the local Gitea, and the canary.
+#
+# Trimmed, and only by whole families: every `monitor_*` family is here in
+# full, and four of the node.js runtime families are kept as the noise the
+# parser has to walk past (`process_open_fds`, `nodejs_active_handles`,
+# `app_version`, and a histogram's buckets). Nothing was edited, reordered or
+# invented -- the `-1` response times are what a tunnel that was down really
+# answered, and `monitor_cert_days_remaining` is empty because this estate has
+# no TLS check, which `tests/live_kuma.rs` records as the direction the real
+# server cannot witness.
+#
+# `#` is a comment in the exposition format, so this header is part of the
+# document the parser is handed and is skipped by it -- which is itself
+# something `tests/contract.rs` relies on.
+# HELP monitor_cert_days_remaining The number of days remaining until the certificate expires
+# TYPE monitor_cert_days_remaining gauge
+
+# HELP monitor_cert_is_valid Is the certificate still valid? (1 = Yes, 0= No)
+# TYPE monitor_cert_is_valid gauge
+
+# HELP monitor_uptime_ratio Uptime ratio calculated over sliding window specified by the 'window' label. (0.0 - 1.0)
+# TYPE monitor_uptime_ratio gauge
+monitor_uptime_ratio{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="1d"} 1
+monitor_uptime_ratio{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="30d"} 1
+monitor_uptime_ratio{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="365d"} 1
+monitor_uptime_ratio{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="1d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="30d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="365d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="1d"} 0.7845188284518828
+monitor_uptime_ratio{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="30d"} 0.7845188284518828
+monitor_uptime_ratio{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="365d"} 0.7845188284518828
+monitor_uptime_ratio{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="1d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="30d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="365d"} 0.7782426778242678
+monitor_uptime_ratio{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="1d"} 0.9839385474860335
+monitor_uptime_ratio{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="30d"} 0.9839385474860335
+monitor_uptime_ratio{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="365d"} 0.9839385474860335
+monitor_uptime_ratio{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="1d"} 1
+monitor_uptime_ratio{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="30d"} 1
+monitor_uptime_ratio{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="365d"} 1
+monitor_uptime_ratio{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="1d"} 1
+monitor_uptime_ratio{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="30d"} 1
+monitor_uptime_ratio{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="365d"} 1
+monitor_uptime_ratio{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="1d"} 1
+monitor_uptime_ratio{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="30d"} 1
+monitor_uptime_ratio{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="365d"} 1
+
+# HELP monitor_response_time_seconds Average response time in seconds calculated over sliding window specified by the 'window' label
+# TYPE monitor_response_time_seconds gauge
+monitor_response_time_seconds{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="1d"} 0.01398744769874477
+monitor_response_time_seconds{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="30d"} 0.01398744769874477
+monitor_response_time_seconds{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null",window="365d"} 0.01398744769874477
+monitor_response_time_seconds{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="1d"} 0.048895161290322585
+monitor_response_time_seconds{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="30d"} 0.048895161290322585
+monitor_response_time_seconds{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null",window="365d"} 0.048895161290322585
+monitor_response_time_seconds{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="1d"} 0.050904000000000005
+monitor_response_time_seconds{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="30d"} 0.050903999999999984
+monitor_response_time_seconds{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null",window="365d"} 0.050903999999999984
+monitor_response_time_seconds{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="1d"} 0.03856720430107527
+monitor_response_time_seconds{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="30d"} 0.03856720430107522
+monitor_response_time_seconds{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null",window="365d"} 0.03856720430107522
+monitor_response_time_seconds{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="1d"} 0.01940525195173882
+monitor_response_time_seconds{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="30d"} 0.019405251951738815
+monitor_response_time_seconds{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null",window="365d"} 0.019405251951738815
+monitor_response_time_seconds{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="1d"} 0.021311255230125493
+monitor_response_time_seconds{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="30d"} 0.02131125523012551
+monitor_response_time_seconds{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null",window="365d"} 0.02131125523012551
+monitor_response_time_seconds{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="1d"} 0.022929497907949774
+monitor_response_time_seconds{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="30d"} 0.022929497907949768
+monitor_response_time_seconds{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null",window="365d"} 0.022929497907949768
+monitor_response_time_seconds{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="1d"} 0.021297991631799153
+monitor_response_time_seconds{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="30d"} 0.021297991631799143
+monitor_response_time_seconds{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null",window="365d"} 0.021297991631799143
+
+# HELP monitor_response_time Monitor Response Time (ms)
+# TYPE monitor_response_time gauge
+monitor_response_time{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null"} 16
+monitor_response_time{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null"} -1
+monitor_response_time{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null"} -1
+monitor_response_time{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null"} -1
+monitor_response_time{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null"} 27
+monitor_response_time{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null"} 31.2
+monitor_response_time{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null"} 32.8
+monitor_response_time{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null"} 32.2
+
+# HELP monitor_status Monitor Status (1 = UP, 0= DOWN, 2= PENDING, 3= MAINTENANCE)
+# TYPE monitor_status gauge
+monitor_status{monitor_id="7",monitor_name="gitea",monitor_type="http",monitor_url="http://gitea:3000/api/healthz",monitor_hostname="null",monitor_port="null"} 1
+monitor_status{monitor_id="5",monitor_name="jira (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8080/status",monitor_hostname="null",monitor_port="null"} 0
+monitor_status{monitor_id="4",monitor_name="teamcity (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8111/login.html",monitor_hostname="null",monitor_port="null"} 0
+monitor_status{monitor_id="6",monitor_name="confluence (tunnel)",monitor_type="http",monitor_url="http://host.docker.internal:8090/status",monitor_hostname="null",monitor_port="null"} 0
+monitor_status{monitor_id="8",monitor_name="canary",monitor_type="http",monitor_url="http://host.docker.internal:8299/",monitor_hostname="null",monitor_port="null"} 1
+monitor_status{monitor_id="2",monitor_name="knobas-jira",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.125.111",monitor_port="null"} 1
+monitor_status{monitor_id="1",monitor_name="knobas-teamcity",monitor_type="ping",monitor_url="null",monitor_hostname="46.224.117.158",monitor_port="null"} 1
+monitor_status{monitor_id="3",monitor_name="knobas-confluence",monitor_type="ping",monitor_url="null",monitor_hostname="2.28.72.189",monitor_port="null"} 1
+
+
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 23
+
+# HELP nodejs_active_handles Number of active libuv handles grouped by handle type. Every handle type is C++ class name.
+# TYPE nodejs_active_handles gauge
+nodejs_active_handles{type="Socket"} 3
+nodejs_active_handles{type="Server"} 1
+
+# HELP app_version The service version by package.json
+# TYPE app_version gauge
+app_version{version="2.5.3",major="2",minor="5",patch="3"} 1
+
+# HELP nodejs_gc_duration_seconds Garbage collection duration by kind, one of major, minor, incremental or weakcb.
+# TYPE nodejs_gc_duration_seconds histogram
+nodejs_gc_duration_seconds_bucket{le="0.001",kind="incremental"} 1
+nodejs_gc_duration_seconds_bucket{le="0.01",kind="incremental"} 21
+nodejs_gc_duration_seconds_bucket{le="0.1",kind="incremental"} 29
+nodejs_gc_duration_seconds_bucket{le="1",kind="incremental"} 29
