@@ -899,14 +899,14 @@ mod tests {
                 name: "gitea".to_owned(),
                 state: Some("up".to_owned()),
                 web_url: Some("http://127.0.0.1:3001/dashboard/7".to_owned()),
-                withdrawn: false,
+                tombstoned: false,
             }],
         };
         assert_shape(
             MIRROR,
             "AttachedMonitor",
             &serde_json::to_value(&detail.monitoring[0]).unwrap(),
-            &["entity_id", "name", "state", "web_url", "withdrawn"],
+            &["entity_id", "name", "state", "web_url", "tombstoned"],
         );
         assert_shape(
             MIRROR,

@@ -336,8 +336,14 @@ export interface AttachedMonitor {
   state: string | null;
   /** Its own page in Uptime Kuma (story 71); null when there is none left. */
   web_url: string | null;
-  /** Whether it has left the mirror — paused in Kuma, or deleted. */
-  withdrawn: boolean;
+  /**
+   * Whether it has left the mirror — paused in Kuma, or deleted.
+   *
+   * *Tombstoned* is `CONTEXT.md`'s word for it; the *Linked* panel under the
+   * pane's monitoring section renders the same fact — `LinkEnd.deleted_at` —
+   * with the older spelling *withdrawn*.
+   */
+  tombstoned: boolean;
 }
 
 /**

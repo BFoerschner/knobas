@@ -2481,7 +2481,7 @@ async fn the_pane_lists_the_monitors_watching_an_asset_with_their_state_and_a_li
                     watch.name.as_str(),
                     watch.state.as_deref(),
                     watch.web_url.as_deref(),
-                    watch.withdrawn,
+                    watch.tombstoned,
                 )
             })
             .collect::<Vec<_>>(),
@@ -2545,7 +2545,11 @@ async fn a_paused_monitor_stays_in_the_section_with_no_state_and_no_link() {
     assert_eq!(
         pane.monitoring
             .iter()
-            .map(|watch| (watch.name.as_str(), watch.state.as_deref(), watch.withdrawn))
+            .map(|watch| (
+                watch.name.as_str(),
+                watch.state.as_deref(),
+                watch.tombstoned
+            ))
             .collect::<Vec<_>>(),
         [("gitea", None, true)],
         "still attached, and marked as no longer in Kuma"

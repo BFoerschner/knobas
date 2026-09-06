@@ -6238,7 +6238,7 @@ From this commit on, each of the following requires an orchestrator decision **a
       pub name: String,
       pub state: Option<String>,    // up | down | pending | maintenance
       pub web_url: Option<String>,  // its page in Kuma
-      pub withdrawn: bool,          // it has left the mirror: paused, or deleted
+      pub tombstoned: bool,         // it has left the mirror: paused, or deleted
   }
 
   pub struct UnresolvedMonitor { pub asset_id: String, pub asset_name: String, pub monitor_name: String }
@@ -6268,7 +6268,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   that and the tombstone, which is what makes a **paused** monitor — #442 tombstones a monitor that
   leaves `/metrics` — read as *still attached, no reading, no page* rather than vanishing. A section
   that dropped it would tell an asset somebody deliberately silenced a check on that nothing watches
-  it.
+  it. The field is `tombstoned` and not `withdrawn`, which is `CONTEXT.md`'s distinction: an item
+  deleted-at-source is tombstoned, and a *withdrawn* thing is a queued write pulled back. The
+  *Linked* panel under this section renders the same fact — `LinkEnd.deleted_at` — with the older
+  spelling, and that prose is left as it is.
 
   **One stored relation word, offered from both ends.** `knobas_app::assets::MONITORED_BY` stays the
   only word the import writes and every estate read filters on. What *Link to…* gains is a second

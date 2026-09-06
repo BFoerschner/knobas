@@ -695,11 +695,16 @@ pub struct AttachedMonitor {
     pub web_url: Option<String>,
     /// Whether the monitor has left the mirror -- paused in Kuma, or deleted.
     ///
-    /// A fact the reader is shown rather than a filter, for
-    /// [`knobas_core::link::LinkEnd::deleted_at`]'s reason: a section that
-    /// silently dropped a paused monitor would tell an asset somebody
-    /// deliberately silenced a check on that nothing watches it.
-    pub withdrawn: bool,
+    /// `CONTEXT.md`'s word for this state is **tombstone**: "marking an item
+    /// deleted-at-source while keeping the row", against *withdraw*, which
+    /// that glossary gives to a queued write pulled back. The fact itself is
+    /// [`knobas_core::link::LinkEnd::deleted_at`], which the *Linked* panel
+    /// under this section renders with the older spelling.
+    ///
+    /// A fact the reader is shown rather than a filter, for that field's own
+    /// reason: a section that silently dropped a paused monitor would tell an
+    /// asset somebody deliberately silenced a check on that nothing watches it.
+    pub tombstoned: bool,
 }
 
 /// One route, as both ends read it.
@@ -1333,7 +1338,7 @@ async fn attached_monitors(
                 name: entry.other.title.clone(),
                 state,
                 web_url,
-                withdrawn: entry.other.deleted_at.is_some(),
+                tombstoned: entry.other.deleted_at.is_some(),
             }
         })
         .collect();
@@ -2599,6 +2604,12 @@ pub struct ImportPreview {
     pub monitor_links: Vec<MonitorLink>,
     /// The monitor names the file's assets carry that the mirror does not
     /// hold, by asset and then by name. See [`UnresolvedMonitor`].
+    ///
+    /// **Over the assets the file names, and no others.** A preview is a
+    /// sentence about a file, so a name kept on an asset the file has since
+    /// stopped listing is not reported here -- it is on the asset, where the
+    /// pane draws it, and the next file that names that asset again picks it
+    /// up.
     pub unresolved: Vec<UnresolvedMonitor>,
 }
 

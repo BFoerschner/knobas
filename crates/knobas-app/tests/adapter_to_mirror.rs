@@ -867,7 +867,11 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
     assert_eq!(
         pane.monitoring
             .iter()
-            .map(|watch| (watch.name.as_str(), watch.state.as_deref(), watch.withdrawn))
+            .map(|watch| (
+                watch.name.as_str(),
+                watch.state.as_deref(),
+                watch.tombstoned
+            ))
             .collect::<Vec<_>>(),
         [("gitea", Some("up"), false)],
         "the monitor the file named, with the state the adapter parsed"

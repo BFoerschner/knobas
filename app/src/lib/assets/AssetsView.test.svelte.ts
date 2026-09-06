@@ -169,14 +169,14 @@ const MONITORING: AttachedMonitor[] = [
     name: "postgres-check",
     state: "down",
     web_url: "http://127.0.0.1:3001/dashboard/4",
-    withdrawn: false,
+    tombstoned: false,
   },
   {
     entity_id: "kuma:5",
     name: "postgres-slow-query",
     state: null,
     web_url: null,
-    withdrawn: true,
+    tombstoned: true,
   },
 ];
 

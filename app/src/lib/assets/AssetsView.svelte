@@ -1285,13 +1285,13 @@
    * rather than stored: the backend's two lists are both true, and which of
    * them a name is *still* in is a rendering question.
    */
-  const namedAndWaiting = $derived(
-    detail === null
-      ? []
-      : detail.monitors.filter(
-          (name) => !detail!.monitoring.some((watch) => watch.name === name),
-        ),
-  );
+  const namedAndWaiting = $derived.by(() => {
+    const open = detail;
+    if (open === null) return [];
+    return open.monitors.filter(
+      (name) => !open.monitoring.some((watch) => watch.name === name),
+    );
+  });
 
   /**
    * Follow a `ValueSource`'s link, where it has one.
@@ -2003,7 +2003,7 @@
                     state to show and no page to open. Saying so is the point —
                     a blank beside a live row would read as "up".
                   -->
-                  {#if watch.withdrawn}
+                  {#if watch.tombstoned}
                     <span class="faint">Paused or gone from Kuma</span>
                   {:else if watch.state !== null}
                     <span class="hl {watch.state}">{watch.state}</span>
@@ -2720,32 +2720,26 @@
     text-decoration: underline;
   }
 
-  /* The state words, coloured the way `.prop .hl` colours health: one
-     vocabulary, one palette. `pending` and `maintenance` are Kuma's other two
-     and fall through to the inherited colour, which is what "no opinion"
-     should look like. */
+  /*
+     One vocabulary, one palette: an asset's health and a monitor's state are
+     the same four words, so the two surfaces share these rules rather than
+     asserting in prose that they agree. `.none` is health's alone -- a monitor
+     has no such state -- and Kuma's `pending` and `maintenance` fall through
+     to the inherited colour, which is what "no opinion" should look like.
+  */
+  .prop .hl.up,
   .watch .hl.up {
     color: var(--ok);
   }
 
+  .prop .hl.warn,
   .watch .hl.warn {
     color: var(--amber);
   }
 
+  .prop .hl.down,
   .watch .hl.down {
     color: var(--fail);
-  }
-
-  .prop .hl.warn {
-    color: var(--amber);
-  }
-
-  .prop .hl.down {
-    color: var(--fail);
-  }
-
-  .prop .hl.up {
-    color: var(--ok);
   }
 
   .prop .hl.none {
