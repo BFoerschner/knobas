@@ -196,6 +196,21 @@ export interface AssetProperty {
   custom: boolean;
 }
 
+/**
+ * One row of a room's Assets tile — `assets::MemberAsset` (#434).
+ *
+ * The asset plus **where it sits**, and a carrier rather than a `path` field
+ * on {@link AssetRow}: a Miller column draws no path, so the column reads
+ * leave `path_text` unselected and this one tile does not put it on every
+ * row of every walk.
+ */
+export interface MemberAsset {
+  asset: AssetRow;
+  /** The ancestors' names, outermost first, `" / "` between; `null` at the
+   * top of the estate. */
+  path: string | null;
+}
+
 /** Everything the fixed right pane draws — `assets::AssetDetail`. */
 export interface AssetDetail {
   asset: AssetRow;
@@ -280,6 +295,20 @@ export function assetTree(parentId?: string | null): Promise<AssetRow[]> {
 /** One asset, with its properties, its held-by path, what it holds, and its history. */
 export function getAsset(assetId: string): Promise<AssetDetail> {
   return invoke<AssetDetail>("get_asset", { assetId });
+}
+
+/**
+ * The member assets of a stored context — the room's Assets tile (#434).
+ *
+ * Worst health first, then by name. Membership is the one rule
+ * `contextMembers` answers with (ADR-0008), reaching assets **through their
+ * ancestors**: a VM in the context brings what it holds, so a list of one VM
+ * and its four containers is five rows.
+ *
+ * A context that does not exist answers with an empty list, not a rejection.
+ */
+export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
+  return invoke<MemberAsset[]>("context_assets", { ctxId });
 }
 
 /**

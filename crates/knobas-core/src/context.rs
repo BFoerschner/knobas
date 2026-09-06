@@ -15,6 +15,14 @@
 //! further hop ("a member ticket's PRs, their builds"), and stops. The rule is
 //! fixed and not configurable in v1.
 //!
+//! Since #434 the same statement carries §16.11's other sentence, *"asset
+//! membership counts through ancestors"*: an asset is a member when it or any
+//! of its ancestors is one of those three, expanded over
+//! `knobas.asset.parent_id` (ADR-0014) and never over links. That expansion is
+//! the walk's last layer and lives in [`MEMBER_IDS`] with the rest -- one
+//! statement, so the room's tiles, the per-context inbox filter and the tray's
+//! proposal scope cannot come to different answers about who is here.
+//!
 //! Every step of the walk reads `knobas.confirmed_link`, never `knobas.link`:
 //! the table also holds proposals (#41), the tray *scopes proposals by
 //! membership*, and a membership built from proposals would make the two
@@ -314,6 +322,31 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 ///   epic with `jira-eu:PAY-1`.
 /// * **`direct`** -- the seeds plus everything they link to.
 /// * **`hop`** -- those plus one hop further, and no further.
+/// * **`held`** -- the assets under everything the walk reached, at any depth
+///   (#434). ADR-0008's ratified sentence is *"asset membership counts through
+///   ancestors"*, so an asset is a member when **it or any of its ancestors**
+///   is a seed, a direct link or a one-hop reach.
+///
+/// `held` is a `with recursive` term and the other three are not, and the
+/// asymmetry is the rule rather than an inconsistency: the link walk is *fixed
+/// at* three layers (§16.11, "not configurable in v1"), while containment is
+/// transitive without limit -- spec §12.1's "any asset can hold assets without
+/// limit" -- and ADR-0014 is the decision that keeps the two apart by making
+/// containment a column instead of a relation. It expands over
+/// `knobas.asset.parent_id` and **never over links**, and it is the walk's
+/// **last** layer: the assets it brings in contribute no seeds, no direct
+/// links and no hops of their own, so a page linked to a brought-in container
+/// is not a member. Only assets carry a parent, so nothing else can enter
+/// through it, and the column's one writer refuses cycles before it writes
+/// (`knobas_app::assets::move_to`, with `asset_no_self_parent_chk` under it).
+///
+/// **No `implied` row is written anywhere for this**, which is spec #427's own
+/// ruling -- *"the implied membership of an asset linked to a member ticket is
+/// computed, not stored, as the ADR requires"* -- and ADR-0008's first
+/// subsidiary decision. Spec §5a's *"linking an asset to a ticket auto-adds
+/// the asset to that ticket's contexts"* is what the `direct` layer already
+/// says; what makes it *removable* is that removing the link removes the
+/// membership, with nothing left behind.
 ///
 /// The parent match is a **payload read outside an adapter**, governed by
 /// ADR-0007: it is confined to this statement, and its failure direction is
@@ -327,7 +360,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// `knobas.confirmed_link` at every step -- see the module note for why that
 /// is load-bearing and not a style choice.
 const MEMBER_IDS: &str = "
-    with seed(id) as (
+    with recursive seed(id) as (
         select o.id
           from knobas.confirmed_link l
           join knobas.entity o
@@ -367,8 +400,18 @@ const MEMBER_IDS: &str = "
           join knobas.entity o
             on o.id = case when l.from_id = d.id then l.to_id else l.from_id end
          where o.kind <> 'ctx'
+    ),
+    -- ADR-0008's asset clause, over ADR-0014's column: everything held by
+    -- something the walk reached, at any depth, and nothing that merely links
+    -- to it.
+    held(id) as (
+        select id from hop
+        union
+        select c.id
+          from held h
+          join knobas.asset c on c.parent_id = h.id
     )
-    select id from hop where id <> $1";
+    select id from held where id <> $1";
 
 /// Who is in this context, by the fixed rule -- computed, never stored.
 ///

@@ -1,8 +1,9 @@
-//! The estate: assets, the tree they sit in, and the seven commands that read
-//! and edit it (spec #427 "M4.0 Estate", issues #428 and #429).
+//! The estate: assets, the tree they sit in, and the eight commands that read
+//! and edit it (spec #427 "M4.0 Estate", issues #428, #429, #431 and #434).
 //!
-//! Six of the seven landed with #428; `asset_types` joined them with #429,
-//! when the create dialog gave the built-in table a reader.
+//! Six of the eight landed with #428; `asset_types` joined them with #429,
+//! when the create dialog gave the built-in table a reader, and
+//! `context_assets` with #434, when the room's Assets tile did.
 //!
 //! `commands/assets.rs` is a set of shims over this module; every decision
 //! lives here, with tests, because a `#[tauri::command]` cannot be called from
@@ -66,10 +67,22 @@
 //!   what colours the badge. Monitors join the "own health" half in M4.1; that
 //!   is the only part of story 37 not here.
 //!
+//! # Assets in contexts (#434)
+//!
+//! An asset is a member of a context through its **ancestors**: ADR-0008's
+//! ratified clause, expanded over `parent_id` and never over links, inside
+//! `knobas_core::context::member_ids`' one statement. This module owns no part
+//! of that rule -- [`in_context`] asks for the answer and reads the assets
+//! among the ids it gets back, so the room's Assets tile, the per-context
+//! inbox filter and the tray's proposal scope are one walk and cannot
+//! disagree.
+//!
 //! # What this module deliberately does not do yet
 //!
-//! Routes are **#432**, the create/edit surface is **#429**, and the keyboard
-//! walk and spines are **#430**.
+//! Routes are **#432**; the create/edit surface (#429) and the keyboard walk
+//! and spines (#430) have since landed. [`in_context`] serves a *stored* room; the
+//! Assets tile's rule for the derived rooms -- *All work*'s top level, a
+//! source room's monitored assets, a project room's nothing -- is **#435**.
 
 use std::collections::HashMap;
 
@@ -474,11 +487,14 @@ pub enum AssetEdit {
 /// **Never `fts`**: reading a `tsvector` into a row panics at run time
 /// (interfaces §1), which is the one rule `knobas_search::corpus` makes
 /// structural and the reason it is repeated here in prose. `path_text` is left
-/// out too -- the launcher reads it through the corpus and no surface in this
-/// module draws it, so selecting it on every column of a Miller walk would be
-/// bytes nobody asked for.
+/// out of **these three** -- the launcher reads it through the corpus and no
+/// *Miller column* draws it, so selecting it on every column of a walk would
+/// be bytes nobody asked for. [`MEMBER_ASSETS`] (#434) does select it, and
+/// that is the whole reason it is a fourth statement rather than one of these
+/// three: a room's Assets tile is a flat list of assets from anywhere in the
+/// estate, so where each one sits is the column that makes it readable.
 ///
-/// Three statements rather than one spliced constant: the SQL audit this repo
+/// Four statements rather than one spliced constant: the SQL audit this repo
 /// runs is over literal text, and a statement assembled from fragments is one
 /// a reader cannot check by reading.
 const CHILDREN: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
@@ -789,6 +805,111 @@ pub fn properties_of(type_id: &str, stored: &serde_json::Value) -> Vec<AssetProp
     }
 
     out
+}
+
+/// One asset in a room's Assets tile: the row every other read answers with,
+/// plus where it sits (#434).
+///
+/// **A carrier rather than a field on [`AssetRow`]**, and the reason is the
+/// rule the three column statements above state: `path_text` is left out of a
+/// Miller walk because no column draws it, and putting it on the row would put
+/// it on every column of every walk to serve one tile. The pair here is the
+/// same move [`Written`] makes -- the thing, and the one extra fact this
+/// caller needs about it -- so the tile reads `asset.name` and `path` and
+/// nothing in this module keeps a second copy of a type table or a rollup.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MemberAsset {
+    pub asset: AssetRow,
+    /// The ancestors' names, outermost first, `" / "` between them; `null` for
+    /// an asset at the top of the estate.
+    ///
+    /// Read off `knobas.asset.path_text`, the column the store maintains on
+    /// create, rename and move -- not a recursive read per row, which is what
+    /// a tile of twenty assets would otherwise cost.
+    pub path: Option<String>,
+}
+
+/// The member assets themselves, by id.
+///
+/// Which ids those are is [`knobas_core::context::member_ids`]'s answer and is
+/// **not re-derived here** -- see [`in_context`]. The `order by` is a stable
+/// floor under the sort that follows it, not the order the tile draws.
+const MEMBER_ASSETS: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
+            a.owner, nullif(a.path_text, '') as path,
+            exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
+       from knobas.asset a
+      where a.id = any($1::text[])
+      order by a.name asc, a.id asc";
+
+/// The assets a stored room's Assets tile draws: the context's member assets,
+/// worst health first (spec #427 story 41, issue #434).
+///
+/// **One walk, not two.** The membership rule is
+/// [`knobas_core::context::member_ids`]'s and this read asks it for the
+/// answer, then reads the assets among the ids it gave back. Nothing here
+/// re-states seed / direct / hop / held: a second copy of that statement is
+/// exactly what would let the tile, the per-context inbox filter and the
+/// tray's proposal scope come to different answers about who is here, and
+/// ADR-0008's "one rule, one statement, one battery" is the line this keeps.
+/// Assets reach that answer through their ancestors, so an asset's whole
+/// subtree is in the list when the asset is.
+///
+/// **Worst first** (the mockup's `signal-miller.html:1832`, `rank`): a tile is
+/// twenty rows in a box eight rows tall, and a `down` asset fifteenth is a
+/// tile that has not said the one thing it exists to say. The order is
+/// `health` -- the *effective* health, so a healthy VM holding a dead
+/// container sorts up with the dead one -- then name, then id, so two assets
+/// that are equally well and equally named still draw in a fixed order.
+///
+/// **No `limit`, deliberately**, where `Tile.svelte`'s list tiles window at
+/// fifty and print the unpaged total beside them. There is no total to print
+/// here: `member_ids` answers with a whole set and counting it is reading it,
+/// so a windowed read would either say "50" and be wrong or cost a second
+/// statement to say otherwise. ADR-0008 grants that *"membership can be
+/// wide"*, and the honest shape for a wide answer in a box eight rows tall is
+/// the whole list, worst first, in a tile that scrolls.
+///
+/// An unknown or archived `ctx_id` answers with no assets rather than an
+/// error, which is [`knobas_core::context::member_ids`]' own behaviour and the
+/// honest answer for a reader scoping a view.
+///
+/// # Errors
+///
+/// [`IpcError`] if a read fails.
+pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>, IpcError> {
+    let members = knobas_core::context::member_ids(pool, ctx_id).await?;
+    if members.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rows = sqlx::query(MEMBER_ASSETS)
+        .bind(&members)
+        .fetch_all(pool)
+        .await?;
+    let assets = rows_of(pool, &rows).await?;
+    let mut out: Vec<MemberAsset> = rows
+        .iter()
+        .zip(assets)
+        .map(|(row, asset)| {
+            Ok(MemberAsset {
+                asset,
+                path: row.try_get("path")?,
+            })
+        })
+        .collect::<Result<Vec<_>, IpcError>>()?;
+
+    // `severity` is smaller-is-worse, so this is an ascending sort and the
+    // worst row is first. The statement cannot do it: `health` is the rollup's
+    // answer and the rollup is a read of its own.
+    out.sort_by(|left, right| {
+        left.asset
+            .health
+            .severity()
+            .cmp(&right.asset.health.severity())
+            .then_with(|| left.asset.name.cmp(&right.asset.name))
+            .then_with(|| left.asset.id.cmp(&right.asset.id))
+    });
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

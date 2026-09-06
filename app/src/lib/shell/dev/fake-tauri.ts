@@ -315,6 +315,12 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     edit_asset: (args) => editAsset(args),
     move_asset: (args) => moveAsset(args),
     delete_asset: (args) => deleteAsset(args),
+    // The room's Assets tile (#434). Empty for `context_members`' reason: the
+    // fixture has no link graph, so no context holds anything and membership
+    // -- assets included -- is honestly nothing. A stored room under
+    // `?fake-ipc` therefore draws the tile's empty state rather than a red
+    // "command not found".
+    context_assets: () => [],
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no

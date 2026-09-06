@@ -538,3 +538,182 @@ async fn a_hand_written_ctx_anchor_never_roots_the_walk() {
         b.id
     );
 }
+
+// ---------------------------------------------------------------------------
+// Assets: membership through ancestors (#434, ADR-0008's latent clause)
+// ---------------------------------------------------------------------------
+
+/// One asset in the estate's tree: the entity row and the asset row, written
+/// here rather than through the store because the store is
+/// `knobas_app::assets` and this crate cannot depend on it.
+///
+/// `parent` is the whole of an asset's place in the tree (ADR-0014); nothing
+/// below draws a `holds` link, because there is no such relation.
+async fn asset(pool: &PgPool, type_id: &str, name: &str, parent: Option<&str>) -> String {
+    let id = EntityRef::new("asset", name).to_string();
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.asset (id, parent_id, type_id, name) values ($1,$2,$3,$4)")
+        .bind(&id)
+        .bind(parent)
+        .bind(type_id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
+/// Story 48, the ratified sentence: *"asset membership counts through
+/// ancestors"* -- adding a VM brings what the VM holds, all the way down.
+///
+/// Four negatives ride with the positive, because an expansion that reaches
+/// too far is as wrong as one that reaches nothing:
+///
+/// * the **site above** the VM is not a member -- the rule brings descendants,
+///   and an asset whose *ancestors* were never in the walk is not in it either;
+/// * a **sibling subtree** (the second VM and what it holds) is untouched;
+/// * a page **linked to** a brought-in container is not a member: the
+///   expansion runs over the parent field and never over links, and it is the
+///   walk's last layer rather than a fourth source of seeds;
+/// * the context itself is never in its own membership.
+#[tokio::test]
+async fn a_vm_added_to_a_context_brings_what_it_holds_and_nothing_beside_it() {
+    let pool = scratch().await;
+    let ctx = context::create_adhoc(&pool, "payments stack")
+        .await
+        .unwrap();
+
+    let site = asset(&pool, "site", "hel", None).await;
+    let vm = asset(&pool, "vm", "hel1", Some(&site)).await;
+    let engine = asset(&pool, "container_engine", "docker", Some(&vm)).await;
+    let container = asset(&pool, "container", "payouts", Some(&engine)).await;
+    // A sibling subtree, under the same site.
+    let other_vm = asset(&pool, "vm", "hel2", Some(&site)).await;
+    let other_container = asset(&pool, "container", "gitea", Some(&other_vm)).await;
+    // What a brought-in asset links to is not brought in with it.
+    let page = entity_only(&pool, "confluence", "page", "ENG/Payout runbook").await;
+    draw(&pool, &container, &page).await;
+
+    draw(&pool, &ctx.id, &vm).await; // the explicit add
+
+    let got = members(&pool, &ctx.id).await;
+    assert_eq!(got, set(&[&vm, &engine, &container]));
+    for absent in [&site, &other_vm, &other_container, &page] {
+        assert!(!got.contains(absent), "{absent} is outside the rule");
+    }
+}
+
+/// Story 42 and spec §5a: linking an asset to a ticket that is a member makes
+/// the asset a member too -- **computed, not stored**, which is spec #427's own
+/// wording and ADR-0008's decision. No `implied` row is written anywhere; the
+/// membership is what the one statement answers, and what the asset holds
+/// comes with it.
+#[tokio::test]
+async fn a_container_linked_to_a_member_ticket_is_a_member_and_so_is_what_it_holds() {
+    let pool = scratch().await;
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
+    let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
+    let container = asset(&pool, "container", "payouts", None).await;
+    let service = asset(&pool, "service", "payouts-api", Some(&container)).await;
+
+    draw(&pool, &ctx.id, &ticket).await; // the explicit add
+    draw(&pool, &ticket, &container).await; // linking the asset to the ticket
+
+    assert_eq!(
+        members(&pool, &ctx.id).await,
+        set(&[&ticket, &container, &service])
+    );
+
+    // Nothing was written to make that true: the link table holds the two
+    // links drawn above and no row joining the asset to the context.
+    let joined: i64 =
+        sqlx::query_scalar("select count(*) from knobas.link where from_id = $1 or to_id = $1")
+            .bind(&container)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(joined, 1, "the asset's only link is the one to the ticket");
+}
+
+/// The other half of "computed, never stored": the membership goes when the
+/// link that implied it goes, with nothing left behind to sweep, and the
+/// subtree it brought goes with it.
+///
+/// **Which link is "the implied link".** Spec #427 rules that *"the implied
+/// membership of an asset linked to a member ticket is computed, not stored,
+/// as the ADR requires"*, so there is no second row joining the asset to the
+/// context -- the link the reader removes to remove the membership is the one
+/// they drew between the asset and the ticket. Drawn `manual` here, because
+/// that is what *Link to…* (#435) writes; the origin is not what the walk
+/// reads.
+#[tokio::test]
+async fn removing_the_link_that_implied_the_membership_removes_it() {
+    let pool = scratch().await;
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
+    let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
+    let container = asset(&pool, "container", "payouts", None).await;
+    let service = asset(&pool, "service", "payouts-api", Some(&container)).await;
+    draw(&pool, &ctx.id, &ticket).await;
+
+    let implied = link::create(
+        &pool,
+        &EntityRef::parse(&ticket).unwrap(),
+        &EntityRef::parse(&container).unwrap(),
+        "deployed-from",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        members(&pool, &ctx.id).await,
+        set(&[&ticket, &container, &service])
+    );
+
+    link::unlink(&pool, implied.id).await.unwrap();
+    assert_eq!(members(&pool, &ctx.id).await, set(&[&ticket]));
+}
+
+/// The expansion is the walk's **last** layer and applies to every asset in
+/// it, however it got there: a `runs-on` link from a container to a VM
+/// elsewhere in the tree brings the VM in as an ordinary one-hop neighbour,
+/// and what the VM holds is a member because its ancestor is. ADR-0014's own
+/// example, where the tree and the relation are allowed to disagree.
+///
+/// The trade ADR-0008 already records -- *"membership can be wide"* -- read
+/// through the parent field, and it is asserted rather than left to follow,
+/// because an expansion applied only to the seed layer would answer
+/// differently here and identically in every other test in this file.
+#[tokio::test]
+async fn a_one_hop_asset_neighbour_brings_the_subtree_below_it() {
+    let pool = scratch().await;
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
+    let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
+    let container = asset(&pool, "container", "payouts", None).await;
+    let vm = asset(&pool, "vm", "hel1", None).await;
+    let database = asset(&pool, "database", "payouts-db", Some(&vm)).await;
+
+    draw(&pool, &ctx.id, &ticket).await;
+    draw(&pool, &ticket, &container).await;
+    draw(&pool, &container, &vm).await; // one hop: `runs-on`
+
+    let got = members(&pool, &ctx.id).await;
+    assert!(got.contains(&vm), "the VM is the one hop out");
+    assert!(
+        got.contains(&database),
+        "what the VM holds comes with it: the VM is in the walk, so its subtree is in the membership"
+    );
+    assert_eq!(got, set(&[&ticket, &container, &vm, &database]));
+}

@@ -1,5 +1,5 @@
-//! The estate at the seam the six commands are shims over, and at the seam
-//! Tauri dispatches through (issue #428).
+//! The estate at the seam the eight commands are shims over, and at the seam
+//! Tauri dispatches through (issues #428, #429, #431 and #434).
 //!
 //! Two halves, the same split `tests/backup_ipc.rs` and `tests/time_ipc.rs`
 //! make:
@@ -1329,6 +1329,183 @@ async fn a_column_row_reports_its_effective_health_and_what_is_wrong_inside() {
 }
 
 // ---------------------------------------------------------------------------
+// Assets in a room (#434)
+// ---------------------------------------------------------------------------
+
+/// An ad-hoc context and an explicit *Add to context* -- which is an ordinary
+/// confirmed link, spec §5a.
+async fn context_holding(pool: &PgPool, title: &str, member: &str) -> String {
+    let ctx = knobas_core::context::create_adhoc(pool, title)
+        .await
+        .expect("the context");
+    add(pool, &ctx.id, member).await;
+    ctx.id
+}
+
+/// A confirmed link between two entities, drawn by hand.
+async fn add(pool: &PgPool, from: &str, to: &str) {
+    knobas_core::link::create(
+        pool,
+        &knobas_core::entity::EntityRef::parse(from).expect("a ref"),
+        &knobas_core::entity::EntityRef::parse(to).expect("a ref"),
+        "related",
+        knobas_core::link::Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .expect("the link");
+}
+
+/// A mirrored ticket: the entity row a link needs and the `sync.item` row that
+/// makes it a live one.
+async fn ticket(pool: &PgPool, key: &str) -> String {
+    let id = format!("jira:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .expect("the entity row");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,'jira','ticket',$2,'','{}'::jsonb)",
+    )
+    .bind(&id)
+    .bind(key)
+    .execute(pool)
+    .await
+    .expect("the mirror row");
+    id
+}
+
+/// What the tile draws, in the order it draws it: `(name, path)`.
+async fn tile(pool: &PgPool, ctx: &str) -> Vec<(String, Option<String>)> {
+    assets::in_context(pool, ctx)
+        .await
+        .expect("the tile's read")
+        .into_iter()
+        .map(|row| (row.asset.name, row.path))
+        .collect()
+}
+
+/// Story 41 and story 48 at the tile: a VM added to a context brings what it
+/// holds, each row carries the path it sits at, and the worst row is first.
+///
+/// `two_branches` is the fixture because the claim needs a **sibling subtree**
+/// to leave alone: a single chain cannot tell "the members are this VM's
+/// descendants" from "the members are every asset in the estate".
+///
+/// The order is the assertion a name-only sort fails: `postgres` is
+/// alphabetically first and is drawn **last**, because it is the only one of
+/// the three that is well. The two `down` rows are separated by name, which is
+/// the tiebreak, and `vm-db-01` is `down` only through what it holds -- so a
+/// sort over the asset's *own* status would put it elsewhere.
+#[tokio::test]
+async fn a_stored_rooms_tile_lists_the_member_assets_with_their_path_worst_first() {
+    let pool = pool("assets-in-context").await;
+    let estate = two_branches(&pool).await;
+    edit_one(
+        &pool,
+        &estate.redis.id,
+        AssetEdit::Status {
+            value: AssetStatus::Down,
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &estate.postgres.id,
+        AssetEdit::Status {
+            value: AssetStatus::Up,
+        },
+    )
+    .await;
+
+    let ctx = context_holding(&pool, "payments stack", &estate.db.id).await;
+
+    assert_eq!(
+        tile(&pool, &ctx).await,
+        vec![
+            ("redis".to_owned(), Some("hel1 / vm-db-01".to_owned())),
+            ("vm-db-01".to_owned(), Some("hel1".to_owned())),
+            ("postgres".to_owned(), Some("hel1 / vm-db-01".to_owned())),
+        ]
+    );
+
+    // The far edges: the site *above* the VM is not brought in, and neither is
+    // the other branch -- membership counts through ancestors, not through
+    // whatever else the estate holds.
+    let drawn: Vec<String> = tile(&pool, &ctx)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    for absent in [&estate.site, &estate.app, &estate.nginx] {
+        assert!(
+            !drawn.contains(&absent.name),
+            "{} is outside the rule: {drawn:?}",
+            absent.name
+        );
+    }
+}
+
+/// Story 42: *"linking an asset to a ticket adds the asset to that ticket's
+/// contexts"*, which is what makes the tile fill itself -- and it is
+/// **computed**, per spec #427, so the link the reader draws is the only row
+/// written and removing it empties the tile again.
+#[tokio::test]
+async fn linking_an_asset_to_a_member_ticket_fills_the_tile_and_unlinking_empties_it() {
+    let pool = pool("assets-implied").await;
+    let estate = two_branches(&pool).await;
+    let ticket = ticket(&pool, "PAY-1").await;
+    let ctx = context_holding(&pool, "payout retries", &ticket).await;
+
+    assert_eq!(tile(&pool, &ctx).await, vec![], "no asset is linked yet");
+
+    let link = knobas_core::link::create(
+        &pool,
+        &knobas_core::entity::EntityRef::parse(&ticket).expect("a ref"),
+        &knobas_core::entity::EntityRef::parse(&estate.db.id).expect("a ref"),
+        "runs-on",
+        knobas_core::link::Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .expect("the link");
+
+    assert_eq!(
+        tile(&pool, &ctx)
+            .await
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        vec!["postgres", "redis", "vm-db-01"],
+        "the VM and both containers it holds"
+    );
+
+    knobas_core::link::unlink(&pool, link.id)
+        .await
+        .expect("unlink");
+    assert_eq!(
+        tile(&pool, &ctx).await,
+        vec![],
+        "and the tile empties again"
+    );
+}
+
+/// An address can outlive the thing it names, so a room whose context is gone
+/// draws an empty tile rather than an error -- `context::member_ids`' own
+/// behaviour, carried through.
+#[tokio::test]
+async fn a_context_that_is_not_there_draws_an_empty_tile() {
+    let pool = pool("assets-no-context").await;
+    two_branches(&pool).await;
+    assert_eq!(tile(&pool, "ctx:gone").await, vec![]);
+}
+
+// ---------------------------------------------------------------------------
 // The wiring: registered, named, and decoding.
 // ---------------------------------------------------------------------------
 
@@ -1351,6 +1528,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::move_asset,
             knobas_app::commands::assets::delete_asset,
             knobas_app::commands::assets::asset_types,
+            knobas_app::commands::assets::context_assets,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -1448,6 +1626,7 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             "delete_asset",
             serde_json::json!({ "assetId": "asset:7f2c" }),
         ),
+        ("context_assets", serde_json::json!({ "ctxId": "ctx:7f2c" })),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
