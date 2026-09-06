@@ -81,7 +81,7 @@ function route(target: AssetRow | null): RouteRow {
     target_id: target?.id ?? null,
     target_name: target?.name ?? null,
     name: "Postgres UI",
-    url: "https://pg.hel1.internal/",
+    url: "https://pg.hel1.example/",
     visibility: "internal",
     properties: [],
   };

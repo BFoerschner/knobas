@@ -137,7 +137,7 @@ const DASHBOARD_ROUTE: RouteRow = {
   target_id: null,
   target_name: null,
   name: "Traefik dashboard",
-  url: "http://10.0.0.5:8080/dashboard",
+  url: "http://traefik.hel1.example:8080/dashboard",
   visibility: "internal",
   properties: [],
 };

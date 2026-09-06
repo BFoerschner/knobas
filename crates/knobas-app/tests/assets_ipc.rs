@@ -1617,10 +1617,18 @@ async fn a_route_reads_from_both_ends_and_from_every_asset_on_the_path() {
     // container it is the asset's own id, and on the VM it is not -- which is
     // how the pane says "lands here" against "through postgres" and how story
     // 31's wire knows to be dashed.
-    let here = assets::get(&pool, &container.id).await.expect("the container");
-    assert_eq!(here.reachable_via[0].target_id.as_deref(), Some(container.id.as_str()));
+    let here = assets::get(&pool, &container.id)
+        .await
+        .expect("the container");
+    assert_eq!(
+        here.reachable_via[0].target_id.as_deref(),
+        Some(container.id.as_str())
+    );
     let above = assets::get(&pool, &vm.id).await.expect("the VM");
-    assert_ne!(above.reachable_via[0].target_id.as_deref(), Some(vm.id.as_str()));
+    assert_ne!(
+        above.reachable_via[0].target_id.as_deref(),
+        Some(vm.id.as_str())
+    );
 }
 
 /// A route with no target is a route: an endpoint that lands on nothing knobas
@@ -1664,7 +1672,10 @@ async fn a_route_with_no_target_reads_under_exposes_only() {
     // The one with a target still reaches its end, and the one without reaches
     // nowhere -- which is the whole difference between them.
     let (_, reachable) = both_ends(&pool, &container.id).await;
-    assert_eq!(reachable, [("Postgres UI".to_owned(), "postgres".to_owned())]);
+    assert_eq!(
+        reachable,
+        [("Postgres UI".to_owned(), "postgres".to_owned())]
+    );
 }
 
 /// Editing the target moves the route from one end to the other, and both
@@ -1818,7 +1829,11 @@ async fn a_route_is_renamed_re_pointed_and_re_classified_one_line_each() {
         .expect("the entity row");
     assert_eq!(title, "Postgres console", "the address's title moved too");
 
-    let before = assets::get_route(&pool, &route.id).await.unwrap().history.len();
+    let before = assets::get_route(&pool, &route.id)
+        .await
+        .unwrap()
+        .history
+        .len();
     let again = assets::edit_route(
         &pool,
         &route.id,
@@ -1829,9 +1844,16 @@ async fn a_route_is_renamed_re_pointed_and_re_classified_one_line_each() {
     .await
     .expect("a second edit")
     .activity;
-    assert!(again.is_empty(), "an edit that changes nothing writes no line");
+    assert!(
+        again.is_empty(),
+        "an edit that changes nothing writes no line"
+    );
     assert_eq!(
-        assets::get_route(&pool, &route.id).await.unwrap().history.len(),
+        assets::get_route(&pool, &route.id)
+            .await
+            .unwrap()
+            .history
+            .len(),
         before
     );
 }
@@ -1921,7 +1943,9 @@ async fn deleting_an_asset_refuses_the_routes_it_exposes_and_clears_the_ones_it_
     assets::delete(&pool, &container.id)
         .await
         .expect("an asset a route lands on is still a leaf");
-    let orphaned = assets::get_route(&pool, &route.id).await.expect("the route");
+    let orphaned = assets::get_route(&pool, &route.id)
+        .await
+        .expect("the route");
     assert_eq!(orphaned.route.target_id, None, "it lands on nothing now");
     assert_eq!(
         orphaned
@@ -1931,10 +1955,15 @@ async fn deleting_an_asset_refuses_the_routes_it_exposes_and_clears_the_ones_it_
         Some(("edited", serde_json::json!("target"))),
         "and the route says so in its own history"
     );
-    assert_eq!(orphaned.history[0].detail["from"], serde_json::json!(container.id));
+    assert_eq!(
+        orphaned.history[0].detail["from"],
+        serde_json::json!(container.id)
+    );
 
     // Which leaves the proxy deletable, once its route goes.
-    assets::delete_route(&pool, &route.id).await.expect("the route");
+    assets::delete_route(&pool, &route.id)
+        .await
+        .expect("the route");
     assets::delete(&pool, &proxy.id).await.expect("now a leaf");
 }
 
@@ -1973,7 +2002,11 @@ async fn a_route_is_an_entity_in_the_namespace_knobas_reserves() {
     assert!(knobas_core::entity::is_owned_kind(&kind));
     assert!(knobas_core::entity::is_reserved_namespace("route"));
 
-    for (query, hit) in [("Postgres", true), ("pg.hel1.internal", true), ("hel1", false)] {
+    for (query, hit) in [
+        ("Postgres", true),
+        ("pg.hel1.internal", true),
+        ("hel1", false),
+    ] {
         let matched: Vec<String> = sqlx::query_scalar(
             "select name from knobas.route
               where fts @@ websearch_to_tsquery('english', $1)",
@@ -2052,7 +2085,11 @@ async fn a_route_that_could_not_be_read_back_is_refused() {
     .await
     .unwrap_err();
     assert_eq!(code(&no_target), IpcErrorCode::NotFound);
-    assert!(no_target.message.contains("land on"), "{}", no_target.message);
+    assert!(
+        no_target.message.contains("land on"),
+        "{}",
+        no_target.message
+    );
 
     // Nothing was written by any of the four.
     let (exposes, _) = both_ends(&pool, &proxy.id).await;

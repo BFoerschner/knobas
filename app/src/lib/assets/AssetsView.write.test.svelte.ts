@@ -1026,7 +1026,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   click("Add a route");
   expect(text()).toContain("On vm-db-01");
   type("Name", "Postgres UI");
-  type("URL or endpoint", "https://pg.hel1.internal/");
+  type("URL or endpoint", "https://pg.hel1.example/");
   choose("Visibility", "public");
   // The picker opens where the route is exposed, so the container is one
   // click away — and clicking it is what makes it the target. `Land on …`
@@ -1042,7 +1042,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
     asset_id: "asset:vm-db-01",
     target_id: "asset:postgres",
     name: "Postgres UI",
-    url: "https://pg.hel1.internal/",
+    url: "https://pg.hel1.example/",
     visibility: "public",
   });
   // The route's own address, kept: a reader who copies this link gets the
@@ -1054,7 +1054,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
     routeId: written?.id,
   });
   const pane = text();
-  expect(pane).toContain("https://pg.hel1.internal/");
+  expect(pane).toContain("https://pg.hel1.example/");
   expect(pane).toContain("→ postgres");
   // Exposed here, and reaching the container this VM holds — both ends, in
   // the one pane that is on both.
@@ -1077,7 +1077,7 @@ test("a route with no scheme is refused in place and nothing is written", async 
 
   click("Add a route");
   type("Name", "Postgres UI");
-  type("URL or endpoint", "pg.hel1.internal");
+  type("URL or endpoint", "pg.hel1.example");
   click("Expose");
 
   await vi.waitFor(() => expect(text()).toContain("carries no scheme"));
@@ -1102,7 +1102,7 @@ test("a route is edited and then deleted from the pane", async () => {
       asset_id: "asset:vm-db-01",
       target_id: "asset:postgres",
       name: "Postgres UI",
-      url: "https://pg.hel1.internal/",
+      url: "https://pg.hel1.example/",
       visibility: "internal",
     },
   ]);
@@ -1110,7 +1110,7 @@ test("a route is edited and then deleted from the pane", async () => {
   await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Edit…");
-  expect((field("URL or endpoint") as HTMLInputElement).value).toBe("https://pg.hel1.internal/");
+  expect((field("URL or endpoint") as HTMLInputElement).value).toBe("https://pg.hel1.example/");
   type("Name", "Postgres console");
   // Clearing the target is a first-class choice: an endpoint that lands on
   // nothing knobas knows is a route the model holds on purpose.

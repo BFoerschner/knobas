@@ -2204,13 +2204,11 @@ async fn exists(
 
 /// The four statements that set a single route column, each named where it is
 /// used -- [`SET_STATUS`]'s arrangement, for its reason.
-const SET_ROUTE_NAME: &str =
-    "update knobas.route set name = $2, updated_at = now() where id = $1";
+const SET_ROUTE_NAME: &str = "update knobas.route set name = $2, updated_at = now() where id = $1";
 const SET_ROUTE_URL: &str = "update knobas.route set url = $2, updated_at = now() where id = $1";
 const SET_ROUTE_TARGET: &str =
     "update knobas.route set target_id = $2, updated_at = now() where id = $1";
-const SET_ROUTE_VISIBILITY: &str =
-    "update knobas.route set visibility = coalesce($2, 'internal'), updated_at = now() where id = $1";
+const SET_ROUTE_VISIBILITY: &str = "update knobas.route set visibility = coalesce($2, 'internal'), updated_at = now() where id = $1";
 
 /// Run one of the four `SET_ROUTE_*` statements.
 async fn set_route_column(
@@ -2242,7 +2240,11 @@ fn vet_url(url: &str) -> Result<String, IpcError> {
         return Err(IpcError::invalid("a route needs a URL"));
     }
     if url.split_once("://").is_none_or(|(scheme, rest)| {
-        scheme.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') || rest.is_empty()
+        scheme.is_empty()
+            || !scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+            || rest.is_empty()
     }) {
         return Err(IpcError::invalid(format!(
             "{url:?} carries no scheme -- a route is a URL or an endpoint, \
@@ -2700,9 +2702,12 @@ mod tests {
     fn a_routes_properties_are_all_custom_in_key_order() {
         let listed = custom_properties(&stored(&[
             ("opened_by", text("tunnel up")),
-            ("cert_expires", PropertyValue::Date {
-                value: "2026-12-01".to_owned(),
-            }),
+            (
+                "cert_expires",
+                PropertyValue::Date {
+                    value: "2026-12-01".to_owned(),
+                },
+            ),
         ]));
         assert_eq!(
             listed
@@ -2712,7 +2717,10 @@ mod tests {
             [("cert_expires", true), ("opened_by", true)],
             "by key, and every one of them the reader's own"
         );
-        assert_eq!(listed[0].label, "cert_expires", "a custom key labels itself");
+        assert_eq!(
+            listed[0].label, "cert_expires",
+            "a custom key labels itself"
+        );
         // And the same two rules a bag that is not a bag gets.
         assert!(custom_properties(&serde_json::json!("not an object")).is_empty());
         assert_eq!(

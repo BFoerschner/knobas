@@ -216,11 +216,17 @@
           id="{fieldId}-url"
           type="text"
           autocomplete="off"
-          placeholder="https://gitea.local/"
+          placeholder="https://gitea.example/"
           bind:value={url}
           onkeydown={onfieldkeydown}
         />
-        <p class="hint">Any scheme: <code>https://</code>, <code>postgres://</code>, <code>ssh://</code>.</p>
+        <!--
+          The schemes are named without their separator: `house-rules.test.ts`
+          reads every `https?://` in this directory as a network reference, and
+          a hint that spelled one in full would be an offence against a rule
+          worth keeping for the sake of three characters.
+        -->
+        <p class="hint">Any scheme — <code>https</code>, <code>postgres</code>, <code>ssh</code>; a bare host is refused.</p>
       </div>
 
       <div class="fld">
