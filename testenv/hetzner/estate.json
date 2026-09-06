@@ -1,0 +1,393 @@
+{
+  "version": 1,
+  "name": "knobas test estate",
+  "description": "The real test infrastructure knobas is developed against, as provisioned: the notebook with its OrbStack Docker engine, the three Hetzner servers with their containers and databases, and the SSH tunnel's forwards as routes. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the one exception in the making: Uptime Kuma does not hold them yet and #441 is what creates them. See README.md in this directory.",
+  "assets": [
+    {
+      "id": "asset:knobas-estate",
+      "type": "site",
+      "name": "knobas test estate",
+      "environment": "dev",
+      "owner": "Björn Förschner",
+      "description": "The root. Environment and owner are set here only; everything below inherits them from the nearest ancestor that sets them (spec §12.1)."
+    },
+
+    {
+      "id": "asset:notebook",
+      "type": "hypervisor",
+      "name": "devs-MacBook-Pro",
+      "parent": "asset:knobas-estate",
+      "description": "The development notebook, and the machine `just check` and every live recipe run on. Typed hypervisor because what it holds here is the Linux VM OrbStack runs; the type table has no name for a physical workstation.",
+      "properties": {
+        "os": "macOS 26.5.2",
+        "arch": "arm64",
+        "role": "development notebook"
+      }
+    },
+    {
+      "id": "asset:orbstack",
+      "type": "vm",
+      "name": "OrbStack Linux VM",
+      "parent": "asset:notebook",
+      "description": "OrbStack's Linux VM, where the notebook's Docker engine runs.",
+      "properties": {
+        "docker_context": "orbstack",
+        "docker_socket": "~/.orbstack/run/docker.sock"
+      }
+    },
+    {
+      "id": "asset:orbstack-docker",
+      "type": "container_engine",
+      "name": "Docker engine (OrbStack)",
+      "parent": "asset:orbstack",
+      "description": "The engine `testenv/docker-compose.yml` brings its default services up on.",
+      "properties": {
+        "compose_project": "knobas-testenv",
+        "compose_file": "testenv/docker-compose.yml"
+      }
+    },
+    {
+      "id": "asset:knobas-gitea",
+      "type": "container",
+      "name": "knobas-gitea",
+      "parent": "asset:orbstack-docker",
+      "description": "Gitea: a real product, the Gitea adapter's witness, and the VCS the TeamCity builds clone from through the tunnel's reverse forward.",
+      "properties": {
+        "image": "gitea/gitea",
+        "compose_service": "gitea",
+        "published_port": "127.0.0.1:3000"
+      },
+      "monitors": ["Gitea (local)"]
+    },
+    {
+      "id": "asset:knobas-uptime-kuma",
+      "type": "container",
+      "name": "knobas-uptime-kuma",
+      "parent": "asset:orbstack-docker",
+      "description": "Uptime Kuma v2: the system of record for every monitor this file names. It does not watch itself.",
+      "properties": {
+        "image": "louislam/uptime-kuma",
+        "compose_service": "uptime-kuma",
+        "published_port": "127.0.0.1:3001"
+      }
+    },
+    {
+      "id": "asset:knobas-mockd",
+      "type": "container",
+      "name": "knobas-mockd",
+      "parent": "asset:orbstack-docker",
+      "description": "Our own mock of Jira Data Center and TeamCity. Deprecated since 2026-09-03 (ADR-0013) and unmonitored: it is recorded because the compose file still runs it, and it leaves this file the day the service goes.",
+      "properties": {
+        "compose_service": "mockd",
+        "published_ports": "127.0.0.1:8200, 127.0.0.1:8210, 127.0.0.1:8212",
+        "status": "deprecated (ADR-0013)"
+      }
+    },
+    {
+      "id": "asset:hetzner-nbg1",
+      "type": "site",
+      "name": "Hetzner Cloud nbg1",
+      "parent": "asset:knobas-estate",
+      "description": "The three servers that host the opt-in real products, one product per server, provisioned by `provision.sh`.",
+      "properties": {
+        "provider": "Hetzner Cloud",
+        "location": "nbg1",
+        "firewall": "knobas-testenv: inbound 22/tcp and ICMP only"
+      }
+    },
+
+    {
+      "id": "asset:hetzner-teamcity",
+      "type": "vm",
+      "name": "knobas-teamcity",
+      "parent": "asset:hetzner-nbg1",
+      "description": "The TeamCity server's host. Reached over SSH; nothing but 22 and ICMP is open, which is why its monitor is a ping.",
+      "properties": {
+        "ipv4": "46.224.117.158",
+        "server_type": "cx23",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 40,
+        "os": "ubuntu-24.04",
+        "role": "teamcity",
+        "ssh_host": "knobas-teamcity",
+        "docker_context": "knobas-teamcity",
+        "compose_profile": "real-teamcity"
+      },
+      "monitors": ["knobas-teamcity (ping)"]
+    },
+    {
+      "id": "asset:hetzner-teamcity-docker",
+      "type": "container_engine",
+      "name": "Docker engine (knobas-teamcity)",
+      "parent": "asset:hetzner-teamcity",
+      "properties": {
+        "docker_context": "knobas-teamcity",
+        "installed_by": "cloud-init, get.docker.com"
+      }
+    },
+    {
+      "id": "asset:knobas-teamcity",
+      "type": "container",
+      "name": "knobas-teamcity",
+      "parent": "asset:hetzner-teamcity-docker",
+      "description": "The TeamCity server. Left running and seeded between sessions.",
+      "properties": {
+        "image": "jetbrains/teamcity-server",
+        "compose_service": "teamcity",
+        "compose_profile": "real-teamcity",
+        "published_port": "127.0.0.1:8111 on knobas-teamcity"
+      },
+      "monitors": ["TeamCity (tunnel)"]
+    },
+    {
+      "id": "asset:db-teamcity",
+      "type": "database",
+      "name": "teamcity",
+      "parent": "asset:knobas-teamcity",
+      "description": "TeamCity's internal database. There is no database container for it: the engine is embedded in the server, which is what the compose file's comment rules and what `down -v` throws away.",
+      "properties": {
+        "engine": "HSQLDB, embedded in the server",
+        "data_dir": "/data/teamcity_server/datadir"
+      }
+    },
+    {
+      "id": "asset:knobas-teamcity-agent",
+      "type": "container",
+      "name": "knobas-teamcity-agent",
+      "parent": "asset:hetzner-teamcity-docker",
+      "description": "The one build agent, because a server with none runs nothing. It publishes no port and has no monitor of its own; it falls with its server's ping.",
+      "properties": {
+        "image": "jetbrains/teamcity-agent",
+        "compose_service": "teamcity-agent",
+        "compose_profile": "real-teamcity",
+        "agent_name": "knobas-agent"
+      }
+    },
+
+    {
+      "id": "asset:hetzner-jira",
+      "type": "vm",
+      "name": "knobas-jira",
+      "parent": "asset:hetzner-nbg1",
+      "description": "Jira's host. cpx22 (AMD) rather than a cx type: Jira's start is single-threaded and took 72 s here against 147 s on a cx23.",
+      "properties": {
+        "ipv4": "46.224.125.111",
+        "server_type": "cpx22",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 80,
+        "os": "ubuntu-24.04",
+        "role": "jira",
+        "ssh_host": "knobas-jira",
+        "docker_context": "knobas-jira",
+        "compose_profile": "real-atlassian"
+      },
+      "monitors": ["knobas-jira (ping)"]
+    },
+    {
+      "id": "asset:hetzner-jira-docker",
+      "type": "container_engine",
+      "name": "Docker engine (knobas-jira)",
+      "parent": "asset:hetzner-jira",
+      "properties": {
+        "docker_context": "knobas-jira",
+        "installed_by": "cloud-init, get.docker.com"
+      }
+    },
+    {
+      "id": "asset:knobas-jira",
+      "type": "container",
+      "name": "knobas-jira",
+      "parent": "asset:hetzner-jira-docker",
+      "description": "Jira Software Data Center 10.3 LTS, on a 10-user timebomb licence renewed on the server's own systemd timer.",
+      "properties": {
+        "image": "atlassian/jira-software",
+        "compose_service": "jira",
+        "compose_profile": "real-atlassian",
+        "published_port": "127.0.0.1:8080 on knobas-jira"
+      },
+      "monitors": ["Jira (tunnel)"]
+    },
+    {
+      "id": "asset:knobas-jira-db",
+      "type": "container",
+      "name": "knobas-jira-db",
+      "parent": "asset:hetzner-jira-docker",
+      "description": "Jira's PostgreSQL. One server per product: `down -v` on either has to be a clean slate for that product alone.",
+      "properties": {
+        "image": "postgres",
+        "compose_service": "jira-db",
+        "compose_profile": "real-atlassian"
+      }
+    },
+    {
+      "id": "asset:db-jira",
+      "type": "database",
+      "name": "jira",
+      "parent": "asset:knobas-jira-db",
+      "properties": {
+        "engine": "PostgreSQL 15",
+        "user": "jira",
+        "jdbc_url": "jdbc:postgresql://jira-db:5432/jira",
+        "collation": "C, which Jira requires"
+      }
+    },
+
+    {
+      "id": "asset:hetzner-confluence",
+      "type": "vm",
+      "name": "knobas-confluence",
+      "parent": "asset:hetzner-nbg1",
+      "description": "Confluence's host.",
+      "properties": {
+        "ipv4": "2.28.72.189",
+        "server_type": "cpx22",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 80,
+        "os": "ubuntu-24.04",
+        "role": "confluence",
+        "ssh_host": "knobas-confluence",
+        "docker_context": "knobas-confluence",
+        "compose_profile": "real-atlassian"
+      },
+      "monitors": ["knobas-confluence (ping)"]
+    },
+    {
+      "id": "asset:hetzner-confluence-docker",
+      "type": "container_engine",
+      "name": "Docker engine (knobas-confluence)",
+      "parent": "asset:hetzner-confluence",
+      "properties": {
+        "docker_context": "knobas-confluence",
+        "installed_by": "cloud-init, get.docker.com"
+      }
+    },
+    {
+      "id": "asset:knobas-confluence",
+      "type": "container",
+      "name": "knobas-confluence",
+      "parent": "asset:hetzner-confluence-docker",
+      "description": "Confluence Data Center, the only contract there is for it: Atlassian publishes no machine-readable Confluence DC spec.",
+      "properties": {
+        "image": "atlassian/confluence",
+        "compose_service": "confluence",
+        "compose_profile": "real-atlassian",
+        "published_port": "127.0.0.1:8090 on knobas-confluence"
+      },
+      "monitors": ["Confluence (tunnel)"]
+    },
+    {
+      "id": "asset:knobas-confluence-db",
+      "type": "container",
+      "name": "knobas-confluence-db",
+      "parent": "asset:hetzner-confluence-docker",
+      "properties": {
+        "image": "postgres",
+        "compose_service": "confluence-db",
+        "compose_profile": "real-atlassian"
+      }
+    },
+    {
+      "id": "asset:db-confluence",
+      "type": "database",
+      "name": "confluence",
+      "parent": "asset:knobas-confluence-db",
+      "properties": {
+        "engine": "PostgreSQL 15",
+        "user": "confluence",
+        "jdbc_url": "jdbc:postgresql://confluence-db:5432/confluence",
+        "collation": "C, which Confluence requires"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "route:notebook-gitea",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-gitea",
+      "name": "Gitea",
+      "url": "http://127.0.0.1:3000/",
+      "properties": { "opened_by": "docker compose up (published port)" }
+    },
+    {
+      "id": "route:notebook-kuma",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-uptime-kuma",
+      "name": "Uptime Kuma",
+      "url": "http://127.0.0.1:3001/",
+      "properties": { "opened_by": "docker compose up (published port)" }
+    },
+    {
+      "id": "route:notebook-mockd-admin",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd health and admin",
+      "url": "http://127.0.0.1:8200/",
+      "properties": { "opened_by": "docker compose up (published port)" }
+    },
+    {
+      "id": "route:notebook-mockd-jira",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd Jira Data Center REST v2",
+      "url": "http://127.0.0.1:8210/",
+      "properties": { "opened_by": "docker compose up (published port)" }
+    },
+    {
+      "id": "route:notebook-mockd-teamcity",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd TeamCity REST",
+      "url": "http://127.0.0.1:8212/",
+      "properties": { "opened_by": "docker compose up (published port)" }
+    },
+    {
+      "id": "route:tunnel-teamcity",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-teamcity",
+      "name": "TeamCity (tunnel)",
+      "url": "http://127.0.0.1:8111/",
+      "description": "The forward that makes the server's TeamCity answer on the port the seeds, the live suites and seed-state.json's URLs have always used. It falls with the tunnel, and so does its monitor.",
+      "properties": {
+        "opened_by": "testenv/hetzner/tunnel up",
+        "forward": "ssh -N -L 127.0.0.1:8111:127.0.0.1:8111 knobas-teamcity"
+      }
+    },
+    {
+      "id": "route:tunnel-jira",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-jira",
+      "name": "Jira (tunnel)",
+      "url": "http://127.0.0.1:8080/",
+      "properties": {
+        "opened_by": "testenv/hetzner/tunnel up",
+        "forward": "ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 knobas-jira"
+      }
+    },
+    {
+      "id": "route:tunnel-confluence",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-confluence",
+      "name": "Confluence (tunnel)",
+      "url": "http://127.0.0.1:8090/",
+      "properties": {
+        "opened_by": "testenv/hetzner/tunnel up",
+        "forward": "ssh -N -L 127.0.0.1:8090:127.0.0.1:8090 knobas-confluence"
+      }
+    },
+    {
+      "id": "route:tunnel-gitea-reverse",
+      "asset": "asset:hetzner-teamcity",
+      "target": "asset:knobas-gitea",
+      "name": "gitea (reverse tunnel)",
+      "url": "http://gitea:3000/",
+      "description": "The one forward that runs the other way: the TeamCity server's docker bridge gateway to the notebook's Gitea. teamcity.override.yml maps the name `gitea` to that gateway in both TeamCity containers, so the VCS roots resolve and a build clones through it. A build queued while the tunnel is down fails at checkout.",
+      "properties": {
+        "opened_by": "testenv/hetzner/tunnel up",
+        "forward": "ssh -N -R <docker bridge gateway>:3000:127.0.0.1:3000 knobas-teamcity"
+      }
+    }
+  ]
+}

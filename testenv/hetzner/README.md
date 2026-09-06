@@ -23,6 +23,55 @@ cx line is a 2.1 GHz Skylake), and **72 s on a cpx22**. cpx22 is the cheapest
 AMD type still offered; cpx21 and cpx31 answer "unsupported location"
 everywhere in the EU.
 
+## The estate file
+
+`estate.json`, next to the host list above, is that estate written down: the
+notebook and its OrbStack Docker engine, the three servers with their type,
+address and role, every container and database on them, and the tunnel's
+forwards as routes with the asset each one lands on. Environment (`dev`) and
+owner are set once at the root and inherited from there; each asset also names
+the Uptime Kuma monitors that watch it, by their Kuma name, which the import
+resolves into `monitored-by` links once the monitors are mirrored (M4.1).
+
+It exists because from M4 the estate knobas models **is** this infrastructure
+and not a fictional one (#427): the same file is the Import's input, what
+`--demo` loads, and the witness that the asset model fits an estate that
+exists. So it is not documentation that may rot quietly -- it is a fixture, and
+editing anything here without editing it is a change to the estate that knobas
+has not been told about.
+
+Ids are stable slugs in the asset namespace (`asset:knobas-jira`), because an
+import keeps them and re-importing recognises them by id. Where a server and
+the container on it share a name, the server is the `hetzner-` one
+(`asset:hetzner-jira` is the cx server, `asset:knobas-jira` the Jira container
+on it). The PostgreSQL containers are typed `container` and hold their one
+`database`; nothing is typed `database_server`, because here the container *is*
+the server and a node for each would be the same fact twice.
+
+`crates/knobas-core/tests/estate_file.rs` keeps it honest in `just check` --
+with no container and no database. It asserts that every id is unique, that
+every parent and every route target resolves, that the assets form one tree
+with one root, that every type is in the built-in table, and that no entry
+carries a key the file does not define, since a misspelled `monitors` reads as
+an absent one. It also parses the host-list table above and the compose file's
+service list, so adding a fourth server or a new service and forgetting the
+estate file is a red gate rather than a discovery months later, and a server
+whose type or profile changes in one place and not the other is too, as is a
+service recorded on the wrong host. The one thing it cannot check is the
+addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
+the only committed copy of them, and `hcloud server list` is what settles a
+disagreement.
+
+Two things in the file are still provisional and are named here so that nobody
+reads them as settled. The **type ids** are spec §12.1's list as #427 amends
+it, spelled the way this repository spells enumerated column values; the
+built-in table itself lands in code with #428, and the spellings move with it
+if #428 chooses others. The **monitor names** are a guess: `testenv/monitors.json`
+seeds Uptime Kuma with the two Tidewater checks only, so not one of the names
+`estate.json` lists exists yet. #441 creates the real monitors and is what
+settles the names; until it does, the `monitors` keys record what should watch
+each asset rather than what does, and nothing reads them.
+
 ## How it fits the existing scripts
 
 Nothing in `../docker-compose.yml`, the seeds or the `justfile` changed. Three

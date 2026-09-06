@@ -23,6 +23,9 @@ for role in $roles; do
   say "$host: copying scripts"
   ssh "$host" 'mkdir -p /opt/knobas'
   scp -q renew-licence.sh ../fetch-timebomb-keys.sh "$host:/opt/knobas/"
+  # The `$role` in the unit files below is meant to expand here, on the
+  # notebook: the server has no such variable, and what it needs is the value.
+  # shellcheck disable=SC2029
   ssh "$host" "chmod +x /opt/knobas/renew-licence.sh /opt/knobas/fetch-timebomb-keys.sh
     cat > /etc/systemd/system/knobas-renew-licence.service <<UNIT
 [Unit]
