@@ -260,5 +260,9 @@ A viewing gesture on a [room](#room): one tile fills the tile grid for this visi
 The Assets view's first tab: the [estate](#estate) as Miller columns, one column per level. Its sibling tab is *Monitors*. Named so that "board" never appears unqualified (ADR-0009).
 _Avoid_: board, assets board, columns view
 
+**Spine**:
+A column of the [Tree](#tree) collapsed to a 30px strip, labelled with the [asset](#asset) of the reader's own path that runs through it — or, for a column their path does not reach, with the first asset in it — and re-expanded by clicking it. What collapses is decided by the width left beside the fixed pane and never by depth: the point is that a deep path does not push the pane off the screen. (#430, spec story 28)
+_Avoid_: breadcrumb (that is a line of names, not a column), rail, collapsed column (as a name — that is what a spine *is*)
+
 **Tidewater**:
 The fictional company whose dataset seeds demos, fixtures, and the test environment.

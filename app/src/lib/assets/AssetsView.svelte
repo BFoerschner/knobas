@@ -24,19 +24,29 @@
   coloured by the worst of it, which is why a row can be red with an amber
   badge — the row's colour is about the row, the badge is about its contents.
 
+  **The keyboard walks the same rails a click does** (#430, stories 28-30).
+  Every arrow, `Enter` and `Esc` answers with an *address* (`tree.ts`'s
+  `walk`), so a walked path and a clicked one are the same path read back the
+  same way — and `Esc` that the Tree has no step for is left for the shell's
+  ladder, which takes it back to the room. The columns that no longer fit
+  beside the fixed pane collapse to spines rather than pushing the pane off
+  the screen, and the search box is the launcher's own engine narrowed to
+  `corpus::ASSET`: it hands the first match's id to the router and the
+  columns follow, so "search reveals the path" is the same derivation
+  everything else here uses.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** Creating and editing from the pane is #429 — a `+` on a column
   header with no dialog behind it is a promise the view cannot keep. The
-  keyboard walk, the spine collapse and the search that reveals a path are
-  #430. The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
-  and arrive with the routes that carry the URLs (#432). Wires, *Link to…*,
-  the linked-work badge and monitoring are #433, #435 and M4.1; monitors are
-  also the half of story 37's *own* health that is not here yet. The Monitors
-  tab is M4.1's, so the tab strip has one tab in it: a disabled sibling would
+  *open URL* / *copy SSH* actions are #431's neighbours in spec §2 and arrive
+  with the routes that carry the URLs (#432). Wires, *Link to…*, the
+  linked-work badge and monitoring are #433, #435 and M4.1; monitors are also
+  the half of story 37's *own* health that is not here yet. The Monitors tab
+  is M4.1's, so the tab strip has one tab in it: a disabled sibling would
   teach the reader only that the app is unfinished.
 -->
 <script lang="ts">
-  import { ipcErrorMessage } from "../ipc";
+  import { ipcErrorMessage, type SearchResponse } from "../ipc";
   import {
     assetTree as realAssetTree,
     getAsset as realGetAsset,
@@ -46,6 +56,10 @@
     type Environment,
     type Inherited,
   } from "../ipc/assets";
+  import { search as realSearch } from "../ipc/search";
+  // The launcher's own debounce, imported rather than copied: two search
+  // boxes in one app that wait different amounts of time feel like two apps.
+  import { DEBOUNCE_MS } from "../launcher";
   import { latestRead } from "../shell/latest-read";
   import { ago } from "../shell/time";
   import { hashFor, type Router } from "../shell/router.svelte";
@@ -53,11 +67,16 @@
     addressOf,
     columnPathFor,
     emptyPath,
+    estateQuery,
     heldByPath,
+    matchesIn,
     problemBadge,
     selectionIn,
     sourceOf,
+    stripFor,
+    walk,
     type ColumnPath,
+    type Match,
   } from "./tree";
 
   /**
@@ -67,24 +86,43 @@
   interface AssetPorts {
     assetTree: typeof realAssetTree;
     getAsset: typeof realGetAsset;
+    /** The launcher's engine. The Tree narrows it to assets (`estateQuery`). */
+    search: typeof realSearch;
   }
 
   let {
     router,
     ports,
     now = () => new Date(),
+    stripWidth,
   }: {
     router: Router;
     ports?: Partial<AssetPorts>;
     /** Injectable clock — what the history's *ago* readings are relative to. */
     now?: () => Date;
+    /**
+     * How wide the column strip is, in pixels — measured from the element
+     * itself unless a caller says otherwise.
+     *
+     * A seam because the collapse is a question about a *window*: jsdom
+     * measures every element as zero, so without this no test could put a
+     * reader in front of a narrow one. Zero is a real state as well as the
+     * test default — nothing has been laid out yet — and it collapses
+     * nothing (`stripFor`).
+     */
+    stripWidth?: () => number;
   } = $props();
 
   // svelte-ignore state_referenced_locally
   // Read once, at init: production omits this prop, and a bridge swapped
   // mid-life would leave what is on screen read through one set of ports and
   // re-read through another.
-  const io: AssetPorts = { assetTree: realAssetTree, getAsset: realGetAsset, ...ports };
+  const io: AssetPorts = {
+    assetTree: realAssetTree,
+    getAsset: realGetAsset,
+    search: realSearch,
+    ...ports,
+  };
 
   /** The asset the address names, or `null` for the bare `#/assets/tree`. */
   const selectedId = $derived(
@@ -163,6 +201,278 @@
     router.go(addressOf(row));
   }
 
+  // -- the walk (story 29) --------------------------------------------------
+
+  /**
+   * The keys the Tree answers. Everything else — `Tab` above all — is left
+   * alone, so the walk cannot take the one key that leaves it.
+   */
+  const WALK_KEYS = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Enter"];
+
+  /** The strip and the pane, which is where the focus effect looks for a row. */
+  let tree = $state<HTMLElement | null>(null);
+  /** The column strip, which is the element whose width decides the collapse. */
+  let stripEl = $state<HTMLElement | null>(null);
+  /** The measured width of the column strip; `0` until it is laid out. */
+  let measured = $state(0);
+  /**
+   * Whether the next redraw should take focus.
+   *
+   * A plain variable and not `$state`: the effect that reads it also clears
+   * it, and a reactive flag would make that a dependency on itself. It is set
+   * by the keyboard and by a revealed match — never by a click, which has
+   * already put focus where the reader put it.
+   */
+  let wantFocus = false;
+
+  /** How wide the strip is: what a caller says, or what the element measures. */
+  const available = $derived(stripWidth === undefined ? measured : stripWidth());
+
+  /**
+   * Measure the strip on mount and whenever the window changes size.
+   *
+   * A resize listener rather than `bind:clientWidth`, which is a
+   * `ResizeObserver` — an API jsdom does not implement, so binding would make
+   * every component test of this view fail on a browser feature none of them
+   * are about. The strip's width is the window's minus the fixed pane, so a
+   * resize is the only thing that changes it: the columns' *content* cannot,
+   * because the strip scrolls on its own axis.
+   */
+  $effect(() => {
+    const element = stripEl;
+    if (element === null) return;
+    const measure = () => {
+      measured = element.clientWidth;
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  });
+
+  /**
+   * The spine a reader clicked to re-expand, **and the selection they clicked
+   * it in**.
+   *
+   * The second half is what makes the anchor expire on its own. An anchor is
+   * a look at one path; carried into another it would collapse the columns
+   * the reader had just walked into, at a level they never clicked a spine
+   * on. Stored beside the column rather than cleared by an effect, so there
+   * is no reset to forget and no order for it to run in.
+   */
+  let anchored = $state<{ at: number; of: string | null } | null>(null);
+
+  /** The anchor, if it still belongs to the path on screen. */
+  const anchor = $derived(anchored !== null && anchored.of === selectedId ? anchored.at : null);
+
+  /** Which columns are drawn in full; the rest are spines. */
+  const strip = $derived(stripFor(columns.length, available, anchor));
+
+  /** Is this column collapsed? */
+  function collapsed(column: number): boolean {
+    return column < strip.from || column >= strip.to;
+  }
+
+  /**
+   * The asset a spine is labelled with: the step of the path that runs through
+   * that column.
+   *
+   * The *selection*, not the column's parent. A reader who has walked four
+   * levels wants the spine to say which VM they came through; "top level"
+   * would name the column and tell them nothing about their own path. A
+   * column with nothing selected in it — only ever one an anchor collapsed
+   * from the other end — falls back to what it lists.
+   */
+  function spineRow(column: number): AssetRow | null {
+    const chosen = selectionIn(path, column);
+    const rows = columns[column] ?? [];
+    return rows.find((row) => row.id === chosen) ?? rows[0] ?? null;
+  }
+
+  /**
+   * Bring a row into view, honouring *reduce motion*.
+   *
+   * `Flap.svelte`'s reading of the query, and read per press rather than once
+   * at mount: a reader who changes the system setting while the app is open
+   * has changed their mind about this scroll, not about the next launch.
+   * `scrollIntoView` is guarded because jsdom does not implement it.
+   */
+  function bring(row: Element | null): void {
+    if (row === null || typeof row.scrollIntoView !== "function") return;
+    const reduce =
+      typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    row.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: reduce ? "auto" : "smooth",
+    });
+  }
+
+  /**
+   * Put focus on the selected row once the columns the walk asked for have
+   * been drawn.
+   *
+   * The walk moves the *address*; the row it names exists only after the
+   * reads land, so this is driven off the columns rather than off the press.
+   * `preventScroll` and then {@link bring}: the browser's own scroll on focus
+   * is instant and cannot be told about reduced motion.
+   */
+  $effect(() => {
+    // Read into a variable rather than mentioned: a bare `columns;` is a
+    // statement with no effect, and a compiler is entitled to drop it — with
+    // the dependency this effect exists to have.
+    const drawn = columns;
+    if (!wantFocus || drawn.length === 0) return;
+    const row = tree?.querySelector('.cols button.row[aria-current="true"]') ?? null;
+    // Kept, not cleared, while the row is missing. The columns are redrawn
+    // twice on the way to a new selection — once emptied while the pane's read
+    // is out, once with the answer — and a flag cleared on the first of those
+    // would leave focus on the row the reader walked *away* from.
+    if (!(row instanceof HTMLElement)) return;
+    wantFocus = false;
+    row.focus({ preventScroll: true });
+    bring(row);
+  });
+
+  /**
+   * One press of the keyboard on the Tree.
+   *
+   * Two rules decide whether the press is the walk's, and they are different
+   * on purpose:
+   *
+   * * `Esc` is answered from **anywhere in the view** — it is an unwind, and
+   *   a reader reading the pane means the same thing by it as one standing in
+   *   a column. The press the Tree has no step for is *not* consumed, and the
+   *   shell's ladder takes it back to the room (`shell/keys.ts`).
+   * * the arrows and `Enter` are answered everywhere **except** the three
+   *   places with keys of their own: the pane, which is full of buttons
+   *   (*Held by*, *Holds*, a history) whose activation `Enter` would
+   *   otherwise swallow; the search box, whose arrows walk its offers; and
+   *   the tab strip. Everywhere else in the Tree — a column row, a spine, the
+   *   strip itself — the arrows are the walk's.
+   */
+  const KEEPS_ITS_OWN_KEYS = ".pane, .find, .tabs";
+
+  function onkeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" && !WALK_KEYS.includes(event.key)) return;
+    const from = event.target;
+    const elsewhere = from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null;
+    if (event.key !== "Escape" && elsewhere) return;
+
+    const step = walk(event.key, path, columns);
+    if (step.go === "nowhere" && event.key === "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (step.go === "asset") {
+      wantFocus = true;
+      router.go(addressOf({ id: step.id }));
+    } else if (step.go === "top") {
+      // No focus to want: nothing is selected, and the flag would be spent on
+      // whatever the reader selected next.
+      router.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
+    }
+  }
+
+  // -- the search box (story 30) -------------------------------------------
+
+  /** What is in the box. Empty is the ordinary state, and it asks nothing. */
+  let query = $state("");
+  /** What the estate answered, best first, and which one `Enter` reveals. */
+  let matches = $state<Match[]>([]);
+  let active = $state(0);
+  /** The search's own failure, kept apart from the columns' (`failure`). */
+  let searchFailure = $state<string | null>(null);
+  /** An answer has landed for what is in the box now. */
+  let answered = $state(false);
+  let typing: ReturnType<typeof setTimeout> | undefined;
+
+  const searchRead = latestRead<SearchResponse>();
+
+  /** A pending keystroke must not outlive the view that scheduled it. */
+  $effect(() => () => clearTimeout(typing));
+
+  /** A keystroke: remember it, and ask once the typing stops. */
+  function typed(raw: string): void {
+    query = raw;
+    clearTimeout(typing);
+    if (raw.trim() === "") {
+      matches = [];
+      active = 0;
+      answered = false;
+      searchFailure = null;
+      return;
+    }
+    typing = setTimeout(() => {
+      void searchRead(() => io.search(estateQuery(query)), {
+        ok: (response) => {
+          matches = matchesIn(response);
+          // The cursor goes back to the top on every answer: the row that was
+          // under it is not in the new list (`Session.run`'s rule).
+          active = 0;
+          answered = true;
+          searchFailure = null;
+        },
+        fail: (cause) => {
+          matches = [];
+          answered = true;
+          searchFailure = ipcErrorMessage(cause);
+        },
+      });
+    }, DEBOUNCE_MS);
+  }
+
+  /** Empty the box without asking anything. */
+  function clearQuery(): void {
+    clearTimeout(typing);
+    query = "";
+    matches = [];
+    active = 0;
+    answered = false;
+    searchFailure = null;
+  }
+
+  /**
+   * Reveal a match: open its address, and let the columns follow.
+   *
+   * The whole of story 30 is this line. The box knows an id and nothing about
+   * where the asset lives; the pane's read answers with `held_by`, and
+   * `columnPathFor` turns that into the open columns.
+   */
+  function reveal(match: Match): void {
+    clearQuery();
+    wantFocus = true;
+    router.go(addressOf({ id: match.id }));
+  }
+
+  /** The box's own keys — the launcher's, on a shorter list. */
+  function onboxkey(event: KeyboardEvent): void {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (matches.length === 0) return;
+      event.preventDefault();
+      // The columns keep still while the box has the keyboard: two lists, and
+      // the one in front of the reader is the one that answers.
+      event.stopPropagation();
+      const last = matches.length - 1;
+      active = Math.min(last, Math.max(0, active + (event.key === "ArrowDown" ? 1 : -1)));
+      return;
+    }
+    if (event.key === "Enter") {
+      const match = matches[active];
+      if (match === undefined) return;
+      event.preventDefault();
+      event.stopPropagation();
+      reveal(match);
+      return;
+    }
+    if (event.key === "Escape") {
+      // An empty box has nothing to unwind, so the press falls through to the
+      // Tree's own ladder and then to the shell's.
+      if (query === "") return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearQuery();
+    }
+  }
+
   /** What a history line says, in one sentence. */
   function line(verb: string, raw: unknown): string {
     const said = (value: unknown): string => {
@@ -200,7 +510,22 @@
   }
 </script>
 
-<section class="view">
+<!--
+  `Esc` and the arrows are read here, at the top of the view, and not on
+  `window`: the shell's handler is on `window` (`shell/keys.ts`), so a press
+  the Tree answers is stopped before it gets there, and a press the Tree has
+  no answer for arrives there on its own. Binding both to `window` would make
+  the order they were installed in decide what `Esc` means.
+-->
+<!--
+  The view is not a control and takes no focus of its own: what the reader
+  focuses is a row, a spine or the box, and this handler reads the presses
+  that bubble up from them. So the rule the ignore silences — an element with
+  a key handler needs a role — is asking for a role no assistive technology
+  would want here.
+-->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<section class="view" onkeydown={onkeydown}>
   <div class="room-bar">
     <h1>Assets</h1>
     <!--
@@ -223,10 +548,60 @@
         Tree
       </button>
     </nav>
+
   </div>
 
-  <div class="tree">
-    <div class="cols">
+  <!--
+    The estate's search (story 30), on a strip of its own between the room bar
+    and the columns.
+
+    Not *in* the room bar: `app.css` gives that 40px and `overflow: hidden`,
+    and the offers hang below the box — in there they were clipped to a
+    sliver. A row of its own also keeps the box clear of the path it is about
+    to open, since the offers overlay the columns and nothing else.
+  -->
+  <div class="find">
+    <input
+      class="q"
+      type="search"
+      value={query}
+      placeholder="Find an asset"
+      aria-label="Find an asset in the estate"
+      autocomplete="off"
+      spellcheck="false"
+      oninput={(event) => typed(event.currentTarget.value)}
+      onkeydown={onboxkey}
+    />
+    {#if query.trim() !== ""}
+      <ol class="res">
+        {#each matches as match, index (match.id)}
+          <li>
+            <button
+              class="hit {index === active ? 'on' : ''}"
+              aria-current={index === active ? "true" : undefined}
+              onclick={() => reveal(match)}
+            >
+              <span class="nm">{match.name}</span>
+              <!--
+                Where it lives, before the reader takes it: two containers
+                called `postgres` are told apart by their path and by
+                nothing else on this line.
+              -->
+              <span class="pth faint">{match.path ?? "top level"}</span>
+            </button>
+          </li>
+        {/each}
+        {#if searchFailure}
+          <li class="none fail">{searchFailure}</li>
+        {:else if answered && matches.length === 0}
+          <li class="none">Nothing in the estate matches “{query.trim()}”.</li>
+        {/if}
+      </ol>
+    {/if}
+  </div>
+
+  <div class="tree" bind:this={tree}>
+    <div class="cols" bind:this={stripEl}>
       {#if failure}
         <p class="empty fail">{failure}</p>
       {:else if loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0}
@@ -240,43 +615,61 @@
       {:else}
         {#each columns as column, index (index)}
           {@const chosen = selectionIn(path, index)}
-          <ol class="col">
-            {#each column as row (row.id)}
-              {@const badge = problemBadge(row)}
-              <li>
-                <button
-                  class="row {chosen === row.id ? 'on' : ''}"
-                  aria-current={chosen === row.id ? "true" : undefined}
-                  title={addressOf(row)}
-                  onclick={() => select(row)}
-                >
-                  <span class="mg" title={row.type_label}>{row.monogram}</span>
-                  <span class="nm">{row.name}</span>
-                  {#if badge}
-                    <!--
-                      Story 32: what a *closed* branch is hiding. The number is
-                      the count of descendants carrying warn or down, and the
-                      colour is the worst of them — so a row that is itself
-                      down while holding one warning container is a red row
-                      with an amber badge.
-                    -->
-                    <span
-                      class="badge {badge.tone}"
-                      title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
-                    >{badge.count}</span>
-                  {/if}
-                  {#if row.has_children}
-                    <!--
-                      The chevron is the only thing that says there is a next
-                      column, which is why an empty trailing column is never
-                      drawn: the absence here has already said it.
-                    -->
-                    <span class="chev" aria-hidden="true">›</span>
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          </ol>
+          {#if collapsed(index)}
+            <!--
+              A spine (story 28, `CONTEXT.md`). A button, because clicking it
+              re-expands the column — and the only thing it says is which
+              asset of the reader's own path runs through it, turned on its
+              side.
+            -->
+            {@const step = spineRow(index)}
+            <button
+              class="col spine"
+              onclick={() => (anchored = { at: index, of: selectedId })}
+              title="Show what {step?.name ?? 'the estate'} holds"
+            >
+              <span class="smg" aria-hidden="true">{step?.monogram ?? "··"}</span>
+              <span class="vn">{step?.name ?? "top level"}</span>
+            </button>
+          {:else}
+            <ol class="col">
+              {#each column as row (row.id)}
+                {@const badge = problemBadge(row)}
+                <li>
+                  <button
+                    class="row {chosen === row.id ? 'on' : ''}"
+                    aria-current={chosen === row.id ? "true" : undefined}
+                    title={addressOf(row)}
+                    onclick={() => select(row)}
+                  >
+                    <span class="mg" title={row.type_label}>{row.monogram}</span>
+                    <span class="nm">{row.name}</span>
+                    {#if badge}
+                      <!--
+                        Story 32: what a *closed* branch is hiding. The number is
+                        the count of descendants carrying warn or down, and the
+                        colour is the worst of them — so a row that is itself
+                        down while holding one warning container is a red row
+                        with an amber badge.
+                      -->
+                      <span
+                        class="badge {badge.tone}"
+                        title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
+                      >{badge.count}</span>
+                    {/if}
+                    {#if row.has_children}
+                      <!--
+                        The chevron is the only thing that says there is a next
+                        column, which is why an empty trailing column is never
+                        drawn: the absence here has already said it.
+                      -->
+                      <span class="chev" aria-hidden="true">›</span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ol>
+          {/if}
         {/each}
       {/if}
     </div>
@@ -418,6 +811,12 @@
 </section>
 
 <style>
+  /* Three rows now: the room bar, the search strip, and the tree under both.
+     `app.css` gives `.view` two, and the strip is this view's own. */
+  .view {
+    grid-template-rows: auto auto 1fr;
+  }
+
   /* Columns scroll on their own axis; the pane does not move. Story 33. */
   .tree {
     display: grid;
@@ -434,10 +833,78 @@
     overflow-y: hidden;
   }
 
+  /*
+    The search strip: one row, the box on the right, and its offers hanging
+    over the columns rather than pushing them down while a reader types.
+  */
+  .find {
+    position: relative;
+    display: flex;
+    justify-content: flex-end;
+    padding: 5px 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .find .q {
+    width: 220px;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    background: var(--panel);
+    font-size: 12px;
+  }
+
+  .find .res {
+    position: absolute;
+    top: 100%;
+    right: 14px;
+    z-index: 5;
+    display: grid;
+    gap: 1px;
+    width: 320px;
+    max-height: 320px;
+    margin: 4px 0 0;
+    padding: 4px;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--hair);
+    background: var(--panel);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  }
+
+  .find .hit {
+    display: grid;
+    width: 100%;
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 12px;
+  }
+
+  .find .hit.on,
+  .find .hit:hover {
+    background: var(--raised);
+  }
+
+  .find .hit .pth {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .find .none {
+    padding: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
   .col {
     display: flex;
     flex-direction: column;
     gap: 1px;
+    /* `tree.ts`'s `COLUMN_WIDTH`; see the spine's rule below. */
     width: 220px;
     flex: none;
     margin: 0;
@@ -445,6 +912,54 @@
     list-style: none;
     border-right: 1px solid var(--hair);
     overflow-y: auto;
+  }
+
+  /*
+    A spine (story 28). Its 30px, and `.col`'s 220px above, are `tree.ts`'s
+    `SPINE_WIDTH` and `COLUMN_WIDTH`: the arithmetic that decides *which*
+    columns collapse is pure, so it has to be told how wide the things it
+    arranges are drawn. `the strip's arithmetic measures the widths this view
+    actually draws` in `tree.test.ts` reads both numbers back out of this file
+    — changing one without the other makes the strip overflow the pane the
+    collapse exists to protect, and that test is what says so.
+  */
+  .col.spine {
+    width: 30px;
+    flex: none;
+    align-items: center;
+    padding: 6px 0;
+    background: var(--panel);
+    cursor: pointer;
+  }
+
+  .col.spine:hover {
+    background: var(--raised);
+  }
+
+  .col.spine .smg {
+    flex: none;
+    font: 500 9.5px/1 var(--mono);
+    color: var(--muted);
+  }
+
+  /* The name, turned on its side: a 30px column has no other way to carry
+     one, and the path is the thing a reader needs back. */
+  .col.spine .vn {
+    flex: 1;
+    min-height: 0;
+    margin: 7px 0;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font: 600 11px/1 var(--disp);
+    letter-spacing: 0.1em;
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .col.spine:hover .vn {
+    color: var(--muted);
   }
 
   .row {

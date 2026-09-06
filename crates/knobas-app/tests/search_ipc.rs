@@ -346,3 +346,87 @@ async fn a_smart_list_answers_in_the_search_shape() {
     assert!(hit["entity_id"].is_string(), "{v}");
     assert_eq!(hit["snippet"], serde_json::json!([]), "{v}");
 }
+
+/// **The Tree's search box, at the wire** (#430, story 30).
+///
+/// The box sends this exact query — the raw text and `kinds = ["asset"]`,
+/// which is `app/src/lib/assets/tree.ts`'s `estateQuery` — and reveals the
+/// path of the first hit it gets back. Everything above the wire is asserted
+/// against a fake in `AssetsView.test.svelte.ts`; what a fake cannot say is
+/// whether `corpus::ASSET` answers this filter at all, whether the hit's
+/// `path` is the estate's path or the mirror's `null`, and whether the filter
+/// keeps the mirror's own rows out. So it is said here, on a real database,
+/// through the same function the command is a shim over.
+///
+/// The seeded ticket and PR carry the same token as the assets on purpose:
+/// without a row the filter has to *exclude*, an asset-only answer is not
+/// evidence that anything was filtered.
+#[tokio::test]
+async fn the_trees_search_answers_with_assets_and_their_paths() {
+    let pool = pool().await;
+    let t = seed(&pool, "estate").await;
+
+    let site = knobas_app::assets::create(&pool, None, "site", &format!("site {t}"), &[])
+        .await
+        .unwrap()
+        .value;
+    let vm = knobas_app::assets::create(&pool, Some(&site.id), "vm", &format!("vm {t}"), &[])
+        .await
+        .unwrap()
+        .value;
+    let container =
+        knobas_app::assets::create(&pool, Some(&vm.id), "container", &format!("pg {t}"), &[])
+            .await
+            .unwrap()
+            .value;
+
+    // What the box sends.
+    let mut narrowed = query(&format!("pg {t}"));
+    narrowed.filters.kinds = vec!["asset".to_owned()];
+    let response = search_inner(&pool, narrowed).await.unwrap();
+
+    let kinds: Vec<_> = response.groups.iter().map(|g| g.kind.as_str()).collect();
+    assert_eq!(kinds, ["asset"], "the mirror's rows are out: {kinds:?}");
+    let hits = &response.groups[0].hits;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].row.entity_id, container.id);
+    assert_eq!(hits[0].row.title, format!("pg {t}"));
+    // The path is what the offer line shows and what makes two containers
+    // called `postgres` tellable apart -- the ancestors' names, outermost
+    // first, and never the asset's own.
+    assert_eq!(
+        hits[0].row.path.as_deref(),
+        Some(format!("site {t} / vm {t}").as_str())
+    );
+
+    // Spec §4's own example, which is why the corpus indexes the path at all:
+    // searching for the site finds the machines *under* it, and the site
+    // itself ranks first because its name is weighted above its descendants'
+    // paths.
+    let mut ancestors = query(&format!("site {t}"));
+    ancestors.filters.kinds = vec!["asset".to_owned()];
+    let found = search_inner(&pool, ancestors).await.unwrap();
+    let named: Vec<_> = found.groups[0]
+        .hits
+        .iter()
+        .map(|hit| hit.row.entity_id.clone())
+        .collect();
+    assert_eq!(
+        named.first(),
+        Some(&site.id),
+        "the site outranks what it holds: {named:?}"
+    );
+    let mut found_ids = named.clone();
+    found_ids.sort();
+    let mut want = vec![site.id.clone(), vm.id.clone(), container.id.clone()];
+    want.sort();
+    // The two machines under it tie on rank -- neither name matched, both
+    // paths did -- so what is asserted about them is that they are *there*,
+    // which is the half spec §4 is about. Their order between themselves is
+    // the engine's and nothing reads it.
+    assert_eq!(found_ids, want, "{named:?}");
+
+    // A root asset sits nowhere, and the corpus answers that with `null`
+    // rather than an empty path line under every site in the estate.
+    assert_eq!(found.groups[0].hits[0].row.path, None);
+}

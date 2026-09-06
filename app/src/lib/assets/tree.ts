@@ -12,12 +12,17 @@
  * is the ancestors of the selected asset, outermost first, computed by one
  * recursive read. Deriving the columns from it means the Tree is correct the
  * first time it is opened at a deep address, with nothing walked and nothing
- * remembered — which is what #430's *addresses re-open at the path* will build
- * on and what a client-side tree cache could not have given it.
+ * remembered — which is what #430's *addresses re-open at the path* builds on
+ * and what a client-side tree cache could not have given it.
  *
- * The spine collapse of story 28 and the keyboard walk of story 29 are #430's;
- * this module is the shape they will collapse and walk.
+ * **Everything #430 added is the same arithmetic on the same layout**, which
+ * is why it is here and not in a module of its own: {@link walk} says which
+ * asset a key press selects, {@link stripFor} says which columns collapse to
+ * spines, and {@link estateQuery}/{@link matchesIn} say what the search box
+ * asks for and which of the answers are the estate's. None of the three
+ * touches a window or a bridge.
  */
+import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
 import type { AssetDetail, AssetRow, AssetStatus, Inherited } from "../ipc/assets";
 import { hashFor } from "../shell/router.svelte";
 
@@ -152,4 +157,226 @@ export function sourceOf(detail: AssetDetail, from: Inherited<unknown>): ValueSo
     note: here ? "set here" : `inherited from ${from.source_name}`,
     goTo: here ? null : addressOf({ id: from.source_id }),
   };
+}
+
+/**
+ * Which column the cursor is in: the last one with something selected.
+ *
+ * `-1` — nothing selected anywhere — is the bare `#/assets/tree`, and it is a
+ * *position* rather than an error: the reader is standing in front of the top
+ * column with no row chosen, which is what the first arrow press acts on.
+ */
+export function focusedColumn(path: ColumnPath): number {
+  let found = -1;
+  for (let column = 0; column < path.selected.length; column += 1) {
+    if (path.selected[column] !== null) found = column;
+  }
+  return found;
+}
+
+/**
+ * What one key press does to the walk (story 29).
+ *
+ * Three outcomes and no fourth: select an asset, clear the selection back to
+ * the estate's top, or do nothing. `nowhere` is a value rather than a silence
+ * because the view has to know whether to **consume** the key — an Escape the
+ * Tree did not answer belongs to the shell's ladder (`shell/keys.ts`), which
+ * takes it back to the room, and a Tree that swallowed every Escape would be
+ * the one view a reader cannot leave with the keyboard.
+ */
+export type Step = { go: "asset"; id: string } | { go: "top" } | { go: "nowhere" };
+
+/** The press did nothing here. */
+const NOWHERE: Step = { go: "nowhere" };
+
+/**
+ * The keyboard walk: a key, the layout, and what each column holds, in — the
+ * asset to select, out.
+ *
+ * **It answers with an asset and not with a column index**, which is what
+ * keeps the walk on the same rails as a click: the view turns a step into an
+ * *address*, the address is read back, and the columns follow the answer
+ * ({@link columnPathFor}). A walk that moved a cursor of its own would be a
+ * second owner of the selection, and the two would disagree the first time a
+ * read was slow.
+ *
+ * The ladder, in the mockup's order (`E1-miller-columns.html:857-874`):
+ *
+ * | Key            | What it means                                          |
+ * |----------------|--------------------------------------------------------|
+ * | `↓` / `↑`      | the next / previous row of the column the cursor is in  |
+ * | `→` / `Enter`  | the first row of the column under the selection         |
+ * | `←`            | the asset that holds the selection                      |
+ * | `Esc`          | the same one step, and the top of the estate after that |
+ *
+ * Neither list wraps. A cursor that jumps from the last row back to the first
+ * loses the reader — `Session.move`'s rule in the launcher, for its reason.
+ *
+ * @param key `KeyboardEvent.key`.
+ * @param path the layout, from {@link columnPathFor}.
+ * @param columns what each column holds, aligned with `path.parents`.
+ */
+export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step {
+  const focused = focusedColumn(path);
+
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    const column = Math.max(0, focused);
+    const rows = columns[column] ?? [];
+    if (rows.length === 0) return NOWHERE;
+    const down = key === "ArrowDown";
+    // A column with no row chosen is entered from the end the key comes from:
+    // `↓` lands on the first row, `↑` on the last.
+    const at = rows.findIndex((row) => row.id === selectionIn(path, column));
+    const from = at < 0 ? (down ? -1 : rows.length) : at;
+    const to = Math.min(rows.length - 1, Math.max(0, from + (down ? 1 : -1)));
+    if (to === at) return NOWHERE;
+    return { go: "asset", id: rows[to]!.id };
+  }
+
+  if (key === "ArrowRight" || key === "Enter") {
+    // `focused + 1` reads the same on a bare tree, where the cursor is in
+    // front of the top column and the column "under the selection" is it.
+    const rows = columns[focused + 1] ?? [];
+    const first = rows[0];
+    if (first === undefined) return NOWHERE;
+    return { go: "asset", id: first.id };
+  }
+
+  if (key === "ArrowLeft" || key === "Escape") {
+    if (focused > 0) {
+      const holder = selectionIn(path, focused - 1);
+      return holder === null ? NOWHERE : { go: "asset", id: holder };
+    }
+    // The rung the two keys do not share. `←` is a move between columns and
+    // there is no column left of the first; `Esc` is an unwind, and the step
+    // above a top-level asset is the estate with nothing selected.
+    return key === "Escape" && focused === 0 ? { go: "top" } : NOWHERE;
+  }
+
+  return NOWHERE;
+}
+
+/**
+ * How wide the Tree draws one full column, in pixels — `.col`'s own width.
+ *
+ * A copy of a CSS number, and the one place it is copied. The collapse is a
+ * question about *layout* — does the next column still fit beside the fixed
+ * pane — and the only honest way to answer it in a pure function is with the
+ * width the stylesheet uses. `AssetsView.svelte` sets `.col` and `.spine` from
+ * these two constants' values and says so beside them.
+ */
+export const COLUMN_WIDTH = 220;
+
+/** How wide a collapsed column is drawn — `.spine`'s width. */
+export const SPINE_WIDTH = 30;
+
+/**
+ * Which columns are drawn in full. Everything outside the window is a spine.
+ *
+ * Half-open: `from` is the first full column and `to` is one past the last,
+ * so `to - from` is how many fit and the empty case cannot be spelled.
+ */
+export interface Strip {
+  from: number;
+  to: number;
+}
+
+/**
+ * The spine collapse (story 28): *older columns collapse into labelled spines
+ * as the path deepens, so the pane never leaves the screen.*
+ *
+ * The rule is the mockup's (`E1-miller-columns.html:571-577`): shrink the
+ * number of full columns until the strip fits, counting the collapsed ones at
+ * a spine's width, and keep the **newest** — the ones the reader just walked
+ * into. One column is always full: a strip of nothing but spines would be a
+ * Tree with nowhere to stand.
+ *
+ * It is **width-driven and not depth-driven**, which is what story 28 asks
+ * for and is why there is no "collapse past level four" constant. Where the
+ * collapse begins therefore depends on the window: at knobas' narrowest
+ * (`minWidth: 1100`, about 780px of strip beside the pane) the fourth column
+ * collapses, and at the default 1280 the fifth does.
+ *
+ * @param columns how many columns the layout has.
+ * @param available the strip's width in pixels; `0` where nothing has been
+ *   measured yet, which collapses nothing.
+ * @param anchor the column a reader clicked a spine to re-expand, or `null`
+ *   for the deepest window — clamped, never trusted.
+ */
+export function stripFor(columns: number, available: number, anchor: number | null): Strip {
+  if (columns <= 0) return { from: 0, to: 0 };
+  if (available <= 0) return { from: 0, to: columns };
+
+  let fits = columns;
+  while (fits > 1 && (columns - fits) * SPINE_WIDTH + fits * COLUMN_WIDTH > available) {
+    fits -= 1;
+  }
+  const deepest = columns - fits;
+  const from = anchor === null ? deepest : Math.min(Math.max(0, anchor), deepest);
+  return { from, to: from + fits };
+}
+
+/**
+ * How many matches the Tree's box asks for.
+ *
+ * Smaller than the launcher's 40: this list is a way *into* the columns and
+ * not a place to read results in, and a reader who cannot see their asset in
+ * ten types another letter.
+ */
+export const MATCH_LIMIT = 10;
+
+/**
+ * The query the Tree's search box sends — story 30.
+ *
+ * **The launcher's engine, narrowed to one kind.** `corpus::ASSET` (#428)
+ * indexes an asset's name at weight A and its ancestor path at weight B, which
+ * is exactly what a search in the Tree wants: "pve-02" finds the hypervisor
+ * first and the containers under it after. A second search of its own here
+ * would be a second answer to *what matches*, and it would be the one that
+ * could not see an asset whose column has not been opened.
+ *
+ * Two things the engine does with this query are worth knowing at the call
+ * site, because neither is a bug to be fixed here:
+ *
+ * * the box's own grammar **wins** over this filter (`query::merge` takes the
+ *   typed kinds if there are any), so `#ticket` typed in here comes back as
+ *   tickets — dropped by {@link matchesIn}, which offers assets only;
+ * * `asset:` typed in here comes back **empty**, because the engine still
+ *   short-circuits that prefix until the launcher can draw an asset hit
+ *   (#436). The Tree's box needs no prefix: everything it asks for is an
+ *   asset already.
+ */
+export function estateQuery(raw: string): SearchQuery {
+  // `noFilters()` and then the one dimension, rather than the literal shape:
+  // a dimension added to `SearchFilters` is one edit in the bridge and none
+  // here.
+  return { raw, limit: MATCH_LIMIT, filters: { ...noFilters(), kinds: ["asset"] } };
+}
+
+/** One asset the search box offers, in the engine's own order. */
+export interface Match {
+  id: string;
+  name: string;
+  /**
+   * Where it sits, as the corpus wrote it — ancestor names, outermost first.
+   * `null` for an asset at the top of the estate, which sits nowhere.
+   */
+  path: string | null;
+}
+
+/**
+ * The assets in one search answer, best first.
+ *
+ * Rank order is the engine's, and it is kept: the *first* match is what Enter
+ * reveals, and re-sorting here would make the box and the launcher disagree
+ * about which asset a query means.
+ */
+export function matchesIn(response: SearchResponse): Match[] {
+  const group = response.groups.find((candidate) => candidate.kind === "asset");
+  if (group === undefined) return [];
+  return group.hits.map((hit) => ({
+    id: hit.entity_id,
+    name: hit.title,
+    path: hit.path,
+  }));
 }

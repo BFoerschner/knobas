@@ -19,7 +19,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
 import type { AssetDetail, AssetProperty, AssetRow } from "../ipc/assets";
+import { DEBOUNCE_MS } from "../launcher";
 import { createRouter } from "../shell/router.svelte";
 import AssetsView from "./AssetsView.svelte";
 
@@ -62,7 +64,6 @@ const SIBLING = row({
   type_id: "vm",
   monogram: "VM",
   name: "vm-app-02",
-  has_children: false,
 });
 const CONTAINER = row({
   id: "asset:postgres",
@@ -77,7 +78,34 @@ const CONTAINER = row({
   status: "warn",
   health: "warn",
 });
-const ESTATE = [SITE, VM, SIBLING, CONTAINER];
+/**
+ * A fourth level, under the *other* VM (#430).
+ *
+ * #428's fixture stopped at three because "a fourth would only make the
+ * screenshot wider". The spine collapse needs one: four columns is the
+ * shallowest path a window can fail to hold, and a three-level fixture cannot
+ * witness a column collapsing. It hangs off `vm-app-02` so that every
+ * assertion #428 made about the site → VM → container path still reads the
+ * same estate it was written against.
+ */
+const GITEA = row({
+  id: "asset:gitea",
+  parent_id: SIBLING.id,
+  type_id: "container",
+  type_label: "Container",
+  monogram: "CT",
+  name: "gitea",
+});
+const GITEA_DB = row({
+  id: "asset:gitea-db",
+  parent_id: GITEA.id,
+  type_id: "database",
+  type_label: "Database",
+  monogram: "DB",
+  name: "gitea-db",
+  has_children: false,
+});
+const ESTATE = [SITE, VM, SIBLING, CONTAINER, GITEA, GITEA_DB];
 
 function row(over: Partial<AssetRow> & Pick<AssetRow, "id" | "name">): AssetRow {
   return {
@@ -194,6 +222,15 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
+/**
+ * Every `scrollIntoView` the view asked for, with the options it asked with.
+ *
+ * jsdom implements no scrolling at all, so the method is *defined* here rather
+ * than spied on — which is also what makes the walk's call observable. It is
+ * removed again after each test: a global left behind would make the next
+ * file's components think they can scroll.
+ */
+let scrolled: ScrollIntoViewOptions[] = [];
 
 /**
  * Mount the view at `hash` and record every read it issues.
@@ -203,8 +240,9 @@ let app: Record<string, unknown> | undefined;
  * that is which parents the view asked for having been given nothing but the
  * address and the pane's answer.
  */
-function render(hash: string, estate: AssetRow[] = ESTATE) {
+function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
+  const searched: SearchQuery[] = [];
   location.hash = hash;
   const router = createRouter();
   app = mount(AssetsView, {
@@ -212,7 +250,16 @@ function render(hash: string, estate: AssetRow[] = ESTATE) {
     props: {
       router,
       now: () => NOW,
+      // The strip is measured, and jsdom measures every element as zero — so
+      // the width a reader's window would have is injected. Zero is also a
+      // real state (nothing laid out yet) and is what every test that is not
+      // about the collapse leaves it in.
+      ...(over.stripWidth === undefined ? {} : { stripWidth: () => over.stripWidth ?? 0 }),
       ports: {
+        search: (query: SearchQuery) => {
+          searched.push(query);
+          return Promise.resolve(over.answer ?? matchesFor(query, estate));
+        },
         assetTree: (parentId?: string | null) => {
           const parent = parentId ?? null;
           asked.push(parent);
@@ -239,7 +286,113 @@ function render(hash: string, estate: AssetRow[] = ESTATE) {
     },
   });
   flushSync();
-  return { router, asked };
+  return { router, asked, searched };
+}
+
+/** What a test may put in front of the view besides the estate. */
+interface Over {
+  /** The strip's measured width in pixels. */
+  stripWidth?: number;
+  /** A search answer of the test's own, for the shapes `matchesFor` cannot make. */
+  answer?: SearchResponse;
+}
+
+/**
+ * The engine's answer, faked: every asset whose name contains the query.
+ *
+ * A substring match where the real corpus is PostgreSQL FTS over name and
+ * ancestor path. What that difference costs is named rather than hidden: this
+ * fake certifies the *box* — what it asks for, which hit it reveals, what the
+ * list shows — and what certifies the query is
+ * `crates/knobas-app/tests/search_ipc.rs`, where the same filter runs against
+ * `corpus::ASSET` on a real database.
+ */
+function matchesFor(query: SearchQuery, estate: AssetRow[]): SearchResponse {
+  const needle = query.raw.trim().toLowerCase();
+  const hits = estate
+    .filter((asset) => needle !== "" && asset.name.toLowerCase().includes(needle))
+    .map((asset, index) => ({
+      entity_id: asset.id,
+      kind: "asset",
+      source_id: "asset",
+      updated_at: null,
+      synced_at: NOW.toISOString(),
+      title: asset.name,
+      path: pathTextOf(asset, estate),
+      rank: 1 - index / 10,
+      snippet: [],
+    }));
+  return {
+    interpreted: { text: query.raw, prefix: null, filters: noFilters(), unknown_tokens: [] },
+    groups:
+      hits.length === 0
+        ? []
+        : [
+            {
+              kind: "asset",
+              label: "Asset",
+              plural: "Assets",
+              monogram: "AS",
+              total: hits.length,
+              hits,
+            },
+          ],
+    total: hits.length,
+    took_ms: 1,
+    coverage: [],
+  };
+}
+
+/** `knobas.asset.path_text`: the ancestors' names, outermost first. */
+function pathTextOf(asset: AssetRow, estate: AssetRow[]): string | null {
+  const names: string[] = [];
+  for (let at = asset; at.parent_id !== null; ) {
+    const parent = estate.find((candidate) => candidate.id === at.parent_id);
+    if (parent === undefined) break;
+    names.unshift(parent.name);
+    at = parent;
+  }
+  return names.length === 0 ? null : names.join(" / ");
+}
+
+/**
+ * Press a key on the view, and hand back the event so a test can ask whether
+ * the Tree **consumed** it.
+ *
+ * Dispatched on the element under the cursor rather than on `window`: the
+ * Tree's handler is on its own section precisely so an unanswered `Escape`
+ * bubbles on to the shell's ladder, and a press synthesised at the top of the
+ * document would never travel that path.
+ */
+function press(key: string, on: Element | null = target.querySelector("section.view")): Event {
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  on?.dispatchEvent(event);
+  flushSync();
+  return event;
+}
+
+/** The spine columns, left to right, by the asset each is labelled with. */
+function spines(): string[] {
+  return [...target.querySelectorAll("button.spine .vn")].map((label) =>
+    (label.textContent ?? "").trim(),
+  );
+}
+
+/** The search box, which every test that types has to find. */
+function box(): HTMLInputElement {
+  const input = target.querySelector<HTMLInputElement>("input.q");
+  if (input === null) throw new Error("the Tree has no search box");
+  return input;
+}
+
+/** Type into the search box and wait the debounce out. */
+async function type(text: string): Promise<void> {
+  const input = box();
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 30));
+  flushSync();
 }
 
 function text(): string {
@@ -267,6 +420,12 @@ beforeEach(() => {
   target = document.createElement("div");
   document.body.append(target);
   location.hash = "";
+  scrolled = [];
+  Element.prototype.scrollIntoView = function scrollIntoView(
+    options?: boolean | ScrollIntoViewOptions,
+  ) {
+    scrolled.push(options as ScrollIntoViewOptions);
+  };
 });
 
 afterEach(() => {
@@ -274,6 +433,8 @@ afterEach(() => {
   app = undefined;
   target.remove();
   location.hash = "";
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  vi.restoreAllMocks();
 });
 
 /**
@@ -533,4 +694,298 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
     { name: "red", count: "2", tone: "down", title: "2 problems inside" },
     { name: "worse", count: "1", tone: "warn", title: "1 problem inside" },
   ]);
+});
+
+// -- the keyboard walk, the spines and the search (#430) ---------------------
+
+/**
+ * **The arrows and Enter walk the estate, and every step is an address.**
+ *
+ * Story 29's own sentence, through the rendered view: down the top column,
+ * right into what the selection holds, and the pane following each step. The
+ * assertion is on the address as well as on the markup, because the walk
+ * moves the *selection* and the columns are derived from it — a walk with a
+ * cursor of its own would draw the same thing here and disagree with the
+ * address bar.
+ */
+test("the arrows and enter walk three levels, and the pane follows", async () => {
+  const { router } = render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  press("ArrowDown");
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+
+  press("ArrowRight");
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+
+  press("ArrowDown");
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
+
+  press("Enter");
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  expect(text()).toContain("hel1 / vm-db-01 / postgres");
+  // The container holds nothing: `Enter` on it opens no column and moves
+  // nothing, rather than selecting out of an empty one.
+  press("Enter");
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+});
+
+/**
+ * **The focused row is the selected one**, which is what makes the walk
+ * visible: the global `:focus-visible` ring in `app.css` is drawn on whatever
+ * has focus, and a walk that moved the selection without moving focus would
+ * leave the ring on the row the reader started from.
+ */
+test("the walk carries focus to the row it selected", async () => {
+  render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  press("ArrowDown");
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+
+  const on = target.querySelector('button.row[aria-current="true"]');
+  expect(on?.textContent).toContain("hel1");
+  await vi.waitFor(() => expect(document.activeElement).toBe(on));
+});
+
+/**
+ * **A reader who asked for less motion is scrolled without any.**
+ *
+ * The row the walk lands on is brought into view, and *how* is the one thing
+ * on this surface that animates. `Flap.svelte`'s reading of the media query,
+ * for its reason.
+ */
+test("reduced motion is respected when the walk scrolls a row into view", async () => {
+  const reduce = vi
+    .spyOn(window, "matchMedia")
+    .mockImplementation(
+      (query: string) => ({ matches: query.includes("reduce"), media: query }) as MediaQueryList,
+    );
+
+  render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  press("ArrowDown");
+  await vi.waitFor(() => expect(scrolled).not.toHaveLength(0));
+  expect(scrolled.at(-1)?.behavior).toBe("auto");
+
+  reduce.mockImplementation((query: string) => ({ matches: false, media: query }) as MediaQueryList);
+  // The same press again, now without the preference — the option is read per
+  // press and not once at mount, which is what a reader who changes the
+  // system setting while the app is open would expect.
+  press("ArrowRight");
+  await vi.waitFor(() => expect(scrolled.at(-1)?.behavior).toBe("smooth"));
+});
+
+/**
+ * **Escape unwinds one step per press, and the press it has no step for is
+ * handed on.**
+ *
+ * The rung above the top of the estate is the bare tree; above that the Tree
+ * has nothing to unwind, and the key belongs to the shell's ladder
+ * (`shell/keys.ts` rung 3, *back to the room*). A view that consumed it
+ * anyway would be the one surface a reader cannot leave with the keyboard —
+ * so the last press is asserted **not** to be consumed.
+ */
+test("escape unwinds the path one level at a time and then falls through", async () => {
+  const { router } = render("#/asset/asset:postgres");
+  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+
+  expect(press("Escape").defaultPrevented).toBe(true);
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
+  // Waited out between presses, and that is a statement about the view rather
+  // than about the test: the layout is derived from the pane's answer, so the
+  // rung a press lands on is the one the *drawn* path offers.
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
+
+  press("Escape");
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
+  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+
+  press("Escape");
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: null });
+  await vi.waitFor(() => expect(marked()).toEqual([null]));
+
+  const last = press("Escape");
+  expect(last.defaultPrevented).toBe(false);
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: null });
+});
+
+/**
+ * **Four levels in a window that holds three: the oldest column becomes a
+ * spine labelled by its asset, and clicking the spine re-expands it.**
+ *
+ * Story 28, and the collapse is width-driven — 780px is what knobas' narrowest
+ * allowed window (`minWidth: 1100`) leaves beside the fixed pane. The label is
+ * the asset the reader walked *through*, not the column's parent: a spine
+ * reading "top level" would tell them nothing about the path they are in.
+ *
+ * Clicking it anchors the strip there, which pushes the collapse to the other
+ * end — the deepest column becomes the spine and the site is a full column
+ * again. The pane does not move, which is the whole point of the collapse.
+ */
+test("a path too deep for the window collapses its oldest columns to spines", async () => {
+  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+
+  // Four levels, three of them drawn: the site is a spine and the columns the
+  // reader just walked into are the ones that keep their width.
+  await vi.waitFor(() => expect(spines()).toEqual(["hel1"]));
+  expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
+  expect(marked()).toEqual(["vm-app-02", "gitea", "gitea-db"]);
+  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+
+  target.querySelector<HTMLButtonElement>("button.spine")?.click();
+  flushSync();
+
+  // Anchored at the site, the collapse moves to the other end: the deepest
+  // column is the spine now, and it is labelled with the asset the reader has
+  // selected in it.
+  await vi.waitFor(() => expect(spines()).toEqual(["gitea-db"]));
+  expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]);
+  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+});
+
+/** A window with room for every column draws no spine at all. */
+test("a path the window holds collapses nothing", async () => {
+  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 1400 });
+
+  await vi.waitFor(() => expect(columns()).toHaveLength(4));
+  expect(spines()).toEqual([]);
+});
+
+/**
+ * **Typing a name in the Tree's search opens the path to the first match and
+ * selects it** — criterion 3, and story 30.
+ *
+ * The reveal is an *address*: the box hands the first match's id to the
+ * router, the pane reads it, and the columns are derived from the `held_by`
+ * that comes back. So the box needs to know nothing about where an asset
+ * lives, and a match four levels down opens four columns without the reader
+ * having walked one of them.
+ */
+test("typing a name opens the path to the first match and selects it", async () => {
+  const { router, searched } = render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  await type("gitea-db");
+  // What the box asked for, which is the estate's corpus and nothing else.
+  expect(searched.at(-1)?.filters.kinds).toEqual(["asset"]);
+  expect(searched.at(-1)?.raw).toBe("gitea-db");
+  // The list says where each match lives before the reader takes it.
+  expect(text()).toContain("hel1 / vm-app-02 / gitea");
+
+  press("Enter", box());
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: GITEA_DB.id });
+  await vi.waitFor(() =>
+    expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
+  );
+  expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]);
+  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+});
+
+/**
+ * **One keystroke is not one query**, and a box with nothing in it asks
+ * nothing at all: the debounce is the launcher's own, so the two boxes in this
+ * app wait the same amount of time.
+ */
+test("the box waits for the typing to stop, and an empty box asks nothing", async () => {
+  const { searched } = render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  const input = box();
+  for (const text of ["g", "gi", "git"]) {
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  }
+  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 30));
+  expect(searched.map((query) => query.raw)).toEqual(["git"]);
+
+  await type("");
+  expect(searched.map((query) => query.raw)).toEqual(["git"]);
+});
+
+/**
+ * **A search that matches nothing says so**, and the columns are left alone.
+ *
+ * The box is a way into the estate, not a filter over it: a query with no
+ * match must not blank the path the reader is standing in.
+ */
+test("a query nothing matches leaves the columns where they were", async () => {
+  render("#/asset/asset:postgres");
+  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+
+  await type("nothing-is-called-this");
+
+  expect(text()).toContain("Nothing in the estate matches");
+  expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
+  expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]);
+});
+
+/**
+ * **Escape in the box clears the query first**, which is the launcher's rung 1
+ * and the reason it is a rung: a reader who typed by mistake gets their
+ * columns back without losing the asset they were reading.
+ */
+test("escape in the search box clears the query before it unwinds anything", async () => {
+  const { router } = render("#/asset/asset:postgres");
+  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+
+  await type("gitea");
+  expect(text()).toContain("gitea-db");
+
+  press("Escape", box());
+  expect(box().value).toBe("");
+  expect(text()).not.toContain("gitea-db");
+  // The selection is untouched: clearing the box is not unwinding the path.
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: CONTAINER.id });
+});
+
+/**
+ * **The arrows walk the offered matches while the box has the focus**, and
+ * the columns underneath do not move: two lists and one keyboard, so the one
+ * in front of the reader is the one that answers.
+ */
+test("the arrows move through the matches instead of the columns", async () => {
+  const { router } = render("#/assets/tree");
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  await type("vm-");
+  press("ArrowDown", box());
+  press("Enter", box());
+
+  // `vm-db-01` is the first match and `vm-app-02` the second: the press moved
+  // the cursor down the offers, and `Enter` took the one it had moved to.
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
+});
+
+/**
+ * **A re-expanded spine is a look at one path, and the next selection is
+ * another.**
+ *
+ * So the anchor is kept beside the selection it was clicked in and does not
+ * apply to a different one: carried, it would collapse the columns the reader
+ * had just walked into, at a level they had never clicked a spine on.
+ *
+ * The move is to `gitea`, which is one level *up* and still four columns wide
+ * — it holds `gitea-db`, so a column opens under it. That is what makes the
+ * assertion able to fail: a surviving anchor of 0 would draw the deepest
+ * column as the spine instead of the oldest, and the two are told apart by
+ * which asset the spine is labelled with.
+ */
+test("clicking a spine anchors this path and not the next one", async () => {
+  const { router } = render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+  await vi.waitFor(() => expect(spines()).toEqual(["hel1"]));
+
+  target.querySelector<HTMLButtonElement>("button.spine")?.click();
+  flushSync();
+  await vi.waitFor(() => expect(spines()).toEqual(["gitea-db"]));
+
+  router.go(`#/asset/${GITEA.id}`);
+  flushSync();
+
+  await vi.waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
+  expect(spines()).toEqual(["hel1"]);
+  expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
 });
