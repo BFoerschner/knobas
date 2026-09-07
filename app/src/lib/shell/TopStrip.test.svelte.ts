@@ -11,8 +11,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { createAlerts, type Alerts } from "../assets/alerts.svelte";
 import { createInbox, type Inbox } from "../inbox/inbox.svelte";
-import type { AssetDetail, AssetRow } from "../ipc/assets";
+import type { AssetDetail, AssetRow, OpenAlert } from "../ipc/assets";
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import type { RunningTimer, TimerTarget } from "../ipc/time";
 import TopStrip from "./TopStrip.svelte";
@@ -73,12 +74,37 @@ function timerOn(target_: TimerTarget | null, startedAt = "2026-09-03T09:00:00Z"
   });
 }
 
+/**
+ * An open-alert store holding `count` alerts and no bridge behind it (#444).
+ *
+ * The alerts are *made*, and the store's own count is their number: this
+ * component may not compute the badge from anything but the store, and the
+ * store may not compute it from anything but its list.
+ */
+function alertsOf(count: number): Alerts {
+  const open: OpenAlert[] = Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    monitor_id: `kuma:${index + 1}`,
+    monitor_name: `check ${index + 1}`,
+    web_url: null,
+    state: "down" as const,
+    opened_at: "2026-09-07T08:00:00Z",
+    acked_at: null,
+    assets: [],
+  }));
+  return createAlerts({
+    openAlerts: () => Promise.resolve(open),
+    listen: () => Promise.resolve(() => {}),
+  });
+}
+
 function render(
   states: CredentialHealth[],
   inbox: Inbox = inboxOf(0),
   timer: Timer = timerOn(null),
   ontimer?: () => void,
   asset?: (assetId: string) => Promise<AssetDetail>,
+  alerts: Alerts = alertsOf(0),
 ) {
   const health = createHealth({
     credentialHealth: () => Promise.resolve([]),
@@ -88,10 +114,10 @@ function render(
   const router = createRouter();
   app = mount(TopStrip, {
     target,
-    props: { router, onsearch: () => {}, health, inbox, timer, ontimer, asset },
+    props: { router, onsearch: () => {}, health, inbox, timer, ontimer, asset, alerts },
   });
   flushSync();
-  return { health, router, timer };
+  return { health, router, timer, alerts };
 }
 
 /** One asset, as `get_asset` answers for it (#437). */
@@ -223,6 +249,105 @@ test("a health event repaints the cluster without a remount", () => {
 function tool(label: string) {
   return target.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 }
+
+/** The Assets button, which is drawn whether or not anything is wrong. */
+function assetsButton(): HTMLButtonElement {
+  const button = target.querySelector<HTMLButtonElement>('button[title^="Assets"]');
+  expect(button, "the strip has no way into the estate").toBeTruthy();
+  return button!;
+}
+
+/**
+ * *Assets* (#428) with its open-alert count (#444): the destination is always
+ * drawn and the **number** is absent at zero.
+ *
+ * The two halves are one test because they are one button, and the reason the
+ * rules differ is the whole design: a destination nobody can reach is a view
+ * nobody opens, and a badge reading `0` is a place the eye keeps checking. The
+ * inbox count follows the second rule and this is the strip's second use of it.
+ */
+test("*Assets* is always drawn and its alert count is absent at zero", () => {
+  const { router } = render([]);
+
+  const assets = assetsButton();
+  expect(assets.querySelector(".flap"), "an estate with nothing wrong draws no badge").toBeNull();
+  expect(assets.getAttribute("aria-label")).toBeNull();
+
+  assets.click();
+  flushSync();
+  expect(location.hash).toBe("#/assets/tree");
+  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: null });
+});
+
+/**
+ * The count is the store's, and it **flaps** — spec §2's rule that a flap is a
+ * value that changes while you watch, applied to the one thing on this button
+ * that does.
+ *
+ * The word *Assets* beside it is plain text in the same assertion, because
+ * "split-flap on the count only" is the ticket's own clause and a button where
+ * everything flapped would be a button where nothing read as news.
+ */
+test("the alert count is drawn as a flap, and the label beside it is not", async () => {
+  const alerts = alertsOf(3);
+  await alerts.refresh();
+  render([], inboxOf(0), timerOn(null), undefined, undefined, alerts);
+
+  const assets = assetsButton();
+  const flap = assets.querySelector(".flap");
+  expect(flap, "the count is not a flap").toBeTruthy();
+  expect(flap!.textContent).toContain("3");
+  expect(assets.querySelector(".k")!.textContent).toBe("Assets");
+  expect(assets.querySelector(".k")!.classList.contains("flap")).toBe(false);
+  expect(assets.getAttribute("aria-label")).toBe("Assets: 3 open alerts");
+  expect(assets.getAttribute("title")).toContain("3 open alerts");
+});
+
+/** One is not "1 open alerts". */
+test("a single alert reads in the singular", async () => {
+  const alerts = alertsOf(1);
+  await alerts.refresh();
+  render([], inboxOf(0), timerOn(null), undefined, undefined, alerts);
+
+  expect(assetsButton().getAttribute("aria-label")).toBe("Assets: 1 open alert");
+});
+
+/**
+ * The badge follows the store without a remount, which is what makes it live:
+ * an alert opened by a sync run reaches the strip through the store's own
+ * re-read, and nothing here re-mounts on a sync.
+ */
+test("the count follows the store as alerts open and close", async () => {
+  let open = 0;
+  const alerts = createAlerts({
+    openAlerts: () =>
+      Promise.resolve(
+        Array.from({ length: open }, (_, index) => ({
+          id: index + 1,
+          monitor_id: `kuma:${index + 1}`,
+          monitor_name: "canary",
+          web_url: null,
+          state: "warn" as const,
+          opened_at: "2026-09-07T08:00:00Z",
+          acked_at: null,
+          assets: [],
+        })),
+      ),
+    listen: () => Promise.resolve(() => {}),
+  });
+  render([], inboxOf(0), timerOn(null), undefined, undefined, alerts);
+  expect(assetsButton().querySelector(".flap")).toBeNull();
+
+  open = 2;
+  await alerts.refresh();
+  flushSync();
+  expect(assetsButton().querySelector(".flap")!.textContent).toContain("2");
+
+  open = 0;
+  await alerts.refresh();
+  flushSync();
+  expect(assetsButton().querySelector(".flap"), "a healed estate loses its badge").toBeNull();
+});
 
 /**
  * Settings is reached the way sources is: a labelled button on the strip.

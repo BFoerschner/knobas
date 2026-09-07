@@ -59,15 +59,21 @@
   section that dropped it would tell an asset somebody deliberately silenced a
   check on that nothing watches it.
 
+  **What is wrong right now** (#444, story 58) is a strip above the search:
+  every open alert in the estate, one row per asset the broken monitor watches,
+  each a click to that asset. The same store the top strip counts, so the badge
+  and this list cannot be a moment apart. Health takes the monitors from this
+  ticket too, so a row is red because a check on it is red and not only because
+  somebody rated it. Ack, the cards and the "Not monitored" roster are #446's
+  and #449's.
+
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
-  and arrive with the routes that carry the URLs (#432). Wires are #433's;
-  monitors are also the half of story 37's *own* health that is not here yet,
-  which is #444's. The Monitors tab landed with #448 and is `MonitorsView`, a
-  surface of its own behind the shared tab strip: it draws no columns, no pane
-  and no search box, so folding it in here would have been one component
-  loading the whole estate to show a roster of the mirror. **Environment, owner
-  and status are
+  and arrive with the routes that carry the URLs (#432). Wires are #433's.
+  The Monitors tab landed with #448 and is `MonitorsView`, a surface of its own
+  behind the shared tab strip: it draws no columns, no pane and no search box,
+  so folding it in here would have been one component loading the whole estate
+  to show a roster of the mirror. **Environment, owner and status are
   editable fields on `AssetEdit` and this pane does not set them**: #431 owns
   their *in force* half and draws it, and a control that wrote the stored value
   beside a line reading "or inherited from vm-db-01" is a second ticket's
@@ -110,6 +116,7 @@
   // The launcher's own debounce, imported rather than copied: two search
   // boxes in one app that wait different amounts of time feel like two apps.
   import { DEBOUNCE_MS } from "../launcher";
+  import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
@@ -200,11 +207,23 @@
   let {
     router,
     ports,
+    alerts = sharedAlerts,
     now = () => new Date(),
     stripWidth,
   }: {
     router: Router;
     ports?: Partial<AssetPorts>;
+    /**
+     * The live open-alert store this view lists (#444).
+     *
+     * A prop with the shell's singleton as its default — the shape the top
+     * strip's `alerts`, `inbox` and `health` have — and **the same store the
+     * top strip counts**, which is what makes the badge and this list one
+     * answer rather than two reads taken a moment apart. Not one of `ports`,
+     * because the ports are commands this view calls and this is a store the
+     * shell already keeps live.
+     */
+    alerts?: Alerts;
     /** Injectable clock — what the history's *ago* readings are relative to. */
     now?: () => Date;
     /**
@@ -1364,6 +1383,72 @@
   {/if}
 
   <!--
+    **What is wrong right now** (story 58, #444), on a strip of its own above
+    the search.
+
+    Above the columns and not in the pane, because an alert is about the
+    estate rather than about whatever the reader happens to have selected —
+    story 58's words are "every open alert visible in the Assets view", and a
+    list that only appeared once you had clicked the broken thing would be a
+    list for somebody who already knew.
+
+    **Absent when there is nothing wrong**, the top strip badge's rule and for
+    its reason: a permanently empty box is a place the eye keeps checking.
+
+    The row opens the **asset**, not the alert: spec #427 story 61 is that the
+    next action is one step away, and an alert has no address of its own. A
+    monitor watching two assets draws a row each, because the reader's next
+    step is different for each of them — which of the two is the question the
+    row exists to answer, and one row naming both would answer neither. A
+    monitor watching nothing draws one row all the same, with the monitor's
+    name and nowhere to go, since an alert nobody can act on is the one most
+    worth saying out loud.
+
+    Ack, the cards and the "Not monitored" roster are #446's and #449's; this
+    is the list and the count, which is what #444 owes.
+  -->
+  {#if alerts.count > 0}
+    <section class="alerts" aria-label="Open alerts">
+      <ul>
+        {#each alerts.open as alert (alert.id)}
+          {#if alert.assets.length === 0}
+            <li>
+              <span class="st {alert.state}" aria-hidden="true"></span>
+              <span class="mn">{alert.monitor_name}</span>
+              <span class="pth faint">watching nothing</span>
+              <span class="wh faint">{ago(alert.opened_at, now())}</span>
+            </li>
+          {:else}
+            {#each alert.assets as watched (watched.id)}
+              <li>
+                <span class="st {alert.state}" aria-hidden="true"></span>
+                <button
+                  class="go"
+                  onclick={() =>
+                    router.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
+                >
+                  <span class="mn">{alert.monitor_name}</span>
+                  <span class="nm">{watched.name}</span>
+                  <span class="pth faint">{watched.path ?? "top level"}</span>
+                </button>
+                <!--
+                  Acked is drawn and not hidden: #446's ack clears the *inbox*
+                  item and leaves the alert open, so a list that dropped it
+                  would say the estate was well.
+                -->
+                {#if alert.acked_at}
+                  <span class="ak faint">acked</span>
+                {/if}
+                <span class="wh faint">{ago(alert.opened_at, now())}</span>
+              </li>
+            {/each}
+          {/if}
+        {/each}
+      </ul>
+    </section>
+  {/if}
+
+  <!--
     The estate's search (story 30), on a strip of its own between the room bar
     and the columns.
 
@@ -2400,6 +2485,92 @@
     The search strip: one row, the box on the right, and its offers hanging
     over the columns rather than pushing them down while a reader types.
   */
+  /* The open-alert strip (#444). A band above the search, the same 14px
+     gutter every strip in this view uses. */
+  .alerts {
+    padding: 4px 14px 6px;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .alerts ul {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    /* Six rows, then it scrolls: an estate with twenty broken monitors must
+       not push the columns off the screen. */
+    max-height: 132px;
+    overflow-y: auto;
+  }
+
+  .alerts li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+  }
+
+  /* The state as a dot, not a word: `down` and `warn` are two colours the
+     rest of this app already uses, and a word here would repeat what the
+     colour says in the space the monitor's name needs. */
+  .alerts .st {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .alerts .st.down {
+    background: var(--fail);
+  }
+
+  .alerts .st.warn {
+    background: var(--amber);
+  }
+
+  .alerts .go {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .alerts .go:hover .nm {
+    text-decoration: underline;
+  }
+
+  .alerts .mn {
+    font: 500 11px/1.4 var(--mono);
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .alerts .nm,
+  .alerts .pth,
+  .alerts .ak,
+  .alerts .wh {
+    font: 400 11px/1.4 var(--mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Pushed to the far end, so the readings line up down the strip however
+     long the names before them are. */
+  .alerts .wh {
+    margin-left: auto;
+    flex: none;
+  }
+
   .find {
     position: relative;
     display: flex;

@@ -28,14 +28,19 @@
 
   **Assets** joined them in M4.0 (#428): spec §2's Assets button, opening the
   Tree. Always drawn, the rule *Today* and *Standup* follow — it is a
-  destination rather than a reading. It carries **no count**: the open-alert
-  badge spec §2 puts on it is M4.1's, and a badge that could only ever read
-  zero would be a number nobody could act on, which is the reason the inbox
-  count is absent at zero rather than drawn as `0`.
+  destination rather than a reading.
+
+  Its **open-alert count** arrived with M4.1 (#444), which is what that
+  paragraph said was coming. The button stays drawn at zero because it is a
+  destination; the *number* is absent at zero, the inbox count's rule, because
+  a badge reading `0` is a place for the eye to keep checking. It **flaps**,
+  and it is the only thing on this button that does: spec §2's rule is that a
+  flap is a value that changes while you watch, and the word *Assets* does not.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
+  import { alerts as sharedAlerts, type Alerts } from "../assets/alerts.svelte";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { getAsset as realGetAsset, type AssetDetail } from "../ipc/assets";
   import type { AuthState } from "../ipc/sources";
@@ -55,6 +60,7 @@
     router,
     onsearch,
     contexts = builtinContexts([]),
+    alerts = sharedAlerts,
     health = sharedHealth,
     inbox = sharedInbox,
     timer = sharedTimer,
@@ -101,6 +107,19 @@
      * definition of that, and snoozing is the first thing it would get wrong.
      */
     inbox?: Inbox;
+    /**
+     * The live open-alert store the Assets badge counts (#444).
+     *
+     * A prop with the shell's singleton as its default, the shape `inbox`,
+     * `health` and `timer` have: the strip is correct whatever a caller
+     * passes, and a test can hand it an estate with no Tauri bridge behind it.
+     *
+     * **Counted, not read** — the opposite of `inbox` above, and
+     * `alerts.svelte.ts` argues why: an open alert has no second predicate
+     * like snoozing for a count and a list to disagree about, so one command
+     * answers both and `count` is the list's length.
+     */
+    alerts?: Alerts;
     /**
      * The live `source:health` store the cluster draws.
      *
@@ -149,6 +168,17 @@
    * so the button reads as current when the reader is standing in either.
    */
   const onAssets = $derived(router.route.view === "assets");
+
+  /**
+   * *N open alerts* / *1 open alert*, for the title and the label.
+   *
+   * Spelled once, because the button says it twice — a tooltip a sighted
+   * reader hovers and a label a screen reader hears — and two copies of a
+   * plural rule are two chances for one of them to read "1 open alerts".
+   */
+  const alertReading = $derived(
+    alerts.count === 1 ? "1 open alert" : `${alerts.count} open alerts`,
+  );
 
   /** The asset the clock is on, or `null` for every other target (#437). */
   const onAsset = $derived(assetTargetId(timer.current?.target ?? null));
@@ -329,11 +359,18 @@
     what the view opens on; a reader who was last on an asset gets the Tree at
     the top rather than back where they were, which is the same rule *Today*
     follows in carrying the date it was pressed on.
+
+    The open-alert count (#444) rides on the same button rather than beside it,
+    because it is not a second destination: the estate is where an alert is
+    answered, and a badge on its own would be one more thing to aim at.
   -->
   <button
     class="tb-btn {onAssets ? 'on' : ''}"
     aria-current={onAssets ? "page" : undefined}
-    title="Assets — the estate as a tree"
+    title={alerts.count > 0
+      ? `Assets — the estate as a tree. ${alertReading}.`
+      : "Assets — the estate as a tree"}
+    aria-label={alerts.count > 0 ? `Assets: ${alertReading}` : undefined}
     onclick={() => router.go(hashFor({ view: "assets", tab: "tree", assetId: null }))}
   >
     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -342,6 +379,21 @@
       <path d="M4.5 4.5h.01M4.5 11.5h.01" />
     </svg>
     <span class="k">Assets</span>
+    <!--
+      Absent at zero, the inbox count's rule: an estate with nothing wrong in
+      it draws a plain button. Amber and not red at any count, because the
+      badge says *there is trouble*, and which trouble is what the list under
+      it is for — a red number over one slow monitor would be the strip
+      shouting louder than the estate.
+    -->
+    {#if alerts.count > 0}
+      <Flap
+        value={String(alerts.count)}
+        tone="amber"
+        width="s"
+        label={alertReading}
+      />
+    {/if}
   </button>
 
   <!--

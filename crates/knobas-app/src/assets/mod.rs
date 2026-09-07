@@ -67,8 +67,9 @@
 //!   `problems_inside` counts the descendants carrying `warn` or `down` --
 //!   what story 32's amber-or-red badge draws. [`ROLLUP`] is the one statement
 //!   that answers both, plus the worst status *strictly underneath*, which is
-//!   what colours the badge. Monitors join the "own health" half in M4.1; that
-//!   is the only part of story 37 not here.
+//!   what colours the badge. Monitors joined the "own health" half in #444,
+//!   and `problems_inside` counts over the combined severity, so a container
+//!   nobody has rated with a `down` check on it is a problem inside its VM.
 //!
 //! # Assets in contexts (#434)
 //!
@@ -168,9 +169,13 @@
 //!
 //! Monitors arrived with #442's Kuma adapter, so [`monitored_by`] fills a
 //! source room and [`AssetDetail::monitoring`] fills the pane's *monitoring*
-//! section (#445). What is **not** here is health taking a monitor's state --
-//! story 37's other half, and #444's, along with the alert an asset's monitor
-//! opens.
+//! section (#445). Story 37's other half landed with #444: [`ROLLUP`] takes
+//! the newest sample of every monitor attached to an asset, so a container is
+//! red because a check on it is red and not only because somebody rated it --
+//! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
+//! the estate's own list of what is wrong, one read that the top strip counts
+//! and the Assets view draws. The **ack** on an alert is #446's, with the
+//! inbox category it clears; the Monitors tab's cards are #449's.
 
 use std::collections::{HashMap, HashSet};
 
@@ -245,9 +250,9 @@ const MONITOR_KIND: &str = "monitor";
 ///
 /// Not its health: story 37's health is the worst of this and its monitors'
 /// states, and its *effective* health also takes the worst descendant. Both
-/// are computed at read time, by [`ROLLUP`] over this column -- the monitors'
-/// half is M4.1's and the only part of story 37 not here. This is the stored
-/// fact those reads are built on, and [`AssetRow`] carries all three.
+/// are computed at read time, by [`ROLLUP`] over this column and over the
+/// newest sample of every attached monitor (#444). This is the stored fact
+/// those reads are built on, and [`AssetRow`] carries all three.
 ///
 /// `none` is the default and means *nobody has said*, which is a different
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
@@ -524,9 +529,10 @@ pub struct AssetRow {
     pub owner: Option<String>,
     /// Whether anything sits under it.
     pub has_children: bool,
-    /// The asset's **effective health**: the worst of [`status`](Self::status)
-    /// and every descendant's own status, down over warn over up over none
-    /// (story 37). Monitors join the "own" half in M4.1.
+    /// The asset's **effective health**: the worst of [`status`](Self::status),
+    /// the monitors attached to it, and every descendant's own two, down over
+    /// warn over up over none (stories 37 and 38, #444). A monitor Kuma paused
+    /// contributes nothing.
     pub health: AssetStatus,
     /// The worst status **strictly underneath** this asset; `none` when it
     /// holds nothing, or nothing under it has been rated.
