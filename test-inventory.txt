@@ -1892,6 +1892,7 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::only_the_monitor_familie
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_response_time_sentinel_is_an_absence
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_help_lines_own
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_refused_account_waits_and_a_refused_write_does_not
+knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_session_that_only_pings_is_given_up_on_when_the_time_is_gone
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_ack_is_matched_on_the_whole_id
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_emit_is_a_packet_type_an_ack_id_and_a_document
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_unreadable_answer_is_a_fault_rather_than_a_success
