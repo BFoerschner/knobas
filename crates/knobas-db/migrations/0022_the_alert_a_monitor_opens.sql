@@ -95,7 +95,7 @@ create table knobas.monitor_alert (
   state      text not null,
   acked_at   timestamptz,
   closed_at  timestamptz,
-  constraint monitor_alert_state_chk check (state in ('down', 'warn')),
+  constraint monitor_alert_state_chk check (state in ('down','warn')),
   constraint monitor_alert_closed_after_opened_chk
     check (closed_at is null or closed_at >= opened_at),
   constraint monitor_alert_acked_after_opened_chk

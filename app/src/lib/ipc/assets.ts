@@ -859,3 +859,60 @@ export interface MonitorSample {
 export function monitorRoster(): Promise<MonitorRow[]> {
   return invoke<MonitorRow[]>("monitor_roster");
 }
+
+/**
+ * What trouble an open alert is about — `assets::AlertState`.
+ *
+ * Two words and not four: an alert exists only for `down` and `warn`, so
+ * `AssetStatus`' `up` and `none` have no meaning here. The spellings are
+ * shared with a status on purpose, so a reader can compare an alert with the
+ * health it caused.
+ */
+export type AlertState = "down" | "warn";
+
+/**
+ * One asset an alert's monitor watches — `assets::AlertAsset`.
+ *
+ * A list on the alert and not a field, because `monitored-by` is an ordinary
+ * link and two assets may name one check. Empty is a real answer: a monitor
+ * attached to nothing still opens an alert.
+ */
+export interface AlertAsset {
+  /** `asset:<uuid>` — what the row opens. */
+  id: string;
+  name: string;
+  /** Its ancestors, outermost first, or `null` at the top of the estate. */
+  path: string | null;
+}
+
+/**
+ * One open alert — `assets::OpenAlert` (#444).
+ *
+ * **No address of its own.** The `id` is the row's number, what the alert is
+ * about is the monitor, and what a reader opens is the asset — spec #427
+ * story 61.
+ */
+export interface OpenAlert {
+  id: number;
+  /** The monitor's entity id. */
+  monitor_id: string;
+  monitor_name: string;
+  /** Its own page in Uptime Kuma, or `null` when there is none left to open. */
+  web_url: string | null;
+  state: AlertState;
+  opened_at: string;
+  /** When somebody said they had seen it. Written by #446's ack. */
+  acked_at: string | null;
+  assets: AlertAsset[];
+}
+
+/**
+ * Every open alert in the estate, newest first.
+ *
+ * **One read for both surfaces.** The top strip's count is this list's length
+ * and the Assets view's list is this list, so the badge cannot disagree with
+ * what is under it.
+ */
+export function openAlerts(): Promise<OpenAlert[]> {
+  return invoke<OpenAlert[]>("open_alerts");
+}

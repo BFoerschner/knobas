@@ -2655,6 +2655,398 @@ async fn a_source_rooms_tile_draws_its_worst_asset_first() {
 }
 
 // ---------------------------------------------------------------------------
+// Health takes the monitors, and the estate shows the alerts (#444)
+// ---------------------------------------------------------------------------
+
+/// One sample of one monitor, written by hand -- what the engine appends at
+/// the end of every run of a source that emits `monitor` (#443).
+///
+/// By hand and not through `knobas_sync::run_once`, because what is under test
+/// here is the **read**: `crates/knobas-sync/tests/alerts.rs` and
+/// `tests/samples.rs` are where the engine writing these is the claim. Each
+/// call is a poll, so a later one is a newer reading.
+async fn sampled(pool: &PgPool, monitor_id: &str, state: Option<&str>) {
+    sqlx::query("insert into knobas.monitor_sample (entity_id, state) values ($1, $2)")
+        .bind(monitor_id)
+        .bind(state)
+        .execute(pool)
+        .await
+        .expect("the sample");
+}
+
+/// One open alert on one monitor, written by hand for the read's sake.
+async fn opened(pool: &PgPool, monitor_id: &str, state: &str) -> i64 {
+    sqlx::query_scalar(
+        "insert into knobas.monitor_alert (entity_id, state) values ($1, $2) returning id",
+    )
+    .bind(monitor_id)
+    .bind(state)
+    .fetch_one(pool)
+    .await
+    .expect("the alert")
+}
+
+/// The health of one asset by name, out of the column its parent draws.
+async fn column_health(
+    pool: &PgPool,
+    parent: Option<&str>,
+    name: &str,
+) -> (AssetStatus, AssetStatus, i64) {
+    let row = assets::tree(pool, parent)
+        .await
+        .expect("the column")
+        .into_iter()
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("{name} is not in that column"));
+    (row.health, row.inside, row.problems_inside)
+}
+
+/// The ticket's IPC-seam criterion: **an asset with a `monitored-by` link to a
+/// down monitor reads down, and its ancestors show it inside.**
+///
+/// Story 37's other half. The asset itself is rated by nobody -- its stored
+/// status is `none` throughout -- so every reading here comes from the monitor
+/// and from nothing else, which is what makes this a test of the new half
+/// rather than of the rollup that was already there. `two_branches` is the
+/// fixture because the claim needs a **sibling subtree** to leave alone: a
+/// single chain cannot tell "the monitor colours this asset's ancestors" from
+/// "the monitor colours the estate".
+#[tokio::test]
+async fn an_asset_whose_monitor_is_down_reads_down_and_its_ancestors_show_it_inside() {
+    let pool = pool("assets-health-monitor").await;
+    let estate = two_branches(&pool).await;
+    let check = monitor_reading(&pool, "kuma", "postgres (tunnel)", Some("down"), None).await;
+    link_as(&pool, &estate.postgres.id, &check, "monitored-by").await;
+
+    // Attached, and not yet sampled: an asset whose monitor knobas has never
+    // read is not an asset that is down.
+    assert_eq!(
+        column_health(&pool, Some(&estate.db.id), "postgres").await,
+        (AssetStatus::None, AssetStatus::None, 0),
+        "a monitor with no reading behind it colours nothing"
+    );
+
+    sampled(&pool, &check, Some("down")).await;
+
+    assert_eq!(
+        column_health(&pool, Some(&estate.db.id), "postgres").await,
+        (AssetStatus::Down, AssetStatus::None, 0),
+        "the container reads down, and is never a problem inside itself"
+    );
+    assert_eq!(
+        assets::get(&pool, &estate.postgres.id)
+            .await
+            .expect("the pane")
+            .asset
+            .status,
+        AssetStatus::None,
+        "and nobody wrote a status: the rollup is a read"
+    );
+    assert_eq!(
+        column_health(&pool, Some(&estate.site.id), "vm-db-01").await,
+        (AssetStatus::Down, AssetStatus::Down, 1),
+        "the VM holding it is down through it, with a red badge of one"
+    );
+    assert_eq!(
+        column_health(&pool, None, "hel1").await,
+        (AssetStatus::Down, AssetStatus::Down, 1),
+        "and so is the site above that"
+    );
+    assert_eq!(
+        column_health(&pool, Some(&estate.site.id), "vm-app-02").await,
+        (AssetStatus::None, AssetStatus::None, 0),
+        "the sibling branch holds nothing wrong"
+    );
+    assert_eq!(
+        column_health(&pool, Some(&estate.db.id), "redis").await,
+        (AssetStatus::None, AssetStatus::None, 0),
+        "and neither does the container beside it"
+    );
+}
+
+/// The newest sample is the reading, and a recovery is a reading like any
+/// other.
+///
+/// Also the test that says health is read from the **timeseries** and not from
+/// the mirror row: the mirror says `down` throughout and the asset goes back
+/// to `none` when the newest sample says `up`. A rollup reading
+/// `payload->>'state'` would have both of these backwards.
+#[tokio::test]
+async fn only_the_newest_sample_colours_an_asset() {
+    let pool = pool("assets-health-newest").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let check = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    link_as(&pool, &vm.id, &check, "monitored-by").await;
+
+    sampled(&pool, &check, Some("down")).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+
+    sampled(&pool, &check, Some("up")).await;
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Up,
+        "the monitor recovered, and the older `down` is history"
+    );
+}
+
+/// Story 38: **a paused monitor reads as none in the rollup**, so a
+/// deliberately silenced check does not colour a branch.
+///
+/// The pane still lists it and marks it (#445's
+/// `a_paused_monitor_stays_in_the_section_with_no_state_and_no_link`), which
+/// is the pair of statements this feature has to make at once: *somebody
+/// silenced this check* and *this branch is not red because of it*.
+#[tokio::test]
+async fn a_paused_monitor_colours_nothing_and_is_still_listed() {
+    let pool = pool("assets-health-paused").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let check = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    link_as(&pool, &vm.id, &check, "monitored-by").await;
+    sampled(&pool, &check, Some("down")).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&check)
+        .execute(&pool)
+        .await
+        .expect("the tombstone");
+
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::None,
+        "a paused monitor keeps its samples and colours nothing with them"
+    );
+    let pane = assets::get(&pool, &vm.id).await.expect("the pane");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| (watch.name.as_str(), watch.tombstoned))
+            .collect::<Vec<_>>(),
+        [("gitea", true)],
+        "and it is still attached, and says so"
+    );
+}
+
+/// The whole of the monitor's half of the ordering, in one asset: `warn`
+/// colours it amber, the two words the rollup has no meaning for colour it
+/// nothing, and the worst of the asset's own status and its monitors' wins.
+#[tokio::test]
+async fn the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors() {
+    let pool = pool("assets-health-worst").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let slow = monitor_reading(&pool, "kuma", "gitea", Some("up"), None).await;
+    let other = monitor_reading(&pool, "kuma", "canary", Some("up"), None).await;
+    link_as(&pool, &vm.id, &slow, "monitored-by").await;
+    link_as(&pool, &vm.id, &other, "monitored-by").await;
+
+    // Two words a sample may carry and the rollup has no word for. Neither
+    // colours anything -- `alerts` takes the same reading of them.
+    sampled(&pool, &slow, Some("pending")).await;
+    sampled(&pool, &other, Some("maintenance")).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::None);
+
+    // A miss is a gap, and a gap colours nothing either.
+    sampled(&pool, &slow, None).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::None);
+
+    // *Warn* is knobas' own state and exists only in the timeseries: the
+    // mirror row still says `up`.
+    sampled(&pool, &slow, Some("warn")).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Warn);
+
+    // The worst of the two monitors, not the newest of them.
+    sampled(&pool, &other, Some("down")).await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+
+    // And the worst of the asset's own status and its monitors': the asset is
+    // rated `up` and stays `down`, because a monitor is not milder than a
+    // person's opinion of the machine.
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Status {
+            value: AssetStatus::Up,
+        },
+    )
+    .await;
+    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+}
+
+/// A monitor attached by a relation that is not `monitored-by`, or an item
+/// that is not a monitor, colours nothing.
+///
+/// Two clauses, and a read that dropped either would still colour the VM:
+/// `MONITORED_ASSETS` states the same pair from the other end and #445's pane
+/// test spells out why they are two conditions rather than one.
+#[tokio::test]
+async fn only_a_monitored_by_link_to_a_monitor_colours_an_asset() {
+    let pool = pool("assets-health-near-miss").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let merely_related = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    let not_a_monitor = ticket(&pool, "PAY-9").await;
+    link_as(&pool, &vm.id, &merely_related, "related").await;
+    link_as(&pool, &vm.id, &not_a_monitor, "monitored-by").await;
+    sampled(&pool, &merely_related, Some("down")).await;
+    sampled(&pool, &not_a_monitor, Some("down")).await;
+
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await,
+        (AssetStatus::None, AssetStatus::None, 0),
+        "a `related` link to a monitor is not monitoring, and a ticket is not a monitor"
+    );
+}
+
+/// The other criterion: **the open-alert read and the count off it.**
+///
+/// One alert per broken monitor, newest first, each carrying the monitor it is
+/// about and the assets that monitor watches with their path. The count the
+/// top strip draws is this list's length, which is why there is no second
+/// statement to test.
+#[tokio::test]
+async fn the_open_alert_read_names_the_monitor_and_every_asset_it_watches() {
+    let pool = pool("assets-open-alerts").await;
+    let estate = two_branches(&pool).await;
+    let older = monitor_reading(
+        &pool,
+        "kuma",
+        "postgres (tunnel)",
+        Some("down"),
+        Some("https://kuma.local/dashboard/1"),
+    )
+    .await;
+    let newer = monitor_reading(&pool, "kuma", "canary", Some("up"), None).await;
+    let well = monitor_reading(&pool, "kuma", "gitea", Some("up"), None).await;
+
+    // The first monitor watches two assets, which one `monitored-by` link
+    // each is: a VM and the container on it can honestly both be watched by
+    // one check on the product.
+    link_as(&pool, &estate.postgres.id, &older, "monitored-by").await;
+    link_as(&pool, &estate.db.id, &older, "monitored-by").await;
+    link_as(&pool, &estate.nginx.id, &newer, "monitored-by").await;
+    link_as(&pool, &estate.redis.id, &well, "monitored-by").await;
+
+    assert!(
+        assets::open_alerts(&pool).await.expect("the read").is_empty(),
+        "an estate with nothing wrong in it answers with an empty list"
+    );
+
+    opened(&pool, &older, "down").await;
+    opened(&pool, &newer, "warn").await;
+    // A closed alert is history and is not news.
+    let healed = opened(&pool, &well, "down").await;
+    sqlx::query("update knobas.monitor_alert set closed_at = now() where id = $1")
+        .bind(healed)
+        .execute(&pool)
+        .await
+        .expect("the recovery");
+
+    let open = assets::open_alerts(&pool).await.expect("the read");
+    assert_eq!(
+        open.iter()
+            .map(|alert| (
+                alert.monitor_name.as_str(),
+                alert.state,
+                alert.acked_at.is_some(),
+                alert
+                    .assets
+                    .iter()
+                    .map(|asset| (asset.name.as_str(), asset.path.as_deref()))
+                    .collect::<Vec<_>>()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "canary",
+                assets::AlertState::Warn,
+                false,
+                vec![("nginx", Some("hel1 / vm-app-02"))]
+            ),
+            (
+                "postgres (tunnel)",
+                assets::AlertState::Down,
+                false,
+                vec![
+                    ("postgres", Some("hel1 / vm-db-01")),
+                    ("vm-db-01", Some("hel1"))
+                ]
+            ),
+        ],
+        "the newest first, each with the monitor it is about and every asset it watches"
+    );
+    assert_eq!(
+        open[1].web_url.as_deref(),
+        Some("https://kuma.local/dashboard/1"),
+        "and the page in Kuma the mirror row carries"
+    );
+    assert_eq!(
+        open[0].web_url, None,
+        "a monitor with no page has none to offer"
+    );
+}
+
+/// An alert whose monitor is watching nothing is still read.
+///
+/// The direction that fails safely: a monitor somebody has not finished wiring
+/// up is exactly the one the estate would otherwise be quietest about. The
+/// list draws it with no asset on it, and the count includes it.
+#[tokio::test]
+async fn an_alert_on_a_monitor_that_watches_nothing_is_still_in_the_list() {
+    let pool = pool("assets-open-alerts-loose").await;
+    let loose = monitor_reading(&pool, "kuma", "canary", Some("down"), None).await;
+    opened(&pool, &loose, "down").await;
+
+    let open = assets::open_alerts(&pool).await.expect("the read");
+    assert_eq!(open.len(), 1, "one alert, and one for the top strip to count");
+    assert_eq!(open[0].monitor_id, loose);
+    assert!(
+        open[0].assets.is_empty(),
+        "nothing is attached, and the list says so rather than hiding it"
+    );
+}
+
+/// A paused monitor keeps its open alert, and the estate keeps showing it.
+///
+/// The counterpart of `a_paused_monitor_colours_nothing_and_is_still_listed`,
+/// and the one place this read deliberately does *not* go through
+/// `sync.live_item`: pausing a check is not the monitor recovering, so the
+/// alert stands and the reader is told. What it loses is the page in Kuma,
+/// which a monitor Kuma no longer publishes does not have.
+#[tokio::test]
+async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
+    let pool = pool("assets-open-alerts-paused").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let check = monitor_reading(
+        &pool,
+        "kuma",
+        "gitea",
+        Some("down"),
+        Some("https://kuma.local/dashboard/1"),
+    )
+    .await;
+    link_as(&pool, &vm.id, &check, "monitored-by").await;
+    opened(&pool, &check, "down").await;
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&check)
+        .execute(&pool)
+        .await
+        .expect("the tombstone");
+
+    let open = assets::open_alerts(&pool).await.expect("the read");
+    assert_eq!(open.len(), 1, "the alert nobody has seen the end of stands");
+    assert_eq!(open[0].monitor_name, "gitea", "with the name it had");
+    assert_eq!(
+        open[0].assets.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        ["vm-db-01"],
+        "and the asset it is about"
+    );
+    assert_eq!(
+        open[0].web_url, None,
+        "a monitor out of the mirror has no page left to open"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The Import (#439)
 // ---------------------------------------------------------------------------
 
@@ -3569,6 +3961,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::monitoring_settings,
             knobas_app::commands::assets::set_monitoring_settings,
             knobas_app::commands::assets::monitor_roster,
+            knobas_app::commands::assets::open_alerts,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -3730,6 +4123,9 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         // so there is nothing here for the second call an optional argument
         // would need.
         ("monitor_roster", serde_json::json!({})),
+        // #444: an argument-free read, like `monitoring_settings` -- the whole
+        // estate's open alerts, and the top strip's count is their number.
+        ("open_alerts", serde_json::json!({})),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
