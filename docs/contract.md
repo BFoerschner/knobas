@@ -7736,17 +7736,21 @@ From this commit on, each of the following requires an orchestrator decision **a
 - **A migration and four IPC commands — issue #499 (2026-09-08): the clones root, the scan
   and the per-repo checkout override.**
 
-  The first of v1.5's two migrations. Ratified in advance by spec #491 ("Knobas-owned data in one
-  migration: a settings row for the clones root, and a small table of per-repo overrides keyed by
-  repo entity id") and by #499's own fourth criterion, which asks for this entry by name. **Björn
-  keeps the gate for frozen contracts and this entry is flagged for his review.**
+  The **second** of v1.5's two migrations; #496's expression index above is the first. Ratified
+  in advance by spec #491 ("Knobas-owned data in one migration: a settings row for the clones
+  root, and a small table of per-repo overrides keyed by repo entity id") and by #499's own
+  fourth criterion, which asks for this entry by name. **Björn keeps the gate for frozen
+  contracts and this entry is flagged for his review.**
 
-  **`crates/knobas-db/migrations/**` — one migration, `0023_the_checkout_and_its_override.sql`.**
+  **`crates/knobas-db/migrations/**` — one migration, `0024_the_checkout_and_its_override.sql`.**
   `knobas.checkout_override (entity_id text primary key references knobas.entity(id) on delete
   cascade, path text not null, updated_at timestamptz not null default now())`, with a
-  `btrim(path) <> ''` CHECK. Nothing before it is edited. Two things it deliberately does **not**
-  do, both argued in its own header: it adds **no path column to `sync.item`** — every field on a
-  mirrored repo was written by a remote system, and ADR-0016 forbids a spawned program taking an
+  `btrim(path) <> ''` CHECK. Nothing before `0024` is edited. It was **written as `0023` and
+  renumbered** when #496's index landed on `main` first; nothing had applied it, which is the only
+  circumstance in which a migration may be renumbered at all and the reason the number is
+  single-writer. Two things it deliberately does **not** do, both argued in its own header: it
+  adds **no path column to `sync.item`** — every field on a mirrored repo was written by a remote
+  system, and ADR-0016 forbids a spawned program taking an
   argument from one — and it adds **no table for the clones root**, which is one
   `knobas.setting` row under `checkout.clones_root` (`0002`, comment 6, is what that store exists
   for). The migration's header names that key so a reader of spec #491's "one migration ... *and*

@@ -547,7 +547,7 @@ async fn a_repo_with_no_url_has_no_clone_command_and_is_not_scanned_for() {
     assert_eq!(view(&pool, &id).await.unwrap().found_by, FoundBy::Override);
 }
 
-/// Deleting the repo takes its override with it, which is `0023`'s cascade.
+/// Deleting the repo takes its override with it, which is `0024`'s cascade.
 ///
 /// The point is not the foreign key for its own sake: an override is an answer
 /// *about* a repository, and a row that outlived one would be handed to the

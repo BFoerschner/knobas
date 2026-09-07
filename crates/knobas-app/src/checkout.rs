@@ -5,7 +5,7 @@
 //! field of the mirrored repo. The finding is
 //! [`knobas_core::checkout`](knobas_core::checkout) -- normalising a remote
 //! URL to a key and walking the clones root -- and what is here is everything
-//! that needs a database: the setting, the override table `0023` added, and
+//! that needs a database: the setting, the override table `0024` added, and
 //! the resolution order the two of them make.
 //!
 //! # The order, and why the override is first
@@ -42,7 +42,7 @@ use crate::IpcError;
 /// One function because both writes here mean the same thing by an empty
 /// field -- *forget this* -- and neither may store a blank: an empty clones
 /// root would make the scan walk the process's working directory, and a blank
-/// override is a row `0023`'s CHECK refuses anyway.
+/// override is a row `0024`'s CHECK refuses anyway.
 fn settable(path: Option<&str>) -> Option<&str> {
     path.map(str::trim).filter(|value| !value.is_empty())
 }
@@ -51,7 +51,7 @@ fn settable(path: Option<&str>) -> Option<&str> {
 ///
 /// In `knobas.setting` rather than in a column of its own: migration `0002`,
 /// comment 6, exists for "app-level state that has no other home", and the
-/// clones root is one directory path. Migration `0023`'s header names this key
+/// clones root is one directory path. Migration `0024`'s header names this key
 /// so the two halves of spec #491's "one migration" stay findable from either
 /// side, and [`the_setting_key_is_the_one_the_migration_names`] pins the
 /// spelling.
@@ -352,10 +352,10 @@ mod tests {
     #[test]
     fn the_setting_key_is_the_one_the_migration_names() {
         let migration =
-            include_str!("../../knobas-db/migrations/0023_the_checkout_and_its_override.sql");
+            include_str!("../../knobas-db/migrations/0024_the_checkout_and_its_override.sql");
         assert!(
             migration.contains(CLONES_ROOT_KEY),
-            "migration 0023 no longer names {CLONES_ROOT_KEY}, so spec #491's \
+            "migration 0024 no longer names {CLONES_ROOT_KEY}, so spec #491's \
              \"a settings row for the clones root\" has no record in the schema"
         );
     }

@@ -1,12 +1,18 @@
--- 0023_the_checkout_and_its_override.sql -- the per-repo checkout path a
+-- 0024_the_checkout_and_its_override.sql -- the per-repo checkout path a
 -- person sets by hand, when the clones-root scan is not the answer
 -- (issue #499, v1.5).
 --
 -- Single-writer (orchestrator), like every migration: a stream that needs more
--- schema requests 0024 and never edits this file or its predecessors -- sqlx
+-- schema requests 0025 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations and an edit fails startup on every existing
--- database. `0022` is M4.1's alert table (#444); this number is v1.5's
--- checkout override and nothing else. Ratified in advance by spec #491
+-- database. `0022` is M4.1's alert table (#444) and `0023` the expression
+-- index a pasted URL is resolved through (#496, v1.5's other migration);
+-- this number is v1.5's checkout override and nothing else.
+--
+-- **It was written as `0023` and renumbered when #496 landed first.** Nothing
+-- had applied it -- the branch never ran against a database it kept -- so the
+-- rename costs nothing; a migration that had been applied anywhere could not
+-- be renumbered at all, which is the reason the number is single-writer. Ratified in advance by spec #491
 -- ("Knobas-owned data in one migration: a settings row for the clones root,
 -- and a small table of per-repo overrides keyed by repo entity id") and
 -- recorded as an exception in `docs/contract.md` §10.8.
