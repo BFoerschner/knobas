@@ -7549,9 +7549,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_create_knobas_cannot_deliver_is_refused_here`,
   `the_minted_id_is_read_out_of_kumas_own_answer`,
   `a_creates_target_is_this_sources_own_or_it_is_refused_here` and
-  `a_create_without_an_account_is_refused_by_the_same_sentence`; nine tests in
+  `a_create_without_an_account_is_refused_by_the_same_sentence`; ten tests in
   `knobas-sync`'s `tests/attach.rs`, all driven through `run_once` rather than through the
-  resolver; five in `tests/assets_ipc.rs` for the append, the duplicate, the blank and the absent
+  resolver — the last of them,
+  `a_poll_ignores_monitor_rows_its_descriptor_does_not_declare`, is why `run_locked`'s descriptor
+  gate is a **safety check** here and not `!sweep_kinds.is_empty()`'s saved round trip: the mirror
+  can hold `kind = 'monitor'` rows under an id whose current descriptor has no such kind, since
+  `sync.item.source_id` has no foreign key to `knobas.source_config`, `delete_source`'s
+  `purge_items` is the reader's choice, `0012` leaves unconfigured rows visible, and `add_source`
+  plans for an id being taken again (#127);
+  five in `tests/assets_ipc.rs` for the append, the duplicate, the blank and the absent
   target; six in `create-monitor.test.ts` and seven in `AssetsView.monitor.test.svelte.ts` for the
   prefill and the two writes' order; and — for the halves no test can reach without the real
   server — `just kuma-live`'s
