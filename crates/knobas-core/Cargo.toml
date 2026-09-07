@@ -15,4 +15,7 @@ uuid.workspace = true
 # The stores are tested against a real PostgreSQL: `test-util` exposes the
 # embedded per-binary test server.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
+# The clones-root scan walks a real directory tree; `src/checkout.rs` itself
+# touches no test-only dependency.
+tempfile = "3"
 tokio.workspace = true

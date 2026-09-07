@@ -91,6 +91,16 @@ const DETAIL: EntityDetail = {
   activity: [],
 };
 
+/** What `entity_checkout` answers for the repo the panel case opens (#499). */
+const CHECKOUT = {
+  repo_entity_id: "mock:tidewater/payout-service",
+  repo_url: "https://gitea.example.com/tidewater/payout-service",
+  path: "/Users/mara/src/payout-service",
+  found_by: "scan" as const,
+  clones_root: "/Users/mara/src",
+  clone_command: "git clone https://gitea.example.com/tidewater/payout-service",
+};
+
 const NOTE = {
   note: {
     id: "note:7f2c",
@@ -167,6 +177,13 @@ vi.mock("../ipc/entity", () => ({
   startWorkRetry: () => deferred([]),
   startWorkSkip: () => deferred([]),
   startWorkAmend: () => deferred([]),
+  // The checkout panel's read and its two writes (#499), deferred like the
+  // rest so the panel can be unmounted with the read still in flight -- which
+  // is the case that matters, because the panel's effect *is* that read.
+  entityCheckout: () => deferred(CHECKOUT),
+  setCheckoutOverride: () => deferred(CHECKOUT),
+  clonesRoot: () => deferred("/Users/mara/src"),
+  setClonesRoot: () => deferred(undefined),
 }));
 
 /**
@@ -302,6 +319,8 @@ const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
+const CheckoutPanel = (await import("../detail/CheckoutPanel.svelte")).default;
+const CheckoutsSection = (await import("../settings/CheckoutsSection.svelte")).default;
 const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
 const MonitoringSection = (await import("../settings/MonitoringSection.svelte")).default;
 const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
@@ -1000,6 +1019,40 @@ const CASES: Case[] = [
     source: "lib/sources/AddSource.svelte",
     open: (target) => ({
       app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
+    }),
+  },
+  {
+    /**
+     * The checkout panel (#499). Its effect is the `entity_checkout` read, and
+     * the case that matters is closing the detail before it answers — so the
+     * answer lands after the unmount, through the module mock's `deferred`.
+     */
+    name: "CheckoutPanel",
+    source: "lib/detail/CheckoutPanel.svelte",
+    open: (target) => ({
+      app: mount(CheckoutPanel, {
+        target,
+        props: { entityId: "mock:tidewater/payout-service" },
+      }),
+    }),
+  },
+  {
+    /**
+     * The clones-root section (#499). The same shape the toggles below have:
+     * one settings read, unmounted before it answers.
+     */
+    name: "CheckoutsSection",
+    source: "lib/settings/CheckoutsSection.svelte",
+    open: (target) => ({
+      app: mount(CheckoutsSection, {
+        target,
+        props: {
+          ports: {
+            clonesRoot: () => deferred<string | null>("/Users/mara/src"),
+            setClonesRoot: () => Promise.reject(new Error("no settings write in this test")),
+          },
+        },
+      }),
     }),
   },
   {

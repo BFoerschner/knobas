@@ -103,6 +103,15 @@ vi.mock("../ipc/entity", () => ({
   listEntities: () => Promise.resolve(PAGE),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),
+  // The clones root (#499): the settings view imports it at module level, and
+  // #/settings is one of the addresses below. Unset, which is the state a
+  // fresh install is in — this file is about which surface an address reaches.
+  clonesRoot: () => Promise.resolve(null),
+  setClonesRoot: () => Promise.reject(new Error("no clones root change in this test")),
+  // The checkout panel's read (#499). No address here opens a repo or a
+  // branch, so it refuses rather than answering a view nothing draws.
+  entityCheckout: () => Promise.reject(new Error("no checkout read in this test")),
+  setCheckoutOverride: () => Promise.reject(new Error("no override change in this test")),
 }));
 
 vi.mock("../ipc/app", () => ({

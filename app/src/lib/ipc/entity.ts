@@ -1421,3 +1421,79 @@ export interface NotificationClicked {
 export function notify(draft: NotificationDraft): Promise<void> {
   return invoke<void>("notify", { draft });
 }
+
+/**
+ * How a checkout was arrived at, or that it was not —
+ * `knobas_app::checkout::FoundBy` (#499).
+ *
+ * `"override"` is a path a person set by hand and it wins; `"scan"` is a clone
+ * matched under the clones root; `"nothing"` is *no checkout*, which is a
+ * state and not a failure.
+ */
+export type CheckoutFoundBy = "override" | "scan" | "nothing";
+
+/**
+ * What a repo or branch detail draws for its checkout —
+ * `knobas_app::checkout::CheckoutView` (#499).
+ *
+ * A **checkout** (`CONTEXT.md`) is knobas-owned data about the local disk,
+ * never a field of the mirrored repo. `clone_command` is text to copy and is
+ * never run: knobas issues no clone, no checkout and no fetch (ADR-0016).
+ */
+export interface CheckoutView {
+  /**
+   * The repo the answer belongs to — the entity itself for a repo, its
+   * repository for a branch, `null` for a branch whose repo is not mirrored.
+   * What {@link setCheckoutOverride} keys on.
+   */
+  repo_entity_id: string | null;
+  /** The repo's own stored URL, or `null` where the adapter reported no page. */
+  repo_url: string | null;
+  /** Where the clone is, if there is one. */
+  path: string | null;
+  found_by: CheckoutFoundBy;
+  /** The configured clones root, so *not set* and *not found* stay apart. */
+  clones_root: string | null;
+  /** `git clone <the repo's URL>` — `null` exactly when `repo_url` is. */
+  clone_command: string | null;
+}
+
+/** Where knobas looks for clones — `clones_root` (#499). */
+export function clonesRoot(): Promise<string | null> {
+  return invoke<string | null>("clones_root");
+}
+
+/**
+ * Set the clones root, or clear it — `set_clones_root` (#499).
+ *
+ * A blank path clears it: an empty root would make the scan walk whatever the
+ * process's working directory happens to be.
+ */
+export function setClonesRoot(path: string | null): Promise<void> {
+  return invoke<void>("set_clones_root", { path });
+}
+
+/**
+ * The checkout for a repo or a branch — `entity_checkout` (#499).
+ *
+ * Read on every open rather than stored, so a clone that moved is a *no
+ * checkout* and not a path pointing at nothing. Rejects with `invalid` for an
+ * entity that is neither a repo nor a branch.
+ */
+export function entityCheckout(entityId: string): Promise<CheckoutView> {
+  return invoke<CheckoutView>("entity_checkout", { entityId });
+}
+
+/**
+ * Set this repository's checkout path by hand, or clear it back to the scan —
+ * `set_checkout_override` (#499).
+ *
+ * Answers the fresh view, so clearing an override shows the scan taking over.
+ * Keyed on the repository even when a branch was the address.
+ */
+export function setCheckoutOverride(
+  entityId: string,
+  path: string | null,
+): Promise<CheckoutView> {
+  return invoke<CheckoutView>("set_checkout_override", { entityId, path });
+}

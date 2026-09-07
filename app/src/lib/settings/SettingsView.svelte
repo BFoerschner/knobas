@@ -22,10 +22,12 @@
   The second section arrived with #282 (passive attribution) and cost exactly
   what the ruling said it would: one component and one import. So did the third
   (#290, desktop notifications), the fourth (#289, where standup protocols
-  are published) and the fifth (#443, monitoring's retention and threshold).
+  are published), the fifth (#443, monitoring's retention and threshold) and the
+  sixth (#499, the clones root).
 -->
 <script lang="ts">
   import BackupSection from "./BackupSection.svelte";
+  import CheckoutsSection from "./CheckoutsSection.svelte";
   import MonitoringSection from "./MonitoringSection.svelte";
   import NotificationsSection from "./NotificationsSection.svelte";
   import PassiveSection from "./PassiveSection.svelte";
@@ -40,6 +42,7 @@
   <div class="view-b">
     <BackupSection />
     <MonitoringSection />
+    <CheckoutsSection />
     <PassiveSection />
     <NotificationsSection />
     <StandupSection />

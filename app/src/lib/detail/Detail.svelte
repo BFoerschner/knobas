@@ -27,6 +27,7 @@
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
+  import CheckoutPanel from "./CheckoutPanel.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
   import { linkChanges } from "./links.svelte";
@@ -343,6 +344,17 @@
    * for nothing.
    */
   const isTicket = $derived(shownKind === "ticket");
+
+  /**
+   * Whether this entity has a checkout to show (#499).
+   *
+   * A repo has one; a branch shows its repo's, because a branch is a ref inside
+   * the same working tree and spec #491 story 29 puts the same buttons on both.
+   * Nothing else does, and `entity_checkout` refuses any other kind by name --
+   * so this list and `knobas_app::checkout::CHECKOUT_KINDS` are one rule, and
+   * asking on a ticket would be the panel drawing a refusal.
+   */
+  const hasCheckout = $derived(shownKind === "repo" || shownKind === "branch");
 
   /**
    * The granted read (#177), for this ticket's source.
@@ -966,6 +978,16 @@
         </div>
         <PayloadView {fields} />
       </div>
+
+      <!--
+        Where this repo's clone is on this disk (#499). Above the links because
+        it is a fact about the item itself, and mounted only for the two kinds
+        that have one -- an absent panel is the same honest rule *Start work*
+        and *Open in browser* follow.
+      -->
+      {#if hasCheckout}
+        <CheckoutPanel entityId={detail.row.entity_id} />
+      {/if}
 
       <LinksPanel
         entityId={detail.row.entity_id}
