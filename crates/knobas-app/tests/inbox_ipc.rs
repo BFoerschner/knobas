@@ -1069,6 +1069,23 @@ async fn an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves
         harness.history(&estate.asset).await,
         vec![("user".to_owned(), "acked".to_owned())]
     );
+    // The inbox item is *completed*, which spec #427 names as one of the ack's
+    // three writes. Asserted directly because nothing else can see it: the
+    // rule already excludes acked alerts, so the row is belt and braces and
+    // the stream reads the same with or without it. What it is for is that
+    // *done* means one thing across all six categories.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from knobas.inbox_state
+              where item_key = $1 and done_at is not null",
+        )
+        .bind(&key)
+        .fetch_one(harness.pool())
+        .await
+        .unwrap(),
+        1,
+        "the ack did not complete the inbox item"
+    );
 
     // Recovery, through the engine's own reconciler.
     harness
