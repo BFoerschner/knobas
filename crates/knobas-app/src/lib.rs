@@ -317,6 +317,9 @@ pub fn run() {
             commands::assets::set_monitoring_settings,
             // #448's Monitors tab, appended after those for the same reason.
             commands::assets::monitor_roster,
+            // #444's open-alert read, appended after those: one read, and the
+            // top strip's count is its length.
+            commands::assets::open_alerts,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

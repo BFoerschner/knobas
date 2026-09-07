@@ -67,8 +67,9 @@
 //!   `problems_inside` counts the descendants carrying `warn` or `down` --
 //!   what story 32's amber-or-red badge draws. [`ROLLUP`] is the one statement
 //!   that answers both, plus the worst status *strictly underneath*, which is
-//!   what colours the badge. Monitors join the "own health" half in M4.1; that
-//!   is the only part of story 37 not here.
+//!   what colours the badge. Monitors joined the "own health" half in #444,
+//!   and `problems_inside` counts over the combined severity, so a container
+//!   nobody has rated with a `down` monitor on it is a problem inside its VM.
 //!
 //! # Assets in contexts (#434)
 //!
@@ -168,9 +169,13 @@
 //!
 //! Monitors arrived with #442's Kuma adapter, so [`monitored_by`] fills a
 //! source room and [`AssetDetail::monitoring`] fills the pane's *monitoring*
-//! section (#445). What is **not** here is health taking a monitor's state --
-//! story 37's other half, and #444's, along with the alert an asset's monitor
-//! opens.
+//! section (#445). Story 37's other half landed with #444: [`ROLLUP`] takes
+//! the newest sample of every monitor attached to an asset, so a container is
+//! red because a monitor on it is red and not only because somebody rated it --
+//! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
+//! the estate's own list of what is wrong, one read that the top strip counts
+//! and the Assets view draws. The **ack** on an alert is #446's, with the
+//! inbox category it clears; the Monitors tab's cards are #449's.
 
 use std::collections::{HashMap, HashSet};
 
@@ -245,9 +250,9 @@ const MONITOR_KIND: &str = "monitor";
 ///
 /// Not its health: story 37's health is the worst of this and its monitors'
 /// states, and its *effective* health also takes the worst descendant. Both
-/// are computed at read time, by [`ROLLUP`] over this column -- the monitors'
-/// half is M4.1's and the only part of story 37 not here. This is the stored
-/// fact those reads are built on, and [`AssetRow`] carries all three.
+/// are computed at read time, by [`ROLLUP`] over this column and over the
+/// newest sample of every attached monitor (#444). This is the stored fact
+/// those reads are built on, and [`AssetRow`] carries all three.
 ///
 /// `none` is the default and means *nobody has said*, which is a different
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
@@ -524,9 +529,10 @@ pub struct AssetRow {
     pub owner: Option<String>,
     /// Whether anything sits under it.
     pub has_children: bool,
-    /// The asset's **effective health**: the worst of [`status`](Self::status)
-    /// and every descendant's own status, down over warn over up over none
-    /// (story 37). Monitors join the "own" half in M4.1.
+    /// The asset's **effective health**: the worst of [`status`](Self::status),
+    /// the monitors attached to it, and every descendant's own two, down over
+    /// warn over up over none (stories 37 and 38, #444). A monitor Kuma paused
+    /// contributes nothing.
     pub health: AssetStatus,
     /// The worst status **strictly underneath** this asset; `none` when it
     /// holds nothing, or nothing under it has been rated.
@@ -855,6 +861,103 @@ pub struct MonitorSample {
     pub state: Option<String>,
 }
 
+knobas_core::closed_vocabulary! {
+    /// What state an open [`OpenAlert`] was opened in: the trouble a monitor
+    /// is in.
+    ///
+    /// Two words, not four: an alert exists only for `down` and `warn`, which
+    /// is migration `0022`'s `monitor_alert_state_chk` and
+    /// [`knobas_sync::alerts::OPENS`]. Deliberately **not** [`AssetStatus`],
+    /// although the two words are spelled the same there: an asset's status
+    /// has `up` and `none` in it because "nobody has said" is a thing an asset
+    /// can be, and an alert that could be `none` would be a row saying nothing
+    /// is wrong. [`tests::the_alert_states_are_the_ones_the_engine_opens`]
+    /// holds the two lists together.
+    pub enum AlertState {
+        /// The monitor did not answer.
+        Down => "down",
+        /// The monitor answered slower than the response-time threshold --
+        /// knobas' own state, derived at sample time (#443).
+        Warn => "warn",
+    }
+}
+
+impl AlertState {
+    /// The state a stored spelling belongs to.
+    ///
+    /// [`AssetStatus::parse`]'s shape, and its neighbours' -- one rule per
+    /// vocabulary in this file rather than a fourth copy of it inlined at a
+    /// call site. Unreachable from `monitor_alert_state_chk`, and an error
+    /// rather than a default all the same: a row carrying a word this build
+    /// has no meaning for is a database this build should not be drawing, not
+    /// one to guess about.
+    fn parse(value: &str) -> Result<Self, IpcError> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|state| state.as_str() == value)
+            .ok_or_else(|| IpcError::internal(format!("unknown alert state {value:?}")))
+    }
+}
+
+/// One asset an alert's monitor watches, as the estate's list of open alerts
+/// names it.
+///
+/// A list and not a field, because `monitored-by` is an ordinary link and
+/// nothing stops two assets naming one Uptime Kuma monitor -- a VM and the
+/// container on it can honestly both be watched by one HTTP monitor on the
+/// product. **Empty is a real answer**: a monitor attached to nothing still
+/// opens an alert, and hiding it would make the estate quietest about exactly
+/// the monitors nobody has finished wiring up.
+///
+/// Three fields and not an [`AssetRow`]: this is a line in a list, and an
+/// `AssetRow` would drag the rollup and the linked-work count through a read
+/// whose whole answer is *which machine, and where it lives*.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct AlertAsset {
+    /// `asset:<uuid>` -- the address the list opens.
+    pub id: String,
+    pub name: String,
+    /// Its ancestors, outermost first, or `null` at the top of the estate --
+    /// [`MemberAsset::path`]'s field and its spelling.
+    pub path: Option<String>,
+}
+
+/// One open alert, as the top strip counts it and the Assets view lists it
+/// (spec #427 stories 57 and 58, issue #444).
+///
+/// **No entity and no address of its own**, which spec #427 says in as many
+/// words: the id here is the row's `bigint`, what [`state`](Self::state) is
+/// about is the monitor, and what a reader opens is the asset. #446's ack and
+/// #449's cards address the row by this id.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct OpenAlert {
+    /// The alert row's id. A number and not a string, because it is not an
+    /// address -- see the type's own note.
+    pub id: i64,
+    /// The monitor this alert is about: its entity id, and the *Linked*
+    /// panel's address for it.
+    pub monitor_id: String,
+    /// The monitor's name, which is the name an estate file uses to ask for
+    /// it.
+    ///
+    /// The name and **not** its page in Uptime Kuma: nothing this ticket draws
+    /// opens one, and a field on the wire that no surface reads is a field
+    /// whose shape nothing can be wrong about. #449's cards are where a link
+    /// into Kuma belongs, and [`AttachedMonitor::web_url`] is where one
+    /// already is.
+    pub monitor_name: String,
+    pub state: AlertState,
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    /// When somebody said they had seen it, or `null`. Written by #446's ack;
+    /// on the wire from this ticket because *acked* is part of what an open
+    /// alert is, and a list that could not say so would draw every alert as
+    /// unseen.
+    pub acked_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The assets this alert's monitor watches -- see [`AlertAsset`].
+    pub assets: Vec<AlertAsset>,
+}
+
 /// One route, as both ends read it.
 ///
 /// The same shape in `exposes` and in `reachable_via`, deliberately: it is one
@@ -1125,7 +1228,7 @@ const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 
 /// The health rollup for a set of assets: the worst status at or under each
 /// one, the worst status strictly under it, and how many descendants carry a
-/// problem (stories 32 and 37).
+/// problem (stories 32, 37 and 38).
 ///
 /// **One statement, run once per read**, rather than the same recursive block
 /// spliced into all three of the statements above. It is still a whole
@@ -1134,8 +1237,44 @@ const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 /// place instead of three; the price is one round trip per column, against
 /// three copies of a rule that would drift.
 ///
+/// # An asset's own health is its status **and its monitors** (#444)
+///
+/// Story 37: *"an asset's health is the worst of its own status and its
+/// monitors' states"*. `watched` is the monitors' half: for every asset in
+/// the walk, the newest sample of every monitor attached to it by a
+/// `monitored-by` link, ranked by the same order. `own` is `least` of the two,
+/// and everything below it -- `health`, `inside` and `problems_inside` -- is
+/// computed over that one number, so the monitor reaches all three answers
+/// without any of them being written twice.
+///
+/// Three decisions inside that half:
+///
+/// * **The sample, not the mirror row.** *Warn* is knobas' own state and
+///   exists only in the timeseries (#443): Uptime Kuma publishes `up` for a
+///   monitor answering slowly, and it is `samples::sample_of` that turns the
+///   response-time threshold into a word. A rollup reading `payload->>'state'`
+///   could therefore never produce the `warn` spec #427 puts in the middle of
+///   its own ordering. The pane's [`AttachedMonitor::state`] still reads the
+///   mirror, and deliberately: that section says what *Kuma* last published,
+///   including the two words the rollup has no meaning for.
+/// * **Through `sync.live_item`, which is the whole of "a paused monitor reads
+///   as none"** (story 38). A monitor paused in Kuma is a tombstone and a
+///   monitor of a disabled source is filtered by `0012`; neither is in the
+///   view, so neither is in `watched`, so neither contributes -- and the
+///   `coalesce` below reads the absence as `none`. It is a property of the
+///   view rather than a rule anyone maintains, which is the arrangement
+///   `samples::append` already has for the same fact.
+/// * **`pending` and `maintenance` fall to the `else` arm**, which is `none`.
+///   They are states the sample records and the rollup has no word for, so
+///   they colour nothing -- the same conservative reading
+///   `knobas_sync::alerts` takes of them.
+///
+/// The relation and the kind are **bound** (`$2`, `$3`) rather than written
+/// into the text, so [`MONITORED_BY`] and [`MONITOR_KIND`] have one spelling
+/// in this crate -- [`MONITORED_ASSETS`]' arrangement.
+///
 /// `depth` is what separates the two answers. The anchor row is the asset
-/// itself at depth 0, so `health`'s `min` sees the asset's own status and
+/// itself at depth 0, so `health`'s `min` sees the asset's own severity and
 /// `inside`'s does not -- and `problems_inside` counts only what is
 /// underneath, which is the whole meaning of the badge. The `case` arms are
 /// [`AssetStatus::severity`] in SQL, and a test reads them back out of this
@@ -1148,17 +1287,41 @@ const ROLLUP: &str = "with recursive under (root, id, depth) as (
          union all
          select u.root, c.id, u.depth + 1
            from under u join knobas.asset c on c.parent_id = u.id
+     ),
+     seen as (select distinct id from under),
+     watched as (
+         select v.id as asset_id,
+                min(case s.state when 'down' then 0 when 'warn' then 1
+                                 when 'up' then 2 else 3 end) as severity
+           from seen v
+           join knobas.confirmed_link l
+             on (l.from_id = v.id or l.to_id = v.id) and l.relation = $2
+           join sync.live_item i
+             on i.entity_id = case when l.from_id = v.id then l.to_id else l.from_id end
+            and i.kind = $3
+           join lateral (
+                select ms.state from knobas.monitor_sample ms
+                 where ms.entity_id = i.entity_id
+                 order by ms.taken_at desc, ms.id desc limit 1
+           ) s on true
+          group by v.id
+     ),
+     own as (
+         select u.root, u.depth,
+                least(case d.status when 'down' then 0 when 'warn' then 1
+                                    when 'up' then 2 else 3 end,
+                      coalesce(w.severity, 3)) as severity
+           from under u
+           join knobas.asset d on d.id = u.id
+           left join watched w on w.asset_id = u.id
      )
-     select u.root,
-            min(case d.status when 'down' then 0 when 'warn' then 1
-                              when 'up' then 2 else 3 end) as health,
-            min(case when u.depth = 0 then 3
-                     else case d.status when 'down' then 0 when 'warn' then 1
-                                        when 'up' then 2 else 3 end end) as inside,
-            count(*) filter (where u.depth > 0 and d.status in ('warn','down'))
+     select o.root,
+            min(o.severity) as health,
+            min(case when o.depth = 0 then 3 else o.severity end) as inside,
+            count(*) filter (where o.depth > 0 and o.severity <= 1)
               as problems_inside
-       from under u join knobas.asset d on d.id = u.id
-      group by u.root";
+       from own o
+      group by o.root";
 
 /// How many work items each of a set of assets is linked to -- the *linked
 /// work* badge (story 32, issue #435).
@@ -1230,7 +1393,12 @@ async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows = sqlx::query(ROLLUP).bind(ids).fetch_all(pool).await?;
+    let rows = sqlx::query(ROLLUP)
+        .bind(ids)
+        .bind(MONITORED_BY)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?;
     let mut out = HashMap::with_capacity(rows.len());
     for row in &rows {
         out.insert(
@@ -2020,6 +2188,114 @@ async fn tile_rows(
             .then_with(|| left.asset.id.cmp(&right.asset.id))
     });
     Ok(out)
+}
+
+/// Every open alert, newest first, with the monitor each is about.
+///
+/// One row per alert; the assets are joined on by [`ALERT_ASSETS`] below,
+/// because a monitor may watch none, one or several and a join here would draw
+/// the alert once per asset.
+///
+/// **Not filtered by `sync.live_item`.** Every other read in this module goes
+/// through the view, and this one deliberately does not: an alert is knobas'
+/// own row and stays open until the monitor recovers, so a monitor paused in
+/// Kuma or belonging to a source the reader disabled keeps its open alert and
+/// keeps showing it. Hiding it would be knobas quietly dropping the trouble it
+/// is least able to see the end of.
+///
+/// **The consequence, said out loud: a monitor *deleted* in Kuma can never
+/// recover, so its alert never closes.** `CONTEXT.md` and spec #427 both say
+/// "open until the monitor recovers", and nothing in this ticket, in #446's
+/// ack (which leaves the alert open by design) or in #449's cards closes one
+/// by hand. A paused monitor resumed is sampled again and closes normally; a
+/// deleted one leaves when its source is deleted, because `0022` cascades. A
+/// close-by-hand is a rule neither the ticket nor the spec states, and it is
+/// flagged in `docs/contract.md` §10.8 rather than invented here.
+///
+/// The join to `knobas.entity` is for the monitor's *name*, which a
+/// tombstoned entity still carries.
+const OPEN_ALERTS: &str = "select a.id, a.entity_id, e.title as monitor_name,
+            a.state, a.opened_at, a.acked_at
+       from knobas.monitor_alert a
+       join knobas.entity e on e.id = a.entity_id
+      where a.closed_at is null
+      order by a.opened_at desc, a.id desc";
+
+/// The assets each of a set of monitors is attached to, by name.
+///
+/// [`MONITORED_ASSETS`]' rule read from the other end -- the same relation and
+/// the same either-direction link -- and over the *link* alone, without
+/// `sync.live_item`: [`OPEN_ALERTS`]' note says why an alert outlives the
+/// mirror row, and an alert whose asset went missing from the list would be
+/// worse than one drawn with no asset on it.
+const ALERT_ASSETS: &str = "select m.id as monitor_id, ast.id, ast.name,
+            nullif(ast.path_text, '') as path
+       from unnest($1::text[]) as m(id)
+       join knobas.confirmed_link l
+         on (l.from_id = m.id or l.to_id = m.id) and l.relation = $2
+       join knobas.asset ast
+         on ast.id = case when l.from_id = m.id then l.to_id else l.from_id end
+      order by ast.name asc, ast.id asc";
+
+/// Every open alert in the estate, newest first (issue #444).
+///
+/// **One read, and the count is its length.** Spec #427 story 58 wants every
+/// open alert in the Assets view and the number in the top strip, and those
+/// are one fact: a badge counted by a statement of its own is a badge that can
+/// disagree with the list under it, which is the trap
+/// `inbox.svelte.ts` records for the inbox -- where the two *are* different
+/// statements, because the count excludes what is snoozed and this one
+/// excludes nothing.
+///
+/// Ordered **newest first**: an alert is news, and the list is short by
+/// construction (one per monitor in trouble). #449's cards read the same
+/// answer.
+///
+/// # Errors
+///
+/// [`IpcError`] if either read fails.
+pub async fn open_alerts(pool: &PgPool) -> Result<Vec<OpenAlert>, IpcError> {
+    let rows = sqlx::query(OPEN_ALERTS).fetch_all(pool).await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let monitors: Vec<String> = rows
+        .iter()
+        .map(|row| row.try_get::<String, _>("entity_id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut watching: HashMap<String, Vec<AlertAsset>> = HashMap::new();
+    for row in sqlx::query(ALERT_ASSETS)
+        .bind(&monitors)
+        .bind(MONITORED_BY)
+        .fetch_all(pool)
+        .await?
+    {
+        watching
+            .entry(row.try_get("monitor_id")?)
+            .or_default()
+            .push(AlertAsset {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                path: row.try_get("path")?,
+            });
+    }
+
+    rows.iter()
+        .map(|row| {
+            let monitor_id: String = row.try_get("entity_id")?;
+            let state: String = row.try_get("state")?;
+            Ok(OpenAlert {
+                id: row.try_get("id")?,
+                monitor_name: row.try_get("monitor_name")?,
+                state: AlertState::parse(&state)?,
+                opened_at: row.try_get("opened_at")?,
+                acked_at: row.try_get("acked_at")?,
+                assets: watching.remove(&monitor_id).unwrap_or_default(),
+                monitor_id,
+            })
+        })
+        .collect()
 }
 
 /// The properties of a thing that declares none: every key in the bag, by key.
@@ -4641,6 +4917,9 @@ mod tests {
     const ROUTE_MIGRATION: &str =
         include_str!("../../../knobas-db/migrations/0018_the_route_an_asset_exposes.sql");
 
+    const ALERT_MIGRATION: &str =
+        include_str!("../../../knobas-db/migrations/0022_the_alert_a_monitor_opens.sql");
+
     /// The spellings the wire uses and the ones the schema accepts are one
     /// list in two languages, and neither may grow without the other.
     ///
@@ -4671,6 +4950,49 @@ mod tests {
             );
         }
         assert_eq!(listed.len(), Environment::ALL.len(), "{listed:?}");
+    }
+
+    /// `0022`'s vocabulary, the wire's, and **the engine's** -- three lists
+    /// that have to be one (#444).
+    ///
+    /// The third is what makes this test different from its three neighbours:
+    /// nothing on this side of the bridge ever writes a `monitor_alert` row.
+    /// `knobas_sync::alerts` opens them, this module reads them, and the
+    /// column is between the two. A word the engine can open and this enum has
+    /// no variant for is an alert `open_alerts` refuses to draw, on a database
+    /// the constraint was happy with -- which is exactly the failure this
+    /// three-way pin exists to make loud and early.
+    #[test]
+    fn the_alert_states_are_the_ones_the_engine_opens() {
+        let listed = vocabulary(ALERT_MIGRATION, "monitor_alert_state_chk");
+        for state in AlertState::ALL {
+            assert!(
+                listed.contains(&state.as_str()),
+                "{:?} is on the wire and not in the constraint: {listed:?}",
+                state.as_str()
+            );
+            assert!(
+                knobas_sync::alerts::OPENS.contains(&state.as_str()),
+                "{:?} is on the wire and nothing in the engine opens one",
+                state.as_str()
+            );
+        }
+        assert_eq!(listed.len(), AlertState::ALL.len(), "{listed:?}");
+        assert_eq!(
+            knobas_sync::alerts::OPENS.len(),
+            AlertState::ALL.len(),
+            "the engine opens an alert this wire cannot carry"
+        );
+        // And the two words are `AssetStatus`' spellings, which is what lets a
+        // reader compare an alert with the health it caused without a table
+        // between them -- while the two vocabularies stay separate types (see
+        // `AlertState`).
+        assert_eq!(
+            AlertState::Down.as_str(),
+            AssetStatus::Down.as_str(),
+            "an alert and a status spell the same trouble differently"
+        );
+        assert_eq!(AlertState::Warn.as_str(), AssetStatus::Warn.as_str());
     }
 
     /// `0018`'s vocabulary, held to the wire's the way the two above are.
@@ -5125,41 +5447,48 @@ mod tests {
     /// The statement is read out of this file rather than the numbers being
     /// listed here: a hand-written copy is the remembered-list trap, and the
     /// thing that can silently go wrong is exactly that somebody edits the SQL
-    /// and not the enum. Both `case` expressions are checked, because the
-    /// second one -- the `inside` half -- carries the same four arms and could
-    /// be edited on its own.
+    /// and not the enum. **Both** `case` expressions are checked: the asset's
+    /// own status and a monitor's newest sample are ranked separately in the
+    /// statement (#444) and either could be edited on its own -- and a monitor
+    /// ranked differently from an asset would make a `down` container read as
+    /// worse or milder than a `down` monitor on it.
     #[test]
     fn the_rollup_ranks_the_statuses_the_way_rust_does() {
         let mut seen = 0;
-        let mut rest = ROLLUP;
-        while let Some(at) = rest.find("case d.status") {
-            rest = &rest[at + "case d.status".len()..];
-            let arms = rest
-                .split_once(" end")
-                .unwrap_or_else(|| panic!("a `case d.status` in ROLLUP never ends"))
-                .0;
-            for status in AssetStatus::ALL {
-                if status == AssetStatus::None {
-                    // `none` is the `else` arm; there is no `when` for it.
-                    continue;
+        for needle in ["case d.status", "case s.state"] {
+            let mut rest = ROLLUP;
+            while let Some(at) = rest.find(needle) {
+                rest = &rest[at + needle.len()..];
+                let arms = rest
+                    .split_once(" end")
+                    .unwrap_or_else(|| panic!("a `{needle}` in ROLLUP never ends"))
+                    .0;
+                for status in AssetStatus::ALL {
+                    if status == AssetStatus::None {
+                        // `none` is the `else` arm; there is no `when` for it.
+                        continue;
+                    }
+                    assert!(
+                        arms.contains(&format!(
+                            "when '{}' then {}",
+                            status.as_str(),
+                            status.severity()
+                        )),
+                        "ROLLUP ranks {:?} differently from AssetStatus::severity: {arms}",
+                        status.as_str()
+                    );
                 }
                 assert!(
-                    arms.contains(&format!(
-                        "when '{}' then {}",
-                        status.as_str(),
-                        status.severity()
-                    )),
-                    "ROLLUP ranks {:?} differently from AssetStatus::severity: {arms}",
-                    status.as_str()
+                    arms.contains(&format!("else {}", AssetStatus::None.severity())),
+                    "ROLLUP's else arm is not `none`'s severity: {arms}"
                 );
+                seen += 1;
             }
-            assert!(
-                arms.contains(&format!("else {}", AssetStatus::None.severity())),
-                "ROLLUP's else arm is not `none`'s severity: {arms}"
-            );
-            seen += 1;
         }
-        assert_eq!(seen, 2, "ROLLUP has a `health` case and an `inside` case");
+        assert_eq!(
+            seen, 2,
+            "ROLLUP ranks an asset's own status and its monitors' newest samples"
+        );
         // And the trip back, which is what turns the statement's answer into a
         // status again.
         for status in AssetStatus::ALL {
@@ -5176,15 +5505,41 @@ mod tests {
     /// Pinned as prose because the count lives in SQL: `problems_inside` is
     /// `warn` and `down` and neither of the other two, and it is over `depth >
     /// 0` so an asset is never a problem inside itself.
+    ///
+    /// Since #444 the filter is over the *combined* severity -- an asset's own
+    /// status and its monitors' -- so the threshold is written as a number and
+    /// tied to the enum here rather than as a list of two words: `<= warn` is
+    /// `down` and `warn` exactly because `up` and `none` rank above it, which
+    /// the two assertions below state. A container nobody has rated with a
+    /// `down` monitor on it is a problem inside its VM, and that is the whole
+    /// reason the count moved off `d.status`.
     #[test]
     fn the_rollup_counts_only_what_is_underneath_and_only_the_two_bad_statuses() {
         assert!(
-            ROLLUP.contains("count(*) filter (where u.depth > 0 and d.status in ('warn','down'))"),
+            ROLLUP.contains(&format!(
+                "count(*) filter (where o.depth > 0 and o.severity <= {})",
+                AssetStatus::Warn.severity()
+            )),
             "ROLLUP no longer counts warn and down strictly underneath: {ROLLUP}"
         );
         assert!(
-            ROLLUP.contains("min(case when u.depth = 0 then 3"),
+            AssetStatus::Up.severity() > AssetStatus::Warn.severity()
+                && AssetStatus::None.severity() > AssetStatus::Warn.severity(),
+            "`<= warn` would count a status that is not a problem"
+        );
+        assert!(
+            ROLLUP.contains("min(case when o.depth = 0 then 3"),
             "ROLLUP's `inside` no longer excludes the asset itself: {ROLLUP}"
+        );
+        // The monitors' half reaches all three answers because it is folded
+        // into one severity before any of them is taken -- the claim the
+        // `least` makes, and the reason there is no second `min` per answer.
+        assert!(
+            ROLLUP.contains(&format!(
+                "coalesce(w.severity, {})) as severity",
+                AssetStatus::None.severity()
+            )),
+            "ROLLUP no longer reads a monitor's state as `none` when there is none: {ROLLUP}"
         );
     }
 

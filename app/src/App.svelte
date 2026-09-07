@@ -4,6 +4,7 @@
   import AssetsView from "./lib/assets/AssetsView.svelte";
   import MonitorsView from "./lib/assets/MonitorsView.svelte";
   import InboxView from "./lib/inbox/InboxView.svelte";
+  import { alerts } from "./lib/assets/alerts.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
   import { notifications } from "./lib/inbox/notify.svelte";
   import { Launcher } from "./lib/launcher";
@@ -467,6 +468,7 @@
     let stopHealth: (() => void) | undefined;
     let stopMerges: (() => void) | undefined;
     let stopInbox: (() => void) | undefined;
+    let stopAlerts: (() => void) | undefined;
     let stopContexts: (() => void) | undefined;
     let stopProjects: (() => void) | undefined;
     let stopSourceKinds: (() => void) | undefined;
@@ -509,6 +511,11 @@
       // below: `inbox_items` goes through the sync engine's state and answers
       // `not_ready` for the whole of bring-up.
       stopInbox = inbox.start();
+      // The estate's open alerts (#444): the same split again. They move when
+      // a sync run reconciles them and when the reader acks one, which are the
+      // two events the inbox already subscribes to -- so there is no
+      // `alert:*` channel, for the reason `alerts.svelte.ts` records.
+      stopAlerts = alerts.start();
       // The stored contexts (#47): same split as health — subscribe now,
       // seed once the database can answer.
       stopContexts = storedContexts.start();
@@ -561,6 +568,7 @@
       stopHealth?.();
       stopMerges?.();
       stopInbox?.();
+      stopAlerts?.();
       stopContexts?.();
       stopProjects?.();
       stopSourceKinds?.();
@@ -602,6 +610,18 @@
    */
   $effect(() => {
     if (lifecycle.ready) void inbox.refresh();
+  });
+
+  /**
+   * Seed the open alerts the moment the database can answer — the same rule
+   * and the same shape as the seeds above. `open_alerts` rejects with
+   * `not_ready` for the whole of bring-up, and alerts only move when a sync
+   * run finishes, so a strip seeded at mount would draw no badge until the
+   * next run — which on a one-minute interval is a minute of an estate that is
+   * already down looking well.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void alerts.refresh();
   });
 
   /**

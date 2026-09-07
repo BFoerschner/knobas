@@ -321,6 +321,12 @@ mod tests {
             // somebody's infrastructure, one row per monitor per poll, and it
             // is in the backup because the backup is the whole schema (#443).
             "monitor_sample",
+            // And the alert reconciled from them (#444), for the same reason
+            // and one more: an alert is a statement about somebody's own
+            // infrastructure at a moment, and a share export is what a person
+            // hands to somebody else. It is in the backup because the backup
+            // is the whole schema.
+            "monitor_alert",
         ] {
             assert!(
                 !everything.tables().contains(&forbidden),

@@ -34,7 +34,7 @@ use tauri::{Emitter, State};
 use knobas_core::asset::AssetType;
 
 use crate::assets::{
-    self, AssetDetail, AssetEdit, AssetRow, ImportOutcome, ImportPreview, MemberAsset,
+    self, AssetDetail, AssetEdit, AssetRow, ImportOutcome, ImportPreview, MemberAsset, OpenAlert,
     PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
 };
 use crate::{IpcError, Lifecycle};
@@ -534,6 +534,37 @@ pub async fn monitor_roster(
     assets::monitor_roster(&pool).await
 }
 
+/// Every open alert in the estate, newest first (spec #427 stories 57 and 58,
+/// issue #444).
+///
+/// **One read, and every surface counts it rather than asking for a count.**
+/// The top strip's number is this list's length and the Assets view's list is
+/// this list, which is what makes them one answer: a badge counted by a
+/// statement of its own is a badge that can disagree with the list under it.
+/// The inbox is the deliberate counterexample and its store says why -- there
+/// the count and the stream really are different statements, because the count
+/// excludes what is snoozed.
+///
+/// **A read, so no `AppHandle`**: nothing here announces. An alert opens and
+/// closes inside a sync run, and the signal every surface already listens to
+/// for that is `sync:state` -- a channel of its own would be a second thing to
+/// keep in step, which is the argument `commands::sources::pending_writes`
+/// records for the write queue and `inbox.svelte.ts` for the inbox.
+///
+/// An estate with nothing wrong in it answers with an empty list, which is the
+/// read working: the top strip draws no badge at zero, the rule the inbox
+/// count follows.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
+/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn open_alerts(lifecycle: State<'_, Lifecycle>) -> Result<Vec<OpenAlert>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::open_alerts(&pool).await
+}
+
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
@@ -1017,7 +1048,64 @@ mod tests {
         );
     }
 
-    /// The eighteen commands are invoked from the mirror by the names they are
+    /// The open alert, its two-word state and the asset it names, in the shape
+    /// the top strip counts and the Assets view lists (#444).
+    ///
+    /// Exercised with `acked_at` populated and one asset in the list: `None`
+    /// and `[]` serialize to shapes any declared type accepts, so the
+    /// populated one is the one that tells the two languages apart -- the
+    /// discipline `the_asset_property_matches_its_typescript_mirror` states
+    /// above.
+    #[test]
+    fn the_open_alert_matches_its_typescript_mirror() {
+        let asset = crate::assets::AlertAsset {
+            id: "asset:knobas-jira".to_owned(),
+            name: "knobas-jira".to_owned(),
+            path: Some("hel / hel1".to_owned()),
+        };
+        assert_shape(
+            MIRROR,
+            "AlertAsset",
+            &serde_json::to_value(&asset).unwrap(),
+            &["id", "name", "path"],
+        );
+        assert_shape(
+            MIRROR,
+            "OpenAlert",
+            &serde_json::to_value(OpenAlert {
+                id: 12,
+                monitor_id: "kuma:7".to_owned(),
+                monitor_name: "jira (tunnel)".to_owned(),
+                state: crate::assets::AlertState::Down,
+                opened_at: chrono::Utc::now(),
+                acked_at: Some(chrono::Utc::now()),
+                assets: vec![asset],
+            })
+            .unwrap(),
+            &[
+                "id",
+                "monitor_id",
+                "monitor_name",
+                "state",
+                "opened_at",
+                "acked_at",
+                "assets",
+            ],
+        );
+        // And the union, read out of the mirror rather than listed here: a
+        // third state added on the Rust side has to fail here rather than
+        // fall through as a value the list draws nothing for.
+        assert_eq!(
+            declared_union(MIRROR, "AlertState"),
+            crate::assets::AlertState::ALL
+                .iter()
+                .map(|state| state.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            "AlertState and its mirror disagree"
+        );
+    }
+
+    /// The nineteen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -1045,6 +1133,7 @@ mod tests {
             "monitoring_settings",
             "set_monitoring_settings",
             "monitor_roster",
+            "open_alerts",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),

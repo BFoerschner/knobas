@@ -35,6 +35,7 @@
 //! id does not round-trip, is outside the source's namespace, or carries a kind
 //! the descriptor never declared.
 
+pub mod alerts;
 pub mod config;
 pub mod health;
 #[cfg(any(test, feature = "test-util"))]
@@ -692,6 +693,14 @@ async fn run_locked(
     //    `samples` records the argument in full.
     if let Some(declared) = monitor_paths {
         samples::append(tx, source_id, declared).await?;
+        // And the alerts, immediately after and in the same transaction
+        // (spec #427, issue #444): the reconcile reads the newest sample of
+        // every live monitor, which is the row the line above just wrote. One
+        // statement apart from the other so that each is a rule a reader can
+        // check by reading -- `samples` owns what a reading is, `alerts` owns
+        // what trouble is -- and adjacent so that no run can ever leave a
+        // sample behind without having decided about it.
+        alerts::reconcile(tx, source_id).await?;
     }
 
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
