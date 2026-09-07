@@ -380,9 +380,15 @@ async fn an_unresolved_ref_creates_no_link_and_says_it_is_unresolved() {
 async fn a_ref_to_a_withdrawn_entity_still_resolves_and_is_marked() {
     let pool = pool().await;
     let withdrawn = seed_entity(&pool, "ticket", "Legacy payout (withdrawn)", true).await;
-    let written = note::create(&pool, "Runbook", &format!("was [[{withdrawn}]]"), &[], ACTOR)
-        .await
-        .unwrap();
+    let written = note::create(
+        &pool,
+        "Runbook",
+        &format!("was [[{withdrawn}]]"),
+        &[],
+        ACTOR,
+    )
+    .await
+    .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
 
     let refs = note::refs_of(&pool, &id).await.unwrap();

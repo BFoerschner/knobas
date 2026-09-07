@@ -7974,10 +7974,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   ```
 
   mirrored in `app/src/lib/ipc/entity.ts` as `createNote(title?, bodyMd?, links?)` and
-  `interface NoteLinkInput { target_id: string; relation: string }`. Absent `links` reads exactly
-  as an empty list, so *New note* in a derived room sends nothing rather than sending emptiness,
-  and every existing caller decodes unchanged --- `serde` reads a missing `Option` as `None`, which
-  is what makes this additive rather than a version of the command.
+  `interface NoteLinkInput { target_id: string; relation: string }`. Absent `links` and an empty
+  list are the same answer, which is what lets a caller with nothing to attach say so either way
+  and what makes this additive rather than a version of the command: `serde` reads a missing
+  `Option` as `None`, so every existing caller decodes unchanged. (*New note* sends `[]` from a
+  derived room; #503's capture window may send neither.)
 
   **A list of pairs, not two named fields.** `capturedIn` and `capturedFrom` would put the
   *capture's* vocabulary into the command, and the command's job is *draw these links with the
@@ -8008,9 +8009,21 @@ From this commit on, each of the following requires an orchestrator decision **a
      refusing there would make *New note* a button that stays broken while the reader can do
      nothing about it. It is the same rule, written as the same `select ... from knobas.entity`,
      that `reconcile_refs` applies to a `[[ref]]` naming nothing.
-  4. **The relation is folded by `relation_of`**, like every other relation this module writes, so
+  4. **The relation is folded to lower case**, like every other relation this module writes, so
      `Captured-In` and `captured-in` cannot become two group headers neither of which sees the
-     other.
+     other --- and a **blank** relation is `invalid` rather than `related`. `create_link`'s
+     relation is an `Option` whose absence means *nobody named one*, which `DEFAULT_RELATION`
+     answers; here the reader saw no dialog, so `""` is a caller bug and a link labelled `related`
+     that nobody asked for is the wrong sentence in the panel rather than an error anybody could
+     find.
+
+  **One thing this does not do, named because a reader of the log will meet it.** Neither the note
+  nor its links write an activity line --- nothing in `knobas_core::note` ever has, for the note or
+  for its `[[ref]]` links. A born link is `manual`, so the panel *does* let a reader withdraw one,
+  and that writes an `unlinked` line whose `linked` partner never existed, against the pairing
+  `link_detail` promises. Recording a line here would announce a note's links while the note's own
+  birth stayed silent; the fix, if it is wanted, is a line for the birth covering the note and both
+  links at once, which is a ticket rather than a clause.
 
   **No field on the note, and no membership write.** `CONTEXT.md`'s **Capture** says the first;
   the second is ADR-0008, whose seed is *"every confirmed link touching the context's own `ctx:`
@@ -8032,11 +8045,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   the same mechanism"*, and nothing here reaches past `sync.live_item`, so **Live item**'s census
   of three readers is unchanged.
 
-  Pinned by: three tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
+  Pinned by: four tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
   `a_note_born_in_a_stored_room_carries_both_links_and_is_a_member` (both relations, both origins,
   the note as the `from` end, `context::member_ids`, and the backlink from the ticket),
+  `a_note_born_with_only_a_foreground_carries_only_that_link` (the two are independent),
   `a_note_born_with_no_links_is_born_with_none` and
-  `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one`;
+  `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one` (the two refusals and
+  the skip);
   `entity_mirror.rs`'s `the_note_link_input_shape_matches_its_typescript_mirror`, which round-trips
   the input DTO so a Rust-only field cannot hide; and, on the frontend, four in
   `shell/Room.test.svelte.ts` for what *New note* sends from a stored room, over an open detail,

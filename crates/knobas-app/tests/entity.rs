@@ -1945,7 +1945,7 @@ async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
     let pool = seeded().await;
     use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
 
-    let room = create_context_inner(&pool, &format!("Capture {}", unique()))
+    let ctx = create_context_inner(&pool, &format!("Capture {}", unique()))
         .await
         .unwrap();
     let (ticket, _unused) = linkable_pair(&pool).await;
@@ -1956,7 +1956,7 @@ async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
         None,
         &[
             NoteLinkInput {
-                target_id: room.id.clone(),
+                target_id: ctx.id.clone(),
                 relation: CAPTURED_IN.to_owned(),
             },
             NoteLinkInput {
@@ -1994,7 +1994,11 @@ async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
         .collect();
     assert_eq!(drawn.len(), 2, "two links and no third: {drawn:?}");
     assert!(
-        drawn.contains(&(room.id.as_str(), CAPTURED_IN, knobas_core::link::Origin::Manual)),
+        drawn.contains(&(
+            ctx.id.as_str(),
+            CAPTURED_IN,
+            knobas_core::link::Origin::Manual
+        )),
         "{drawn:?}"
     );
     assert!(
@@ -2007,13 +2011,13 @@ async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
     );
 
     // ADR-0008: an explicit add is a link touching the context's `ctx:` entity,
-    // so the note is in the room it was written in without a second write.
-    let members = knobas_core::context::member_ids(&pool, &room.id)
+    // so the note is a member of it without a second write anywhere.
+    let members = knobas_core::context::member_ids(&pool, &ctx.id)
         .await
         .unwrap();
     assert!(
         members.contains(&note_id),
-        "the note is a member of the room it was captured in: {members:?}"
+        "the note is a member of the context it was captured in: {members:?}"
     );
 
     // ...and the thing the reader was looking at shows the thought it produced.
@@ -2051,6 +2055,41 @@ async fn a_note_born_with_no_links_is_born_with_none() {
     assert!(read.links.is_empty(), "and still none on a fresh read");
 }
 
+/// Criterion 1's third case on its own: a foreground entity and no room.
+///
+/// Its own test rather than a clause of the two above, because the interesting
+/// thing about it is that the two links are **independent**. A command that
+/// drew the second only alongside the first -- or that took the first target
+/// as the note's context and hung the second off it -- would pass both of the
+/// tests above and fail here, which is the whole reason a reader standing in
+/// *All work* over an open ticket still gets the link that says where the
+/// thought came from.
+#[tokio::test]
+async fn a_note_born_with_only_a_foreground_carries_only_that_link() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
+
+    let (ticket, _unused) = linkable_pair(&pool).await;
+    let born = create_note_inner(
+        &pool,
+        None,
+        None,
+        &[NoteLinkInput {
+            target_id: ticket.clone(),
+            relation: CAPTURED_FROM.to_owned(),
+        }],
+    )
+    .await
+    .unwrap();
+
+    let drawn: Vec<(&str, &str)> = born
+        .links
+        .iter()
+        .map(|entry| (entry.other.entity_id.as_str(), entry.link.relation.as_str()))
+        .collect();
+    assert_eq!(drawn, [(ticket.as_str(), CAPTURED_FROM)]);
+}
+
 /// A target that is not an entity id is refused; a well-formed id nothing
 /// carries draws no link and the note is written anyway.
 ///
@@ -2086,10 +2125,29 @@ async fn a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one(
         );
     }
 
+    for blank in ["", "   "] {
+        let refused = create_note_inner(
+            &pool,
+            None,
+            None,
+            &[NoteLinkInput {
+                target_id: "mock:PAY-231".to_owned(),
+                relation: blank.to_owned(),
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            refused.code,
+            knobas_app::IpcErrorCode::Invalid,
+            "a link drawn without the reader seeing a dialog has no relation to default to"
+        );
+    }
+
     let gone = format!("ctx:{}", uuid::Uuid::new_v4());
     let born = create_note_inner(
         &pool,
-        Some("Captured from a room that went"),
+        Some("Captured in a context that went"),
         None,
         &[NoteLinkInput {
             target_id: gone,
@@ -2116,9 +2174,14 @@ async fn a_note_ref_to_a_withdrawn_ticket_resolves_and_is_marked() {
     let pool = seeded().await;
     use knobas_app::commands::entity::create_note_inner;
 
-    let detail = create_note_inner(&pool, Some("Runbook"), Some("superseded: [[mock:PAY-198]]"), &[])
-        .await
-        .unwrap();
+    let detail = create_note_inner(
+        &pool,
+        Some("Runbook"),
+        Some("superseded: [[mock:PAY-198]]"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     let target = detail.refs[0]
         .target

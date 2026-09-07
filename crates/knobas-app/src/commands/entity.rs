@@ -1230,9 +1230,15 @@ pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, 
 pub struct NoteLinkInput {
     /// The other end's entity id.
     pub target_id: String,
-    /// The relation the link carries, folded by [`relation_of`] like every
-    /// other relation this module writes. Blank is [`DEFAULT_RELATION`], which
-    /// is the app-wide rule for a relation nobody named.
+    /// The relation the link carries, folded to lower case like every other
+    /// relation this module writes.
+    ///
+    /// Required, and blank is refused rather than defaulted. `create_link`'s
+    /// relation is an `Option` and its absence means *nobody named one*, which
+    /// [`DEFAULT_RELATION`] answers; here the caller is drawing a link the
+    /// reader never saw a dialog for, so `""` is a caller bug and a link
+    /// labelled `related` that nobody asked for would be the wrong sentence in
+    /// the panel rather than an error anybody could find.
     pub relation: String,
 }
 
@@ -1261,10 +1267,10 @@ pub struct NoteLinkInput {
 /// # Errors
 ///
 /// [`Invalid`](crate::IpcErrorCode::Invalid) if a link's target is not an
-/// entity id -- a caller bug, and the one thing here that is worth refusing
-/// loudly, since every id this command is handed came from a row the caller
-/// was already drawing; [`Internal`](crate::IpcErrorCode::Internal) for a write
-/// failure.
+/// entity id, or if its relation is blank -- both are caller bugs, and both are
+/// worth refusing loudly, since every id this command is handed came from a row
+/// the caller was already drawing and every relation from its own vocabulary;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
 pub async fn create_note_inner(
     pool: &PgPool,
     title: Option<&str>,
@@ -1276,7 +1282,9 @@ pub async fn create_note_inner(
         .map(|link| {
             Ok(knobas_core::note::BornLink {
                 target: EntityRef::parse(&link.target_id).map_err(IpcError::invalid)?,
-                relation: relation_of(Some(&link.relation)),
+                relation: present(Some(&link.relation))
+                    .ok_or_else(|| IpcError::invalid("a link drawn with a note needs a relation"))?
+                    .to_lowercase(),
             })
         })
         .collect::<Result<Vec<_>, IpcError>>()?;

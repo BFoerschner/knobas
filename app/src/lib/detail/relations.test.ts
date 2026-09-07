@@ -107,13 +107,13 @@ test("the two relations a capture draws read as sentences from both of their end
  * end that matters is the **context's**, since that is the one nobody sees
  * while writing the note.
  */
-test("a captured-in link reads one way on the note and the other in the room", () => {
+test("a captured-in link reads one way on the note and the other on its context", () => {
   const note = "note:7f2cf0d4";
-  const room = "ctx:2f1a5d6e";
-  const captured = entry({ id: "c", relation: CAPTURED_IN, from: note, to: room });
+  const context = "ctx:2f1a5d6e";
+  const captured = entry({ id: "c", relation: CAPTURED_IN, from: note, to: context });
 
   expect(groupLinks([captured], note).map((group) => group.reading)).toEqual(["captured in"]);
-  expect(groupLinks([captured], room).map((group) => group.reading)).toEqual(["captured here"]);
+  expect(groupLinks([captured], context).map((group) => group.reading)).toEqual(["captured here"]);
 });
 
 /**

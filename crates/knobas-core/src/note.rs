@@ -239,8 +239,19 @@ pub async fn create(
 /// `on conflict do nothing` because the pair's uniqueness is the database's
 /// (`link_pair_active_idx`) and a caller naming the same target twice under one
 /// relation is asking for one link, not for a failure. `e.id <> $1` is the
-/// self-link guard [`reconcile_refs`] carries, for the same reason: a note is
-/// not linked to itself.
+/// self-link guard [`reconcile_refs`] carries; no caller can reach it today,
+/// since the id was minted three statements ago and nobody else has seen it,
+/// and it is written all the same so that the two inserts in this module state
+/// the same rule rather than one of them relying on its caller.
+///
+/// **No activity line, and that is a gap worth naming.** Nothing in this module
+/// writes one: not the note, not its `[[ref]]` links. So a born link can be
+/// withdrawn from the panel -- it is `manual`, the panels allow it -- and leave
+/// an `unlinked` line whose `linked` partner never existed, against the pairing
+/// `commands::entity`'s `link_detail` promises a reader of the log. Recording
+/// one *here* would announce a note's links while the note's own birth stayed
+/// silent; the honest fix is a line for the birth, covering the note and both
+/// links at once, and that is a ticket rather than a clause.
 async fn draw_born_links(
     tx: &mut Transaction<'_, Postgres>,
     note_id: &str,

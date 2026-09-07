@@ -1938,10 +1938,6 @@ function saveNote(args: Record<string, unknown>) {
  */
 function noteDetail(id: string) {
   const note = NOTES.get(id)!;
-  const refs = [...note.body_md.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {
-    const targetId = found[1]!.trim();
-    return { target_id: targetId, target: noteLinkEnd(targetId) };
-  });
   const links = note.born
     .map((born) => ({ born, other: noteLinkEnd(born.target_id) }))
     .filter((drawn): drawn is { born: NoteLinkInput; other: LinkEnd } => drawn.other !== null)
@@ -1973,7 +1969,7 @@ function noteDetail(id: string) {
       created_at: note.created_at,
       updated_at: SYNCED_AT,
     },
-    refs,
+    refs: [],
     links,
   };
 }
@@ -1982,8 +1978,8 @@ function noteDetail(id: string) {
  * The other end of a note's ref or born link, out of whatever this fixture
  * holds — the mirror's corpus, or a context this session made.
  *
- * `null` where nothing carries the id, which is an unresolved ref and, for a
- * born link, no link at all: the same failure direction the real command has.
+ * `null` where nothing carries the id — an unresolved ref, and for a born link
+ * no link at all: the same failure direction the real command has.
  */
 function noteLinkEnd(entityId: string): LinkEnd | null {
   const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
