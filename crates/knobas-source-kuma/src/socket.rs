@@ -492,15 +492,15 @@ mod tests {
 
     /// **A Kuma that stays up and never acknowledges anything.**
     ///
-    /// The one fake in this adapter, and it does **not** stand on a standing
-    /// exception, because ADR-0013 has none: "no mock is a witness for any
-    /// acceptance or exit criterion", and what certifies this adapter --
-    /// this write path included -- is still `just kuma-live` against the real
-    /// container. This is issue #486's own ruling for one fault, made for one
-    /// reason: a released Kuma cannot be asked to withhold an ack, since what
-    /// would produce one is a *future* release that renames an event. So the
-    /// bound below is the only thing in this module with no live counterpart,
-    /// and the ticket says so in as many words.
+    /// The one fake in this adapter. It stands on ADR-0013's consequence for
+    /// a fault the real instance cannot produce (ruled 2026-09-07, after PR
+    /// #488): a released Kuma cannot be asked to withhold an ack, since what
+    /// would produce one is a *future* release that renames an event, so no
+    /// recipe can drive the pinned container into it. For that one criterion
+    /// this fake is the witness; what certifies the adapter -- this write path
+    /// included -- is still `just kuma-live` against the real container, and
+    /// the bound below is the only thing in this module with no live
+    /// counterpart.
     ///
     /// It is faithful to the exchange in every other respect: the handshake
     /// mints a session, `40`, the login emit and every pong are accepted, and

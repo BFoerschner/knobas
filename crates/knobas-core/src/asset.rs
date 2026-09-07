@@ -54,7 +54,7 @@
 //!
 //! *runtime* and *scenario* are generic on purpose: spec #427 replaced the
 //! Flowrun-branded types with them so the tree can hold an Orchestra instance
-//! by hand until an instance is reachable.
+//! by hand; no adapter for it is planned.
 
 /// What a property value may be.
 ///
