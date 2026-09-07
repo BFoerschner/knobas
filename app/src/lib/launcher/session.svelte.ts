@@ -179,10 +179,12 @@ export class Session {
     // #491): a link is not a search, and handing one to the FTS engine would
     // answer with whatever words happen to be in the host.
     const resolveUrl = this.#ports.resolveUrl;
-    const url = resolveUrl ? pastedUrl(this.raw) : null;
-    if (url !== null) {
-      await this.#resolve(url, resolveUrl!);
-      return;
+    if (resolveUrl) {
+      const url = pastedUrl(this.raw);
+      if (url !== null) {
+        await this.#resolve(url, resolveUrl);
+        return;
+      }
     }
     this.url = null;
     this.urlAnswer = null;
@@ -198,7 +200,10 @@ export class Session {
       });
       // The whole point of the counter. A stale answer is dropped *silently*:
       // a newer one is already on screen and there is nothing to report.
-      if (id <= this.#applied) return;
+      // The second half is what a counter cannot see: a paste issued after
+      // this query has already put a link in the box, and an answer applied
+      // over it would put results behind a panel that is not showing them.
+      if (id <= this.#applied || this.url !== null) return;
       this.#applied = id;
       this.response = response;
       this.error = null;
@@ -254,18 +259,36 @@ export class Session {
     this.pending = true;
     try {
       const match = await resolveUrl(url);
-      if (id <= this.#applied) return;
+      if (this.#stale(id, url)) return;
       this.#applied = id;
       this.urlAnswer = { match };
       this.error = null;
     } catch (cause) {
-      if (id <= this.#applied) return;
+      if (this.#stale(id, url)) return;
       this.#applied = id;
       this.error = ipcErrorMessage(cause);
       this.urlAnswer = null;
     } finally {
       if (id === this.#issued) this.pending = false;
     }
+  }
+
+  /**
+   * Whether the answer to request `id` about `url` is worth applying.
+   *
+   * **Two questions, and the counter answers only one of them.** `#applied`
+   * orders the answers, which is enough for a read whose result is *drawn* --
+   * a stale one is replaced by the newer one already on screen. A resolved
+   * paste is not drawn: the launcher **navigates** on it. So an answer that
+   * arrives after the reader has typed the link back into a query would open
+   * an entity nobody asked for and close the box over it, and the counter
+   * cannot see that: the query bumps `#issued` but does not touch `#applied`
+   * until its *own* answer lands, so a resolver that beats a slow search sails
+   * through the ordering check. The box itself is what closes it -- the answer
+   * is good only while the box still holds the URL it was asked about.
+   */
+  #stale(id: number, url: string): boolean {
+    return id <= this.#applied || this.url !== url;
   }
 
   /** Everything an empty box has nothing to say about. */

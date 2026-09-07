@@ -637,7 +637,7 @@ pub const RESOLVE_URL: &str = concat!(
 /// The entity a URL names, or `None` -- *"a URL in, an entity reference or a
 /// miss out"* (spec #491).
 ///
-/// **Never a fetch from a source** (ADR-0007's direction, spec story 16): a
+/// **Never a fetch from a source** (spec #491 story 16): a
 /// paste while the tunnel is down is a miss and not a hang, so this is one
 /// read on the local mirror and nothing else.
 ///
@@ -676,7 +676,7 @@ pub async fn resolve_url_inner(pool: &PgPool, url: &str) -> Result<Option<UrlMat
 /// case-insensitively because a scheme is case-insensitive and the
 /// normalisation down-cases it anyway. Everything past it is the
 /// normalisation's business: a URL with no host simply matches no row, which
-/// is the miss ADR-0007 asks for rather than a second opinion about what a
+/// is the miss `web_url.rs` describes rather than a second opinion about what a
 /// well-formed URL is.
 fn is_web_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();

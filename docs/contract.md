@@ -7686,9 +7686,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   compares the characters, and `the_resolvers_statement_reaches_the_expression_index` asks the
   planner, which is what `the_view_still_reaches_the_fts_index` does for the launcher's GIN index.
 
-  **The failure direction is absence** (ADR-0007's interim discipline, for a payload-adjacent read
-  outside an adapter): a stored value that is not an absolute URL normalises to SQL `null`, `null`
-  equals nothing, and such a row is unreachable by paste rather than reachable by accident.
+  **The failure direction is absence.** A stored value that is not an absolute URL normalises to
+  SQL `null`, `null` equals nothing, and such a row is unreachable by paste rather than reachable
+  by accident. This is ADR-0007's first requirement *borrowed*, and it is worth saying which:
+  `web_url` is a plain column and not a payload read, so that ADR does not govern this and no
+  interim exception is owed — the hazard is simply the same shape, and the discipline is the one
+  that answers it.
 
   **The IPC schema — one command, one DTO, no argument change anywhere else:**
 
@@ -7723,9 +7726,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   the two misses, the tombstone, two Jira instances, the refusal, the index's shape and the plan
   that reaches it; `entity_mirror.rs`'s `the_url_match_shape_matches_its_typescript_mirror`;
   `wiring.rs`'s `every_command_is_in_the_handler_list`; and, on the frontend, five in
-  `launcher/url.test.ts` for what is a paste and what is still a query, seven in
-  `session.test.svelte.ts` for which backend read a keystroke reaches and how the answers are
-  sequenced, and five in `Launcher.test.svelte.ts` for the two outcomes on screen.
+  `launcher/url.test.ts` for what is a paste and what is still a query, ten in
+  `session.test.svelte.ts` for which backend read a keystroke reaches, what a close leaves behind
+  and how the answers are sequenced in both directions, and five in `Launcher.test.svelte.ts` for
+  the two outcomes on screen.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

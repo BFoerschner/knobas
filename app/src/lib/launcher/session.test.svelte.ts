@@ -383,3 +383,56 @@ test("closing after a search still comes back to it", async () => {
   expect(session.raw, "a query is what the reader was in the middle of").toBe("sepa");
   expect(session.mode).toBe("results");
 });
+
+/**
+ * The other direction of the same rule, and the one that does damage.
+ *
+ * Ordering the answers is not enough on its own: the launcher **navigates** on
+ * a resolved paste, so an answer that arrives after the reader has gone back
+ * to typing a query would open an entity nobody is asking about and close the
+ * box over it. The counters cannot see that — a search issued after the paste
+ * bumps `#issued` but does not *apply* until its own answer lands, so the
+ * stale resolve passes the "is this older than what has been applied" guard.
+ * What closes it is the box itself: the answer is only good if the box still
+ * holds the URL it was asked about.
+ */
+test("an answer to a paste the reader has typed over is dropped", async () => {
+  let settle: ((match: typeof FOUND) => void) | undefined;
+  const session = new Session({
+    // The query is still in flight when the older paste answers, which is the
+    // whole point: a search that had already applied would have moved
+    // `#applied` past the paste and the counters alone would have caught it.
+    search: () => new Promise(() => {}),
+    launcherHome: async () => EMPTY_HOME,
+    resolveUrl: () => new Promise((resolve) => (settle = resolve)),
+  });
+
+  session.set(PASTED);
+  // The reader keeps typing, and what is in the box is a query again.
+  session.set("sepa");
+  await vi.advanceTimersByTimeAsync(0);
+  settle!(FOUND);
+  await vi.advanceTimersByTimeAsync(0);
+
+  expect(session.urlAnswer, "nothing to navigate on").toBeNull();
+  expect(session.mode).toBe("results");
+});
+
+/** And the mirror image: a search answer overtaken by a paste. */
+test("an answer to a query the reader has pasted over is dropped", async () => {
+  let settle: ((response: SearchResponse) => void) | undefined;
+  const session = new Session({
+    search: () => new Promise((resolve) => (settle = resolve)),
+    launcherHome: async () => EMPTY_HOME,
+    resolveUrl: async () => null,
+  });
+
+  session.set("sepa");
+  session.set(PASTED);
+  await vi.advanceTimersByTimeAsync(0);
+  settle!(answer("sepa"));
+  await vi.advanceTimersByTimeAsync(0);
+
+  expect(session.response).toBeNull();
+  expect(session.mode).toBe("url");
+});

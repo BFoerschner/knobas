@@ -1388,6 +1388,14 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   await search(`${PASTED}#comment-42`);
 
   expect(target.textContent).toContain("Not in the mirror");
+  // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
+  // says to avoid: this panel is the reader's only account of why the
+  // launcher has nothing. Scoped to the panel, because the box's own footnote
+  // has said "local index" since M1 and correcting it is not this ticket's.
+  expect(
+    target.querySelector(".miss")?.textContent,
+    "`index` is not the word for the mirror",
+  ).not.toContain("index");
   expect(navigated, "there is nothing to open in the app").toEqual([]);
 
   const button = [...target.querySelectorAll("button")].find((element) =>

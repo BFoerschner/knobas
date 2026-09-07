@@ -54,6 +54,7 @@
 
   import {
     launcherHome as defaultHome,
+    ipcErrorMessage,
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
   } from "../ipc";
@@ -440,7 +441,7 @@
       await openExternal(url);
       close();
     } catch (cause) {
-      session.error = cause instanceof Error ? cause.message : String(cause);
+      session.error = ipcErrorMessage(cause);
     }
   }
 
@@ -589,7 +590,7 @@
               <p class="none raw">{session.url}</p>
               <button class="pfx" onclick={() => session.url && void openTheMiss(session.url)}>
                 <span class="nm">Open in browser</span>
-                <span class="s">The link is not in the local index — open it where it lives.</span>
+                <span class="s">Open it where it lives.</span>
               </button>
             </div>
           {/if}

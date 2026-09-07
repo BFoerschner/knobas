@@ -341,7 +341,7 @@ async fn a_row_with_no_address_is_unreachable_by_paste() {
     let pool = corpus("url_no_address").await;
     mirror_without_url(&pool, "gitea:acme/payments-svc@main", "branch", "gitea").await;
     // A stored value that is not an absolute URL: the mirror holds whatever an
-    // adapter reported, and the rule misses rather than guessing (ADR-0007).
+    // adapter reported, and the rule misses rather than guessing.
     mirror(&pool, "mock:relative", "ticket", "mock", "/browse/PAY-231").await;
 
     assert_eq!(
@@ -419,14 +419,24 @@ async fn the_resolvers_statement_reaches_the_expression_index() {
     // a drifted expression produces, and it is what an assertion on the name
     // alone would call a pass (measured while mutating migration 0023: one
     // character class changed, this test stayed green until this line).
-    let key = plan
-        .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("Index Cond:"));
+    //
+    // The condition names the expression by a literal of its own rather than
+    // by a fragment: `lower(` alone appears in the `Filter:` too, so a check
+    // for that would pass on exactly the plan this rejects.
+    const AUTHORITY: &str = "'^[^:/?#]+://[^/?#]*'";
+    let lines: Vec<&str> = plan.lines().map(str::trim).collect();
+    let key = lines.iter().find(|line| line.starts_with("Index Cond:"));
     assert!(
-        plan.contains("item_web_url_norm_idx") && key.is_some_and(|line| line.contains("lower(")),
-        "the normalised URL must be the index *key* migration 0023 created, not a filter over \
-         every row of it:\n{plan}"
+        plan.contains("item_web_url_norm_idx") && key.is_some_and(|line| line.contains(AUTHORITY)),
+        "the normalised URL must be the index *key* migration 0023 created:\n{plan}"
+    );
+    // And nowhere else: a `Filter:` carrying it is the whole index read row by
+    // row, which is the work this index exists to avoid.
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("Filter:") && line.contains(AUTHORITY)),
+        "the comparison must not be rechecked per row:\n{plan}"
     );
     tx.rollback().await.expect("rollback");
 }

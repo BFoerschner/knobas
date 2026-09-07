@@ -156,7 +156,7 @@ async fn two_hosts_never_collapse_onto_each_other() {
     );
 }
 
-/// ADR-0007's direction, in the one place a value can be anything: the mirror
+/// The direction, in the one place a value can be anything: the mirror
 /// holds whatever an adapter reported, and a value that is not an absolute
 /// URL yields `null` rather than a partial guess. `null` equals nothing, so
 /// such a row is unreachable by paste rather than reachable by accident.

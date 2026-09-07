@@ -49,8 +49,12 @@
 //!
 //! # The failure direction is absence
 //!
-//! ADR-0007's discipline for a read that is not the adapter's: this one
-//! **misses rather than guesses**. A value that is not an absolute URL --
+//! **The same direction ADR-0007 fixes for payload reads, borrowed rather
+//! than owed.** That ADR governs reads *into a payload* outside an adapter,
+//! and `web_url` is a plain column, so nothing here is bound by it; what is
+//! worth keeping is its first requirement, because the hazard is the same
+//! shape. So this one **misses rather than guesses**. A value that is not an
+//! absolute URL --
 //! anything without a `scheme://` -- normalises to SQL `null`, because both
 //! `substring`s fail to match and `null || null` is `null`. A `null` index
 //! entry equals nothing, so such a row is unreachable by paste rather than
