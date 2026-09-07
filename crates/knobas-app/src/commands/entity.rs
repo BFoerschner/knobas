@@ -606,7 +606,9 @@ pub struct UrlMatch {
 /// **`sync.item`, not `sync.live_item`**, and for the two reasons
 /// [`DETAIL`] reaches past that view as well: a withdrawn entity still opens
 /// and says it is gone (spec #491 story 15 -- *"a stale link explains
-/// itself"*), and a disabled source's items still open. Resolving to a
+/// itself"*), and a disabled source's items still open. It is the **third**
+/// reader to do so, and `CONTEXT.md`'s **Live item** entry is the list of
+/// them: a fourth owes a reason of its own and a line there. Resolving to a
 /// tombstone and letting the detail's banner do the explaining is a better
 /// answer than *Not in the mirror*, which would send the reader to the
 /// browser to discover the same thing.

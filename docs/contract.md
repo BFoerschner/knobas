@@ -7639,7 +7639,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `web_url`; one IPC read (`resolve_url`)"*. **Ratified by the orchestrator under this issue's
   own third criterion, which asks for the entry by name and for the normalisation rule to be
   stated here. Björn keeps the gate for frozen contracts and this entry is flagged for his
-  review.**
+  review — ratified in his absence by the deputy's ruling of 2026-09-08 on #496
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on both
+  surfaces and found the entry sufficient as written.**
 
   **`crates/knobas-db/migrations/**` — one migration, `0023_the_url_a_paste_names.sql`, and it
   creates one index.** No table, no column, no constraint, no view:
