@@ -70,6 +70,7 @@ vi.mock("../ipc/sources", () => ({
         capabilities: [],
         adapter_version: "0",
         auth_methods: [],
+        accepts_account: false,
         // A getter, because the registry caches the descriptor on its first
         // (and only) `load()`: a plain array would freeze whatever `write_ops`
         // happened to be during the first test in this file, and every later

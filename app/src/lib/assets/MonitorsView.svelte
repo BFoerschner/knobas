@@ -41,8 +41,20 @@
   that recovers takes its card away through the store's own `sync:state`
   re-read rather than through anything this tab decides.
 
-  Creating or pausing a monitor is the Kuma write half (story 81) and is not in
-  M4.1's committed scope.
+  **Pause and Resume are offered only where they exist** (issue #452, story
+  69). A monitor's `actions` come from the backend already filtered twice --
+  by what its source declares, which is nothing at all for an Uptime Kuma
+  configured with only an API key, and by what this row's state has a use for
+  -- so this file renders a list and decides nothing, the inbox's rule
+  (`inbox/actions.ts`). The write goes through the ordinary queue, so a Kuma
+  that is unreachable leaves a pending row rather than an error the reader has
+  to remember.
+
+  **The roster is re-read after the write, and the row does not move.** A pause
+  reaches the mirror only when the next poll finds the monitor gone from
+  `/metrics`, which is up to a minute away; the button says what knobas did --
+  *queued* -- and the roster catches up on its own. Creating a monitor is the
+  rest of story 81 and is not in M4.1's committed scope.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -53,9 +65,12 @@
     type UnmonitoredAsset,
     type UptimeRatio,
   } from "../ipc/assets";
+  import { submitWrite as realSubmitWrite } from "../ipc/entity";
+  import type { WriteOpPayload } from "../ipc/sources";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
+  import { push } from "../shell/toasts.svelte";
   import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import AssetsTabs from "./AssetsTabs.svelte";
   import {
@@ -76,7 +91,32 @@
     unmonitoredAssets: typeof realUnmonitoredAssets;
     /** *Open in Kuma* (story 71) — the OS browser, so a test can press it. */
     openExternal: typeof realOpenExternal;
+    /** Pause / Resume (#452) — the ordinary write queue, one command. */
+    submitWrite: typeof realSubmitWrite;
   }
+
+  /**
+   * What each offered op is called and what it queues.
+   *
+   * The inbox's `ACTION_FORMS` in miniature, and for its reason: an op with no
+   * entry here is **skipped**, not drawn disabled, so a backend that grows a
+   * third monitor op does not put a nameless button on this tab.
+   */
+  const MONITOR_ACTIONS: Record<
+    string,
+    { label: string; queued: string; build: (entity: string) => WriteOpPayload }
+  > = {
+    pause_monitor: {
+      label: "Pause",
+      queued: "Pause queued for",
+      build: (entity) => ({ PauseMonitor: { entity } }),
+    },
+    resume_monitor: {
+      label: "Resume",
+      queued: "Resume queued for",
+      build: (entity) => ({ ResumeMonitor: { entity } }),
+    },
+  };
 
   let {
     router,
@@ -113,6 +153,7 @@
     monitorRoster: realMonitorRoster,
     unmonitoredAssets: realUnmonitoredAssets,
     openExternal: realOpenExternal,
+    submitWrite: realSubmitWrite,
     ...ports,
   };
 
@@ -214,6 +255,43 @@
       await alerts.ack(monitorId);
     } finally {
       acking = null;
+    }
+  }
+
+  /**
+   * The monitor whose pause or resume is in flight, or `null`.
+   *
+   * Per row and not a flag on the view, {@link acking}'s reason exactly: two
+   * monitors are two independent writes, and the race worth guarding is the
+   * double-click on one button.
+   */
+  let writing = $state<string | null>(null);
+
+  /**
+   * Queue one monitor's pause or resume.
+   *
+   * **The roster is re-read afterwards and is expected not to change.** A
+   * pause reaches the mirror when the next poll finds the monitor gone from
+   * `/metrics`, so the honest thing on screen now is the toast; the re-read is
+   * there for the case where the write went through fast enough that the
+   * backend's own post-write sync (`sources::write_queue::flush`) already
+   * landed.
+   */
+  async function act(monitor: MonitorRow, op: string): Promise<void> {
+    const form = MONITOR_ACTIONS[op];
+    if (!form) return;
+    writing = monitor.entity_id;
+    try {
+      await io.submitWrite(form.build(monitor.entity_id));
+      push({ text: `${form.queued} ${monitor.name}` });
+      await read();
+    } catch (rejection) {
+      push({
+        text: `Could not queue that for ${monitor.name}: ${ipcErrorMessage(rejection)}`,
+        tone: "err",
+      });
+    } finally {
+      writing = null;
     }
   }
 
@@ -395,12 +473,29 @@
               page left in Kuma to open — so the button is absent rather than
               dead.
             -->
-            {#if monitor.web_url}
-              {@const url = monitor.web_url}
-              <button class="kuma" onclick={() => void io.openExternal(url)}>
-                Open in Kuma
-              </button>
-            {/if}
+            <!--
+              The controls, in one `flex: none` group so `margin-left: auto`
+              pushes the pair rather than only the first of them.
+            -->
+            <span class="acts">
+              {#each monitor.actions as op (op)}
+                {#if MONITOR_ACTIONS[op]}
+                  <button
+                    class="act"
+                    disabled={writing === monitor.entity_id}
+                    onclick={() => void act(monitor, op)}
+                  >
+                    {MONITOR_ACTIONS[op].label}
+                  </button>
+                {/if}
+              {/each}
+              {#if monitor.web_url}
+                {@const url = monitor.web_url}
+                <button class="kuma" onclick={() => void io.openExternal(url)}>
+                  Open in Kuma
+                </button>
+              {/if}
+            </span>
           </div>
 
           <!--
@@ -930,8 +1025,15 @@
     text-overflow: ellipsis;
   }
 
-  .head .kuma {
+  .head .acts {
     margin-left: auto;
+    flex: none;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .head .kuma {
     flex: none;
     font-size: 11px;
     color: var(--link);
@@ -941,6 +1043,29 @@
 
   .head .kuma:hover {
     background: var(--raised);
+  }
+
+  /* The alert card's *Ack*, in the roster's scale: this is a write, so it
+     reads as a control rather than as the link *Open in Kuma* is. Same
+     tokens as `.card .ack` above, so the two writes on this tab look like
+     one kind of thing. */
+  .head .act {
+    flex: none;
+    font-size: 11px;
+    height: 20px;
+    padding: 0 8px;
+    border: 1px solid var(--hair2);
+    border-radius: 3px;
+    color: var(--text);
+  }
+
+  .head .act:hover:not(:disabled) {
+    background: var(--raised);
+    border-color: var(--text);
+  }
+
+  .head .act:disabled {
+    color: var(--muted);
   }
 
   /* Forty-eight equal segments, `flex: 1` each, so the bar is the width it is

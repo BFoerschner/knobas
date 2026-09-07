@@ -72,6 +72,7 @@
   import AddSource from "./AddSource.svelte";
   import { failedReport } from "./connection";
   import Diagnostics from "./Diagnostics.svelte";
+  import { kindRegistry } from "../shell/kind-registry.svelte";
   import ReenterSecret from "./ReenterSecret.svelte";
   import SourceRow from "./SourceRow.svelte";
 
@@ -382,6 +383,7 @@
           <ReenterSecret
             sourceId={source.id}
             displayName={source.display_name}
+            acceptsAccount={kindRegistry.acceptsAccount(source.adapter_kind)}
             {onhealth}
             oncancel={() => {
               // Opening the strip kept the result: it is the reason the

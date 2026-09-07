@@ -727,6 +727,7 @@ mod tests {
                 },
                 adapter_version: "0.1.0".into(),
                 auth_methods: vec![AuthMethod::Pat],
+                accepts_account: false,
                 // Declares no write ops, so the battery probes `comment` and
                 // expects a refusal -- except where the behavior needs otherwise.
                 write_ops: match self.behavior {

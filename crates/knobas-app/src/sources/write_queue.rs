@@ -78,7 +78,13 @@ pub(crate) async fn queue(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<(QueuedWrite, String), IpcError> {
-    let (op, source_id) = submittable(&state.pool, state.registry.as_ref(), payload).await?;
+    let (op, source_id) = submittable(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        payload,
+    )
+    .await?;
     let queued = knobas_sync::write_queue::queue(state.scheduler.deps(), &source_id, op)
         .await
         .map_err(IpcError::internal)?;
@@ -133,6 +139,7 @@ pub(crate) async fn flush(
 /// As [`submit`].
 pub(crate) async fn submittable(
     pool: &sqlx::PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     payload: serde_json::Value,
 ) -> Result<(WriteOp, String), IpcError> {
@@ -152,13 +159,23 @@ pub(crate) async fn submittable(
             ))
         })?;
 
-    // The adapter's **template** descriptor, which is what `list_adapters`
-    // serves and what the action bar is rendered from. `write_ops` is a
-    // property of the adapter kind rather than of the instance, so this needs
-    // no secret and no built adapter -- and a write for a source whose
-    // credential is gone is exactly one the queue should be keeping, not one
-    // this should refuse for want of a keychain entry.
-    let declared: Vec<String> = registry
+    // **What the adapter kind offers, plus what this instance offers.**
+    //
+    // The template is what `list_adapters` serves and what most action bars
+    // are rendered from, and for every source but one it is the whole answer.
+    // It is also the half that must stay: it needs no secret, and a write for
+    // a source whose credential is gone is exactly one the queue should be
+    // keeping rather than one this should refuse for want of a keychain entry.
+    //
+    // Since issue #452 it is no longer the whole answer. An Uptime Kuma's
+    // `pause_monitor` is a property of the *instance* -- it exists only when
+    // that source's keychain item carries an account -- so a check against the
+    // template alone would refuse every pause the Monitors tab correctly
+    // offered. The union is what keeps both readings: an op is refused here
+    // only when **neither** the kind nor the instance has ever heard of it,
+    // which is the case this refusal exists for (story 13: an op absent from
+    // `write_ops` is one that should never have been offered).
+    let template: Vec<String> = registry
         .descriptors()
         .into_iter()
         .find(|d| d.adapter_kind == source.adapter_kind)
@@ -169,6 +186,15 @@ pub(crate) async fn submittable(
                 source.id, source.adapter_kind
             ))
         })?;
+    let mut declared = template;
+    for offered in crate::sources::crud::instance_write_ops(secrets, registry, &source)
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&source.id)))?
+    {
+        if !declared.contains(&offered) {
+            declared.push(offered);
+        }
+    }
     if !declared.iter().any(|o| o == op.identifier()) {
         return Err(IpcError::invalid(format!(
             "source {:?} does not offer {:?} -- it offers {declared:?}",
@@ -403,6 +429,15 @@ mod tests {
         crate::sources::Registry::builtin()
     }
 
+    /// The store `submittable` reads an instance's own write ops through
+    /// (issue #452). Empty, which is the honest state for these fixtures: they
+    /// configure a source row and no credential, and what that proves is that
+    /// the *template* half of the union still carries every write these
+    /// adapters have always taken.
+    fn secrets() -> std::sync::Arc<dyn knobas_secrets::SecretStore> {
+        std::sync::Arc::new(knobas_secrets::MemoryStore::new())
+    }
+
     /// The happy path, and the reason there is no `source_id` argument: the
     /// target's namespace **is** the source, so one string decides both what is
     /// written and who is asked.
@@ -413,6 +448,7 @@ mod tests {
         configured(&pool, &id, "jira").await;
         let (op, source) = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Transition": { "entity": format!("{id}:PAY-231"), "status": "In Review" }
@@ -430,9 +466,14 @@ mod tests {
     #[tokio::test]
     async fn a_payload_that_is_not_a_write_op_is_refused_before_anything_is_queued() {
         let pool = pool().await;
-        let error = submittable(&pool, &registry(), serde_json::json!({ "Nonsense": {} }))
-            .await
-            .expect_err("not a write op");
+        let error = submittable(
+            &pool,
+            &secrets(),
+            &registry(),
+            serde_json::json!({ "Nonsense": {} }),
+        )
+        .await
+        .expect_err("not a write op");
         assert_eq!(error.code, crate::IpcErrorCode::Invalid);
         assert!(
             error.message.contains("not a write operation"),
@@ -448,6 +489,7 @@ mod tests {
         let pool = pool().await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({ "Comment": { "entity": "PAY-231", "body": "hi" } }),
         )
@@ -467,6 +509,7 @@ mod tests {
         let pool = pool().await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Comment": { "entity": "jira-not-configured:PAY-231", "body": "hi" }
@@ -497,6 +540,7 @@ mod tests {
         configured(&pool, &id, "teamcity").await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Comment": { "entity": format!("{id}:build:1187"), "body": "hi" }

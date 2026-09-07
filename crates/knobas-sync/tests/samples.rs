@@ -95,6 +95,7 @@ impl Source for Monitors {
             capabilities: Vec::<Capability>::new(),
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
+            accepts_account: false,
             write_ops: Vec::new(),
             entity_kinds: self
                 .kinds

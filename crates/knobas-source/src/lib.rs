@@ -46,6 +46,27 @@ pub struct SourceDescriptor {
     /// offers these; the chosen method's secret goes to the OS keychain and
     /// never into [`Self::config_schema`]'s config blob.
     pub auth_methods: Vec<AuthMethod>,
+    /// Whether this adapter can use a **second** credential beside the one
+    /// [`auth_methods`](Self::auth_methods) names: an optional username and
+    /// password, stored in the same keychain item
+    /// ([`instance::Account`], M4.1, issue #452).
+    ///
+    /// `false` for every adapter but Uptime Kuma, and it is a *declaration*
+    /// rather than a fact the forms could work out: what the Add-source and
+    /// re-enter forms need to know is whether to draw the optional account
+    /// fields at all, and the alternative to declaring it is a
+    /// `adapter_kind === "kuma"` in a Svelte component -- the per-adapter
+    /// table §3a exists to forbid.
+    ///
+    /// **Not an [`AuthMethod`]**, for the reason `instance::Account` argues:
+    /// the auth method is how a source authenticates its ordinary traffic,
+    /// one per source, and offering the account as a rival method would let a
+    /// reader pick it *instead of* the key.
+    ///
+    /// `#[serde(default)]`, so a descriptor built by a peer that predates this
+    /// still decodes -- as the adapter with one credential it was.
+    #[serde(default)]
+    pub accepts_account: bool,
     /// Which [`WriteOp`]s this adapter supports, as the stable snake_case
     /// identifiers documented on that enum (`Comment` → `"comment"`).
     ///
@@ -715,6 +736,7 @@ mod tests {
             capabilities: vec![Capability::Search, Capability::Write, Capability::Webhooks],
             adapter_version: "0.1.0".into(),
             auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
+            accepts_account: false,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),

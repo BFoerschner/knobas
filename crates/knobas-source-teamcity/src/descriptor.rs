@@ -25,6 +25,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         adapter_version: ADAPTER_VERSION.to_owned(),
         // Bearer access token (TeamCity 2019.1+) or Basic user+password.
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
+        // One credential. The second one of envelope version 2 is Uptime
+        // Kuma's alone (issue #452), and a form that offered account
+        // fields here would be asking for something nothing reads.
+        accepts_account: false,
         // M2's ratified TeamCity set (issue #43, ADR-0006), and the whole of
         // what the action bar offers. The battery holds this and
         // `Capability::Write` to each other in both directions.

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   ConnectionReport,
   CredentialHealth,
+  SecretInput,
   SourceDraft,
   SourceSummary,
   SyncRunRow,
@@ -27,7 +28,7 @@ const calls = {
   syncNow: [] as string[],
   syncAll: 0,
   deleteSource: [] as { id: string; purge: boolean }[],
-  setSecret: [] as { id: string; value: string }[],
+  setSecret: [] as { id: string; value: string | null | undefined }[],
   listSources: 0,
   testSource: [] as SourceDraft[],
 };
@@ -81,7 +82,7 @@ vi.mock("../ipc/sources", () => ({
     calls.deleteSource.push({ id, purge: purgeItems });
     return Promise.resolve();
   },
-  setSourceSecret: (id: string, secret: { value: string }) => {
+  setSourceSecret: (id: string, secret: SecretInput) => {
     calls.setSecret.push({ id, value: secret.value });
     return Promise.resolve({
       source_id: id,

@@ -708,6 +708,7 @@ impl Source for MockSource {
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             // Nothing to authenticate against: the fixture is compiled in.
             auth_methods: Vec::new(),
+            accepts_account: false,
             write_ops: vec!["comment".to_owned()],
             // The UI renders this source's launcher groups and chips from these
             // alone, so every kind `sync` emits is declared here.

@@ -33,6 +33,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 7.9) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
+        // One credential. The second one of envelope version 2 is Uptime
+        // Kuma's alone (issue #452), and a form that offered account
+        // fields here would be asking for something nothing reads.
+        accepts_account: false,
         // Spec #272's Confluence set, ratified under ADR-0006 in one §10.8
         // entry (#286). `comment` is the SPI's existing op re-used with the
         // **page** as its container -- a reply on a page is the same act as a

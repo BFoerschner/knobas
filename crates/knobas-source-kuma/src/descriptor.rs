@@ -103,6 +103,11 @@ pub fn descriptor_template() -> SourceDescriptor {
         // `AuthMethod` would let a reader choose it *instead of* the key,
         // which is a Kuma that cannot read.
         auth_methods: vec![AuthMethod::ApiToken],
+        // **The one adapter that says yes** (issue #452). It is what makes the
+        // Add-source and re-enter forms draw the optional account fields, and
+        // it is a declaration for exactly the reason `config_schema` is one:
+        // the alternative is a Svelte component that knows the string "kuma".
+        accepts_account: true,
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),

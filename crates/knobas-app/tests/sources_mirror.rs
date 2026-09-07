@@ -266,6 +266,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         "SourceDescriptor",
         &wire,
         &[
+            "accepts_account",
             "adapter_kind",
             "adapter_version",
             "auth_methods",

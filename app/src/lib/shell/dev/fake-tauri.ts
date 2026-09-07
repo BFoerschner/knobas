@@ -340,6 +340,13 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // names -- see `fakeMonitorRoster` -- so the roster a browser draws is the
     // set of monitors the file asks for, with a reading invented on top.
     monitor_roster: () => fakeMonitorRoster(),
+    // The Monitors tab's Pause / Resume (#452). Answers the queued row the
+    // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
+    // behind it, so the honest fixture is "knobas took the write" and a
+    // roster that still says what it said. A handler is here at all because
+    // the button beside it is -- a control that answers "command not found"
+    // in red is worse than no control.
+    submit_write: (args: Record<string, unknown>) => fakeQueuedWrite(args),
     // The estate's open alerts (#444), derived from the same roster so the
     // strip a browser draws agrees with the tab beside it. Added with #446
     // because #444 left it out and the two surfaces it feeds -- the Assets
@@ -2199,6 +2206,40 @@ function fakeOpenAlerts() {
 }
 
 /**
+ * `submit_write`: the row the queue answers with, for the fixture's own
+ * Pause / Resume.
+ *
+ * `sent`, with no wait reason: what a fixture must not do is show a write
+ * *pending* for ever, which is what a `pending` row with nothing to flush it
+ * would look like.
+ */
+function fakeQueuedWrite(args: Record<string, unknown>) {
+  const payload = (args.payload ?? {}) as Record<string, { entity?: string }>;
+  const [tag, body] = Object.entries(payload)[0] ?? ["PauseMonitor", {}];
+  const entity = body?.entity ?? "kuma:1";
+  const now = new Date().toISOString();
+  return {
+    id: (FIXTURE_WRITE_ID += 1),
+    source_id: entity.split(":")[0] ?? "kuma",
+    entity_id: entity,
+    op: tag === "ResumeMonitor" ? "resume_monitor" : "pause_monitor",
+    payload,
+    target_snapshot: null,
+    state: "sent",
+    wait_reason: null,
+    detail: null,
+    queued_at: now,
+    attempted_at: now,
+    attempts: 1,
+    held_snapshot: null,
+    settled_at: now,
+    source_enabled: true,
+  };
+}
+
+let FIXTURE_WRITE_ID = 0;
+
+/**
  * The monitors a reader has acked in this session, by monitor entity id.
  *
  * Module state, like the fixture's other writes: `?fake-ipc` is a browser
@@ -2302,6 +2343,11 @@ function fakeMonitorRoster() {
           path: assetPathText(entry.asset),
         },
       ],
+      // The fixture's Kuma has an account, so the tab draws its buttons
+      // (issue #452) -- and the per-row half of the rule is the fixture's
+      // too: the paused monitor is the one offered *Resume*. A fixture that
+      // offered both on every row would photograph a tab that cannot exist.
+      actions: [tombstoned ? "resume_monitor" : "pause_monitor"],
       samples,
     };
   });

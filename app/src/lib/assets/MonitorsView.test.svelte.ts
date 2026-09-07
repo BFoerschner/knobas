@@ -22,6 +22,7 @@ import type {
   UnmonitoredAsset,
 } from "../ipc/assets";
 import { createRouter } from "../shell/router.svelte";
+import { toasts } from "../shell/toasts.svelte";
 import { createAlerts } from "./alerts.svelte";
 import { BAR_BUCKETS, BAR_WINDOW_MS } from "./monitors";
 import MonitorsView from "./MonitorsView.svelte";
@@ -42,6 +43,7 @@ function monitor(over: Partial<MonitorRow> & { name: string }): MonitorRow {
     entity_id: `kuma:${over.name}`,
     source_id: "kuma",
     state: "up",
+    actions: [],
     monitor_type: "http",
     target: null,
     response_time_ms: null,
@@ -733,4 +735,130 @@ test("a failed Not monitored read is reported in the backend's own words", async
   expect(target.querySelector("section.unmon p.fail")?.textContent).toContain(
     "the database went away",
   );
+});
+
+/**
+ * The Kuma write half on the tab (#452, spec #427 story 69).
+ *
+ * Mounts the tab over a roster whose rows carry `actions`, recording every
+ * write it queues. A separate helper from {@link render} because it needs the
+ * write port and because a test asserting *no buttons* must be able to mount a
+ * roster with no actions at all -- which is what a Kuma configured with only an
+ * API key answers.
+ */
+function renderWrites(roster: MonitorRow[], reject?: unknown) {
+  const queued: unknown[] = [];
+  location.hash = "#/assets/monitors";
+  const router = createRouter();
+  app = mount(MonitorsView, {
+    target,
+    props: {
+      router,
+      now: () => NOW,
+      ports: {
+        monitorRoster: () => Promise.resolve(roster),
+        unmonitoredAssets: () => Promise.resolve([]),
+        openExternal: () => Promise.resolve(),
+        submitWrite: (payload: unknown) => {
+          queued.push(payload);
+          return reject ? Promise.reject(reject) : Promise.resolve({} as never);
+        },
+      },
+    },
+  });
+  flushSync();
+  return { queued };
+}
+
+/** Every action button on the roster, as `monitor name → button label`. */
+function actionButtons(): string[] {
+  return [...target.querySelectorAll("ol.roster li.mon")].flatMap((row) => {
+    const name = row.querySelector(".nm")?.textContent?.trim() ?? "?";
+    return [...row.querySelectorAll<HTMLButtonElement>("button.act")].map(
+      (button) => `${name} → ${(button.textContent ?? "").trim()}`,
+    );
+  });
+}
+
+/**
+ * The whole of criterion 1's second half: **a source with only the key shows
+ * no buttons.**
+ *
+ * The roster is the ordinary one, whose rows carry an empty `actions` -- which
+ * is what `monitor_roster` answers for a Kuma with no account in its keychain
+ * item. Nothing else about the tab changes, which is the point: the reader of a
+ * read-only Kuma sees the roster they always saw.
+ */
+test("a monitor whose source offers nothing gets no buttons", async () => {
+  renderWrites(ROSTER);
+  await vi.waitFor(() => expect(target.querySelectorAll("li.mon").length).toBe(ROSTER.length));
+  expect(actionButtons()).toEqual([]);
+  // *Open in Kuma* is not a write and is unaffected.
+  expect(target.querySelectorAll("button.kuma").length).toBeGreaterThan(0);
+});
+
+/**
+ * The other direction, and the per-row rule with it: a live monitor is offered
+ * *Pause*, a tombstoned one *Resume*, and neither is offered both.
+ *
+ * The row's own `actions` decide it -- the backend has already filtered -- so
+ * what this asserts is that the tab renders what it is handed and invents
+ * nothing. A tab that read `tombstoned` itself would pass a fixture where the
+ * two agree and fail the day the backend narrows differently.
+ */
+test("pause is offered on a live monitor and resume on a paused one", async () => {
+  renderWrites([
+    { ...GITEA, actions: ["pause_monitor"] },
+    { ...PAUSED, actions: ["resume_monitor"] },
+    // An op the tab has no form for is skipped rather than drawn nameless.
+    { ...JIRA, actions: ["create_monitor"] },
+  ]);
+  await vi.waitFor(() => expect(target.querySelectorAll("li.mon").length).toBe(3));
+  expect(actionButtons()).toEqual(["gitea → Pause", "canary → Resume"]);
+});
+
+/** The payload each button queues, and that it is the row's own entity. */
+test("pressing pause queues a PauseMonitor for that monitor", async () => {
+  const { queued } = renderWrites([
+    { ...GITEA, actions: ["pause_monitor"] },
+    { ...PAUSED, actions: ["resume_monitor"] },
+  ]);
+  await vi.waitFor(() => expect(target.querySelectorAll("button.act").length).toBe(2));
+  const [pause, resume] = [...target.querySelectorAll<HTMLButtonElement>("button.act")];
+  pause!.click();
+  await vi.waitFor(() => expect(queued.length).toBe(1));
+  expect(queued[0]).toEqual({ PauseMonitor: { entity: GITEA.entity_id } });
+
+  resume!.click();
+  await vi.waitFor(() => expect(queued.length).toBe(2));
+  expect(queued[1]).toEqual({ ResumeMonitor: { entity: PAUSED.entity_id } });
+  // What the reader is told is that knobas *queued* it -- not that the monitor
+  // is paused, which is only true once the next poll reads it back.
+  await vi.waitFor(() =>
+    expect(toasts.items.map((item) => item.text)).toContain("Resume queued for canary"),
+  );
+});
+
+/**
+ * A refused write says so and leaves the roster alone.
+ *
+ * The direction that matters: a tab that dropped the rejection would leave a
+ * reader believing a monitor was paused -- and a paused monitor looks exactly
+ * like a monitor nobody touched until the next poll, so nothing on screen would
+ * ever correct them.
+ */
+test("a refused pause is reported and the row stays as it was", async () => {
+  renderWrites([{ ...GITEA, actions: ["pause_monitor"] }], {
+    code: "invalid",
+    message: "source \"kuma\" does not offer \"pause_monitor\"",
+  });
+  await vi.waitFor(() => expect(target.querySelectorAll("button.act").length).toBe(1));
+  toasts.items = [];
+  target.querySelector<HTMLButtonElement>("button.act")!.click();
+  // The toast store rather than the DOM: the toaster is the shell's and is not
+  // mounted inside this component's tree.
+  await vi.waitFor(() => expect(toasts.items.length).toBe(1));
+  expect(toasts.items[0]!.text).toContain("Could not queue that for gitea");
+  expect(toasts.items[0]!.tone).toBe("err");
+  expect(actionButtons()).toEqual(["gitea → Pause"]);
 });

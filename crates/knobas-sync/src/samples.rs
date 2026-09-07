@@ -616,6 +616,7 @@ mod tests {
             capabilities: Vec::new(),
             adapter_version: "0".into(),
             auth_methods: Vec::new(),
+            accepts_account: false,
             write_ops: Vec::new(),
             entity_kinds: vec![knobas_source::KindInfo {
                 id: "ticket".into(),

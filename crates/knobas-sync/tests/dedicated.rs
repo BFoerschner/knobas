@@ -41,6 +41,7 @@ impl Source for Parked {
             capabilities: Vec::new(),
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
+            accepts_account: false,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),

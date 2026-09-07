@@ -811,6 +811,30 @@ pub struct MonitorRow {
     /// apart. Empty for a monitor nothing is attached to, which the tab says
     /// in as many words.
     pub assets: Vec<MonitoredAsset>,
+    /// The write ops the tab may offer **on this monitor**, already filtered
+    /// to what its source declares and to what makes sense here (issue #452).
+    ///
+    /// `knobas_source::WriteOp` identifiers, and the inbox's precedent
+    /// exactly (`app/src/lib/inbox/actions.ts`: "the backend has already
+    /// filtered them to what that item's source declares"). Two filters, and
+    /// they answer different questions:
+    ///
+    /// * **The source's**, which is what an empty list usually means: an
+    ///   Uptime Kuma configured with only an API key declares no write ops at
+    ///   all, because pausing is a socket.io login the key cannot make. Adding
+    ///   the account to that source's keychain item fills this in for every
+    ///   row, with no other change anywhere.
+    /// * **The row's**: `pause_monitor` on a monitor that is live,
+    ///   `resume_monitor` on one that is [`tombstoned`](Self::tombstoned) --
+    ///   never both, because a monitor is one or the other.
+    ///
+    /// That second filter is the one worth stating, because through Kuma's
+    /// `/metrics` **paused and deleted are one observation**: a monitor that
+    /// left the mirror may have been paused or may have been deleted, and
+    /// nothing on this side can tell. So *Resume* is offered on both, and one
+    /// of them is refused by Kuma with its own words -- which is the source's
+    /// answer to give, not a guess to make here.
+    pub actions: Vec<String>,
     /// Its samples inside the bar's window, **oldest first**.
     ///
     /// Raw and not bucketed, because the bucketing is the tab's and is tested
@@ -1838,12 +1862,55 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
                 web_url: row.try_get("web_url")?,
                 tombstoned: row.try_get("tombstoned")?,
                 assets: attached.remove(&entity_id).unwrap_or_default(),
+                // Filled by `offer_actions`, which needs the keychain and so
+                // cannot happen inside a read over a pool. Empty here means
+                // "nothing has said yet", and empty *after* that means "this
+                // source offers nothing", which draws the same: no buttons.
+                actions: Vec::new(),
                 samples,
                 entity_id,
             })
         })
         .collect()
 }
+
+/// Fill in each row's [`actions`](MonitorRow::actions) from what each source
+/// offers (issue #452).
+///
+/// `offered` is the write ops per source id, as the *instances* declare them
+/// -- `crate::sources::crud::instance_write_ops` is what reads them, because
+/// for Uptime Kuma the answer depends on a credential and therefore on the
+/// keychain. A source missing from the map offers nothing, which is what a
+/// roster row for a source whose adapter is no longer compiled in should draw.
+///
+/// A free function over the rows rather than a branch inside the read, so the
+/// rule is testable without a database and without a keychain -- and so the
+/// read stays what it is, a read.
+pub fn offer_actions(rows: &mut [MonitorRow], offered: &HashMap<String, Vec<String>>) {
+    for row in rows {
+        let source = offered.get(&row.source_id).map_or(&[][..], Vec::as_slice);
+        let wanted = if row.tombstoned {
+            RESUME_MONITOR
+        } else {
+            PAUSE_MONITOR
+        };
+        row.actions = source
+            .iter()
+            .filter(|op| op.as_str() == wanted)
+            .cloned()
+            .collect();
+    }
+}
+
+/// The two identifiers the Monitors tab knows by name.
+///
+/// Spelled out rather than built from `WriteOp::identifier`, because this file
+/// is about what a *surface* offers and the ops it offers are a choice made
+/// here: the tab draws pause and resume, and a future `create_monitor` on the
+/// same source would need a control of its own before it belonged in this
+/// list. `the_tab_offers_the_ops_the_spi_names` holds the spellings to the SPI.
+const PAUSE_MONITOR: &str = "pause_monitor";
+const RESUME_MONITOR: &str = "resume_monitor";
 
 /// What the *Not monitored* roster draws: an asset nothing watches, with where
 /// it sits and what it is (spec #427 story 68, issue #449).
@@ -5224,6 +5291,82 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// The Monitors tab's per-row rule (issue #452), without a database and
+    /// without a keychain.
+    ///
+    /// Three things are asserted and each is a direction the tab can be wrong
+    /// in: a source that offers nothing draws nothing; a live monitor is
+    /// offered *pause* and never *resume*; a tombstoned one the other way
+    /// round. The last is the one a reader would call a bug either way if it
+    /// were reversed, because a tombstoned monitor is drawn as *Paused*.
+    #[test]
+    fn a_row_is_offered_the_action_its_state_has_a_use_for() {
+        let row = |source_id: &str, tombstoned: bool| MonitorRow {
+            entity_id: format!("{source_id}:8"),
+            source_id: source_id.to_owned(),
+            name: "canary".to_owned(),
+            state: None,
+            monitor_type: None,
+            target: None,
+            response_time_ms: None,
+            checked_at: chrono::Utc::now(),
+            uptime: Vec::new(),
+            cert_days_remaining: None,
+            web_url: None,
+            tombstoned,
+            assets: Vec::new(),
+            actions: Vec::new(),
+            samples: Vec::new(),
+        };
+        let offered = HashMap::from([(
+            "kuma".to_owned(),
+            vec![PAUSE_MONITOR.to_owned(), RESUME_MONITOR.to_owned()],
+        )]);
+
+        let mut rows = vec![
+            row("kuma", false),
+            row("kuma", true),
+            // A second Kuma, configured with only an API key: it is in the
+            // roster and offers nothing. The negative direction, and the one
+            // the whole ticket turns on.
+            row("kuma-eu", false),
+        ];
+        offer_actions(&mut rows, &offered);
+        assert_eq!(rows[0].actions, [PAUSE_MONITOR]);
+        assert_eq!(rows[1].actions, [RESUME_MONITOR]);
+        assert!(rows[2].actions.is_empty(), "{:?}", rows[2].actions);
+
+        // A source that offers only one of the two offers only that one: the
+        // row's rule narrows what the source declares, it never adds to it.
+        let half = HashMap::from([("kuma".to_owned(), vec![PAUSE_MONITOR.to_owned()])]);
+        offer_actions(&mut rows, &half);
+        assert_eq!(rows[0].actions, [PAUSE_MONITOR]);
+        assert!(rows[1].actions.is_empty(), "{:?}", rows[1].actions);
+    }
+
+    /// The two spellings this file writes out are the SPI's own.
+    ///
+    /// A tab offering `"pauseMonitor"` -- Kuma's event name -- would draw a
+    /// button whose write `submit_write` refuses, and the failure would read
+    /// as a source that does not support pausing.
+    #[test]
+    fn the_tab_offers_the_ops_the_spi_names() {
+        assert_eq!(
+            PAUSE_MONITOR,
+            knobas_source::WriteOp::PauseMonitor {
+                entity: "kuma:8".to_owned()
+            }
+            .identifier()
+        );
+        assert_eq!(
+            RESUME_MONITOR,
+            knobas_source::WriteOp::ResumeMonitor {
+                entity: "kuma:8".to_owned()
+            }
+            .identifier()
+        );
+    }
 
     const MIGRATION: &str =
         include_str!("../../../knobas-db/migrations/0017_the_estate_and_its_assets.sql");

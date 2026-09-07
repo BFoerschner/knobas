@@ -87,6 +87,7 @@ impl Source for Fake {
             capabilities: Vec::new(),
             adapter_version: "0".to_owned(),
             auth_methods: vec![AuthMethod::Pat],
+            accepts_account: false,
             write_ops: vec!["comment".to_owned()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
