@@ -1942,7 +1942,9 @@ The `Source` trait grows one method and the IPC surface grows one command, so th
 §10.8 entry and it is **§10.8's *`crates/knobas-source/src/**` and the IPC command schema — issue
 #498***, below. This section is the argument; that one is the list of frozen surfaces. Ratified
 by the orchestrator under #498's first acceptance criterion, which asks for the entry by name.
-Björn keeps the gate for frozen contracts and both are flagged for his review.
+Björn keeps the gate for frozen contracts and both are flagged for his review — ratified in his
+absence by the deputy's ruling of 2026-09-08 on #498
+(`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which found both sufficient as written.
 
 **`Source::reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>`.** The
 statuses this entity's workflow offers **from where it stands right now**, in the source's own
@@ -7862,7 +7864,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   above; this is the list of frozen surfaces it touches. **Ratified by the orchestrator under
   #498's first acceptance criterion, which asks for "the §10.8 entry [that] records the trait
   growth and the IPC read" by name. Björn keeps the gate for frozen contracts and this entry is
-  flagged for his review.**
+  flagged for his review — ratified in his absence by the deputy's ruling of 2026-09-08 on #498
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the trait
+  method, on battery clause 8 — the strictest of the three, since #146 had reserved a battery
+  clause change to Björn and this ticket's own first criterion asks for it by name — and on the
+  IPC read, and found both this entry and §9's section sufficient as written.**
 
   **`crates/knobas-source/src/**` — two additions, both additive:**
 
