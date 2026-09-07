@@ -109,7 +109,11 @@
     type RouteDetail,
     type RouteRow,
   } from "../ipc/assets";
-  import { unlink as realUnlink, type LinkEntry } from "../ipc/entity";
+  import {
+    submitWrite as realSubmitWrite,
+    unlink as realUnlink,
+    type LinkEntry,
+  } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
   import LinkDialog from "../detail/LinkDialog.svelte";
   import LinksPanel from "../detail/LinksPanel.svelte";
@@ -120,11 +124,16 @@
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
+  // The queued-write line, and the same one the Monitors tab draws for a pause:
+  // what a create can honestly say now is that knobas asked, and a toast is
+  // where this app says that.
+  import { push } from "../shell/toasts.svelte";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import AssetsTabs from "./AssetsTabs.svelte";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
+  import MonitorDialog from "./MonitorDialog.svelte";
   import MoveDialog from "./MoveDialog.svelte";
   import RouteDialog from "./RouteDialog.svelte";
   import {
@@ -202,6 +211,16 @@
      */
     previewEstateImport: typeof realPreviewEstateImport;
     applyEstateImport: typeof realApplyEstateImport;
+    /**
+     * Queueing *Create monitor for this asset* (#453).
+     *
+     * The ordinary write queue, one command, exactly as the Monitors tab
+     * queues a pause -- so a Kuma that is unreachable leaves a pending row
+     * rather than an error the reader has to remember. The *other* half of
+     * that gesture, recording the monitor's name on the asset, is
+     * {@link editAsset} and is already a port.
+     */
+    submitWrite: typeof realSubmitWrite;
   }
 
   let {
@@ -260,6 +279,7 @@
     unlink: realUnlink,
     previewEstateImport: realPreviewEstateImport,
     applyEstateImport: realApplyEstateImport,
+    submitWrite: realSubmitWrite,
     ...ports,
   };
 
@@ -361,6 +381,14 @@
    * asset selected to hang a button off.
    */
   let importing = $state(false);
+  /**
+   * Whether *Create monitor for this asset* is open (#453, story 70).
+   *
+   * A pane capability, unlike the Import: the form is prefilled from *this*
+   * asset's routes and hostname and the name it records goes on *this* asset,
+   * so it closes with the selection like every other dialog about one asset.
+   */
+  let creatingMonitor = $state(false);
   /** The property row being edited, by key, and the text in its field. */
   let editingKey = $state<string | null>(null);
   let draft = $state("");
@@ -1004,6 +1032,7 @@
     exposing = false;
     editingRoute = null;
     linking = false;
+    creatingMonitor = false;
     writeFailure = null;
   }
 
@@ -2115,6 +2144,30 @@
         {/if}
 
         <!--
+          **Create monitor for this asset** (#453, story 70), drawn only where
+          a source could take it.
+
+          Its own section rather than a button under *Monitoring*, because
+          *Monitoring* is drawn only when something already watches this asset
+          — and the asset this control is for is the one nothing watches yet.
+          A control that appeared the moment an asset acquired its first
+          monitor would be missing from every asset that needed it.
+
+          `monitor_targets` empty is the ordinary answer and the criterion:
+          without an account the Uptime Kuma source declares no write ops, so
+          nothing is here to draw. No disabled button and no explanatory line —
+          a reader with no monitoring source configured is not being kept from
+          anything, and *Sources* is where a Kuma is added.
+        -->
+        {#if detail.monitor_targets.length > 0}
+          <section class="grp mkmon">
+            <button class="btn sm" onclick={() => (creatingMonitor = true)}>
+              Create monitor for this asset
+            </button>
+          </section>
+        {/if}
+
+        <!--
           The selected route's **own** history (spec #427: routes *"have their
           own history"*), drawn only when the address names one. Beside the
           asset's rather than inside the route rows: a line per route in the
@@ -2224,6 +2277,27 @@
       // The address is unchanged — the asset is the same asset — so the
       // re-read is what puts the new link in the panel and the new count in
       // the column's badge.
+      revision += 1;
+    }}
+  />
+{/if}
+
+{#if creatingMonitor && detail}
+  {@const on = detail}
+  <MonitorDialog
+    detail={on}
+    record={io.editAsset}
+    queue={io.submitWrite}
+    onclose={() => (creatingMonitor = false)}
+    oncreated={({ name, source }) => {
+      creatingMonitor = false;
+      // The address is unchanged — the asset is the same asset — so the
+      // re-read is what puts the recorded name into the pane's *not in Kuma
+      // yet* list, which is where this monitor lives until the poll that
+      // mirrors it. The line says what knobas **did**: the monitor itself is
+      // up to a poll away, and claiming otherwise would be the optimistic
+      // update every other write in this view refuses to make.
+      push({ text: `${name} queued for ${source} — the next poll attaches it` });
       revision += 1;
     }}
   />

@@ -153,6 +153,7 @@ function assetNamed(id: string, name: string, monogram: string): AssetDetail {
     effective_owner: null,
     monitors: [],
     monitoring: [],
+    monitor_targets: [],
   };
 }
 

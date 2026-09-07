@@ -61,6 +61,7 @@ function detailOf(): AssetDetail {
     links: [],
     monitors: [],
     monitoring: [],
+    monitor_targets: [],
   };
 }
 

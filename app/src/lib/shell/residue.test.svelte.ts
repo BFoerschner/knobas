@@ -360,6 +360,7 @@ const ASSET_DETAIL = {
   effective_owner: null,
   monitors: [],
   monitoring: [],
+  monitor_targets: [],
 };
 
 const ASSET_TIMER = {

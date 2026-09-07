@@ -317,6 +317,7 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
           // every asset carries neither.
           monitors: [],
           monitoring: [],
+          monitor_targets: [],
         });
       } catch (cause) {
         return Promise.reject(cause);
