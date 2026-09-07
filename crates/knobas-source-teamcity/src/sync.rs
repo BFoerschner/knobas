@@ -86,6 +86,7 @@ const CEILING_PROBE: u32 = PAGE;
 
 pub(crate) async fn execute(
     source_id: &str,
+    base_url: &str,
     cfg: &TeamCityConfig,
     rest: &dyn Rest,
     cursor_in: Option<Cursor>,
@@ -247,7 +248,7 @@ pub(crate) async fn execute(
         if let Some(id) = type_id_of(&b.rec) {
             touched.insert(id.to_owned());
         }
-        builds.push(map::build_item(source_id, &b.raw, &b.rec));
+        builds.push(map::build_item(source_id, base_url, &b.raw, &b.rec));
     }
 
     // 6. The configurations of the builds that moved. Fetched from the same
@@ -846,6 +847,12 @@ mod tests {
     use knobas_source::contract::VecSink;
     use std::sync::Mutex;
 
+    /// The base URL these runs are configured with. Deliberately **not** the
+    /// host `FakeRest`'s records carry in their own `webUrl`, so a run that
+    /// stored the record's URL instead of composing one is visible here as
+    /// well as in `map`'s own tests (issue #495).
+    const TEST_BASE_URL: &str = "https://ci.tidewater.example";
+
     /// A [`Rest`] that answers locators the way TeamCity does: `sinceBuild` is
     /// exclusive, `count` truncates, `buildType` and `state` filter. Small
     /// enough to read, honest enough that the run's logic is actually
@@ -1243,7 +1250,7 @@ mod tests {
         cursor: Option<String>,
     ) -> (Vec<SyncItem>, String) {
         let mut sink = VecSink(Vec::new());
-        let next = execute("teamcity", cfg, rest, cursor, &mut sink)
+        let next = execute("teamcity", TEST_BASE_URL, cfg, rest, cursor, &mut sink)
             .await
             .expect("run");
         (sink.0, next)
@@ -1251,6 +1258,41 @@ mod tests {
 
     fn keys(items: &[SyncItem]) -> Vec<String> {
         items.iter().map(|i| i.entity.key.clone()).collect()
+    }
+
+    /// **The run carries the configured base URL down to every build it
+    /// emits** (issue #495).
+    ///
+    /// The seam `map`'s own tests cannot reach: `execute` is what holds the
+    /// base URL, and a run that stopped threading it through would leave the
+    /// mirror with no *Open in browser* on any build while every unit test
+    /// here still passed. These records carry no `webUrl` of their own -- as a
+    /// queued or running build's record does not -- so the URL asserted below
+    /// exists only because the adapter composed it.
+    #[tokio::test]
+    async fn every_build_a_run_emits_carries_a_url_composed_from_the_base_url() {
+        let rest = tidewater();
+        let (items, _) = run(&rest, &TeamCityConfig::default(), None).await;
+        let builds: Vec<&SyncItem> = items
+            .iter()
+            .filter(|i| i.kind == crate::KIND_BUILD)
+            .collect();
+        assert_eq!(builds.len(), 3, "{:?}", keys(&items));
+        for it in builds {
+            let id = it.entity.key.strip_prefix("build:").expect("build keys");
+            let config = it.payload["buildTypeId"].as_str().expect("buildTypeId");
+            assert!(
+                it.payload.get("webUrl").is_none(),
+                "the record itself names no URL, so the one below is knobas': {}",
+                it.payload
+            );
+            assert_eq!(
+                it.web_url,
+                Some(format!("{TEST_BASE_URL}/buildConfiguration/{config}/{id}")),
+                "{}",
+                it.entity.key
+            );
+        }
     }
 
     #[tokio::test]
@@ -1575,6 +1617,7 @@ mod tests {
         for kind in ["build_config", "build"] {
             let outcome = execute(
                 "teamcity",
+                TEST_BASE_URL,
                 &TeamCityConfig::default(),
                 &tidewater(),
                 None,
@@ -1601,6 +1644,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let err = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
@@ -1688,6 +1732,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let outcome = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
@@ -1871,6 +1916,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let error = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             None,
@@ -1949,6 +1995,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let err = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             None,
@@ -2091,6 +2138,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":400}"#.to_owned()),
@@ -2133,6 +2181,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let cursor = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":400}"#.to_owned()),
@@ -2357,6 +2406,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let err = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":5000}"#.to_owned()),
@@ -2471,6 +2521,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let cursor = execute(
             "teamcity",
+            TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
             Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
@@ -2525,6 +2576,7 @@ mod tests {
         let mut sink = VecSink(Vec::new());
         let cursor = execute(
             "teamcity",
+            TEST_BASE_URL,
             &cfg,
             &rest,
             Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),

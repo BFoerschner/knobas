@@ -1985,6 +1985,8 @@ knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::the_plaintext_err
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_bare_build_configuration_still_maps
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_and_a_configuration_cannot_share_a_key
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_configuration_maps_to_a_build_config_item
+knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_that_names_no_configuration_has_no_web_url
+knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_builds_web_url_is_composed_from_the_configured_base_url
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_canceled_build_reads_finished_canceled_and_never_unknown
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_finished_build_maps_to_a_build_item
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_queued_build_is_dated_by_its_queue_time
@@ -1992,6 +1994,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_running_build_is
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::an_undated_build_has_no_updated_at
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::items_are_namespaced_to_the_instance_not_the_adapter_kind
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::nothing_but_a_finished_unknown_is_relabelled
+knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_base_url_is_joined_the_way_a_user_pasted_it
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_key_is_the_id_and_the_title_is_the_number
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_newest_of_the_three_dates_wins
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::a_build_types_listing_parses
@@ -2043,6 +2046,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_oldest_first_s
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_unreadable_cursor_falls_back_to_a_full_sync
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_unreadably_large_queue_is_an_error_not_a_truncated_clamp
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::builds_are_emitted_oldest_first_whatever_the_server_sent
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::every_build_a_run_emits_carries_a_url_composed_from_the_base_url
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::exactly_the_ceiling_is_not_an_overflow
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::foreign_builds_advance_the_watermark_but_do_not_clamp_it
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::overflowing_one_run_is_an_error_not_a_silent_truncation
@@ -2065,6 +2069,7 @@ knobas-source-teamcity	test/live_teamcity	the_opening_page_carries_ids_but_promi
 knobas-source-teamcity	test/live_teamcity	the_state_vocabulary_is_queued_running_finished_and_nothing_else
 knobas-source-teamcity	test/live_teamcity	the_two_facet_dimensions_do_not_open_the_personal_facet
 knobas-source-teamcity	test/live_teamcity_seeded	a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands_still
+knobas-source-teamcity	test/live_teamcity_seeded	a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200
 knobas-source-teamcity	test/live_teamcity_seeded	passes_the_contract_battery_against_the_seeded_server
 knobas-source-teamcity	test/live_teamcity_seeded	test_connection_names_the_seeded_server_and_the_seed_account
 knobas-source-teamcity	test/live_teamcity_seeded	the_cleanup_reports_a_server_it_cannot_reach_rather_than_calling_the_build_gone

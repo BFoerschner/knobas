@@ -236,17 +236,26 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
         it.body_text
     );
     // P5: *Open in browser* renders from this alone. The shape is the one a
-    // TeamCity 2026.1 serves (issue #266): `/buildConfiguration/<cfg>/<id>`.
+    // TeamCity 2026.1 serves (issue #266): `/buildConfiguration/<cfg>/<id>`,
+    // under the base URL this source is configured with -- **the whole URL**,
+    // because since issue #495 the adapter composes it rather than reading
+    // one off the record. The record carries none: `BUILD_FIELDS` stopped
+    // asking for `webUrl` when the last reader of it went away, and mockd
+    // serves exactly what a selector asks for.
     assert!(
-        it.web_url
-            .as_deref()
-            .expect("the adapter can say where a human reads this")
-            .ends_with(&format!(
-                "/buildConfiguration/{}/{}",
-                failed.cfg, failed.num
-            )),
-        "{:?}",
-        it.web_url
+        it.payload.get("webUrl").is_none(),
+        "the record names no URL, so the one below is knobas' own: {}",
+        it.payload
+    );
+    assert_eq!(
+        it.web_url,
+        Some(format!(
+            "{}/buildConfiguration/{}/{}",
+            server.base_url().trim_end_matches('/'),
+            failed.cfg,
+            failed.num
+        )),
+        "the adapter can say where a human reads this"
     );
     // Interfaces §4.1: the source's own timestamp, never `now()`.
     assert!(
