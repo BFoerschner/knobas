@@ -231,7 +231,10 @@ note "pid $app_pid"
 step "waiting for a window (up to ${WINDOW_TIMEOUT} s)"
 "$ax" wait-window "$app_pid" "$WINDOW_TIMEOUT" | sed 's/^/desktop-witness:   window titled /'
 
-instances=$(pgrep -f 'knobas\.app/Contents/MacOS/' | wc -l | tr -d ' ')
+# `|| true` because `set -o pipefail` turns pgrep's "found nothing" exit 1
+# into an aborted run, and "no instances" is a verdict this line has to be
+# allowed to reach rather than a reason to die without saying so.
+instances=$(pgrep -f 'knobas\.app/Contents/MacOS/' | wc -l | tr -d ' ' || true)
 [ "$instances" = 1 ] || fail "$instances knobas processes are running, not one." \
     "That is the Launch Services caveat in the README: a second copy was" \
     "started from a path this run did not launch."
