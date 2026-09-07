@@ -413,15 +413,19 @@ macro_rules! host_of {
 /// (`app/src/lib/detail/relations.ts` gives the sentence and its inverse).
 ///
 /// Two ways an asset states a host, unioned rather than written as two rules,
-/// because they are one fact -- *knobas knows this asset by that name* -- and a
-/// pair the two both find must produce one suggestion, which the driver's
-/// `distinct on` then guarantees:
+/// because they are one fact -- *knobas knows this asset by that name*:
 ///
 /// * the **hostname property** (`knobas_core::asset::TYPES`: a hypervisor's
 ///   and a VM's), and
 /// * the host of a **route**, credited to
 ///   `coalesce(target_id, asset_id)` -- *the asset the route lands on, or the
 ///   one that exposes it when it lands on nothing knobas knows*.
+///
+/// A pair both arms find must still produce one suggestion, and the driver
+/// guarantees that twice over: `distinct on` collapses the candidates, and `on
+/// conflict do nothing` would swallow the survivor anyway. Measured, because
+/// the second half is easy to forget -- deleting the `distinct on` leaves
+/// every assertion in this rule's battery passing.
 ///
 /// That `coalesce` is the one place this rule reads #451's sentence -- "the
 /// host of a route the asset exposes" -- as naming *which routes are in play*

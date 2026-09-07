@@ -832,10 +832,12 @@ async fn a_route_with_no_target_credits_the_asset_that_exposes_it() {
 /// An asset both arms find is proposed **once**, and so is an asset exposing
 /// several routes on one host.
 ///
-/// The driver's `distinct on` is what guarantees it, and without a fixture
-/// that reaches the same pair twice the guarantee is a sentence in a comment:
-/// the unique index would refuse the second row, and refusing it is a *failed
-/// statement*, not a skipped candidate.
+/// The driver guarantees it twice over, and without a fixture that reaches the
+/// same pair three times neither half is exercised at all. Which half carries
+/// it was measured rather than assumed: deleting the head's `distinct on`
+/// leaves this test green, because the tail's `on conflict do nothing` then
+/// swallows the duplicate rows. So what is asserted here is the promise --
+/// **one proposal** -- and not the clause that happens to keep it.
 #[tokio::test]
 async fn an_asset_a_monitor_reaches_twice_is_proposed_once() {
     let pool = scratch().await;
