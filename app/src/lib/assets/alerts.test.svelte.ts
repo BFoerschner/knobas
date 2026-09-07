@@ -19,7 +19,6 @@ function alert(id: number, monitor: string, state: "down" | "warn" = "down"): Op
     id,
     monitor_id: `kuma:${id}`,
     monitor_name: monitor,
-    web_url: null,
     state,
     opened_at: "2026-09-07T08:00:00Z",
     acked_at: null,

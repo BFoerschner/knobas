@@ -74,7 +74,6 @@ function alert(over: Partial<OpenAlert> = {}): OpenAlert {
     id: 1,
     monitor_id: "kuma:1",
     monitor_name: "postgres (tunnel)",
-    web_url: null,
     state: "down",
     opened_at: new Date(2026, 8, 7, 8, 30, 0, 0).toISOString(),
     acked_at: null,
@@ -166,7 +165,7 @@ test("an open alert names the monitor, the asset, its path and how long", async 
  *
  * *Which* of the two is the question the row exists to answer, and one row
  * naming both would answer neither — a VM and the container on it can honestly
- * both be watched by one HTTP check on the product, and the reader's next step
+ * both be watched by one HTTP monitor on the product, and the reader's next step
  * is different for each.
  */
 test("one alert on a monitor watching two assets draws a row each", async () => {

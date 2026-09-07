@@ -69,7 +69,7 @@
 //!   that answers both, plus the worst status *strictly underneath*, which is
 //!   what colours the badge. Monitors joined the "own health" half in #444,
 //!   and `problems_inside` counts over the combined severity, so a container
-//!   nobody has rated with a `down` check on it is a problem inside its VM.
+//!   nobody has rated with a `down` monitor on it is a problem inside its VM.
 //!
 //! # Assets in contexts (#434)
 //!
@@ -171,7 +171,7 @@
 //! source room and [`AssetDetail::monitoring`] fills the pane's *monitoring*
 //! section (#445). Story 37's other half landed with #444: [`ROLLUP`] takes
 //! the newest sample of every monitor attached to an asset, so a container is
-//! red because a check on it is red and not only because somebody rated it --
+//! red because a monitor on it is red and not only because somebody rated it --
 //! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
 //! the estate's own list of what is wrong, one read that the top strip counts
 //! and the Assets view draws. The **ack** on an alert is #446's, with the
@@ -882,12 +882,30 @@ knobas_core::closed_vocabulary! {
     }
 }
 
+impl AlertState {
+    /// The state a stored spelling belongs to.
+    ///
+    /// [`AssetStatus::parse`]'s shape, and its neighbours' -- one rule per
+    /// vocabulary in this file rather than a fourth copy of it inlined at a
+    /// call site. Unreachable from `monitor_alert_state_chk`, and an error
+    /// rather than a default all the same: a row carrying a word this build
+    /// has no meaning for is a database this build should not be drawing, not
+    /// one to guess about.
+    fn parse(value: &str) -> Result<Self, IpcError> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|state| state.as_str() == value)
+            .ok_or_else(|| IpcError::internal(format!("unknown alert state {value:?}")))
+    }
+}
+
 /// One asset an alert's monitor watches, as the estate's list of open alerts
 /// names it.
 ///
 /// A list and not a field, because `monitored-by` is an ordinary link and
-/// nothing stops two assets naming one Uptime Kuma check -- a VM and the
-/// container on it can honestly both be watched by one HTTP check on the
+/// nothing stops two assets naming one Uptime Kuma monitor -- a VM and the
+/// container on it can honestly both be watched by one HTTP monitor on the
 /// product. **Empty is a real answer**: a monitor attached to nothing still
 /// opens an alert, and hiding it would make the estate quietest about exactly
 /// the monitors nobody has finished wiring up.
@@ -922,10 +940,13 @@ pub struct OpenAlert {
     pub monitor_id: String,
     /// The monitor's name, which is the name an estate file uses to ask for
     /// it.
+    ///
+    /// The name and **not** its page in Uptime Kuma: nothing this ticket draws
+    /// opens one, and a field on the wire that no surface reads is a field
+    /// whose shape nothing can be wrong about. #449's cards are where a link
+    /// into Kuma belongs, and [`AttachedMonitor::web_url`] is where one
+    /// already is.
     pub monitor_name: String,
-    /// Its own page in Uptime Kuma, or `null` when there is none left to open
-    /// -- straight from the mirror row, like [`AttachedMonitor::web_url`].
-    pub web_url: Option<String>,
     pub state: AlertState,
     pub opened_at: chrono::DateTime<chrono::Utc>,
     /// When somebody said they had seen it, or `null`. Written by #446's ack;
@@ -2180,15 +2201,23 @@ async fn tile_rows(
 /// own row and stays open until the monitor recovers, so a monitor paused in
 /// Kuma or belonging to a source the reader disabled keeps its open alert and
 /// keeps showing it. Hiding it would be knobas quietly dropping the trouble it
-/// is least able to see the end of. The join to `knobas.entity` is for the
-/// monitor's *name*, which a tombstoned entity still carries; `web_url` comes
-/// from the mirror by a left join, so it is `null` for exactly the monitors
-/// that no longer have a page to open.
+/// is least able to see the end of.
+///
+/// **The consequence, said out loud: a monitor *deleted* in Kuma can never
+/// recover, so its alert never closes.** `CONTEXT.md` and spec #427 both say
+/// "open until the monitor recovers", and nothing in this ticket, in #446's
+/// ack (which leaves the alert open by design) or in #449's cards closes one
+/// by hand. A paused monitor resumed is sampled again and closes normally; a
+/// deleted one leaves when its source is deleted, because `0022` cascades. A
+/// close-by-hand is a rule neither the ticket nor the spec states, and it is
+/// flagged in `docs/contract.md` §10.8 rather than invented here.
+///
+/// The join to `knobas.entity` is for the monitor's *name*, which a
+/// tombstoned entity still carries.
 const OPEN_ALERTS: &str = "select a.id, a.entity_id, e.title as monitor_name,
-            i.web_url, a.state, a.opened_at, a.acked_at
+            a.state, a.opened_at, a.acked_at
        from knobas.monitor_alert a
        join knobas.entity e on e.id = a.entity_id
-       left join sync.live_item i on i.entity_id = a.entity_id
       where a.closed_at is null
       order by a.opened_at desc, a.id desc";
 
@@ -2259,16 +2288,7 @@ pub async fn open_alerts(pool: &PgPool) -> Result<Vec<OpenAlert>, IpcError> {
             Ok(OpenAlert {
                 id: row.try_get("id")?,
                 monitor_name: row.try_get("monitor_name")?,
-                web_url: row.try_get("web_url")?,
-                state: AlertState::ALL
-                    .iter()
-                    .copied()
-                    .find(|known| known.as_str() == state)
-                    // Unreachable from `monitor_alert_state_chk`, and an error
-                    // rather than a default all the same: a row carrying a
-                    // word this build has no meaning for is a database this
-                    // build should not be drawing, not one to guess about.
-                    .ok_or_else(|| IpcError::internal(format!("unknown alert state {state:?}")))?,
+                state: AlertState::parse(&state)?,
                 opened_at: row.try_get("opened_at")?,
                 acked_at: row.try_get("acked_at")?,
                 assets: watching.remove(&monitor_id).unwrap_or_default(),
@@ -5431,7 +5451,7 @@ mod tests {
     /// own status and a monitor's newest sample are ranked separately in the
     /// statement (#444) and either could be edited on its own -- and a monitor
     /// ranked differently from an asset would make a `down` container read as
-    /// worse or milder than a `down` check on it.
+    /// worse or milder than a `down` monitor on it.
     #[test]
     fn the_rollup_ranks_the_statuses_the_way_rust_does() {
         let mut seen = 0;
@@ -5491,7 +5511,7 @@ mod tests {
     /// tied to the enum here rather than as a list of two words: `<= warn` is
     /// `down` and `warn` exactly because `up` and `none` rank above it, which
     /// the two assertions below state. A container nobody has rated with a
-    /// `down` check on it is a problem inside its VM, and that is the whole
+    /// `down` monitor on it is a problem inside its VM, and that is the whole
     /// reason the count moved off `d.status`.
     #[test]
     fn the_rollup_counts_only_what_is_underneath_and_only_the_two_bad_statuses() {

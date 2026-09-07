@@ -37,9 +37,9 @@
 -- deleted with `purge_items`) takes its alerts with it, and a *tombstoned*
 -- monitor -- paused in Kuma, or deleted there -- keeps its entity row and
 -- therefore keeps an open alert. That second half is deliberate and it is the
--- conservative direction: pausing a check is not the monitor recovering, and
--- an alert that closed itself because somebody silenced the thing watching it
--- would be knobas reporting a fix nobody made.
+-- conservative direction: pausing a monitor is not it recovering, and an
+-- alert that closed itself because somebody silenced the thing watching an
+-- asset would be knobas reporting a fix nobody made.
 --
 -- ## `state` is the crossing, and it is two words and not five
 --

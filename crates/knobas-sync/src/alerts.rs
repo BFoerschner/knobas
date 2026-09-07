@@ -327,7 +327,7 @@ mod tests {
                 Some("maintenance"),
                 true,
                 Nothing,
-                "silencing a check is not fixing it",
+                "silencing a monitor is not fixing it",
             ),
         ];
         for (newest, already_open, want, why) in cases {

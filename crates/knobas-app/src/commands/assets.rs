@@ -1051,9 +1051,9 @@ mod tests {
     /// The open alert, its two-word state and the asset it names, in the shape
     /// the top strip counts and the Assets view lists (#444).
     ///
-    /// Exercised with **both** optional fields populated and one asset in the
-    /// list: `None` and `[]` serialize to shapes any declared type accepts, so
-    /// the populated one is the one that tells the two languages apart -- the
+    /// Exercised with `acked_at` populated and one asset in the list: `None`
+    /// and `[]` serialize to shapes any declared type accepts, so the
+    /// populated one is the one that tells the two languages apart -- the
     /// discipline `the_asset_property_matches_its_typescript_mirror` states
     /// above.
     #[test]
@@ -1076,7 +1076,6 @@ mod tests {
                 id: 12,
                 monitor_id: "kuma:7".to_owned(),
                 monitor_name: "jira (tunnel)".to_owned(),
-                web_url: Some("https://kuma.local/dashboard/7".to_owned()),
                 state: crate::assets::AlertState::Down,
                 opened_at: chrono::Utc::now(),
                 acked_at: Some(chrono::Utc::now()),
@@ -1087,7 +1086,6 @@ mod tests {
                 "id",
                 "monitor_id",
                 "monitor_name",
-                "web_url",
                 "state",
                 "opened_at",
                 "acked_at",

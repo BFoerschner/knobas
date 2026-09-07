@@ -874,7 +874,7 @@ export type AlertState = "down" | "warn";
  * One asset an alert's monitor watches — `assets::AlertAsset`.
  *
  * A list on the alert and not a field, because `monitored-by` is an ordinary
- * link and two assets may name one check. Empty is a real answer: a monitor
+ * link and two assets may name one monitor. Empty is a real answer: a monitor
  * attached to nothing still opens an alert.
  */
 export interface AlertAsset {
@@ -897,8 +897,6 @@ export interface OpenAlert {
   /** The monitor's entity id. */
   monitor_id: string;
   monitor_name: string;
-  /** Its own page in Uptime Kuma, or `null` when there is none left to open. */
-  web_url: string | null;
   state: AlertState;
   opened_at: string;
   /** When somebody said they had seen it. Written by #446's ack. */

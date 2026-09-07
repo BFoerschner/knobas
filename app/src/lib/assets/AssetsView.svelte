@@ -63,9 +63,9 @@
   every open alert in the estate, one row per asset the broken monitor watches,
   each a click to that asset. The same store the top strip counts, so the badge
   and this list cannot be a moment apart. Health takes the monitors from this
-  ticket too, so a row is red because a check on it is red and not only because
-  somebody rated it. Ack, the cards and the "Not monitored" roster are #446's
-  and #449's.
+  ticket too, so a row is red because a monitor on it is red and not only
+  because somebody rated it. Ack, the cards and the "Not monitored" roster are
+  #446's and #449's.
 
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2

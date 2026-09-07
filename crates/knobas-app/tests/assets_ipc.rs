@@ -2793,12 +2793,12 @@ async fn only_the_newest_sample_colours_an_asset() {
 }
 
 /// Story 38: **a paused monitor reads as none in the rollup**, so a
-/// deliberately silenced check does not colour a branch.
+/// deliberately silenced monitor does not colour a branch.
 ///
 /// The pane still lists it and marks it (#445's
 /// `a_paused_monitor_stays_in_the_section_with_no_state_and_no_link`), which
 /// is the pair of statements this feature has to make at once: *somebody
-/// silenced this check* and *this branch is not red because of it*.
+/// silenced this monitor* and *this branch is not red because of it*.
 #[tokio::test]
 async fn a_paused_monitor_colours_nothing_and_is_still_listed() {
     let pool = pool("assets-health-paused").await;
@@ -2927,20 +2927,13 @@ async fn only_a_monitored_by_link_to_a_monitor_colours_an_asset() {
 async fn the_open_alert_read_names_the_monitor_and_every_asset_it_watches() {
     let pool = pool("assets-open-alerts").await;
     let estate = two_branches(&pool).await;
-    let older = monitor_reading(
-        &pool,
-        "kuma",
-        "postgres (tunnel)",
-        Some("down"),
-        Some("https://kuma.local/dashboard/1"),
-    )
-    .await;
+    let older = monitor_reading(&pool, "kuma", "postgres (tunnel)", Some("down"), None).await;
     let newer = monitor_reading(&pool, "kuma", "canary", Some("up"), None).await;
     let well = monitor_reading(&pool, "kuma", "gitea", Some("up"), None).await;
 
     // The first monitor watches two assets, which one `monitored-by` link
     // each is: a VM and the container on it can honestly both be watched by
-    // one check on the product.
+    // one monitor on the product.
     link_as(&pool, &estate.postgres.id, &older, "monitored-by").await;
     link_as(&pool, &estate.db.id, &older, "monitored-by").await;
     link_as(&pool, &estate.nginx.id, &newer, "monitored-by").await;
@@ -2997,15 +2990,6 @@ async fn the_open_alert_read_names_the_monitor_and_every_asset_it_watches() {
         ],
         "the newest first, each with the monitor it is about and every asset it watches"
     );
-    assert_eq!(
-        open[1].web_url.as_deref(),
-        Some("https://kuma.local/dashboard/1"),
-        "and the page in Kuma the mirror row carries"
-    );
-    assert_eq!(
-        open[0].web_url, None,
-        "a monitor with no page has none to offer"
-    );
 }
 
 /// An alert whose monitor is watching nothing is still read.
@@ -3036,26 +3020,25 @@ async fn an_alert_on_a_monitor_that_watches_nothing_is_still_in_the_list() {
 ///
 /// The counterpart of `a_paused_monitor_colours_nothing_and_is_still_listed`,
 /// and the one place this read deliberately does *not* go through
-/// `sync.live_item`: pausing a check is not the monitor recovering, so the
-/// alert stands and the reader is told. What it loses is the page in Kuma,
-/// which a monitor Kuma no longer publishes does not have.
+/// `sync.live_item`: pausing a monitor is not it recovering, so the
+/// alert stands and the reader is told. The name it had is still on the
+/// tombstoned entity row, which is what the read joins for.
+///
+/// The consequence `OPEN_ALERTS` names out loud is here too: nothing in this
+/// ticket closes this alert. A monitor *resumed* is sampled again and closes
+/// normally; a monitor *deleted* in Kuma can never recover, and its alert
+/// leaves only with its source. §10.8 flags that for Björn rather than
+/// inventing a close-by-hand neither the ticket nor the spec states.
 #[tokio::test]
 async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
     let pool = pool("assets-open-alerts-paused").await;
     let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
-    let check = monitor_reading(
-        &pool,
-        "kuma",
-        "gitea",
-        Some("down"),
-        Some("https://kuma.local/dashboard/1"),
-    )
-    .await;
-    link_as(&pool, &vm.id, &check, "monitored-by").await;
-    opened(&pool, &check, "down").await;
+    let watch = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    link_as(&pool, &vm.id, &watch, "monitored-by").await;
+    opened(&pool, &watch, "down").await;
 
     sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
-        .bind(&check)
+        .bind(&watch)
         .execute(&pool)
         .await
         .expect("the tombstone");
@@ -3071,10 +3054,6 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
             .collect::<Vec<_>>(),
         ["vm-db-01"],
         "and the asset it is about"
-    );
-    assert_eq!(
-        open[0].web_url, None,
-        "a monitor out of the mirror has no page left to open"
     );
 }
 
