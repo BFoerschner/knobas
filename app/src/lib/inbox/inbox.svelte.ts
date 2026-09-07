@@ -269,7 +269,7 @@ export interface SnoozePreset {
  * The third preset is offered only when there is a date to hang it on, which
  * for M2 is a credential expiry: *after it expires* is a real answer for a
  * token and nonsense for a review request, and a preset that computes to the
- * same thing as *tomorrow* on four of the five categories is a button that
+ * same thing as *tomorrow* on five of the six categories is a button that
  * teaches the reader nothing.
  */
 export function snoozePresets(now: Date, deadline?: Date | null): SnoozePreset[] {

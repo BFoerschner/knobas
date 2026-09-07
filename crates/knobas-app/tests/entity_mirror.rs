@@ -763,7 +763,7 @@ const INBOX_ITEM_FIELDS: &[&str] = &[
 /// nullable field on this shape is exercised as `None` somewhere.
 ///
 /// That matters more here than on most shapes. `entity_id` and `kind` are null
-/// for exactly one of the five categories, so a `skip_serializing_if` added to
+/// for exactly one of the six categories, so a `skip_serializing_if` added to
 /// either would pass every test written against a review request and hand the
 /// inbox view `undefined` on the one row that needs the *Open* button hidden.
 fn inbox_expiry() -> knobas_core::inbox::InboxItem {
