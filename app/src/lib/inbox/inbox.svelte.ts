@@ -27,6 +27,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS, ipcErrorMessage } from "../ipc";
+import { ackAlert as realAck } from "../ipc/assets";
 import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
@@ -42,6 +43,17 @@ export interface InboxPorts {
   inboxCount: () => Promise<number>;
   snoozeInboxItem: (itemKey: string, until: string) => Promise<void>;
   completeInboxItem: (itemKey: string) => Promise<void>;
+  /**
+   * Ack the open alert of one monitor (#446).
+   *
+   * The one answer on this store that is **not** an inbox command: acking is
+   * an estate write (`ack_alert`), and what clears the item is the alert
+   * reading acked rather than an `inbox_state` row. It is here anyway because
+   * the row that offers it is an inbox row and the re-read afterwards is this
+   * store's — a second store for one button would be a second answer to "what
+   * is in the inbox now".
+   */
+  ackAlert: (monitorId: string) => Promise<void>;
   listen: (event: string, handler: () => void) => Promise<() => void>;
 }
 
@@ -74,6 +86,13 @@ export interface Inbox {
   snooze(itemKey: string, until: Date): Promise<void>;
   complete(itemKey: string): Promise<void>;
   /**
+   * Seen, not fixed: clears this alert's item and leaves the alert open.
+   *
+   * Takes the **monitor**, which is the alert item's subject — the second half
+   * of its `<category>:<subject>` key.
+   */
+  ack(monitorId: string): Promise<void>;
+  /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
    *
@@ -97,6 +116,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
     inboxCount: () => realCount(),
     snoozeInboxItem: (itemKey, until) => realSnooze(itemKey, until),
     completeInboxItem: (itemKey) => realComplete(itemKey),
+    ackAlert: async (monitorId) => {
+      await realAck(monitorId);
+    },
     listen: (event, handler) => tauriListen(event, () => handler()),
   };
 
@@ -186,6 +208,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
     refresh,
     snooze: (itemKey, until) => act(() => io.snoozeInboxItem(itemKey, until.toISOString())),
     complete: (itemKey) => act(() => io.completeInboxItem(itemKey)),
+    ack: (monitorId) => act(() => io.ackAlert(monitorId)),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

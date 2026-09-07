@@ -776,7 +776,8 @@ export type InboxCategory =
   | "mention"
   | "failed_build"
   | "new_assignment"
-  | "credential_expiry";
+  | "credential_expiry"
+  | "alert";
 
 /**
  * Which shelf a read wants — `knobas_core::inbox::Shelf`.

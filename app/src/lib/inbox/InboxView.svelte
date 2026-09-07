@@ -2,8 +2,8 @@
   The inbox — one actionable stream (issue #45, spec §8).
 
   One queue, not a scored one: review requests, mentions, failed builds, new
-  assignments and credential expiry, newest first, with the action each item is
-  asking for inline.
+  assignments, credential expiry and — since #446 — alerts on assets a context
+  holds, newest first, with the action each item is asking for inline.
 
   **The snoozed shelf is a section, not a second view.** Story 15 is that
   snoozing is deferral rather than deletion, and a deferred item that vanished
@@ -61,8 +61,31 @@
    * mirror's word and the router's kind segment is the view's — resolving the
    * one from the other is `get_entity`'s job and it already does it.
    */
-  function open(entityId: string) {
-    router.go(hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId } }));
+  function open(entry: InboxEntry) {
+    const entityId = entry.item.entity_id;
+    if (entityId === null) return;
+    // An alert's way in is the **Tree at the affected asset** (spec #427 story
+    // 61), not a room detail: its `entity_id` is the asset the monitor watches
+    // and `#/asset/<id>` re-opens the Tree at its path. Every other category's
+    // subject is a mirrored item, and a room detail is where those are read.
+    router.go(
+      entry.item.category === "alert"
+        ? hashFor({ view: "assets", tab: "tree", assetId: entityId })
+        : hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId } }),
+    );
+  }
+
+  /**
+   * The subject half of an item's key — `<category>:<subject>`, the shape
+   * `knobas_core::inbox` documents.
+   *
+   * For an alert that is the **monitor's entity id**, which is what
+   * `ackAlert` takes: there is at most one open alert per monitor, so the
+   * monitor is a complete address for it and the row needs no second read to
+   * find a row id.
+   */
+  function subjectOf(key: string): string {
+    return key.slice(key.indexOf(":") + 1);
   }
 
   async function openInBrowser(url: string) {
@@ -214,7 +237,8 @@
       <p class="empty">
         {#if ctxFilter === ""}
           Nothing needs you. Review requests, mentions, failed builds on your work, new
-          assignments and expiring credentials arrive here.
+          assignments, expiring credentials and alerts on what your contexts hold arrive
+          here.
         {:else}
           Nothing here needs you — nothing in the inbox is about this context's members.
         {/if}
@@ -232,7 +256,21 @@
         </span>
         <span class="acts">
           {#if entry.item.entity_id}
-            <button class="btn sm" onclick={() => open(entry.item.entity_id!)}>Open</button>
+            <button class="btn sm" onclick={() => open(entry)}>Open</button>
+          {/if}
+          {#if entry.item.category === "alert"}
+            <!--
+              Seen, not fixed (story 62): this clears the row and leaves the
+              alert open in the Assets view and the top strip, where it stays
+              until the monitor recovers.
+            -->
+            <button
+              class="btn sm pri"
+              disabled={inbox.busy}
+              onclick={() => void inbox.ack(subjectOf(entry.item.key))}
+            >
+              Ack
+            </button>
           {/if}
           {#if entry.item.web_url}
             <button class="btn sm ghost" onclick={() => void openInBrowser(entry.item.web_url!)}>

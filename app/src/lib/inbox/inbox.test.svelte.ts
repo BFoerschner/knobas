@@ -57,6 +57,14 @@ vi.mock("../ipc/entity", () => ({
   submitWrite: (payload: unknown) => record(`write ${JSON.stringify(payload)}`, undefined),
 }));
 
+// The ack is an **estate** command and not an inbox one (#446): what clears
+// the item is the alert reading acked, which is `assets::ack_alert`'s write.
+// Only the one export this store imports, so a call to anything else in that
+// module from this window would fail here rather than reach a real bridge.
+vi.mock("../ipc/assets", () => ({
+  ackAlert: (monitorId: string) => record(`ack ${monitorId}`, undefined),
+}));
+
 /** No Tauri bridge in jsdom; the view must still mount. */
 vi.mock("@tauri-apps/api/event", () => ({
   listen: () => Promise.resolve(() => {}),
@@ -494,4 +502,77 @@ test("the context filter keeps members, counts them as here, and clears whole", 
 
   view.stop();
   stopContexts();
+});
+
+
+// -- the alert (#446) --------------------------------------------------------
+
+/** One alert row, as the backend derives it: subject the monitor, way in the asset. */
+function alertEntry(): InboxEntry {
+  return entry({
+    key: "alert:kuma:7",
+    category: "alert",
+    source_id: "kuma",
+    entity_id: "asset:hel1",
+    kind: "asset",
+    title: "jira (tunnel)",
+    reason: "hel / hel1 is down",
+    web_url: null,
+  });
+}
+
+/**
+ * Story 61: *"opening an alert from the inbox lands in the Tree at the
+ * affected asset"* — `#/asset/<id>`, and **not** the `#/entity/<id>` room
+ * detail every other category opens.
+ *
+ * The row also has to say which machine and which check, which is the two
+ * fields the backend fills: the monitor's name as the title and the asset's
+ * whole path in the reason.
+ */
+test("an alert opens the Tree at the affected asset and names both", async () => {
+  stream = [alertEntry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  expect(view.text()).toContain("jira (tunnel)");
+  expect(view.text()).toContain("hel / hel1 is down");
+  view.button("Open")!.click();
+  flushSync();
+  expect(router.hash).toBe("#/asset/asset:hel1");
+  view.stop();
+});
+
+/**
+ * Story 62: *ack* is offered on an alert and on nothing else, and it sends the
+ * **monitor** — the subject half of the item's own key — rather than a row id
+ * this window would have to fetch.
+ */
+test("acking an alert sends the monitor out of the item's key", async () => {
+  stream = [alertEntry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  view.button("Ack")!.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+  expect(calls).toContain("ack kuma:7");
+  view.stop();
+});
+
+/** And no other category offers it: acking a mention would mean nothing. */
+test("only an alert offers ack", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  expect(view.button("Ack")).toBeUndefined();
+  view.stop();
 });

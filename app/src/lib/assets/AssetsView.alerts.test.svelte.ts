@@ -14,11 +14,12 @@
  * goes stale. What is here is the part only this view can get wrong — that the
  * strip is absent when nothing is wrong, that a monitor watching two assets
  * draws a row each, that a monitor watching nothing is still drawn, that an
- * acked alert says so rather than disappearing, and that a row is a click to
- * the **asset** rather than to an alert that has no address.
+ * acked alert says so rather than disappearing, that a row is a click to the
+ * **asset** rather than to an alert that has no address, and — since #446 —
+ * that the ack and the recovery read as sentences in the asset's history.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetRow, OpenAlert } from "../ipc/assets";
 import { createRouter } from "../shell/router.svelte";
@@ -274,4 +275,73 @@ test("the strip follows the store as alerts open and close", async () => {
   await alerts.refresh();
   flushSync();
   expect(target.querySelector(".alerts"), "a healed estate loses the strip").toBeNull();
+});
+
+/**
+ * The two lines an alert leaves behind on the asset (#446), as the pane draws
+ * them: the ack a person made and the recovery the estate made.
+ *
+ * Every other verb this pane has no arm for renders as
+ * `nothing: nothing → nothing`, which is what these two would do without one
+ * — the failure #439's import lines already had once, on every asset in the
+ * demo profile.
+ */
+test("the ack and the recovery are sentences in the asset's history", async () => {
+  const alerts = alertsHolding([]);
+  await alerts.refresh();
+  // The pane, not the strip: the history is what the *selected* asset draws.
+  location.hash = "#/asset/asset:hel1";
+  const router = createRouter();
+  app = mount(AssetsView, {
+    target,
+    props: {
+      router,
+      now: () => NOW,
+      alerts,
+      ports: {
+        assetTypes: () => Promise.resolve([]),
+        assetTree: (parentId?: string | null) =>
+          Promise.resolve((parentId ?? null) === null ? [SITE] : []),
+        getAsset: () =>
+          Promise.resolve({
+            ...detailOf(),
+            history: [
+              {
+                id: 2,
+                at: new Date(2026, 8, 7, 8, 45, 0, 0).toISOString(),
+                actor: "sync:kuma",
+                verb: "recovered",
+                entity_id: SITE.id,
+                detail: { monitor: "kuma:1", monitor_name: "postgres (tunnel)" },
+              },
+              {
+                id: 1,
+                at: new Date(2026, 8, 7, 8, 40, 0, 0).toISOString(),
+                actor: "user",
+                verb: "acked",
+                entity_id: SITE.id,
+                detail: {
+                  item_key: "alert:kuma:1",
+                  monitor: "kuma:1",
+                  monitor_name: "postgres (tunnel)",
+                  state: "down",
+                },
+              },
+            ],
+          }),
+      },
+    },
+  });
+  flushSync();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.textContent ?? "").toContain("Alert closed");
+  });
+
+  const text = (target.textContent ?? "").replace(/\s+/g, " ");
+  expect(text).toContain("Alert acked: postgres (tunnel) is down");
+  expect(text).toContain("Alert closed: postgres (tunnel) recovered");
+  expect(text, "neither falls through to the old-to-new composition").not.toContain(
+    "nothing → nothing",
+  );
 });
