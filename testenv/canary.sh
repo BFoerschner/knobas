@@ -14,10 +14,15 @@
 # TeamCity runs, the servers are the estate). Stopping any of those to make a
 # red is how one stream's live run becomes another's mystery failure. So the
 # estate gets one check that exists purely to be knocked over, whose whole
-# blast radius is a port nobody else binds. M4.1's live recipe will release the
-# port, wait for `canary` to read down, ack the alert, bind it again and wait
-# for the recovery -- and will stop no container at all (M4 spec, issue #427).
-# No recipe uses this script yet; nothing in the justfile mentions 8299.
+# blast radius is a port nobody else binds.
+#
+# WHO USES IT (issue #450, M4.1's exit). `just kuma-live` binds the port before
+# its suites and rebinds it from a trap however the run ends;
+# `crates/knobas-app/tests/alert_chain_live.rs` releases it, waits for `canary`
+# to read down, acks the alert, binds it again and waits for the recovery --
+# and stops no container at all (M4 spec, issue #427). Both call this script
+# and nothing else, which is what makes that sentence checkable: the only thing
+# either of them can knock over is 8299.
 #
 # WHY A HOST PROCESS AND NOT A CONTAINER. Kuma reaches it at
 # http://host.docker.internal:8299/, the same host alias the three tunnel

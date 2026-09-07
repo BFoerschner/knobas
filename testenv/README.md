@@ -136,7 +136,7 @@ variables gate it and where those come from.
 | `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back, and then that pull request on the standup digest (M3.3's digest witness for Gitea). Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
 | `just teamcity-live-seeded` | two suites: `knobas-source-teamcity` / `live_teamcity_seeded` — the adapter against **our** seeded TeamCity — and then `knobas-app` / `teamcity_seeded_live`, read-only, which is M3.3's digest witness for this source (a seeded build the mirror attributes to the reader is on the digest for the day it ran) | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
-| `just kuma-live` | `knobas-source-kuma` / `live_kuma` — the Uptime Kuma adapter against **this** container: the estate mirrored, an idle poll that emits nothing, a monitor really deleted and reported gone, a wrong API key's 401 | `KNOBAS_KUMA_URL`, `KNOBAS_KUMA_API_KEY` | `./seed-kuma.sh` then `eval "$(./seed --env-kuma)"` (the recipe does both) |
+| `just kuma-live` | two suites: `knobas-source-kuma` / `live_kuma` — the Uptime Kuma adapter against **this** container: the estate mirrored, an idle poll that emits nothing, a monitor really deleted and reported gone, a wrong API key's 401 — and then `knobas-app` / `alert_chain_live`, **M4.1's exit witness**: the canary released, the alert in the inbox because a context holds its asset, acked, the port rebound, the alert closed. The recipe binds the canary first and rebinds it from a trap | `KNOBAS_KUMA_URL`, `KNOBAS_KUMA_API_KEY` | `./seed-kuma.sh` then `eval "$(./seed --env-kuma)"` (the recipe does both) |
 | `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
 
 **A recipe with nothing to run against fails; it does not pass quietly.** Each
@@ -908,6 +908,19 @@ inside one interval. Measured 2026-09-06 over two cycles, polling `/metrics` at
 `1` after 17 s and 17 s. An earlier pair of cycles saw a 5 s -- where in the
 interval the release falls is what varies, so a recipe waits for the state and
 not for a duration.
+
+**Who knocks it over** (#450, M4.1's exit). `just kuma-live` binds the port
+before its two suites and rebinds it from a `trap` however the run ends, and
+`crates/knobas-app/tests/alert_chain_live.rs` — the exit witness — releases it,
+waits for Kuma to publish `down`, syncs, acks the alert, binds it again and
+waits for the recovery. Both go through this script and touch nothing else, so
+"no live run stops a shared container" is a sentence you can check by reading
+two call sites. The suite carries a rebind in `Drop` as well as the recipe's
+trap: a killed run and a panicking one leave the estate green either way.
+Measured through the suite on 2026-09-07 (the notebook otherwise idle,
+`/metrics` polled every 2 s through the adapter): `down` after 14.9 s, `up`
+again after 21.2 s, the whole chain — import, fall, inbox, ack, recovery — in
+38.7 s.
 
 ### Reading the state back
 

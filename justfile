@@ -1126,7 +1126,18 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
   worktree or run ./hetzner/provision.sh."
 
 # The Uptime Kuma adapter against the REAL pinned container in `testenv/`
-# (issue #442, M4.1). ADR-0013: the real container is the witness.
+# (issue #442, M4.1), and then **M4.1's exit witness**: the whole alert chain
+# against that container (issue #450). ADR-0013: the real container is the
+# witness.
+#
+# TWO SUITES, in two crates, and the second is not the adapter's -- the shape
+# `teamcity-live-seeded` established (issue #389) and its reason:
+# `crates/knobas-app/tests/alert_chain_live.rs` asserts what the *inbox* does
+# with an alert, and the inbox is an app-crate read, so a suite in
+# `knobas-source-kuma` could not make the assertion at all. It runs second and
+# is strictly additive to the first: it creates no monitor, so it disturbs
+# neither the exact-set assertions of the suite above it nor its litter
+# clearing.
 #
 # WHICH RECIPE CERTIFIES WHAT. `tests/contract.rs` runs the contract battery
 # against a *recording* of this server's `/metrics`, so that `just check` stays
@@ -1143,6 +1154,16 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # killed run leaves behind is removed by the `./seed-kuma.sh` above, which
 # deletes every monitor `monitors.json` does not name. **No shared container is
 # stopped by anything here** (M4 spec, issue #427).
+#
+# AND WHAT IT KNOCKS DOWN: `127.0.0.1:8299`, the canary's port, and nothing
+# else. The exit suite releases it to make the estate's one red on purpose and
+# rebinds it on the way out; this recipe binds it before either suite runs and
+# rebinds it from a `trap` however the run ends, including a killed one -- so a
+# failure leaves the estate green rather than leaving a monitor red for the
+# next reader to explain. `testenv/canary.sh` is idempotent both ways, its
+# whole blast radius is a host port nobody else binds, and the reason the
+# estate carries such a check at all is that **every other thing Kuma watches
+# here is shared** (`testenv/README.md`, "The canary").
 #
 # THE TUNNEL DOES NOT HAVE TO BE UP. Three of the seeded monitors check the
 # products through `hetzner/tunnel` and are red without it. The suite asserts
@@ -1162,13 +1183,25 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 kuma-live:
     #!/usr/bin/env bash
     set -euo pipefail
+    # The repo root, captured before anything `cd`s: the trap below runs with
+    # whatever directory the shell died in, and a relative path in it would
+    # fail exactly when it is most needed.
+    root=$PWD
     cd testenv
     docker compose up -d --wait uptime-kuma
     ./seed-kuma.sh
     eval "$(./seed --env-kuma)"
     just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY
+    # The canary bound before either suite, and rebound however this ends.
+    # `|| true` because the trap must not turn a suite's failure into a
+    # different exit status, and `status` is not consulted first: `up` is
+    # idempotent and says so itself.
+    ./canary.sh up
+    trap 'cd "$root/testenv" && ./canary.sh up || true' EXIT
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
+      -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test alert_chain_live \
       -- --ignored --nocapture --test-threads=1
 
 # TeamCity's live certification: the adapter against a **real** TeamCity.
