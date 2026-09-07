@@ -3568,6 +3568,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::apply_estate_import,
             knobas_app::commands::assets::monitoring_settings,
             knobas_app::commands::assets::set_monitoring_settings,
+            knobas_app::commands::assets::monitor_roster,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -3724,6 +3725,11 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
                 "settings": { "sample_retention_days": 90, "response_time_warn_ms": 1500 },
             }),
         ),
+        // #448's roster. No arguments at all: the tab is a destination of its
+        // own and the estate is not scoped by the room the reader came from,
+        // so there is nothing here for the second call an optional argument
+        // would need.
+        ("monitor_roster", serde_json::json!({})),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
