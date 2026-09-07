@@ -26,6 +26,7 @@
 
 pub mod assets;
 pub mod backup;
+pub mod checkout;
 pub mod commands;
 mod error;
 pub mod inbox;
@@ -234,6 +235,10 @@ pub fn run() {
             commands::entity::snooze_inbox_item,
             commands::entity::complete_inbox_item,
             commands::entity::list_projects,
+            commands::entity::clones_root,
+            commands::entity::set_clones_root,
+            commands::entity::entity_checkout,
+            commands::entity::set_checkout_override,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,

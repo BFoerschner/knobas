@@ -163,6 +163,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
 export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
+  seedClonesRoot(params);
   installFakeTauri(demoHandlers(params));
 }
 
@@ -182,6 +183,34 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     get_entity: (args) => getEntity(args),
     resolve_url: (args) => resolveUrl(args),
     recent_activity: (args) => recentActivity(args),
+
+    // Checkouts (#499). The fixture has no filesystem, so what stands in for
+    // the scan is `FAKE_CHECKOUTS` -- one repo with a path and one without --
+    // and the override is a variable this file keeps. That is enough for the
+    // panel, which branches on `found_by` and on whether `path` is there;
+    // whether a directory really holds a clone is `knobas-core`'s question and
+    // is answered by its own tests over a real temporary tree.
+    clones_root: () => fakeClonesRoot,
+    set_clones_root: (args) => {
+      const path = args["path"];
+      fakeClonesRoot = typeof path === "string" && path.trim() !== "" ? path.trim() : null;
+      return null;
+    },
+    entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
+    set_checkout_override: (args) => {
+      const id = String(args["entityId"] ?? "");
+      const repo = fakeRepoOf(id);
+      const path = args["path"];
+      if (repo === null) {
+        throw { code: "not_found", message: `${id} has no repository in the local index`, source_id: null };
+      }
+      if (typeof path === "string" && path.trim() !== "") {
+        fakeOverrides[repo] = path.trim();
+      } else {
+        delete fakeOverrides[repo];
+      }
+      return fakeCheckout(id);
+    },
 
     // The sources cockpit. Three sources, one of them refusing its credential
     // and one with a PAT running out, because those are the two rows a person
@@ -1434,6 +1463,40 @@ const CORPUS: {
     priority: "Low",
     assignee: null,
   }),
+  // The repo and one of its branches (#499). Both are here so a QA pass can
+  // see the two checkout states the panel exists to keep apart: this repo has
+  // a clone under the fixture's clones root, and `mock:ledger` deliberately
+  // does not -- so one detail shows a path and the other shows the clone
+  // command to copy. The keys follow interfaces §4.2's Gitea grammar
+  // (`owner/repo`, `owner/repo@refs/heads/<name>`), which is what the real
+  // backend resolves a branch's repository by.
+  {
+    ...row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
+      full_name: "tidewater/payout-service",
+      description: "Payout scheduling and SEPA retries.",
+    }),
+    // A forge-shaped URL rather than the fixture's default: it is what the
+    // clone command is built from, and a person reading the panel should see
+    // the command they would actually run.
+    web_url: "https://gitea.example.com/tidewater/payout-service",
+  },
+  row(
+    "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry",
+    "branch",
+    "feat/PAY-231-idempotent-retry",
+    "2026-08-22T09:40:00Z",
+    "mara",
+    { name: "feat/PAY-231-idempotent-retry", repository: "tidewater/payout-service" },
+  ),
+  // A second repo, with no clone on this fixture's disk: the *no checkout*
+  // arm, and the one that shows the clone command.
+  {
+    ...row("mock:tidewater/ledger", "repo", "tidewater/ledger", "2026-08-18T12:00:00Z", "jonas", {
+      full_name: "tidewater/ledger",
+      description: "The ledger service.",
+    }),
+    web_url: "https://gitea.example.com/tidewater/ledger",
+  },
   row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
     num: 142,
     repo: "payout-service",
@@ -1836,6 +1899,89 @@ function getEntity(args: Record<string, unknown>) {
     deleted_at: entry.deleted_at,
     links: [],
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
+  };
+}
+
+/**
+ * The checkout fixture (#499): a clones root, what the scan "found" under it,
+ * and the overrides this session has set.
+ *
+ * `let` and a mutable map, because the panel's whole point is that setting a
+ * path changes what the next read says — a fixture that answered the same
+ * thing after a write would make the QA pass prove nothing.
+ */
+const DEFAULT_CLONES_ROOT = "/Users/mara/src";
+
+let fakeClonesRoot: string | null = DEFAULT_CLONES_ROOT;
+
+/**
+ * `?fake-clones-root=<path>` seeds it, and `?fake-clones-root=` (empty) leaves
+ * it unset.
+ *
+ * The `?fake-db=` precedent: a QA pass has to be able to put a screen in a
+ * state the default fixture is not in, and *no clones root set* is a different
+ * sentence on the panel from *nothing found under one*. A headless run can
+ * therefore point the fixture at a temporary directory of its own, which is
+ * what #499's third criterion asks for — the fixture has no filesystem, so the
+ * root is a label rather than a walk, and the walk is `knobas-core`'s to prove.
+ */
+function seedClonesRoot(params: URLSearchParams): void {
+  const given = params.get("fake-clones-root");
+  if (given === null) return;
+  fakeClonesRoot = given.trim() === "" ? null : given.trim();
+}
+
+/** What the scan would find, per repo entity. */
+const FAKE_SCANNED: Record<string, string> = {
+  "mock:tidewater/payout-service": "/Users/mara/src/payout-service",
+};
+
+const fakeOverrides: Record<string, string> = {};
+
+/** The repo a checkout question is about: itself, or a branch's repository. */
+function fakeRepoOf(entityId: string): string | null {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
+  if (!entry) return null;
+  if (entry.kind === "repo") return entry.entity_id;
+  if (entry.kind !== "branch") return null;
+  // The same prefix rule the backend uses: the longest repo id this branch's
+  // id starts with (interfaces §4.2's nested key grammar).
+  const repos = CORPUS.filter(
+    (candidate) => candidate.kind === "repo" && entityId.startsWith(candidate.entity_id),
+  ).sort((a, b) => b.entity_id.length - a.entity_id.length);
+  return repos[0]?.entity_id ?? null;
+}
+
+/** `entity_checkout`, including the refusal a non-repo kind gets. */
+function fakeCheckout(entityId: string) {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
+  if (!entry) {
+    throw { code: "not_found", message: `${entityId} is not in the local index`, source_id: null };
+  }
+  if (entry.kind !== "repo" && entry.kind !== "branch") {
+    throw {
+      code: "invalid",
+      message: `a checkout belongs to a repo or a branch, and ${entityId} is a ${entry.kind}`,
+      source_id: null,
+    };
+  }
+  const repo = fakeRepoOf(entityId);
+  const repoRow = CORPUS.find((candidate) => candidate.entity_id === repo);
+  const url = repoRow?.web_url ?? null;
+  const override = repo === null ? undefined : fakeOverrides[repo];
+  // Keyed on the *root* as well as the repo, so a run pointed at a temporary
+  // directory of its own sees the honest *no checkout* rather than a path
+  // under a root nobody set.
+  const scanned =
+    repo === null || fakeClonesRoot !== DEFAULT_CLONES_ROOT ? undefined : FAKE_SCANNED[repo];
+  const path = override ?? scanned ?? null;
+  return {
+    repo_entity_id: repo,
+    repo_url: url,
+    path,
+    found_by: override !== undefined ? "override" : path !== null ? "scan" : "nothing",
+    clones_root: fakeClonesRoot,
+    clone_command: url === null ? null : `git clone ${url}`,
   };
 }
 

@@ -1954,6 +1954,94 @@ pub async fn notify(
     }
 }
 
+// -- checkouts (#499) -------------------------------------------------------
+//
+// Here rather than in a module pair of their own for the reason `notify` and
+// #290's setting are: a repo and a branch are entities, `get_entity` is in this
+// module, and §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
+// `crate::checkout`; these four are the thin shims the layout asks for.
+
+/// Where knobas looks for clones, or nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn clones_root(lifecycle: State<'_, Lifecycle>) -> Result<Option<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::clones_root(&pool).await
+}
+
+/// Set the clones root, or clear it with a blank one.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_clones_root(
+    lifecycle: State<'_, Lifecycle>,
+    path: Option<String>,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_clones_root(&pool, path.as_deref()).await
+}
+
+/// The checkout a repo or branch detail draws -- the override, else the scan,
+/// else *no checkout* and the clone command to copy.
+///
+/// Read on every open rather than stored: a clone that moved between two opens
+/// would leave a cached path pointing at nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn entity_checkout(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::checkout::CheckoutView, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::view(&pool, &entity_id).await
+}
+
+/// Set this repository's checkout path by hand, or clear it back to the scan.
+///
+/// Answers the fresh view rather than nothing, so the panel draws what is now
+/// true without a second round trip -- and so clearing an override *shows* the
+/// scan taking over, which is the whole of what clearing means.
+///
+/// Keyed on the repository even when a branch was the address: a per-branch
+/// path would be a second answer to one question, stale the moment somebody
+/// switched branches in that working tree.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// holds neither it nor its repository,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_override(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    path: Option<String>,
+) -> Result<crate::checkout::CheckoutView, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_override(&pool, &entity_id, path.as_deref()).await?;
+    crate::checkout::view(&pool, &entity_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
