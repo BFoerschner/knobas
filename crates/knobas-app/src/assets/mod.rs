@@ -5831,13 +5831,15 @@ mod tests {
         assert!(vet_against_schema(Some(service), "wattage", &text("650W")).is_ok());
     }
 
-    /// `scenario` is one of the three types spec #491 dropped, so it is a
-    /// word no table declares -- and the refusal has to say which word.
     #[test]
     fn a_type_no_table_declares_is_refused_by_name() {
-        let refused = vet_type("scenario").unwrap_err();
+        let refused = vet_type("tape-library").unwrap_err();
         assert_eq!(refused.code, crate::IpcErrorCode::Invalid);
-        assert!(refused.message.contains("scenario"), "{}", refused.message);
+        assert!(
+            refused.message.contains("tape-library"),
+            "{}",
+            refused.message
+        );
         assert!(vet_type("vm").is_ok());
     }
 

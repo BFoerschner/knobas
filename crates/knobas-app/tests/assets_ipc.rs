@@ -459,16 +459,149 @@ async fn an_edit_that_does_not_fit_the_schema_is_refused_by_name() {
         "only `created`"
     );
 
-    // `scenario` is one of the three types spec #491 dropped from the table,
-    // so the door refuses it now, and by name.
-    let unknown = assets::create(&pool, None, "scenario", "nightly refresh", &[])
+    let unknown = assets::create(&pool, None, "tape-library", "lto-8", &[])
         .await
         .unwrap_err();
     assert_eq!(code(&unknown), IpcErrorCode::Invalid);
     assert!(
-        unknown.message.contains("scenario"),
+        unknown.message.contains("tape-library"),
         "{}",
         unknown.message
+    );
+}
+
+/// **A row whose type the table no longer carries is kept, drawn with the
+/// `??` chip, and edits like a custom asset; the create dialog does not offer
+/// the type.**
+///
+/// Spec #491 dropped `scenario`, `step` and `connector`, and
+/// `knobas.asset.type_id` is open text rather than a `check` constraint -- so
+/// a database written before this build still holds rows naming them and
+/// nothing was migrated. That is the case #439's rule was built for, and the
+/// deputy's ruling of 2026-09-07 on issue #493 is that it stays as it is: the
+/// row is not relabelled `custom`, because "an asset somebody typed as Custom"
+/// and "an asset whose type this build does not know" are two different facts
+/// and only the second one can be fixed by retyping it.
+///
+/// What *is* true of `custom` is true here, and it is the property half: a
+/// type `find` does not know declares nothing, so every stored key comes back
+/// custom and no schema is in force over an edit.
+///
+/// The row has to be made the way an older database made it, because the one
+/// door that mints assets refuses the type by name -- which is the same fact
+/// as the create dialog not offering it, the dialog drawing what
+/// `asset_types` answers.
+#[tokio::test]
+async fn a_row_whose_type_the_table_dropped_reads_back_and_edits_like_a_custom_asset() {
+    let pool = pool("assets-dropped-type").await;
+
+    let refused = assets::create(&pool, None, "scenario", "nightly refresh", &[])
+        .await
+        .unwrap_err();
+    assert_eq!(code(&refused), IpcErrorCode::Invalid);
+    assert!(refused.message.contains("scenario"), "{}", refused.message);
+
+    // `path` and `last_run` are the two keys `scenario` used to declare, so
+    // this is the row a pre-v1.5 database holds and not an invented one.
+    let made = make(
+        &pool,
+        None,
+        "custom",
+        "nightly refresh",
+        &[
+            ("path".to_owned(), text("flows/nightly")),
+            (
+                "last_run".to_owned(),
+                PropertyValue::Date {
+                    value: "2026-09-06".to_owned(),
+                },
+            ),
+        ],
+    )
+    .await;
+    sqlx::query("update knobas.asset set type_id = 'scenario' where id = $1")
+        .bind(&made.id)
+        .execute(&pool)
+        .await
+        .expect("the type id is open text, which is the whole point");
+
+    // The asset read: the row comes back, saying which type it names and that
+    // this build has no chip for it.
+    let detail = assets::get(&pool, &made.id).await.expect("the row is kept");
+    assert_eq!(detail.asset.type_id, "scenario");
+    assert_eq!(detail.asset.type_label, "scenario");
+    assert_eq!(detail.asset.monogram, "??");
+
+    // Every stored key is a custom one, and there is no declared property to
+    // be unfilled: a type nobody declares declares nothing.
+    assert_eq!(
+        detail
+            .properties
+            .iter()
+            .map(|property| (property.key.as_str(), property.custom))
+            .collect::<Vec<_>>(),
+        [("last_run", true), ("path", true)],
+        "{:?}",
+        detail.properties
+    );
+
+    // The Tree: the same row through the column read the Miller walk makes.
+    let top = assets::tree(&pool, None).await.expect("the top level");
+    assert_eq!(
+        top.iter()
+            .map(|row| (
+                row.id.as_str(),
+                row.type_label.as_str(),
+                row.monogram.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [(made.id.as_str(), "scenario", "??")]
+    );
+
+    // And it edits like a custom asset. `port` as *text* is the sharp case:
+    // `service` declares `port` a number and `assets::edit` would refuse this
+    // pair there, so accepting it here is the assertion that no schema is in
+    // force -- not that this particular key happens to be free.
+    let edited = assets::edit(
+        &pool,
+        &made.id,
+        &[
+            AssetEdit::Name {
+                value: "nightly refresh (retired)".to_owned(),
+            },
+            AssetEdit::Property {
+                key: "path".to_owned(),
+                value: Some(text("flows/nightly-2")),
+            },
+            AssetEdit::Property {
+                key: "port".to_owned(),
+                value: Some(text("8080")),
+            },
+        ],
+    )
+    .await
+    .expect("nothing is refused on the type's account");
+    assert_eq!(edited.value.name, "nightly refresh (retired)");
+    assert_eq!(edited.value.monogram, "??");
+
+    let after = assets::get(&pool, &made.id).await.expect("read back");
+    assert_eq!(
+        after
+            .properties
+            .iter()
+            .map(|property| (property.key.as_str(), property.custom))
+            .collect::<Vec<_>>(),
+        [("last_run", true), ("path", true), ("port", true)],
+        "{:?}",
+        after.properties
+    );
+    assert_eq!(
+        after
+            .properties
+            .iter()
+            .find(|property| property.key == "path")
+            .and_then(|property| property.value.clone()),
+        Some(text("flows/nightly-2"))
     );
 }
 

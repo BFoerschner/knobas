@@ -132,7 +132,7 @@ test("nothing is usual at the top of the estate and everything is offered", () =
  * refusing it, so a plus on its column has to open on something.
  */
 test("a type with no conventions and a type nobody declares both offer the whole table", () => {
-  for (const parent of ["custom", "scenario"]) {
+  for (const parent of ["custom", "tape-library"]) {
     const choices = typeChoices(TABLE, parent);
     expect(choices.usual, parent).toEqual([]);
     expect(choices.rest, parent).toEqual(TABLE);

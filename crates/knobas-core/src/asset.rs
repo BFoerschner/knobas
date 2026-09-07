@@ -527,10 +527,18 @@ mod tests {
     #[test]
     fn find_answers_for_a_declared_type_and_misses_for_anything_else() {
         assert_eq!(find("vm").map(|t| t.label), Some("VM"));
-        // `scenario` is one of the three spec #491 dropped, and a word no
-        // type carries is exactly what it is now.
-        for unknown in ["", "VM", "scenario", "step", "connector", "asset", "site "] {
+        // An id this build never had.
+        for unknown in ["", "VM", "tape-library", "asset", "site "] {
             assert!(find(unknown).is_none(), "{unknown:?} is not a type");
+        }
+        // And an id this build *dropped*, which is the other way a word gets
+        // here: spec #491 took these three out of the table, and a row in an
+        // older database still carries one. The two cases are named apart on
+        // purpose -- `knobas_app::assets` has a test for what such a row reads
+        // as, and it would say nothing if a dropped id and an invented one
+        // were the same case.
+        for dropped in ["scenario", "step", "connector"] {
+            assert!(find(dropped).is_none(), "{dropped:?} left the table");
         }
     }
 
