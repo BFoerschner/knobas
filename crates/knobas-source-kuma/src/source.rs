@@ -322,8 +322,12 @@ impl Source for KumaSource {
     /// refusal holds for an instance with an account exactly as it does for one
     /// with only an API key: an account buys write ops, not a workflow.
     ///
-    /// **Refused rather than answered empty**, so a monitor's detail draws no
-    /// status select at all instead of an empty one.
+    /// **Refused rather than answered empty**, because an empty answer means
+    /// something a monitor cannot mean: a workflow with no moves left. A
+    /// monitor's detail draws no status select and makes no read at all, the
+    /// read being gated on the descriptor's `transition` op this adapter does
+    /// not declare; contract battery clause 8 is what holds the refusal in
+    /// place for any other caller.
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
         Err(SourceError::protocol(format!(
             "the Uptime Kuma adapter has no workflow, so there are no reachable transitions to \

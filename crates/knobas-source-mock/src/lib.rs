@@ -840,9 +840,11 @@ impl Source for MockSource {
     /// transition* is not: an answer about now, from a source that knows what
     /// its workflow offers from where the ticket stands. The fixture knows no
     /// such thing, and a mock certifies nothing anyway (ADR-0013). So the mock
-    /// refuses, the demo ticket draws no select, and the corpus-observed offer
-    /// stays where it belongs -- in the shell, as the fallback, labelled
-    /// *offer unverified*.
+    /// refuses, the demo ticket draws no select and makes no read (the detail
+    /// gates it on the descriptor's `transition` op), and the corpus-observed
+    /// offer stays where it belongs -- in the shell, as the fallback for a
+    /// source that *has* a workflow and could not be read, labelled *offer
+    /// unverified*.
     ///
     /// Consistent with the descriptor either way: the mock declares `comment`
     /// and no `transition`, so the contract battery requires this refusal.

@@ -240,8 +240,14 @@ impl Source for GiteaSource {
     /// **Refused rather than answered empty**, and the difference is what a
     /// reader sees. An empty list is a workflow with nowhere left to go, which
     /// is a real state a real Jira ticket can be in; this is a source that was
-    /// asked the wrong question. The shell reads the refusal as "draw no
-    /// select" and an empty answer as "draw a select with nothing in it".
+    /// asked the wrong question. The two are not drawn the same way: an empty
+    /// answer *is* an answer, and the select is built from it, so there is no
+    /// select; a refusal is a **failed** read, and the corpus-observed offer
+    /// stands in its place marked *offer unverified*. In practice the detail
+    /// never asks -- it gates the read on the descriptor's `transition` op,
+    /// which this adapter does not declare, so a pull request draws no select
+    /// and makes no call -- and what holds this adapter to a refusal is
+    /// contract battery clause 8.
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
         Err(SourceError::protocol(format!(
             "gitea: this adapter has no workflow, so there are no reachable transitions to read \

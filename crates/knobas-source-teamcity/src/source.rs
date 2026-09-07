@@ -212,8 +212,12 @@ impl Source for TeamCitySource {
     /// transition of an existing record.
     ///
     /// **Refused rather than answered empty**: an empty list is a workflow
-    /// with no moves left, and this is a source with no workflow at all. The
-    /// shell draws no select for the first and an empty one for the second.
+    /// with no moves left, and this is a source with no workflow at all. A
+    /// build's detail draws no select either way, but not for the same reason
+    /// -- an empty answer is a ticket with nothing to move to, while this
+    /// adapter is never asked at all, the read being gated on the descriptor's
+    /// `transition` op it does not declare. Contract battery clause 8 is what
+    /// holds the refusal in place for any other caller.
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
         Err(SourceError::protocol(format!(
             "the TeamCity adapter has no workflow, so there are no reachable transitions to read \

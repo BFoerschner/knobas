@@ -1976,10 +1976,13 @@ reason: the battery's probe target exists on no instance, so a call could only w
 as a refusal. That skip is control flow, so `accepts_an_adapter_that_answers_the_read` pins it with
 an adapter whose read panics if reached.
 
-**Refused, never answered empty**, and the two are drawn differently: an empty list is a real
-workflow with nowhere left to go, and the shell draws no select for a refusal and no select for an
-empty answer — but it falls back to the corpus offer for a *failed* read and does not for an empty
-one. Collapsing them would put an empty select on screen and call it the workflow's answer.
+**Refused, never answered empty**, and the two are not one fact. An empty list is a real workflow
+with nowhere left to go: an *answer*, which the select is built from, so there is no select. A
+refusal is a source with no workflow to ask about, and it reaches the shell as a **failed** read —
+the corpus-observed offer stands in its place, marked *offer unverified*. In practice a refusal does
+not reach the shell at all, because the detail gates the read on the descriptor's `transition` op
+and a source with no workflow declares none; what holds those five adapters to a refusal is battery
+clause 8. Collapsing the two would put an empty select on screen and call it the workflow's answer.
 
 **Jira's implementation is the request its `write` already makes.** `write::transition`'s
 `GET rest/api/2/issue/{key}/transitions` is now `write::offered_transitions`, returning each move's

@@ -1077,7 +1077,9 @@ export interface MiniBoard {
   columns: MiniBoardColumn[];
   /**
    * Per source that put a card on this board, the statuses its own corpus
-   * shows — what the ticket detail's status select offers (#179).
+   * shows — what the ticket detail's status select falls back to when the
+   * workflow read fails (#179, and {@link reachableTransitions} for why it is
+   * the fallback rather than the offer).
    */
   sources: SourceStatuses[];
 }

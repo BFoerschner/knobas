@@ -46,7 +46,9 @@
 //! ticket detail's status select (#179): the statuses each source's own
 //! *corpus* shows, which is deliberately wider than the board's columns -- a
 //! room with nothing finished still has to be able to offer *Done*. Both come
-//! out of this one read.
+//! out of this one read. Since #498 the select's offer is the **workflow's**
+//! answer (`Source::reachable_transitions`) and this corpus is what it falls
+//! back to when that read fails, marked *offer unverified*.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -156,7 +158,9 @@ pub struct MiniBoard {
     /// them alphabetically, and the terminal group last.
     pub columns: Vec<MiniBoardColumn>,
     /// Per source that put a card on this board, the statuses its own corpus
-    /// shows -- what the ticket detail's status select offers (#179).
+    /// shows -- what the ticket detail's status select falls back to when the
+    /// workflow read fails (#179, and #498 for why it is the fallback rather
+    /// than the offer).
     pub sources: Vec<SourceStatuses>,
 }
 
