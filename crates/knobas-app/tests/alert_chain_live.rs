@@ -538,16 +538,17 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "the real estate, with every one of its seven monitor names resolved against \
          the monitors the real Kuma published"
     );
-    // The four counts are already pinned by `estate_exit.rs` and `share_exit.rs`
-    // against the same file, so nothing here is a new place to update when the
-    // estate changes. What is new is the last one: `estate_exit.rs` asserts
+    // The first three counts are already pinned by `estate_exit.rs` and
+    // `share_exit.rs` against the same file, so an estate edit that moves them
+    // reddens those two first and this line with them -- one more place, not a
+    // new claim. What is new is the last one: `estate_exit.rs` asserts
     // `monitors_linked == 0`, because no adapter emitted a monitor when it was
     // written, and `adapter_to_mirror.rs` asserts seven against a *recording* of
     // this server -- which agrees with it by construction until somebody edits
     // one of the two files. Seven, here, is seven names typed into `estate.json`
     // answering to seven monitors typed into Uptime Kuma.
 
-    // ---- the canary's asset, and a room somewhere else ---------------------
+    // ---- the canary's asset, and a context somewhere else ------------------
     let canary_asset = assets::create(
         pool,
         Some(NOTEBOOK),
