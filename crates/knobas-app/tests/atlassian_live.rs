@@ -1453,6 +1453,183 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     drop(litter);
 }
 
+/// **What the workflow offers, from each of its four states** (issue #498,
+/// spec #491's stream 3).
+///
+/// The read the status select is offered, against the real thing. A mock can
+/// only say the adapter reads `to.name` off the response it was handed; what it
+/// cannot say is what a **Jira workflow** answers, and this suite's own header
+/// records why that matters here more than usual: mockd's fixture workflow has
+/// shape -- one move out of *To Do*, two out of *In Progress* -- and the seeded
+/// project's has none, offering all four of its statuses from every one of
+/// them, the issue's own included. An adapter certified only against mockd
+/// would be certified against the wrong shape (ADR-0013).
+///
+/// **The ground truth is `seed-state.json`'s `jira.statuses`**, which the seed
+/// read off `GET /rest/api/2/project/PAY/statuses` -- a different endpoint from
+/// the one under test. So this is the workflow's own answer checked against the
+/// project's own answer, not the read checked against itself.
+///
+/// **Four tickets, one per state, and the states are read off Jira rather than
+/// assumed.** The fixture puts PAY-240 in *To Do*, PAY-231 *In Progress*,
+/// PAY-228 *In Review* and PAY-219 *Done*; this reads each one's status from
+/// the server and asserts the four are the four, because a run that found two
+/// of them in the same column would otherwise quietly certify three states and
+/// report four. That is also the leftover check: a killed run of the write
+/// test above leaves PAY-240 moved, and `live_jira_seeded.rs`'s
+/// `Seeded::clear_leftovers` is what puts it back.
+///
+/// **This test writes nothing.** Every call it makes is a `GET`, including the
+/// refusal at the end -- an unreachable status never reaches the `POST`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_state() {
+    use knobas_app::sources::crud;
+    use knobas_source::{Source, SourceError, instance::SourceInstance};
+    use knobas_sync::scheduler::AdapterRegistry;
+
+    let env = env();
+    let expected: std::collections::BTreeSet<String> = env.statuses.iter().cloned().collect();
+    assert_eq!(
+        expected.len(),
+        4,
+        "this workflow is the seeded template's four statuses; {:?} is not that, and every \
+         assertion below is written against it",
+        env.statuses
+    );
+
+    // **User and password, not a PAT**: every call here is a read, the adapter's
+    // own live suite certifies this scheme, and it means this test mints and
+    // revokes nothing. The wrong credential below is a *bearer token* for the
+    // reason `live_jira_seeded.rs` spells out at length -- a wrong password
+    // earns the seed's admin a Jira CAPTCHA lockout, and a token Jira cannot
+    // resolve never reaches Seraph at all.
+    let (state, _events) = app(
+        "atlassian_live_reachable",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+    )
+    .await;
+
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for key in ["PAY-240", COMMENTED, "PAY-228", "PAY-219"] {
+        let standing = env.status_at_jira(key).await;
+        assert!(
+            expected.contains(&standing),
+            "{key} is in {standing:?}, which is not one of this project's statuses {:?}",
+            env.statuses
+        );
+        assert!(
+            seen.insert(standing.clone()),
+            "two of the four tickets are in {standing:?}, so this run witnesses fewer than the \
+             four states it claims -- a killed run of the write test above leaves PAY-240 \
+             moved, and `live_jira_seeded.rs`'s Seeded::clear_leftovers puts it back"
+        );
+
+        let reachable = crud::reachable_transitions(
+            &state.pool,
+            &state.secrets,
+            state.registry.as_ref(),
+            &format!("{JIRA}:{key}"),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("the read must answer for {key}: {error}"));
+        let answered: std::collections::BTreeSet<String> = reachable.iter().cloned().collect();
+        println!("SEEDED {key} stands in {standing:?} and reaches {reachable:?}");
+        assert_eq!(
+            answered, expected,
+            "from {standing:?} this workflow reaches every one of its statuses ({:?}); the read \
+             answered {reachable:?}",
+            env.statuses
+        );
+    }
+    assert_eq!(
+        seen, expected,
+        "the four tickets have to stand in the four states for this to be a read from each of \
+         them"
+    );
+
+    // -- the wrong token ----------------------------------------------------
+    //
+    // A bearer token this Jira cannot resolve. The read **errors**, and that is
+    // the whole claim: the shell's fallback is keyed on a rejection, so a read
+    // that answered an empty list here would put an empty select on screen and
+    // call it the workflow's answer.
+    let (refused_state, _refused_events) = app(
+        "atlassian_live_reachable_refused",
+        &env,
+        AuthMethod::Pat,
+        &format!("revoked-{}", std::process::id()),
+    )
+    .await;
+    let error = crud::reachable_transitions(
+        &refused_state.pool,
+        &refused_state.secrets,
+        refused_state.registry.as_ref(),
+        &format!("{JIRA}:{COMMENTED}"),
+    )
+    .await
+    .expect_err("a token Jira cannot resolve must not read a workflow");
+    println!("SEEDED the read under a token Jira cannot resolve: {error}");
+
+    // -- and the write side is unchanged ------------------------------------
+    //
+    // The point of the whole ticket: this read narrows what is *offered*, and
+    // it replaces nothing. The adapter still resolves the status it is handed
+    // against the source's own answer at write time and still refuses by name
+    // with what the workflow does offer. Asserted at the adapter rather than
+    // through the queue because the queue's half is already this file's
+    // `the_three_write_ops_go_through_the_queue_and_come_back_from_jira`, and
+    // because a refusal is the one write that reaches no `POST`.
+    assert!(
+        !env.statuses.iter().any(|s| s == UNREACHABLE_STATUS),
+        "this workflow does have {UNREACHABLE_STATUS:?} after all ({:?}), so the refusal below \
+         would be testing nothing",
+        env.statuses
+    );
+    let source: Box<dyn Source> = Registry::builtin()
+        .build(SourceInstance {
+            id: JIRA.to_owned(),
+            kind: "jira".to_owned(),
+            display_name: "Tidewater Jira (seeded)".to_owned(),
+            base_url: env.url.clone(),
+            auth: Some(AuthMethod::UserPassword),
+            secret: Some(env.password.clone()),
+            account: None,
+            config: json!({ "username": env.user }),
+        })
+        .unwrap_or_else(|error| panic!("the adapter must build against the seeded URL: {error:?}"));
+    let standing = env.status_at_jira(COMMENTED).await;
+    let refused = source
+        .write(knobas_source::WriteOp::Transition {
+            entity: format!("{JIRA}:{COMMENTED}"),
+            status: UNREACHABLE_STATUS.to_owned(),
+        })
+        .await;
+    let Err(SourceError::Protocol { message, .. }) = &refused else {
+        panic!("a status this workflow does not have must be refused, got {refused:?}");
+    };
+    assert!(
+        message.contains(UNREACHABLE_STATUS),
+        "the refusal names the status that was asked for: {message}"
+    );
+    assert!(
+        env.statuses.iter().any(|s| message.contains(s)),
+        "...and carries what the workflow does offer, which is what makes it actionable: \
+         {message}"
+    );
+    assert_eq!(
+        env.status_at_jira(COMMENTED).await,
+        standing,
+        "a refused transition must not have moved anything"
+    );
+    println!("SEEDED the write-side refusal, unchanged: {message}");
+
+    state.scheduler.shutdown().await;
+    refused_state.scheduler.shutdown().await;
+}
+
 /// **A day's blocks logged to PAY-231, at Jira and back through the mirror**
 /// (issue #280, M3.1).
 ///
