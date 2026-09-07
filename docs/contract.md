@@ -6793,7 +6793,12 @@ From this commit on, each of the following requires an orchestrator decision **a
     affected asset with the monitor in the pane". `kind` is therefore `asset`, and `InboxView`
     branches on the category to send `#/asset/<id>` rather than the `#/entity/<id>` room detail.
     Where a monitor watches several assets the rule picks one, by path then name then id, so the
-    row opens the same asset on every read.
+    row opens the same asset on every read. Two consequences of that pick, named rather than left
+    to be discovered: the inbox's **context filter** scopes by `entity_id`, so a monitor watching
+    assets in two contexts shows its one item under the picked asset's context and not the
+    other; and story 61's *"with the monitor in the pane"* is served by the pane's existing
+    **Monitoring** section, which lists every monitor attached to that asset — the row's own
+    title names the one that fell, and singling it out in the pane is #449's surface, not this one.
   * **`web_url` is null**, `OpenAlert`'s call and for its reason (#444): nothing knobas draws opens
     a monitor's page in Kuma, and reaching one would mean joining `sync.live_item`, which would drop
     a **paused** monitor's alert out of the inbox while it went on counting in the top strip.
@@ -6841,7 +6846,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   before it, or an `acked` with no `recovered` after it, and its history would hold half a story with
   nothing saying which half. The inbox picking one asset is a property of *the row* — one demand, one
   way in — and not a claim about which machines the trouble was on. `OpenAlert::assets` on the ack's
-  answer is the set its lines landed on, so a caller can see it.
+  answer is the set its lines landed on, so a caller can see it. That set is the **confirmed-watch**
+  set and deliberately not the routing rule's: an ack can write a line on an asset no context
+  holds — one the inbox would never have routed — for the symmetry above, since the recovery line
+  it pairs with is written with no context in view at all.
 
   **Recovery writes the other line, and `knobas_sync::alerts` is where it is.** The reconciler's
   close now records one `recovered` line per confirmed watched asset, actor `sync:<source_id>`,
@@ -6852,7 +6860,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   where what recovery leaves behind would otherwise be unrecoverable — a closed alert is out of every
   open-alert read at once. `alerts::reconcile` widens from `pub(crate)` to `pub` so the app's inbox
   battery can drive the recovery half of its own seam without an adapter; `crates/knobas-sync`
-  is not frozen (see below) and the twelve tests in `tests/alerts.rs` still go through the engine.
+  is not frozen (see below) and all fourteen tests in `tests/alerts.rs` still go through the engine,
+  none of them calling the reconciler directly.
 
   **The membership walk is seeded twice and written once.** The rule needs *"is this asset a member
   of some context, directly or through an ancestor"* inside one statement that binds no context id,
@@ -6875,8 +6884,8 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **`knobas_core::link::MONITORED_BY`**, new, because four places have to agree on that word and
   three of them are SQL: the alert rule, #478's `monitor_url_host` suggestion, the recovery line,
-  and `knobas_app::assets` — which keeps its own `MONITORED_BY` as a re-export so nothing that reads
-  it moves. A fifth spelling would be a monitor visibly attached to an asset that never colours it,
+  and `knobas_app::assets` — which keeps its own `MONITORED_BY` as an alias of it, so nothing
+  that reads it moves. A fifth spelling would be a monitor visibly attached to an asset that never colours it,
   never reaches the inbox and never takes a recovery line, with nothing failing anywhere. The two
   statements that cannot name the constant, both compile-time `concat!`s, are pinned to it by
   `inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws` and
@@ -6922,8 +6931,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   and open, item gone, both history lines; recovery removing an un-acked item; the second ack and
   the refusal); `crates/knobas-app/tests/assets_ipc.rs`' handler list and its argument-decode loop;
   `commands::assets::tests`' registration and argument-name loops (now twenty commands); and on the
-  frontend three new tests in `inbox.test.svelte.ts` (the Tree address, the ack's argument, and that
-  no other category offers it), one in `AssetsView.alerts.test.svelte.ts` (the two history verbs
+  frontend four new tests in `inbox.test.svelte.ts` (the Tree address, the ack's argument,
+  `subjectOf` over a subject carrying colons, slashes and a hash, and that no other category
+  offers it), one in `AssetsView.alerts.test.svelte.ts` (the two history verbs
   read as sentences), one in `fake-tauri.test.ts`, and the widened
   `NotificationsSection.test.svelte.ts`.
 

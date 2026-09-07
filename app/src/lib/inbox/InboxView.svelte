@@ -75,7 +75,6 @@
     );
   }
 
-
   async function openInBrowser(url: string) {
     try {
       await openExternal(url);

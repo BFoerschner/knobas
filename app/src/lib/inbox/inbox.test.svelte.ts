@@ -504,7 +504,6 @@ test("the context filter keeps members, counts them as here, and clears whole", 
   stopContexts();
 });
 
-
 // -- the alert (#446) --------------------------------------------------------
 
 /** One alert row, as the backend derives it: subject the monitor, way in the asset. */

@@ -2311,7 +2311,7 @@ pub async fn ack_alert(
     let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at")?;
     let already: Option<chrono::DateTime<chrono::Utc>> = row.try_get("acked_at")?;
 
-    let assets = watched_assets(&mut *tx, std::slice::from_ref(&monitor_id.to_owned()))
+    let assets = watched_assets(&mut *tx, &[monitor_id.to_owned()])
         .await?
         .remove(monitor_id)
         .unwrap_or_default();
