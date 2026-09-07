@@ -104,7 +104,7 @@
     <p class="fail">{failure}</p>
     <button class="btn" onclick={() => void load()}>Retry</button>
   {:else if stored !== undefined}
-    <div class="row">
+    <div class="field">
       <label class="lab" for="clones-root">Directory</label>
       <input
         id="clones-root"
@@ -151,7 +151,13 @@
     color: var(--fail);
   }
 
-  .row {
+  /*
+    `field` and not `row`: the stylesheet's global `.row` is the list row --
+    a five-column grid one line high with `overflow: hidden` on every child --
+    and a form laid out in it clips its own label and its last button. Seen in
+    the headless pass for this ticket.
+  */
+  .field {
     margin-top: 12px;
     display: grid;
     gap: 6px;

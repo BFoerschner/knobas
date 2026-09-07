@@ -1469,10 +1469,16 @@ const CORPUS: {
   // command to copy. The keys follow interfaces §4.2's Gitea grammar
   // (`owner/repo`, `owner/repo@refs/heads/<name>`), which is what the real
   // backend resolves a branch's repository by.
-  row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
-    full_name: "tidewater/payout-service",
-    description: "Payout scheduling and SEPA retries.",
-  }),
+  {
+    ...row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
+      full_name: "tidewater/payout-service",
+      description: "Payout scheduling and SEPA retries.",
+    }),
+    // A forge-shaped URL rather than the fixture's default: it is what the
+    // clone command is built from, and a person reading the panel should see
+    // the command they would actually run.
+    web_url: "https://gitea.example.com/tidewater/payout-service",
+  },
   row(
     "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry",
     "branch",
@@ -1483,10 +1489,13 @@ const CORPUS: {
   ),
   // A second repo, with no clone on this fixture's disk: the *no checkout*
   // arm, and the one that shows the clone command.
-  row("mock:tidewater/ledger", "repo", "tidewater/ledger", "2026-08-18T12:00:00Z", "jonas", {
-    full_name: "tidewater/ledger",
-    description: "The ledger service.",
-  }),
+  {
+    ...row("mock:tidewater/ledger", "repo", "tidewater/ledger", "2026-08-18T12:00:00Z", "jonas", {
+      full_name: "tidewater/ledger",
+      description: "The ledger service.",
+    }),
+    web_url: "https://gitea.example.com/tidewater/ledger",
+  },
   row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
     num: 142,
     repo: "payout-service",
