@@ -30,6 +30,25 @@ import type { LinkEntry } from "../ipc/entity";
  */
 export const DEFAULT_RELATION = "related";
 
+/**
+ * What a **capture** attaches its note to (`CONTEXT.md`, **Capture**).
+ *
+ * `captured-in` names the [context](../shell/contexts.ts) of the stored room
+ * the reader stood in — which is what makes the note a member of it by
+ * ADR-0008 — and `captured-from` the entity whose detail was open. Constants
+ * because three places have to agree on the spelling: the curated list below,
+ * what *New note* sends (`shell/Room.svelte`), and what the capture window
+ * will send (#503). A fourth spelling would be a note that says it was
+ * captured somewhere and belongs to nothing.
+ *
+ * They are ordinary relations and not a second vocabulary: no field on the
+ * note records a capture, the links are the whole record, and a reader
+ * withdraws one from the panel like any other.
+ */
+export const CAPTURED_IN = "captured-in";
+/** See {@link CAPTURED_IN}. */
+export const CAPTURED_FROM = "captured-from";
+
 /** One offered relation, and its two readings. */
 export interface Relation {
   /** The stored value: lower case, because the backend folds it on write. */
@@ -99,6 +118,14 @@ export const RELATIONS: readonly Relation[] = [
   // backwards and say the monitor was monitored by the container. `inverseOf`
   // is how one word covers both ends without two words reaching the database.
   { id: "monitors", forward: "monitors", inverse: "monitored by", inverseOf: "monitored-by" },
+  // The two a capture draws (#502, spec #491 stories 40-43). Curated for the
+  // reason `published-as` is: an unknown relation reads the same word from
+  // both ends, and "captured in" on a *context* would say the room was
+  // captured in the note. The inverse reads "here" because that is what the
+  // other end is — the place the thought was taken down in, and the thing it
+  // was taken down from.
+  { id: CAPTURED_IN, forward: "captured in", inverse: "captured here" },
+  { id: CAPTURED_FROM, forward: "captured from", inverse: "captured from here" },
 ];
 
 /** One link about to be written: the ends, in order, and the stored word. */

@@ -16,7 +16,9 @@ import type {
   EntityPage,
   EntityRow,
   MiniBoard,
+  NoteLinkInput,
 } from "../ipc/entity";
+import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
 
 /** A plain function, not a `vi.fn` — see the note in `Tile.test.svelte.ts`. */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
@@ -33,6 +35,16 @@ let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Pr
  */
 /** Every note *New note* wrote. */
 const written: string[] = [];
+/**
+ * The `links` argument of each `createNote` call — what a new note is **born
+ * with** (#502).
+ *
+ * Recorded rather than answered: this file cannot see a link a note carries,
+ * only the one it asked for, and what the room decides *is* the argument. The
+ * links themselves are checked where the database is, in
+ * `crates/knobas-app/tests/entity.rs`.
+ */
+const born: (NoteLinkInput[] | undefined)[] = [];
 
 vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
@@ -55,8 +67,9 @@ vi.mock("../ipc/entity", () => ({
   },
   getEntity: (entityId: string): Promise<EntityDetail> =>
     Promise.reject({ code: "not_found", message: `${entityId} is not in the local index`, source_id: null }),
-  createNote: () => {
+  createNote: (_title?: string, _bodyMd?: string, links?: NoteLinkInput[]) => {
     written.push("note:new");
+    born.push(links);
     return Promise.resolve({
       note: {
         id: "note:new",
@@ -441,6 +454,83 @@ test("New note writes the note first and opens it", async () => {
   expect(written).toEqual(["note:new"]);
   expect(location.hash).toBe("#/note/note:new");
   screen.done();
+});
+
+/**
+ * Which links *New note* attaches, over the four rooms-and-details a reader
+ * can be standing in (#502, spec #491 stories 40-43; `CONTEXT.md`,
+ * **Capture**).
+ *
+ * The room is the only thing that knows the answer, and the answer is a
+ * *decision*, not a lookup: a derived room has an id (`src:jira`) and no
+ * context, so a room that linked to "the room" would attach a link to an
+ * address nothing carries. Walked as a table rather than as four tests
+ * because the interesting property is the difference between the rows.
+ *
+ * The detail is opened the way a reader opens one — clicking a row — so the
+ * foreground under test is the one the address really holds, and not a prop
+ * this file set.
+ */
+async function bornWithFrom(hash: string, openADetail: boolean) {
+  born.length = 0;
+  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1 });
+  const screen = render("#/ctx/all");
+  await settle();
+  screen.relist([...CONTEXTS, storedContext(STORED)]);
+  screen.router.go(hash);
+  // The room re-reads on the switch, so its previous tiles are still drawn for
+  // a turn: settling first is what makes the row clicked below this room's.
+  await settle();
+  await vi.waitFor(() => expect(screen.rows()).toEqual(["Title of INC-1"]));
+
+  if (openADetail) {
+    screen.target.querySelector<HTMLButtonElement>(".row")?.click();
+    flushSync();
+    await settle();
+    expect(screen.router.route, hash).toMatchObject({ detail: { entityId: "mock:INC-1" } });
+  }
+
+  const button = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (node) => node.textContent?.trim() === "New note",
+  );
+  expect(button, `${hash} offers somewhere to start writing`).toBeDefined();
+  button!.click();
+  await settle();
+  screen.done();
+
+  expect(born, hash).toHaveLength(1);
+  return born[0] ?? [];
+}
+
+test("New note in a stored room is born linked to that room's context", async () => {
+  expect(await bornWithFrom("#/ctx/ctx:pay", false)).toEqual([
+    { target_id: "ctx:pay", relation: CAPTURED_IN },
+  ]);
+});
+
+test("New note over an open detail is born linked to what was being read", async () => {
+  expect(await bornWithFrom("#/ctx/ctx:pay", true)).toEqual([
+    { target_id: "ctx:pay", relation: CAPTURED_IN },
+    { target_id: "mock:INC-1", relation: CAPTURED_FROM },
+  ]);
+});
+
+/**
+ * The negative, and the one worth three rooms rather than one: *All work*, a
+ * source room and a project room are all derived, all have an id, and none has
+ * a context to be captured in (`CONTEXT.md`, **Room**).
+ */
+test("New note in a derived room is born linked to nothing", async () => {
+  for (const hash of ["#/ctx/all", "#/ctx/src:jira", "#/ctx/proj:jira:PAY"]) {
+    expect(await bornWithFrom(hash, false), hash).toEqual([]);
+  }
+});
+
+/** A detail is a foreground wherever it is open, including in a derived room. */
+test("New note over a detail in a derived room is born linked only to it", async () => {
+  expect(await bornWithFrom("#/ctx/src:jira", true)).toEqual([
+    { target_id: "mock:INC-1", relation: CAPTURED_FROM },
+  ]);
 });
 
 /**

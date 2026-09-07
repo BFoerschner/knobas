@@ -281,7 +281,7 @@ pub async fn get_or_create(pool: &PgPool, day: NaiveDate) -> Result<NoteRow, Ipc
     if let Some(note) = existing {
         return Ok(note);
     }
-    Ok(note::create(pool, &title, &template_of(day), ACTOR).await?)
+    Ok(note::create(pool, &title, &template_of(day), &[], ACTOR).await?)
 }
 
 /// One action item a protocol's body names.

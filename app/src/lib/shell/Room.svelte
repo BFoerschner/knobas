@@ -19,7 +19,13 @@
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";
-  import { createNote, listEntities, type EntityRow } from "../ipc/entity";
+  import {
+    createNote,
+    listEntities,
+    type EntityRow,
+    type NoteLinkInput,
+  } from "../ipc/entity";
+  import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
   import AssetsTile from "./AssetsTile.svelte";
   import RoomBar from "./RoomBar.svelte";
   import SuggestionTray from "./SuggestionTray.svelte";
@@ -227,16 +233,55 @@
   }
 
   /**
+   * The links a note started here is **born with** (#502, spec #491 stories
+   * 40-43; `CONTEXT.md`, **Capture**).
+   *
+   * Two of them at most, and each is present only when it has something true
+   * to say:
+   *
+   * * `captured-in` names this room's **context**, which is `null` for every
+   *   derived room — *All work*, a source, a project — because a derived room
+   *   has no context (`CONTEXT.md`, **Room**). Not the room's `id`: a derived
+   *   room's id (`src:gitea`) addresses nothing, and a stored room's id and its
+   *   context are the same `ctx:` entity, so reading the filter is the reading
+   *   that cannot be wrong for one of them. The link is what makes the note a
+   *   member of the context (ADR-0008), which is why there is no membership
+   *   write beside it.
+   * * `captured-from` names the entity whose **detail is open**, and nothing
+   *   else. Deliberately not the timer's foreground rule (*open detail, else
+   *   room anchor, else none*, #278): the ticket and story 42 both say *when a
+   *   detail was open*, and falling back to the room's anchor would attach a
+   *   second link to the promoted ticket the `captured-in` context is already
+   *   about — saying twice, in two words, where the note came from.
+   *
+   * Built here rather than inside {@link startNote} so the decision is one
+   * expression a test can read, and because #503's capture window makes the
+   * same two from a room and a detail it remembered rather than ones it is
+   * drawing.
+   */
+  function bornWith(): NoteLinkInput[] {
+    const links: NoteLinkInput[] = [];
+    if (context.filter.context !== null) {
+      links.push({ target_id: context.filter.context, relation: CAPTURED_IN });
+    }
+    if (detail !== null) {
+      links.push({ target_id: detail.entityId, relation: CAPTURED_FROM });
+    }
+    return links;
+  }
+
+  /**
    * Write a new note and open it.
    *
    * The row exists before the editor does, and that is the whole of story 2:
-   * `create_note` takes no arguments, so there is nothing to lose between
-   * *New note* and the first keystroke. What the reader then edits is a note
-   * that is already saved.
+   * *New note* needs nothing typed, so there is nothing to lose between the
+   * button and the first keystroke. What the reader then edits is a note that
+   * is already saved — and already linked to where it was written, in the same
+   * transaction, so it is never briefly a thought belonging to nothing.
    */
   async function startNote() {
     try {
-      const written = await createNote();
+      const written = await createNote(undefined, undefined, bornWith());
       router.go(
         hashFor({
           view: "room",

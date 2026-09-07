@@ -2170,7 +2170,7 @@ async fn comment_pending(pool: &PgPool, entity_id: &str, body: &str, at: DateTim
 /// then moves the one row's stamp, exactly as a real afternoon's typing would
 /// leave it.
 async fn note_edited(pool: &PgPool, title: &str, at: DateTime<Utc>, saves: usize) -> String {
-    let row = knobas_core::note::create(pool, title, "", "user")
+    let row = knobas_core::note::create(pool, title, "", &[], "user")
         .await
         .expect("a note");
     let id = knobas_core::entity::EntityRef::parse(&row.id).expect("a note id");

@@ -1861,7 +1861,7 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
     let (ticket, _unused) = linkable_pair(&pool).await;
 
     // Story 2: *New note* writes the row before anything is typed into it.
-    let fresh = create_note_inner(&pool, None, None).await.unwrap();
+    let fresh = create_note_inner(&pool, None, None, &[]).await.unwrap();
     assert_eq!(fresh.note.title, knobas_core::note::UNTITLED);
     assert!(fresh.note.body_md.is_empty());
     assert!(fresh.refs.is_empty() && fresh.links.is_empty());
@@ -1917,6 +1917,194 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
     );
 }
 
+/* ------------------------------------- a note is born with its links (#502) */
+
+/// The two relations a capture attaches (`CONTEXT.md`, **Capture**; spec #491
+/// stories 40--43), spelled here as the ticket spells them.
+///
+/// Literals rather than a constant imported from somewhere: the frontend is
+/// where these words live (`app/src/lib/detail/relations.ts`, the curated menu,
+/// pinned to what *New note* sends by `shell/Room.test.svelte.ts`), because
+/// nothing in Rust filters on them -- the command draws the relation it is
+/// handed, the way `create_link_inner` does. What this file is entitled to
+/// check is that the words survive the seam and read back on both ends.
+const CAPTURED_IN: &str = "captured-in";
+const CAPTURED_FROM: &str = "captured-from";
+
+/// A note born in a **stored** room with a detail open carries both links,
+/// and the `captured-in` one makes it a member of that context.
+///
+/// Membership is the point of criterion 1's first clause and it is not a
+/// second mechanism: ADR-0008's seed is *"every confirmed link touching the
+/// context's own `ctx:` entity"*, so the link **is** the add. Asserted through
+/// `context::member_ids` -- the one statement every membership surface reads --
+/// rather than by re-querying `knobas.link`, which would only restate the row
+/// this test already wrote.
+#[tokio::test]
+async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+
+    let room = create_context_inner(&pool, &format!("Capture {}", unique()))
+        .await
+        .unwrap();
+    let (ticket, _unused) = linkable_pair(&pool).await;
+
+    let born = create_note_inner(
+        &pool,
+        None,
+        None,
+        &[
+            NoteLinkInput {
+                target_id: room.id.clone(),
+                relation: CAPTURED_IN.to_owned(),
+            },
+            NoteLinkInput {
+                target_id: ticket.clone(),
+                relation: CAPTURED_FROM.to_owned(),
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    let note_id = born.note.id.clone();
+
+    // Story 2 still holds: the row exists before anything is typed, and the
+    // links arrived with it rather than after a first save.
+    assert!(born.note.body_md.is_empty());
+    assert!(
+        born.refs.is_empty(),
+        "a capture link is not a [[ref]]: the body names nothing"
+    );
+
+    let drawn: Vec<(&str, &str, knobas_core::link::Origin)> = born
+        .links
+        .iter()
+        .map(|entry| {
+            assert_eq!(
+                entry.link.from_id, note_id,
+                "the note is the from end, so `captured in` reads on the note"
+            );
+            (
+                entry.other.entity_id.as_str(),
+                entry.link.relation.as_str(),
+                entry.link.origin,
+            )
+        })
+        .collect();
+    assert_eq!(drawn.len(), 2, "two links and no third: {drawn:?}");
+    assert!(
+        drawn.contains(&(room.id.as_str(), CAPTURED_IN, knobas_core::link::Origin::Manual)),
+        "{drawn:?}"
+    );
+    assert!(
+        drawn.contains(&(
+            ticket.as_str(),
+            CAPTURED_FROM,
+            knobas_core::link::Origin::Manual
+        )),
+        "{drawn:?}"
+    );
+
+    // ADR-0008: an explicit add is a link touching the context's `ctx:` entity,
+    // so the note is in the room it was written in without a second write.
+    let members = knobas_core::context::member_ids(&pool, &room.id)
+        .await
+        .unwrap();
+    assert!(
+        members.contains(&note_id),
+        "the note is a member of the room it was captured in: {members:?}"
+    );
+
+    // ...and the thing the reader was looking at shows the thought it produced.
+    let back = links_on(&pool, &ticket).await;
+    let entry = back
+        .iter()
+        .find(|entry| entry.other.entity_id == note_id)
+        .expect("the ticket shows the note captured from it");
+    assert_eq!(entry.link.relation, CAPTURED_FROM);
+    assert_eq!(entry.other.kind, "note");
+}
+
+/// A note born in a **derived** room with nothing open carries no links.
+///
+/// Both halves of criterion 1's negative, and on this seam they are one fact:
+/// a derived room has no context (`CONTEXT.md`, **Room**) and an absent
+/// foreground has nothing to point at, so the caller sends nothing and the
+/// command draws nothing. *Which* rooms send nothing is the frontend's
+/// decision and is pinned in `shell/Room.test.svelte.ts`; what is checked here
+/// is that nothing means nothing -- no `related` fallback, no link to the room
+/// the note happens to be listed in.
+#[tokio::test]
+async fn a_note_born_with_no_links_is_born_with_none() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::create_note_inner;
+
+    let born = create_note_inner(&pool, Some("Loose thought"), None, &[])
+        .await
+        .unwrap();
+    assert!(born.links.is_empty(), "{:?}", born.links);
+
+    let read = knobas_app::commands::entity::get_note_inner(&pool, &born.note.id)
+        .await
+        .unwrap();
+    assert!(read.links.is_empty(), "and still none on a fresh read");
+}
+
+/// A target that is not an entity id is refused; a well-formed id nothing
+/// carries draws no link and the note is written anyway.
+///
+/// The two directions are deliberately different, and the difference is who
+/// can act on it. A malformed id is a caller bug, deterministic, and worth a
+/// refusal a test can pin. An id with no `knobas.entity` row is a **race** --
+/// a remembered room, a detail whose source was purged between the read and
+/// the keystroke -- and refusing there would make *New note* a button that
+/// stays broken while the reader can do nothing about it. It is the same rule
+/// `note::reconcile_refs` applies to a `[[ref]]` naming nothing, written as
+/// the same `select ... from knobas.entity`.
+#[tokio::test]
+async fn a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
+
+    for bad in ["no-colon-here", "", ":x"] {
+        let refused = create_note_inner(
+            &pool,
+            None,
+            None,
+            &[NoteLinkInput {
+                target_id: bad.to_owned(),
+                relation: CAPTURED_IN.to_owned(),
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            refused.code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?} is not an address"
+        );
+    }
+
+    let gone = format!("ctx:{}", uuid::Uuid::new_v4());
+    let born = create_note_inner(
+        &pool,
+        Some("Captured from a room that went"),
+        None,
+        &[NoteLinkInput {
+            target_id: gone,
+            relation: CAPTURED_IN.to_owned(),
+        }],
+    )
+    .await
+    .unwrap();
+    assert!(
+        born.links.is_empty(),
+        "no link, and the thought is still saved: {:?}",
+        born.links
+    );
+}
+
 /// Story 9 over the seam: a ref whose target the source withdrew stays
 /// visible and marked.
 ///
@@ -1928,7 +2116,7 @@ async fn a_note_ref_to_a_withdrawn_ticket_resolves_and_is_marked() {
     let pool = seeded().await;
     use knobas_app::commands::entity::create_note_inner;
 
-    let detail = create_note_inner(&pool, Some("Runbook"), Some("superseded: [[mock:PAY-198]]"))
+    let detail = create_note_inner(&pool, Some("Runbook"), Some("superseded: [[mock:PAY-198]]"), &[])
         .await
         .unwrap();
 
@@ -1951,7 +2139,7 @@ async fn deleting_a_note_over_the_seam_is_idempotent_and_a_stale_editor_is_told(
         create_note_inner, delete_note_inner, get_note_inner, save_note_inner,
     };
 
-    let detail = create_note_inner(&pool, Some("Scratch"), Some("a thought"))
+    let detail = create_note_inner(&pool, Some("Scratch"), Some("a thought"), &[])
         .await
         .unwrap();
     let id = detail.note.id.clone();

@@ -778,6 +778,7 @@ async fn a_note_is_found_by_the_same_search_that_finds_a_ticket() {
         &pool,
         &format!("{t} investigation"),
         "the counter starts at zero, not one",
+        &[],
         "user",
     )
     .await
@@ -830,7 +831,7 @@ async fn the_note_prefix_returns_notes_and_only_notes() {
         Utc::now(),
     )
     .await;
-    let note = knobas_core::note::create(&pool, &format!("{t} a note"), "", "user")
+    let note = knobas_core::note::create(&pool, &format!("{t} a note"), "", &[], "user")
         .await
         .unwrap();
 
@@ -891,7 +892,7 @@ async fn a_notes_snippet_is_segments_of_the_markdown_the_user_typed() {
     // `ts_headline` chooses rather than left to luck.
     let body =
         format!("## Runbook\n\nThe {t} escalation [[jira:PAY-231]] path is not the on-call rota.");
-    let note = knobas_core::note::create(&pool, &format!("{t} runbook"), &body, "user")
+    let note = knobas_core::note::create(&pool, &format!("{t} runbook"), &body, &[], "user")
         .await
         .unwrap();
 

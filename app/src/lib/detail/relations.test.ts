@@ -10,7 +10,16 @@
 import { expect, test } from "vitest";
 
 import type { LinkEntry } from "../ipc/entity";
-import { DEFAULT_RELATION, RELATIONS, drawn, groupLinks, readingFor, readingOf } from "./relations";
+import {
+  CAPTURED_FROM,
+  CAPTURED_IN,
+  DEFAULT_RELATION,
+  RELATIONS,
+  drawn,
+  groupLinks,
+  readingFor,
+  readingOf,
+} from "./relations";
 
 function entry(over: { relation?: string; from?: string; to?: string; id?: string } = {}): LinkEntry {
   const from = over.from ?? "mock:PAY-231";
@@ -70,6 +79,41 @@ test("an asset's relations read as sentences from both of their ends", () => {
   expect(readingOf("documented-in", false)).toBe("documents");
   expect(readingOf("monitored-by", true)).toBe("monitored by");
   expect(readingOf("monitored-by", false)).toBe("monitors");
+});
+
+/**
+ * The two a capture draws (#502, spec #491 stories 40-43), as literal words
+ * from both ends.
+ *
+ * Curated because an unknown relation reads the same word from both ends: an
+ * uncurated `captured-in` would print *captured in* on the **context's** panel
+ * over a row that is the note, which says the room was captured in the
+ * thought. The panel is the only place these words are ever read, so the two
+ * readings are the whole of what being in the menu buys.
+ */
+test("the two relations a capture draws read as sentences from both of their ends", () => {
+  expect(readingOf(CAPTURED_IN, true)).toBe("captured in");
+  expect(readingOf(CAPTURED_IN, false)).toBe("captured here");
+  expect(readingOf(CAPTURED_FROM, true)).toBe("captured from");
+  expect(readingOf(CAPTURED_FROM, false)).toBe("captured from here");
+  expect(
+    RELATIONS.map((relation) => relation.id),
+    "both are offered by the dialog, not only understood by the panel",
+  ).toEqual(expect.arrayContaining([CAPTURED_IN, CAPTURED_FROM]));
+});
+
+/**
+ * The same two at the grouping level, which is what the panel draws — and the
+ * end that matters is the **context's**, since that is the one nobody sees
+ * while writing the note.
+ */
+test("a captured-in link reads one way on the note and the other in the room", () => {
+  const note = "note:7f2cf0d4";
+  const room = "ctx:2f1a5d6e";
+  const captured = entry({ id: "c", relation: CAPTURED_IN, from: note, to: room });
+
+  expect(groupLinks([captured], note).map((group) => group.reading)).toEqual(["captured in"]);
+  expect(groupLinks([captured], room).map((group) => group.reading)).toEqual(["captured here"]);
 });
 
 /**

@@ -151,11 +151,47 @@ pub fn parse_refs(body_md: &str) -> Vec<String> {
     out
 }
 
-/// Write a new note, and the links its body already names.
+/// One link a note is **born with**: what it points at, and the word it
+/// carries.
+///
+/// The note is always the `from` end. A capture says *this thought was
+/// captured in that context* and *captured from that ticket* (`CONTEXT.md`,
+/// **Capture**), and both sentences run outwards from the note, which is what
+/// makes `captured in` and `captured here` the two readings of one row.
+///
+/// Deliberately not a `[[ref]]`: a ref is *the body's own list* and is
+/// reconciled against the text on every save ([`reconcile_refs`]), so a link
+/// the body does not name would be withdrawn by the first autosave. These are
+/// ordinary links of origin [`Origin::Manual`], governed by nothing but the
+/// reader, and [`crate::link::unlink`] withdraws one exactly as it withdraws a
+/// link drawn from the panel by hand.
+#[derive(Clone, Debug)]
+pub struct BornLink {
+    /// The other end.
+    pub target: EntityRef,
+    /// The stored relation, already folded to the one spelling that groups it.
+    pub relation: String,
+}
+
+/// Write a new note, the links its body already names, and the links it is
+/// **born with**.
 ///
 /// The id is knobas': a `note:<uuid>` nobody has to choose and nobody can
-/// collide with. Both rows and every ref land in one transaction, so a note is
-/// never half-written and its links never describe a body that was rolled back.
+/// collide with. Both rows, every ref and every [`BornLink`] land in one
+/// transaction, so a note is never half-written and its links never describe a
+/// body that was rolled back. That atomicity is the whole of #502's title: a
+/// note that existed for a moment without its `captured-in` link would be a
+/// note that was, for that moment, in no context.
+///
+/// **A target with no `knobas.entity` row draws no link, and the note is
+/// written anyway.** The same rule [`reconcile_refs`] applies to a `[[ref]]`
+/// naming nothing, expressed as the same `select ... from knobas.entity`: the
+/// caller's ids are read from surfaces that can go stale between the read and
+/// the keystroke -- a remembered room, a detail whose source was purged -- and
+/// refusing the note would make *New note* a button that stays broken while
+/// the reader can do nothing about it. Nothing is hidden by this: the note's
+/// links panel draws the links that exist, and there is no field claiming
+/// otherwise (`CONTEXT.md`, **Capture**: *"Never a field on the note"*).
 ///
 /// # Errors
 ///
@@ -164,6 +200,7 @@ pub async fn create(
     pool: &PgPool,
     title: &str,
     body_md: &str,
+    born_with: &[BornLink],
     author: &str,
 ) -> Result<NoteRow, CoreError> {
     let id = EntityRef::new("note", &Uuid::new_v4().to_string()).to_string();
@@ -188,8 +225,45 @@ pub async fn create(
     .await?;
 
     reconcile_refs(&mut tx, &id, body_md, author).await?;
+    draw_born_links(&mut tx, &id, born_with, author).await?;
     tx.commit().await?;
     Ok(row)
+}
+
+/// Draw the links a note is born with, inside the transaction that wrote it.
+///
+/// One statement per link rather than one over an array: there are two of them
+/// at most, they carry *different relations*, and an `unnest` of two parallel
+/// arrays would trade a legible statement for a round trip nobody is counting.
+///
+/// `on conflict do nothing` because the pair's uniqueness is the database's
+/// (`link_pair_active_idx`) and a caller naming the same target twice under one
+/// relation is asking for one link, not for a failure. `e.id <> $1` is the
+/// self-link guard [`reconcile_refs`] carries, for the same reason: a note is
+/// not linked to itself.
+async fn draw_born_links(
+    tx: &mut Transaction<'_, Postgres>,
+    note_id: &str,
+    born_with: &[BornLink],
+    author: &str,
+) -> Result<(), CoreError> {
+    for born in born_with {
+        sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+             select $1, e.id, $2, $3, $4
+               from knobas.entity e
+              where e.id = $5 and e.id <> $1
+             on conflict do nothing",
+        )
+        .bind(note_id)
+        .bind(&born.relation)
+        .bind(Origin::Manual.as_str())
+        .bind(author)
+        .bind(born.target.to_string())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Rewrite a note's title and body, and bring its `[[refs]]` back into step.
