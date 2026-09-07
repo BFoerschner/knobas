@@ -6862,10 +6862,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   inbox failing its own promise. `context::list` draws the same line for the switcher. Recorded in
   `CONTEXT.md`'s **Alert** entry as a 2026-09-07 amendment.
 
-  **`knobas_core::link::MONITORED_BY`**, new, because three places have to agree on that word and
-  two of them are SQL: the alert rule, the recovery line, and `knobas_app::assets` — which keeps its
-  own `MONITORED_BY` as a re-export so nothing that reads it moves. A fourth spelling would be a
-  monitor that is attached and reaches nothing, with nothing failing anywhere.
+  **`knobas_core::link::MONITORED_BY`**, new, because four places have to agree on that word and
+  three of them are SQL: the alert rule, #478's `monitor_url_host` suggestion, the recovery line,
+  and `knobas_app::assets` — which keeps its own `MONITORED_BY` as a re-export so nothing that reads
+  it moves. A fifth spelling would be a monitor visibly attached to an asset that never colours it,
+  never reaches the inbox and never takes a recovery line, with nothing failing anywhere. The two
+  statements that cannot name the constant, both compile-time `concat!`s, are pinned to it by
+  `inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws` and
+  `suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads`.
 
   **The sixth notification category is switched on here and its behaviour is #447's.**
   `every_inbox_category_has_a_toggle_in_the_interface` is a pin, not a nicety: a category with no

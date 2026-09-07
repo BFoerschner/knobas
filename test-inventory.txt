@@ -763,6 +763,7 @@ knobas-core	lib/knobas_core	suggest::tests::every_rule_has_its_own_name_and_can_
 knobas-core	lib/knobas_core	suggest::tests::every_rule_statement_is_built_from_the_one_driver
 knobas-core	lib/knobas_core	suggest::tests::rule_class_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	suggest::tests::rule_class_serializes_as_its_column_value
+knobas-core	lib/knobas_core	suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads
 knobas-core	lib/knobas_core	suggest::tests::the_rule_classes_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	suggest::tests::the_similarity_floor_in_the_statement_is_the_one_that_is_documented
 knobas-core	lib/knobas_core	write_queue::tests::a_comments_target_changes_when_its_text_does

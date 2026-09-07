@@ -35,12 +35,19 @@ use uuid::Uuid;
 /// the asset it watches by.
 ///
 /// `CONTEXT.md`, **Monitor**: *"Attached to an asset by a `monitored-by`
-/// link"*. Here, in the crate every other one depends on, because **three**
-/// places have to agree on the spelling and two of them are SQL: the inbox's
-/// alert rule (`knobas_core::inbox`), the recovery line the sync engine writes
+/// link"*. Here, in the crate every other one depends on, because **four**
+/// places have to agree on the spelling and three of them are SQL: the inbox's
+/// alert rule ([`crate::inbox`]), the `monitor_url_host` suggestion
+/// ([`crate::suggest`], #478), the recovery line the sync engine writes
 /// (`knobas_sync::alerts`), and `knobas_app::assets`, which is what draws the
-/// link in the first place. A fourth spelling of it would be a monitor that is
-/// attached and reaches nothing, with nothing failing anywhere.
+/// link in the first place. A fifth spelling of it would be a monitor visibly
+/// attached to an asset that never colours it, never reaches the inbox and
+/// never takes a recovery line -- with nothing failing anywhere.
+///
+/// The two statements that cannot name the constant -- both are compile-time
+/// `concat!`s -- are pinned to it by
+/// `inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws` and
+/// `suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads`.
 ///
 /// The rest of the relation vocabulary is a *rendering* decision and stays in
 /// `app/src/lib/detail/relations.ts`; this one is load-bearing in a `where`
