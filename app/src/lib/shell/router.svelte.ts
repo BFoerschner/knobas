@@ -9,6 +9,7 @@
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/assets/tree`        | the Assets view, on its Tree tab (#428)          |
+ * | `#/assets/monitors`    | the Assets view, on its Monitors tab (#448)      |
  * | `#/asset/<entity_id>`  | the Tree, opened at one asset (#428)             |
  * | `#/route/<entity_id>`  | the Tree, at the asset exposing one route (#432) |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
@@ -40,14 +41,26 @@
  * The Assets view's tabs — `CONTEXT.md`, **Tree**: *"its sibling tab is
  * Monitors"*.
  *
- * One member today, and deliberately not a bare string: `"monitors"` arrives
- * with M4.1 and every place that branches on the tab has to fail
- * `svelte-check` when it does, rather than fall through to the Tree.
+ * Both members since #448. Deliberately not a bare string: every place that
+ * branches on the tab has to fail `svelte-check` when a third arrives, rather
+ * than fall through to the Tree.
  *
  * Never "board" — ADR-0009, which is why the first tab is called *Tree* at
  * all.
  */
-export type AssetsTab = "tree";
+export type AssetsTab = "tree" | "monitors";
+
+/**
+ * Read a tab out of an address, defaulting to the Tree.
+ *
+ * The **head owns the whole address** here as everywhere else in this module:
+ * `#/assets/whatever` is the Tree, not "arrives in a later milestone" and not
+ * a tab that does not exist. A typo in a bookmark lands somewhere that draws
+ * rather than on a blank surface asking what `whatever` was.
+ */
+function tabOf(segment: string | undefined): AssetsTab {
+  return segment === "monitors" ? "monitors" : "tree";
+}
 
 export type Route =
   | {
@@ -241,10 +254,10 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
   // both words are in `RESERVED`, so these are the only things that can reach
   // the view. The head owns the whole address, so `#/assets/whatever` is the
   // Tree rather than "arrives in a later milestone" -- the rule `#/sources/x`
-  // and `#/time/whenever` already follow. `#/asset` with no id is *not* the
-  // view: an address that sets out to name an asset and does not is a typo,
-  // not the estate.
-  if (head === "assets") return { view: "assets", tab: "tree", assetId: null };
+  // and `#/time/whenever` already follow, and `tabOf` is where it is applied
+  // to the tab segment. `#/asset` with no id is *not* the view: an address
+  // that sets out to name an asset and does not is a typo, not the estate.
+  if (head === "assets") return { view: "assets", tab: tabOf(segments[1]), assetId: null };
   if (head === "asset") {
     return tail === ""
       ? { view: "unknown", hash }

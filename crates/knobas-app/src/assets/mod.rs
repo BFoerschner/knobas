@@ -707,6 +707,154 @@ pub struct AttachedMonitor {
     pub tombstoned: bool,
 }
 
+/// One row of the Monitors tab's roster -- every monitor the mirror holds, with
+/// what the tab draws beside it (spec #427 story 68, issue #448).
+///
+/// **The whole roster in one read, and no per-monitor round trip.** A tab that
+/// fetched a monitor's samples on demand would be one call per row on a
+/// surface whose point is that every row is comparable at a glance; the counts
+/// on the chips are a count of *these rows*, so the frontend cannot draw them
+/// without the whole list anyway.
+///
+/// The fields split three ways and it is worth knowing which is which. The
+/// identity and the address are `knobas.entity`'s and `sync.item`'s. The
+/// **reading** -- [`monitor_type`], [`target`], [`response_time_ms`],
+/// [`uptime`], [`cert_days_remaining`] -- is read out of the mirrored
+/// payload, under ADR-0007's interim discipline (see [`reading_of`]). And
+/// [`state`] and [`samples`] are knobas' own timeseries: *warn* exists
+/// nowhere in Uptime Kuma and is derived at sample time (`0021`), so a chip
+/// counting warns has to count samples and not the mirror.
+///
+/// [`monitor_type`]: MonitorRow::monitor_type
+/// [`target`]: MonitorRow::target
+/// [`response_time_ms`]: MonitorRow::response_time_ms
+/// [`uptime`]: MonitorRow::uptime
+/// [`cert_days_remaining`]: MonitorRow::cert_days_remaining
+/// [`state`]: MonitorRow::state
+/// [`samples`]: MonitorRow::samples
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MonitorRow {
+    /// `<source>:<monitor id in Kuma>` -- the entity id, and the address a
+    /// detail slide-over opens at.
+    pub entity_id: String,
+    /// The source that mirrored it. On the row because a second monitoring
+    /// source is one more configured source and no new code (`samples::KIND`
+    /// samples any source that emits the kind), so the roster has to be able
+    /// to say which Kuma a monitor came from.
+    pub source_id: String,
+    /// Its name in Uptime Kuma, which is the name an estate file uses to ask
+    /// for it.
+    pub name: String,
+    /// **The state knobas last recorded**: the newest [`sample`](MonitorSample)
+    /// where there is one, and the mirror's own `state` where there is not.
+    ///
+    /// The newest sample first and not the mirror first, because the mirror
+    /// carries Kuma's four words and the sample carries knobas' five: *warn*
+    /// is derived from the response-time threshold at sample time and exists
+    /// in no payload. A chip counting warns off the mirror would count none,
+    /// for ever. The mirror is the fallback for the one case a sample cannot
+    /// cover -- a monitor mirrored by a run that wrote no sample, or one whose
+    /// samples retention has swept -- and it is the same
+    /// `payload->>'state'` read the pane's monitoring section makes (#445).
+    ///
+    /// `null` is a genuine miss: a tombstone with no reading left, or a state
+    /// code the adapter had no word for.
+    pub state: Option<String>,
+    /// `http`, `ping`, `docker`, `port` -- Kuma's own word for what kind of
+    /// check this is. `null` where the payload does not say.
+    pub monitor_type: Option<String>,
+    /// **What it watches**: the URL where there is one, else the hostname with
+    /// its port where there is one. One field and not three, because it is one
+    /// column of the roster and the three are never all present -- an HTTP
+    /// monitor has a URL and no hostname, a ping has a hostname and no URL.
+    pub target: Option<String>,
+    /// The reading Kuma last published, in milliseconds. `null` for a poll
+    /// that did not answer -- Kuma's `-1` sentinel, which the adapter already
+    /// carries as an absence.
+    pub response_time_ms: Option<f64>,
+    /// **When knobas last read this monitor** -- `sync.item.synced_at`, the
+    /// same instant the run's samples carry.
+    ///
+    /// Kuma's `/metrics` has no clock in it at all (#442): there is no "last
+    /// checked" to mirror, so the honest answer is when knobas looked. For a
+    /// tombstoned monitor it is the run that noticed it had gone.
+    pub checked_at: chrono::DateTime<chrono::Utc>,
+    /// Kuma's sliding-window uptime ratios, by its own window labels (`1d`,
+    /// `30d`, `365d`), in label order.
+    ///
+    /// A list and not three fields, for the reason the adapter's payload is a
+    /// map: the windows are Kuma's choice and a release that adds a fourth
+    /// should widen the payload rather than need a field here.
+    pub uptime: Vec<UptimeRatio>,
+    /// Days until the watched certificate expires, for a monitor that watches
+    /// one. `null` for every monitor that does not, which is most of them.
+    pub cert_days_remaining: Option<f64>,
+    /// Its own page in Uptime Kuma (story 71); `null` when there is none left.
+    pub web_url: Option<String>,
+    /// Whether it has left the mirror -- **paused** in Kuma, or deleted.
+    ///
+    /// *Tombstoned* is `CONTEXT.md`'s word and [`AttachedMonitor`]'s field
+    /// name; *Paused* is what the chip says, because pausing is what a reader
+    /// did to make it true. A tombstoned monitor is still a row here: it keeps
+    /// its samples, so the hours before it vanished are still drawable, and a
+    /// roster that dropped it would say nothing about a monitor somebody
+    /// silenced.
+    pub tombstoned: bool,
+    /// The assets this monitor is attached to by a `monitored-by` link, by
+    /// name -- with the path that tells two containers called `postgres`
+    /// apart. Empty for a monitor nothing is attached to, which the tab says
+    /// in as many words.
+    pub assets: Vec<MonitoredAsset>,
+    /// Its samples inside the bar's window, **oldest first**.
+    ///
+    /// Raw and not bucketed, because the bucketing is the tab's and is tested
+    /// there: the backend would otherwise own a number of segments that only a
+    /// stylesheet knows. Bounded by the poll interval's own floor -- 60 s
+    /// (`knobas_sync::config::check_interval`), so at most 1 440 per monitor
+    /// per day -- which is why the window and not a `limit` is what bounds it.
+    pub samples: Vec<MonitorSample>,
+}
+
+/// One uptime ratio, at the window Kuma computed it over.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct UptimeRatio {
+    /// Kuma's own label: `1d`, `30d`, `365d`.
+    pub window: String,
+    /// `0.0` to `1.0`, as Kuma publishes it -- not a percentage.
+    pub ratio: f64,
+}
+
+/// One asset a monitor is attached to.
+///
+/// Not a [`MemberAsset`]: a roster row needs a name, an address and a path,
+/// and a tile's row carries a whole [`AssetRow`] with a health rollup behind
+/// it -- a read per asset per monitor for facts this column does not draw.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MonitoredAsset {
+    /// `asset:<uuid>` -- and the `#/asset/<id>` address the name links to.
+    pub id: String,
+    pub name: String,
+    /// The ancestors' names, outermost first, `" / "` between; `null` for an
+    /// asset at the top of the estate.
+    pub path: Option<String>,
+}
+
+/// One sample as the bar draws it: when it was taken and what it read.
+///
+/// The response time is deliberately **not** here. The bar is coloured by
+/// state, one segment per bucket, and a response time per sample would be
+/// 1 440 numbers per monitor crossing the bridge for a chart this milestone
+/// does not draw (spec #427, *Out of scope*: "charts beyond the 24-hour
+/// bar"). The reading the tab does show is [`MonitorRow::response_time_ms`],
+/// the latest one.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MonitorSample {
+    pub taken_at: chrono::DateTime<chrono::Utc>,
+    /// `up`, `warn`, `down`, `pending`, `maintenance`, or `null` for a poll
+    /// whose state did not resolve -- which the bar draws as a gap.
+    pub state: Option<String>,
+}
+
 /// One route, as both ends read it.
 ///
 /// The same shape in `exposes` and in `reachable_via`, deliberately: it is one
@@ -1348,6 +1496,273 @@ async fn attached_monitors(
             .then_with(|| left.entity_id.cmp(&right.entity_id))
     });
     Ok(out)
+}
+
+/// How far back the Monitors tab's bar reaches, in hours (spec #427 story 68:
+/// *"a 24-hour bar per monitor drawn from the samples"*).
+///
+/// Here and not in the tab, because it is what bounds the answer this module
+/// hands over: at the sync interval's own floor of 60 s
+/// (`knobas_sync::config::check_interval`) it is at most 1 440 samples per
+/// monitor, and that bound is the reason the read needs no `limit`.
+const BAR_WINDOW_HOURS: i32 = 24;
+
+/// Every monitor the mirror holds, tombstones included.
+///
+/// **`sync.item` and not `sync.live_item`**, which is the one place in this
+/// module that departs from the view every other read goes through. That view
+/// drops an entity with a `deleted_at`, and a tombstoned monitor -- one Kuma
+/// no longer publishes, which is what *paused* looks like from `/metrics`
+/// (#442) -- is a row the roster has to draw: it keeps its samples, so the
+/// hours before it went quiet are still there, and a roster that dropped it
+/// would say nothing about a monitor somebody deliberately silenced. The
+/// **other** half of the view is kept and kept deliberately: a disabled
+/// source's items are hidden here as everywhere else (`0012`), because turning
+/// a source off is a statement about what the reader wants to see, and it is a
+/// different statement from Kuma pausing a monitor.
+///
+/// **It is `sync.live_item`'s body minus one clause, and this names the drift
+/// rather than preventing it**: `coalesce(s.enabled, true)` is now written in
+/// two places, here and in `0012`. A shared `sync.item_of_enabled_source` view
+/// would keep one spelling and is a migration and a §10.8 conversation;
+/// `CONTEXT.md`'s **Live item** entry carries the exception, so the next
+/// reader tempted to copy this finds the reason before the statement.
+///
+/// By name, then by id: the tab is a list a person reads down, and two
+/// monitors named the same still draw in a fixed order.
+const ROSTER: &str = "select i.entity_id, i.source_id, i.title, i.payload, i.web_url, i.synced_at,
+                             e.deleted_at is not null as tombstoned
+  from sync.item i
+  join knobas.entity e on e.id = i.entity_id
+  left join knobas.source_config s on s.id = i.source_id
+ where i.kind = $1
+   and coalesce(s.enabled, true)
+ order by i.title asc, i.entity_id asc";
+
+/// Every sample of these monitors inside the bar's window, oldest first.
+///
+/// One statement for the whole roster rather than one per row: the tab draws
+/// every bar at once, and a call per monitor would be a round trip per row of
+/// a surface whose point is that the rows are read together.
+///
+/// `now()` is the **database's** clock and not a parameter, because it is the
+/// same clock `monitor_sample.taken_at` defaults to -- so "the last day" is
+/// one instant's arithmetic rather than two machines' opinions. The tab
+/// buckets against the reader's own clock, which is a different question: what
+/// this bounds is how much crosses the bridge.
+const ROSTER_SAMPLES: &str = "select entity_id, taken_at, state
+  from knobas.monitor_sample
+ where entity_id = any($1::text[])
+   and taken_at >= now() - make_interval(hours => $2::int)
+ order by entity_id asc, taken_at asc";
+
+/// The assets these monitors are attached to, by `monitored-by`.
+///
+/// **Undirected**, like every other reader of this relation: a link is one row
+/// and `0011` made the pair unordered, so which end the import or *Link to…*
+/// happened to write it from is not a fact any read is allowed to depend on.
+/// `a.id <> m.id` is the guard that keeps a link from an asset to itself out
+/// of the join rather than drawing the asset as its own monitor's asset.
+///
+/// `$1` is the monitor ids and `$2` the relation ([`MONITORED_BY`]), bound
+/// rather than written into the text, which is [`MONITORED_ASSETS`]' rule.
+const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name,
+                                    nullif(a.path_text, '') as path
+  from unnest($1::text[]) as m(id)
+  join knobas.confirmed_link l on m.id in (l.from_id, l.to_id)
+  join knobas.asset a on a.id in (l.from_id, l.to_id) and a.id <> m.id
+ where l.relation = $2
+ order by a.name asc, a.id asc";
+
+/// What the Monitors tab draws: every mirrored monitor with its state, its
+/// last day of samples, its last check, its uptime, its certificate days and
+/// the assets it watches (spec #427 story 68, issue #448).
+///
+/// # Three statements, not one and not one per row
+///
+/// The roster, its samples and its attachments are three different
+/// cardinalities over the same set of ids -- one row per monitor, up to 1 440
+/// per monitor, and zero-or-more per monitor. Joined into one statement the
+/// payload would be multiplied out; asked per monitor they would be a round
+/// trip per row. So: read the monitors, then ask each of the other two once,
+/// for the ids the first found.
+///
+/// # The state is the bar's right-hand end
+///
+/// [`MonitorRow::state`] is the newest sample in the window, and the mirror's
+/// own `state` only where the window holds none. That is not a preference
+/// between two sources, it is what makes the chip and the bar one statement:
+/// a *warn* chip counts a state that exists nowhere in Uptime Kuma -- knobas
+/// derives it from the response-time threshold at sample time (`0021`) -- so a
+/// roster that took its state from the mirror would count no warns for ever
+/// while drawing amber segments in every bar.
+///
+/// # Errors
+///
+/// [`IpcError`] if a read fails.
+pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> {
+    let rows = sqlx::query(ROSTER)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|row| row.try_get("entity_id"))
+        .collect::<Result<_, _>>()?;
+
+    let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
+    for sample in sqlx::query(ROSTER_SAMPLES)
+        .bind(&ids)
+        .bind(BAR_WINDOW_HOURS)
+        .fetch_all(pool)
+        .await?
+    {
+        samples
+            .entry(sample.try_get("entity_id")?)
+            .or_default()
+            .push(MonitorSample {
+                taken_at: sample.try_get("taken_at")?,
+                state: sample.try_get("state")?,
+            });
+    }
+
+    let mut attached: HashMap<String, Vec<MonitoredAsset>> = HashMap::new();
+    for row in sqlx::query(ROSTER_ASSETS)
+        .bind(&ids)
+        .bind(MONITORED_BY)
+        .fetch_all(pool)
+        .await?
+    {
+        attached
+            .entry(row.try_get("monitor_id")?)
+            .or_default()
+            .push(MonitoredAsset {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                path: row.try_get("path")?,
+            });
+    }
+
+    rows.iter()
+        .map(|row| {
+            let entity_id: String = row.try_get("entity_id")?;
+            let payload: serde_json::Value = row.try_get("payload")?;
+            let reading = reading_of(&payload);
+            let samples = samples.remove(&entity_id).unwrap_or_default();
+            let state = match samples.last() {
+                Some(newest) => newest.state.clone(),
+                None => text_at(&payload, "state"),
+            };
+            Ok(MonitorRow {
+                source_id: row.try_get("source_id")?,
+                name: row.try_get("title")?,
+                state,
+                monitor_type: reading.monitor_type,
+                target: reading.target,
+                response_time_ms: reading.response_time_ms,
+                checked_at: row.try_get("synced_at")?,
+                uptime: reading.uptime,
+                cert_days_remaining: reading.cert_days_remaining,
+                web_url: row.try_get("web_url")?,
+                tombstoned: row.try_get("tombstoned")?,
+                assets: attached.remove(&entity_id).unwrap_or_default(),
+                samples,
+                entity_id,
+            })
+        })
+        .collect()
+}
+
+/// The half of a [`MonitorRow`] that is read out of the mirrored payload.
+///
+/// A struct rather than five returns, so [`reading_of`] is one named place and
+/// not five call sites that could each drift.
+struct Reading {
+    monitor_type: Option<String>,
+    target: Option<String>,
+    response_time_ms: Option<f64>,
+    uptime: Vec<UptimeRatio>,
+    cert_days_remaining: Option<f64>,
+}
+
+/// Read a monitor's payload for the columns the roster draws.
+///
+/// # This is a payload read outside an adapter (ADR-0007, #277)
+///
+/// `KindPaths` has no slot shaped like any of these -- no "what kind of check",
+/// no "what it watches", no "a ratio per window" -- so declaring them would
+/// itself be a `crates/knobas-source/src/**` change and a §10.8 conversation of
+/// its own. Until there is such a slot the interim discipline applies in full,
+/// and this function meets all three requirements the way
+/// `knobas_sync::samples::sample_of` does:
+///
+/// 1. **It misses, never guesses.** Every field is `None` (or, for the ratios,
+///    absent from the list) unless the payload holds the shape it expects: a
+///    non-string type, a non-number reading, a `uptime` that is not an object,
+///    a ratio that is not a number -- each one is left out rather than
+///    coerced. A blank string is a miss too, for `estate_file.rs`' reason:
+///    *nothing here* and *somebody meant to fill this in* must not read alike.
+/// 2. **One named place**, this function, reached from [`monitor_roster`] and
+///    from nowhere else. The one read outside it is `state`, which
+///    [`monitor_roster`] takes with [`text_at`] because it is the *fallback*
+///    for a value the samples normally supply, and the pane's own monitoring
+///    section already reads it that way (#445, [`MONITOR_READINGS`]).
+/// 3. **The failure direction is absence.** A drifted key draws an empty cell
+///    in the roster -- never a target that is somebody else's host, never a
+///    ratio invented from a string.
+///
+/// # The target is one column
+///
+/// The URL where there is one, else the hostname, with `:port` after it where
+/// there is a port. Kuma gives an HTTP monitor a URL and no hostname and a
+/// ping a hostname and no URL, so the three keys are one fact under three
+/// spellings and the roster draws it in one column.
+fn reading_of(payload: &serde_json::Value) -> Reading {
+    let hostname = text_at(payload, "hostname");
+    let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {
+        (Some(host), Some(port)) => Some(format!("{host}:{port}")),
+        (host, _) => host,
+    });
+    Reading {
+        monitor_type: text_at(payload, "type"),
+        target,
+        response_time_ms: number_at(payload, "response_time_ms"),
+        uptime: payload
+            .get("uptime")
+            .and_then(serde_json::Value::as_object)
+            .map(|windows| {
+                windows
+                    .iter()
+                    .filter_map(|(window, ratio)| {
+                        Some(UptimeRatio {
+                            window: window.clone(),
+                            ratio: ratio.as_f64()?,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        cert_days_remaining: number_at(payload, "cert_days_remaining"),
+    }
+}
+
+/// One string off a payload, or nothing -- including for a blank one.
+fn text_at(payload: &serde_json::Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// One number off a payload, or nothing.
+fn number_at(payload: &serde_json::Value, key: &str) -> Option<f64> {
+    payload.get(key).and_then(serde_json::Value::as_f64)
 }
 
 /// One route, with its own history -- what `#/route/<id>` opens on.

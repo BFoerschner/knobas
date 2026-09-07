@@ -315,6 +315,8 @@ pub fn run() {
             // reason: the list is append-only (§10.8) and never re-sorted.
             commands::assets::monitoring_settings,
             commands::assets::set_monitoring_settings,
+            // #448's Monitors tab, appended after those for the same reason.
+            commands::assets::monitor_roster,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

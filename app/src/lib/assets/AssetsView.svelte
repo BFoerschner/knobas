@@ -63,9 +63,11 @@
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
   and arrive with the routes that carry the URLs (#432). Wires are #433's;
   monitors are also the half of story 37's *own* health that is not here yet,
-  which is #444's. The Monitors tab is #448's, so the tab strip has one tab
-  in it: a disabled sibling would teach the reader only that the app is
-  unfinished. **Environment, owner and status are
+  which is #444's. The Monitors tab landed with #448 and is `MonitorsView`, a
+  surface of its own behind the shared tab strip: it draws no columns, no pane
+  and no search box, so folding it in here would have been one component
+  loading the whole estate to show a roster of the mirror. **Environment, owner
+  and status are
   editable fields on `AssetEdit` and this pane does not set them**: #431 owns
   their *in force* half and draws it, and a control that wrote the stored value
   beside a line reading "or inherited from vm-db-01" is a second ticket's
@@ -113,6 +115,7 @@
   import { ago } from "../shell/time";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
+  import AssetsTabs from "./AssetsTabs.svelte";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
   import MoveDialog from "./MoveDialog.svelte";
@@ -1335,25 +1338,13 @@
   <div class="room-bar">
     <h1>Assets</h1>
     <!--
-      A tab strip with one tab: *Tree* is a destination with an address
-      (`#/assets/tree`) and the name is what keeps "board" off this surface
-      (ADR-0009). Its sibling *Monitors* arrives with M4.1.
+      The tab strip, shared with the roster (`AssetsTabs`): *Tree* is a
+      destination with an address (`#/assets/tree`) and the name is what keeps
+      "board" off this surface (ADR-0009). Its sibling *Monitors* landed with
+      #448 and is a view of its own, which is why the strip is a component
+      rather than markup here.
     -->
-    <nav class="tabs" aria-label="Assets views">
-      <!--
-        `hashFor` and not the literal `"#/assets/tree"`: the tab rides in the
-        address, so when *Monitors* arrives with M4.1 a literal would keep
-        type-checking while pointing at the wrong tab. Bare literals stay right
-        for the addresses that carry nothing (`"#/inbox"`, `"#/sources"`).
-      -->
-      <button
-        class="tab on"
-        aria-current="page"
-        onclick={() => router.go(hashFor({ view: "assets", tab: "tree", assetId: null }))}
-      >
-        Tree
-      </button>
-    </nav>
+    <AssetsTabs {router} />
 
     <!--
       Beside the tab strip, not on a column header: an import is about the

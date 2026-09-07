@@ -336,6 +336,10 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // `?fake-ipc` therefore draws the tile's empty state rather than a red
     // "command not found".
     context_assets: () => [],
+    // The Monitors tab (#448). Derived from the estate file's own monitor
+    // names -- see `fakeMonitorRoster` -- so the roster a browser draws is the
+    // set of monitors the file asks for, with a reading invented on top.
+    monitor_roster: () => fakeMonitorRoster(),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -2094,4 +2098,109 @@ function fakeRuns(args: Record<string, unknown>) {
     },
   ];
   return typeof sourceId === "string" ? runs.filter((run) => run.source_id === sourceId) : runs;
+}
+
+// -- the Monitors tab (#448) ------------------------------------------------
+
+/**
+ * The monitors the estate file asks for, as `monitor_roster` answers them.
+ *
+ * **Derived from the file and not listed here.** `estate.json` names each
+ * asset's monitors by their Uptime Kuma name (story 25), so the set of
+ * monitors that ought to exist is already written down once; a second list
+ * here would be a fixture that drifts from the file the Import loads.
+ *
+ * What this *does* invent is the reading — a state, a response time, a day of
+ * samples — because `/metrics` is a live system and there is nothing on disk
+ * to read it from. The states are dealt round in a fixed order so that every
+ * chip on the tab has something in it: a roster where everything is `up` can
+ * be photographed without showing that the chips do anything.
+ */
+const FIXTURE_MONITOR_STATES = ["up", "warn", "down", "pending", "up", "maintenance", "up"];
+
+/**
+ * How many minutes ago the newest sample of the fixture roster is.
+ *
+ * A whole number of half hours, so the fixture's bars start on a bucket edge
+ * and a screenshot is not one segment shorter than the next reader's.
+ */
+const FIXTURE_SAMPLE_STEP_MIN = 30;
+
+/**
+ * One monitor's last day, one sample per half hour — forty-eight of them, so
+ * the bar is full rather than a strip with the left three quarters missing.
+ *
+ * The blips are placed by index and not at random: a fixture that redrew
+ * itself on every reload would make two QA screenshots of the same build
+ * disagree.
+ */
+function fakeSamples(state: string, seed: number, now: number) {
+  return Array.from({ length: 48 }, (_, index) => {
+    const takenAt = new Date(now - (47 - index) * FIXTURE_SAMPLE_STEP_MIN * 60_000);
+    // Two hours with no reading at all, so a gap is on the screenshot: a bar
+    // that is never interrupted cannot show what an interruption looks like.
+    const quiet = index >= 10 + (seed % 5) && index < 14 + (seed % 5);
+    // One bad half hour per monitor, in a different place for each.
+    const blip = index === 30 + (seed % 9);
+    return {
+      taken_at: takenAt.toISOString(),
+      state: quiet ? null : blip ? "down" : state,
+    };
+  });
+}
+
+/**
+ * `monitor_roster`: every monitor the file names, with a reading, a day of
+ * samples and the asset it watches.
+ *
+ * The **last** sample is what the row's `state` says, which is the rule the
+ * backend follows (`assets::monitor_roster`): the chip and the bar's
+ * right-hand end are one statement, and a fixture that let them disagree
+ * would make the tab look right while hiding the one thing that could be
+ * wrong.
+ */
+function fakeMonitorRoster() {
+  const now = Date.now();
+  const named = FIXTURE_ESTATE.flatMap((asset) =>
+    asset.monitors.map((name) => ({ name, asset })),
+  );
+  return named.map((entry, index) => {
+    const state = FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up";
+    const samples = fakeSamples(state, index, now);
+    // The last one, for the reason above.
+    const last = samples.at(-1);
+    // One paused monitor, because a roster with none cannot show what a
+    // silenced check looks like and it is the state the tab most needs to be
+    // able to say out loud.
+    const tombstoned = entry.name === "confluence (tunnel)";
+    return {
+      entity_id: `kuma:${index + 1}`,
+      source_id: "kuma",
+      name: entry.name,
+      state: last?.state ?? null,
+      monitor_type: entry.name.includes("(tunnel)") ? "port" : "http",
+      target: entry.name.includes("(tunnel)")
+        ? `${entry.asset.name}.invalid:8080`
+        : `http://localhost:3001/${entry.name.replace(/\W+/g, "-")}`,
+      response_time_ms: state === "warn" ? 2_140 : 13 + index * 7,
+      checked_at: new Date(now - 60_000).toISOString(),
+      uptime: [
+        { window: "1d", ratio: state === "down" ? 0.62 : 0.998 },
+        { window: "30d", ratio: 0.9962 },
+      ],
+      // One certificate check, since most monitors watch no certificate and a
+      // roster where every row had one would hide that the column is optional.
+      cert_days_remaining: index === 0 ? 9 : null,
+      web_url: tombstoned ? null : `http://localhost:3001/dashboard/${index + 1}`,
+      tombstoned,
+      assets: [
+        {
+          id: entry.asset.id,
+          name: entry.asset.name,
+          path: assetPathText(entry.asset),
+        },
+      ],
+      samples,
+    };
+  });
 }

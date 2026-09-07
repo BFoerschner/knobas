@@ -118,12 +118,15 @@ test("a route's address reaches the Tree, carrying the route", () => {
  *
  * The head owns the whole address, the rule `#/sources/x` and `#/time/whenever`
  * already follow: `#/assets/anything` is the Tree, because "arrives in a later
- * milestone" is the one thing it must not say now that it does not.
+ * milestone" is the one thing it must not say now that it does not. The one
+ * tail with a meaning of its own is `monitors` (#448), which is the sibling
+ * tab and not a second view — same surface, different tab, so the address is
+ * `#/assets/<tab>` and nothing more.
  */
 test("the assets addresses reach the Tree, with and without a selection", () => {
   expect(parseHash("#/assets/tree")).toEqual({ view: "assets", tab: "tree", assetId: null });
   expect(parseHash("#/assets")).toEqual({ view: "assets", tab: "tree", assetId: null });
-  expect(parseHash("#/assets/monitors")).toEqual({
+  expect(parseHash("#/assets/whatever")).toEqual({
     view: "assets",
     tab: "tree",
     assetId: null,
@@ -137,6 +140,29 @@ test("the assets addresses reach the Tree, with and without a selection", () => 
   // encoded, the rule every entity address in this module follows.
   expect(hashFor(parseHash("#/asset/asset:7f2c"))).toBe("#/asset/asset:7f2c");
   expect(hashFor({ view: "assets", tab: "tree", assetId: null })).toBe("#/assets/tree");
+});
+
+/**
+ * The Monitors tab is a destination (#448), which is the whole reason the tab
+ * rides in the address: a reader who has filtered the roster to *down* can
+ * hand somebody the link they are looking at.
+ *
+ * It round-trips, and it does **not** carry an asset: `#/asset/<id>` opens the
+ * Tree at that asset, and there is no asset a monitor roster is "at".
+ */
+test("the monitors address reaches the same view on its other tab, and round-trips", () => {
+  expect(parseHash("#/assets/monitors")).toEqual({
+    view: "assets",
+    tab: "monitors",
+    assetId: null,
+  });
+  expect(hashFor({ view: "assets", tab: "monitors", assetId: null })).toBe("#/assets/monitors");
+  expect(hashFor(parseHash("#/assets/monitors"))).toBe("#/assets/monitors");
+  // An asset's address is the Tree's, whatever tab the reader was on: a
+  // selection is a thing the roster does not have.
+  expect(hashFor({ view: "assets", tab: "monitors", assetId: "asset:7f2c" })).toBe(
+    "#/asset/asset:7f2c",
+  );
 });
 
 /**

@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
 
   import AssetsView from "./lib/assets/AssetsView.svelte";
+  import MonitorsView from "./lib/assets/MonitorsView.svelte";
   import InboxView from "./lib/inbox/InboxView.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
   import { notifications } from "./lib/inbox/notify.svelte";
@@ -822,8 +823,19 @@
           pane. One branch for `#/assets/tree` and `#/asset/<id>` alike — they
           are the same surface, one of them with a selection — so the view
           reads the address itself rather than being handed an id.
+
+          The **tab** is the one thing read here rather than inside, because
+          the two tabs are two components (#448): the roster draws no columns,
+          no pane and no search box, and one component covering both would
+          load the whole estate to show a list of the mirror. What makes them
+          one view to a reader is the tab strip, which both draw from
+          `AssetsTabs`.
         -->
-        <AssetsView {router} />
+        {#if router.route.tab === "monitors"}
+          <MonitorsView {router} />
+        {:else}
+          <AssetsView {router} />
+        {/if}
       {:else if router.route.view === "standup"}
         <!--
           The standup digest (#288): three lists at their own address, drawn
