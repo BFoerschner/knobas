@@ -113,9 +113,12 @@ async fn from(
 /// `jira` would let a rule that reads the wrong column still pass.
 const KUMA: &str = "kuma";
 
-/// One mirrored monitor, with the address it watches -- the payload shape
-/// `knobas_source_kuma::map` writes, where **every key is present** and a
-/// monitor with no URL carries `null` rather than omitting it.
+/// One mirrored monitor, with the address it watches.
+///
+/// The keys this rule reads, spelled as `knobas_source_kuma::map::payload`
+/// spells them -- not all eleven it writes, but including the one that matters
+/// here: a monitor with no URL carries `url: null` rather than omitting the
+/// key, because the adapter builds the object from `Option`s.
 async fn monitor(pool: &PgPool, key: &str, name: &str, url: Option<&str>) -> String {
     monitor_payload(
         pool,

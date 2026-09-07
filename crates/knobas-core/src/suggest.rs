@@ -166,10 +166,20 @@ macro_rules! driver_head {
 /// this clause did not change.
 ///
 /// `distinct on` in the head plus this `order by` de-duplicates *within* one
-/// pass as well: `not exists` reads the snapshot the statement started from, so
-/// two candidate rows describing one undirected pair would both survive it.
-/// That is still needed after `0011` -- the index refuses the second row, and
-/// refusing it is a failed statement, not a skipped candidate.
+/// pass: `not exists` reads the snapshot the statement started from, so two
+/// candidate rows describing one undirected pair would both survive it.
+///
+/// **What actually keeps the promise is this `on conflict do nothing`, and the
+/// `distinct on` is belt to its braces.** This paragraph used to end "the index
+/// refuses the second row, and refusing it is a failed statement, not a skipped
+/// candidate", and that is wrong: the clause carries no conflict target, so the
+/// unique violation `0011`'s index raises on the second row is swallowed rather
+/// than raised, and the row `order by` puts first lands either way. Measured in
+/// #451, and corrected here rather than left standing (ADR-0011, *verify, then
+/// correct or file*): deleting the `distinct on` leaves every test in
+/// `tests/suggestions.rs` green. It stays because it says in the statement
+/// which of two duplicate candidates is meant to land, instead of leaving that
+/// to a constraint firing behind it.
 macro_rules! driver_tail {
     () => {
         ") as c(from_id, to_id, relation, reason)
@@ -423,9 +433,12 @@ macro_rules! host_of {
 ///
 /// A pair both arms find must still produce one suggestion, and the driver
 /// guarantees that twice over: `distinct on` collapses the candidates, and `on
-/// conflict do nothing` would swallow the survivor anyway. Measured, because
+/// conflict do nothing` would swallow the duplicate anyway. Measured, because
 /// the second half is easy to forget -- deleting the `distinct on` leaves
-/// every assertion in this rule's battery passing.
+/// every assertion in this rule's battery passing. The reason the survivor
+/// carries follows the driver's `order by`, whose last key is `c.reason`: where
+/// both arms reach one pair the route wording wins, "the host of ..." sorting
+/// before "which is ...".
 ///
 /// That `coalesce` is the one place this rule reads #451's sentence -- "the
 /// host of a route the asset exposes" -- as naming *which routes are in play*
@@ -451,6 +464,17 @@ macro_rules! host_of {
 /// `distinct on` keeps one row per pair, and the reason then names whichever
 /// of those routes sorts first.
 ///
+/// The cost is **a host several assets share**, and it is the known weakness
+/// of this rule rather than an oversight: eight routes in
+/// `testenv/hetzner/estate.json` carry `127.0.0.1` and land on seven different
+/// assets, so a Kuma running on the notebook rather than in a container would
+/// watch `http://127.0.0.1:8111/` and be proposed to all seven. Nothing fires
+/// on it today -- the seeded Kuma is in a container and reaches the notebook as
+/// `host.docker.internal` -- and narrowing it is its own decision: the hostname
+/// arm has no port to compare, so comparing ports on the route arm alone would
+/// make one rule fail two ways. A proposal is dismissible and a dismissal is
+/// remembered, which is what makes the weak side of this trade survivable.
+///
 /// `route_name` carries the route's name **and** tells the two arms apart, and
 /// that is sound rather than clever: `0018` declares `name text not null` with
 /// `route_name_chk check (btrim(name) <> '')`, so a route arm's `route_name` is
@@ -469,9 +493,13 @@ macro_rules! host_of {
 /// The monitor's own `hostname` field -- what Kuma reports for a ping or a port
 /// check -- is **not** read here. #451's sentence is "a mirrored monitor's URL
 /// host", and widening it to every address a monitor carries is a decision with
-/// its own negative controls to write. It is not free: three of the eight
-/// monitors `testenv/monitors.json` seeds are `ping` checks carrying the
-/// Hetzner servers' IPs there, and this rule cannot see them.
+/// its own negative controls to write. It is not free, and it disagrees with a
+/// sibling: `knobas_app::assets::reading_of` draws the roster's target column
+/// from "the URL where there is one, else the hostname", because "Kuma gives an
+/// HTTP monitor a URL and no hostname and a ping a hostname and no URL, so the
+/// three keys are one fact under three spellings". Three of the eight monitors
+/// `testenv/monitors.json` seeds are `ping` checks carrying the Hetzner
+/// servers' IPs in `hostname`, and this rule cannot see them.
 const MONITOR_URL_HOST: &str = detection!(concat!(
     "with watched as (
          select m.entity_id, ",
