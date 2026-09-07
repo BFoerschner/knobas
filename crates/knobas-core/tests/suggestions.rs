@@ -618,13 +618,25 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
 /// * an asset whose hostname is `3000`, which a split on the wrong colon piece
 ///   would match;
 /// * an asset whose hostname is `http`, which a URL read that forgot to strip
-///   the scheme would match.
+///   the scheme would match;
+/// * a **repository** carrying the very same URL in its payload, so the rule
+///   is about monitors and not about every mirrored item with an address.
 #[tokio::test]
 async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else() {
     let pool = scratch().await;
     let watching = monitor(&pool, "1", "knobas-gitea", Some("http://gitea:3000")).await;
     let off_estate = monitor(&pool, "2", "status page", Some("https://status.invalid/")).await;
     let addressless = monitor(&pool, "3", "a ping check", None).await;
+    let not_a_monitor = from(
+        &pool,
+        "gitea",
+        "repo",
+        "knobas",
+        "knobas",
+        "",
+        serde_json::json!({ "url": "http://gitea:3000" }),
+    )
+    .await;
 
     let gitea = asset(&pool, "knobas-gitea", Some("gitea")).await;
     let namesake = asset(&pool, "gitea-mirror", Some("gitea.example.com")).await;
@@ -667,12 +679,16 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
     ] {
         assert!(between(&entries, other, &watching).is_none(), "{why}");
     }
-    for monitor_id in [&off_estate, &addressless] {
+    for (id, why) in [
+        (&off_estate, "a monitor whose host no asset carries proposes nothing"),
+        (&addressless, "a monitor with no URL proposes nothing"),
+        (&not_a_monitor, "a repository is not a monitor, whatever its payload says"),
+    ] {
         assert!(
             entries
                 .iter()
-                .all(|e| e.link.from_id != *monitor_id && e.link.to_id != *monitor_id),
-            "a monitor with no host match proposes nothing"
+                .all(|e| e.link.from_id != *id && e.link.to_id != *id),
+            "{why}"
         );
     }
 }
