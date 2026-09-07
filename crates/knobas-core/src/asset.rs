@@ -169,9 +169,10 @@ use PropertyKind::{Number as N, Text as T, Url as U};
 /// Three buckets, in descending order of how much they answer to:
 ///
 /// * **Design §12.1's two chains** -- *site > hypervisor > VM > engine >
-///   container > runtime* -- §12.1 drew three more links below *runtime*, and
-///   spec #491 dropped the types they named -- *and database server >
-///   database > schema > table*. Every link in both is a suggestion here, and
+///   container > runtime* and *database server > database > schema > table*.
+///   §12.1 drew three more links below *runtime*; spec #491 dropped the types
+///   they named, so the first chain now ends there. Every link in both is a
+///   suggestion here, and
 ///   [`tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time`] reads
 ///   them back.
 /// * **What the real estate actually holds.** `testenv/hetzner/estate.json`
@@ -184,9 +185,9 @@ use PropertyKind::{Number as N, Text as T, Url as U};
 ///
 /// * **The neighbouring types §12.1's prose names, and the few this estate
 ///   will plainly grow into.** A service or a database server on a VM, a
-///   middleware behind a reverse proxy, a module under a service. And four
-///   the chains do not draw and the estate has no instance
-///   of yet, each argued rather than assumed: a `network` under a `site`
+///   middleware behind a reverse proxy, a module under a service. And four the
+///   chains do not draw and the estate has no instance of yet, each argued
+///   rather than assumed: a `network` under a `site`
 ///   (a network belongs to the place it is provisioned in, and there is
 ///   nowhere else in the table to hang one), a `reverse_proxy` on a `vm` (the
 ///   estate runs one and will hold it once it is described), and a `service`
