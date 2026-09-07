@@ -302,6 +302,7 @@ const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
 const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
+const MonitoringSection = (await import("../settings/MonitoringSection.svelte")).default;
 const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
 const { createNotifications } = await import("../inbox/notify.svelte");
 const { createHealth } = await import("./health.svelte");
@@ -1003,6 +1004,28 @@ const CASES: Case[] = [
           ports: {
             passiveAttribution: () => deferred<boolean>(false),
             setPassiveAttribution: () =>
+              Promise.reject(new Error("no settings write in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The monitoring settings section (#443). Its effect is the settings read,
+     * and the case that matters is the same one the toggle above has: leaving
+     * settings before the read answers, so the answer lands after the unmount.
+     */
+    name: "MonitoringSection",
+    source: "lib/settings/MonitoringSection.svelte",
+    open: (target) => ({
+      app: mount(MonitoringSection, {
+        target,
+        props: {
+          ports: {
+            monitoringSettings: () =>
+              deferred({ sample_retention_days: 90, response_time_warn_ms: 1500 }),
+            setMonitoringSettings: () =>
               Promise.reject(new Error("no settings write in this test")),
           },
         },

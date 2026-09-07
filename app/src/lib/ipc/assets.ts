@@ -729,3 +729,38 @@ export function previewEstateImport(file: string): Promise<ImportPreview> {
 export function applyEstateImport(file: string): Promise<ImportOutcome> {
   return invoke<ImportOutcome>("apply_estate_import", { file });
 }
+
+/**
+ * The two numbers monitoring is shaped by — `commands::assets::MonitoringSettings`.
+ *
+ * Both are clamped by the backend on the way in and on the way out, so what
+ * this posts and what it gets back can differ, and the section draws the
+ * answer.
+ */
+export interface MonitoringSettings {
+  /** How many days of samples knobas keeps. Default 90, floor 1. */
+  sample_retention_days: number;
+  /**
+   * The response time in milliseconds above which an otherwise-up monitor
+   * samples as *warn*. Default 1500.
+   */
+  response_time_warn_ms: number;
+}
+
+/** What monitoring is set to; the ratified defaults where nothing is stored. */
+export function monitoringSettings(): Promise<MonitoringSettings> {
+  return invoke<MonitoringSettings>("monitoring_settings");
+}
+
+/**
+ * Change both, and get back what is now stored.
+ *
+ * Nothing already sampled is rewritten: *warn* is derived at sample time, so a
+ * new threshold decides the next poll and leaves the hours already drawn on
+ * the Monitors tab as they were recorded.
+ */
+export function setMonitoringSettings(
+  settings: MonitoringSettings,
+): Promise<MonitoringSettings> {
+  return invoke<MonitoringSettings>("set_monitoring_settings", { settings });
+}

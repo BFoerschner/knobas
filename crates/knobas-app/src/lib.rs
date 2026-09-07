@@ -311,6 +311,10 @@ pub fn run() {
             // #439's Import, appended after those for the same reason.
             commands::assets::preview_estate_import,
             commands::assets::apply_estate_import,
+            // #443's monitoring settings, appended after those for the same
+            // reason: the list is append-only (§10.8) and never re-sorted.
+            commands::assets::monitoring_settings,
+            commands::assets::set_monitoring_settings,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

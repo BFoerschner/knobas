@@ -316,6 +316,11 @@ mod tests {
             "start_work_step",
             "inbox_state",
             "item",
+            // Spec #427, in as many words: "The activity stream and the
+            // samples are never in a share export." A sample is a minute of
+            // somebody's infrastructure, one row per monitor per poll, and it
+            // is in the backup because the backup is the whole schema (#443).
+            "monitor_sample",
         ] {
             assert!(
                 !everything.tables().contains(&forbidden),

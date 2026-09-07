@@ -3566,6 +3566,8 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::source_assets,
             knobas_app::commands::assets::preview_estate_import,
             knobas_app::commands::assets::apply_estate_import,
+            knobas_app::commands::assets::monitoring_settings,
+            knobas_app::commands::assets::set_monitoring_settings,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -3714,6 +3716,13 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         (
             "apply_estate_import",
             serde_json::json!({ "file": ESTATE_FILE }),
+        ),
+        ("monitoring_settings", serde_json::json!({})),
+        (
+            "set_monitoring_settings",
+            serde_json::json!({
+                "settings": { "sample_retention_days": 90, "response_time_warn_ms": 1500 },
+            }),
         ),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");

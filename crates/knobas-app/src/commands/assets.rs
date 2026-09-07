@@ -417,6 +417,105 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
     Ok(written.value)
 }
 
+/// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
+/// keys for the sample retention, the response-time threshold").
+///
+/// One DTO and two commands rather than four commands, the shape
+/// `BackupSchedule` and `set_backup_schedule` have: they are edited on one
+/// section of one dialog and saved together, and a surface that could save
+/// half of them is a surface that can be interrupted between the halves.
+///
+/// `u32` because neither is ever negative, and both are clamped into range by
+/// `knobas_sync::samples` on the way in and on the way out -- a settings
+/// dialog and a hand-edited `knobas.setting` row are both places a number
+/// arrives from, and only one of them has a spinner on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MonitoringSettings {
+    /// How many days of samples knobas keeps. Default ninety.
+    pub sample_retention_days: u32,
+    /// The response time, in milliseconds, above which an otherwise-up
+    /// monitor samples as *warn*. Default 1500.
+    pub response_time_warn_ms: u32,
+}
+
+/// A stored setting narrowed to what the wire carries, saturating.
+///
+/// `knobas_sync::samples` clamps both into ranges no `u32` conversion can fail
+/// from, so the saturation is **unreachable** and is written rather than
+/// unwrapped because a panic is the wrong way for a settings *read* to say
+/// that a number was out of range.
+fn narrowed(value: i64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+/// What monitoring is set to today.
+///
+/// Answers the ratified defaults on a database nobody has written a setting
+/// to: neither key is inserted by a migration, which is the convention
+/// `knobas.setting` has had since `0002` -- the default lives in Rust, beside
+/// the reader, and a fresh profile and a profile whose row was deleted give
+/// the same answer.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn monitoring_settings(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<MonitoringSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    read_monitoring(&pool).await
+}
+
+/// Change both, and answer with what is now stored.
+///
+/// The stored values rather than the posted ones, the rule
+/// `set_backup_schedule` and `set_passive_attribution` both follow on this
+/// surface: the section redraws what the database holds instead of what the
+/// click asked for, so a value the clamp moved is shown moved.
+///
+/// **Both rows move or neither does.** `samples::set_settings` writes them in
+/// one transaction, which is what makes the single DTO above honest: a save
+/// that stored the retention and then failed on the threshold would be exactly
+/// the half-saved surface that DTO exists to rule out.
+///
+/// **Nothing already sampled is rewritten.** *Warn* is derived at sample time
+/// and stored, so a new threshold decides the next poll and leaves every hour
+/// already on the Monitors tab's bar as it was recorded. A threshold that
+/// redrew history would make the bar a picture of the current setting rather
+/// than of what happened.
+///
+/// # Errors
+///
+/// [`monitoring_settings`]'s.
+#[tauri::command]
+pub async fn set_monitoring_settings(
+    lifecycle: State<'_, Lifecycle>,
+    settings: MonitoringSettings,
+) -> Result<MonitoringSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    let (days, ms) = knobas_sync::samples::set_settings(
+        &pool,
+        i64::from(settings.sample_retention_days),
+        i64::from(settings.response_time_warn_ms),
+    )
+    .await
+    .map_err(crate::IpcError::from)?;
+    Ok(MonitoringSettings {
+        sample_retention_days: narrowed(days),
+        response_time_warn_ms: narrowed(ms),
+    })
+}
+
+async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
+    use knobas_sync::samples;
+    Ok(MonitoringSettings {
+        sample_retention_days: narrowed(samples::retention_days(pool).await?),
+        response_time_warn_ms: narrowed(samples::threshold_ms(pool).await?),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,7 +875,44 @@ mod tests {
         }
     }
 
-    /// The fifteen commands are invoked from the mirror by the names they are
+    /// The two numbers monitoring is shaped by, in both directions, with the
+    /// ratified defaults asserted as values.
+    ///
+    /// The values and not only the shape: two `u32` fields decode from each
+    /// other's positions without complaint, and "the default retention is
+    /// ninety days" is the sentence spec #427 ratified rather than "there is a
+    /// number here". The literals are checked against the crate's own
+    /// constants too, so moving a default in one place and not the other is a
+    /// failure here rather than a surprise on a fresh profile.
+    #[test]
+    fn the_monitoring_settings_match_their_typescript_mirror() {
+        let settings = MonitoringSettings {
+            sample_retention_days: 90,
+            response_time_warn_ms: 1500,
+        };
+        assert_eq!(
+            i64::from(settings.sample_retention_days),
+            knobas_sync::samples::DEFAULT_RETENTION_DAYS
+        );
+        assert_eq!(
+            i64::from(settings.response_time_warn_ms),
+            knobas_sync::samples::DEFAULT_THRESHOLD_MS
+        );
+        let json = serde_json::to_value(settings).expect("MonitoringSettings serializes");
+        assert_shape(
+            MIRROR,
+            "MonitoringSettings",
+            &json,
+            &["sample_retention_days", "response_time_warn_ms"],
+        );
+        assert_eq!(
+            serde_json::from_value::<MonitoringSettings>(json).expect("and decodes"),
+            settings,
+            "the dialog posts this shape back and the backend has to read it"
+        );
+    }
+
+    /// The seventeen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -801,6 +937,8 @@ mod tests {
             "delete_route",
             "preview_estate_import",
             "apply_estate_import",
+            "monitoring_settings",
+            "set_monitoring_settings",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -839,6 +977,7 @@ mod tests {
             ("delete_route", "routeId"),
             ("preview_estate_import", "file"),
             ("apply_estate_import", "file"),
+            ("set_monitoring_settings", "settings"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
