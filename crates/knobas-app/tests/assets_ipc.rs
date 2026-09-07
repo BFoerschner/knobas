@@ -3071,6 +3071,15 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
 /// stops being true.
 const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 
+/// The monitor list `seed-kuma.sh` creates in Uptime Kuma, embedded.
+///
+/// The estate file's other half: `estate.json` says which monitor names the
+/// assets keep and this says which monitors exist, and #479's witness below is
+/// the one place the two are read together. Embedded for `ESTATE_FILE`'s
+/// reason -- so a change to either file is a red gate here rather than a
+/// discovery later.
+const MONITORS_FILE: &str = include_str!("../../../testenv/monitors.json");
+
 /// One count.
 async fn rows(pool: &PgPool, statement: &'static str) -> i64 {
     sqlx::query(statement)
@@ -3936,6 +3945,193 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
         "the real estate file is not one of the seven"
     );
     assert_eq!(tables(&pool).await, before, "a refused preview wrote a row");
+}
+
+/// **`monitor_url_host` proposes nothing over the real estate, and that
+/// silence is the correct answer** (#479, ADR-0013).
+///
+/// The rule reads a monitor's `hostname` where it has no URL and an asset's
+/// `ip` beside its `hostname`, which is what puts the estate's three ping
+/// checks inside its reach at all. Having widened it, the question a reader
+/// asks is what it now *does* to the estate this milestone is developed
+/// against -- and the answer has to be *nothing*, because every pair it can
+/// find is already a `monitored-by` link the import drew from the name the
+/// asset keeps. A tray holding four proposals about links that already exist
+/// would be the widening's cost and nobody's gain.
+///
+/// The silence is asserted from **both** directions, because on its own it is
+/// the answer a rule that reached nothing would also give:
+///
+/// * the three `vm` assets carry an `ip` property, so the day somebody spells
+///   it `ipv4` again this test says so rather than going quietly green on a
+///   rule that can no longer see the servers;
+/// * the seven names the file keeps are seven links after the import, so the
+///   pairs really are suppressed rather than unreachable;
+/// * and with those links deleted the same pass proposes exactly four --
+///   the three servers by their `ip`, and Gitea by the host of the reverse
+///   tunnel's route. That is the control the zero cannot be read without.
+///
+/// The monitors are **read out of `testenv/monitors.json`**, not copied from
+/// it, and mirrored at the keys `knobas_source_kuma::map::payload` writes: a
+/// `ping` carries `hostname` and a null `url`, an `http` check the other way
+/// round. The file's three `${KNOBAS_HETZNER_*_IP}` placeholders are resolved
+/// from the estate's own `ip` properties, which is what `seed-kuma.sh` does
+/// with `hetzner/hosts.env` -- so the two files are compared against each other
+/// rather than against a copy of either, and a ninth monitor added to the seed
+/// list is a monitor this test then has to account for. `canary` is in that
+/// list precisely because no asset names it and nothing states
+/// `host.docker.internal` -- four of the eight monitors watch a host the estate
+/// does not state, and they must still propose nothing.
+#[tokio::test]
+async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
+    let pool = pool("assets-import-monitor-host-rule").await;
+    let estate: serde_json::Value = serde_json::from_str(ESTATE_FILE).expect("the estate file");
+
+    // Read out of the file the import is about to load, so the ping monitors
+    // watch the addresses the estate actually states -- and so a file that
+    // stopped stating them fails here.
+    let address = |id: &str| -> String {
+        let asset = estate["assets"]
+            .as_array()
+            .expect("the assets")
+            .iter()
+            .find(|asset| asset["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is in the estate file"));
+        assert_eq!(
+            asset["type"], "vm",
+            "{id} is a cloud server and states its address as a vm does"
+        );
+        asset["properties"]["ip"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("{id} needs an `ip` property -- the type schema's word, and the one the rule reads")
+            })
+            .to_owned()
+    };
+
+    // The monitors the seed creates, read out of the seed's own list. A
+    // `${KNOBAS_HETZNER_<ROLE>_IP}` resolves to the `ip` of `asset:hetzner-<role>`,
+    // which is `seed-kuma.sh` reading `hetzner/hosts.env` -- the file this test
+    // cannot have, and whose three values `estate.json` commits anyway.
+    let seeded: Vec<serde_json::Value> =
+        serde_json::from_str(MONITORS_FILE).expect("testenv/monitors.json");
+    assert_eq!(
+        seeded.len(),
+        8,
+        "the seed list is what this test mirrors; if it grew, so must the counts below"
+    );
+    let mut pings = 0;
+    for monitor in &seeded {
+        let name = monitor["name"].as_str().expect("every monitor has a name");
+        let resolved = monitor["hostname"].as_str().map(|hostname| {
+            let role = hostname
+                .strip_prefix("${KNOBAS_HETZNER_")
+                .and_then(|rest| rest.strip_suffix("_IP}"))
+                .unwrap_or_else(|| {
+                    panic!("{name}'s hostname {hostname:?} is not a placeholder this test resolves")
+                })
+                .to_lowercase();
+            pings += 1;
+            address(&format!("asset:hetzner-{role}"))
+        });
+        kuma_monitor(
+            &pool,
+            "kuma",
+            name,
+            serde_json::json!({
+                "id": name,
+                "name": name,
+                "type": monitor["type"],
+                "url": monitor["url"],
+                "hostname": resolved,
+                "port": serde_json::Value::Null,
+                "state": "up",
+            }),
+            None,
+        )
+        .await;
+    }
+    assert_eq!(
+        pings, 3,
+        "three of the eight are pings on the servers' addresses, and they are \
+         the reason this rule reads `hostname` and `ip` at all"
+    );
+
+    let imported = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the import")
+        .value;
+    assert_eq!(
+        imported.monitors_linked, 7,
+        "the seven names the estate file keeps are seven links"
+    );
+    for (asset, monitor) in [
+        ("asset:hetzner-teamcity", "kuma:knobas-teamcity"),
+        ("asset:hetzner-jira", "kuma:knobas-jira"),
+        ("asset:hetzner-confluence", "kuma:knobas-confluence"),
+        ("asset:knobas-gitea", "kuma:gitea"),
+    ] {
+        assert!(
+            links_of(&pool, asset).await.contains(&(
+                "monitored-by".to_owned(),
+                monitor.to_owned(),
+                "monitor".to_owned()
+            )),
+            "{asset} is already linked to {monitor}, which is what the rule must not propose again"
+        );
+    }
+
+    let rule = knobas_core::suggest::rule("monitor_url_host").expect("the rule");
+    let written = knobas_core::suggest::detect_rule(&pool, rule)
+        .await
+        .expect("the pass");
+    assert_eq!(
+        written, 0,
+        "every pair the rule can find on the real estate is already a link"
+    );
+    assert!(
+        knobas_core::suggest::proposals(&pool, &[], None, 200)
+            .await
+            .expect("the tray")
+            .is_empty(),
+        "and nothing else in the file proposes anything either"
+    );
+
+    // The control: the same pass over the same estate with the links gone.
+    sqlx::query("delete from knobas.link")
+        .execute(&pool)
+        .await
+        .expect("the links removed");
+    let written = knobas_core::suggest::detect_rule(&pool, rule)
+        .await
+        .expect("the second pass");
+    assert_eq!(written, 4, "four pairs, once nothing is suppressing them");
+    let mut found = knobas_core::suggest::proposals(&pool, &[], None, 200)
+        .await
+        .expect("the tray")
+        .into_iter()
+        .map(|entry| (entry.link.from_id, entry.link.to_id))
+        .collect::<Vec<_>>();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            (
+                "asset:hetzner-confluence".to_owned(),
+                "kuma:knobas-confluence".to_owned()
+            ),
+            (
+                "asset:hetzner-jira".to_owned(),
+                "kuma:knobas-jira".to_owned()
+            ),
+            (
+                "asset:hetzner-teamcity".to_owned(),
+                "kuma:knobas-teamcity".to_owned()
+            ),
+            ("asset:knobas-gitea".to_owned(), "kuma:gitea".to_owned()),
+        ],
+        "the three servers by their ip, and Gitea by the host of the reverse tunnel's route"
+    );
 }
 
 // ---------------------------------------------------------------------------

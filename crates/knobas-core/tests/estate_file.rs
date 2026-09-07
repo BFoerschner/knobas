@@ -470,11 +470,17 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
             "vm",
             "`{server}` is a cloud server and belongs in the tree as a vm"
         );
-        let address = asset["properties"]["ipv4"]
+        // `ip` and not `ipv4`: the type schema's own word for this field
+        // (`knobas_core::asset::TYPES`, a vm's and a hypervisor's), and what
+        // `monitor_url_host` reads to reach a ping check on this server
+        // (#479). A property the schema does not declare is legal -- `ssh_host`
+        // beside it is one -- so nothing but this line would have noticed the
+        // file spelling it its own way.
+        let address = asset["properties"]["ip"]
             .as_str()
-            .unwrap_or_else(|| panic!("`{server}` needs its public `ipv4` property"));
+            .unwrap_or_else(|| panic!("`{server}` needs its public `ip` property"));
         address.parse::<Ipv4Addr>().unwrap_or_else(|e| {
-            panic!("`{server}`'s ipv4 property `{address}` is not an address: {e}")
+            panic!("`{server}`'s ip property `{address}` is not an address: {e}")
         });
 
         // The `runs` column, which is the fact the set-comparison in
