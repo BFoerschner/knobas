@@ -149,6 +149,12 @@
 //!   [`monitor_plan`], which since #442's Kuma adapter answers with real links
 //!   -- and reports the names that still find nothing, so a reader is told on
 //!   every preview and not only on the one that first kept a name (#445).
+//!   Since #453 the import is neither the only writer of a name nor the only
+//!   resolver of one: [`AssetEdit::Monitors`] is what *Create monitor for this
+//!   asset* records before it queues its write, and `knobas_sync::attach`
+//!   resolves whatever the mirror can answer to on **every poll** of a
+//!   monitoring source -- which is the rest of that import sentence
+//!   (*"or the M4.1 sync"*) and what makes a created monitor attach itself.
 //! * **The file's plain scalars become tagged values here.** #428 chose
 //!   `{"kind":…,"value":…}` and left the translation to this ticket;
 //!   [`property_of`] is it, and the kind a type declares is what decides.
@@ -175,7 +181,11 @@
 //! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
 //! the estate's own list of what is wrong, one read that the top strip counts
 //! and the Assets view draws. The **ack** on an alert is #446's, with the
-//! inbox category it clears; the Monitors tab's cards are #449's.
+//! inbox category it clears; the Monitors tab's cards are #449's. Story 70's
+//! *Create monitor for this asset* is #453's: [`AssetDetail::monitor_targets`]
+//! is how the pane knows whether to offer one, filled by
+//! `commands::assets::get_asset` because the answer is in the keychain and this
+//! module reads the database.
 
 use std::collections::{HashMap, HashSet};
 

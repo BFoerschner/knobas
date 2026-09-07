@@ -1754,6 +1754,110 @@ create, and #452 is the first two. No *remove the account*: `set_source_secret` 
 *keep* for both halves, which is the safe direction and the only one available to a form that may
 never read a credential back — deleting and re-adding the source is how an account goes away.
 
+### Amendments from the Uptime Kuma adapter, create (2026-09-07, binding) — issue #453
+
+The third and last of the write half's ops, and the one whose consequences reach furthest from
+the adapter: **a create needs somewhere to put the thing it made.** Its §10.8 entry is at
+**§10.8, *The create, the roster it targets, and the name that attaches it***; what follows is
+the argument, in the order a reader meets it.
+
+**A create's target is a container, and a monitoring source's container is itself.** The `WriteOp`
+doc has said since M1 that a create's `entity` is the container the new thing goes into, addressed
+in the source's own namespace — `jira:PAY`, `gitea:tidewater/payout-service`. Uptime Kuma has
+nothing above a monitor that knobas mirrors: its only container is a monitor *group*, and spec #427
+puts groups out of scope. So the container is the instance, and the address is
+`<source id>:monitors` — spelled once, in the SPI, as `knobas_source::monitor_roster`.
+
+**In the SPI and not in the app**, which is the decision worth recording. The alternative was the
+app composing that string, and the only way to compose it is to know that this adapter kind spells
+its roster that way — a per-adapter table in `commands/assets.rs`, which is exactly the coupling
+`config_schema`, `write_ops` and `accepts_account` exist to forbid. What the app does instead is
+ask which sources declare `create_monitor` and ask the SPI what to address; the word *Kuma* does
+not appear in it. `the_roster_is_not_a_monitor_id` pins the other half: the key is not decimal, and
+a monitor id in Kuma is, so a roster can never collide with a monitor.
+
+**A URL and no type.** `CreateMonitor { entity, name, url }` carries no `monitor_type`, and the
+absence is the decision. A monitor of a URL is an HTTP check, which is what the pane's form has to
+offer because the form is prefilled from an asset's route or its hostname (story 70). A type field
+would be a string with one legal value that every adapter would then have to vet, and the day
+knobas offers a ping or a TCP check is the day the op grows the field that says which — with a
+vocabulary decided then rather than left open now.
+
+**The whole `add` document, and the seed is the fidelity guard.** `server.js` hands what it is
+given to RedBean's `bean.import` and then to `bean.validate()`, so a field knobas omits is a column
+left at whatever the ORM defaults it to — and two of those defaults are load-bearing: a monitor
+created with no `accepted_statuscodes` fails an `.every(...)` the server runs for **every** monitor
+of **every** type with no type check first, and one created with no `active` never starts checking.
+So the adapter sends the same complete document `testenv/kuma-monitor.mjs` sends, whose payload was
+read off the pinned image (2.5.3), and `the_document_is_the_seeds_own` parses the object out of
+*that file* and compares field for field. Two implementations of one document is the drift this
+repository has been bitten by before; this is one implementation and one test that reads the other.
+
+**The one op here that answers a receipt.** Kuma's `add` answers
+`{"ok":true,"msg":"successAdded","monitorID":31}`, so `Source::write` returns
+`WriteReceipt::id(31)` and the queue row keeps it. It is **not** how the monitor is attached — see
+below — and it is not an idempotency key (ADR-0012 is unchanged). What it is for is
+`UNCLAIMED_OPS`: a create withdrawn in flight leaves a check running against somebody's estate that
+no knobas row claims, and the disclosure line can now point at the monitor rather than only saying
+one was made. `create_page`'s shape exactly, which is also in that list and also answers an id: what
+puts an op there is the artefact, not the silence.
+
+**The name is the attachment, and that is the part that is not the adapter's.** A create is
+delivered, Kuma starts checking, and the monitor reaches knobas the ordinary way — the next poll.
+Nothing in that path knows which asset the reader was looking at. What closes the loop is the rule
+#439 already built for the estate import: **a name on an asset becomes a `monitored-by` link the
+moment the mirror holds a monitor called that.** So the pane's create records the name on the asset
+*before* it queues the write, and the poll that mirrors the monitor draws the link.
+
+Two consequences, both deliberate:
+
+* **`knobas_sync::attach` is new, and it is what spec #427's *Import* already promised**: a name
+  the mirror cannot answer yet "is kept on the asset and resolved by the next import **or the M4.1
+  sync**". Only the first half existed. It runs inside the run's transaction, after the alert
+  reconcile, over `sync.live_item` — a monitor Kuma has just stopped publishing is not something to
+  attach an asset to — and it skips a pair that already has an **active** `knobas.link` row,
+  confirmed *or proposed*: `0011`'s unique index is over the unordered pair whatever its
+  confirmation state, so `monitor_url_host`'s proposal (#478) is not something to insert over. It
+  is the reader's to accept, and the name waits.
+* **`AssetEdit::Monitors { added }`** is the write that puts the name there, and it is the one edit
+  in that enum that appends rather than sets. It reaches the same column, the same `array_cat` and
+  the same `edited`/`field: "monitors"` line the import writes, from the other of the two surfaces
+  that name a monitor. Setting would drop the six names an estate file put there; the pane offers
+  no removal, and that is a later ticket.
+
+**The order of the pane's two writes is the design.** Name first, then queue. A create whose write
+landed with no name recorded would be a monitor watching this asset that knobas joined to nothing —
+invisible in the pane and on the *Not monitored* roster at the same time. Written this way round
+the failure is recoverable and, more to the point, **visible**: the name is on the asset, the pane
+lists it under *Named by the import, not in Kuma yet*, and pressing *Create* again is the retry.
+That is the state an estate file written before its monitors existed has been in since #439, so the
+pane already draws it and a reader already has a word for it.
+
+**`AssetDetail.monitor_targets` is how the pane knows whether to offer anything**, and empty is
+both the ordinary answer and the criterion: *"without the account the action is absent"*. A Kuma
+with only its API key declares no write ops at all, so it is not in the list and no control is
+drawn — no disabled button, no explanatory line. `get_asset` fills it, because the answer is in the
+keychain and `assets::get` reads the database, and it narrows before opening one: only a kind that
+already declares `create_monitor` or declares `accepts_account` is worth asking about. That
+narrowing is a rule about the SPI and not a table of kinds, and it matters because this read runs on
+every selection in the Tree.
+
+**The live run is the witness** (ADR-0013), at both seams, for #452's reason.
+`crates/knobas-source-kuma/tests/live_kuma.rs` gains the SPI seam — the document accepted, the
+minted id matching the entity the next poll emits, and the two refusals creating nothing — and
+`crates/knobas-app/tests/kuma_write_live.rs` gains the whole gesture: the real estate imported, the
+name recorded on `asset:knobas-gitea`, the create queued through `write_queue::submit`, the row
+settled `sent`, and the pane's own read listing the monitor as attached. Each suite's monitor is
+named something `testenv/monitors.json` does not carry, each guard is armed before anything is
+created, and each is deleted through `testenv/kuma-monitor.sh` however the run ends.
+
+**What this does not do.** No `deleteMonitor`: knobas mirrors a monitor and does not own it, and an
+op that removed somebody's check would be the one write on this channel with no undo. No removal of
+a monitor *name* from an asset either — the pane offers none, and `attach` never withdraws a link.
+No schedule, notification or TLS switch on the form: the adapter creates the plainest possible
+check on Kuma's own default schedule, and the monitor's own page in Kuma is one click away
+(story 71).
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
@@ -7352,6 +7456,96 @@ From this commit on, each of the following requires an orchestrator decision **a
   gate**: if the exit sentence's *"the canary's asset"* was meant to be an entry in the estate
   file, that is an estate-file edit plus a type-table one, and it is his call and not this
   ticket's.
+
+- **`crates/knobas-source/src/**` and the IPC schema — issue #453 (2026-09-07): the create, the
+  roster it targets, and the name that attaches it.**
+
+  The last of the Uptime Kuma write half's three ops, and the one whose consequences reach past the
+  adapter: a create needs somewhere to put what it made, and something has to join it to the asset
+  it was made for. The argument behind every line here is **§9's *Amendments from the Uptime Kuma
+  adapter, create***; this is the list of frozen surfaces it touches. **Ratified by the orchestrator
+  under #453's own third criterion, which asks for this entry by name. Björn keeps the gate for
+  frozen contracts and this entry is flagged for his review** — and in particular the SPI's new
+  free function, the `AssetEdit` variant, and the sync engine now writing links.
+
+  **`crates/knobas-source/src/**` — three additions, all additive:**
+
+  1. `WriteOp::CreateMonitor { entity, name, url }`, identifier `create_monitor` (ADR-0006's
+     per-milestone growth). `entity` is the **container**, as every other create in that enum
+     spells it, and for a monitoring source the container is the source itself. **No
+     `monitor_type`**: a monitor of a URL is an HTTP check, and a field with one legal value is one
+     every adapter would have to vet. Every device that forces a decision on a new variant was fed:
+     `WriteOp::identifier`, `knobas_sync::write_queue::target_entity`,
+     `knobas_core::write_queue::PROJECTED_OPS` and `project` (liveness alone, and the clause has no
+     teeth — the roster is a container knobas never mirrors, so both projections are
+     `{"live": false}` and the write always sends, which is `create_ticket`'s reading),
+     `knobas_sync::write_queue::UNCLAIMED_OPS` (**in**, `create_page`'s shape: a withdrawn create
+     leaves a check running that no knobas row claims, and a monitor's *name* is a label rather than
+     an address — Kuma holds any number of monitors called the same thing),
+     `contract::known_write_ops`' probes, `every_write_op_has_a_stated_projection`,
+     `every_write_op_says_whether_a_withdrawal_can_leave_one`, and the four sibling adapters'
+     exhaustive `write` matches, which refuse it by name.
+  2. `knobas_source::MONITOR_ROSTER_KEY` and `knobas_source::monitor_roster(source_id)` — the
+     entity id of a source's monitor roster, `<source id>:monitors`, spelled **once and in the
+     SPI**. The alternative was every producer of the op composing it, which is a per-adapter table
+     in the app of exactly the kind `config_schema` and `accepts_account` exist to forbid. The key
+     is not decimal and a Kuma monitor id is, so a roster cannot collide with a monitor
+     (`the_roster_is_not_a_monitor_id`).
+  3. `contract::battery`'s probe list grows a `CreateMonitor` aimed at a container **no source
+     has** — a create is the one probe whose success would leave something behind.
+
+  **The IPC schema — three shapes, no new command:**
+
+  * `AssetDetail.monitor_targets: MonitorTarget[]`, `#[serde(default)]`. The sources a *Create
+    monitor for this asset* would go to. **Empty is the ordinary answer and it is #453's second
+    criterion**: a Kuma with only its API key declares no write ops, so it is not in the list and
+    the pane draws no control. Filled by `commands::assets::get_asset`, which gains an injected
+    `AppHandle` — `monitor_roster`'s arrangement since #452, supplied by Tauri, nothing on the wire.
+  * `MonitorTarget { source_id, display_name, roster }` — a new DTO. `roster` is composed by the
+    backend from `monitor_roster`, so the form submits an entity it never spelled.
+  * `AssetEdit` gains `Monitors { added: string[] }` — the **one variant in that union that
+    appends**. It reaches `0020`'s column, `ADD_MONITORS`' `array_cat` and the `edited` /
+    `field: "monitors"` line the import already writes, from the other of the two surfaces that
+    name a monitor. `WriteOpPayload` in `sources.ts` gains the matching `CreateMonitor` branch.
+
+  **`crates/knobas-sync/**` is not frozen** (this section says so in as many words) and is where
+  the new module lands: `knobas_sync::attach::resolve` draws the `monitored-by` links an asset's
+  recorded names have earned, inside the run's transaction, after the alert reconcile. Recorded
+  here rather than left out because it is the half of spec #427's *Import* sentence that had never
+  been built — *"resolved by the next import **or the M4.1 sync**"* — and because it means **the
+  sync engine now writes `knobas.link` rows**, which it did not before. What bounds it: never
+  removes a link, never touches a pair with an active row (confirmed *or* proposed — `0011`'s index
+  is over the unordered pair whatever its confirmation, so #478's proposal is not something to
+  insert over), never attaches a tombstoned monitor, and writes no activity line (the name's own
+  line is written where the name is added).
+
+  **What is not touched.** **No migration** — `knobas.asset.monitors` is `0020`'s column and
+  `knobas.link` is `0001`'s. **No new command, no argument change, no event change**; the
+  `commands/` + `ipc/` module layout is unchanged and **neither append-only barrel grows a line**.
+  `crates/knobas-http/**` and `crates/knobas-app/src/{error,profile}.rs` are untouched. The
+  keychain envelope is unchanged at version 2.
+
+  Pinned by: `knobas_source`'s `the_roster_is_not_a_monitor_id`, `write_op_round_trips` and
+  `every_op_has_its_own_snake_case_identifier` (now fourteen); `knobas-sync`'s
+  `every_write_op_has_a_stated_projection` and
+  `every_write_op_says_whether_a_withdrawal_can_leave_one`; `sources_mirror.rs`'s
+  `every_write_op_variant_is_declared_in_the_mirror`; `commands::assets`'
+  `the_asset_detail_matches_its_typescript_mirror`,
+  `only_an_instance_that_offers_the_op_is_a_create_target`,
+  `only_a_kind_whose_ops_could_include_it_is_worth_a_keychain_read` and
+  `the_pane_offers_the_op_the_spi_names_at_the_roster_the_spi_spells`; the Kuma crate's
+  `the_document_is_the_seeds_own` (which parses `testenv/kuma-monitor.mjs`),
+  `a_create_knobas_cannot_deliver_is_refused_here`,
+  `the_minted_id_is_read_out_of_kumas_own_answer`,
+  `a_creates_target_is_this_sources_roster_or_it_is_refused_here` and
+  `a_create_without_an_account_is_refused_by_the_same_sentence`; nine tests in
+  `knobas-sync`'s `tests/attach.rs`, all driven through `run_once` rather than through the
+  resolver; five in `tests/assets_ipc.rs` for the append, the duplicate, the blank and the absent
+  target; six in `create-monitor.test.ts` and seven in `AssetsView.monitor.test.svelte.ts` for the
+  prefill and the two writes' order; and — for the halves no test can reach without the real
+  server — `just kuma-live`'s
+  `a_monitor_created_through_the_write_op_is_published_under_the_id_it_answered` and
+  `a_monitor_created_through_the_write_queue_is_mirrored_and_attached_to_its_asset`.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

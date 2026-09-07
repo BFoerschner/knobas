@@ -198,17 +198,20 @@ it at the same time will break each other. Four ways:
 - **`./seed-kuma.sh` deletes every monitor `monitors.json` does not name**
   (since 2026-09-06, #441). That is what makes the seed idempotent, and it is
   also a sweep: a monitor a sibling added by hand, or that knobas itself
-  created through the Kuma source once M4.1 lands *Create monitor for this
-  asset*, is gone on anyone's next `./seed`, silently and with no way back.
-  Add a monitor that has to survive to `monitors.json`, not to the UI.
+  created through the Kuma source's *Create monitor for this asset* (#453,
+  landed 2026-09-07), is gone on anyone's next `./seed`, silently and with no
+  way back. Add a monitor that has to survive to `monitors.json`, not to the
+  UI.
 
 - **`just kuma-live` re-mints the API key** when the worktree it runs from has
   no `kuma-api-key` — Kuma hands a key's clear text out once, so a key that
   exists in the instance with no copy on the host is replaced. A second agent
   running it mid-run makes the first agent's `/metrics` requests answer 401,
   which reads as a credential defect and is not one. It also adds and deletes
-  one monitor of its own, `knobas-live-scratch`, which is why the sweep above
-  matters: a killed run's leftover is removed by the next `./seed-kuma.sh`.
+  four monitors of its own -- `knobas-live-scratch` and `knobas-write-scratch`
+  through `kuma-monitor.sh`, `knobas-live-created` and `knobas-write-created`
+  through knobas' own create (#453) -- which is why the sweep above matters: a
+  killed run's leftovers are removed by the next `./seed-kuma.sh`.
 
 So: **claim the environment before running `./seed`, `just gitea-live`,
 `just gitea-live-capped`, `just start-work-live` or `just kuma-live`, and say

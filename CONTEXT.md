@@ -224,7 +224,7 @@ A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or wit
 _Avoid_: URL (that is a route's property), ingress, endpoint (bare)
 
 **Monitor**:
-A mirrored [item](#item) of the Uptime Kuma [source](#source), kind `monitor`: one check as Uptime Kuma defines it, with its current state. Attached to an [asset](#asset) by a `monitored-by` [link](#link); never an asset itself, and never created or edited in the mirror by hand. A **monitor name** an [import](#import) has kept on an asset is not one of these — it is the Uptime Kuma name the estate file gave, waiting for a monitor of that name to be mirrored; the import draws the link the moment there is one, and until then the name is all knobas has. (Added 2026-09-06, #439, from spec #427's *"a name the mirror does not hold yet is kept on the asset and resolved by the next import or the M4.1 sync"*.)
+A mirrored [item](#item) of the Uptime Kuma [source](#source), kind `monitor`: one check as Uptime Kuma defines it, with its current state. Attached to an [asset](#asset) by a `monitored-by` [link](#link); never an asset itself, and never created or edited in the mirror by hand. A **monitor name** kept on an asset is not one of these — it is the Uptime Kuma name a monitor of that name will answer to, waiting to be mirrored, and until then it is all knobas has. (Added 2026-09-06, #439, from spec #427's *"a name the mirror does not hold yet is kept on the asset and resolved by the next import or the M4.1 sync"*.) (Amended 2026-09-07, #453: a name arrives two ways and is resolved two ways, and the entry originally said only the [import](#import)'s. *Create monitor for this asset* records one too — it is what joins the monitor to the asset when it arrives, which is why the pane records the name before it queues the write — and **every poll of a monitoring source** resolves whatever names the mirror can now answer to, which is the other half of the spec sentence above. A **roster** is the container a create goes into: a monitoring source has nothing above a monitor that knobas mirrors, so the roster is the source itself, addressed `<source>:monitors`.)
 _Avoid_: check (that is one heartbeat of a monitor), probe, healthcheck
 
 **Sample**:
@@ -265,7 +265,7 @@ _Avoid_: kanban, board (unqualified)
 A viewing gesture on a [room](#room): one tile fills the tile grid for this visit, restored by its own button or by Escape, and never persisted — a room switch or a restart brings the grid back. (#250)
 
 **Tree**:
-The Assets view's first tab: the [estate](#estate) as Miller columns, one column per level. Its sibling tab is *Monitors*. Named so that "board" never appears unqualified (ADR-0009).
+The Assets view's first tab: the [estate](#estate) as Miller columns, one column per level. Its sibling tab is *Monitors*. Named so that "board" never appears unqualified (ADR-0009). Its fixed pane offers **Create monitor for this asset** where a configured [source](#source) offers the op — prefilled from the asset's route or its hostname, and drawn nowhere else: a source with only its API key offers no create, and the pane then shows no control rather than a disabled one. (Amended 2026-09-07, #453, spec #427 story 70.)
 _Avoid_: board, assets board, columns view
 
 **Spine**:
