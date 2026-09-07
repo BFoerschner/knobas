@@ -94,19 +94,93 @@ pub async fn asset_tree(
 }
 
 /// One asset with everything the pane draws: its properties, its held-by path,
-/// what it holds, and its history.
+/// what it holds, its history -- and which sources, if any, it could have a
+/// monitor created in (issue #453).
+///
+/// **The `AppHandle` is for that last field alone**, and it is `monitor_roster`'s
+/// arrangement for `monitor_roster`'s reason: whether a source offers
+/// `create_monitor` is a property of the *instance* and lives in the keychain,
+/// which `assets::get` -- a module that reads the database -- has no business
+/// opening. Nothing on the wire changes; Tauri supplies the handle.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no asset carries.
 #[tauri::command]
-pub async fn get_asset(
+pub async fn get_asset<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     asset_id: String,
 ) -> Result<AssetDetail, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::get(&pool, &asset_id).await
+    let mut detail = assets::get(&pool, &asset_id).await?;
+    detail.monitor_targets = monitor_targets(&app).await?;
+    Ok(detail)
+}
+
+/// The `WriteOp` identifier the pane's *Create monitor for this asset* queues.
+///
+/// Spelled out beside `assets::PAUSE_MONITOR` and `assets::RESUME_MONITOR` and
+/// for the same two reasons: what a *surface* offers is a choice made here,
+/// and `knobas-sync`'s `write_choke_point` proves there is one outbound write
+/// path by finding every file under `crates/*/src/` that names the SPI's write
+/// op -- a read that decides which button to draw is not one and must not look
+/// like one. `tests/assets_ipc.rs` holds this spelling to `WriteOp::identifier`
+/// from a file that scan does not read.
+const CREATE_MONITOR: &str = "create_monitor";
+
+/// The configured sources a new monitor could be created in, by source id.
+///
+/// **Narrowed before the keychain is opened.** A source's ops are read out of
+/// its credential, and this read runs on every selection in the Tree -- so
+/// asking every configured source would be a keychain read per source per
+/// click. The narrowing is generic and not a table of adapter kinds: a source
+/// is worth asking about when its *kind* either already declares
+/// `create_monitor` or declares `accepts_account`, which is the SPI's way of
+/// saying "what this instance offers depends on a credential". Every other
+/// source's template answer is the whole answer, and it does not name the op.
+///
+/// **An empty list rather than a refusal** when the sync engine has not
+/// started, `monitor_write_ops`' rule: the pane draws during bring-up, and a
+/// moment when knobas cannot say which sources can write is a moment for no
+/// button rather than for no pane.
+async fn monitor_targets<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Vec<assets::MonitorTarget>, IpcError> {
+    let Ok(state) = crate::sources::state(app) else {
+        return Ok(Vec::new());
+    };
+    let templates = state.registry.descriptors();
+    let could: std::collections::BTreeSet<&str> = templates
+        .iter()
+        .filter(|d| d.accepts_account || d.write_ops.iter().any(|op| op == CREATE_MONITOR))
+        .map(|d| d.adapter_kind.as_str())
+        .collect();
+
+    let mut targets = Vec::new();
+    for cfg in knobas_sync::config::list(&state.pool)
+        .await
+        .map_err(IpcError::internal)?
+    {
+        if !could.contains(cfg.adapter_kind.as_str()) {
+            continue;
+        }
+        let ops =
+            crate::sources::crud::instance_write_ops(&state.secrets, state.registry.as_ref(), &cfg)
+                .await;
+        if ops.iter().any(|op| op == CREATE_MONITOR) {
+            targets.push(assets::MonitorTarget {
+                roster: knobas_source::monitor_roster(&cfg.id),
+                source_id: cfg.id,
+                display_name: cfg.display_name,
+            });
+        }
+    }
+    // By id, so a profile with two Kumas draws the same order every time and
+    // the form's default target does not move between reads.
+    targets.sort_by(|a, b| a.source_id.cmp(&b.source_id));
+    Ok(targets)
 }
 
 /// Create an asset under `parentId`, or at the top of the estate.
@@ -1381,12 +1455,26 @@ mod tests {
                 web_url: Some("http://127.0.0.1:3001/dashboard/7".to_owned()),
                 tombstoned: false,
             }],
+            // Populated for the same reason again: the pane branches on this
+            // list being empty, so a fixture that left it so would let the
+            // mirror declare the target shape anything at all (#453).
+            monitor_targets: vec![assets::MonitorTarget {
+                source_id: "kuma".to_owned(),
+                display_name: "Uptime Kuma".to_owned(),
+                roster: "kuma:monitors".to_owned(),
+            }],
         };
         assert_shape(
             MIRROR,
             "AttachedMonitor",
             &serde_json::to_value(&detail.monitoring[0]).unwrap(),
             &["entity_id", "name", "state", "web_url", "tombstoned"],
+        );
+        assert_shape(
+            MIRROR,
+            "MonitorTarget",
+            &serde_json::to_value(&detail.monitor_targets[0]).unwrap(),
+            &["source_id", "display_name", "roster"],
         );
         assert_shape(
             MIRROR,
@@ -1405,7 +1493,34 @@ mod tests {
                 "links",
                 "monitors",
                 "monitoring",
+                "monitor_targets",
             ],
+        );
+    }
+
+    /// The identifier this module offers is the **SPI's**, and the roster it
+    /// addresses is the SPI's too.
+    ///
+    /// `assets::PAUSE_MONITOR`'s pin, applied to the third op. Both halves are
+    /// spelled out in `src/` on purpose (see [`CREATE_MONITOR`]) and both
+    /// would fail silently: an identifier that drifted would be a control
+    /// nothing ever draws, and a roster composed by hand would be a write
+    /// `submit_write` routes at a source that is not there.
+    #[test]
+    fn the_pane_offers_the_op_the_spi_names_at_the_roster_the_spi_spells() {
+        assert_eq!(
+            CREATE_MONITOR,
+            knobas_source::WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_roster("kuma"),
+                name: "gitea".to_owned(),
+                url: "http://gitea:3000/".to_owned(),
+            }
+            .identifier()
+        );
+        assert_eq!(
+            knobas_source::monitor_roster("kuma-eu"),
+            "kuma-eu:monitors",
+            "a target the form submits must be the roster the adapter refuses everything else for"
         );
     }
 
