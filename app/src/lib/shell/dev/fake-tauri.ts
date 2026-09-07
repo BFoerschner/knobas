@@ -348,6 +348,15 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // different matter and still has no handlers here at all**, so the sixth
     // category's row cannot be seen this way whatever this answers.
     open_alerts: () => fakeOpenAlerts(),
+    // The ack a card offers (#446's write, #449's button). Kept in a set here
+    // rather than derived, because *acked* is the one fact on this surface a
+    // reader makes themselves — a fixture that answered the same list after
+    // the click would make the button look broken.
+    ack_alert: (args) => fakeAck(args),
+    // The Monitors tab's *Not monitored* roster (#449), derived from the same
+    // file: an asset the estate names no Uptime Kuma monitor for is an asset
+    // nothing watches, which is exactly what the backend's read answers.
+    unmonitored_assets: () => fakeUnmonitored(),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -2181,9 +2190,65 @@ function fakeOpenAlerts() {
       monitor_name: row.name,
       state: row.state,
       opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
-      acked_at: index === 0 ? new Date(now - 12 * 60_000).toISOString() : null,
+      acked_at:
+        index === 0 || FIXTURE_ACKED.has(row.entity_id)
+          ? new Date(now - 12 * 60_000).toISOString()
+          : null,
       assets: row.assets,
     }));
+}
+
+/**
+ * The monitors a reader has acked in this session, by monitor entity id.
+ *
+ * Module state, like the fixture's other writes: `?fake-ipc` is a browser
+ * with no backend behind it, so the only place an ack can be remembered is
+ * here. Cleared by a reload, which is what a fixture is.
+ */
+const FIXTURE_ACKED = new Set<string>();
+
+/**
+ * `ack_alert`: mark one monitor's open alert seen, and answer with it.
+ *
+ * **Leaves the alert open**, which is the whole of what #446 decided: only a
+ * return to `up` closes one, so the card stays and starts reading acked. A
+ * monitor with nothing open is `not_found`, the refusal the real command
+ * makes for an alert that recovered while a reader was looking at it.
+ */
+function fakeAck(args: Record<string, unknown>) {
+  const monitorId = typeof args.monitorId === "string" ? args.monitorId : "";
+  const alert = fakeOpenAlerts().find((row) => row.monitor_id === monitorId);
+  if (!alert) {
+    throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
+  }
+  FIXTURE_ACKED.add(monitorId);
+  return { ...alert, acked_at: new Date().toISOString() };
+}
+
+/**
+ * `unmonitored_assets`: every asset in the file for which it names no Uptime
+ * Kuma monitor.
+ *
+ * **Derived from the file and not listed here**, `fakeMonitorRoster`'s rule:
+ * `estate.json` says which monitors each asset asks for, so *which assets ask
+ * for none* is already written down once and a second list would drift from
+ * it.
+ */
+function fakeUnmonitored() {
+  return FIXTURE_ESTATE.filter((asset) => asset.monitors.length === 0)
+    .map((asset) => ({
+      id: asset.id,
+      type_id: asset.type_id,
+      type_label: asset.type_label,
+      monogram: asset.monogram,
+      name: asset.name,
+      path: assetPathText(asset),
+    }))
+    .sort(
+      (left, right) =>
+        (left.path ?? "").localeCompare(right.path ?? "") ||
+        left.name.localeCompare(right.name),
+    );
 }
 
 /**

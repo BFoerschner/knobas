@@ -11,14 +11,16 @@
  */
 import { expect, test } from "vitest";
 
-import type { MonitorRow, MonitorSample } from "../ipc/assets";
+import type { MonitorRow, MonitorSample, UnmonitoredAsset } from "../ipc/assets";
 import {
   BAR_BUCKETS,
   BAR_WINDOW_MS,
   bar,
+  byType,
   chipCounts,
   chipOf,
   filtered,
+  typeCounts,
 } from "./monitors";
 
 /** Half an hour: the width of one bucket, and the unit these fixtures place. */
@@ -204,4 +206,59 @@ test("a sample older than the window is drawn nowhere at all", () => {
   const drawn = bar([at(25 * 60, "down"), at(10, "up")], NOW);
   expect(drawn.filter((bucket) => bucket.state !== null)).toHaveLength(1);
   expect(drawn.at(-1)?.state).toBe("up");
+});
+
+// -- the "Not monitored" roster's type filter (#449) -------------------------
+
+/** One row of the roster, carrying only what the filter reads. */
+function unwatched(name: string, typeId: string, label: string): UnmonitoredAsset {
+  return {
+    id: `asset:${name}`,
+    type_id: typeId,
+    type_label: label,
+    monogram: label.slice(0, 2).toUpperCase(),
+    name,
+    path: null,
+  };
+}
+
+const UNWATCHED = [
+  unwatched("hel1", "site", "Site"),
+  unwatched("vm-db-01", "vm", "VM"),
+  unwatched("vm-web-01", "vm", "VM"),
+  unwatched("postgres", "container", "Container"),
+];
+
+/**
+ * **The filter's options are the types the answer holds**, each with how many
+ * of them there are — never the whole nineteen-row type table. An option
+ * behind which there is nothing can only empty the list, and a roster of gaps
+ * that offered sixteen dead filters would hide the four live ones.
+ *
+ * Alphabetical by label, and not by count: the chips are found by reading
+ * their names, and count order would rearrange them under the reader's pointer
+ * every time somebody attached a monitor.
+ */
+test("the type filter offers the types the roster holds, counted, by label", () => {
+  expect(typeCounts(UNWATCHED)).toEqual([
+    { type_id: "container", label: "Container", monogram: "CO", count: 1 },
+    { type_id: "site", label: "Site", monogram: "SI", count: 1 },
+    { type_id: "vm", label: "VM", monogram: "VM", count: 2 },
+  ]);
+});
+
+/** An empty roster offers no filter at all, rather than a row of zeroes. */
+test("a roster with nothing in it offers no type filter", () => {
+  expect(typeCounts([])).toEqual([]);
+});
+
+/**
+ * The filter narrows to exactly what its option counted, and no filter is the
+ * whole roster — the same `type_id` on both sides, so a chip reading `VM 2`
+ * over a list of one is not a state this can reach.
+ */
+test("a type narrows the roster to what its option counted", () => {
+  expect(byType(UNWATCHED, "vm").map((row) => row.name)).toEqual(["vm-db-01", "vm-web-01"]);
+  expect(byType(UNWATCHED, null)).toHaveLength(UNWATCHED.length);
+  expect(byType(UNWATCHED, "network")).toEqual([]);
 });

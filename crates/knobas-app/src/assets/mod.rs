@@ -1845,6 +1845,143 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .collect()
 }
 
+/// What the *Not monitored* roster draws: an asset nothing watches, with where
+/// it sits and what it is (spec #427 story 68, issue #449).
+///
+/// Not an [`AssetRow`], and the reason is the same one [`MonitoredAsset`]
+/// gives: this is a line in a list of gaps, and an `AssetRow` would drag the
+/// health rollup and the linked-work count through a read whose whole answer
+/// is *which thing, where it lives, and what kind of thing it is*. It carries
+/// the **path**, which `AssetRow` does not, because that is what tells two
+/// containers called `postgres` apart -- and it is the field the criterion
+/// asks for by name.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct UnmonitoredAsset {
+    /// `asset:<uuid>` -- the `#/asset/<id>` address the name opens.
+    pub id: String,
+    /// One of [`knobas_core::asset::TYPES`], and what the tab's type filter
+    /// narrows by.
+    pub type_id: String,
+    /// What that type is called -- resolved here, [`AssetRow`]'s rule, so the
+    /// filter's labels are not a second copy of the table.
+    pub type_label: String,
+    /// The type's two-character chip.
+    pub monogram: String,
+    pub name: String,
+    /// The ancestors' names, outermost first, `" / "` between; `null` for an
+    /// asset at the top of the estate. [`MonitoredAsset::path`]'s field and
+    /// its spelling.
+    pub path: Option<String>,
+}
+
+/// Every asset with no confirmed [`MONITORED_BY`] link to a monitor.
+///
+/// **`not exists` and not a left join**, because the question is about a
+/// *set*: an asset watched by three monitors is one row of the answer either
+/// way, and a join would need a `distinct` over a shape the read then has to
+/// re-sort.
+///
+/// The inner statement is [`ROSTER_ASSETS`]' join read backwards, guards
+/// included -- **undirected** (`0011` made the pair unordered, so which end a
+/// link was written from is not a fact any read may depend on),
+/// `m.id <> a.id`, and `m.kind = $2` so a `monitored-by` link to a ticket is
+/// not an attachment.
+///
+/// `m.id <> a.id` is carried over from [`ROSTER_ASSETS`] and, **here**, is
+/// belt-and-braces rather than load-bearing: that read joins `knobas.asset` at
+/// both ends, so there the guard is the only thing standing between a
+/// self-link and a row, while this one binds the other end to
+/// `knobas.entity` and `m.kind = $2` already refuses an asset's own entity
+/// row. Dropping `m.id <> a.id` from this statement fails no test, which is
+/// said here rather than left for somebody to rediscover; the self-link case
+/// of `only_a_confirmed_monitored_by_link_to_a_monitor_takes_an_asset_off_the_roster`
+/// is pinned by the kind guard.
+/// `knobas.confirmed_link` is what makes an unconfirmed *proposal* leave the
+/// asset here, which is the answer the reader wants: a guess nobody has agreed
+/// to is exactly the gap this list exists to point at.
+///
+/// `$1` is the relation and `$2` the monitor kind, bound rather than written
+/// into the text, which is [`ROSTER_ASSETS`]' rule.
+///
+/// Ordered by where an asset sits and then by name, `path_text` first so the
+/// top of the estate leads -- the inbox's own pick order (#446) and, like it,
+/// total: `id` breaks the tie two siblings of the same name would leave.
+const UNMONITORED: &str = "select a.id, a.type_id, a.name,
+                                  nullif(a.path_text, '') as path
+  from knobas.asset a
+ where not exists (select 1
+                     from knobas.confirmed_link l
+                     join knobas.entity m
+                       on m.id in (l.from_id, l.to_id) and m.id <> a.id
+                    where l.relation = $1
+                      and a.id in (l.from_id, l.to_id)
+                      and m.kind = $2)
+ order by a.path_text asc, a.name asc, a.id asc";
+
+/// The assets nothing is watching -- the Monitors tab's second list (spec #427
+/// story 68, issue #449).
+///
+/// # What "not monitored" is a statement about
+///
+/// About **attachment**, not about attention. An asset whose only monitor Kuma
+/// has **paused** is not here: somebody wired a check to it and then silenced
+/// it, which is a different fact from nobody ever having wired one, and it is
+/// already said in as many words by the *Paused* chip on the roster above --
+/// with the monitor's own history under it. A list that grew a row the moment
+/// somebody paused a check would tell a reader to go and do work that has
+/// already been done.
+///
+/// # A disabled source's monitor is still an attachment
+///
+/// And the consequence is worth saying out loud, because it makes an asset
+/// quiet in **both** lists: [`monitor_roster`] drops a monitor whose source the
+/// reader turned off (`0012`'s `coalesce(s.enabled, true)`), so an asset
+/// watched only by such a monitor has no row up there and no row here either.
+///
+/// It is the right way round all the same. A source-aware read would put the
+/// **whole estate** on this roster the moment somebody turned their one Uptime
+/// Kuma source off — a wall of rows telling a reader to attach monitors they
+/// have already attached, while the roster above says "nothing is mirrored
+/// yet" and the Sources view says why. Disabling a source is a statement about
+/// what the reader wants to look at; this list is about what is wired up.
+/// Pinned by `a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached`.
+///
+/// # Every type, and the filter is the reader's
+///
+/// No type is left out here, although a *site* or a *network* is not usually
+/// something anybody checks: which types are worth monitoring is a judgement
+/// about a particular estate, and a read that made it would be a read hiding
+/// gaps it had decided did not count. The tab's type filter is where that
+/// judgement belongs, and it is why the filter exists.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, IpcError> {
+    sqlx::query(UNMONITORED)
+        .bind(MONITORED_BY)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(|row| {
+            let type_id: String = row.try_get("type_id")?;
+            let declared = asset::find(&type_id);
+            Ok(UnmonitoredAsset {
+                id: row.try_get("id")?,
+                type_label: declared.map_or_else(|| type_id.clone(), |t| t.label.to_owned()),
+                // `??` for a type this build has lost, `row_of`'s rule and for
+                // its reason: an estate file may name a type this build does
+                // not carry, and the asset still has to be visible.
+                monogram: declared.map_or("??", |t| t.monogram).to_owned(),
+                type_id,
+                name: row.try_get("name")?,
+                path: row.try_get("path")?,
+            })
+        })
+        .collect()
+}
+
 /// The half of a [`MonitorRow`] that is read out of the mirrored payload.
 ///
 /// A struct rather than five returns, so [`reading_of`] is one named place and

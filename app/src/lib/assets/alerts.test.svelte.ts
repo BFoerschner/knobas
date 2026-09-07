@@ -127,3 +127,58 @@ test("starting twice does not subscribe twice, and the second teardown is inert"
   stop();
   expect(events.unlistened).toBe(2);
 });
+
+/**
+ * The ack (#446's write, on this store since #449's cards): it asks for the
+ * **monitor**, re-reads, and the alert comes back **open and acked** — only a
+ * return to `up` closes one.
+ */
+test("an ack asks for the monitor, re-reads, and leaves the alert open", async () => {
+  const asked: string[] = [];
+  let acked = false;
+  const alerts = createAlerts({
+    openAlerts: () => Promise.resolve([{ ...alert(1, "gitea"), acked_at: acked ? "x" : null }]),
+    ackAlert: (monitorId) => {
+      asked.push(monitorId);
+      acked = true;
+      return Promise.resolve();
+    },
+    listen: () => Promise.resolve(() => {}),
+  });
+  await alerts.refresh();
+
+  await alerts.ack("kuma:1");
+  expect(asked).toEqual(["kuma:1"]);
+  expect(alerts.count, "an ack is not a close").toBe(1);
+  expect(alerts.open[0]?.acked_at).toBe("x");
+  expect(alerts.error).toBeNull();
+});
+
+/**
+ * **A failed ack outlives the re-read that follows it.**
+ *
+ * The re-read happens whatever the write did — a `not_found` means the alert
+ * closed while the card was on screen, so the stale list is what caused it —
+ * and a successful re-read clears `error`. Writing the failure *before* that
+ * read would therefore erase it a tick later and the reader would never be
+ * told the ack did not land. The list is still refreshed, which is the other
+ * half of the claim.
+ */
+test("a failed ack is still reported after the re-read that follows it", async () => {
+  let reads = 0;
+  const alerts = createAlerts({
+    openAlerts: () => {
+      reads += 1;
+      return Promise.resolve([alert(1, "gitea")]);
+    },
+    ackAlert: () => Promise.reject({ code: "not_found", message: "no open alert" }),
+    listen: () => Promise.resolve(() => {}),
+  });
+  await alerts.refresh();
+  expect(alerts.error).toBeNull();
+
+  await alerts.ack("kuma:1");
+  expect(reads, "the list is re-read whether or not the write landed").toBe(2);
+  expect(alerts.error).toContain("no open alert");
+  expect(alerts.count, "and the list is the fresh one").toBe(1);
+});

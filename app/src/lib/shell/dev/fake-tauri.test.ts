@@ -437,3 +437,69 @@ test("the fixture's open alerts are the roster's monitors in trouble", () => {
     "nothing in the fixture is acked, so the list cannot show what seen-not-fixed looks like",
   ).toBe(true);
 });
+
+/**
+ * The Monitors tab's second list under `?fake-ipc` (#449).
+ *
+ * Read against the **estate file itself**, because that is the claim the
+ * fixture makes: the roster of gaps is the assets `estate.json` names no
+ * Uptime Kuma monitor for, so a browser screenshot of the tab is a picture of
+ * the real estate's real gaps rather than of a list invented beside it.
+ *
+ * Both directions, since a handler answering the whole estate would pass a
+ * one-directional check: every asset with monitors is out, and every asset
+ * without them is in.
+ */
+test("the fixture's Not monitored roster is the estate's assets with no monitor named", () => {
+  const handlers = demoHandlers();
+  const gaps = handlers["unmonitored_assets"]!({}) as {
+    id: string;
+    name: string;
+    type_label: string;
+  }[];
+  const roster = handlers["monitor_roster"]!({}) as { assets: { id: string }[] }[];
+  const watched = new Set(roster.flatMap((row) => row.assets.map((asset) => asset.id)));
+
+  expect(gaps.length, "an estate where everything is watched cannot show the roster").toBeGreaterThan(0);
+  for (const gap of gaps) {
+    expect(watched.has(gap.id), `${gap.name} has a monitor and is still on the roster`).toBe(false);
+    expect(gap.type_label, `${gap.name} has no type label to filter by`).not.toBe("");
+  }
+  // And the other way: nothing the file gives a monitor is on this list. The
+  // size check first, or an estate whose roster watched nothing would pass
+  // this loop without entering it.
+  expect(
+    watched.size,
+    "no asset in the fixture has a monitor, so the reverse direction is vacuous",
+  ).toBeGreaterThan(0);
+  for (const id of watched) {
+    expect(gaps.some((gap) => gap.id === id)).toBe(false);
+  }
+});
+
+/**
+ * The ack a card offers under `?fake-ipc` (#449's button over #446's write).
+ *
+ * The two things the real command guarantees and a fixture can get wrong: the
+ * alert **stays open** and comes back reading acked — only a return to `up`
+ * closes one — and a monitor with nothing open is refused rather than
+ * answered.
+ */
+test("the fixture's ack leaves the alert open and refuses a monitor with none", () => {
+  const handlers = demoHandlers();
+  const open = handlers["open_alerts"]!({}) as { monitor_id: string; acked_at: string | null }[];
+  const unacked = open.find((row) => row.acked_at === null);
+  expect(unacked, "every alert is already acked, so the ack cannot be exercised").toBeDefined();
+
+  const acked = handlers["ack_alert"]!({ monitorId: unacked!.monitor_id }) as {
+    acked_at: string | null;
+  };
+  expect(acked.acked_at).not.toBeNull();
+  const after = handlers["open_alerts"]!({}) as { monitor_id: string; acked_at: string | null }[];
+  expect(
+    after.find((row) => row.monitor_id === unacked!.monitor_id)?.acked_at,
+    "an ack is not a close",
+  ).not.toBeNull();
+
+  expect(() => handlers["ack_alert"]!({ monitorId: "kuma:nothing-is-wrong-here" })).toThrow();
+});

@@ -28,11 +28,26 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS, ipcErrorMessage } from "../ipc";
-import { openAlerts as realOpenAlerts, type OpenAlert } from "../ipc/assets";
+import {
+  ackAlert as realAckAlert,
+  openAlerts as realOpenAlerts,
+  type OpenAlert,
+} from "../ipc/assets";
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
 export interface AlertPorts {
   openAlerts: () => Promise<OpenAlert[]>;
+  /**
+   * Ack the open alert of one monitor (#446, #449's cards).
+   *
+   * On this store rather than in the component that draws the button, for the
+   * reason `createInbox` keeps its own ack: what an ack changes is *this list*
+   * — the alert stays open and starts reading acked — so the write and the
+   * re-read after it are one statement. A card that acked through its own port
+   * would leave the top strip's badge and the Assets view's strip reading the
+   * pre-ack answer until the next event arrived.
+   */
+  ackAlert: (monitorId: string) => Promise<void>;
   listen: (event: string, handler: () => void) => Promise<() => void>;
 }
 
@@ -41,10 +56,31 @@ export interface Alerts {
   readonly open: OpenAlert[];
   /** How many. `open.length` — see the module note. */
   readonly count: number;
-  /** Set when the last read failed, so a surface can say so. */
+  /**
+   * Set when the last read or ack failed, so a surface can say so.
+   *
+   * An **ack's** failure outlives the re-read that follows it: the re-read
+   * clears `error` when it succeeds, and a message wiped a tick after it was
+   * written is a write the reader is never told failed. The fresh list is
+   * evidence about the alerts, not about the ack.
+   */
   readonly error: string | null;
   /** Read them all. */
   refresh(): Promise<void>;
+  /**
+   * Ack one monitor's open alert — **seen, not fixed**.
+   *
+   * The alert stays open (only a return to `up` closes one) and comes back
+   * carrying `acked_at`; what it clears is the reader's inbox item. The
+   * re-read afterwards happens whether the write succeeded or failed, the
+   * inbox's rule: a `not_found` means the alert closed while the card was on
+   * screen, so the stale list is what caused it.
+   *
+   * **No in-flight flag here.** Two acks on two monitors are independent
+   * writes, and a store-wide guard would drop the second silently; the card
+   * keeps its own button down, which is the only race there is.
+   */
+  ack(monitorId: string): Promise<void>;
   /**
    * Subscribe to the two signals an alert moves on. Returns the teardown;
    * calling `start` twice is harmless.
@@ -56,15 +92,20 @@ export interface Alerts {
   start(): () => void;
 }
 
-export function createAlerts(ports?: AlertPorts): Alerts {
+export function createAlerts(ports?: Partial<AlertPorts>): Alerts {
   // Wrapped rather than bound, for the reason `createInbox` records: this
   // module's singleton is constructed at import time, and a partial
   // `vi.mock` of `../ipc/assets` throws on the first access to an export it
   // did not declare. Reading the function inside its own call defers that to
-  // a call no such test makes.
-  const io: AlertPorts = ports ?? {
+  // a call no such test makes -- which is what lets the defaults be built
+  // even when a caller overrides them, the `Partial` this takes since #449.
+  const io: AlertPorts = {
     openAlerts: () => realOpenAlerts(),
+    ackAlert: async (monitorId) => {
+      await realAckAlert(monitorId);
+    },
     listen: (event, handler) => tauriListen(event, () => handler()),
+    ...ports,
   };
 
   const state = $state<{ open: OpenAlert[]; error: string | null }>({
@@ -97,6 +138,21 @@ export function createAlerts(ports?: AlertPorts): Alerts {
       return state.error;
     },
     refresh,
+    async ack(monitorId: string): Promise<void> {
+      let failed: string | null = null;
+      try {
+        await io.ackAlert(monitorId);
+      } catch (error) {
+        failed = ipcErrorMessage(error);
+      }
+      // Always, whether it worked or not: a `not_found` means the alert closed
+      // while the card was on screen, so the stale list is what caused it.
+      await refresh();
+      // And after the re-read, not before it. `refresh` clears `error` on
+      // success, so writing the ack's failure first would erase it with the
+      // very read that proves the reader is looking at a live list.
+      state.error = failed ?? state.error;
+    },
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

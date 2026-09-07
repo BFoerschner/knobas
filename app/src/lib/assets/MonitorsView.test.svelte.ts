@@ -15,8 +15,14 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { MonitorRow, MonitorSample } from "../ipc/assets";
+import type {
+  MonitorRow,
+  MonitorSample,
+  OpenAlert,
+  UnmonitoredAsset,
+} from "../ipc/assets";
 import { createRouter } from "../shell/router.svelte";
+import { createAlerts } from "./alerts.svelte";
 import { BAR_BUCKETS, BAR_WINDOW_MS } from "./monitors";
 import MonitorsView from "./MonitorsView.svelte";
 
@@ -111,6 +117,10 @@ function render(roster: MonitorRow[] = ROSTER, fail?: unknown) {
       now: () => NOW,
       ports: {
         monitorRoster: () => (fail ? Promise.reject(fail) : Promise.resolve(roster)),
+        // The other read this tab makes (#449). Answered here so the tests
+        // above stay about the monitor roster: a port left off would send
+        // them at the real bridge, which is not in a jsdom window.
+        unmonitoredAssets: () => Promise.resolve([]),
         openExternal: (url: string) => {
           opened.push(url);
           return Promise.resolve();
@@ -399,4 +409,328 @@ test("the bar's newest bucket ends at the clock the view was given", async () =>
   const segments = [...rowOf("gitea").querySelectorAll<HTMLElement>(".bar .seg")];
   const last = segments.at(-1)?.getAttribute("title") ?? "";
   expect(last).toContain(new Date(NOW.getTime() - BUCKET_MS).toLocaleString());
+});
+
+// -- the open-alert cards and the "Not monitored" roster (#449) --------------
+
+/** One open alert, half an hour old, watching one asset. */
+function alert(over: Partial<OpenAlert> = {}): OpenAlert {
+  return {
+    id: 1,
+    monitor_id: "kuma:knobas-teamcity",
+    monitor_name: "knobas-teamcity",
+    state: "down",
+    opened_at: new Date(NOW.getTime() - 30 * 60_000).toISOString(),
+    acked_at: null,
+    assets: [{ id: "asset:hetzner-teamcity", name: "hetzner-teamcity", path: "hel1" }],
+    ...over,
+  };
+}
+
+/** One row of the *Not monitored* roster. */
+function gap(name: string, typeId: string, label: string, path: string | null): UnmonitoredAsset {
+  return {
+    id: `asset:${name}`,
+    type_id: typeId,
+    type_label: label,
+    monogram: label.slice(0, 2).toUpperCase(),
+    name,
+    path,
+  };
+}
+
+const GAPS = [
+  gap("hel1", "site", "Site", null),
+  gap("vm-db-01", "vm", "VM", "hel1"),
+  gap("vm-web-01", "vm", "VM", "hel1"),
+];
+
+/**
+ * Mount the tab over a roster, an alert store and a *Not monitored* answer,
+ * recording what an Ack asked for.
+ */
+function renderWith(options: {
+  open?: OpenAlert[];
+  gaps?: UnmonitoredAsset[];
+  gapsFail?: unknown;
+}) {
+  const acked: string[] = [];
+  let open = options.open ?? [];
+  const alerts = createAlerts({
+    openAlerts: () => Promise.resolve(open),
+    ackAlert: (monitorId: string) => {
+      acked.push(monitorId);
+      // What the backend does: the alert stays open and reads acked.
+      open = open.map((row) =>
+        row.monitor_id === monitorId ? { ...row, acked_at: new Date(NOW).toISOString() } : row,
+      );
+      return Promise.resolve();
+    },
+    listen: () => Promise.resolve(() => {}),
+  });
+  location.hash = "#/assets/monitors";
+  const router = createRouter();
+  app = mount(MonitorsView, {
+    target,
+    props: {
+      router,
+      now: () => NOW,
+      alerts,
+      ports: {
+        monitorRoster: () => Promise.resolve(ROSTER),
+        openExternal: () => Promise.resolve(),
+        unmonitoredAssets: () =>
+          options.gapsFail
+            ? Promise.reject(options.gapsFail)
+            : Promise.resolve(options.gaps ?? GAPS),
+      },
+    },
+  });
+  // The store is seeded by the shell in the real window (`App.svelte`, on
+  // `lifecycle.ready`), never by a view — so a test that mounts one view has
+  // to do the seeding the shell would have done.
+  void alerts.refresh();
+  flushSync();
+  return {
+    router,
+    alerts,
+    acked,
+    close: (monitorId: string) => {
+      open = open.filter((row) => row.monitor_id !== monitorId);
+    },
+  };
+}
+
+/** Each open-alert card, as a reader reads it. */
+function cards(): string[] {
+  return [...target.querySelectorAll("li.card")].map((card) =>
+    (card.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
+}
+
+/** The *Not monitored* roster's names, in the order it draws them. */
+function gaps(): string[] {
+  return [...target.querySelectorAll("li.gap .nm")].map((name) => name.textContent ?? "");
+}
+
+/** One type-filter option, by its label. */
+function typeFilter(label: string): HTMLButtonElement {
+  const found = [...target.querySelectorAll<HTMLButtonElement>("button.tf")].find((button) =>
+    button.textContent?.includes(label),
+  );
+  if (!found) throw new Error(`no type filter labelled ${label}`);
+  return found;
+}
+
+/**
+ * **Criterion 1, the cards.** Every open alert is a card at the top of the
+ * tab, in the order the read answers — newest first, which is `open_alerts`'
+ * own `opened_at desc` — carrying the monitor that fell, the asset it watches
+ * with the path that says where it sits, and how long it has been open.
+ *
+ * Two alerts and not one, because *in opened-at order* is not a claim a list
+ * of one can witness.
+ */
+test("open alerts are cards at the top of the tab, newest first", async () => {
+  renderWith({
+    open: [
+      alert(),
+      alert({
+        id: 2,
+        monitor_id: "kuma:knobas-jira",
+        monitor_name: "knobas-jira",
+        state: "warn",
+        opened_at: new Date(NOW.getTime() - 3 * 60 * 60_000).toISOString(),
+        assets: [{ id: "asset:hetzner-jira", name: "hetzner-jira", path: null }],
+      }),
+    ],
+  });
+  await vi.waitFor(() => expect(cards()).toHaveLength(2));
+
+  expect(cards()[0]).toContain("knobas-teamcity");
+  expect(cards()[0]).toContain("hetzner-teamcity");
+  expect(cards()[0]).toContain("hel1");
+  expect(cards()[0]).toContain("30 min ago");
+  expect(cards()[1]).toContain("knobas-jira");
+  // An asset at the top of the estate has no ancestors, and "top level" is
+  // what that reads as — the roster below uses the same word.
+  expect(cards()[1]).toContain("top level");
+  expect(cards()[1]).toContain("3 h ago");
+
+  // The card opens the asset, which is the next step: an alert has no address
+  // of its own (spec #427 story 61).
+  const open = target.querySelector<HTMLAnchorElement>("li.card a.open");
+  expect(open?.getAttribute("href")).toBe("#/asset/asset:hetzner-teamcity");
+});
+
+/** Nothing wrong draws no card section at all, the top strip badge's rule. */
+test("an estate with nothing wrong in it draws no cards", async () => {
+  renderWith({ open: [] });
+  await vi.waitFor(() => expect(listed()).toHaveLength(ROSTER.length));
+
+  expect(target.querySelector("section.cards")).toBeNull();
+});
+
+/**
+ * **Criterion 1, the ack.** Ack from a card is the inbox's ack: it asks for
+ * the alert's own **monitor** (`ack_alert`'s argument since #446), and the
+ * card comes back **acked and still there** — only a return to `up` closes an
+ * alert, so a card that vanished on an ack would say the estate was well.
+ */
+test("Ack from a card acks the alert's monitor and leaves the card acked", async () => {
+  const { acked } = renderWith({ open: [alert()] });
+  await vi.waitFor(() => expect(cards()).toHaveLength(1));
+
+  target.querySelector<HTMLButtonElement>("li.card button.ack")?.click();
+  // The store re-reads *after* the write, so the card is redrawn a tick later
+  // than the call — waiting on the call alone would assert against the
+  // pre-ack DOM.
+  await vi.waitFor(() => {
+    flushSync();
+    expect(cards()[0]).toContain("Acked");
+  });
+
+  expect(acked, "the ack is addressed by the monitor, `ack_alert`'s argument").toEqual([
+    "kuma:knobas-teamcity",
+  ]);
+  expect(cards(), "acked is not closed").toHaveLength(1);
+  expect(
+    target.querySelector("li.card button.ack"),
+    "there is nothing a second ack would say",
+  ).toBeNull();
+});
+
+/** An alert that arrived already acked draws the same card, with no Ack. */
+test("an alert acked elsewhere is drawn as acked here", async () => {
+  renderWith({ open: [alert({ acked_at: new Date(NOW.getTime() - 60_000).toISOString() })] });
+  await vi.waitFor(() => expect(cards()).toHaveLength(1));
+
+  expect(cards()[0]).toContain("Acked");
+  expect(target.querySelector("li.card button.ack")).toBeNull();
+});
+
+/**
+ * **Criterion 1, the recovery.** A monitor that comes back up closes its alert
+ * in the sync run, and the card leaves through the store's own re-read — no
+ * remount, and nothing on this tab deciding when an alert is over.
+ */
+test("a monitor that recovers takes its card off the tab", async () => {
+  const { alerts, close } = renderWith({ open: [alert()] });
+  await vi.waitFor(() => expect(cards()).toHaveLength(1));
+
+  close("kuma:knobas-teamcity");
+  await alerts.refresh();
+  flushSync();
+  expect(cards()).toEqual([]);
+  expect(target.querySelector("section.cards")).toBeNull();
+});
+
+/** An alert on a monitor watching nothing is the one most worth saying aloud. */
+test("an alert whose monitor watches nothing is a card with nowhere to go", async () => {
+  renderWith({ open: [alert({ assets: [] })] });
+  await vi.waitFor(() => expect(cards()).toHaveLength(1));
+
+  expect(cards()[0]).toContain("watching nothing");
+  expect(target.querySelector("li.card a.open")).toBeNull();
+  // And it can still be acked: seen is a thing a reader can say about an
+  // alert whether or not anybody has finished wiring the monitor up.
+  expect(target.querySelector("li.card button.ack")).not.toBeNull();
+});
+
+/**
+ * **Criterion 2.** The roster lists the assets with no monitor, each with the
+ * path that tells two containers called `postgres` apart, and excludes the
+ * ones that have one — which is what the read answers and what this asserts
+ * reaches the screen.
+ */
+test("the Not monitored roster lists the assets nothing watches, with their path", async () => {
+  renderWith({});
+  await vi.waitFor(() => expect(gaps()).toHaveLength(GAPS.length));
+
+  expect(gaps()).toEqual(["hel1", "vm-db-01", "vm-web-01"]);
+  const first = target.querySelector<HTMLAnchorElement>("li.gap a");
+  expect(first?.getAttribute("href")).toBe("#/asset/asset:hel1");
+  const paths = [...target.querySelectorAll("li.gap .pth")].map((path) => path.textContent);
+  expect(paths).toEqual(["top level", "hel1", "hel1"]);
+});
+
+/** **Criterion 2, the filter.** A type narrows the roster and clears on a second press. */
+test("a type filter narrows the Not monitored roster and clears again", async () => {
+  renderWith({});
+  await vi.waitFor(() => expect(gaps()).toHaveLength(GAPS.length));
+
+  // The options are the types the answer holds, counted — never the whole
+  // type table, most of which nothing on this roster is.
+  expect(
+    [...target.querySelectorAll("button.tf")].map((button) =>
+      (button.textContent ?? "").replace(/\s+/g, " ").trim(),
+    ),
+  ).toEqual(["Site 1", "VM 2"]);
+
+  typeFilter("VM").click();
+  flushSync();
+  expect(gaps()).toEqual(["vm-db-01", "vm-web-01"]);
+  expect(typeFilter("VM").getAttribute("aria-pressed")).toBe("true");
+
+  typeFilter("VM").click();
+  flushSync();
+  expect(gaps()).toEqual(["hel1", "vm-db-01", "vm-web-01"]);
+});
+
+/** An estate where everything is watched says so, rather than drawing a blank. */
+test("an estate with a monitor on everything says the roster is empty", async () => {
+  renderWith({ gaps: [] });
+  await vi.waitFor(() => expect(listed()).toHaveLength(ROSTER.length));
+
+  expect(target.querySelector("section.unmon")?.textContent).toContain(
+    "Every asset has a monitor",
+  );
+  expect(target.querySelector("button.tf"), "nothing to narrow").toBeNull();
+});
+
+/**
+ * A failed **alert** read says so, and says it where a reader will see it even
+ * though there are no cards: the store keeps its last list when a read fails,
+ * so a first read that failed leaves the count at zero — and a message drawn
+ * only alongside cards would be silent in exactly the case where the tab has
+ * nothing to show and no idea whether that is good news.
+ */
+test("a failed alert read is reported although there are no cards to draw", async () => {
+  location.hash = "#/assets/monitors";
+  const router = createRouter();
+  const alerts = createAlerts({
+    openAlerts: () => Promise.reject({ code: "internal", message: "the alerts went away" }),
+    listen: () => Promise.resolve(() => {}),
+  });
+  app = mount(MonitorsView, {
+    target,
+    props: {
+      router,
+      now: () => NOW,
+      alerts,
+      ports: {
+        monitorRoster: () => Promise.resolve(ROSTER),
+        openExternal: () => Promise.resolve(),
+        unmonitoredAssets: () => Promise.resolve([]),
+      },
+    },
+  });
+  void alerts.refresh();
+  flushSync();
+
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.textContent).toContain("the alerts went away");
+  });
+  expect(target.querySelector("section.cards"), "a failed read draws no cards").toBeNull();
+});
+
+/** A failed roster read is reported rather than drawn as a well-watched estate. */
+test("a failed Not monitored read is reported in the backend's own words", async () => {
+  renderWith({ gapsFail: { code: "internal", message: "the database went away" } });
+  await vi.waitFor(() => expect(target.querySelector("section.unmon p.fail")).not.toBeNull());
+
+  expect(target.querySelector("section.unmon p.fail")?.textContent).toContain(
+    "the database went away",
+  );
 });

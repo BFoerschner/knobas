@@ -323,6 +323,10 @@ pub fn run() {
             // #446's ack, appended after that: the one write on this surface
             // that leaves its subject open on purpose.
             commands::assets::ack_alert,
+            // #449's *Not monitored* roster, appended after that: the other
+            // list the Monitors tab draws, and a list of assets rather than
+            // of monitors.
+            commands::assets::unmonitored_assets,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
