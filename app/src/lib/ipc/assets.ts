@@ -914,3 +914,20 @@ export interface OpenAlert {
 export function openAlerts(): Promise<OpenAlert[]> {
   return invoke<OpenAlert[]>("open_alerts");
 }
+
+/**
+ * Ack the open alert of one monitor — seen, not fixed (#446).
+ *
+ * Clears the reader's inbox item and **leaves the alert open**: only a return
+ * to `up` closes one, so the estate goes on saying this thing is down while
+ * the inbox stops saying it needs somebody. A history line lands on every
+ * asset the monitor watches.
+ *
+ * **By the monitor and not the alert row's id**: the inbox item's subject is
+ * the monitor entity, and one monitor has at most one open alert. Rejects with
+ * `not_found` when it has none — which is what acking a row that recovered
+ * while the reader was looking at it gets.
+ */
+export function ackAlert(monitorId: string): Promise<OpenAlert> {
+  return invoke<OpenAlert>("ack_alert", { monitorId });
+}

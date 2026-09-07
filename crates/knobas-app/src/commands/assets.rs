@@ -565,6 +565,43 @@ pub async fn open_alerts(lifecycle: State<'_, Lifecycle>) -> Result<Vec<OpenAler
     assets::open_alerts(&pool).await
 }
 
+/// Ack the open alert of one monitor: seen, not fixed (spec #427 story 62,
+/// issue #446).
+///
+/// Clears the reader's inbox item and leaves the alert **open** -- only a
+/// return to `up` closes one -- and writes a history line on every asset the
+/// monitor watches. `assets::ack_alert` is where the three writes and the one
+/// transaction are argued.
+///
+/// **Takes the monitor, not the alert row's id**, because the inbox item's
+/// subject is the monitor entity and `monitor_alert_one_open_idx` makes "the
+/// open alert of this monitor" exactly one row or none; #449's cards carry
+/// `OpenAlert::monitor_id` and are served by the same argument.
+///
+/// **An `AppHandle`, unlike the alert *read* beside it**: this one is a
+/// mutation and its lines go out on `activity:new`, so the status bar's
+/// latest-change line hears about an ack the way it hears about every other
+/// estate write.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when that monitor has no open
+/// alert -- which is what acking a row that recovered while the reader was
+/// looking at it gets -- and
+/// [`Internal`](crate::IpcErrorCode::Internal) if a write fails.
+#[tauri::command]
+pub async fn ack_alert<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    monitor_id: String,
+) -> Result<OpenAlert, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::ack_alert(&pool, &monitor_id, chrono::Utc::now()).await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
@@ -1105,7 +1142,7 @@ mod tests {
         );
     }
 
-    /// The nineteen commands are invoked from the mirror by the names they are
+    /// The twenty commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -1134,6 +1171,7 @@ mod tests {
             "set_monitoring_settings",
             "monitor_roster",
             "open_alerts",
+            "ack_alert",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -1173,6 +1211,7 @@ mod tests {
             ("preview_estate_import", "file"),
             ("apply_estate_import", "file"),
             ("set_monitoring_settings", "settings"),
+            ("ack_alert", "monitorId"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))

@@ -855,6 +855,25 @@ pub async fn snooze(pool: &PgPool, key: &str, until: DateTime<Utc>) -> Result<()
 ///
 /// [`CoreError::Db`] if the write fails.
 pub async fn complete(pool: &PgPool, key: &str, at: DateTime<Utc>) -> Result<(), CoreError> {
+    complete_with(pool, key, at).await
+}
+
+/// [`complete`], against an executor the caller chooses.
+///
+/// `activity::record_with`'s shape and its reason: an answer that is one part
+/// of a larger write belongs in that write's transaction. #446's ack is the
+/// caller -- it sets an alert's `acked_at`, completes this item and writes the
+/// asset's history line as one act, and an ack that recorded two of the three
+/// would leave an item on the stream for an alert nobody will be told about
+/// again.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn complete_with<'e, E>(executor: E, key: &str, at: DateTime<Utc>) -> Result<(), CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     sqlx::query(
         "insert into knobas.inbox_state (item_key, done_at)
               values ($1, $2)
@@ -865,7 +884,7 @@ pub async fn complete(pool: &PgPool, key: &str, at: DateTime<Utc>) -> Result<(),
     )
     .bind(key)
     .bind(at)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
