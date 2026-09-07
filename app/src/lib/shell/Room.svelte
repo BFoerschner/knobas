@@ -36,6 +36,7 @@
   import { kindRegistry } from "./kind-registry.svelte";
   import { tilesFor } from "./kinds";
   import { hashFor, type Router } from "./router.svelte";
+  import { roomForeground } from "./timer";
 
   let {
     router,
@@ -247,16 +248,27 @@
    *   that cannot be wrong for one of them. The link is what makes the note a
    *   member of the context (ADR-0008), which is why there is no membership
    *   write beside it.
-   * * `captured-from` names the entity whose **detail is open**, and nothing
-   *   else. Deliberately not the timer's foreground rule (*open detail, else
-   *   room anchor, else none*, #278): the ticket and story 42 both say *when a
-   *   detail was open*, and falling back to the room's anchor would attach a
-   *   second link to the promoted ticket the `captured-in` context is already
-   *   about — saying twice, in two words, where the note came from.
+   * * `captured-from` names the **foreground**, as `CONTEXT.md`'s **Passive
+   *   attribution** defines that word and as the heartbeat computes it: the
+   *   open detail, else the room's anchor, else nothing. It is *exactly* the
+   *   timer's foreground rule (#278) and shares its one spelling,
+   *   `timer.ts`'s `roomForeground` — that is the point, not an accident. The
+   *   ticket's *"when a detail is open"* and story 42's *"when a detail was
+   *   open"* name the first rung, which is the common case, and the word they
+   *   use has a definition; the deputy's ruling of 2026-09-08 on #502 settles
+   *   it that way.
+   *
+   *   A promoted room with nothing open therefore draws two links that share a
+   *   name in the panel, and they are two facts: `captured-in` is which
+   *   working set the note belongs to (ADR-0008), `captured-from` is what the
+   *   note was about — the same split the timer in that room already makes
+   *   when it runs on the anchor and not on the context (`contexts.ts`,
+   *   *"Never the context's own id"*). What it buys is that the note and the
+   *   day review's passive block for that minute name the same entity.
    *
    * Built here rather than inside {@link startNote} so the decision is one
    * expression a test can read, and because #503's capture window makes the
-   * same two from a room and a detail it remembered rather than ones it is
+   * same two from a room and a foreground it remembered rather than ones it is
    * drawing.
    */
   function bornWith(): NoteLinkInput[] {
@@ -264,8 +276,9 @@
     if (context.filter.context !== null) {
       links.push({ target_id: context.filter.context, relation: CAPTURED_IN });
     }
-    if (detail !== null) {
-      links.push({ target_id: detail.entityId, relation: CAPTURED_FROM });
+    const front = roomForeground(detail?.entityId, context.anchorId);
+    if (front !== null) {
+      links.push({ target_id: front, relation: CAPTURED_FROM });
     }
     return links;
   }

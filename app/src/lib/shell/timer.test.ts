@@ -6,6 +6,9 @@
  * `timer.svelte.ts` owns the state and `TimerPicker.svelte` owns the drawing,
  * and both read these.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "vitest";
 
 import {
@@ -13,6 +16,7 @@ import {
   canBeTarget,
   elapsedReading,
   legalCandidates,
+  roomForeground,
   targetReading,
   type TargetCandidate,
 } from "./timer";
@@ -20,6 +24,66 @@ import {
 function candidate(entityId: string, kind: string, title = entityId): TargetCandidate {
   return { entityId, kind, title };
 }
+
+// -- what is in front of a reader standing in a room ------------------------
+
+/**
+ * The ladder itself: the open detail, else the room's anchor, else nothing
+ * (#278, spec #272), each rung through `canBeTarget`.
+ *
+ * The literal words rather than a re-derivation, and each rung driven with the
+ * one below it *present*, because the mistake this rule can make is order: an
+ * implementation that read the anchor first would pass a test that only ever
+ * supplied one of the two.
+ */
+test("a room's foreground is the open detail, else its anchor, else nothing", () => {
+  expect(roomForeground("mock:INC-1", "mock:PAY-231")).toBe("mock:INC-1");
+  expect(roomForeground(null, "mock:PAY-231")).toBe("mock:PAY-231");
+  expect(roomForeground(undefined, undefined)).toBe(null);
+  expect(roomForeground(null, null)).toBe(null);
+});
+
+/**
+ * Both rungs go through `canBeTarget`, so a context is nothing in front of
+ * anybody — and the fall-through is to the **next** rung, not to `null`.
+ *
+ * A room whose anchor were somehow a context has to answer with the open
+ * detail rather than with nothing, which is the direction a guard applied to
+ * the wrong half would get backwards.
+ */
+test("a context is never a room's foreground, from either rung", () => {
+  expect(roomForeground("ctx:5b1c0f1e", "mock:PAY-231")).toBe("mock:PAY-231");
+  expect(roomForeground("ctx:5b1c0f1e", "ctx:2f1a5d6e")).toBe(null);
+  expect(roomForeground("not-an-id", "mock:PAY-231")).toBe("mock:PAY-231");
+});
+
+/**
+ * **One spelling of the ladder, scanned rather than remembered** (#502, the
+ * deputy's ruling of 2026-09-08).
+ *
+ * Two readers ask what is in front of a reader standing in a room: the
+ * heartbeat's foreground (`App.svelte`) and the `captured-from` link a note is
+ * born with (`Room.svelte`). They must not be able to disagree, and calling
+ * one function is what makes that structural — but only until somebody inlines
+ * the two lines back into one of them, which is a change that would look local
+ * and would silently make a captured note point at something the day review's
+ * passive block for that minute does not.
+ *
+ * So the scan is the pin: neither file may reach the anchor through
+ * `canBeTarget` itself, which is the shape a re-inlined ladder has. `App.svelte`
+ * keeps its **assets** branch, which is a different rung of a different view,
+ * so the pattern looked for is `anchorId` beside `canBeTarget` rather than
+ * `canBeTarget` at all.
+ */
+test("the room foreground ladder is spelled once, and both readers call it", () => {
+  const root = join(process.cwd(), "src");
+  for (const file of ["App.svelte", "lib/shell/Room.svelte"]) {
+    const source = readFileSync(join(root, file), "utf8");
+    expect(source, `${file} has to go through roomForeground`).toContain("roomForeground(");
+    const inlined = /anchorId[^\n]*canBeTarget|canBeTarget[^\n]*anchorId/.test(source);
+    expect(inlined, `${file} re-spells the anchor rung instead of calling it`).toBe(false);
+  }
+});
 
 // -- what may be a target ---------------------------------------------------
 

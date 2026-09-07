@@ -221,3 +221,88 @@ meaning of *a precondition only a person meets, the work itself scripted*,
 distinct from the retired checklist — a triage-vocabulary question
 (`docs/agents/triage-labels.md`) for Björn's return; this ruling uses the label
 once, for #525.
+
+---
+
+## #502 — what `captured-from` names when no detail is open, and the activity line a born link's withdrawal has no partner for
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/502#issuecomment-5576885970>
+
+**The fork:** two, both raised from the branch before any PR. (1) `Room.svelte` attached
+`captured-from` only when a detail was open. #502's body and story 42 both say *"the foreground
+entity **when a detail is open**"*, but spec #491's Implementation Decisions says *"`captured-from`
+for the foreground entity **the heartbeat already computes**"* — *open detail, else room anchor,
+else none* — `CONTEXT.md`'s **Capture** says *"if there was one"*, and **Passive attribution**
+defines *foreground* as *"the open detail, else the asset in the Tree's pane, else the room's
+anchor entity, else nothing"*. #503 is specified to pass *"the last foreground entity"*, which is
+the heartbeat's value. Option A: the open detail only. Option B: the heartbeat's foreground. The
+implementer leaned A. (2) Nothing in `knobas_core::note` writes an activity line, so withdrawing a
+born link leaves an `unlinked` line whose `linked` partner never existed — owed inside #502, owed
+as a follow-up, or not owed.
+
+**Ruling:** (1) **Option B.** `captured-from` names the **foreground** as **Passive attribution**
+defines it and as the heartbeat computes it, through the same `canBeTarget` guard, which refuses a
+`ctx:` entity and nothing else. From *New note* the Tree branch is unreachable, so in
+`Room.svelte` the value is *open detail, else the room's anchor, else none*; what binds is that at
+the instant the note is written it equals what the heartbeat would send. Reading
+`timer.foreground` makes that true by construction; recomputing it from `detail` and
+`context.anchorId` is allowed, and then one test pins that the two cannot disagree. Two cases join
+`Room.test.svelte.ts`: a promoted room with nothing open is born with `captured-in` to the context
+**and** `captured-from` to its anchor; an ad-hoc stored room with nothing open is born with
+`captured-in` alone. The four tests already on the branch stand — a derived room has no anchor. The
+prose the implementer said was owed either way is ruled and written on this PR: `CONTEXT.md`'s
+**Capture** gains the cross-reference *"the word as [Passive attribution](#passive-attribution)
+defines it, so a promoted room with nothing open gives its anchor"*; the §10.8 entry's three
+sentences are corrected; `bornWith()`'s doc comment inverts. No new glossary entry, no ADR.
+(2) **Not owed inside #502.** One follow-up ticket, filed by the orchestrator outside v1.5,
+`needs-triage`, for Björn to place — **#524**, *A note's birth is a line in the activity stream*.
+Inside #502 one clause is owed on the §10.8 paragraph that already names the gap: that the class
+exists on `main` before this ticket, and the follow-up's number. `draw_born_links`' doc comment
+stands as written.
+
+**Reasoning:** (1) the answer already exists in the glossary entry the grilling ruled and the
+ticket binds itself to (*"Vocabulary: `CONTEXT.md`"*), with *foreground* defined once under
+**Passive attribution**; spec #491 says it three times, in Implementation Decisions, in Further
+Notes (*"the foreground a capture attaches is by construction the last one before focus left"*) and
+in #503's body. The ticket's *"when a detail is open"* and story 42's *"when a detail was open, so
+that the thought points at what I was reading"* name the first branch of the defined term — the
+common case, and what the story's *so that* is about; read as a narrowing condition they would
+contradict the glossary entry the ticket names as its vocabulary, and a ticket is a transcription
+of the grilling rather than a re-decision of it. The #496 ruling's *"the ticket is the operative
+text and the spec's count is a shorthand"* does not reach here: that was a count of migrations,
+arithmetic with no term behind it, where this is a word with a definition ruled the same day as the
+ticket. The implementer's redundancy objection is answered by the split `contexts.ts` already
+draws — *"**Never the context's own id.** A context is a set, and time on a set has nowhere to go;
+the anchor is a ticket or an epic, which is a thing"*: `captured-in` says which working set the
+note belongs to (the membership write, ADR-0008) and `captured-from` says what the note was about,
+the same two facts the timer in that room already tells apart. Under B a note born in a promoted
+room with nothing open and the day review's passive block for that minute name one entity; under A
+knobas' two records of *what was I on* disagree about the same instant. The decisive cost is the
+one the implementer named: under A, #503 would have to record *was a detail open* separately, which
+the heartbeat does not, so the two callers of one command diverge — and #503's body does not build
+that recording, the glossary says *"the same two, by the same mechanism"*, and the spec's Further
+Notes sentence would be false. (2) the gap is real and it is not this ticket's. Notes have never
+written a line, and #409 is Björn's own ruling of 2026-09-05 on the nearest question — *"This
+writes no activity lines at all"* — so the shape of the decision is his. The orphan `unlinked` line
+already exists for another population: `Origin::Imported` `monitored-by` links, drawn by the estate
+apply and by the poll, are withdrawable from the same panel, whose only refusal is `implied`, and
+neither writes a `linked` line; `link_detail`'s pairing is a property of links drawn through
+`create_link`, not an invariant of the log. Nothing runs on the pairing — detection's suppression
+reads the tombstone and the tray uses `unlinked` only as a refresh signal — so the orphan misleads
+a reader of the history panel and breaks nothing. Inside #502 it would be a third mechanism in a
+ticket whose own words are *"No field on the note"* and two ordinary links; inside v1.5 it fits
+neither precedent — it is not a witness gap on anything #491 promises (#522's reason) and the
+defect predates the milestone (#518's reason). And the fix carries the trap #409 named: a note's
+`[[ref]]` links are reconciled on every autosave, so a writer announcing *links* rather than the
+*birth* would be that flood in another shape.
+
+**If you disagree, the cost of reversing this is:** (1) trivial before merge — one expression in
+`bornWith()`, two tests, three sentences in the contract entry and one in the glossary. After
+merge, a note born under B in a promoted room carries a `captured-from` its author can withdraw
+from the panel like any manual link, and there is no migration; the real cost of reversing is #503,
+which would then have to record *was a detail open* beside the foreground, a second thing the
+capture window remembers. (2) small either way: into v1.5 the orchestrator sets the milestone and
+`ready-for-agent` and the ticket is one writer inside an existing transaction, one detail shape and
+a seam test; into #502 the same work on an open branch plus a §10.8 sentence, and after merge it is
+the follow-up ticket anyway.

@@ -476,7 +476,7 @@ async function bornWithFrom(hash: string, openADetail: boolean) {
   answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1 });
   const screen = render("#/ctx/all");
   await settle();
-  screen.relist([...CONTEXTS, storedContext(STORED)]);
+  screen.relist([...CONTEXTS, storedContext(STORED), storedContext(PROMOTED)]);
   screen.router.go(hash);
   // The room re-reads on the switch, so its previous tiles are still drawn for
   // a turn: settling first is what makes the row clicked below this room's.
@@ -512,6 +512,31 @@ test("New note over an open detail is born linked to what was being read", async
   expect(await bornWithFrom("#/ctx/ctx:pay", true)).toEqual([
     { target_id: "ctx:pay", relation: CAPTURED_IN },
     { target_id: "mock:INC-1", relation: CAPTURED_FROM },
+  ]);
+});
+
+/**
+ * The rung under the open detail (the deputy's ruling of 2026-09-08 on #502):
+ * `captured-from` is the **foreground** as `CONTEXT.md`'s **Passive
+ * attribution** defines it, so a promoted room with nothing open gives its
+ * anchor — the same value the heartbeat would send at that instant, which is
+ * what makes the note and the day review's passive block for that minute name
+ * one entity.
+ *
+ * The two rooms are the pair that tells the rule from a coincidence: both are
+ * stored, both send `captured-in`, and only the promoted one has a second
+ * thing to say.
+ */
+test("New note in a promoted room with nothing open is born linked to its anchor", async () => {
+  expect(await bornWithFrom("#/ctx/ctx:pay-epic", false)).toEqual([
+    { target_id: "ctx:pay-epic", relation: CAPTURED_IN },
+    { target_id: "mock:PAY-231", relation: CAPTURED_FROM },
+  ]);
+});
+
+test("New note in an ad-hoc room with nothing open is born linked to the room alone", async () => {
+  expect(await bornWithFrom("#/ctx/ctx:pay", false)).toEqual([
+    { target_id: "ctx:pay", relation: CAPTURED_IN },
   ]);
 });
 
@@ -1203,6 +1228,23 @@ const STORED: ContextRow = {
   kind: "adhoc",
   title: "payments stack",
   anchor_id: null,
+  created_at: "2026-09-06T09:00:00Z",
+  archived_at: null,
+};
+
+/**
+ * A **promoted** stored context — the one with an anchor.
+ *
+ * Beside the ad-hoc one rather than instead of it: the difference between the
+ * two is the whole of the foreground rule's second rung (#502), and a fixture
+ * with only one of them could not show that the anchor is what is being read
+ * rather than "a stored room attaches two links".
+ */
+const PROMOTED: ContextRow = {
+  id: "ctx:pay-epic",
+  kind: "ticket",
+  title: "Retry storm",
+  anchor_id: "mock:PAY-231",
   created_at: "2026-09-06T09:00:00Z",
   archived_at: null,
 };

@@ -7954,14 +7954,17 @@ From this commit on, each of the following requires an orchestrator decision **a
 - **One argument on one command — issue #502 (2026-09-08): a new note is born with its links.**
 
   A note started from a room carries `captured-in` to that room's context and `captured-from` to
-  the entity whose detail is open (spec #491, v1.5 stream 5, stories 40--43; `CONTEXT.md`,
-  **Capture**). One frozen surface, additive, and both the ticket and the stream map name it in
-  advance: the ticket's own words are *"`create_note` grows an optional list of links to draw at
-  creation (§10.8 entry)"* and its third criterion asks for this entry by name; #491's stream map
-  row 5 says *"`create_note` grows its two links"*. **Björn keeps the gate for frozen contracts
-  and this entry is flagged for his review.** No fork arose on this ticket, so no deputy ruling
-  ratifies it; what authorises the touch is the ticket text above, and the entry below is the
-  record the freeze asks for in exchange.
+  the **foreground**, as `CONTEXT.md`'s **Passive attribution** defines that word and as the
+  heartbeat computes it --- the open detail, else the room's anchor, else nothing (spec #491, v1.5
+  stream 5, stories 40--43; `CONTEXT.md`, **Capture**). One frozen surface, additive, and both the
+  ticket and the stream map name it in advance: the ticket's own words are *"`create_note` grows an
+  optional list of links to draw at creation (§10.8 entry)"* and its third criterion asks for this
+  entry by name; #491's stream map row 5 says *"`create_note` grows its two links"*. **Björn keeps
+  the gate for frozen contracts and this entry is flagged for his review.** What `captured-from`
+  names when no detail is open was a fork, and the deputy's ruling of 2026-09-08 on #502
+  ([comment](https://github.com/BFoerschner/knobas/issues/502#issuecomment-5576885970),
+  `docs/decisions/2026-09-v1-5-unattended-rulings.md`) ratifies the reading recorded here --- the
+  defined term, not the ticket's narrower phrasing of its first rung.
 
   **The IPC schema — one argument and one input DTO, on a command that already exists:**
 
@@ -7990,6 +7993,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   from both ends, so a context's own panel would say the room was captured in the note. #503's
   capture window passes the same two through the same argument, and a third caller with a third
   relation needs no further change here.
+
+  **What the two relations name.** `captured-in` is the room's **context**, so it is `null` for
+  every derived room (`CONTEXT.md`, **Room**) and, where there is one, it is the **membership
+  write**: ADR-0008's seed is *"every confirmed link touching the context's own `ctx:` entity"*.
+  `captured-from` is the foreground, and in a promoted room with nothing open those two draw the
+  context and its anchor --- two facts that share a name in the panel, the same split the timer in
+  that room already makes when it runs on the anchor and not on the context (`contexts.ts`,
+  *"Never the context's own id"*). The ladder has one spelling, `shell/timer.ts`'s
+  `roomForeground`, called by `App.svelte`'s heartbeat foreground and by `Room.svelte`'s
+  `bornWith`, so what a capture attaches equals what the heartbeat would send at that instant.
 
   **The four rules the argument carries**, all of them stated because each is a thing a later
   reader could reasonably decide the other way:
@@ -8023,7 +8036,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   and that writes an `unlinked` line whose `linked` partner never existed, against the pairing
   `link_detail` promises. Recording a line here would announce a note's links while the note's own
   birth stayed silent; the fix, if it is wanted, is a line for the birth covering the note and both
-  links at once, which is a ticket rather than a clause.
+  links at once, which is a ticket rather than a clause. **The class predates this ticket**: a
+  `monitored-by` link drawn by the estate apply is `Origin::Imported` and withdrawable from the
+  same panel, whose only refusal is `implied`, and it was never announced by a `linked` line
+  either (`assets/mod.rs`, `knobas-sync/src/attach.rs`), so what #502 adds is a second population
+  to a milestone-old class. Ruled not owed here by the deputy on 2026-09-08 and filed as **#524**,
+  outside v1.5 for Björn to place.
 
   **No field on the note, and no membership write.** `CONTEXT.md`'s **Capture** says the first;
   the second is ADR-0008, whose seed is *"every confirmed link touching the context's own `ctx:`
@@ -8040,10 +8058,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   grows and no descriptor gains a slot, and a link is never written back to a source
   (`CONTEXT.md`, **Link**). Nothing in `crates/knobas-http/**`;
   `crates/knobas-app/src/{error,profile}.rs` untouched; the keychain envelope unchanged at
-  version 2. The **glossary** needs nothing: `CONTEXT.md`'s **Capture** entry (added 2026-09-07 by
-  #494) already states this behaviour, including *"The in-app New note attaches the same two, by
-  the same mechanism"*, and nothing here reaches past `sync.live_item`, so **Live item**'s census
-  of three readers is unchanged.
+  version 2. The **glossary** gains one cross-reference and no entry: `CONTEXT.md`'s **Capture**
+  (added 2026-09-07 by #494) already states this behaviour, including *"The in-app New note
+  attaches the same two, by the same mechanism"*, and its *"the foreground entity if there was
+  one"* now says which word that is --- *"the word as [Passive attribution](#passive-attribution)
+  defines it, so a promoted room with nothing open gives its anchor"* --- as the ruling directs.
+  Nothing here reaches past `sync.live_item`, so **Live item**'s census of three readers is
+  unchanged.
 
   Pinned by: four tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
   `a_note_born_in_a_stored_room_carries_both_links_and_is_a_member` (both relations, both origins,
@@ -8051,11 +8072,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_note_born_with_only_a_foreground_carries_only_that_link` (the two are independent),
   `a_note_born_with_no_links_is_born_with_none` and
   `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one` (the two refusals and
-  the skip);
+  the skip); three in `app/src/lib/shell/timer.test.ts` for the foreground ladder, its `canBeTarget`
+  fall-through and the scan that keeps it spelled once;
   `entity_mirror.rs`'s `the_note_link_input_shape_matches_its_typescript_mirror`, which round-trips
-  the input DTO so a Rust-only field cannot hide; and, on the frontend, four in
+  the input DTO so a Rust-only field cannot hide; and, on the frontend, six in
   `shell/Room.test.svelte.ts` for what *New note* sends from a stored room, over an open detail,
-  from the three derived rooms and over a detail in a derived room, plus two in
+  from the three derived rooms and over a detail in a derived room, and two more for the ruled
+  second rung --- a promoted room with nothing open, and an ad-hoc one --- plus two in
   `detail/relations.test.ts` for the two readings of each word and the grouping they produce on the
   context's own panel.
 

@@ -23,7 +23,7 @@
   import { sourceKinds } from "./lib/shell/source-kinds.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { timer } from "./lib/shell/timer.svelte";
-  import { canBeTarget } from "./lib/shell/timer";
+  import { canBeTarget, roomForeground } from "./lib/shell/timer";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import { localDay, offsetMinutes } from "./lib/time/draft";
@@ -226,6 +226,12 @@
    * context's anchor is a ticket or an epic, so it always passes today; the
    * guard is what stops a room shape that changes later quietly making a
    * context the thing the clock runs on.
+   *
+   * The **room** ladder itself is `timer.ts`'s `roomForeground` since #502,
+   * which is the other reader of it: a note born from *New note* carries a
+   * `captured-from` link to the foreground, and it has to be the same answer
+   * the heartbeat would send at that instant or knobas' two records of what
+   * the reader was on disagree about one minute.
    */
   const foreground = $derived.by(() => {
     const route = router.route;
@@ -236,15 +242,8 @@
         : null;
     }
     if (route.view !== "room") return null;
-    const open = route.detail?.entityId;
-    if (open && canBeTarget({ entityId: open })) {
-      return { kind: "entity", entity_id: open } as const;
-    }
-    const anchor = standingIn?.anchorId;
-    if (anchor && canBeTarget({ entityId: anchor })) {
-      return { kind: "entity", entity_id: anchor } as const;
-    }
-    return null;
+    const front = roomForeground(route.detail?.entityId, standingIn?.anchorId);
+    return front === null ? null : ({ kind: "entity", entity_id: front } as const);
   });
 
   // The store holds the answer rather than a function that computes it: the
