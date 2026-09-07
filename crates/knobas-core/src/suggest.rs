@@ -382,9 +382,12 @@ const SOURCE_RECORDED_RELATION: &str = detection!(
 ///   and the fragment. The port is what makes `http://gitea:3000` match an
 ///   asset whose hostname is `gitea`, which is the whole of criterion 1.
 ///
-/// Lowercased because hostnames are case-insensitive and an estate file is
-/// typed by hand; `nullif(..., '')` because a blank property and an absent one
-/// are the same fact and neither may join to the other.
+/// Lowercased because hostnames are case-insensitive; `btrim` because a
+/// hostname property is typed by hand into a form and ` gitea ` is the same
+/// host as `gitea`; `nullif(..., '')` because a blank property and an absent
+/// one are the same fact and neither may join to the other -- which is also
+/// the whole of "an address with no host joins to nothing", since SQL equality
+/// on `null` is `null`.
 ///
 /// An IPv6 literal in brackets comes back as `[2001` and therefore matches
 /// nothing rather than matching wrongly -- the failure direction ADR-0007 asks
@@ -414,22 +417,57 @@ macro_rules! host_of {
 /// pair the two both find must produce one suggestion, which the driver's
 /// `distinct on` then guarantees:
 ///
-/// * the **hostname property** (`knobas_core::asset::TYPES`: a server's and a
-///   VM's), and
-/// * the host of a **route the asset exposes** (`knobas.route.asset_id`).
-///   `target_id` is deliberately not read: a route *lands on* its target, and
-///   the asset that answers at the URL's host is the one that exposes it.
+/// * the **hostname property** (`knobas_core::asset::TYPES`: a hypervisor's
+///   and a VM's), and
+/// * the host of a **route**, credited to
+///   `coalesce(target_id, asset_id)` -- *the asset the route lands on, or the
+///   one that exposes it when it lands on nothing knobas knows*.
+///
+/// That `coalesce` is the one place this rule reads #451's sentence -- "the
+/// host of a route the asset exposes" -- as naming *which routes are in play*
+/// rather than which end of one gets the suggestion, and the estate the
+/// milestone is developed against is why. `testenv/hetzner/estate.json`'s only
+/// route whose host a seeded monitor watches is `route:tunnel-gitea-reverse`,
+/// `http://gitea:3000/`, exposed by `asset:hetzner-teamcity` and targeting
+/// `asset:knobas-gitea`; the monitor is `gitea`,
+/// `http://gitea:3000/api/healthz`. The thing that answers at that host is
+/// Gitea. Crediting the exposing end would make the rule's *only* firing on
+/// the real estate a proposal naming the wrong asset -- and the right one is
+/// already a link, drawn from that asset's `monitors: ["gitea"]` by #439's
+/// import, so the driver's suppression drops it and the tray is left holding
+/// exactly the wrong half. `0018` is where the fallback comes from: a route
+/// with no target is "an endpoint that lands on nothing knobas knows", and
+/// then the asset that exposes it is the best answer there is.
+///
+/// **The port is not compared**, on either side: `host_of!` stops at it, which
+/// is what criterion 1 asks for on the monitor's side and what makes a host
+/// serving several ports one asset rather than several. So a monitor on
+/// `http://host:3000/` matches a route at `http://host:8080/`, and an asset
+/// exposing many routes on one host is proposed once -- the driver's
+/// `distinct on` keeps one row per pair, and the reason then names whichever
+/// of those routes sorts first.
+///
+/// `route_name` carries the route's name **and** tells the two arms apart, and
+/// that is sound rather than clever: `0018` declares `name text not null` with
+/// `route_name_chk check (btrim(name) <> '')`, so a route arm's `route_name` is
+/// never null and the hostname arm's always is. A migration that relaxed either
+/// would make the `case` below tell the wrong story, which is why the constraint
+/// is named here.
 ///
 /// A **payload read outside an adapter** (ADR-0007), and it takes that
 /// discipline in full, as `SOURCE_RECORDED_RELATION` does: one named
 /// statement, the `jsonb_typeof` guard, and a failure direction of *absence* --
 /// a monitor with no `url`, a `url` that is not a string, or one naming no host
-/// contributes no candidate rather than a guessed one.
+/// contributes no candidate rather than a guessed one. The same guard sits on
+/// the asset's `hostname`, which is a jsonb bag knobas writes but does not
+/// type.
 ///
 /// The monitor's own `hostname` field -- what Kuma reports for a ping or a port
 /// check -- is **not** read here. #451's sentence is "a mirrored monitor's URL
 /// host", and widening it to every address a monitor carries is a decision with
-/// its own negative controls to write.
+/// its own negative controls to write. It is not free: three of the eight
+/// monitors `testenv/monitors.json` seeds are `ping` checks carrying the
+/// Hetzner servers' IPs there, and this rule cannot see them.
 const MONITOR_URL_HOST: &str = detection!(concat!(
     "with watched as (
          select m.entity_id, ",
@@ -442,23 +480,23 @@ const MONITOR_URL_HOST: &str = detection!(concat!(
      stated as (
          select a.id as asset_id, ",
     host_of!("a.properties->>'hostname'"),
-    " as host, null::text as route
+    " as host, null::text as route_name
            from knobas.asset a
           where jsonb_typeof(a.properties->'hostname') = 'string'
           union all
-         select r.asset_id, ",
+         select coalesce(r.target_id, r.asset_id), ",
     host_of!("r.url"),
     ", r.name
            from knobas.route r
      )
      select s.asset_id, w.entity_id, 'monitored-by',
-            case when s.route is null
+            case when s.route_name is null
                  then format('this monitor watches %s, which is the asset''s hostname', w.host)
-                 else format('this monitor watches %s, the host of the route %s', w.host, s.route)
+                 else format('this monitor watches %s, the host of the route %s',
+                             w.host, s.route_name)
             end
        from watched w
-       join stated s on s.host = w.host
-      where w.host is not null"
+       join stated s on s.host = w.host"
 ));
 
 /// How many distinct shared lexemes make two documents similar, as the literal
