@@ -348,3 +348,38 @@ test("clearing the box forgets the paste", async () => {
   expect(session.url).toBeNull();
   expect(session.urlAnswer).toBeNull();
 });
+
+/**
+ * The box is emptied on close, and only for a paste: what the launcher
+ * navigates on must not be there to navigate on again, and a URL left in the
+ * box with its answer gone is a box that says *Searching…* with nothing in
+ * flight.
+ */
+test("closing after a paste leaves nothing to reopen onto", async () => {
+  const session = new Session({
+    ...ports(async (q) => answer(q.raw)),
+    resolveUrl: async () => FOUND,
+  });
+
+  session.type(PASTED);
+  await vi.advanceTimersByTimeAsync(120);
+  session.dispose();
+
+  expect(session.raw).toBe("");
+  expect(session.mode).toBe("board");
+  expect(session.urlAnswer).toBeNull();
+});
+
+test("closing after a search still comes back to it", async () => {
+  const session = new Session({
+    ...ports(async (q) => answer(q.raw)),
+    resolveUrl: async () => FOUND,
+  });
+
+  session.type("sepa");
+  await vi.advanceTimersByTimeAsync(120);
+  session.dispose();
+
+  expect(session.raw, "a query is what the reader was in the middle of").toBe("sepa");
+  expect(session.mode).toBe("results");
+});

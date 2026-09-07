@@ -219,14 +219,20 @@ export class Session {
    * Stop the pending timer and forget the paste. Called when the overlay
    * closes.
    *
-   * The paste is forgotten and not merely stale: a resolved URL is what the
-   * launcher navigates on, so one left behind would re-navigate the moment the
-   * overlay opened again.
+   * **The box is emptied too, and only for a paste.** A query and its answer
+   * survive a close on purpose — reopening the launcher shows what was last
+   * searched for. A paste has no such state to come back to: it has already
+   * been opened or handed to the browser, and what makes the difference
+   * structural rather than cosmetic is that the answer is what the launcher
+   * *navigates on*. Left behind, it would either re-navigate on the next
+   * opening or sit in a box that says it is searching with nothing in flight.
    */
   dispose(): void {
     this.#cancel();
-    this.url = null;
-    this.urlAnswer = null;
+    if (this.url !== null) {
+      this.raw = "";
+      this.#clear();
+    }
   }
 
   /**
