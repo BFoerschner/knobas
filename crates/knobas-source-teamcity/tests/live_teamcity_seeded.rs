@@ -1041,7 +1041,10 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
     // runs is which URL the adapter was configured with -- which is the claim.
     let Some(alternate) = alternate_host(&seeded.url) else {
         panic!(
-            "KNOBAS_TEAMCITY_URL is {:?} and this suite knows no second spelling of its host,              so the half of this test that separates a composed URL from the server's own              cannot run. Point it at 127.0.0.1 or localhost, or teach `alternate_host` this              host.",
+            "KNOBAS_TEAMCITY_URL is {:?} and this suite knows no second spelling of its \
+             host, so the half of this test that separates a composed URL from the \
+             server's own cannot run. Point it at 127.0.0.1 or localhost, or teach \
+             `alternate_host` this host.",
             seeded.url
         );
     };
@@ -1057,7 +1060,8 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
         let url = it.web_url.as_deref().expect("every build has a URL");
         assert!(
             url.starts_with(&alternate),
-            "a source configured with {alternate} must mirror URLs under it, not under the              server's own root URL: {url}"
+            "a source configured with {alternate} must mirror URLs under it, not under \
+             the server's own root URL: {url}"
         );
         assert_eq!(
             seeded.status_of(url).await,
