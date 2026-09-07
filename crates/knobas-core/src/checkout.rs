@@ -80,11 +80,14 @@ impl std::fmt::Display for RemoteKey {
 /// # What is deliberately refused
 ///
 /// A Windows path (`C:\src\payout-service`) reads as a scp-like remote to a
-/// naive split on `:`. Two guards keep it out and both are needed: a scp-like
-/// host must be longer than one character, and its path must carry a `/`
-/// separator. A remote with an empty host, an empty repository, or a path of
-/// one segment is a miss for the same reason -- a key assembled out of those
-/// would match nothing, or worse, match everything with the same shape.
+/// naive split on `:`. **One** guard is what keeps it out: a scp-like host must
+/// be longer than one character, so a drive letter is not a host. The other
+/// spellings are refused by rules that are there anyway -- `C:/src/a/b` by the
+/// leading slash, `C:\src\a\b` by having no `/` and therefore one path
+/// segment, where an owner *and* a repository are wanted. A third guard on
+/// "the path must carry a `/`" was written and removed: mutation-checked, it
+/// killed nothing that the one-segment miss did not already kill, and armour no
+/// test can see go is armour nobody can maintain.
 #[must_use]
 pub fn remote_key(url: &str) -> Option<RemoteKey> {
     let url = url.trim();
@@ -358,6 +361,11 @@ mod tests {
             // A Windows path, which the scp-like form would otherwise swallow.
             r"C:\src\payout-service",
             r"C:\src\tidewater\payout-service",
+            // Drive-relative, and the one Windows spelling that reaches the
+            // scp-like branch with a usable-looking path behind it.
+            r"C:src\tidewater\payout-service",
+            "C:src/tidewater/payout-service",
+            "C:/src/tidewater/payout-service",
             // An absolute local path: no host, and no repository named.
             "/Users/mara/src/payout-service",
             "payout-service",
