@@ -37,7 +37,7 @@ RUN useradd -r -u 10001 mockd
 COPY --from=build /src/target/release/mockd /usr/local/bin/mockd
 USER mockd
 # 8211 (ADR-0013, 2026-09-03: mockd is deprecated and gets no Confluence half)
-# and 8213 (2026-09-06: the Flowrun stub left the plan with the feature) were
-# once reserved and are ordinary free ports now.
+# and 8213 (2026-09-06: a low-code-runtime stub left the plan with its
+# feature) were once reserved and are ordinary free ports now.
 EXPOSE 8200 8210 8212
 ENTRYPOINT ["/usr/local/bin/mockd"]

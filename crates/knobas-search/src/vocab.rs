@@ -102,7 +102,6 @@ const SOURCE_ALIASES: &[(&str, &str)] = &[
     ("assets", "asset"),
     ("infra", "asset"),
     ("kuma", "asset"),
-    ("flowrun", "asset"),
 ];
 
 /// The one query a vocabulary is loaded with.

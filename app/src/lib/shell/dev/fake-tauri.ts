@@ -473,7 +473,7 @@ const ASSET_TYPES: {
       { key: "port", label: "Port", kind: "number" },
       { key: "health_path", label: "Health path", kind: "text" },
     ],
-    suggests: ["module", "connector"],
+    suggests: ["module"],
   },
   {
     id: "database_server",

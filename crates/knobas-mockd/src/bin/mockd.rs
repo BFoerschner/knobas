@@ -36,8 +36,8 @@ NOTE:
     real container is the witness.
 
     8211 (once reserved for a Confluence half) and 8213 (once reserved for a
-    Flowrun stub, until the feature left the plan on 2026-09-06) are ordinary
-    free ports: neither API will exist here.
+    low-code runtime stub, until that feature left the plan on 2026-09-06) are
+    ordinary free ports: neither API will exist here.
 ";
 
 struct Args {
@@ -169,8 +169,7 @@ async fn main() {
     );
     println!(
         "mockd: DEPRECATED (ADR-0013) -- the real container is the witness; \
-         port 8213 (flowrun, M4) is reserved, not bound; 8211 is unreserved; \
-         fixture today = {}",
+         8213 and 8211 are unreserved, not bound; fixture today = {}",
         knobas_source_mock::fixture().today
     );
 

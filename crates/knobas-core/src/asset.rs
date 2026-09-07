@@ -1,6 +1,6 @@
 //! The built-in asset types (spec #427, stories 4 and 5; issue #428).
 //!
-//! Nineteen of them, in code and not in the database, and the reason is the
+//! Sixteen of them, in code and not in the database, and the reason is the
 //! half of a type that SQL cannot hold: each one carries a **monogram** the
 //! column rows draw and an **ordered typed-property schema** the pane shows
 //! first. A `check (type_id in (…))` would be a second, partial copy of this
@@ -52,9 +52,16 @@
 //! on a VM elsewhere (story 16) is exactly the shape a constraint here would
 //! have refused. What the list buys is the common case costing one click.
 //!
-//! *runtime* and *scenario* are generic on purpose: spec #427 replaced the
-//! Flowrun-branded types with them so the tree can hold an Orchestra instance
-//! by hand; no adapter for it is planned.
+//! # Why there is no low-code-runtime chain any more
+//!
+//! *runtime* is generic on purpose: spec #427 replaced a vendor-branded type
+//! with it, so the tree can hold a low-code runtime instance by hand. The
+//! three types that hung below it -- *scenario*, *step* and *connector* --
+//! left the table with spec #491, because no adapter for such a system is
+//! planned and a type nothing real is filed under is a chip in the create
+//! dialog with nothing behind it. `knobas.asset.type_id` is open text, so a
+//! row still carrying one of the three is read rather than refused; nothing
+//! was migrated.
 
 /// What a property value may be.
 ///
@@ -101,7 +108,7 @@ impl PropertyKind {
 ///
 /// Serialized as it stands: `asset_types` puts the table on the wire so the
 /// create dialog and the pane's property editor read *one* list. Without it
-/// the frontend would carry a second copy of nineteen types -- and, worse,
+/// the frontend would carry a second copy of sixteen types -- and, worse,
 /// would have to guess which kind an unfilled typed property takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct TypedProperty {
@@ -145,9 +152,13 @@ const fn p(key: &'static str, label: &'static str, kind: PropertyKind) -> TypedP
     TypedProperty { key, label, kind }
 }
 
-use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
+// No `Date as D`: since spec #491 dropped *scenario* and its `last_run`, no
+// built-in type declares a date. The kind itself stays -- a custom property
+// may be one -- and `knobas_app::assets` exercises the declared-date arm
+// against a type it builds by hand.
+use PropertyKind::{Number as N, Text as T, Url as U};
 
-/// The nineteen built-in types, in spec #427's own order.
+/// The sixteen built-in types, in spec #427's own order.
 ///
 /// The order is the one story 4 lists them in -- outermost thing first, down to
 /// the smallest -- so a reader scanning the list reads the estate top to
@@ -158,7 +169,8 @@ use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
 /// Three buckets, in descending order of how much they answer to:
 ///
 /// * **Design §12.1's two chains** -- *site > hypervisor > VM > engine >
-///   container > runtime > scenario > step > connector* and *database server >
+///   container > runtime* -- §12.1 drew three more links below *runtime*, and
+///   spec #491 dropped the types they named -- *and database server >
 ///   database > schema > table*. Every link in both is a suggestion here, and
 ///   [`tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time`] reads
 ///   them back.
@@ -172,15 +184,15 @@ use PropertyKind::{Date as D, Number as N, Text as T, Url as U};
 ///
 /// * **The neighbouring types §12.1's prose names, and the few this estate
 ///   will plainly grow into.** A service or a database server on a VM, a
-///   middleware behind a reverse proxy, a module or a connector under a
-///   service. And four the chains do not draw and the estate has no instance
+///   middleware behind a reverse proxy, a module under a service. And four
+///   the chains do not draw and the estate has no instance
 ///   of yet, each argued rather than assumed: a `network` under a `site`
 ///   (a network belongs to the place it is provisioned in, and there is
 ///   nowhere else in the table to hang one), a `reverse_proxy` on a `vm` (the
 ///   estate runs one and will hold it once it is described), and a `service`
 ///   inside a `container` and behind a `reverse_proxy` -- the two ways a
 ///   service is actually reached here. These are the judgement calls, and
-///   they are suggestions: the dialog offers all nineteen whatever is listed,
+///   they are suggestions: the dialog offers all sixteen whatever is listed,
 ///   and nothing in the table is a constraint.
 pub const TYPES: &[AssetType] = &[
     AssetType {
@@ -245,7 +257,7 @@ pub const TYPES: &[AssetType] = &[
             p("port", "Port", N),
             p("health_path", "Health path", T),
         ],
-        suggests: &["module", "connector"],
+        suggests: &["module"],
     },
     AssetType {
         id: "module",
@@ -259,27 +271,8 @@ pub const TYPES: &[AssetType] = &[
         label: "Runtime",
         monogram: "RT",
         properties: &[p("url", "URL", U), p("version", "Version", T)],
-        suggests: &["scenario"],
-    },
-    AssetType {
-        id: "scenario",
-        label: "Scenario",
-        monogram: "SC",
-        properties: &[p("path", "Path", T), p("last_run", "Last run", D)],
-        suggests: &["step"],
-    },
-    AssetType {
-        id: "step",
-        label: "Step",
-        monogram: "SP",
-        properties: &[p("position", "Position", N), p("action", "Action", T)],
-        suggests: &["connector"],
-    },
-    AssetType {
-        id: "connector",
-        label: "Connector",
-        monogram: "CN",
-        properties: &[p("protocol", "Protocol", T), p("target", "Target", T)],
+        // Nothing: *scenario*, *step* and *connector* were what went inside
+        // one, and they left the table with spec #491.
         suggests: &[],
     },
     AssetType {
@@ -363,7 +356,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    /// Story 4 names nineteen types, and this is the list.
+    /// Story 4 named nineteen types; spec #491 dropped three of them, and
+    /// this is what is left.
     ///
     /// Spelled lower snake case, the way this repository spells every other
     /// enumerated column value, and the way `testenv/hetzner/estate.json`
@@ -371,7 +365,7 @@ mod tests {
     /// this ticket, so a hyphen here would have made the checked-in estate
     /// unimportable.
     #[test]
-    fn the_table_holds_the_nineteen_types_the_spec_names() {
+    fn the_table_holds_the_sixteen_types_the_spec_names() {
         let ids: Vec<&str> = TYPES.iter().map(|t| t.id).collect();
         assert_eq!(
             ids,
@@ -384,9 +378,6 @@ mod tests {
                 "service",
                 "module",
                 "runtime",
-                "scenario",
-                "step",
-                "connector",
                 "database_server",
                 "database",
                 "schema",
@@ -490,8 +481,9 @@ mod tests {
     #[test]
     fn the_two_chains_the_design_draws_are_each_a_link_at_a_time() {
         let chains = [
-            // site > hypervisor > VM > engine > container > runtime >
-            // scenario > step > connector
+            // site > hypervisor > VM > engine > container > runtime
+            // (§12.1 drew three more links below *runtime*; spec #491 dropped
+            // the types they named)
             [
                 "site",
                 "hypervisor",
@@ -499,9 +491,6 @@ mod tests {
                 "container_engine",
                 "container",
                 "runtime",
-                "scenario",
-                "step",
-                "connector",
             ]
             .as_slice(),
             // database server > database > schema > table
@@ -538,7 +527,9 @@ mod tests {
     #[test]
     fn find_answers_for_a_declared_type_and_misses_for_anything_else() {
         assert_eq!(find("vm").map(|t| t.label), Some("VM"));
-        for unknown in ["", "VM", "flowrun-scenario", "asset", "site "] {
+        // `scenario` is one of the three spec #491 dropped, and a word no
+        // type carries is exactly what it is now.
+        for unknown in ["", "VM", "scenario", "step", "connector", "asset", "site "] {
             assert!(find(unknown).is_none(), "{unknown:?} is not a type");
         }
     }

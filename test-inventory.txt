@@ -742,7 +742,7 @@ knobas-core	lib/knobas_core	asset::tests::every_property_kind_spells_itself_the_
 knobas-core	lib/knobas_core	asset::tests::every_suggestion_is_a_type_that_exists
 knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_misses_for_anything_else
 knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
-knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_nineteen_types_the_spec_names
+knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_sixteen_types_the_spec_names
 knobas-core	lib/knobas_core	asset::tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time
 knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value

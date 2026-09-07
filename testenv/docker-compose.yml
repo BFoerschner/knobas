@@ -153,8 +153,8 @@ services:
       - "127.0.0.1:8210:8210"   # Jira Data Center REST v2
       - "127.0.0.1:8212:8212"   # TeamCity REST
       # 8211 (a Confluence DC mock, until ADR-0013 on 2026-09-03) and 8213 (a
-      # Flowrun stub, until the feature left the plan on 2026-09-06) were once
-      # reserved here; both are ordinary free ports now.
+      # low-code-runtime stub, until that feature left the plan on 2026-09-06)
+      # were once reserved here; both are ordinary free ports now.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8200/__mock/health"]
       interval: 5s

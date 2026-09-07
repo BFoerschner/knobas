@@ -1,7 +1,7 @@
 # knobas
 
 knobas is a personal work cockpit: a desktop app (Rust + Tauri) that pulls Jira,
-Confluence, Gitea, TeamCity, Uptime Kuma and Flowrun into one local Postgres, so
+Confluence, Gitea, TeamCity and Uptime Kuma into one local Postgres, so
 one full-text search covers all of them at once. On top of that index it keeps
 the things no single source owns — links between tickets / branches / PRs /
 builds / pages / notes, local notes, contexts, and time tracking whose worklogs

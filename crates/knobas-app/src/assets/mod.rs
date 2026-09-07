@@ -5831,15 +5831,13 @@ mod tests {
         assert!(vet_against_schema(Some(service), "wattage", &text("650W")).is_ok());
     }
 
+    /// `scenario` is one of the three types spec #491 dropped, so it is a
+    /// word no table declares -- and the refusal has to say which word.
     #[test]
     fn a_type_no_table_declares_is_refused_by_name() {
-        let refused = vet_type("flowrun-scenario").unwrap_err();
+        let refused = vet_type("scenario").unwrap_err();
         assert_eq!(refused.code, crate::IpcErrorCode::Invalid);
-        assert!(
-            refused.message.contains("flowrun-scenario"),
-            "{}",
-            refused.message
-        );
+        assert!(refused.message.contains("scenario"), "{}", refused.message);
         assert!(vet_type("vm").is_ok());
     }
 
@@ -6266,13 +6264,24 @@ mod tests {
     /// and so is one JSON has no property spelling for.
     #[test]
     fn a_file_value_that_is_not_the_kind_its_type_declares_is_refused() {
-        let scenario = vet_type("scenario").expect("`scenario` is a type");
-        // `last_run` is the table's one date, and `position` (on `step`) its
-        // one number -- so these are the two arms that only a real declared
-        // kind can reach.
+        // `size_mb` is a declared number. The declared *date* has no type to
+        // come from since spec #491 dropped `scenario` and its `last_run`, so
+        // the date arm is exercised against a type built here -- the alternative
+        // is leaving `property_of`'s `Some(Date)` arm asserted by nothing.
+        static DATED: AssetType = AssetType {
+            id: "dated",
+            label: "Dated",
+            monogram: "DT",
+            properties: &[knobas_core::asset::TypedProperty {
+                key: "last_run",
+                label: "Last run",
+                kind: PropertyKind::Date,
+            }],
+            suggests: &[],
+        };
         assert!(
             bag_of(
-                Some(scenario),
+                Some(&DATED),
                 &serde_json::from_str(r#"{"last_run":"yesterday"}"#).unwrap(),
                 None,
             )
@@ -6281,18 +6290,18 @@ mod tests {
         );
         assert_eq!(
             bag_of(
-                Some(scenario),
+                Some(&DATED),
                 &serde_json::from_str(r#"{"last_run":"2026-09-06"}"#).unwrap(),
                 None,
             )
             .expect("a real date")["last_run"],
             serde_json::json!({ "kind": "date", "value": "2026-09-06" })
         );
-        let step = vet_type("step").expect("`step` is a type");
+        let database = vet_type("database").expect("`database` is a type");
         assert!(
             bag_of(
-                Some(step),
-                &serde_json::from_str(r#"{"position":"third"}"#).unwrap(),
+                Some(database),
+                &serde_json::from_str(r#"{"size_mb":"third"}"#).unwrap(),
                 None,
             )
             .is_err(),

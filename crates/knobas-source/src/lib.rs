@@ -1,7 +1,7 @@
 //! The source SPI -- the one interface every knobas adapter implements.
 //!
-//! Jira, Gitea, TeamCity, Confluence, Uptime Kuma, Flowrun and everything added
-//! later reach knobas through [`Source`]. The contract freezes at the M0 exit:
+//! Jira, Gitea, TeamCity, Confluence, Uptime Kuma and everything added later
+//! reach knobas through [`Source`]. The contract freezes at the M0 exit:
 //! changing anything in this module afterwards needs an orchestrator decision
 //! and a spec update, because it breaks every adapter at once.
 //!

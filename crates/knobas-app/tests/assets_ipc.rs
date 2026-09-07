@@ -459,12 +459,14 @@ async fn an_edit_that_does_not_fit_the_schema_is_refused_by_name() {
         "only `created`"
     );
 
-    let unknown = assets::create(&pool, None, "flowrun-scenario", "orchestra", &[])
+    // `scenario` is one of the three types spec #491 dropped from the table,
+    // so the door refuses it now, and by name.
+    let unknown = assets::create(&pool, None, "scenario", "nightly refresh", &[])
         .await
         .unwrap_err();
     assert_eq!(code(&unknown), IpcErrorCode::Invalid);
     assert!(
-        unknown.message.contains("flowrun-scenario"),
+        unknown.message.contains("scenario"),
         "{}",
         unknown.message
     );
