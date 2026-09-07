@@ -681,9 +681,11 @@ async fn a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back(
 
     // It exists and is published, which is what makes the disappearance below
     // a fact about the pause rather than about a monitor that was never there.
-    until(source.as_ref(), "the scratch monitor is published", |items| {
-        items.iter().any(|item| item.title == SCRATCH)
-    })
+    until(
+        source.as_ref(),
+        "the scratch monitor is published",
+        |items| items.iter().any(|item| item.title == SCRATCH),
+    )
     .await;
     // The position the next poll resumes from, taken while the monitor is
     // still there -- this is the stored cursor a scheduled run would hold.

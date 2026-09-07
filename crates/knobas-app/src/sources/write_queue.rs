@@ -403,6 +403,22 @@ mod tests {
 
     /// A source of `kind`, so `submittable` has something to find.
     async fn configured(pool: &sqlx::PgPool, id: &str, kind: &str) {
+        configured_with(pool, id, kind, knobas_source::AuthMethod::Pat).await;
+    }
+
+    /// The same, with the auth method spelled out.
+    ///
+    /// It matters for exactly one adapter: `submittable` reads an *instance's*
+    /// write ops by building it (issue #452), and Uptime Kuma refuses to build
+    /// against any method but `ApiToken` -- so a Kuma row carrying `Pat` would
+    /// answer "offers nothing" for a reason that has nothing to do with the
+    /// account this test is about.
+    async fn configured_with(
+        pool: &sqlx::PgPool,
+        id: &str,
+        kind: &str,
+        auth: knobas_source::AuthMethod,
+    ) {
         sqlx::query("delete from knobas.source_config where id = $1")
             .bind(id)
             .execute(pool)
@@ -415,7 +431,7 @@ mod tests {
                 adapter_kind: kind.to_owned(),
                 display_name: id.to_owned(),
                 base_url: "http://127.0.0.1:1".to_owned(),
-                auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::Pat),
+                auth_kind: knobas_sync::config::AuthKind::Method(auth),
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
@@ -480,6 +496,66 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    /// **The union, and why it has to be one** (issue #452).
+    ///
+    /// `pause_monitor` is on no adapter *kind*'s template -- an Uptime Kuma
+    /// declares it only when its own keychain item carries an account -- so a
+    /// check against `list_adapters` alone would refuse at the button every
+    /// pause the Monitors tab correctly offered. Both directions are asserted
+    /// here, against one source, with the credential as the only difference.
+    #[tokio::test]
+    async fn a_pause_is_queueable_exactly_when_the_source_has_an_account() {
+        use knobas_secrets::SecretStore as _;
+        let pool = pool().await;
+        let id = unique("kuma-submit");
+        configured_with(
+            &pool,
+            &id,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let payload = serde_json::json!({ "PauseMonitor": { "entity": format!("{id}:8") } });
+
+        // Key only: the instance declares nothing to write, the template
+        // declares nothing to write, and the refusal names the op.
+        let store = knobas_secrets::MemoryStore::new();
+        store
+            .put(
+                &id,
+                &knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, "uk1_metrics"),
+            )
+            .unwrap();
+        let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(store);
+        let error = submittable(&pool, &secrets, &registry(), payload.clone())
+            .await
+            .expect_err("a Kuma with no account offers no pause");
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        assert!(error.message.contains("pause_monitor"), "{}", error.message);
+
+        // The same source with an account beside the key: queueable.
+        let store = knobas_secrets::MemoryStore::new();
+        store
+            .put(
+                &id,
+                &knobas_secrets::Secret {
+                    kind: knobas_source::AuthMethod::ApiToken,
+                    value: "uk1_metrics".to_owned(),
+                    account: Some(knobas_source::instance::Account {
+                        username: "knobas".to_owned(),
+                        password: "knobas-dev".to_owned(),
+                    }),
+                },
+            )
+            .unwrap();
+        let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(store);
+        let (op, source) = submittable(&pool, &secrets, &registry(), payload)
+            .await
+            .expect("a Kuma with an account offers pause_monitor");
+        assert_eq!(op.identifier(), "pause_monitor");
+        assert_eq!(source, id);
     }
 
     /// A target that is not an entity id names nothing the queue could ever
