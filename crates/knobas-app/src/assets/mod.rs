@@ -1884,8 +1884,18 @@ pub struct UnmonitoredAsset {
 /// The inner statement is [`ROSTER_ASSETS`]' join read backwards, guards
 /// included -- **undirected** (`0011` made the pair unordered, so which end a
 /// link was written from is not a fact any read may depend on),
-/// `m.id <> a.id` so an asset cannot take itself off the list, and
-/// `m.kind = $2` so a `monitored-by` link to a ticket is not an attachment.
+/// `m.id <> a.id`, and `m.kind = $2` so a `monitored-by` link to a ticket is
+/// not an attachment.
+///
+/// `m.id <> a.id` is carried over from [`ROSTER_ASSETS`] and, **here**, is
+/// belt-and-braces rather than load-bearing: that read joins `knobas.asset` at
+/// both ends, so there the guard is the only thing standing between a
+/// self-link and a row, while this one binds the other end to
+/// `knobas.entity` and `m.kind = $2` already refuses an asset's own entity
+/// row. Dropping `m.id <> a.id` from this statement fails no test, which is
+/// said here rather than left for somebody to rediscover; the self-link case
+/// of `only_a_confirmed_monitored_by_link_to_a_monitor_takes_an_asset_off_the_roster`
+/// is pinned by the kind guard.
 /// `knobas.confirmed_link` is what makes an unconfirmed *proposal* leave the
 /// asset here, which is the answer the reader wants: a guess nobody has agreed
 /// to is exactly the gap this list exists to point at.

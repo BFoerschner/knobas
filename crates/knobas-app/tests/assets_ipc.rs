@@ -4813,9 +4813,12 @@ async fn only_a_confirmed_monitored_by_link_to_a_monitor_takes_an_asset_off_the_
     .execute(&pool)
     .await
     .expect("the proposal");
-    // A link from an asset to itself. `knobas.link` allows it and
-    // `ROSTER_ASSETS` guards against it with `a.id <> m.id`; the roster owes
-    // the same guard, or an asset could take itself off this list.
+    // A link from an asset to itself. `knobas.link` allows it, and what keeps
+    // `d-selfish` on the roster is `UNMONITORED`'s `m.kind = $2`: the only
+    // entity the join can bind here is the asset's own row, whose kind is not
+    // `monitor`. `UNMONITORED` also carries `ROSTER_ASSETS`' `m.id <> a.id`,
+    // but that guard is redundant in this statement -- dropping it fails
+    // nothing -- so this case pins the kind guard and not that one.
     sqlx::query(
         "insert into knobas.link
              (from_id, to_id, relation, origin, created_by, confirmed_at)
@@ -4892,7 +4895,7 @@ async fn the_roster_is_ordered_by_where_an_asset_sits_and_then_by_name() {
 async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached() {
     let pool = pool("assets-unmonitored-disabled").await;
     let watched = make(&pool, None, "vm", "watched-by-a-disabled-source", &[]).await;
-    let bare = make(&pool, None, "vm", "watched-by-nothing", &[]).await;
+    make(&pool, None, "vm", "watched-by-nothing", &[]).await;
     let monitor = kuma_monitor(
         &pool,
         "kuma-eu",
@@ -4927,5 +4930,4 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
             .is_empty(),
         "and the roster above draws no monitor for it, which is the fact this pins"
     );
-    assert_eq!(bare.name, "watched-by-nothing");
 }

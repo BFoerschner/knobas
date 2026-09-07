@@ -7029,9 +7029,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   **`not exists` and not a left join**, because the question is about a set: an asset watched by
   three monitors is one row of the answer either way, and a join would need a `distinct` over a
   shape the read then has to re-sort. The inner statement is `ROSTER_ASSETS`' join read backwards
-  with its guards intact — **undirected** (`0011` made the pair unordered), `m.id <> a.id` so an
-  asset cannot take itself off the list, and `m.kind = 'monitor'` so a `monitored-by` link to a
-  ticket is not an attachment. `knobas.confirmed_link` is what leaves an unconfirmed **proposal**
+  with its guards intact — **undirected** (`0011` made the pair unordered), `m.id <> a.id`, and
+  `m.kind = 'monitor'` so a `monitored-by` link to a ticket is not an attachment. `m.id <> a.id` is
+  belt-and-braces here rather than load-bearing, unlike in `ROSTER_ASSETS`, which joins
+  `knobas.asset` at both ends: this read binds the other end to `knobas.entity`, so the kind guard
+  already refuses an asset's own row and dropping `m.id <> a.id` fails no test — verified by
+  mutation while merging #482, and written down here rather than left to be rediscovered. `knobas.confirmed_link` is what leaves an unconfirmed **proposal**
   (#478's `monitor_url_host`) on the roster, which is the answer the reader wants: a guess nobody
   has agreed to is exactly the gap this list points at.
 

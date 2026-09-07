@@ -452,7 +452,6 @@ test("the fixture's open alerts are the roster's monitors in trouble", () => {
  */
 test("the fixture's Not monitored roster is the estate's assets with no monitor named", () => {
   const handlers = demoHandlers();
-  const tree = handlers["asset_tree"]!({}) as AssetRow[];
   const gaps = handlers["unmonitored_assets"]!({}) as {
     id: string;
     name: string;
@@ -467,12 +466,15 @@ test("the fixture's Not monitored roster is the estate's assets with no monitor 
     expect(gap.type_label, `${gap.name} has no type label to filter by`).not.toBe("");
   }
   // And the other way: nothing the file gives a monitor is on this list. The
-  // top of the estate is enough to witness it — those are the assets the file
-  // names monitors for.
+  // size check first, or an estate whose roster watched nothing would pass
+  // this loop without entering it.
+  expect(
+    watched.size,
+    "no asset in the fixture has a monitor, so the reverse direction is vacuous",
+  ).toBeGreaterThan(0);
   for (const id of watched) {
     expect(gaps.some((gap) => gap.id === id)).toBe(false);
   }
-  expect(tree.length).toBeGreaterThan(0);
 });
 
 /**
