@@ -146,23 +146,40 @@ async fn monitor_payload(
     from(pool, KUMA, "monitor", key, name, "", payload).await
 }
 
+/// One property as the estate stores one: **tagged**, and the tag is stored.
+///
+/// `knobas_app::assets`' `PropertyValue` is `#[serde(tag = "kind")]` and the
+/// import and both editors write it into `knobas.asset.properties` that way,
+/// so a hostname in the estate is `{"kind":"text","value":"gitea"}` and never
+/// a bare `"gitea"`. Written down here because getting it wrong is invisible:
+/// a fixture holding the bare string is a corpus no `knobas.asset` row in a
+/// real database looks like, and a rule tested only against it can read a key
+/// that is never there. That is what #478 shipped and what #479's estate
+/// witness caught (`knobas-app`'s
+/// `the_monitor_host_rule_proposes_nothing_over_the_real_estate`).
+fn text_property(value: &str) -> serde_json::Value {
+    serde_json::json!({ "kind": "text", "value": value })
+}
+
 /// One asset in the estate's tree, typed `vm` because that is one of the two
-/// types whose schema declares a `hostname` (`knobas_core::asset::TYPES`).
+/// types whose schema declares a `hostname` and an `ip`
+/// (`knobas_core::asset::TYPES`).
 ///
 /// The entity row and the asset row, written here rather than through the
 /// store because the store is `knobas_app::assets` and this crate cannot
 /// depend on it.
 async fn asset(pool: &PgPool, name: &str, hostname: Option<&str>) -> String {
     let properties = match hostname {
-        Some(host) => serde_json::json!({ "hostname": host }),
+        Some(host) => serde_json::json!({ "hostname": text_property(host) }),
         None => serde_json::json!({}),
     };
     asset_properties(pool, name, properties).await
 }
 
 /// An asset whose property bag is written out in full -- `properties` is
-/// `jsonb` that knobas writes and does not type, so a `hostname` that is not a
-/// string is a shape the rule has to miss rather than one it cannot meet.
+/// `jsonb` that knobas writes and the database does not type, so a property
+/// whose `value` is not a string is a shape the rule has to miss rather than
+/// one it cannot meet.
 async fn asset_properties(pool: &PgPool, name: &str, properties: serde_json::Value) -> String {
     let id = EntityRef::new("asset", name).to_string();
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
@@ -644,13 +661,14 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
 /// A monitor watching a host proposes the asset that *is* that host, and no
 /// other asset in the estate.
 ///
-/// Eight negative controls, and each fails a different wrong implementation:
+/// Nine negative controls, and each fails a different wrong implementation:
 ///
 /// * an asset with no hostname at all, so the rule cannot be "every asset,
 ///   every monitor";
 /// * a monitor whose host no asset carries, the same test from the other end;
-/// * a monitor with no URL, whose host is therefore `null` and must join to
-///   nothing rather than to every asset that also has none;
+/// * a monitor with neither a URL nor a hostname, whose host is therefore
+///   `null` and must join to nothing rather than to every asset that also has
+///   none;
 /// * `gitea.example.com` against a monitor on `gitea` -- host **equality**,
 ///   not a prefix, a suffix or a `like`;
 /// * an asset whose hostname is `3000`, which a split on the wrong colon piece
@@ -659,24 +677,61 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
 ///   the scheme would match;
 /// * a **repository** carrying the very same URL in its payload, so the rule
 ///   is about monitors and not about every mirrored item with an address;
-/// * a monitor whose `hostname` -- the field Kuma fills for a `ping` check --
-///   names an asset, which pins the docstring's claim that only the **URL**
-///   host is read.
+/// * a monitor carrying **both** a URL and a hostname, whose URL names a host
+///   nothing states and whose hostname names an asset -- "the URL where there
+///   is one, **else** the hostname" (#479) is a `coalesce` and not a union, and
+///   a rule that read both would propose that asset;
+/// * and the asset that hostname names, which must therefore stay out of the
+///   tray;
+/// * a monitor whose hostname is **blank**, which names no host for the same
+///   reason a blank hostname property does;
+/// * a monitor whose URL is a real string that **names no host** (`/status`,
+///   a path somebody typed into the URL field), beside a hostname that names an
+///   asset. The `coalesce` picks the *address* and then takes its host, the way
+///   `reading_of` picks the target and then renders it -- so a monitor that has
+///   a URL is matched on that URL even when it turns out to name nothing, and
+///   never quietly on the other key.
 #[tokio::test]
 async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else() {
     let pool = scratch().await;
     let watching = monitor(&pool, "1", "knobas-gitea", Some("http://gitea:3000")).await;
     let off_estate = monitor(&pool, "2", "status page", Some("https://status.invalid/")).await;
     let addressless = monitor(&pool, "3", "a ping check", None).await;
-    let pinging = monitor_payload(
+    let both_addresses = monitor_payload(
         &pool,
         "4",
         "knobas-teamcity",
         serde_json::json!({
             "id": "4",
             "name": "knobas-teamcity",
-            "url": serde_json::Value::Null,
+            "url": "https://status.invalid/",
             "hostname": "teamcity",
+            "state": "up",
+        }),
+    )
+    .await;
+    let hostless_url = monitor_payload(
+        &pool,
+        "6",
+        "a url naming no host",
+        serde_json::json!({
+            "id": "6",
+            "name": "a url naming no host",
+            "url": "/status",
+            "hostname": "teamcity",
+            "state": "up",
+        }),
+    )
+    .await;
+    let blank_hostname = monitor_payload(
+        &pool,
+        "5",
+        "a blank ping check",
+        serde_json::json!({
+            "id": "5",
+            "name": "a blank ping check",
+            "url": serde_json::Value::Null,
+            "hostname": "   ",
             "state": "up",
         }),
     )
@@ -697,7 +752,7 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
     let porty = asset(&pool, "three-thousand", Some("3000")).await;
     let schemey = asset(&pool, "scheme", Some("http")).await;
     let hostless = asset(&pool, "no-hostname", None).await;
-    let pinged = asset(&pool, "knobas-teamcity", Some("teamcity")).await;
+    let shadowed = asset(&pool, "knobas-teamcity", Some("teamcity")).await;
 
     let written = run_rule(&pool, "monitor_url_host").await;
     assert_eq!(written, 1, "one host match, one proposal");
@@ -720,10 +775,10 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
     assert_eq!(proposal.link.rule_class, Some(RuleClass::ExactKey));
     assert_eq!(proposal.link.origin, Origin::Suggested);
     assert!(proposal.link.confirmed_at.is_none());
-    let reason = proposal.link.reason.clone().unwrap();
-    assert!(
-        reason.contains("gitea") && reason.contains("hostname"),
-        "the reason names the host it matched and where the asset states it: {reason}"
+    assert_eq!(
+        proposal.link.reason.as_deref(),
+        Some("this monitor watches gitea, which is the asset's hostname"),
+        "the reason names the host it matched and the property the asset states it in"
     );
 
     for (other, why) in [
@@ -739,12 +794,23 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
             &off_estate,
             "a monitor whose host no asset carries proposes nothing",
         ),
-        (&addressless, "a monitor with no URL proposes nothing"),
         (
-            &pinging,
-            "only the URL host is read, never the monitor's own hostname field",
+            &addressless,
+            "a monitor with neither a URL nor a hostname proposes nothing",
         ),
-        (&pinged, "and the asset that field names is not proposed"),
+        (
+            &both_addresses,
+            "a monitor with a URL is matched on that host, not on the hostname beside it",
+        ),
+        (
+            &shadowed,
+            "and the asset that hostname names is not proposed",
+        ),
+        (&blank_hostname, "a blank hostname names no host"),
+        (
+            &hostless_url,
+            "a monitor that has a URL is matched on it even when it names no host",
+        ),
         (
             &not_a_monitor,
             "a repository is not a monitor, whatever its payload says",
@@ -757,6 +823,129 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
             "{why}"
         );
     }
+}
+
+/// **A ping check reaches the estate's servers** -- the widening of #479, and
+/// the pair the rule could not see before it: Kuma fills `hostname` and no
+/// `url` for a `ping`, and the three Hetzner servers state their address in an
+/// `ip` property rather than a `hostname` one.
+///
+/// The negative control is one octet off, because the join is equality on the
+/// whole address and a rule that matched on a prefix would answer `10.0.0.8`
+/// too. The reason has to name the address **and** the property that states
+/// it: a reader looking at a proposal about `10.0.0.7` needs to know which of
+/// an asset's two address fields the machine read.
+#[tokio::test]
+async fn a_ping_monitor_proposes_the_asset_whose_ip_it_watches() {
+    let pool = scratch().await;
+    let pinging = monitor_payload(
+        &pool,
+        "1",
+        "knobas-teamcity",
+        serde_json::json!({
+            "id": "1",
+            "name": "knobas-teamcity",
+            "type": "ping",
+            "url": serde_json::Value::Null,
+            "hostname": "10.0.0.7",
+            "state": "up",
+        }),
+    )
+    .await;
+    let server = asset_properties(
+        &pool,
+        "hetzner-teamcity",
+        serde_json::json!({ "ip": text_property("10.0.0.7") }),
+    )
+    .await;
+    let neighbour = asset_properties(
+        &pool,
+        "hetzner-jira",
+        serde_json::json!({ "ip": text_property("10.0.0.8") }),
+    )
+    .await;
+
+    let written = run_rule(&pool, "monitor_url_host").await;
+    assert_eq!(written, 1, "one address match, one proposal");
+
+    let entries = tray(&pool).await;
+    assert_eq!(
+        pairs(&entries),
+        [(server.clone(), pinging.clone())].into_iter().collect(),
+        "only the asset whose ip the ping watches is proposed"
+    );
+    let proposal = between(&entries, &server, &pinging).expect("the ping watches this server");
+    assert_eq!(proposal.link.from_id, server, "the asset is the subject");
+    assert_eq!(proposal.link.to_id, pinging);
+    assert_eq!(proposal.link.relation, "monitored-by");
+    assert_eq!(
+        proposal.link.reason.as_deref(),
+        Some("this monitor watches 10.0.0.7, which is the asset's ip"),
+        "the reason names the address and the property that states it"
+    );
+    assert!(
+        between(&entries, &neighbour, &pinging).is_none(),
+        "10.0.0.8 is not 10.0.0.7"
+    );
+}
+
+/// An asset that states one address in **both** properties is proposed once,
+/// and the reason names the `hostname`.
+///
+/// The shape is a real one and it is why the asset side reads `ip` at all: a
+/// Kuma ping carries a bare address, and an estate whose servers state theirs
+/// only in a field labelled *Hostname* is exactly the estate the `ip` arm was
+/// added for -- so the two arms will meet on the same pair the day somebody
+/// fills in both. The tie is broken by the driver's `order by`, whose last key
+/// is `c.reason`, and `hostname` sorts before `ip`. Written down because a
+/// reason is *stored*: which of the two a reader sees is decided here and
+/// nowhere else.
+#[tokio::test]
+async fn an_asset_stating_one_address_in_both_properties_is_proposed_once() {
+    let pool = scratch().await;
+    let pinging = monitor_payload(
+        &pool,
+        "1",
+        "knobas-teamcity",
+        serde_json::json!({
+            "id": "1",
+            "name": "knobas-teamcity",
+            "type": "ping",
+            "url": serde_json::Value::Null,
+            "hostname": "10.0.0.7",
+            "state": "up",
+        }),
+    )
+    .await;
+    let server = asset_properties(
+        &pool,
+        "hetzner-teamcity",
+        serde_json::json!({
+            "hostname": text_property("10.0.0.7"),
+            "ip": text_property("10.0.0.7"),
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        run_rule(&pool, "monitor_url_host").await,
+        1,
+        "two candidate rows, one proposal"
+    );
+    let entries = tray(&pool).await;
+    assert_eq!(
+        pairs(&entries),
+        [(server.clone(), pinging.clone())].into_iter().collect(),
+    );
+    assert_eq!(
+        between(&entries, &server, &pinging)
+            .expect("the ping watches this server")
+            .link
+            .reason
+            .as_deref(),
+        Some("this monitor watches 10.0.0.7, which is the asset's hostname"),
+        "the reason a reader is left with is the hostname one"
+    );
 }
 
 /// The other half of the rule: the host may be stated by a route rather than
@@ -857,16 +1046,17 @@ async fn an_asset_a_monitor_reaches_twice_is_proposed_once() {
     );
 }
 
-/// The two `jsonb_typeof` guards, from the direction that can fail: neither
-/// `payload` nor `properties` is a typed column, so a `url` or a `hostname`
-/// that is not a string is a shape the rule meets and must **miss**.
+/// The four `jsonb_typeof` guards, from the direction that can fail: neither
+/// `payload` nor `properties` is a typed column, so a monitor's `url` or
+/// `hostname`, or an asset's `hostname` or `ip`, that is not a string is a
+/// shape the rule meets and must **miss**.
 ///
 /// ADR-0007's discipline for a payload read outside an adapter is that the
 /// failure direction is *absence* and that a test pins it. Without this the
-/// two guards could both be deleted and every other assertion would still
+/// four guards could all be deleted and every other assertion would still
 /// pass -- `->>` renders a number as its text, so `3000` and `"3000"` are one
-/// value to the join, and the asset carrying the *string* `3000` is here to be
-/// the end each malformed address would have reached.
+/// value to the join, and the pair of well-formed ends carrying the *string*
+/// `3000` is here to be what each malformed address would have reached.
 #[tokio::test]
 async fn an_address_that_is_not_a_string_proposes_nothing() {
     let pool = scratch().await;
@@ -877,9 +1067,32 @@ async fn an_address_that_is_not_a_string_proposes_nothing() {
         serde_json::json!({ "id": "1", "name": "odd", "url": 3000, "state": "up" }),
     )
     .await;
-    let numeric_hostname =
-        asset_properties(&pool, "numeric", serde_json::json!({ "hostname": 3000 })).await;
-    // The asset each malformed monitor would reach if its guard were gone.
+    let numeric_ping = monitor_payload(
+        &pool,
+        "2",
+        "odd ping",
+        serde_json::json!({
+            "id": "2",
+            "name": "odd ping",
+            "url": serde_json::Value::Null,
+            "hostname": 3000,
+            "state": "up",
+        }),
+    )
+    .await;
+    let numeric_hostname = asset_properties(
+        &pool,
+        "numeric",
+        serde_json::json!({ "hostname": { "kind": "number", "value": 3000 } }),
+    )
+    .await;
+    let numeric_ip = asset_properties(
+        &pool,
+        "numeric-ip",
+        serde_json::json!({ "ip": { "kind": "number", "value": 3000 } }),
+    )
+    .await;
+    // The ends each malformed address would have reached if its guard were gone.
     let three_thousand = asset(&pool, "three-thousand", Some("3000")).await;
     let addressed = monitor(&pool, "3", "numeric", Some("http://3000/")).await;
 
@@ -890,7 +1103,7 @@ async fn an_address_that_is_not_a_string_proposes_nothing() {
         pairs(&tray(&pool).await),
         [(three_thousand, addressed)].into_iter().collect(),
     );
-    for id in [&numeric_url, &numeric_hostname] {
+    for id in [&numeric_url, &numeric_ping, &numeric_hostname, &numeric_ip] {
         assert!(
             tray(&pool)
                 .await

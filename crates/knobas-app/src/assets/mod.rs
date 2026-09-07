@@ -2200,6 +2200,23 @@ struct Reading {
 /// there is a port. Kuma gives an HTTP monitor a URL and no hostname and a
 /// ping a hostname and no URL, so the three keys are one fact under three
 /// spellings and the roster draws it in one column.
+///
+/// # One predicate, two encodings
+///
+/// *"The URL where there is one, else the hostname"* is also what
+/// `knobas_core::suggest`'s `MONITOR_URL_HOST` means by **what a monitor
+/// watches**, and it says so in its own doc (#479). The two are written in
+/// different languages -- this in Rust over a `serde_json::Value`, that as a
+/// `coalesce` of two `jsonb_typeof`-guarded reads inside a detection statement
+/// -- and neither compiler will say when they stop agreeing, the way
+/// `knobas_sync::attach` and [`monitor_plan`] already have to say it to each
+/// other. **A change to which keys mean "what this monitor watches" is a change
+/// to both.**
+///
+/// What the two then *do* with that address differs, and deliberately: the
+/// roster shows a reader where the check points, port and all, while the rule
+/// joins on a host and stops at the port so that `http://gitea:3000` matches an
+/// asset whose hostname is `gitea`. Same key, different question.
 fn reading_of(payload: &serde_json::Value) -> Reading {
     let hostname = text_at(payload, "hostname");
     let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {

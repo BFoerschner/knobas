@@ -422,23 +422,76 @@ macro_rules! host_of {
 /// the candidate's `from_id` is the asset and its `to_id` the monitor
 /// (`app/src/lib/detail/relations.ts` gives the sentence and its inverse).
 ///
-/// Two ways an asset states a host, unioned rather than written as two rules,
-/// because they are one fact -- *knobas knows this asset by that name*:
+/// # What a monitor watches: the URL where there is one, else the hostname
 ///
-/// * the **hostname property** (`knobas_core::asset::TYPES`: a hypervisor's
-///   and a VM's), and
+/// One definition, shared with `knobas_app::assets::reading_of`, which draws
+/// the Monitors roster's *target* column from the same pair of keys and whose
+/// doc points back here. Kuma gives an HTTP check a `url` and no `hostname`
+/// and a `ping` a `hostname` and no `url`, so the two keys are one fact under
+/// two spellings and a rule that read only the first could not see a ping at
+/// all -- which is what #479 was: three of the eight monitors
+/// `testenv/monitors.json` seeds are pings carrying the Hetzner servers'
+/// addresses in `hostname`, and the three real servers were out of reach.
+///
+/// `coalesce` and **not** a union: a monitor carrying both is matched on the
+/// URL only, the way `reading_of` prefers the URL. A blank `url`, or one that
+/// is not a string, is *not one* -- the sibling's reading, where `text_at`
+/// misses on a blank as well as on an absent key -- and the hostname beside it
+/// is then what the monitor watches.
+///
+/// The `coalesce` is over the **address**, and `host_of!` is applied to what it
+/// picks. That ordering is the whole of "the two agree": a monitor that has a
+/// URL is matched on that URL *even when the URL turns out to name no host*,
+/// rather than quietly falling through to a hostname the sibling would never
+/// have shown. Coalescing the two *hosts* instead would put the divergence
+/// exactly where nobody would look for it.
+///
+/// # How an asset states an address: two properties and a route
+///
+/// Unioned rather than written as three rules, because they are one fact --
+/// *knobas knows this asset by that name*:
+///
+/// * the **hostname property**,
+/// * the **ip property** (both `knobas_core::asset::TYPES`: a hypervisor's and
+///   a VM's), and
 /// * the host of a **route**, credited to
 ///   `coalesce(target_id, asset_id)` -- *the asset the route lands on, or the
 ///   one that exposes it when it lands on nothing knobas knows*.
 ///
-/// A pair both arms find must still produce one suggestion, and the driver
+/// Reading `ip` is what makes a ping check reachable at all. Kuma pings a bare
+/// address, and an asset arm that read only `hostname` would match one only
+/// where somebody had typed an address into a field labelled *Hostname*.
+///
+/// # A property is stored **tagged**, and this reads through the tag
+///
+/// `knobas.asset.properties` is a bag of `knobas_app::assets`' `PropertyValue`,
+/// which is `#[serde(tag = "kind")]`: a hostname in a real database is
+/// `{"kind":"text","value":"gitea"}` and never a bare `"gitea"`. So both
+/// property arms read `->'hostname'->>'value'` and guard on that `value` being
+/// a string. Three of `PropertyValue`'s four kinds are string-valued, so the
+/// guard admits a `url` or a `date` as well as a `text` -- `host_of!` reads a
+/// scheme off the first and finds nothing to match in the second. What it keeps
+/// out is the fourth: `8080` typed as a `number` is not a host.
+///
+/// **This is a correction, not a decision.** #478 read `properties->>'hostname'`
+/// against a battery whose fixtures wrote an untagged bag, so the arm passed
+/// every test in `tests/suggestions.rs` and could not fire against a single row
+/// any import or editor had written. What found it is the estate witness #479
+/// added (`knobas-app`'s
+/// `the_monitor_host_rule_proposes_nothing_over_the_real_estate`), which runs
+/// the real import before it runs the rule; the battery's helpers now write
+/// what the store writes.
+///
+/// # One pair, one suggestion, and which reason survives
+///
+/// A pair two arms find must still produce one suggestion, and the driver
 /// guarantees that twice over: `distinct on` collapses the candidates, and `on
 /// conflict do nothing` would swallow the duplicate anyway. Measured, because
 /// the second half is easy to forget -- deleting the `distinct on` leaves
 /// every assertion in this rule's battery passing. The reason the survivor
-/// carries follows the driver's `order by`, whose last key is `c.reason`: where
-/// both arms reach one pair the route wording wins, "the host of ..." sorting
-/// before "which is ...".
+/// carries follows the driver's `order by`, whose last key is `c.reason`: the
+/// route wording wins ("the host of ..." sorts before "which is ..."), and
+/// between the two properties `hostname` wins over `ip`.
 ///
 /// That `coalesce` is the one place this rule reads #451's sentence -- "the
 /// host of a route the asset exposes" -- as naming *which routes are in play*
@@ -448,82 +501,96 @@ macro_rules! host_of {
 /// `http://gitea:3000/`, exposed by `asset:hetzner-teamcity` and targeting
 /// `asset:knobas-gitea`; the monitor is `gitea`,
 /// `http://gitea:3000/api/healthz`. The thing that answers at that host is
-/// Gitea. Crediting the exposing end would make the rule's *only* firing on
-/// the real estate a proposal naming the wrong asset -- and the right one is
-/// already a link, drawn from that asset's `monitors: ["gitea"]` by #439's
-/// import, so the driver's suppression drops it and the tray is left holding
-/// exactly the wrong half. `0018` is where the fallback comes from: a route
-/// with no target is "an endpoint that lands on nothing knobas knows", and
-/// then the asset that exposes it is the best answer there is.
+/// Gitea. Crediting the exposing end would make the rule's *only* route
+/// firing on the real estate a proposal naming the wrong asset -- and the
+/// right one is already a link, drawn from that asset's `monitors: ["gitea"]`
+/// by #439's import, so the driver's suppression drops it and the tray is left
+/// holding exactly the wrong half. `0018` is where the fallback comes from: a
+/// route with no target is "an endpoint that lands on nothing knobas knows",
+/// and then the asset that exposes it is the best answer there is.
 ///
-/// **The port is not compared**, on either side: `host_of!` stops at it, which
-/// is what criterion 1 asks for on the monitor's side and what makes a host
-/// serving several ports one asset rather than several. So a monitor on
-/// `http://host:3000/` matches a route at `http://host:8080/`, and an asset
-/// exposing many routes on one host is proposed once -- the driver's
-/// `distinct on` keeps one row per pair, and the reason then names whichever
-/// of those routes sorts first.
+/// # The port is not compared
+///
+/// On either side: `host_of!` stops at it, which is what criterion 1 asks for
+/// on the monitor's side and what makes a host serving several ports one asset
+/// rather than several. So a monitor on `http://host:3000/` matches a route at
+/// `http://host:8080/`, and an asset exposing many routes on one host is
+/// proposed once -- the driver's `distinct on` keeps one row per pair, and the
+/// reason then names whichever of those routes sorts first. The monitor's own
+/// `port` key is not read either, for the same reason: there is nothing on the
+/// asset's side to compare it against.
 ///
 /// The cost is **a host several assets share**, and it is the known weakness
 /// of this rule rather than an oversight: eight routes in
-/// `testenv/hetzner/estate.json` carry `127.0.0.1` and land on seven different
+/// `testenv/hetzner/estate.json` carry `127.0.0.1` and land on six different
 /// assets, so a Kuma running on the notebook rather than in a container would
-/// watch `http://127.0.0.1:8111/` and be proposed to all seven. Nothing fires
+/// watch `http://127.0.0.1:8111/` and be proposed to all six. Nothing fires
 /// on it today -- the seeded Kuma is in a container and reaches the notebook as
-/// `host.docker.internal` -- and narrowing it is its own decision: the hostname
-/// arm has no port to compare, so comparing ports on the route arm alone would
-/// make one rule fail two ways. A proposal is dismissible and a dismissal is
-/// remembered, which is what makes the weak side of this trade survivable.
+/// `host.docker.internal` -- and narrowing it was **rejected in triage**
+/// (#479): the hostname and ip arms have no port to compare, so comparing
+/// ports on the route arm alone would make one rule fail two ways. A proposal
+/// is dismissible and a dismissal is remembered, which is what makes the weak
+/// side of this trade survivable. The argument and the trigger that would
+/// reopen it are `.out-of-scope/monitor-host-rule-shared-host-narrowing.md`.
 ///
-/// `route_name` carries the route's name **and** tells the two arms apart, and
-/// that is sound rather than clever: `0018` declares `name text not null` with
-/// `route_name_chk check (btrim(name) <> '')`, so a route arm's `route_name` is
-/// never null and the hostname arm's always is. A migration that relaxed either
-/// would make the `case` below tell the wrong story, which is why the constraint
-/// is named here.
+/// # Telling the three arms apart
 ///
-/// A **payload read outside an adapter** (ADR-0007), and it takes that
-/// discipline in full, as `SOURCE_RECORDED_RELATION` does: one named
-/// statement, the `jsonb_typeof` guard, and a failure direction of *absence* --
-/// a monitor with no `url`, a `url` that is not a string, or one naming no host
-/// contributes no candidate rather than a guessed one. The same guard sits on
-/// the asset's `hostname`, which is a jsonb bag knobas writes but does not
-/// type.
+/// `route_name` carries the route's name **and** says the candidate came from
+/// the route arm; `property` names which of the two properties stated the
+/// address and is null on that arm. Sound rather than clever: `0018` declares
+/// `name text not null` with `route_name_chk check (btrim(name) <> '')`, so a
+/// route arm's `route_name` is never null and a property arm's always is. A
+/// migration that relaxed either would make the `case` below tell the wrong
+/// story, which is why the constraint is named here.
 ///
-/// The monitor's own `hostname` field -- what Kuma reports for a ping or a port
-/// check -- is **not** read here. #451's sentence is "a mirrored monitor's URL
-/// host", and widening it to every address a monitor carries is a decision with
-/// its own negative controls to write. It is not free, and it disagrees with a
-/// sibling: `knobas_app::assets::reading_of` draws the roster's target column
-/// from "the URL where there is one, else the hostname", because "Kuma gives an
-/// HTTP monitor a URL and no hostname and a ping a hostname and no URL, so the
-/// three keys are one fact under three spellings". Three of the eight monitors
-/// `testenv/monitors.json` seeds are `ping` checks carrying the Hetzner
-/// servers' IPs in `hostname`, and this rule cannot see them.
+/// # ADR-0007
+///
+/// A **payload read outside an adapter**, and it takes that discipline in
+/// full, as `SOURCE_RECORDED_RELATION` does: one named statement, a
+/// `jsonb_typeof` guard on each of the four keys it reads -- the monitor's
+/// `url` and its `hostname`, the asset's `hostname` and its `ip` -- and a
+/// failure direction of *absence*. A monitor with neither key, with either of
+/// them not a string, or with one naming no host contributes no candidate
+/// rather than a guessed one, and so does an asset whose property carries a
+/// `value` that is not a string. Neither bag is a typed column: `payload` is
+/// what a source sent and `properties` is what knobas wrote, and the database
+/// vouches for the shape of neither.
 const MONITOR_URL_HOST: &str = detection!(concat!(
     "with watched as (
          select m.entity_id, ",
-    host_of!("m.payload->>'url'"),
+    host_of!(
+        "coalesce(
+                    nullif(btrim(case when jsonb_typeof(m.payload->'url') = 'string'
+                                      then m.payload->>'url' end), ''),
+                    nullif(btrim(case when jsonb_typeof(m.payload->'hostname') = 'string'
+                                      then m.payload->>'hostname' end), ''))"
+    ),
     " as host
            from sync.live_item m
           where m.kind = 'monitor'
-            and jsonb_typeof(m.payload->'url') = 'string'
      ),
      stated as (
          select a.id as asset_id, ",
-    host_of!("a.properties->>'hostname'"),
-    " as host, null::text as route_name
+    host_of!("a.properties->'hostname'->>'value'"),
+    " as host, null::text as route_name, 'hostname'::text as property
            from knobas.asset a
-          where jsonb_typeof(a.properties->'hostname') = 'string'
+          where jsonb_typeof(a.properties->'hostname'->'value') = 'string'
+          union all
+         select a.id, ",
+    host_of!("a.properties->'ip'->>'value'"),
+    ", null::text, 'ip'::text
+           from knobas.asset a
+          where jsonb_typeof(a.properties->'ip'->'value') = 'string'
           union all
          select coalesce(r.target_id, r.asset_id), ",
     host_of!("r.url"),
-    ", r.name
+    ", r.name, null::text
            from knobas.route r
      )
      select s.asset_id, w.entity_id, 'monitored-by',
             case when s.route_name is null
-                 then format('this monitor watches %s, which is the asset''s hostname', w.host)
+                 then format('this monitor watches %s, which is the asset''s %s',
+                             w.host, s.property)
                  else format('this monitor watches %s, the host of the route %s',
                              w.host, s.route_name)
             end
