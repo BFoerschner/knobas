@@ -27,6 +27,13 @@ KEY_FILE=kuma-api-key
 # The published port docker-compose.yml gives Uptime Kuma, in one place: both
 # printers below hand it to a suite, and two copies is one to forget.
 KUMA_URL=http://127.0.0.1:3001
+# The admin account kuma-seed.mjs creates -- the same pair docker-compose.yml
+# passes it as KUMA_USER/KUMA_PASS, and README.md's credential table. It is
+# printed because the adapter's *write* half needs it (issue #452): Kuma's API
+# key opens `/metrics` and nothing else, and pausing a monitor is a socket.io
+# login only an account can make.
+KUMA_USER=knobas
+KUMA_PASSWORD=knobas-dev
 
 # The variables an adapter test suite needs. Printed at the end of a seed and
 # by `--env`, so a consumer never has to know where the seed put things.
@@ -38,6 +45,8 @@ print_env() {
   echo "export KNOBAS_GITEA_REPO=payout-service"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_URL=$KUMA_URL"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
+  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_USER=$KUMA_USER"
+  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_PASSWORD=$KUMA_PASSWORD"
   echo "export KNOBAS_MOCKD_JIRA_URL=http://127.0.0.1:8210"
   echo "export KNOBAS_MOCKD_TEAMCITY_URL=http://127.0.0.1:8212"
   echo "export KNOBAS_MOCKD_ADMIN_URL=http://127.0.0.1:8200"
@@ -75,6 +84,13 @@ print_env_kuma() {
     echo "seed: $KEY_FILE not found -- run ./seed-kuma.sh first" >&2; exit 1; }
   echo "export KNOBAS_KUMA_URL=$KUMA_URL"
   echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
+  # Gated on the key file like the two above, although the account is a
+  # constant: what the file's presence means is "this Kuma has been seeded",
+  # and an account printed for a Kuma with no admin yet is a credential for
+  # nothing. Both halves come from one place, so a suite that reads them
+  # cannot half-configure itself.
+  echo "export KNOBAS_KUMA_USER=$KUMA_USER"
+  echo "export KNOBAS_KUMA_PASSWORD=$KUMA_PASSWORD"
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi

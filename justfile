@@ -1191,7 +1191,8 @@ kuma-live:
     docker compose up -d --wait uptime-kuma
     ./seed-kuma.sh
     eval "$(./seed --env-kuma)"
-    just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY
+    just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY \
+      KNOBAS_KUMA_USER KNOBAS_KUMA_PASSWORD
     # The canary bound before either suite, and rebound however this ends.
     # `|| true` because the trap must not turn a suite's failure into a
     # different exit status, and `status` is not consulted first: `up` is
