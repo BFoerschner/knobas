@@ -176,6 +176,19 @@ function press(button: HTMLButtonElement | undefined) {
   flushSync();
 }
 
+/**
+ * Let a paste handler that resolves asynchronously have its turn.
+ *
+ * The point of the wait is the *second* half of what these tests check: a
+ * field that took a URL over on a round trip rather than synchronously would
+ * pass a `defaultPrevented` assertion and pass an immediate value assertion,
+ * and only fail after the answer landed.
+ */
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+  flushSync();
+}
+
 function type(area: HTMLTextAreaElement, text: string) {
   area.value = text;
   area.dispatchEvent(new Event("input", { bubbles: true }));
@@ -391,7 +404,10 @@ test("a URL pasted into a section edit is left as text and goes out as typed", a
 
   press(screen.button("Edit section"));
   const area = screen.editors()[0]!;
+  const before = area.value;
   expect(paste(area, link), "something took the paste over").toBe(false);
+  await settle();
+  expect(area.value, "something rewrote the field without cancelling").toBe(before);
   expect(resolvedUrls).toEqual([]);
 
   type(area, `base 30 s, factor 2. See ${link}`);
@@ -413,7 +429,10 @@ test("a URL pasted into a comment is left as text and is queued as typed", async
 
   press(screen.button("Comment"));
   const area = screen.editors()[0]!;
+  const before = area.value;
   expect(paste(area, link), "something took the paste over").toBe(false);
+  await settle();
+  expect(area.value, "something rewrote the field without cancelling").toBe(before);
   expect(resolvedUrls).toEqual([]);
 
   type(area, `see ${link}`);

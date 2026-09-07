@@ -418,7 +418,10 @@ test("a URL pasted into the protocol is left as text and published as typed", as
   await settle();
 
   const editor = target.querySelector<HTMLTextAreaElement>("textarea")!;
+  const before = editor.value;
   expect(paste(editor, link), "something took the paste over").toBe(false);
+  await settle();
+  expect(editor.value, "something rewrote the field without cancelling").toBe(before);
 
   editor.value = `${BODY}\n- context: ${link}\n`;
   editor.dispatchEvent(new Event("input", { bubbles: true }));

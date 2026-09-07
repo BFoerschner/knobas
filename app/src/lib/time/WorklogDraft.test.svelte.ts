@@ -353,11 +353,17 @@ test("a draft with no candidates says so rather than showing an empty list", () 
  * `notes/NoteView.svelte`); a worklog comment that did would send Jira a
  * spelling only knobas can read.
  */
-test("a URL pasted into the comment is left as text and is logged as typed", () => {
+test("a URL pasted into the comment is left as text and is logged as typed", async () => {
   const link = "https://jira.example/browse/PAY-231";
   const { sent } = render();
 
+  const before = commentBox().value;
   expect(paste(commentBox(), link), "something took the paste over").toBe(false);
+  // A handler that took the URL over on a round trip would pass both
+  // assertions above and only rewrite the field once its answer landed.
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+  flushSync();
+  expect(commentBox().value, "something rewrote the field without cancelling").toBe(before);
 
   type(`- Retry SEPA payouts\n- see ${link}`);
   logButton().click();

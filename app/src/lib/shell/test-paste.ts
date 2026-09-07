@@ -14,10 +14,22 @@
  *   afterwards would be measuring the absence of jsdom rather than the
  *   presence of a rule.
  *
- * So what a suite checks is `defaultPrevented` — whether anything took the
- * paste over — and, where the field sends its value somewhere, that what goes
- * out carries the URL verbatim. Prefixed `test-` like `test-setup.ts`: it is
- * imported by suites, never by the app, and nothing in a bundle reaches it.
+ * So a suite checks the two things a field could do about a paste, and neither
+ * on its own is enough:
+ *
+ * 1. **`defaultPrevented`** — did anything take the event over? That catches a
+ *    handler that cancels and writes something of its own, which is what the
+ *    note body does.
+ * 2. **the field's own `value`, before against after** — a handler that
+ *    rewrote the field *without* cancelling would sail past (1), and this is
+ *    what catches it. In jsdom the platform inserts nothing, so a field that
+ *    left the paste alone is one whose value did not move.
+ *
+ * And then, where the field sends its value somewhere, that what goes out
+ * carries the URL verbatim — which is the claim story 13 is actually about.
+ *
+ * Prefixed `test-` like `test-setup.ts`: it is imported by suites, never by
+ * the app, and nothing in a bundle reaches it.
  */
 
 /** A cancelable `paste` carrying `text` as its `text/plain` flavour. */

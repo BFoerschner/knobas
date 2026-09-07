@@ -299,7 +299,7 @@
   function complete(hit: SearchHit) {
     const area = editor;
     if (!area || !active) return;
-    write(area, insertRef(area.value, active, hit.entity_id));
+    applyEdit(area, insertRef(area.value, active, hit.entity_id));
     area.focus();
     active = null;
     session.set("");
@@ -308,12 +308,16 @@
   /**
    * Put an edit this component made into the body, the field and the caret.
    *
+   * Not `write`: a *write* in this app is a write-back to a source
+   * (`CONTEXT.md`'s **Write-back**, `submitWrite`, `WriteQueue.svelte`), and
+   * nothing here leaves the editor.
+   *
    * The textarea's `value` is written directly as well as through `body`
    * because the caret is set in the same breath: `setSelectionRange` addresses
    * the text the field holds *now*, and leaving the field to catch up on the
    * next flush would put the caret at an offset into the previous body.
    */
-  function write(area: HTMLTextAreaElement, edit: { body: string; caret: number }) {
+  function applyEdit(area: HTMLTextAreaElement, edit: { body: string; caret: number }) {
     body = edit.body;
     area.value = edit.body;
     area.setSelectionRange(edit.caret, edit.caret);
@@ -344,6 +348,16 @@
    * A reader who kept typing through the round trip has moved the text under
    * it, and the honest answer there is to leave the paste as the text it
    * already is rather than to splice a reference into a body that has changed.
+   *
+   * **What `preventDefault` costs.** Writing the paste ourselves puts it in
+   * the undo stack as a scripted `value` write, so ⌘Z does not unwind it the
+   * way it unwinds a platform paste. Letting the platform insert the URL and
+   * only scripting the swap would keep undo on the miss path, and it would
+   * also put "an unresolvable URL is left as text" beyond any test: jsdom
+   * performs no default paste, so nothing would be inserted for a suite to
+   * read, and the ticket's own criterion asks for a vitest over both outcomes
+   * and the caret. The swap breaks undo either way; this trades undo on the
+   * miss for an outcome that can be checked.
    */
   async function onpaste(event: ClipboardEvent & { currentTarget: HTMLTextAreaElement }) {
     const area = event.currentTarget;
@@ -354,7 +368,7 @@
     event.preventDefault();
 
     const at = area.selectionStart;
-    write(area, replaceSpan(area.value, at, area.selectionEnd, url));
+    applyEdit(area, replaceSpan(area.value, at, area.selectionEnd, url));
     retarget(area);
 
     const mine = token;
@@ -368,7 +382,7 @@
     }
     if (mine !== token || match === null || editor !== area) return;
     if (area.value.slice(at, at + url.length) !== url) return;
-    write(area, replaceSpan(area.value, at, at + url.length, `[[${match.entity_id}]]`));
+    applyEdit(area, replaceSpan(area.value, at, at + url.length, `[[${match.entity_id}]]`));
     retarget(area);
   }
 

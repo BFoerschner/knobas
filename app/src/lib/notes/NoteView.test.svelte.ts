@@ -84,6 +84,10 @@ function hold() {
  * would show a note whose body says one thing and whose chips say another —
  * which is exactly the mismatch a paste-to-reference has to be checked
  * against.
+ *
+ * `shell/dev/fake-tauri.ts` spells the same rule for the browser walk, and the
+ * two deliberately do not share — see the note on `noteDetail` there for why
+ * neither the dev harness nor a shared module is somewhere this can live.
  */
 function refsOf(bodyMd: string): NoteDetail["refs"] {
   return [...bodyMd.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {

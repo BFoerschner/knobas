@@ -1907,6 +1907,13 @@ function saveNote(args: Record<string, unknown>) {
  * entity comes back with a chip to draw, and a body naming nothing does not.
  * `links` stays empty: the panel a link would fill is not what the walk is
  * looking at, and inventing rows for it would be a third copy of a rule.
+ *
+ * `notes/NoteView.test.svelte.ts` stands in for the same backend rule, and the
+ * two deliberately do not share: this module is the dev harness, and
+ * `shell/house-rules.test.ts` pins `App.svelte` as its only importer outside
+ * `shell/dev/`. Lifting the scanner somewhere both could reach would put a
+ * second `[[…]]` scanner into app code, which is what `notes/note-body.ts`
+ * exists to refuse.
  */
 function noteDetail(id: string) {
   const note = NOTES.get(id)!;
