@@ -228,6 +228,22 @@ impl Seeded {
         (status, json)
     }
 
+    /// One `GET` at an **absolute** URL, with the credential the adapter is
+    /// configured with -- the request a browser would make for the URL the
+    /// mirror holds, minus the browser. `Seeded::get` cannot serve this: it
+    /// joins onto `self.url`, and what is under test here is whether the
+    /// whole URL the adapter composed reaches a page on the real server.
+    async fn status_of(&self, url: &str) -> u16 {
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("GET {url}: {e}"))
+            .status()
+            .as_u16()
+    }
+
     /// `GET /app/rest/builds?locator=…`, unwrapped to the ids on the page.
     async fn build_ids(&self, locator: &str) -> Vec<i64> {
         let (status, body) = self
@@ -912,14 +928,14 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
         );
         let real_id = it.entity.key.strip_prefix("build:").expect("build keys");
         let build_type = it.payload["buildTypeId"].as_str().expect("buildTypeId");
-        assert!(
-            it.web_url.as_deref().is_some_and(
-                |u| u.ends_with(&format!("/buildConfiguration/{build_type}/{real_id}"))
-            ),
-            "a finished build's webUrl is `/buildConfiguration/<buildTypeId>/<id>` on a \
-             TeamCity 2026.1 (the host is the server's configured root URL, not the one the \
-             request went to): {:?}",
-            it.web_url
+        assert_eq!(
+            it.web_url,
+            Some(format!(
+                "{}/buildConfiguration/{build_type}/{real_id}",
+                seeded.url
+            )),
+            "a build's URL is `<the configured base URL>/buildConfiguration/<buildTypeId>/<id>` \
+             -- see `a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200`"
         );
         assert!(!it.deleted);
     }
@@ -930,6 +946,146 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
         "a full sync over a quiet server lands on the newest seeded build"
     );
     println!("SEEDED cursor after a full sync: {cursor}");
+}
+
+/// **A build's `web_url` is knobas' own composition, and it opens a page on
+/// the real server** (issue #495).
+///
+/// Two claims, and the second is the one only a live server can make.
+///
+/// *The shape*: `<the configured base URL>/buildConfiguration/<buildTypeId>/<id>`,
+/// asserted whole rather than by suffix. The seeded container is configured
+/// with a *Server URL* of its own and fills every `webUrl` in from that -- it
+/// answers `http://localhost:8111/...` whatever host the request arrived on --
+/// so the record's URL and the mirror's are two different strings whenever the
+/// source is reached by any other spelling, and only a composed URL follows
+/// the source. The suite prints both, and runs the same corpus a second time
+/// through a **second spelling of the same host** so that the "follows the
+/// configuration" half is a measurement rather than a coincidence of this
+/// container's setting.
+///
+/// *That it opens*: each composed URL is fetched at its absolute address with
+/// the credential the adapter uses. The adapter's own HTTP client is not
+/// reachable from a test -- `HttpRest` is crate-private and joins every path
+/// onto the base URL, so it cannot be handed a whole URL -- so what stands in
+/// for it is this suite's client with the same bearer token, **plus**
+/// `test_connection`, which does go through the adapter's client: it is what
+/// says the host these URLs are rooted at is a host the adapter itself
+/// reaches. Together, the closest a test can get to the criterion's "through
+/// the source's own client". Each fetch must answer 200 -- and that is a
+/// weaker statement than it looks and is worth being exact about. TeamCity
+/// 2026.1
+/// serves the same single-page-application shell for every path under
+/// `/buildConfiguration/`, including one naming a build that does not exist,
+/// while an unknown *prefix* (`/nonsense/path`) is a 404 and an unauthenticated
+/// request is a 401. So a 200 certifies the route, the host and the credential,
+/// and not the build. The build itself is certified beside it, by
+/// [`Seeded::build`] reading `/app/rest/builds/id:<id>` for the very id the
+/// composed URL carries and asserting 200 on it: together they say that the
+/// URL names a route this server serves and a build this server has.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let source = seeded.scoped_to(&QUIET_CONFIGURATIONS);
+    // Through the adapter's own client, and first: it is what makes the base
+    // URL below one the adapter reaches rather than one a test asserted about.
+    let connected = source
+        .test_connection()
+        .await
+        .unwrap_or_else(|e| panic!("the adapter's own client must reach {}: {e:?}", seeded.url));
+    println!("SEEDED connected as {:?}", connected.account);
+    let (items, _) = full(&*source).await;
+    let builds = of_kind(&items, "build");
+    assert_eq!(
+        builds.len(),
+        QUIET_CONFIGURATIONS.len(),
+        "one finished build per quiet configuration: {:?}",
+        keys(&items)
+    );
+
+    for it in &builds {
+        let id: i64 = it
+            .entity
+            .key
+            .strip_prefix("build:")
+            .expect("build keys are build:<id>")
+            .parse()
+            .expect("the key carries the numeric id");
+        let build_type = it.payload["buildTypeId"].as_str().expect("buildTypeId");
+        let composed = format!("{}/buildConfiguration/{build_type}/{id}", seeded.url);
+        assert_eq!(
+            it.web_url,
+            Some(composed.clone()),
+            "the mirror holds the URL knobas composed from the configured base URL"
+        );
+        // What the server would have said, for the record -- the suite asserts
+        // nothing about it, because it is a fact about the container's
+        // *Server URL* setting and not about the adapter.
+        let served = seeded.build(id).await["webUrl"]
+            .as_str()
+            .unwrap_or("<not served>")
+            .to_owned();
+        println!("SEEDED {id}: composed {composed} -- server's own webUrl {served}");
+
+        let status = seeded.status_of(&composed).await;
+        assert_eq!(
+            status, 200,
+            "the composed URL must reach a page on the real server: {composed}"
+        );
+    }
+
+    // The same corpus under a second spelling of the loopback host. Both reach
+    // the same container, so the *only* thing that can differ between the two
+    // runs is which URL the adapter was configured with -- which is the claim.
+    let Some(alternate) = alternate_host(&seeded.url) else {
+        panic!(
+            "KNOBAS_TEAMCITY_URL is {:?} and this suite knows no second spelling of its \
+             host, so the half of this test that separates a composed URL from the \
+             server's own cannot run. Point it at 127.0.0.1 or localhost, or teach \
+             `alternate_host` this host.",
+            seeded.url
+        );
+    };
+    let (alt_items, _) = full(&*seeded.source_with(
+        &alternate,
+        &seeded.token,
+        serde_json::json!({ "build_type_ids": QUIET_CONFIGURATIONS }),
+    ))
+    .await;
+    let alt_builds = of_kind(&alt_items, "build");
+    assert_eq!(alt_builds.len(), builds.len(), "the same corpus");
+    for it in &alt_builds {
+        let url = it.web_url.as_deref().expect("every build has a URL");
+        assert!(
+            url.starts_with(&alternate),
+            "a source configured with {alternate} must mirror URLs under it, not under \
+             the server's own root URL: {url}"
+        );
+        assert_eq!(
+            seeded.status_of(url).await,
+            200,
+            "and the second spelling reaches the server too: {url}"
+        );
+    }
+    println!(
+        "SEEDED: {} builds re-mirrored under {alternate}",
+        alt_builds.len()
+    );
+}
+
+/// A second spelling of the loopback host, so that "the URL follows the
+/// configuration" can be measured against one container. `None` for a host
+/// with no second spelling this suite knows.
+fn alternate_host(url: &str) -> Option<String> {
+    if url.contains("127.0.0.1") {
+        Some(url.replace("127.0.0.1", "localhost"))
+    } else if url.contains("localhost") {
+        Some(url.replace("localhost", "127.0.0.1"))
+    } else {
+        None
+    }
 }
 
 /// **The finding of the first hour, certified from both ends** (issue #266):

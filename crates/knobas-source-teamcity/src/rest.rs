@@ -59,10 +59,19 @@ pub(crate) const BUILD_TYPE_FIELDS: &str =
 /// What `/app/rest/builds` is asked for. The nested `buildType(...)` is what
 /// makes client-side project scoping possible: the locator grammar has no
 /// project dimension.
+///
+/// **No `webUrl`, at either level** (issue #495). A build's URL is knobas'
+/// own composition from the configured base URL now -- see
+/// [`map::build_web_url`](crate::map) for why -- so the server's own is a
+/// name no reader in `map` looks at, and `struct Build` no longer parses it.
+/// The `percentageComplete` precedent below is the same rule:
+/// `the_selectors_ask_for_nothing_no_reader_looks_at` keeps both. The nested
+/// `buildType(webUrl)` goes with it; nothing has ever read that one, and
+/// `BUILD_TYPE_FIELDS` is where a configuration's URL comes from.
 pub(crate) const BUILD_FIELDS: &str = concat!(
-    "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,webUrl,",
+    "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
-    "buildType(id,name,projectId,projectName,webUrl),",
+    "buildType(id,name,projectId,projectName),",
     "running-info(percentageComplete,currentStageText),",
     "triggered(user(username)))"
 );
@@ -148,7 +157,6 @@ pub(crate) struct Build {
     pub status: Option<String>,
     pub status_text: Option<String>,
     pub branch_name: Option<String>,
-    pub web_url: Option<String>,
     pub queued_date: Option<String>,
     pub start_date: Option<String>,
     pub finish_date: Option<String>,
@@ -721,7 +729,6 @@ mod tests {
             "status",
             "statusText",
             "branchName",
-            "webUrl",
             "finishDate",
             "startDate",
             "queuedDate",
@@ -804,6 +811,15 @@ mod tests {
     fn the_selectors_ask_for_nothing_no_reader_looks_at() {
         // (selector, its name, the unasked name, what asking would cost)
         let unread = [
+            (
+                BUILD_FIELDS,
+                "BUILD_FIELDS",
+                "webUrl",
+                "a build's URL is composed from the configured base URL since issue #495, so \
+                 `struct Build` no longer parses the server's own and no reader in `map` looks \
+                 at it; the nested `buildType(webUrl)` was never read either, and a \
+                 configuration's URL comes from BUILD_TYPE_FIELDS",
+            ),
             (
                 BUILD_FIELDS,
                 "BUILD_FIELDS",

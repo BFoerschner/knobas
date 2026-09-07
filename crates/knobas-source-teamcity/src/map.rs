@@ -71,15 +71,49 @@ fn status_element(state: Option<&str>, status: Option<&str>) -> Option<String> {
     }
 }
 
-pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) -> SyncItem {
+/// The URL a human opens for one build: `<base>/buildConfiguration/<build
+/// configuration id>/<build id>`, the shape a TeamCity 2026.1 serves.
+///
+/// **Composed from the configured base URL, not read off the record** (issue
+/// #495). TeamCity fills a build's `webUrl` in from the server's own *Server
+/// URL* setting, which is a fact about the server rather than about the
+/// reader: the seeded container answers `http://localhost:8111/...` whatever
+/// host the request arrived on, so a mirror that stored `webUrl` would hold a
+/// URL naming a machine the reader may not be sitting at. Jira and Confluence
+/// already compose from the configured base URL for that reason -- the URL the
+/// user typed is the one reachable from the user's machine -- and spec §16's
+/// URL resolver matches a pasted link against this column, which can only
+/// agree if both ends spell the host the same way.
+///
+/// `None` when the record does not name its configuration. The two-segment
+/// form is the only build URL witnessed against a real TeamCity, and P5 wants
+/// *Open in browser* absent rather than pointed at a URL knobas guessed --
+/// the rule `knobas-source-confluence`'s mapping already follows for a page
+/// with no web link.
+fn build_web_url(base_url: &str, build_config_id: Option<&str>, id: i64) -> Option<String> {
+    let base = base_url.trim().trim_end_matches('/');
+    let config = build_config_id.map(str::trim).filter(|c| !c.is_empty())?;
+    Some(format!("{base}/buildConfiguration/{config}/{id}"))
+}
+
+/// Map one build, in the namespace of the instance that fetched it and under
+/// the base URL that instance is configured with.
+pub(crate) fn build_item(
+    source_id: &str,
+    base_url: &str,
+    raw: &serde_json::Value,
+    b: &Build,
+) -> SyncItem {
     let nested = b.build_type.as_ref();
+    // The configuration this build belongs to, as the record names it --
+    // verbatim, because the title renders it. `build_web_url` decides
+    // separately whether it can also be a URL segment.
     let type_id = b
         .build_type_id
         .as_deref()
-        .or_else(|| nested.map(|t| t.id.as_str()))
-        .unwrap_or("build");
+        .or_else(|| nested.map(|t| t.id.as_str()));
     let config = config_title(
-        type_id,
+        type_id.unwrap_or("build"),
         nested.and_then(|t| t.name.as_deref()),
         nested.and_then(|t| t.project_name.as_deref()),
     );
@@ -143,7 +177,11 @@ pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) ->
             .flatten()
             .find_map(|raw| parse_ts(raw)),
         payload: raw.clone(),
-        web_url: b.web_url.clone(),
+        // Knobas' own composition; the record's `webUrl` is deliberately not
+        // read, and `build_web_url` owns the rule about which ids can make a
+        // URL segment -- the title keeps the id verbatim, as it always has.
+        // See [`build_web_url`].
+        web_url: build_web_url(base_url, type_id, b.id),
         // TeamCity's cleanup rules remove old builds, but M1 has no deletion
         // channel: the adapter never sees the removal, so it never claims one.
         deleted: false,
@@ -178,6 +216,12 @@ pub(crate) fn build_config_item(
 mod tests {
     use super::*;
 
+    /// The base URL these mappings are configured with. Deliberately a
+    /// different host from the one the fixture records carry in their own
+    /// `webUrl`, so a mapping that read the record instead of composing is
+    /// visible in every assertion below (issue #495).
+    const BASE: &str = "https://ci.tidewater.example";
+
     fn finished() -> (serde_json::Value, Build) {
         let raw = serde_json::json!({
             "id": 1187, "number": "1187", "buildTypeId": "Payout_IntegrationTests",
@@ -197,7 +241,7 @@ mod tests {
     #[test]
     fn a_finished_build_maps_to_a_build_item() {
         let (raw, b) = finished();
-        let it = build_item("teamcity", &raw, &b);
+        let it = build_item("teamcity", BASE, &raw, &b);
         // The key is the numeric build id, not the build *number*: numbers are
         // per-configuration and get reset, ids are server-wide and monotonic.
         assert_eq!(it.entity.to_string(), "teamcity:build:1187");
@@ -215,9 +259,12 @@ mod tests {
             it.updated_at.expect("finished date").to_rfc3339(),
             "2026-08-22T10:10:18+00:00"
         );
+        // Composed from the configured base URL, not the record's own
+        // `webUrl` -- which says a different host, and a different shape
+        // (issue #495).
         assert_eq!(
             it.web_url.as_deref(),
-            Some("https://ci.example.com/build/1187")
+            Some("https://ci.tidewater.example/buildConfiguration/Payout_IntegrationTests/1187")
         );
         assert!(!it.deleted);
         // What FTS indexes: the status text is the reason a build is searched
@@ -245,7 +292,7 @@ mod tests {
         });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
         assert_eq!(
-            build_item("teamcity", &raw, &b)
+            build_item("teamcity", BASE, &raw, &b)
                 .updated_at
                 .expect("finished")
                 .to_rfc3339(),
@@ -259,7 +306,7 @@ mod tests {
         });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
         assert_eq!(
-            build_item("teamcity", &raw, &b)
+            build_item("teamcity", BASE, &raw, &b)
                 .updated_at
                 .expect("started")
                 .to_rfc3339(),
@@ -276,7 +323,7 @@ mod tests {
             "running-info": { "currentStageText": "step 3/5 `cargo test`" }
         });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
-        let it = build_item("teamcity", &raw, &b);
+        let it = build_item("teamcity", BASE, &raw, &b);
         assert_eq!(
             it.updated_at.expect("start date").to_rfc3339(),
             "2026-08-22T11:45:00+00:00"
@@ -284,7 +331,13 @@ mod tests {
         // No nested buildType: the title falls back to the configuration id,
         // which is the only name the record carries.
         assert_eq!(it.title, "Payout_Build #1188");
-        assert_eq!(it.web_url, None);
+        // The server sent this record no `webUrl` at all -- a running build
+        // and the same `fields=`. It still has one, because the adapter
+        // composes it (issue #495).
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some("https://ci.tidewater.example/buildConfiguration/Payout_Build/1188")
+        );
         assert_eq!(it.author, None, "nothing triggered it in this record");
         assert!(it.body_text.contains("running"));
         assert!(
@@ -299,7 +352,7 @@ mod tests {
         let raw = serde_json::json!({ "id": 1190, "buildTypeId": "Payout_Build",
                                       "state": "queued", "queuedDate": "20260822T120000+0000" });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
-        let it = build_item("teamcity", &raw, &b);
+        let it = build_item("teamcity", BASE, &raw, &b);
         assert_eq!(
             it.updated_at.expect("queued date").to_rfc3339(),
             "2026-08-22T12:00:00+00:00"
@@ -333,7 +386,7 @@ mod tests {
             "startDate": "20260822T100600+0000", "finishDate": "20260822T101018+0000"
         });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
-        let it = build_item("teamcity", &raw, &b);
+        let it = build_item("teamcity", BASE, &raw, &b);
         assert!(
             it.body_text.contains("finished canceled"),
             "a canceled build is searchable by the word a user would type: {:?}",
@@ -372,7 +425,7 @@ mod tests {
         ] {
             let raw = serde_json::json!({ "id": 1, "state": state, "status": status });
             let b: Build = serde_json::from_value(raw.clone()).expect("build");
-            let it = build_item("teamcity", &raw, &b);
+            let it = build_item("teamcity", BASE, &raw, &b);
             assert!(
                 it.body_text.contains(expected),
                 "{state}/{status} must compose verbatim as {expected:?}: {:?}",
@@ -393,7 +446,7 @@ mod tests {
     fn an_undated_build_has_no_updated_at() {
         let raw = serde_json::json!({ "id": 1, "state": "queued", "queuedDate": "soon" });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
-        assert_eq!(build_item("teamcity", &raw, &b).updated_at, None);
+        assert_eq!(build_item("teamcity", BASE, &raw, &b).updated_at, None);
     }
 
     #[test]
@@ -448,7 +501,7 @@ mod tests {
     fn items_are_namespaced_to_the_instance_not_the_adapter_kind() {
         let (raw, b) = finished();
         assert_eq!(
-            build_item("teamcity-eu", &raw, &b).entity.to_string(),
+            build_item("teamcity-eu", BASE, &raw, &b).entity.to_string(),
             "teamcity-eu:build:1187"
         );
         let bt: BuildType =
@@ -476,7 +529,7 @@ mod tests {
             "finishDate": "20260822T101018+0000"
         });
         let b: Build = serde_json::from_value(raw.clone()).expect("build");
-        let it = build_item("teamcity", &raw, &b);
+        let it = build_item("teamcity", BASE, &raw, &b);
         assert_eq!(it.entity.key, "build:5001", "the server-wide id");
         assert_eq!(it.title, "Payout_Build #42", "the human-facing number");
     }
@@ -489,5 +542,96 @@ mod tests {
         assert_ne!(build_key(7), build_config_key("7"));
         assert!(build_key(7).starts_with("build:"));
         assert!(build_config_key("7").starts_with("buildType:"));
+    }
+
+    /// **The build's URL is knobas' own composition, and the record's own
+    /// `webUrl` is not read** (issue #495).
+    ///
+    /// TeamCity composes `webUrl` from the server's *Server URL* setting,
+    /// which is a fact about the server and not about the reader: the seeded
+    /// container serves `http://localhost:8111/...` whatever host the request
+    /// arrived on. So this record names two different hosts -- one in
+    /// `webUrl`, one as the configured base URL -- and only a mapping that
+    /// composes can produce the second.
+    #[test]
+    fn a_builds_web_url_is_composed_from_the_configured_base_url() {
+        let (raw, b) = finished();
+        assert_eq!(
+            raw["webUrl"], "https://ci.example.com/build/1187",
+            "the record says one host..."
+        );
+        let it = build_item("teamcity", BASE, &raw, &b);
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some("https://ci.tidewater.example/buildConfiguration/Payout_IntegrationTests/1187"),
+            "...and the mirror holds the other, under the id the key is built from"
+        );
+    }
+
+    /// A base URL as a paste usually carries it -- a trailing slash, stray
+    /// whitespace, or a path prefix such as the public instance's
+    /// `/guestAuth` -- composes onto the path without doubling the separator
+    /// and without losing the prefix.
+    #[test]
+    fn the_base_url_is_joined_the_way_a_user_pasted_it() {
+        let (raw, b) = finished();
+        // The shape a TeamCity 2026.1 serves, and the one the seeded live
+        // suite certifies against the real server.
+        let path = "/buildConfiguration/Payout_IntegrationTests/1187";
+        for (configured, root) in [
+            (
+                "https://ci.tidewater.example/",
+                "https://ci.tidewater.example",
+            ),
+            (
+                "  https://ci.tidewater.example  ",
+                "https://ci.tidewater.example",
+            ),
+            (
+                "https://teamcity.jetbrains.com/guestAuth",
+                "https://teamcity.jetbrains.com/guestAuth",
+            ),
+        ] {
+            assert_eq!(
+                build_item("teamcity", configured, &raw, &b).web_url,
+                Some(format!("{root}{path}")),
+                "base URL {configured:?}"
+            );
+        }
+    }
+
+    /// A record that names no configuration gets **no** URL rather than one
+    /// with a hole in it: `/buildConfiguration/<id>/<build>` is the only build
+    /// URL witnessed against a real TeamCity, so there is no second shape to
+    /// fall back to, and P5 draws no *Open in browser* over a URL knobas
+    /// guessed.
+    #[test]
+    fn a_build_that_names_no_configuration_has_no_web_url() {
+        for raw in [
+            serde_json::json!({ "id": 1, "state": "finished" }),
+            serde_json::json!({ "id": 1, "state": "finished", "buildTypeId": "  " }),
+            serde_json::json!({ "id": 1, "state": "finished", "buildType": { "id": "" } }),
+        ] {
+            let b: Build = serde_json::from_value(raw.clone()).expect("build");
+            let it = build_item("teamcity", BASE, &raw, &b);
+            assert_eq!(it.web_url, None, "{raw}");
+        }
+        // The **title** is untouched by that strictness and still renders the
+        // id the record carries, whitespace and all: only the URL refuses a
+        // blank segment, and this change is not a licence to reword a title.
+        let raw = serde_json::json!({ "id": 1, "number": "7", "buildTypeId": "  " });
+        let b: Build = serde_json::from_value(raw.clone()).expect("build");
+        assert_eq!(build_item("teamcity", BASE, &raw, &b).title, "   #7");
+        // ...and the nested `buildType` alone is enough, which is what makes
+        // the absence above a statement about the record rather than about
+        // which field the mapping happens to read.
+        let raw = serde_json::json!({
+            "id": 1, "state": "finished", "buildType": { "id": "Payout_Build" }
+        });
+        let b: Build = serde_json::from_value(raw.clone()).expect("build");
+        assert_eq!(
+            build_item("teamcity", BASE, &raw, &b).web_url.as_deref(),
+            Some("https://ci.tidewater.example/buildConfiguration/Payout_Build/1")
+        );
     }
 }

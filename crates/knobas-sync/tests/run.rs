@@ -338,6 +338,32 @@ async fn the_mirror_stores_the_item_web_url() {
             .await
             .unwrap();
     assert_eq!(stored, None);
+
+    // ...and **the other direction**, which is the one issue #495 turns on: an
+    // item already in the mirror with no URL gains one when the adapter starts
+    // reporting it, without waiting for the item to change in the source. The
+    // clause above only ever witnessed a URL being cleared, so a coalescing
+    // upsert -- `coalesce(i.web_url, old.web_url)`, the shape
+    // `item_updated_at` genuinely has one line above it -- would have passed
+    // it while leaving every TeamCity build in the mirror unopenable until it
+    // was re-synced from nothing.
+    let regained = SyncItem {
+        web_url: Some("https://ci.tidewater.example/buildConfiguration/Payout_Build/9".to_owned()),
+        ..item(&id, "TIDE-9", "has a page", false)
+    };
+    knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![regained]), None)
+        .await
+        .unwrap();
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select web_url from sync.item where entity_id = $1")
+            .bind(format!("{id}:TIDE-9"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some("https://ci.tidewater.example/buildConfiguration/Payout_Build/9")
+    );
 }
 
 /// A remote deletion tombstones the entity without dropping it -- links point

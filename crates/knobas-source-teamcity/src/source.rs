@@ -16,6 +16,14 @@ pub struct TeamCitySource {
     /// emits, immutable once chosen (P10).
     id: String,
     display_name: String,
+    /// The base URL this instance was configured with, trimmed of surrounding
+    /// whitespace and of the trailing slash a paste usually carries, so a
+    /// path composes onto it without doubling -- the shape `JiraSource` and
+    /// `ConfluenceSource` already keep it in. Every build's `web_url` is
+    /// composed from it (issue #495): the URL the user typed is the one
+    /// reachable from the user's machine, and TeamCity's own `webUrl` names
+    /// the server's configured *Server URL* instead.
+    base_url: String,
     cfg: TeamCityConfig,
     rest: HttpRest,
 }
@@ -40,6 +48,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     Ok(Box::new(TeamCitySource {
         id: instance.id,
         display_name: instance.display_name,
+        base_url: instance.base_url.trim().trim_end_matches('/').to_owned(),
         cfg,
         rest,
     }))
@@ -143,7 +152,15 @@ impl Source for TeamCitySource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        sync::execute(&self.id, &self.cfg, &self.rest, cursor, sink).await
+        sync::execute(
+            &self.id,
+            &self.base_url,
+            &self.cfg,
+            &self.rest,
+            cursor,
+            sink,
+        )
+        .await
     }
 
     /// Perform one of the two writes M2 ratified for TeamCity, or refuse.

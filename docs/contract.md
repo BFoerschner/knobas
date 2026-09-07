@@ -1448,7 +1448,9 @@ and a form assertion cannot say that a build which *should* be on a page is miss
   queued, and `/buildConfiguration/<buildTypeId>?mode=builds` for a configuration. The
   `viewLog.html?buildId=` / `viewType.html?buildTypeId=` forms mockd served are an older UI's; the
   real server still resolves them but no longer emits them, and the adapter passes the field through
-  untouched (P5). The host in a real `webUrl` is the server's configured root URL
+  untouched (P5). *Superseded in part by the #495 amendment below (2026-09-07): the adapter composes
+  a build's URL from the configured base URL and no longer reads `webUrl`; this sentence is left as
+  history rather than rewritten.* The host in a real `webUrl` is the server's configured root URL
   (`http://localhost:8111` on the seeded server) and not the one the request went to; mockd uses
   its own bound address, and nothing in knobas depends on either.
 - **Compared and found in agreement, so nothing changed**: the JSON error envelope (#113) on 400
@@ -1867,6 +1869,70 @@ a monitor *name* from an asset either — the pane offers none, and `attach` nev
 No schedule, notification or TLS switch on the form: the adapter creates the plainest possible
 check on Kuma's own default schedule, and the monitor's own page in Kuma is one click away
 (story 71).
+
+### Amendments from the TeamCity build URL composition (2026-09-07, binding) — issue #495
+
+Ruled on #495 by a Fable deputy for Björn, who is away for this milestone and can overturn it; the
+fix is in `crates/knobas-source-teamcity/**` and `crates/knobas-sync/tests/**`, which §10.8 does not
+freeze, so **no §10.8 entry is owed**. §4.2 pins TeamCity's endpoints and the requirement that every
+request carry an explicit `fields=`; it does not pin the selector's contents.
+
+**§4.2 TeamCity a build's `web_url` is composed, from this commit:**
+`<the source's configured base URL>/buildConfiguration/<buildTypeId>/<build id>` — the rule Jira
+(`/browse/<key>`) and Confluence already follow, and for their reason: the URL the user typed is the
+one reachable from the user's machine. A record naming its configuration nowhere — neither
+`buildTypeId` nor a nested `buildType.id`, or either of them blank — gets **no** URL rather than one
+with a hole in it, since the two-segment form is the only build URL witnessed against a real server
+and P5 draws no *Open in browser* over a URL knobas guessed. The title is unaffected and still
+renders the id verbatim; only the URL is strict about it.
+
+**The server's own `webUrl` is no longer read, and the measurement is why.** TeamCity fills it in
+from the server's *Server URL* setting, which is a fact about the server and not about the reader:
+the seeded container answers `http://localhost:8111/buildConfiguration/<cfg>/<id>` **however it is
+reached**, measured 2026-09-07 through the tunnel with the source configured at
+`http://127.0.0.1:8111`. Mirrored verbatim, that is an *Open in browser* pointing at whatever
+`localhost:8111` happens to be on the reader's machine.
+
+**§4.2 TeamCity `BUILD_FIELDS` drops `webUrl` at both levels** — top-level and inside the nested
+`buildType(...)` — **and `struct Build` stops parsing it**: with the composition above there is no
+reader, so the name was requested and never read, exactly the #33 section's `percentageComplete`
+case. Pinned by `the_selectors_ask_for_nothing_no_reader_looks_at`, whose `unread` list gains the
+pair with its reason. `BUILD_TYPE_FIELDS` keeps `webUrl`: `map::build_config_item` still reads it,
+and a build **configuration**'s URL is unchanged by this entry. A build's `payload` therefore no
+longer carries the server's `webUrl`, which is not a narrowing of what a payload promises: a payload
+is the raw record an item carries verbatim, and for TeamCity the record is what `fields=` returned.
+
+**TeamCity 2026.1 answers 200 for any path under `/buildConfiguration/`**, measured the same day:
+`/buildConfiguration/No_Such_Config/99999` is a 200 (the single-page-application shell), an unknown
+prefix such as `/nonsense/path` is a 404, and an unauthenticated request is a 401. So the live
+test's 200 certifies the **host, the route and the credential** and says nothing about the build;
+the build is certified beside it by `/app/rest/builds/id:<id>` on the very id the composed URL
+carries, and `test_connection` — the one request that goes through the adapter's own client — is
+what says the host these URLs are rooted at is a host the adapter reaches.
+
+**The resolver consequence, for #496 to inherit rather than rediscover.** A link copied out of the
+TeamCity UI carries the *server's* spelling, so it will not equal the composed `web_url` of a source
+configured with another. Spec #491 already rules this: matching is exact on the mirror's stored
+`web_url` after normalisation on both sides, and story 17 pins matching to the source's own
+configured base URL. Per-adapter URL parsers are out of scope there, so a miss of this class is the
+`web_url` column being right, not a defect to fix in the resolver.
+
+Pinned by: `map::tests::a_builds_web_url_is_composed_from_the_configured_base_url`,
+`the_base_url_is_joined_the_way_a_user_pasted_it` (trailing slash, stray whitespace, and a base URL
+with a path prefix such as the public instance's `/guestAuth`) and
+`a_build_that_names_no_configuration_has_no_web_url` (which also pins that the *title* is untouched);
+`sync::tests::every_build_a_run_emits_carries_a_url_composed_from_the_base_url`;
+`tests/mockd.rs`'s `a_mirrored_build_carries_what_the_ui_and_the_index_read`, now asserting the whole
+URL rather than its suffix; `tests/live_teamcity_seeded.rs`'s
+`a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200`, which asserts the whole
+URL against the seeded server, fetches each one, and re-syncs the same corpus under a second spelling
+of the host so that "the URL follows the configuration" is a measurement and not a coincidence of
+this container's setting; and `knobas-sync`'s `the_mirror_stores_the_item_web_url`, which gained the
+direction it lacked — an item in the mirror **gaining** a URL, not only losing one. **The seam
+`TeamCitySource::sync` → `sync::execute` is guarded only from `tests/mockd.rs` outward and by the
+seeded live suite**: replacing `&self.base_url` there with the server's own root URL survives all 107
+lib tests and dies in both of those, so a change to `TeamCitySource` is not covered by the unit tests
+alone.
 
 ---
 
