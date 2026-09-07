@@ -23,7 +23,9 @@ use std::fs;
 use std::path::Path;
 
 use knobas_app::IpcErrorCode;
-use knobas_app::checkout::{CheckoutView, FoundBy, clones_root, set_clones_root, set_override, view};
+use knobas_app::checkout::{
+    CheckoutView, FoundBy, clones_root, set_clones_root, set_override, view,
+};
 use sqlx::PgPool;
 
 const HOST: &str = "gitea.example.com";
@@ -146,11 +148,17 @@ async fn the_clones_root_is_set_read_back_and_cleared() {
     let spelled = root.path().to_string_lossy().into_owned();
 
     set_clones_root(&pool, Some(&spelled)).await.unwrap();
-    assert_eq!(clones_root(&pool).await.unwrap().as_deref(), Some(spelled.as_str()));
+    assert_eq!(
+        clones_root(&pool).await.unwrap().as_deref(),
+        Some(spelled.as_str())
+    );
 
     // Idempotent: setting it twice replaces the row rather than conflicting.
     set_clones_root(&pool, Some(&spelled)).await.unwrap();
-    assert_eq!(clones_root(&pool).await.unwrap().as_deref(), Some(spelled.as_str()));
+    assert_eq!(
+        clones_root(&pool).await.unwrap().as_deref(),
+        Some(spelled.as_str())
+    );
 
     set_clones_root(&pool, Some("   ")).await.unwrap();
     assert_eq!(clones_root(&pool).await.unwrap(), None);
@@ -209,7 +217,10 @@ async fn an_override_wins_over_the_scan_and_clearing_it_gives_the_scan_back() {
     // Set twice: one answer per repository, replaced rather than doubled.
     let moved = "/Users/mara/elsewhere/payout-service";
     set_override(&pool, &repo.id, Some(moved)).await.unwrap();
-    assert_eq!(view(&pool, &repo.id).await.unwrap().path.as_deref(), Some(moved));
+    assert_eq!(
+        view(&pool, &repo.id).await.unwrap().path.as_deref(),
+        Some(moved)
+    );
     let rows: i64 =
         sqlx::query_scalar("select count(*) from knobas.checkout_override where entity_id = $1")
             .bind(&repo.id)
@@ -249,8 +260,14 @@ async fn a_branch_answers_its_repositorys_checkout() {
     // therefore read by the repository's own detail too.
     let by_hand = "/Users/mara/work/payout-service";
     set_override(&pool, &branch, Some(by_hand)).await.unwrap();
-    assert_eq!(view(&pool, &branch).await.unwrap().path.as_deref(), Some(by_hand));
-    assert_eq!(view(&pool, &repo.id).await.unwrap().path.as_deref(), Some(by_hand));
+    assert_eq!(
+        view(&pool, &branch).await.unwrap().path.as_deref(),
+        Some(by_hand)
+    );
+    assert_eq!(
+        view(&pool, &repo.id).await.unwrap().path.as_deref(),
+        Some(by_hand)
+    );
 }
 
 /// A repo with no clone under the root reads *no checkout*, with the clone
@@ -320,7 +337,10 @@ async fn an_override_answers_without_a_clones_root() {
 
     let answer = view(&pool, &repo.id).await.unwrap();
     assert_eq!(answer.found_by, FoundBy::Override);
-    assert_eq!(answer.path.as_deref(), Some("/Users/mara/work/payout-service"));
+    assert_eq!(
+        answer.path.as_deref(),
+        Some("/Users/mara/work/payout-service")
+    );
 }
 
 /// The three refusals, each with the code the panel branches on.
@@ -339,8 +359,17 @@ async fn the_refusals_carry_the_codes_the_panel_branches_on() {
     // A checkout belongs to a repo or a branch. A ticket has no clone, and
     // saying so by name is better than answering an empty view that a panel
     // would draw as *no checkout* on a surface that should never ask.
-    let ticket = item(&pool, &format!("jira-{}", unique()), "ticket", "PAY-231", None).await;
-    let wrong = view(&pool, &ticket).await.expect_err("a ticket has no clone");
+    let ticket = item(
+        &pool,
+        &format!("jira-{}", unique()),
+        "ticket",
+        "PAY-231",
+        None,
+    )
+    .await;
+    let wrong = view(&pool, &ticket)
+        .await
+        .expect_err("a ticket has no clone");
     assert_eq!(wrong.code, IpcErrorCode::Invalid);
     assert!(wrong.message.contains("ticket"), "{}", wrong.message);
 

@@ -134,9 +134,15 @@ fn both_spellings_of_the_remote_carry_the_same_key() {
 #[test]
 fn the_shallower_of_two_clones_wins_and_the_answer_is_stable() {
     let tree = tree();
-    assert_eq!(find(&tree.path, REPO_URL).as_deref(), Some(tree.shallow.as_path()));
+    assert_eq!(
+        find(&tree.path, REPO_URL).as_deref(),
+        Some(tree.shallow.as_path())
+    );
     for _ in 0..5 {
-        assert_eq!(find(&tree.path, REPO_URL).as_deref(), Some(tree.shallow.as_path()));
+        assert_eq!(
+            find(&tree.path, REPO_URL).as_deref(),
+            Some(tree.shallow.as_path())
+        );
     }
     assert!(
         tree.deep < tree.shallow,
@@ -148,10 +154,17 @@ fn the_shallower_of_two_clones_wins_and_the_answer_is_stable() {
 #[test]
 fn a_repo_url_finds_its_checkout() {
     let tree = tree();
-    assert_eq!(find(&tree.path, REPO_URL).as_deref(), Some(tree.shallow.as_path()));
+    assert_eq!(
+        find(&tree.path, REPO_URL).as_deref(),
+        Some(tree.shallow.as_path())
+    );
     // Whichever way the *stored* URL is spelled, since the key is what matches.
     assert_eq!(
-        find(&tree.path, "git@gitea.example.com:tidewater/payout-service.git").as_deref(),
+        find(
+            &tree.path,
+            "git@gitea.example.com:tidewater/payout-service.git"
+        )
+        .as_deref(),
         Some(tree.shallow.as_path())
     );
 }
@@ -162,11 +175,17 @@ fn a_repo_url_finds_its_checkout() {
 fn a_repository_with_no_clone_is_a_miss() {
     let tree = tree();
     assert_eq!(
-        find(&tree.path, "https://gitea.example.com/tidewater/nowhere.git"),
+        find(
+            &tree.path,
+            "https://gitea.example.com/tidewater/nowhere.git"
+        ),
         None
     );
     assert_eq!(
-        find(&tree.path, "https://other.example.com/tidewater/payout-service"),
+        find(
+            &tree.path,
+            "https://other.example.com/tidewater/payout-service"
+        ),
         None,
         "the host is part of the key: two forges may hold the same owner/repo"
     );

@@ -20,33 +20,42 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
   import { entityCheckout, setCheckoutOverride, type CheckoutView } from "../ipc/entity";
+  import { latestRead } from "../shell/latest-read";
   import { push } from "../shell/toasts.svelte";
 
   let { entityId }: { entityId: string } = $props();
 
   let checkout = $state<CheckoutView | null>(null);
-  /** The read's own generation — a slow answer for a panel that moved on is dropped. */
-  let token = 0;
   let editing = $state(false);
   let draft = $state("");
   let saving = $state(false);
 
+  /**
+   * The read's own generation, through the module rather than by hand.
+   *
+   * `latest-read.ts` argues that at length: the four-line guard is copied
+   * wrong in one predictable way, which is dropping the rejection path — and
+   * a rejection path that drops itself is exactly what this panel wants, so
+   * writing it out here would look right and be indistinguishable from the
+   * mistake.
+   */
+  const read = latestRead<CheckoutView>();
+
   $effect(() => {
     const id = entityId;
-    const mine = ++token;
     checkout = null;
     editing = false;
-    void entityCheckout(id)
-      .then((answer) => {
-        if (mine !== token) return;
+    void read(() => entityCheckout(id), {
+      ok: (answer) => {
         checkout = answer;
-      })
-      .catch(() => {
-        // Swallowed, and it is the panel's own read: a repo detail is worth
-        // drawing without it, and a toast about a checkout nobody asked to see
-        // would be noise over the item they did open. A `null` view renders
-        // the reading line and then nothing.
-      });
+      },
+      fail: () => {
+        // Nothing, on purpose, and it is the panel's own read: a repo detail
+        // is worth drawing without a checkout, and a toast about one nobody
+        // asked to see would be noise over the item they did open. A `null`
+        // view renders the reading line and then nothing.
+      },
+    });
   });
 
   /** Set or clear the override, and redraw from what the backend now says. */

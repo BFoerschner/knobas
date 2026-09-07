@@ -163,6 +163,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
 export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
+  seedClonesRoot(params);
   installFakeTauri(demoHandlers(params));
 }
 
@@ -1909,7 +1910,26 @@ function getEntity(args: Record<string, unknown>) {
  * path changes what the next read says — a fixture that answered the same
  * thing after a write would make the QA pass prove nothing.
  */
-let fakeClonesRoot: string | null = "/Users/mara/src";
+const DEFAULT_CLONES_ROOT = "/Users/mara/src";
+
+let fakeClonesRoot: string | null = DEFAULT_CLONES_ROOT;
+
+/**
+ * `?fake-clones-root=<path>` seeds it, and `?fake-clones-root=` (empty) leaves
+ * it unset.
+ *
+ * The `?fake-db=` precedent: a QA pass has to be able to put a screen in a
+ * state the default fixture is not in, and *no clones root set* is a different
+ * sentence on the panel from *nothing found under one*. A headless run can
+ * therefore point the fixture at a temporary directory of its own, which is
+ * what #499's third criterion asks for — the fixture has no filesystem, so the
+ * root is a label rather than a walk, and the walk is `knobas-core`'s to prove.
+ */
+function seedClonesRoot(params: URLSearchParams): void {
+  const given = params.get("fake-clones-root");
+  if (given === null) return;
+  fakeClonesRoot = given.trim() === "" ? null : given.trim();
+}
 
 /** What the scan would find, per repo entity. */
 const FAKE_SCANNED: Record<string, string> = {
@@ -1949,7 +1969,11 @@ function fakeCheckout(entityId: string) {
   const repoRow = CORPUS.find((candidate) => candidate.entity_id === repo);
   const url = repoRow?.web_url ?? null;
   const override = repo === null ? undefined : fakeOverrides[repo];
-  const scanned = repo === null || fakeClonesRoot === null ? undefined : FAKE_SCANNED[repo];
+  // Keyed on the *root* as well as the repo, so a run pointed at a temporary
+  // directory of its own sees the honest *no checkout* rather than a path
+  // under a root nobody set.
+  const scanned =
+    repo === null || fakeClonesRoot !== DEFAULT_CLONES_ROOT ? undefined : FAKE_SCANNED[repo];
   const path = override ?? scanned ?? null;
   return {
     repo_entity_id: repo,

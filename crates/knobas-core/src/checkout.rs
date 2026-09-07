@@ -136,9 +136,11 @@ fn split_remote(url: &str) -> Option<(&str, &str)> {
     // The scp-like form. `rsplit` would take the last colon, which an IPv6
     // literal is made of; the *first* colon is the separator git uses.
     let (authority, path) = url.split_once(':')?;
-    // `C:\src\payout-service` is not a remote. A one-character authority is a
-    // drive letter, and a path with no `/` in it cannot be `owner/repo`.
-    if authority.chars().count() < 2 || !path.contains('/') || path.starts_with('/') {
+    // `C:\src\payout-service` is not a remote: a one-character authority is a
+    // drive letter, not a host. `C:/src/a/b` is refused by the leading slash,
+    // and `C:\src\a\b` by having one path segment where two are wanted --
+    // see the doc comment for why there is no third guard here.
+    if authority.chars().count() < 2 || path.starts_with('/') {
         return None;
     }
     Some((authority, path))
@@ -410,7 +412,8 @@ mod tests {
     /// happens to have: on a fork, `upstream` is a *different* repository.
     #[test]
     fn a_config_with_no_origin_misses() {
-        let config = "[remote \"upstream\"]\n\turl = https://gitea.example.com/upstream/other.git\n";
+        let config =
+            "[remote \"upstream\"]\n\turl = https://gitea.example.com/upstream/other.git\n";
         assert_eq!(origin_url(config), None);
         assert_eq!(origin_url("[core]\n\tbare = false\n"), None);
         assert_eq!(origin_url("[remote \"origin\"]\n\turl =\n"), None);

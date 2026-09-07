@@ -37,6 +37,16 @@ use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
+/// A path a person typed, cleared to `None` when it is blank.
+///
+/// One function because both writes here mean the same thing by an empty
+/// field -- *forget this* -- and neither may store a blank: an empty clones
+/// root would make the scan walk the process's working directory, and a blank
+/// override is a row `0023`'s CHECK refuses anyway.
+fn settable(path: Option<&str>) -> Option<&str> {
+    path.map(str::trim).filter(|value| !value.is_empty())
+}
+
 /// The `knobas.setting` key holding the clones root.
 ///
 /// In `knobas.setting` rather than in a column of its own: migration `0002`,
@@ -126,8 +136,7 @@ pub async fn clones_root(pool: &PgPool) -> Result<Option<String>, IpcError> {
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 pub async fn set_clones_root(pool: &PgPool, path: Option<&str>) -> Result<(), IpcError> {
-    let path = path.map(str::trim).filter(|value| !value.is_empty());
-    match path {
+    match settable(path) {
         Some(value) => {
             sqlx::query(
                 "insert into knobas.setting (key, value) values ($1, $2)
@@ -171,8 +180,7 @@ pub async fn set_override(
              so there is nothing to set a checkout on"
         ))
     })?;
-    let path = path.map(str::trim).filter(|value| !value.is_empty());
-    match path {
+    match settable(path) {
         Some(value) => {
             sqlx::query(
                 "insert into knobas.checkout_override (entity_id, path) values ($1, $2)
@@ -209,11 +217,13 @@ pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcErr
     let root = clones_root(pool).await?;
 
     let stored: Option<String> = match repo.entity_id.as_deref() {
-        Some(id) => sqlx::query_scalar("select path from knobas.checkout_override where entity_id = $1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .map_err(IpcError::internal)?,
+        Some(id) => {
+            sqlx::query_scalar("select path from knobas.checkout_override where entity_id = $1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .map_err(IpcError::internal)?
+        }
         None => None,
     };
 
@@ -350,6 +360,37 @@ mod tests {
         );
     }
 
+    /// The kinds that have a checkout are one rule in two languages.
+    ///
+    /// `entity_checkout` refuses anything else **by name**, so a `Detail.svelte`
+    /// that mounted the panel on a fourth kind would draw a refusal at a reader
+    /// who opened an ordinary ticket, and one that dropped a kind would hide a
+    /// checkout that exists. The other two mirrors in this file are pinned
+    /// against `entity.ts` the same way; this one is pinned against the
+    /// component, because that is where the gate is written.
+    #[test]
+    fn the_kinds_with_a_checkout_are_the_ones_the_panel_is_mounted_for() {
+        let detail = include_str!("../../../app/src/lib/detail/Detail.svelte");
+        let gate = detail
+            .lines()
+            .find(|line| line.contains("const hasCheckout"))
+            .expect("Detail.svelte still gates the checkout panel on `hasCheckout`");
+        for kind in CHECKOUT_KINDS {
+            assert!(
+                gate.contains(&format!("\"{kind}\"")),
+                "{kind:?} has a checkout here and Detail.svelte does not mount the panel for it: \
+                 {gate}"
+            );
+        }
+        // And no more than those: a kind on the component's side alone is a
+        // panel that draws `entity_checkout`'s refusal.
+        assert_eq!(
+            gate.matches("shownKind ===").count(),
+            CHECKOUT_KINDS.len(),
+            "Detail.svelte gates on a different number of kinds than CHECKOUT_KINDS has: {gate}"
+        );
+    }
+
     /// The three states serialise as the words `app/src/lib/ipc/entity.ts`
     /// narrows on. A renamed variant is a panel that draws nothing.
     #[test]
@@ -360,7 +401,10 @@ mod tests {
             (FoundBy::Scan, "scan"),
             (FoundBy::Nothing, "nothing"),
         ] {
-            assert_eq!(serde_json::to_value(state).unwrap(), serde_json::json!(word));
+            assert_eq!(
+                serde_json::to_value(state).unwrap(),
+                serde_json::json!(word)
+            );
             assert!(
                 mirror.contains(&format!("\"{word}\"")),
                 "{word:?} is missing from app/src/lib/ipc/entity.ts"
