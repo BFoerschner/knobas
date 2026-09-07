@@ -88,10 +88,13 @@ export interface Inbox {
   /**
    * Seen, not fixed: clears this alert's item and leaves the alert open.
    *
-   * Takes the **monitor**, which is the alert item's subject — the second half
-   * of its `<category>:<subject>` key.
+   * Takes the **item key**, like {@link snooze} and {@link complete}, although
+   * the command underneath takes the monitor: an alert's subject *is* its
+   * monitor, and the one place that inverse is written on this side of the
+   * bridge is here — beside the other two key-takers — rather than in a
+   * component.
    */
-  ack(monitorId: string): Promise<void>;
+  ack(itemKey: string): Promise<void>;
   /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
@@ -101,6 +104,22 @@ export interface Inbox {
    * division `health.start()`/`health.reseed()` makes.
    */
   start(): () => void;
+}
+
+/**
+ * The subject half of an item's key.
+ *
+ * `knobas_core::inbox` composes every key as `<category>:<subject>` and both
+ * halves are stable across syncs; this is that format's inverse, and for an
+ * alert the subject is the **monitor's entity id** — which is what `ack_alert`
+ * takes, since a monitor has at most one open alert. A category is one word
+ * with no colon in it, so the first colon is the boundary whatever the subject
+ * carries (`gitea:acme/payouts#144` has two more).
+ *
+ * Exported so its own test can read it; nothing outside this module needs it.
+ */
+export function subjectOf(key: string): string {
+  return key.slice(key.indexOf(":") + 1);
 }
 
 export function createInbox(ports?: InboxPorts): Inbox {
@@ -208,7 +227,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
     refresh,
     snooze: (itemKey, until) => act(() => io.snoozeInboxItem(itemKey, until.toISOString())),
     complete: (itemKey) => act(() => io.completeInboxItem(itemKey)),
-    ack: (monitorId) => act(() => io.ackAlert(monitorId)),
+    ack: (itemKey) => act(() => io.ackAlert(subjectOf(itemKey))),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

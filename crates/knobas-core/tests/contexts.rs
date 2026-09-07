@@ -821,3 +821,78 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
         );
     }
 }
+
+/// ADR-0007's requirement 3 for the **merged** seed: the parent read misses,
+/// it never guesses.
+///
+/// `a_foreign_or_misshapen_parent_contributes_nothing` is the same pin on
+/// `member_ids`, and this is the reason it needs a second one rather than
+/// inheriting that one: the merged walk splits the source and the key out of
+/// the anchor id itself (`split_part` and `substr`) where `member_ids` binds
+/// them as two parameters, so *the same path* is read against two different
+/// right-hand sides. A `substr` off by one, or a `split_part` taking the wrong
+/// field, would seed nothing here and everything there — and the union
+/// equality test would go on passing, because both sides would be short by the
+/// same rows.
+///
+/// Three tickets and one epic: one that fits (and must come in, or the test
+/// asserts an emptiness the fixture produced), one in another source's
+/// namespace, and one whose `fields.parent` is a string rather than an object.
+/// The failure direction is an absent member, never a wrong one.
+#[tokio::test]
+async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
+    let pool = scratch().await;
+    let epic = with_payload(
+        &pool,
+        "ticket",
+        "EPIC-1",
+        serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
+    )
+    .await;
+    let child = with_payload(
+        &pool,
+        "ticket",
+        "PAY-2",
+        serde_json::json!({"fields": {"parent": {"key": "EPIC-1"}}}),
+    )
+    .await;
+    // Same key, another source: two Jiras are two namespaces.
+    let foreign = mirrored(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "PAY-3",
+        serde_json::json!({"fields": {"parent": {"key": "EPIC-1"}}}),
+    )
+    .await;
+    // The right source, a shape the path does not fit.
+    let misshapen = with_payload(
+        &pool,
+        "ticket",
+        "PAY-4",
+        serde_json::json!({"fields": {"parent": "EPIC-1"}}),
+    )
+    .await;
+    context::promote(&pool, &EntityRef::parse(&epic).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let got: BTreeSet<String> = context::held_by_any_context(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert!(
+        got.contains(&child),
+        "the well-formed child is not in the walk, so this test asserts nothing: {got:?}"
+    );
+    assert!(
+        !got.contains(&foreign),
+        "{foreign} is another source's ticket"
+    );
+    assert!(
+        !got.contains(&misshapen),
+        "{misshapen}'s parent is not the recorded shape"
+    );
+}

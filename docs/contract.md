@@ -6832,6 +6832,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   the item is gone the moment the column is written. The row is what keeps *done* meaning one thing
   across all six categories, and what a later un-ack would have to clear.
 
+  **Both lines land on every asset the monitor is confirmed to watch; the ack's does not narrow to
+  the one the inbox row named.** Surfaced by this PR's spec review, which read story 63's *"an ack
+  recorded on the asset's history"* as the singular affected asset, and decided the other way for one
+  reason: **recovery has no context notion and must not grow one**. The recovery line is written by
+  the sync engine, about an estate fact, with no reader and no inbox in view; if the ack narrowed to
+  whichever asset the inbox row happened to open, an asset could carry a `recovered` with no `acked`
+  before it, or an `acked` with no `recovered` after it, and its history would hold half a story with
+  nothing saying which half. The inbox picking one asset is a property of *the row* — one demand, one
+  way in — and not a claim about which machines the trouble was on. `OpenAlert::assets` on the ack's
+  answer is the set its lines landed on, so a caller can see it.
+
   **Recovery writes the other line, and `knobas_sync::alerts` is where it is.** The reconciler's
   close now records one `recovered` line per confirmed watched asset, actor `sync:<source_id>`,
   inside the run's own transaction — so a run that rolls back leaves no line claiming a recovery it
@@ -6871,6 +6882,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   `inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws` and
   `suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads`.
 
+  **`knobas_core::context::recorded_parent_key!`**, likewise, and for ADR-0007 rather than for
+  tidiness: the epic-children seed is a payload read outside an adapter, two seeds make it now, and
+  requirement 2 is *"confined to one named statement"* — so the path `fields.parent.key` is that
+  named statement and both seeds read it, leaving a second source's spelling one more `coalesce` in
+  one place. Its failure direction is stated there (it **misses**: an epic seeds fewer children
+  rather than the wrong ones, an absent member never a wrong one) and pinned on both sides.
+
   **The sixth notification category is switched on here and its behaviour is #447's.**
   `every_inbox_category_has_a_toggle_in_the_interface` is a pin, not a nicety: a category with no
   switch in `NotificationsSection.svelte` is a demand nobody can ever be notified about, and the
@@ -6890,7 +6908,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   closed both gone; snooze on and off the shelf; what the row says, including that `entity_id` is
   the asset; the archived-context negative; a monitor watching several assets as one item; and all
   six categories on one stream with the count over them);
-  `the_merged_walk_is_the_union_of_every_contexts_members` in `crates/knobas-core/tests/contexts.rs`;
+  `the_merged_walk_is_the_union_of_every_contexts_members` in `crates/knobas-core/tests/contexts.rs`,
+  beside `a_misshapen_parent_seeds_no_context_in_the_merged_walk` — ADR-0007's requirement 3 for the
+  merged seed, which needs a pin of its own because it splits the source and the key out of the
+  anchor id where `member_ids` binds them as two parameters, so the same path is read against a
+  different right-hand side and a `substr` off by one would leave the union-equality test passing
+  with both sides short by the same rows;
   `inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws`, and the existing
   `every_category_has_a_rule` and `the_count_is_the_stream_statement_counted`, which now walk six;
   `crates/knobas-sync/tests/alerts.rs`' two new tests through the engine (recovery writes a line and

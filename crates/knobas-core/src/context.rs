@@ -308,6 +308,32 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
     .await?)
 }
 
+/// Where a source records an item's **parent**, as one named path.
+///
+/// A **payload read outside an adapter**, governed by ADR-0007, and this is
+/// requirement 2 discharged: two seeds read it now — [`MEMBER_IDS`]' one
+/// context and [`held_by_any_context!`]'s every context — and a second
+/// source's spelling has to be one more `coalesce` *here* rather than an edit
+/// in each. `fields.parent.key` is Jira's, widened by #32.
+///
+/// **Its failure direction, stated (requirement 3): it misses.** A record
+/// whose payload does not carry this path yields no row, so an epic seeds
+/// fewer children rather than the wrong ones, and the walk is short rather
+/// than wrong — an absent member, never a wrong one. Pinned in both seeds:
+/// `a_foreign_or_misshapen_parent_contributes_nothing` for `member_ids`, and
+/// `a_misshapen_parent_seeds_no_context_in_the_merged_walk` for the merged
+/// one, both in `tests/contexts.rs`.
+///
+/// Exported for [`held_by_any_context!`]'s sake — a macro's body resolves at
+/// its call site — which is [`context_expansion!`]'s reason too.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! recorded_parent_key {
+    () => {
+        "i.payload->'fields'->'parent'->>'key'"
+    };
+}
+
 /// The three layers every membership walk shares, whatever seeded it.
 ///
 /// Written once because there are two seeds -- [`MEMBER_IDS`]' one context and
@@ -402,10 +428,12 @@ macro_rules! context_expansion {
 /// membership, with nothing left behind.
 ///
 /// The parent match is a **payload read outside an adapter**, governed by
-/// ADR-0007: it is confined to this statement, and its failure direction is
-/// pinned by `a_foreign_or_misshapen_parent_contributes_nothing` -- a shape
-/// the path does not fit contributes no seed, so the failure is an absent
-/// member, never a wrong one.
+/// ADR-0007. Since #446 there are two seeds that make it, so the *path* is
+/// confined to one named statement of its own -- [`recorded_parent_key!`],
+/// which both read -- rather than to this one; its failure direction is stated
+/// there and pinned here by `a_foreign_or_misshapen_parent_contributes_nothing`
+/// -- a shape the path does not fit contributes no seed, so the failure is an
+/// absent member, never a wrong one.
 ///
 /// Every **link** expansion joins `knobas.entity` to refuse `ctx`-kind
 /// neighbours: a ticket shared by two contexts would otherwise walk *through*
@@ -435,7 +463,9 @@ const MEMBER_IDS: &str = concat!(
           from sync.live_item i
          where $3::text is not null
            and i.source_id = $3::text
-           and i.payload->'fields'->'parent'->>'key' = $4::text
+           and ",
+    crate::recorded_parent_key!(),
+    " = $4::text
     ),
 ",
     crate::context_expansion!(),
@@ -472,6 +502,12 @@ const MEMBER_IDS: &str = concat!(
 /// spring would be the inbox failing its own promise. It is why the comparison
 /// above is against `list`'s contexts rather than every row.
 ///
+/// The epic-children seed makes the same **payload read outside an adapter**
+/// [`MEMBER_IDS`] does, through the same [`recorded_parent_key!`], and is bound
+/// by ADR-0007's three requirements through it: it misses, the path is one
+/// named statement both seeds read, and its failure direction is stated there
+/// and pinned here by `a_misshapen_parent_seeds_no_context_in_the_merged_walk`.
+///
 /// A subquery and not a `const`, because the one caller `concat!`s it into a
 /// compile-time statement; `declared_list!` is the same shape for the same
 /// reason.
@@ -500,8 +536,9 @@ macro_rules! held_by_any_context {
           from knobas.context c
           join sync.live_item i
             on i.source_id = split_part(c.anchor_id, ':', 1)
-           and i.payload->'fields'->'parent'->>'key'
-             = substr(c.anchor_id, strpos(c.anchor_id, ':') + 1)
+           and ",
+            $crate::recorded_parent_key!(),
+            " = substr(c.anchor_id, strpos(c.anchor_id, ':') + 1)
          where c.archived_at is null and c.kind = 'epic'
     ),
 ",

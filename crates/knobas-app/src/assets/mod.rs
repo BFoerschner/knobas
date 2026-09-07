@@ -2311,20 +2311,10 @@ pub async fn ack_alert(
     let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at")?;
     let already: Option<chrono::DateTime<chrono::Utc>> = row.try_get("acked_at")?;
 
-    let mut assets = Vec::new();
-    let watching = vec![monitor_id.to_owned()];
-    for asset in sqlx::query(ALERT_ASSETS)
-        .bind(&watching)
-        .bind(MONITORED_BY)
-        .fetch_all(&mut *tx)
+    let assets = watched_assets(&mut *tx, std::slice::from_ref(&monitor_id.to_owned()))
         .await?
-    {
-        assets.push(AlertAsset {
-            id: asset.try_get("id")?,
-            name: asset.try_get("name")?,
-            path: asset.try_get("path")?,
-        });
-    }
+        .remove(monitor_id)
+        .unwrap_or_default();
 
     let mut activity = Vec::new();
     let acked_at = match already {
@@ -2396,6 +2386,49 @@ const ALERT_ASSETS: &str = "select m.id as monitor_id, ast.id, ast.name,
          on ast.id = case when l.from_id = m.id then l.to_id else l.from_id end
       order by ast.name asc, ast.id asc";
 
+/// [`ALERT_ASSETS`] run, grouped by monitor.
+///
+/// One reader for both callers -- [`open_alerts`], which needs a whole page of
+/// them, and [`ack_alert`], which needs one monitor's inside its own
+/// transaction -- because the *shape* of an [`AlertAsset`] is the same answer
+/// to the same question and two copies of the mapping would be two places for
+/// a fourth field to be forgotten. Generic over the executor for
+/// `activity::record_with`'s reason: the ack reads this in the transaction it
+/// is about to write in, and the list does not have one.
+///
+/// A monitor with no watched assets is simply absent from the map, which is
+/// what lets both callers spell "watches nothing" as an empty list rather than
+/// as a special case.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+async fn watched_assets<'e, E>(
+    executor: E,
+    monitors: &[String],
+) -> Result<HashMap<String, Vec<AlertAsset>>, IpcError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let mut watching: HashMap<String, Vec<AlertAsset>> = HashMap::new();
+    for row in sqlx::query(ALERT_ASSETS)
+        .bind(monitors)
+        .bind(MONITORED_BY)
+        .fetch_all(executor)
+        .await?
+    {
+        watching
+            .entry(row.try_get("monitor_id")?)
+            .or_default()
+            .push(AlertAsset {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                path: row.try_get("path")?,
+            });
+    }
+    Ok(watching)
+}
+
 /// Every open alert in the estate, newest first (issue #444).
 ///
 /// **One read, and the count is its length.** Spec #427 story 58 wants every
@@ -2423,22 +2456,7 @@ pub async fn open_alerts(pool: &PgPool) -> Result<Vec<OpenAlert>, IpcError> {
         .iter()
         .map(|row| row.try_get::<String, _>("entity_id"))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut watching: HashMap<String, Vec<AlertAsset>> = HashMap::new();
-    for row in sqlx::query(ALERT_ASSETS)
-        .bind(&monitors)
-        .bind(MONITORED_BY)
-        .fetch_all(pool)
-        .await?
-    {
-        watching
-            .entry(row.try_get("monitor_id")?)
-            .or_default()
-            .push(AlertAsset {
-                id: row.try_get("id")?,
-                name: row.try_get("name")?,
-                path: row.try_get("path")?,
-            });
-    }
+    let mut watching = watched_assets(pool, &monitors).await?;
 
     rows.iter()
         .map(|row| {

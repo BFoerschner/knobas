@@ -75,7 +75,7 @@ vi.mock("../shell/open-external", () => ({
 }));
 
 const { default: InboxView } = await import("./InboxView.svelte");
-const { createInbox, snoozePresets } = await import("./inbox.svelte");
+const { createInbox, snoozePresets, subjectOf } = await import("./inbox.svelte");
 const { drawable, formFor } = await import("./actions");
 
 /** A Wednesday, so "next Monday" is five days out and not a special case. */
@@ -575,4 +575,19 @@ test("only an alert offers ack", async () => {
 
   expect(view.button("Ack")).toBeUndefined();
   view.stop();
+});
+
+/**
+ * The key's inverse, on the one part of it that is not obvious: a subject may
+ * itself carry colons and slashes and hashes (`gitea:acme/payouts#144`), and
+ * only the **first** colon is the category boundary.
+ *
+ * `knobas_core::inbox` composes the key; this is the only place on this side
+ * of the bridge that takes one apart, which is why it is here and not in a
+ * component.
+ */
+test("the subject of a key is everything after the first colon", () => {
+  expect(subjectOf("alert:kuma:7")).toBe("kuma:7");
+  expect(subjectOf("review_request:gitea:acme/payouts#144")).toBe("gitea:acme/payouts#144");
+  expect(subjectOf("credential_expiry:jira")).toBe("jira");
 });

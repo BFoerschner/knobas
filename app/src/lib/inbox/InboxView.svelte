@@ -75,18 +75,6 @@
     );
   }
 
-  /**
-   * The subject half of an item's key — `<category>:<subject>`, the shape
-   * `knobas_core::inbox` documents.
-   *
-   * For an alert that is the **monitor's entity id**, which is what
-   * `ackAlert` takes: there is at most one open alert per monitor, so the
-   * monitor is a complete address for it and the row needs no second read to
-   * find a row id.
-   */
-  function subjectOf(key: string): string {
-    return key.slice(key.indexOf(":") + 1);
-  }
 
   async function openInBrowser(url: string) {
     try {
@@ -267,7 +255,7 @@
             <button
               class="btn sm pri"
               disabled={inbox.busy}
-              onclick={() => void inbox.ack(subjectOf(entry.item.key))}
+              onclick={() => void inbox.ack(entry.item.key)}
             >
               Ack
             </button>
