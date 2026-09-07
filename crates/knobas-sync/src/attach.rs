@@ -81,6 +81,17 @@ use sqlx::{Postgres, Row, Transaction};
 /// rather than as two `or`ed comparisons so that a reader can see it is the
 /// same statement the unique index makes -- if the two ever disagree, this
 /// insert is the one that fails.
+///
+/// **And that is why it reads `knobas.link` rather than a view.** `0007` split
+/// the table into `confirmed_link` and `proposed_link` so that no reader has
+/// to remember which population it means, and `knobas-core`'s `link_reads`
+/// battery holds every module to it. This is the third exemption on that
+/// battery's list, and the reason it is one: the question here is not *which*
+/// population the row is in but **whether the index already holds the pair** --
+/// `link_pair_active_idx` does not look at `confirmed_at`, so a guard that did
+/// would insert over `monitor_url_host`'s proposal (#478) and fail this poll,
+/// and the next, and every one after. `tests/attach.rs`'
+/// `a_proposal_over_the_same_pair_is_left_alone` is that failure as a test.
 const UNATTACHED: &str = "select ast.id as asset_id,
                                  m.entity_id as monitor_id,
                                  m.title as monitor_name
