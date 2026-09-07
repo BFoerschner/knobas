@@ -891,3 +891,309 @@ async fn an_unknown_word_beside_known_ones_drops_only_itself() {
         ]
     );
 }
+
+// -- the alert, acked and recovered, through the seam (#446) -----------------
+
+/// The estate an alert is about: an asset, a monitor watching it, and a
+/// context holding the asset.
+///
+/// Written by hand except for the link's **relation**, which is
+/// `knobas_app::assets::MONITORED_BY` -- the constant the estate's own writer
+/// uses. That is what makes this a test of the wiring rather than of a string:
+/// rename the relation on either side and this fixture stops producing an
+/// inbox item.
+struct Estate {
+    asset: String,
+    monitor: String,
+}
+
+impl Harness {
+    async fn estate(&self, opened_at: DateTime<Utc>) -> Estate {
+        let asset = "asset:hel1".to_owned();
+        let monitor = "kuma:7".to_owned();
+        for (id, kind, title) in [
+            (asset.as_str(), "asset", "hel1"),
+            (monitor.as_str(), "monitor", "jira (tunnel)"),
+            ("ctx:payouts", "ctx", "payouts"),
+        ] {
+            sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+                .bind(id)
+                .bind(kind)
+                .bind(title)
+                .execute(self.pool())
+                .await
+                .unwrap();
+        }
+        sqlx::query("insert into knobas.asset (id, type_id, name) values ($1,'vm','hel1')")
+            .bind(&asset)
+            .execute(self.pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, payload)
+             values ($1,'kuma','monitor','jira (tunnel)','{}'::jsonb)",
+        )
+        .bind(&monitor)
+        .execute(self.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "insert into knobas.context (id, kind, title) values ('ctx:payouts','adhoc','payouts')",
+        )
+        .execute(self.pool())
+        .await
+        .unwrap();
+        for (from, to, relation) in [
+            ("ctx:payouts", asset.as_str(), "related"),
+            (
+                monitor.as_str(),
+                asset.as_str(),
+                knobas_app::assets::MONITORED_BY,
+            ),
+        ] {
+            sqlx::query(
+                "insert into knobas.link
+                     (from_id, to_id, relation, origin, created_by, confirmed_at)
+                 values ($1,$2,$3,'manual','user',now())",
+            )
+            .bind(from)
+            .bind(to)
+            .bind(relation)
+            .execute(self.pool())
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "insert into knobas.monitor_alert (entity_id, state, opened_at)
+             values ($1,'down',$2)",
+        )
+        .bind(&monitor)
+        .bind(opened_at)
+        .execute(self.pool())
+        .await
+        .unwrap();
+        Estate { asset, monitor }
+    }
+
+    /// The verbs on one asset's history, oldest first.
+    async fn history(&self, asset: &str) -> Vec<(String, String)> {
+        sqlx::query_as::<_, (String, String)>(
+            "select actor, verb from knobas.activity
+              where entity_id = $1 order by at asc, id asc",
+        )
+        .bind(asset)
+        .fetch_all(self.pool())
+        .await
+        .unwrap()
+    }
+
+    /// The open alert of one monitor, as `(acked, closed)`.
+    async fn alert_state(&self, monitor: &str) -> Option<(bool, bool)> {
+        sqlx::query_as::<_, (Option<DateTime<Utc>>, Option<DateTime<Utc>>)>(
+            "select acked_at, closed_at from knobas.monitor_alert where entity_id = $1",
+        )
+        .bind(monitor)
+        .fetch_optional(self.pool())
+        .await
+        .unwrap()
+        .map(|(acked, closed)| (acked.is_some(), closed.is_some()))
+    }
+
+    /// One sample of one monitor, as a poll would have left it.
+    async fn sample(&self, monitor: &str, state: &str, taken_at: DateTime<Utc>) {
+        sqlx::query(
+            "insert into knobas.monitor_sample (entity_id, state, taken_at) values ($1,$2,$3)",
+        )
+        .bind(monitor)
+        .bind(state)
+        .bind(taken_at)
+        .execute(self.pool())
+        .await
+        .unwrap();
+    }
+}
+
+/// The ticket's IPC criterion, end to end: **ack from the inbox; the alert
+/// reads acked and open; after recovery the item is gone and the asset's
+/// history shows both lines.**
+///
+/// Stories 62 and 64 joined, and the join is the point: `knobas-core`'s
+/// battery stops at the derivation and `knobas-sync`'s at the reconcile, and
+/// both can be green while nothing clears anybody's inbox. The recovery half
+/// runs the engine's own reconciler over a sample the poll would have written,
+/// because that is where the close and its history line are -- a test that
+/// wrote `closed_at` by hand would assert its own `update`.
+#[tokio::test]
+async fn an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves_a_line() {
+    let harness = harness().await;
+    let estate = harness.estate(now() - Duration::hours(3)).await;
+    let key = format!("alert:{}", estate.monitor);
+
+    let entry = harness.entry(&key).await;
+    assert_eq!(entry.item.category, knobas_core::inbox::Category::Alert);
+    assert_eq!(entry.item.title, "jira (tunnel)");
+    assert_eq!(entry.item.entity_id.as_deref(), Some(estate.asset.as_str()));
+    assert!(
+        entry.actions.is_empty(),
+        "an alert asks a source for nothing: {:?}",
+        entry.actions
+    );
+    assert_eq!(
+        inbox_count_inner(harness.pool(), harness.registry.as_ref(), now())
+            .await
+            .expect("the count reads"),
+        1
+    );
+
+    // Ack: seen, not fixed.
+    let acked = knobas_app::assets::ack_alert(harness.pool(), &estate.monitor, now())
+        .await
+        .expect("the ack");
+    assert_eq!(acked.value.monitor_id, estate.monitor);
+    assert!(acked.value.acked_at.is_some());
+    assert_eq!(
+        acked
+            .value
+            .assets
+            .iter()
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>(),
+        vec![estate.asset.clone()],
+        "the ack answers with the assets its line landed on"
+    );
+    assert_eq!(
+        harness.alert_state(&estate.monitor).await,
+        Some((true, false)),
+        "the alert reads acked and still open -- only a return to up closes one"
+    );
+    assert!(
+        !harness
+            .stream()
+            .await
+            .iter()
+            .any(|entry| entry.item.key == key),
+        "and the reader's inbox is clear of it"
+    );
+    assert_eq!(
+        harness.history(&estate.asset).await,
+        vec![("user".to_owned(), "acked".to_owned())]
+    );
+    // The inbox item is *completed*, which spec #427 names as one of the ack's
+    // three writes. Asserted directly because nothing else can see it: the
+    // rule already excludes acked alerts, so the row is belt and braces and
+    // the stream reads the same with or without it. What it is for is that
+    // *done* means one thing across all six categories.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from knobas.inbox_state
+              where item_key = $1 and done_at is not null",
+        )
+        .bind(&key)
+        .fetch_one(harness.pool())
+        .await
+        .unwrap(),
+        1,
+        "the ack did not complete the inbox item"
+    );
+
+    // Recovery, through the engine's own reconciler.
+    harness
+        .sample(&estate.monitor, "up", now() - Duration::minutes(1))
+        .await;
+    let mut tx = harness.pool().begin().await.expect("a transaction");
+    knobas_sync::alerts::reconcile(&mut tx, "kuma")
+        .await
+        .expect("the reconcile");
+    tx.commit().await.expect("the run commits");
+
+    assert_eq!(
+        harness.alert_state(&estate.monitor).await,
+        Some((true, true)),
+        "the return to up closed it"
+    );
+    assert!(
+        !harness
+            .stream()
+            .await
+            .iter()
+            .any(|entry| entry.item.key == key),
+        "the item is gone by construction, not by anybody deleting one"
+    );
+    assert_eq!(
+        harness.history(&estate.asset).await,
+        vec![
+            ("user".to_owned(), "acked".to_owned()),
+            ("sync:kuma".to_owned(), knobas_sync::alerts::VERB.to_owned()),
+        ],
+        "and the asset's history holds both lines: who saw it, and when it healed"
+    );
+}
+
+/// Recovery takes an **un-acked** item away too, and writes the same line --
+/// story 64's own wording, and the case the test above cannot make because it
+/// acks first.
+#[tokio::test]
+async fn recovery_removes_an_unacked_item_and_still_writes_the_line() {
+    let harness = harness().await;
+    let estate = harness.estate(now() - Duration::hours(3)).await;
+    let key = format!("alert:{}", estate.monitor);
+    assert!(harness.stream().await.iter().any(|e| e.item.key == key));
+
+    harness
+        .sample(&estate.monitor, "up", now() - Duration::minutes(1))
+        .await;
+    let mut tx = harness.pool().begin().await.expect("a transaction");
+    knobas_sync::alerts::reconcile(&mut tx, "kuma")
+        .await
+        .expect("the reconcile");
+    tx.commit().await.expect("the run commits");
+
+    assert_eq!(
+        harness.alert_state(&estate.monitor).await,
+        Some((false, true))
+    );
+    assert!(
+        !harness.stream().await.iter().any(|e| e.item.key == key),
+        "a self-healed blip does not linger"
+    );
+    assert_eq!(
+        harness.history(&estate.asset).await,
+        vec![("sync:kuma".to_owned(), knobas_sync::alerts::VERB.to_owned())]
+    );
+}
+
+/// Acking twice is one ack, and acking a monitor with nothing open is
+/// refused by name.
+///
+/// The second half is what a reader gets when the alert recovers while they
+/// are looking at the row -- the same refusal `inbox::answer` makes for an
+/// item that has left the stream, rather than a silent success.
+#[tokio::test]
+async fn a_second_ack_writes_nothing_and_an_alert_that_recovered_is_refused() {
+    let harness = harness().await;
+    let estate = harness.estate(now() - Duration::hours(3)).await;
+
+    knobas_app::assets::ack_alert(harness.pool(), &estate.monitor, now())
+        .await
+        .expect("the first ack");
+    let again = knobas_app::assets::ack_alert(harness.pool(), &estate.monitor, now())
+        .await
+        .expect("the second ack is answered, not refused");
+    assert!(
+        again.activity.is_empty(),
+        "seeing something twice is not two events"
+    );
+    assert_eq!(
+        harness.history(&estate.asset).await.len(),
+        1,
+        "and the asset's history says so"
+    );
+
+    let missing = knobas_app::assets::ack_alert(harness.pool(), "kuma:404", now())
+        .await
+        .expect_err("no open alert on that monitor");
+    assert!(
+        format!("{missing:?}").contains("no open alert"),
+        "the refusal names what happened: {missing:?}"
+    );
+}

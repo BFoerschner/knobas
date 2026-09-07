@@ -36,13 +36,14 @@
 //! and *done*. Neither is derivable from anything a source says. Its key is
 //! `'<category>:<subject>'` and both halves are stable across syncs:
 //!
-//! * the **category** is one of five words fixed in [`Category`] -- not the
+//! * the **category** is one of six words fixed in [`Category`] -- not the
 //!   name of the rule that produced the item. Rules are expected to grow (a
 //!   second mention spelling, a second way a build is "on my work"), and
 //!   keying on a rule name would forget a snooze the day a category gained a
 //!   second detector;
 //! * the **subject** is `knobas.entity.id` for the four mirror-derived
-//!   categories -- the durable identity in this database, which survives
+//!   categories and for the alert (the *monitor's* entity, which outlives the
+//!   mirror row) -- the durable identity in this database, which survives
 //!   re-sync, tombstoning and a source being deleted and re-added -- and
 //!   `source_config.id` for credential expiry, which interfaces §4.1 makes
 //!   immutable.
@@ -54,7 +55,7 @@
 //! control*: a rule that fires for everything is as broken as one that never
 //! fires, and only the negative case catches the first.
 //!
-//! Four of the five read a payload path, and that is a deliberate and narrow
+//! Four of the six read a payload path, and that is a deliberate and narrow
 //! coupling rather than an oversight. Interfaces §4.1 normalizes `title`,
 //! `body_text`, `author` and `updated_at` and nothing else; a review request,
 //! a build's status and an assignee live only in the verbatim `payload`.
@@ -95,7 +96,7 @@ use sqlx::PgPool;
 
 use crate::CoreError;
 
-/// The five kinds of demand the inbox distinguishes.
+/// The six kinds of demand the inbox distinguishes.
 ///
 /// Serialized as its stored spelling, which is also the first half of every
 /// [`InboxItem::key`]. **Not a database vocabulary**: no column holds a
@@ -116,6 +117,9 @@ pub enum Category {
     NewAssignment,
     /// A credential knobas holds stops working soon.
     CredentialExpiry,
+    /// A monitor watching something in the estate is down or slow, and a
+    /// context holds the asset it watches.
+    Alert,
 }
 
 impl Category {
@@ -126,6 +130,7 @@ impl Category {
         Category::FailedBuild,
         Category::NewAssignment,
         Category::CredentialExpiry,
+        Category::Alert,
     ];
 
     /// The spelling that opens an [`InboxItem::key`].
@@ -137,6 +142,7 @@ impl Category {
             Category::FailedBuild => "failed_build",
             Category::NewAssignment => "new_assignment",
             Category::CredentialExpiry => "credential_expiry",
+            Category::Alert => "alert",
         }
     }
 
@@ -161,13 +167,20 @@ impl Category {
     ///   credential is a knobas-local act on the sources view, and there is no
     ///   write op for it. Snooze -- *after the credential expires* is one of
     ///   the presets -- and done are the actions.
+    /// * **`Alert`.** Three, and none of them is a `WriteOp`. *Ack* is
+    ///   knobas-local because **Uptime Kuma has no ack** (`CONTEXT.md`,
+    ///   **Alert**) -- it is `knobas_app::assets::ack_alert`, an estate write
+    ///   and not a source one. *Open* lands in the Tree at the affected asset
+    ///   (story 61). What would actually fix a down monitor is nowhere near a
+    ///   source API, and Kuma's own write ops -- create, pause, resume a
+    ///   monitor -- are not answers to "this thing is down".
     #[must_use]
     pub fn candidate_ops(self) -> &'static [&'static str] {
         match self {
             Category::ReviewRequest => &["approve", "comment"],
             Category::Mention => &["comment"],
             Category::FailedBuild => &["rerun_build"],
-            Category::NewAssignment | Category::CredentialExpiry => &[],
+            Category::NewAssignment | Category::CredentialExpiry | Category::Alert => &[],
         }
     }
 }
@@ -484,6 +497,84 @@ macro_rules! credential_expiry {
     };
 }
 
+/// A monitor watching something somebody is working on is in trouble.
+///
+/// The sixth category (#446), and the one that is **not about the reader's
+/// accounts at all**: an alert is routed by *what it is about* rather than by
+/// whose name is on it, so this rule reads neither `$1` nor a declared path.
+/// `CONTEXT.md`, **Alert**: *"it reaches the inbox only when some context holds
+/// the affected asset, directly or through an ancestor"* -- spec #427 story 59,
+/// with story 60 as its negative control ("a fresh install with no contexts
+/// shows alerts in the Assets view and the top strip and never in the inbox").
+///
+/// Four statements, each of which is the difference between this and noise.
+///
+/// **Which alerts.** Open (`closed_at is null`) and **un-acked**. Ack is
+/// knobas-local and is *seen*, not *fixed* (story 62), so an acked alert leaves
+/// the inbox and stays in the Assets view; recovery closes the row and takes
+/// the item with it **by construction** (story 64) rather than by anybody
+/// deleting an item. Both are the derived-inbox promise the module header makes
+/// -- nobody removes an item, the rule stops firing.
+///
+/// **Which asset.** The one the monitor watches through a *confirmed*
+/// `monitored-by` link (`CONTEXT.md`, **Monitor**), and, where a monitor
+/// watches several, exactly one of them: a `lateral … limit 1` rather than a
+/// join, because a monitor on a product can honestly watch the VM and the
+/// container on it, and a plain join would draw the alert once per asset and
+/// leave `distinct on (category, subject)` to pick between rows an arbitrary
+/// order produced. Ordered by path and name so the one it picks is the same one
+/// on every read.
+///
+/// **Which contexts.** [`crate::held_by_any_context!`] -- ADR-0008's membership
+/// walk seeded from every context at once, so *"directly or through an
+/// ancestor"* is that statement's `held` layer and not a second reading of it
+/// (#434's third criterion). The lateral is what turns it into the routing
+/// rule: an asset no context holds contributes no row, so the alert is simply
+/// not a candidate.
+///
+/// **What it says.** `title` is the monitor's name, out of `knobas.entity` and
+/// **not** `sync.live_item` -- a monitor paused in Kuma keeps its open alert
+/// (#444) and would otherwise fall out of the inbox while still counting in the
+/// top strip. `source_id` is the namespace half of the monitor's id, which is
+/// the source it came from, for the same reason. `reason` names the asset by
+/// its whole path and says which trouble it is in, which is what makes the row
+/// readable without opening it (story 7). `entity_id` is the **asset**, not the
+/// monitor: story 61 is *"opening an alert from the inbox lands in the Tree at
+/// the affected asset with the monitor in the pane"*, and an item that pointed
+/// at the monitor would land in a room detail instead. `web_url` is null --
+/// `OpenAlert` carries no link into Kuma either, and for the reason #444
+/// records: no surface opens one.
+macro_rules! alert {
+    () => {
+        concat!(
+            "select 'alert', a.entity_id, split_part(a.entity_id, ':', 1), watched.id,
+                    'asset', e.title,
+                    format('%s is %s', watched.full_path, a.state),
+                    a.opened_at, null::text
+               from knobas.monitor_alert a
+               join knobas.entity e on e.id = a.entity_id
+               cross join lateral (
+                     select ast.id,
+                            case when nullif(ast.path_text, '') is null then ast.name
+                                 else ast.path_text || ' / ' || ast.name end as full_path
+                       from knobas.confirmed_link l
+                       join knobas.asset ast
+                         on ast.id = case when l.from_id = a.entity_id
+                                          then l.to_id else l.from_id end
+                      where (l.from_id = a.entity_id or l.to_id = a.entity_id)
+                        and l.relation = 'monitored-by'
+                        and ast.id in ",
+            $crate::held_by_any_context!(),
+            "
+                      order by ast.path_text asc, ast.name asc, ast.id asc
+                      limit 1
+                   ) watched
+              where a.closed_at is null
+                and a.acked_at is null"
+        )
+    };
+}
+
 /// Wrap a set of candidate rows in the shelving, the de-duplication and the
 /// ordering every read shares.
 ///
@@ -561,6 +652,8 @@ macro_rules! all_rules {
             new_assignment!(),
             "\nunion all\n",
             credential_expiry!(),
+            "\nunion all\n",
+            alert!(),
         ))
     };
 }
@@ -612,6 +705,10 @@ pub const RULES: &[Rule] = &[
     Rule {
         category: Category::CredentialExpiry,
         sql: shelved!(credential_expiry!()),
+    },
+    Rule {
+        category: Category::Alert,
+        sql: shelved!(alert!()),
     },
 ];
 
@@ -758,6 +855,29 @@ pub async fn snooze(pool: &PgPool, key: &str, until: DateTime<Utc>) -> Result<()
 ///
 /// [`CoreError::Db`] if the write fails.
 pub async fn complete(pool: &PgPool, key: &str, at: DateTime<Utc>) -> Result<(), CoreError> {
+    complete_with(pool, key, at).await
+}
+
+/// [`complete`], against an executor the caller chooses.
+///
+/// `activity::record_with`'s shape and its reason: an answer that is one part
+/// of a larger write belongs in that write's transaction. #446's ack is the
+/// caller -- it sets an alert's `acked_at`, completes this item and writes the
+/// asset's history line as one act, and an ack that recorded two of the three
+/// would leave an item on the stream for an alert nobody will be told about
+/// again.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn complete_with<'e, E>(
+    executor: E,
+    key: &str,
+    at: DateTime<Utc>,
+) -> Result<(), CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     sqlx::query(
         "insert into knobas.inbox_state (item_key, done_at)
               values ($1, $2)
@@ -768,7 +888,7 @@ pub async fn complete(pool: &PgPool, key: &str, at: DateTime<Utc>) -> Result<(),
     )
     .bind(key)
     .bind(at)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
@@ -806,6 +926,22 @@ mod tests {
     #[test]
     fn the_count_is_the_stream_statement_counted() {
         assert!(COUNT_ALL.contains(ALL_RULES));
+    }
+
+    /// The alert rule reads the relation the estate actually draws.
+    ///
+    /// The rule is a compile-time `concat!`, so the relation is a literal in
+    /// it and cannot be the constant itself. Three modules have to agree on
+    /// that word -- this rule, `knobas_sync::alerts`' recovery line and
+    /// `knobas_app::assets`, which draws the link -- and a fourth spelling
+    /// would be a monitor attached to an asset that reaches no inbox, with
+    /// nothing failing anywhere.
+    #[test]
+    fn the_alert_rule_reads_the_relation_the_estate_draws() {
+        assert!(
+            ALL_RULES.contains(&format!("l.relation = '{}'", crate::link::MONITORED_BY)),
+            "the alert rule does not join on knobas_core::link::MONITORED_BY"
+        );
     }
 
     /// Round-trips, because the wire form and the key's first half are the

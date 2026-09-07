@@ -232,11 +232,17 @@ async fn source(pool: &PgPool, id: &str, expires: Option<DateTime<Utc>>, enabled
 
 /// A link between two entities, confirmed or merely proposed.
 async fn link(pool: &PgPool, from: &str, to: &str, confirmed: bool) {
+    link_as(pool, from, to, "related", confirmed).await;
+}
+
+/// The same, asserting a named relation -- `monitored-by` is what attaches a
+/// monitor to the asset it watches (`CONTEXT.md`, **Monitor**).
+async fn link_as(pool: &PgPool, from: &str, to: &str, relation: &str, confirmed: bool) {
     sqlx::query(
         "insert into knobas.link
              (from_id, to_id, relation, origin, created_by, confirmed_at,
               rule, rule_class, reason)
-         values ($1,$2,'related','manual','user',
+         values ($1,$2,$4,'manual','user',
                  case when $3 then now() end,
                  case when $3 then null else 'branch_name_key' end,
                  case when $3 then null else 'exact_key' end,
@@ -245,9 +251,113 @@ async fn link(pool: &PgPool, from: &str, to: &str, confirmed: bool) {
     .bind(from)
     .bind(to)
     .bind(confirmed)
+    .bind(relation)
     .execute(pool)
     .await
     .unwrap();
+}
+
+// -- the estate, for the alert rule (#446) ----------------------------------
+
+/// One asset, under `parent` or at the top of the estate.
+///
+/// `path_text` is composed from the parent's the way `knobas_app::assets` does
+/// it -- ancestor names, outermost first -- because the alert rule reads it
+/// back as the asset's whole path and a fixture that left it empty could not
+/// witness that.
+async fn asset(pool: &PgPool, key: &str, name: &str, parent: Option<&str>) -> String {
+    let id = EntityRef::new("asset", key).to_string();
+    let path_text: String = match parent {
+        None => String::new(),
+        Some(parent) => sqlx::query_scalar(
+            "select case when path_text = '' then name else path_text || ' / ' || name end
+               from knobas.asset where id = $1",
+        )
+        .bind(parent)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+    };
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.asset (id, parent_id, type_id, name, path_text)
+         values ($1,$2,'vm',$3,$4)",
+    )
+    .bind(&id)
+    .bind(parent)
+    .bind(name)
+    .bind(&path_text)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// One mirrored Uptime Kuma monitor: the entity carries the *name* the alert
+/// row is drawn with, which is what makes the title assertion below mean
+/// something.
+async fn monitor(pool: &PgPool, key: &str, name: &str) -> String {
+    item(
+        pool,
+        Mirrored {
+            source: "kuma",
+            kind: "monitor",
+            key,
+            author: None,
+            body: "",
+            payload: serde_json::json!({ "active": true }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+    let id = EntityRef::new("kuma", key).to_string();
+    sqlx::query("update knobas.entity set title = $2 where id = $1")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
+/// An open alert on `monitor`, opened at `at`.
+async fn alert(pool: &PgPool, monitor: &str, state: &str, at: DateTime<Utc>) -> i64 {
+    sqlx::query_scalar(
+        "insert into knobas.monitor_alert (entity_id, state, opened_at)
+         values ($1,$2,$3) returning id",
+    )
+    .bind(monitor)
+    .bind(state)
+    .bind(at)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A context, and -- with `holds` -- what it was told to hold.
+async fn context(pool: &PgPool, key: &str, holds: &[&str]) -> String {
+    let id = format!("ctx:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ctx',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    for held in holds {
+        link(pool, &id, held, true).await;
+    }
+    id
 }
 
 /// The stream, as the reader sees it.
@@ -1034,4 +1144,307 @@ async fn one_rule_sees_only_its_own_category() {
         .unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].category, Category::Mention);
+}
+
+// -- the sixth rule: an alert, and only when a context holds its asset -------
+
+/// Story 59 and its negative control, story 60: *"an alert in my inbox only
+/// when some context holds the affected asset"*, and *"a fresh install with no
+/// contexts shows alerts in the Assets view and the top strip and never in the
+/// inbox"*.
+///
+/// Four monitors, all of them in trouble, and one item. The three that stay
+/// out are the three ways a rule reading "is there an open alert" would be
+/// wrong: an asset nobody has put in a context, a monitor attached to no asset
+/// at all, and a monitor whose link to a held asset is only *proposed* -- the
+/// same distinction the failed-build rule draws, and for the same reason (#41,
+/// #161: an inbox built on guesses is one the reader stops trusting).
+#[tokio::test]
+async fn an_alert_is_in_the_stream_only_when_a_context_holds_its_asset() {
+    let pool = &scratch().await;
+    let held = asset(pool, "db-01", "db-01", None).await;
+    let loose = asset(pool, "spare", "spare", None).await;
+    let guessed = asset(pool, "guess", "guess", None).await;
+    context(pool, "payouts", &[&held, &guessed]).await;
+
+    let watched = monitor(pool, "1", "db-01 ping").await;
+    let unheld = monitor(pool, "2", "spare ping").await;
+    let orphan = monitor(pool, "3", "nothing at all").await;
+    let proposed = monitor(pool, "4", "guess ping").await;
+    link_as(pool, &watched, &held, "monitored-by", true).await;
+    link_as(pool, &unheld, &loose, "monitored-by", true).await;
+    link_as(pool, &proposed, &guessed, "monitored-by", false).await;
+    for id in [&watched, &unheld, &orphan, &proposed] {
+        alert(pool, id, "down", days_ago(1)).await;
+    }
+
+    let keys = keys(&stream(pool).await);
+    assert!(
+        keys.contains(&format!("alert:{watched}")),
+        "an alert on an asset a context holds is in the stream: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&format!("alert:{unheld}")),
+        "an alert on an asset no context holds is not mine to answer: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&format!("alert:{orphan}")),
+        "a monitor watching nothing reaches no inbox: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&format!("alert:{proposed}")),
+        "a proposed monitored-by link is a guess, not a routing rule: {keys:?}"
+    );
+}
+
+/// *"directly or through an ancestor"* -- `CONTEXT.md`, **Alert**, over
+/// ADR-0008's asset clause and ADR-0014's parent column.
+///
+/// The context holds the **site**; the monitor watches a container three
+/// levels below it. The negative control is a whole sibling subtree, deep
+/// enough to be reached by any rule that expanded over links instead of over
+/// the parent field.
+#[tokio::test]
+async fn an_alert_reaches_the_stream_through_the_assets_ancestors() {
+    let pool = &scratch().await;
+    let site = asset(pool, "hel", "hel", None).await;
+    let vm = asset(pool, "hel1", "hel1", Some(&site)).await;
+    let container = asset(pool, "jira", "knobas-jira", Some(&vm)).await;
+    let elsewhere = asset(pool, "fsn", "fsn", None).await;
+    let sibling = asset(pool, "fsn1", "fsn1", Some(&elsewhere)).await;
+    context(pool, "payouts", &[&site]).await;
+
+    let deep = monitor(pool, "1", "jira (tunnel)").await;
+    let away = monitor(pool, "2", "fsn1 ping").await;
+    link_as(pool, &deep, &container, "monitored-by", true).await;
+    link_as(pool, &away, &sibling, "monitored-by", true).await;
+    alert(pool, &deep, "down", days_ago(1)).await;
+    alert(pool, &away, "down", days_ago(1)).await;
+
+    let keys = keys(&stream(pool).await);
+    assert!(
+        keys.contains(&format!("alert:{deep}")),
+        "a context holding the site holds what is inside it: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&format!("alert:{away}")),
+        "a sibling subtree is not in the context: {keys:?}"
+    );
+}
+
+/// Story 62 and story 64, as the *rule* sees them: **ack** is seen and
+/// **recovery** is fixed, and both take the item out without anybody deleting
+/// one.
+///
+/// Three alerts on three monitors watching three assets one context holds, so
+/// the only difference between them is the two columns under test.
+#[tokio::test]
+async fn an_acked_alert_and_a_recovered_one_have_both_left_the_stream() {
+    let pool = &scratch().await;
+    let ids: Vec<String> = {
+        let mut out = Vec::new();
+        for key in ["a", "b", "c"] {
+            out.push(asset(pool, key, key, None).await);
+        }
+        out
+    };
+    context(
+        pool,
+        "payouts",
+        &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
+    .await;
+
+    let open = monitor(pool, "1", "a ping").await;
+    let acked = monitor(pool, "2", "b ping").await;
+    let recovered = monitor(pool, "3", "c ping").await;
+    for (id, asset_id) in [(&open, &ids[0]), (&acked, &ids[1]), (&recovered, &ids[2])] {
+        link_as(pool, id, asset_id, "monitored-by", true).await;
+    }
+    alert(pool, &open, "down", days_ago(1)).await;
+    let acked_id = alert(pool, &acked, "down", days_ago(1)).await;
+    let closed_id = alert(pool, &recovered, "down", days_ago(2)).await;
+    sqlx::query("update knobas.monitor_alert set acked_at = now() where id = $1")
+        .bind(acked_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.monitor_alert set closed_at = now() where id = $1")
+        .bind(closed_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let keys = keys(&stream(pool).await);
+    assert_eq!(
+        keys,
+        vec![format!("alert:{open}")],
+        "only the open, un-acked alert is a demand: {keys:?}"
+    );
+}
+
+/// Story 65: *"snooze an alert like any inbox item"*. It is the inbox's
+/// snooze and not a second one -- the same key, the same table, the same
+/// clock.
+#[tokio::test]
+async fn an_alert_is_snoozed_and_comes_back_like_any_other_item() {
+    let pool = &scratch().await;
+    let vm = asset(pool, "db-01", "db-01", None).await;
+    context(pool, "payouts", &[&vm]).await;
+    let watching = monitor(pool, "1", "db-01 ping").await;
+    link_as(pool, &watching, &vm, "monitored-by", true).await;
+    alert(pool, &watching, "down", days_ago(1)).await;
+
+    let key = format!("alert:{watching}");
+    let until = now() + Duration::days(2);
+    inbox::snooze(pool, &key, until).await.unwrap();
+
+    assert!(
+        !keys(&stream(pool).await).contains(&key),
+        "a snoozed alert is off the stream"
+    );
+    let shelved = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
+        .await
+        .unwrap();
+    assert_eq!(keys(&shelved), vec![key.clone()]);
+    assert_eq!(shelved[0].snoozed_until, Some(until));
+    assert!(
+        keys(&stream_at(pool, until + Duration::hours(1)).await).contains(&key),
+        "and it is back when the maintenance window is over"
+    );
+}
+
+/// What the row says: story 7 (judge it without opening it) and story 61 (the
+/// way in is the **asset**, not the monitor).
+#[tokio::test]
+async fn an_alert_names_its_monitor_and_the_path_of_the_asset_it_watches() {
+    let pool = &scratch().await;
+    let site = asset(pool, "hel", "hel", None).await;
+    let vm = asset(pool, "hel1", "hel1", Some(&site)).await;
+    context(pool, "payouts", &[&site]).await;
+    let watching = monitor(pool, "1", "jira (tunnel)").await;
+    link_as(pool, &watching, &vm, "monitored-by", true).await;
+    alert(pool, &watching, "warn", days_ago(1)).await;
+
+    let items = stream(pool).await;
+    let item = items.first().expect("one alert");
+    assert_eq!(item.category, Category::Alert);
+    assert_eq!(item.source_id, "kuma");
+    assert_eq!(item.title, "jira (tunnel)", "the monitor's name");
+    assert_eq!(
+        item.entity_id.as_deref(),
+        Some(vm.as_str()),
+        "opening an alert lands at the affected asset"
+    );
+    assert_eq!(item.kind.as_deref(), Some("asset"));
+    assert_eq!(
+        item.reason, "hel / hel1 is warn",
+        "the reason is the asset's whole path and the trouble it is in"
+    );
+    assert_eq!(item.occurred_at, days_ago(1));
+    assert_eq!(item.web_url, None);
+}
+
+/// A context the reader archived is one they put away, and an alert must not
+/// go on interrupting them because of it.
+///
+/// The one place `held_by_any_context!` and `member_ids` differ on purpose --
+/// see the macro's own note. The positive half is in the same test so this is
+/// a statement about *archiving* and not about the fixture.
+#[tokio::test]
+async fn an_alert_leaves_the_stream_when_the_only_context_holding_it_is_archived() {
+    let pool = &scratch().await;
+    let vm = asset(pool, "db-01", "db-01", None).await;
+    let ctx = context(pool, "payouts", &[&vm]).await;
+    let watching = monitor(pool, "1", "db-01 ping").await;
+    link_as(pool, &watching, &vm, "monitored-by", true).await;
+    alert(pool, &watching, "down", days_ago(1)).await;
+
+    let key = format!("alert:{watching}");
+    assert!(keys(&stream(pool).await).contains(&key));
+
+    sqlx::query("update knobas.context set archived_at = now() where id = $1")
+        .bind(&ctx)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        !keys(&stream(pool).await).contains(&key),
+        "an archived context holds nothing anybody is still working on"
+    );
+}
+
+/// A monitor may watch several assets -- a VM and the container on it can
+/// honestly both be behind one HTTP check -- and that is still **one** demand.
+#[tokio::test]
+async fn an_alert_on_a_monitor_watching_several_assets_is_one_item() {
+    let pool = &scratch().await;
+    let vm = asset(pool, "hel1", "hel1", None).await;
+    let container = asset(pool, "jira", "knobas-jira", Some(&vm)).await;
+    context(pool, "payouts", &[&vm]).await;
+    let watching = monitor(pool, "1", "jira (tunnel)").await;
+    link_as(pool, &watching, &vm, "monitored-by", true).await;
+    link_as(pool, &watching, &container, "monitored-by", true).await;
+    alert(pool, &watching, "down", days_ago(1)).await;
+
+    let items = stream(pool).await;
+    assert_eq!(keys(&items), vec![format!("alert:{watching}")]);
+    assert_eq!(
+        items[0].entity_id.as_deref(),
+        Some(vm.as_str()),
+        "and the asset it opens is the same one on every read"
+    );
+}
+
+/// The sixth category is an addition and not a rewrite: one item of each of
+/// the six, all six on the stream, and the count over them.
+#[tokio::test]
+async fn the_five_existing_categories_are_untouched_by_the_sixth() {
+    let pool = &scratch().await;
+    source(pool, "jira", Some(now() + Duration::days(4)), true).await;
+    let pr = pull_request(pool, "acme/payouts#144", &[ME], "open").await;
+    let mention = ticket(
+        pool,
+        "PAY-9",
+        Some(THEM),
+        None,
+        "@mara.lindqvist ping?",
+        days_ago(1),
+    )
+    .await;
+    let assigned = ticket(pool, "PAY-1", Some(THEM), Some(ME), "", days_ago(1)).await;
+    let red = build(
+        pool,
+        "teamcity:Payouts_Build:9",
+        "FAILURE",
+        "Payouts_Build",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
+    let vm = asset(pool, "db-01", "db-01", None).await;
+    context(pool, "payouts", &[&vm]).await;
+    let watching = monitor(pool, "1", "db-01 ping").await;
+    link_as(pool, &watching, &vm, "monitored-by", true).await;
+    alert(pool, &watching, "down", days_ago(1)).await;
+
+    let mut keys = keys(&stream(pool).await);
+    keys.sort();
+    let mut want = vec![
+        format!("review_request:{pr}"),
+        format!("mention:{mention}"),
+        format!("new_assignment:{assigned}"),
+        format!("failed_build:{red}"),
+        "credential_expiry:jira".to_owned(),
+        format!("alert:{watching}"),
+    ];
+    want.sort();
+    assert_eq!(keys, want);
+    assert_eq!(
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
+        6,
+        "and the count is the same statement, counted"
+    );
 }

@@ -1219,6 +1219,12 @@
     if (verb === "imported") {
       return fields.estate === undefined ? "Imported" : `Imported from ${said(fields.estate)}`;
     }
+    // The alert pair (#446). Two verbs and not one line with a field in it,
+    // because a reader scanning this column wants *somebody saw it* and *it
+    // healed* to be different words; the actor beside them says who — `user`
+    // against `sync:<source_id>`.
+    if (verb === "acked") return `Alert acked: ${said(fields.monitor_name)} is ${said(fields.state)}`;
+    if (verb === "recovered") return `Alert closed: ${said(fields.monitor_name)} recovered`;
     if (verb === "edited" && fields.field === "monitors" && Array.isArray(fields.added)) {
       // *Kept*, not *added*: a name is written down on the asset precisely
       // because no monitor answers to it yet, and the line says which names

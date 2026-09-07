@@ -1029,6 +1029,22 @@ async fn settle(
 mod tests {
     use super::*;
 
+    /// The relation `monitor_url_host` proposes is the one the estate reads
+    /// (#446).
+    ///
+    /// The fourth place that word is written and the second one in SQL, so it
+    /// gets the pin the inbox's own alert rule gets: a proposal confirmed into
+    /// a link nothing joins on would be a monitor visibly attached to an asset
+    /// that never colours it, never reaches the inbox and never takes a
+    /// recovery line -- with nothing failing anywhere.
+    #[test]
+    fn the_relation_this_rule_proposes_is_the_one_the_estate_reads() {
+        assert!(
+            MONITOR_URL_HOST.contains(&format!("'{}'", crate::link::MONITORED_BY)),
+            "monitor_url_host proposes a relation nothing else in knobas reads"
+        );
+    }
+
     #[test]
     fn rule_class_roundtrips_through_its_column_value() {
         for class in RuleClass::ALL {

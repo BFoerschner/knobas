@@ -27,6 +27,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS, ipcErrorMessage } from "../ipc";
+import { ackAlert as realAck } from "../ipc/assets";
 import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
@@ -42,6 +43,17 @@ export interface InboxPorts {
   inboxCount: () => Promise<number>;
   snoozeInboxItem: (itemKey: string, until: string) => Promise<void>;
   completeInboxItem: (itemKey: string) => Promise<void>;
+  /**
+   * Ack the open alert of one monitor (#446).
+   *
+   * The one answer on this store that is **not** an inbox command: acking is
+   * an estate write (`ack_alert`), and what clears the item is the alert
+   * reading acked rather than an `inbox_state` row. It is here anyway because
+   * the row that offers it is an inbox row and the re-read afterwards is this
+   * store's — a second store for one button would be a second answer to "what
+   * is in the inbox now".
+   */
+  ackAlert: (monitorId: string) => Promise<void>;
   listen: (event: string, handler: () => void) => Promise<() => void>;
 }
 
@@ -74,6 +86,16 @@ export interface Inbox {
   snooze(itemKey: string, until: Date): Promise<void>;
   complete(itemKey: string): Promise<void>;
   /**
+   * Seen, not fixed: clears this alert's item and leaves the alert open.
+   *
+   * Takes the **item key**, like {@link snooze} and {@link complete}, although
+   * the command underneath takes the monitor: an alert's subject *is* its
+   * monitor, and the one place that inverse is written on this side of the
+   * bridge is here — beside the other two key-takers — rather than in a
+   * component.
+   */
+  ack(itemKey: string): Promise<void>;
+  /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
    *
@@ -82,6 +104,22 @@ export interface Inbox {
    * division `health.start()`/`health.reseed()` makes.
    */
   start(): () => void;
+}
+
+/**
+ * The subject half of an item's key.
+ *
+ * `knobas_core::inbox` composes every key as `<category>:<subject>` and both
+ * halves are stable across syncs; this is that format's inverse, and for an
+ * alert the subject is the **monitor's entity id** — which is what `ack_alert`
+ * takes, since a monitor has at most one open alert. A category is one word
+ * with no colon in it, so the first colon is the boundary whatever the subject
+ * carries (`gitea:acme/payouts#144` has two more).
+ *
+ * Exported so its own test can read it; nothing outside this module needs it.
+ */
+export function subjectOf(key: string): string {
+  return key.slice(key.indexOf(":") + 1);
 }
 
 export function createInbox(ports?: InboxPorts): Inbox {
@@ -97,6 +135,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
     inboxCount: () => realCount(),
     snoozeInboxItem: (itemKey, until) => realSnooze(itemKey, until),
     completeInboxItem: (itemKey) => realComplete(itemKey),
+    ackAlert: async (monitorId) => {
+      await realAck(monitorId);
+    },
     listen: (event, handler) => tauriListen(event, () => handler()),
   };
 
@@ -186,6 +227,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
     refresh,
     snooze: (itemKey, until) => act(() => io.snoozeInboxItem(itemKey, until.toISOString())),
     complete: (itemKey) => act(() => io.completeInboxItem(itemKey)),
+    ack: (itemKey) => act(() => io.ackAlert(subjectOf(itemKey))),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*
@@ -246,7 +288,7 @@ export interface SnoozePreset {
  * The third preset is offered only when there is a date to hang it on, which
  * for M2 is a credential expiry: *after it expires* is a real answer for a
  * token and nonsense for a review request, and a preset that computes to the
- * same thing as *tomorrow* on four of the five categories is a button that
+ * same thing as *tomorrow* on five of the six categories is a button that
  * teaches the reader nothing.
  */
 export function snoozePresets(now: Date, deadline?: Date | null): SnoozePreset[] {

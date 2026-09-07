@@ -62,6 +62,8 @@
 //! made. A monitor coming *out* of maintenance broken is sampled `down` on the
 //! next poll and opens one then.
 
+use knobas_core::activity;
+use knobas_core::entity::EntityRef;
 use sqlx::{Postgres, Row, Transaction};
 
 /// The two state words an alert may carry: the trouble a monitor can be in.
@@ -72,6 +74,13 @@ use sqlx::{Postgres, Row, Transaction};
 /// and an alert records trouble, and the two lists are different lengths
 /// because they are different statements.
 pub const OPENS: &[&str] = &["down", "warn"];
+
+/// The activity verb a recovery writes on the asset the monitor watches.
+///
+/// Past tense, like every other verb in the log. `knobas_app::assets` reads
+/// the same spelling to draw the line, and its own ack writes `acked` beside
+/// it.
+pub const VERB: &str = "recovered";
 
 /// The state that closes an open alert.
 ///
@@ -141,6 +150,28 @@ const ROSTER: &str = "select distinct on (i.entity_id)
       where i.source_id = $1 and i.kind = $2
       order by i.entity_id, s.taken_at desc, s.id desc";
 
+/// Every asset a recovering monitor watches, with the monitor's own name.
+///
+/// The `monitored-by` link (`CONTEXT.md`, **Monitor**) read from the monitor's
+/// end, over `knobas.confirmed_link` and never `knobas.link`: a *proposed*
+/// attachment is a guess, and a history line on somebody's server saying a
+/// monitor nobody confirmed watches it recovered would be knobas writing a
+/// fact out of a suggestion.
+///
+/// A monitor watching nothing yields no rows and therefore no lines, which is
+/// the honest answer: story 64's line goes on *the affected asset*, and a
+/// monitor nobody has finished wiring up affects none. `$1` is the monitor
+/// ids, `$2` the relation.
+const RECOVERED_ASSETS: &str =
+    "select m.id as monitor_id, e.title as monitor_name, ast.id as asset_id
+       from unnest($1::text[]) as m(id)
+       join knobas.entity e on e.id = m.id
+       join knobas.confirmed_link l
+         on (l.from_id = m.id or l.to_id = m.id) and l.relation = $2
+       join knobas.asset ast
+         on ast.id = case when l.from_id = m.id then l.to_id else l.from_id end
+      order by ast.id asc";
+
 /// Reconcile every live monitor of `source_id` against its newest sample,
 /// inside the run's own transaction.
 ///
@@ -160,7 +191,7 @@ const ROSTER: &str = "select distinct on (i.entity_id)
 /// [`sqlx::Error`] if any of the three statements fails; the caller rolls the
 /// run back, which is what keeps an alert from claiming to have seen a state
 /// the run never committed.
-pub(crate) async fn reconcile(
+pub async fn reconcile(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
 ) -> Result<(), sqlx::Error> {
@@ -212,6 +243,71 @@ pub(crate) async fn reconcile(
         .bind(&closing)
         .execute(&mut **tx)
         .await?;
+        recovered_lines(tx, source_id, &closing).await?;
+    }
+    Ok(())
+}
+
+/// One history line per asset a recovered monitor watches (spec #427 story
+/// 64, issue #446).
+///
+/// **Only recovery writes one, and only on the asset.** Story 64 is *"recovery
+/// to close the alert and remove an un-acked inbox item with a history line"*,
+/// and the pair to it is #446's ack line, which the app writes. Opening one
+/// writes nothing: an alert *is* the record that a monitor fell, it is drawn in
+/// the Assets view and counted in the top strip from the moment it opens, and a
+/// second copy of it in every affected asset's history would put a line in front
+/// of the reader for something no person did. What recovery leaves behind is
+/// the only thing that would otherwise be unrecoverable — the alert row goes
+/// out of every open-alert read the instant it closes, so without this the
+/// asset's history would have nothing to say about a night it spent down.
+///
+/// Inside the run's transaction, so a run that rolls back leaves no line
+/// claiming a recovery it never committed — and, unlike the run's own `synced`
+/// line, a failure here **fails the run**: that line is written after the
+/// commit and is a log entry about work already durable, while this one is part
+/// of the same write as the `closed_at` it describes.
+///
+/// The actor is `sync:<source_id>`, which is `knobas_core::activity`'s own
+/// vocabulary for a synced event and what tells this line apart from the ack's
+/// `user`.
+async fn recovered_lines(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    closing: &[String],
+) -> Result<(), sqlx::Error> {
+    let watched = sqlx::query(RECOVERED_ASSETS)
+        .bind(closing)
+        .bind(knobas_core::link::MONITORED_BY)
+        .fetch_all(&mut **tx)
+        .await?;
+    let actor = format!("sync:{source_id}");
+    for row in &watched {
+        let asset_id: String = row.try_get("asset_id")?;
+        let monitor_id: String = row.try_get("monitor_id")?;
+        let monitor_name: String = row.try_get("monitor_name")?;
+        // An asset id that does not parse is not a thing this run can write a
+        // line about; `knobas.asset` constrains the namespace, so it cannot
+        // happen from the join above, and guessing an entity would be worse
+        // than saying nothing.
+        let Ok(entity) = EntityRef::parse(&asset_id) else {
+            continue;
+        };
+        activity::record_with(
+            &mut **tx,
+            &actor,
+            VERB,
+            Some(&entity),
+            serde_json::json!({
+                "monitor": monitor_id,
+                "monitor_name": monitor_name,
+            }),
+        )
+        .await
+        .map_err(|error| match error {
+            knobas_core::CoreError::Db(error) => error,
+            other => sqlx::Error::Protocol(other.to_string()),
+        })?;
     }
     Ok(())
 }

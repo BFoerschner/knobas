@@ -100,7 +100,7 @@ afterEach(() => {
  */
 test("the section offers one switch per category and says when a desktop notification fires", async () => {
   render();
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   expect(boxes()).toEqual([
     "Review requests",
@@ -108,6 +108,7 @@ test("the section offers one switch per category and says when a desktop notific
     "Failed builds",
     "New assignments",
     "Credentials about to expire",
+    "A monitor down on something in a context",
   ]);
   expect(text()).toContain("not");
   expect(text()).toContain("focused");
@@ -119,7 +120,7 @@ test("the section offers one switch per category and says when a desktop notific
 /** All off is what a profile nobody has opted in on draws (story 71). */
 test("a profile nobody has opted in on draws every switch off", async () => {
   render();
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   for (const label of boxes()) {
     expect(box(label).checked, `${label} is on for a profile nobody opted in on`).toBe(false);
@@ -128,7 +129,7 @@ test("a profile nobody has opted in on draws every switch off", async () => {
 
 test("the switches draw the stored categories", async () => {
   render({ stored: ["mention", "failed_build"] });
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   expect(box("Mentions").checked).toBe(true);
   expect(box("Failed builds").checked).toBe(true);
@@ -141,7 +142,7 @@ test("the switches draw the stored categories", async () => {
  */
 test("switching the first category on asks the OS, stores it, and reports the outcome", async () => {
   const { calls } = render();
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   box("Failed builds").click();
   await vi.waitFor(() => {
@@ -163,7 +164,7 @@ test("switching the first category on asks the OS, stores it, and reports the ou
  */
 test("an OS that refuses leaves every switch off and says so", async () => {
   const { calls } = render({ answer: "denied" });
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   box("Mentions").click();
   await vi.waitFor(() => {
@@ -186,7 +187,7 @@ test("an OS that refuses leaves every switch off and says so", async () => {
  */
 test("the first switch-on against an already-granted permission still says so", async () => {
   const { calls } = render({ granted: true });
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   box("Review requests").click();
   await vi.waitFor(() => {
@@ -200,7 +201,7 @@ test("the first switch-on against an already-granted permission still says so", 
 /** Switching one off sends the rest and asks the OS nothing. */
 test("switching a category off sends what is left and prompts nobody", async () => {
   const { calls } = render({ stored: ["review_request", "mention"], granted: true });
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   box("Mentions").click();
   await vi.waitFor(() => {
@@ -223,7 +224,7 @@ test("a write that is refused says why rather than claiming the category is on",
         Promise.reject({ code: "not_ready", message: "the database is still starting" }),
     },
   });
-  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
 
   box("Mentions").click();
   await vi.waitFor(() => {
@@ -238,7 +239,7 @@ test("a write that is refused says why rather than claiming the category is on",
  * stored, and a section that could not ask has not earned it. Retry asks
  * again.
  */
-test("a read that failed offers Retry rather than drawing five switches off", async () => {
+test("a read that failed offers Retry rather than drawing every switch off", async () => {
   let attempts = 0;
   render({
     ports: {

@@ -340,6 +340,14 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // names -- see `fakeMonitorRoster` -- so the roster a browser draws is the
     // set of monitors the file asks for, with a reading invented on top.
     monitor_roster: () => fakeMonitorRoster(),
+    // The estate's open alerts (#444), derived from the same roster so the
+    // strip a browser draws agrees with the tab beside it. Added with #446
+    // because #444 left it out and the two surfaces it feeds -- the Assets
+    // view's strip and the top strip's badge -- were the only ones under
+    // `?fake-ipc` answering "command not found" in red. **The inbox is a
+    // different matter and still has no handlers here at all**, so the sixth
+    // category's row cannot be seen this way whatever this answers.
+    open_alerts: () => fakeOpenAlerts(),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -2147,6 +2155,35 @@ function fakeSamples(state: string, seed: number, now: number) {
       state: quiet ? null : blip ? "down" : state,
     };
   });
+}
+
+/**
+ * `open_alerts`: one alert per monitor the fixture roster has in trouble.
+ *
+ * **Derived from `fakeMonitorRoster`**, so the strip and the Monitors tab are
+ * one statement about one fixture rather than two lists that can disagree —
+ * the rule the backend follows, where both surfaces read one table. A
+ * `pending` or `maintenance` monitor is deliberately not in it: those two
+ * words neither open an alert nor close one (`CONTEXT.md`, **Alert**), and a
+ * fixture that drew them would teach a reader the wrong rule.
+ *
+ * `opened_at` is derived from the row's index so two screenshots of the same
+ * build agree, and the first one is acked so the list can show what *seen, not
+ * fixed* looks like without anything here having to remember a click.
+ */
+function fakeOpenAlerts() {
+  const now = Date.now();
+  return fakeMonitorRoster()
+    .filter((row) => row.state === "down" || row.state === "warn")
+    .map((row, index) => ({
+      id: index + 1,
+      monitor_id: row.entity_id,
+      monitor_name: row.name,
+      state: row.state,
+      opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
+      acked_at: index === 0 ? new Date(now - 12 * 60_000).toISOString() : null,
+      assets: row.assets,
+    }));
 }
 
 /**

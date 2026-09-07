@@ -396,3 +396,44 @@ test("the fixture roster is the file's monitors, with every chip reachable", () 
   }
   expect(roster.some((row) => row.tombstoned), "no paused monitor in the fixture").toBe(true);
 });
+
+/**
+ * The open alerts the strip draws under `?fake-ipc` (#444's gap, filled with
+ * #446).
+ *
+ * Read against the **roster handler beside it**, because that is the claim:
+ * one fixture, two surfaces, and a screenshot of the strip that disagreed with
+ * the tab would be evidence about nothing. The two properties the fixture has
+ * to have are that only the two trouble words open one — `pending` and
+ * `maintenance` neither open an alert nor close one — and that an acked alert
+ * is among them, since *seen, not fixed* is the distinction the list exists to
+ * draw.
+ */
+test("the fixture's open alerts are the roster's monitors in trouble", () => {
+  const handlers = demoHandlers();
+  const roster = handlers["monitor_roster"]!({}) as { name: string; state: string | null }[];
+  const open = handlers["open_alerts"]!({}) as {
+    monitor_name: string;
+    state: string;
+    acked_at: string | null;
+    assets: { id: string }[];
+  }[];
+
+  expect(open.map((row) => row.monitor_name).sort()).toEqual(
+    roster
+      .filter((row) => row.state === "down" || row.state === "warn")
+      .map((row) => row.name)
+      .sort(),
+  );
+  expect(open.length).toBeGreaterThan(0);
+  for (const row of open) {
+    expect(["down", "warn"], `${row.monitor_name} opened an alert on ${row.state}`).toContain(
+      row.state,
+    );
+    expect(row.assets.length, `${row.monitor_name} watches nothing`).toBeGreaterThan(0);
+  }
+  expect(
+    open.some((row) => row.acked_at !== null),
+    "nothing in the fixture is acked, so the list cannot show what seen-not-fixed looks like",
+  ).toBe(true);
+});

@@ -320,6 +320,9 @@ pub fn run() {
             // #444's open-alert read, appended after those: one read, and the
             // top strip's count is its length.
             commands::assets::open_alerts,
+            // #446's ack, appended after that: the one write on this surface
+            // that leaves its subject open on purpose.
+            commands::assets::ack_alert,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -32,13 +32,18 @@
   } = $props();
 
   /**
-   * The five categories, in `knobas_core::inbox::Category::ALL`'s order and
+   * The six categories, in `knobas_core::inbox::Category::ALL`'s order and
    * with knobas' own words for them.
    *
    * Pinned to that list by `knobas_app::inbox`'s
-   * `every_inbox_category_has_a_toggle_in_the_interface`: a sixth category
+   * `every_inbox_category_has_a_toggle_in_the_interface`: a seventh category
    * added on the Rust side would otherwise be a demand nobody can ever switch
    * desktop notifications on for, with nothing failing anywhere.
+   *
+   * *A monitor down on something in a context* is the alert (#446), and the
+   * label says the routing rule out loud because the switch cannot: an alert
+   * on an asset no context holds never reaches the inbox and so can never
+   * notify, whatever this box says.
    */
   const KINDS: { id: InboxCategory; label: string }[] = [
     { id: "review_request", label: "Review requests" },
@@ -46,6 +51,7 @@
     { id: "failed_build", label: "Failed builds" },
     { id: "new_assignment", label: "New assignments" },
     { id: "credential_expiry", label: "Credentials about to expire" },
+    { id: "alert", label: "A monitor down on something in a context" },
   ];
 
   $effect(() => {

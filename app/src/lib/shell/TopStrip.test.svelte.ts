@@ -47,6 +47,7 @@ function inboxOf(count: number): Inbox {
     inboxCount: () => Promise.resolve(count),
     snoozeInboxItem: () => Promise.resolve(),
     completeInboxItem: () => Promise.resolve(),
+    ackAlert: () => Promise.resolve(),
     listen: () => Promise.resolve(() => {}),
   });
   return inbox;

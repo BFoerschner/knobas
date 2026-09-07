@@ -3973,6 +3973,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::set_monitoring_settings,
             knobas_app::commands::assets::monitor_roster,
             knobas_app::commands::assets::open_alerts,
+            knobas_app::commands::assets::ack_alert,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4137,6 +4138,10 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         // #444: an argument-free read, like `monitoring_settings` -- the whole
         // estate's open alerts, and the top strip's count is their number.
         ("open_alerts", serde_json::json!({})),
+        // #446: the ack takes the monitor, not the alert row's id -- one
+        // monitor has at most one open alert, and it is what the inbox item's
+        // subject already is.
+        ("ack_alert", serde_json::json!({ "monitorId": "kuma:7" })),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(

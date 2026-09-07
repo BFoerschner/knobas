@@ -232,7 +232,7 @@ const PATH_SEPARATOR: &str = " / ";
 /// `app/src/lib/detail/relations.ts`, which is where `monitored-by` is given
 /// its two readings. The two spellings are pinned together by
 /// `commands::assets`' mirror test, the way `DEFAULT_RELATION` is.
-pub const MONITORED_BY: &str = "monitored-by";
+pub const MONITORED_BY: &str = knobas_core::link::MONITORED_BY;
 
 /// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
 ///
@@ -2221,6 +2221,155 @@ const OPEN_ALERTS: &str = "select a.id, a.entity_id, e.title as monitor_name,
       where a.closed_at is null
       order by a.opened_at desc, a.id desc";
 
+/// The activity verb an **ack** writes on the asset the monitor watches.
+///
+/// Past tense, like every verb in the log, and the pair to
+/// [`knobas_sync::alerts::VERB`] -- *acked* is what a person did and
+/// *recovered* is what the estate did, and the actor column says which
+/// (`user` against `sync:<source_id>`). Two verbs and not one *alert* line
+/// with a field in it, because the history panel renders a verb and a reader
+/// scanning a column wants the difference at a glance.
+const ACKED: &str = "acked";
+
+/// The open alert of one monitor, for the ack to write on.
+///
+/// `for update` on the alert row alone, so two acks from two surfaces at once
+/// -- the inbox row and #449's card -- serialise rather than both deciding the
+/// row was un-acked. The join to `knobas.entity` is the monitor's *name*,
+/// which a tombstoned entity still carries: an alert outlives its mirror row
+/// (see [`OPEN_ALERTS`]) and an ack that could not name a paused monitor would
+/// be the one alert nobody can clear.
+const ALERT_TO_ACK: &str = "select a.id, a.state, a.opened_at, a.acked_at,
+            e.title as monitor_name
+       from knobas.monitor_alert a
+       join knobas.entity e on e.id = a.entity_id
+      where a.entity_id = $1 and a.closed_at is null
+      for update of a";
+
+/// Ack the open alert of one monitor: seen, not fixed (spec #427 story 62).
+///
+/// Three writes and one transaction, which is spec #427's own sentence --
+/// *"Ack is the inbox item's completion plus the alert's acked-at plus a
+/// history line on the asset"*:
+///
+/// * **`acked_at` on the alert**, which **leaves it open**. `CONTEXT.md`,
+///   **Alert**: *"Ack is knobas-local -- Uptime Kuma has no ack -- and clears
+///   the inbox item while the alert stays open."* Only a return to `up` closes
+///   one, so the estate goes on saying this thing is down while the inbox
+///   stops saying it needs somebody. That is the whole point of the two
+///   columns being different columns.
+/// * **the inbox item, completed.** Belt and braces, and deliberately: the
+///   alert rule already excludes acked alerts, so the item is gone the moment
+///   the column is written and no `knobas.inbox_state` row is needed to remove
+///   it. The row is what keeps *done* meaning one thing across all six
+///   categories -- it is what a later un-ack would have to clear, and what the
+///   activity line's `item_key` refers to.
+/// * **one history line per watched asset**, `user` and [`ACKED`]. On the
+///   asset and not on the monitor, because the monitor is a mirrored item and
+///   an ack is a knobas act about somebody's own machine; a monitor watching
+///   nothing is acked and writes no line, the same absence
+///   [`knobas_sync::alerts`]' recovery makes.
+///
+/// **Addressed by the monitor and not by the alert row's id.** #444's §10.8
+/// entry predicted the row id, and this supersedes that sentence: the inbox
+/// item's subject *is* the monitor entity (spec #427: "subject the monitor
+/// entity id"), the partial unique index `monitor_alert_one_open_idx` makes
+/// "the open alert of this monitor" exactly one row or none, and asking the
+/// inbox to translate a monitor into a row id would be a second read of the
+/// alert list that can disagree with the one the row was drawn from. #449's
+/// cards carry [`OpenAlert::monitor_id`] and are served by the same shape.
+///
+/// **Acking twice is one ack.** An alert that already carries `acked_at` is
+/// answered with itself and writes nothing: two surfaces can hold the same
+/// alert, and a second line saying somebody saw it again is not a fact anybody
+/// asked for.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] when the monitor has no open alert -- which is what
+/// a reader acking a row that recovered while they were looking at it gets,
+/// and is the same refusal `knobas_app::inbox::answer` makes for an item that
+/// left the stream.
+pub async fn ack_alert(
+    pool: &PgPool,
+    monitor_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Written<OpenAlert>, IpcError> {
+    let mut tx = pool.begin().await?;
+    let Some(row) = sqlx::query(ALERT_TO_ACK)
+        .bind(monitor_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Err(IpcError::not_found(format!(
+            "no open alert on {monitor_id:?} -- it may have recovered"
+        )));
+    };
+    let id: i64 = row.try_get("id")?;
+    let state = AlertState::parse(&row.try_get::<String, _>("state")?)?;
+    let monitor_name: String = row.try_get("monitor_name")?;
+    let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at")?;
+    let already: Option<chrono::DateTime<chrono::Utc>> = row.try_get("acked_at")?;
+
+    let assets = watched_assets(&mut *tx, &[monitor_id.to_owned()])
+        .await?
+        .remove(monitor_id)
+        .unwrap_or_default();
+
+    let mut activity = Vec::new();
+    let acked_at = match already {
+        Some(at) => at,
+        None => {
+            let at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+                "update knobas.monitor_alert set acked_at = $2
+                  where id = $1 returning acked_at",
+            )
+            .bind(id)
+            .bind(now)
+            .fetch_one(&mut *tx)
+            .await?;
+            let key = format!(
+                "{}:{monitor_id}",
+                knobas_core::inbox::Category::Alert.as_str()
+            );
+            knobas_core::inbox::complete_with(&mut *tx, &key, now).await?;
+            for asset in &assets {
+                let entity = EntityRef::parse(&asset.id).map_err(IpcError::internal)?;
+                activity.push(
+                    knobas_core::activity::record_with(
+                        &mut *tx,
+                        ACTOR,
+                        ACKED,
+                        Some(&entity),
+                        serde_json::json!({
+                            "item_key": key,
+                            "monitor": monitor_id,
+                            "monitor_name": monitor_name,
+                            "state": state,
+                        }),
+                    )
+                    .await?,
+                );
+            }
+            at
+        }
+    };
+    tx.commit().await?;
+
+    Ok(Written {
+        value: OpenAlert {
+            id,
+            monitor_id: monitor_id.to_owned(),
+            monitor_name,
+            state,
+            opened_at,
+            acked_at: Some(acked_at),
+            assets,
+        },
+        activity,
+    })
+}
+
 /// The assets each of a set of monitors is attached to, by name.
 ///
 /// [`MONITORED_ASSETS`]' rule read from the other end -- the same relation and
@@ -2236,6 +2385,49 @@ const ALERT_ASSETS: &str = "select m.id as monitor_id, ast.id, ast.name,
        join knobas.asset ast
          on ast.id = case when l.from_id = m.id then l.to_id else l.from_id end
       order by ast.name asc, ast.id asc";
+
+/// [`ALERT_ASSETS`] run, grouped by monitor.
+///
+/// One reader for both callers -- [`open_alerts`], which needs a whole page of
+/// them, and [`ack_alert`], which needs one monitor's inside its own
+/// transaction -- because the *shape* of an [`AlertAsset`] is the same answer
+/// to the same question and two copies of the mapping would be two places for
+/// a fourth field to be forgotten. Generic over the executor for
+/// `activity::record_with`'s reason: the ack reads this in the transaction it
+/// is about to write in, and the list does not have one.
+///
+/// A monitor with no watched assets is simply absent from the map, which is
+/// what lets both callers spell "watches nothing" as an empty list rather than
+/// as a special case.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+async fn watched_assets<'e, E>(
+    executor: E,
+    monitors: &[String],
+) -> Result<HashMap<String, Vec<AlertAsset>>, IpcError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let mut watching: HashMap<String, Vec<AlertAsset>> = HashMap::new();
+    for row in sqlx::query(ALERT_ASSETS)
+        .bind(monitors)
+        .bind(MONITORED_BY)
+        .fetch_all(executor)
+        .await?
+    {
+        watching
+            .entry(row.try_get("monitor_id")?)
+            .or_default()
+            .push(AlertAsset {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                path: row.try_get("path")?,
+            });
+    }
+    Ok(watching)
+}
 
 /// Every open alert in the estate, newest first (issue #444).
 ///
@@ -2264,22 +2456,7 @@ pub async fn open_alerts(pool: &PgPool) -> Result<Vec<OpenAlert>, IpcError> {
         .iter()
         .map(|row| row.try_get::<String, _>("entity_id"))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut watching: HashMap<String, Vec<AlertAsset>> = HashMap::new();
-    for row in sqlx::query(ALERT_ASSETS)
-        .bind(&monitors)
-        .bind(MONITORED_BY)
-        .fetch_all(pool)
-        .await?
-    {
-        watching
-            .entry(row.try_get("monitor_id")?)
-            .or_default()
-            .push(AlertAsset {
-                id: row.try_get("id")?,
-                name: row.try_get("name")?,
-                path: row.try_get("path")?,
-            });
-    }
+    let mut watching = watched_assets(pool, &monitors).await?;
 
     rows.iter()
         .map(|row| {

@@ -700,3 +700,129 @@ async fn a_run_reconciles_its_own_sources_monitors_only() {
         "and the source that did not run was not touched"
     );
 }
+
+// --- what recovery leaves on the asset (#446) --------------------------------
+
+/// One asset in the estate, and a confirmed `monitored-by` link to a monitor.
+///
+/// Written by hand rather than through `knobas_app::assets`, which this crate
+/// cannot depend on -- `tests/contexts.rs` in `knobas-core` makes the same
+/// trade for the same reason. The relation is the shared constant and not a
+/// literal, so a rename reaches this fixture.
+async fn watched_asset(pool: &PgPool, monitor_id: &str, name: &str, confirmed: bool) -> String {
+    let id = format!("asset:{name}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.asset (id, type_id, name) values ($1,'vm',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.link
+             (from_id, to_id, relation, origin, created_by, confirmed_at,
+              rule, rule_class, reason)
+         values ($1,$2,$3,'manual','user',
+                 case when $4 then now() end,
+                 case when $4 then null else 'branch_name_key' end,
+                 case when $4 then null else 'exact_key' end,
+                 case when $4 then null else 'a reason' end)",
+    )
+    .bind(monitor_id)
+    .bind(&id)
+    .bind(knobas_core::link::MONITORED_BY)
+    .bind(confirmed)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// One asset's history, newest first, as `(actor, verb)`.
+async fn history(pool: &PgPool, asset_id: &str) -> Vec<(String, String)> {
+    sqlx::query_as::<_, (String, String)>(
+        "select actor, verb from knobas.activity
+          where entity_id = $1 order by at desc, id desc",
+    )
+    .bind(asset_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Story 64: *"recovery to close the alert and remove an un-acked inbox item
+/// **with a history line**"* -- and the negative that makes it a rule rather
+/// than a habit: **opening** one writes nothing.
+///
+/// Three runs, and the history is read after each: up (nothing), down (an
+/// alert, and still nothing in the history), up again (one `recovered` line,
+/// by `sync:<source>`). Without the third assertion this would pass on an
+/// implementation that wrote a line on every reconcile.
+#[tokio::test]
+async fn recovery_writes_a_history_line_on_the_asset_and_opening_writes_none() {
+    let pool = pool("recovery_writes_a_histor").await;
+    let id = "kuma".to_owned();
+    let (src, corpus) = source(&id, &[Monitor::up("gitea")]);
+    let gitea = format!("{id}:gitea");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    let asset = watched_asset(&pool, &gitea, "hel1", true).await;
+    assert!(history(&pool, &asset).await.is_empty());
+
+    publishes(&corpus, Monitor::down("gitea"));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(open(&pool, &gitea).await.len(), 1, "the alert is open");
+    assert!(
+        history(&pool, &asset).await.is_empty(),
+        "an alert opening is not somebody's act, and the strip already says so"
+    );
+
+    publishes(&corpus, Monitor::up("gitea"));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert!(open(&pool, &gitea).await.is_empty(), "and it closed");
+    assert_eq!(
+        history(&pool, &asset).await,
+        vec![("sync:kuma".to_owned(), knobas_sync::alerts::VERB.to_owned())],
+        "what the alert row can no longer say, the asset's history does"
+    );
+}
+
+/// The line goes on the asset the monitor **is confirmed to watch**, and
+/// nowhere else.
+///
+/// Three assets and one recovery: one confirmed (a line), one whose link is a
+/// bare proposal (nothing), and one nothing links to at all (nothing). The
+/// proposal is the case a rule reading `knobas.link` instead of
+/// `knobas.confirmed_link` would get wrong, and it would be knobas writing a
+/// fact into somebody's history out of a guess (#41, #161).
+#[tokio::test]
+async fn the_recovery_line_lands_only_on_the_assets_the_monitor_is_confirmed_to_watch() {
+    let pool = pool("the_recovery_line_lands_").await;
+    let id = "kuma".to_owned();
+    let (src, corpus) = source(&id, &[Monitor::down("gitea"), Monitor::up("jira")]);
+    let gitea = format!("{id}:gitea");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    let confirmed = watched_asset(&pool, &gitea, "hel1", true).await;
+    let guessed = watched_asset(&pool, &gitea, "hel2", false).await;
+    // Watched by a monitor that is not the one recovering.
+    let elsewhere = watched_asset(&pool, &format!("{id}:jira"), "fsn1", true).await;
+
+    publishes(&corpus, Monitor::up("gitea"));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(history(&pool, &confirmed).await.len(), 1);
+    assert!(
+        history(&pool, &guessed).await.is_empty(),
+        "a proposed monitored-by link is a guess, not a fact to write down"
+    );
+    assert!(
+        history(&pool, &elsewhere).await.is_empty(),
+        "and an asset this monitor does not watch hears nothing"
+    );
+}
