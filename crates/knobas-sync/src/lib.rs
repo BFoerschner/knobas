@@ -709,6 +709,15 @@ async fn run_locked(
         // rather than for state -- the sweep has run, the tombstones are in,
         // and what is live here is this poll's answer. `attach` records why a
         // resolution is the sync's business at all.
+        //
+        // **Being inside this gate is a saved round trip, not a safety
+        // check**, `sweep_kinds`' clause above and its reason: `attach`'s own
+        // statement filters on `kind = 'monitor'`, and a source that declares
+        // no `monitor` kind cannot emit an item of one either -- the sink
+        // refuses an undeclared kind. So moving this line outside the `if`
+        // would change only whether a Jira poll issues one statement that
+        // matches nothing. `tests/attach.rs`' negative control says the same
+        // from the other side, and says which of the two guards it witnesses.
         attach::resolve(tx, source_id).await?;
     }
 

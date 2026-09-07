@@ -181,6 +181,36 @@ async fn attachments(pool: &PgPool) -> Vec<(String, String, String, bool)> {
     .collect()
 }
 
+/// Put monitor names on an asset that already exists -- what an import or a
+/// create does *after* the estate is in place.
+async fn names(pool: &PgPool, id: &str, monitors: &[&str]) {
+    sqlx::query("update knobas.asset set monitors = $2 where id = $1")
+        .bind(id)
+        .bind(monitors)
+        .execute(pool)
+        .await
+        .expect("the names are recorded");
+}
+
+/// Whether the mirror holds this entity as a tombstone.
+///
+/// Read as the raw join and not through `sync.live_item`, because what this
+/// asserts is the difference between the two: the `sync.item` row is still
+/// there and it is `knobas.entity.deleted_at` that has moved.
+async fn tombstoned(pool: &PgPool, entity_id: &str) -> bool {
+    sqlx::query(
+        "select entity.deleted_at is not null as gone
+           from sync.item item
+           join knobas.entity entity on entity.id = item.entity_id
+          where item.entity_id = $1",
+    )
+    .bind(entity_id)
+    .fetch_one(pool)
+    .await
+    .expect("the mirror still holds the row")
+    .get::<bool, _>("gone")
+}
+
 /// Stop publishing one monitor -- a Kuma pause, from `/metrics`.
 fn pauses(corpus: &Corpus, key: &str) {
     corpus.lock().unwrap().retain(|(k, _)| *k != key);
@@ -364,23 +394,39 @@ async fn a_proposal_over_the_same_pair_is_left_alone() {
     );
 }
 
-/// A monitor that has left the mirror attaches nothing.
+/// A monitor that has left the mirror attaches nothing, and the resume that
+/// brings it back is what draws the link.
 ///
-/// A pause takes a monitor out of `/metrics` entirely, so the sweep tombstones
-/// it -- and an asset naming it must not acquire an attachment to something
-/// knobas has just been told is gone. The name stays, and the resume that
-/// brings the monitor back is what draws the link.
+/// **The name arrives after the monitor is already tombstoned**, and that
+/// sequence is the whole test rather than a convenience. A pause takes a
+/// monitor out of `/metrics` entirely, so the sweep tombstones it while its
+/// `sync.item` row stays -- which means a resolution reading `sync.item`
+/// instead of `sync.live_item` would attach an asset to something knobas has
+/// just been told is gone, and would do it in silence. Adding the name *before*
+/// the pause cannot witness that: the poll before the pause would have drawn
+/// the link already, and the two readings would agree.
 #[tokio::test]
 async fn a_tombstoned_monitor_is_not_attached_and_a_resumed_one_is() {
     let pool = pool("a_tombstoned_monitor_is_").await;
     let (src, corpus) = source("kuma", &[("1", "canary"), ("2", "gitea")]);
-    asset(&pool, "asset:gitea", "knobas-gitea", &["gitea"]).await;
+    asset(&pool, "asset:gitea", "knobas-gitea", &[]).await;
 
+    // Mirrored, so the row exists -- and unnamed, so nothing is attached to it.
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert!(attachments(&pool).await.is_empty());
+
+    // Now the name, and now the pause: the sweep tombstones the entity and
+    // leaves the `sync.item` row where it is.
+    names(&pool, "asset:gitea", &["gitea"]).await;
     pauses(&corpus, "2");
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert!(
+        tombstoned(&pool, "kuma:2").await,
+        "the fixture must actually tombstone the monitor, or this proves nothing"
+    );
+    assert!(
         attachments(&pool).await.is_empty(),
-        "a paused monitor is not an attachment"
+        "a monitor knobas has just been told is gone is not an attachment"
     );
 
     publishes(&corpus, "2", "gitea");
@@ -457,10 +503,16 @@ async fn a_run_attaches_only_its_own_sources_monitors() {
 /// The negative control: a source that emits **no monitors** resolves nothing,
 /// however well the names would have matched.
 ///
-/// The gate is the descriptor's, and it is the one `samples` and `alerts`
-/// share -- so this asserts the resolution sits inside that gate and not
-/// beside it. Without the control, a resolution that ran for every source
-/// would pass every test above.
+/// What this witnesses is the read's own `kind = 'monitor'` filter, and it is
+/// worth being exact about which of the two guards that is. The resolution
+/// also sits inside `run_locked`'s descriptor gate -- the one `samples` and
+/// `alerts` share -- and **that gate is a saved round trip rather than a
+/// safety check**: a source that declares no `monitor` kind cannot emit an
+/// item of it either (the engine refuses an undeclared kind), so the filter
+/// below is what makes this true and moving the call outside the gate would
+/// leave every assertion in this file standing. `run_locked` says the same of
+/// its `!sweep_kinds.is_empty()`, verified the same way and written down for
+/// the same reason.
 #[tokio::test]
 async fn a_source_that_emits_no_monitors_attaches_nothing() {
     let pool = pool("a_source_that_emits_no_m").await;
