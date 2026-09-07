@@ -91,11 +91,11 @@ import {
   setNotificationKinds as realWrite,
   type InboxCategory,
   type InboxEntry,
-  type InboxItem,
   type NotificationClicked,
   type NotificationDraft as WireDraft,
 } from "../ipc/entity";
-import { DEFAULT_CTX, hashFor, router } from "../shell/router.svelte";
+import { router } from "../shell/router.svelte";
+import { addressOf } from "./address";
 
 /**
  * The key in a desktop notification's `extra` that carries where its click goes.
@@ -170,31 +170,6 @@ export interface Notifications {
   saw(items: InboxEntry[]): void;
   /** Subscribe to desktop notification clicks. Returns the teardown. */
   start(): () => void;
-}
-
-/**
- * Where a desktop notification's click goes.
- *
- * The kind-agnostic `#/entity/<id>` alias, which is what `InboxView`'s own
- * *Open* uses and for the reason recorded there: an item's `kind` is the
- * mirror's word and the router's kind segment is the view's.
- *
- * A credential expiry has no entity — its subject is a source — so its address
- * is the inbox itself. That is honest rather than incomplete: the item is
- * there, with its *Open in browser* and its snooze, and inventing a detail
- * address for a source would land on a 404.
- *
- * The room in the route is `DEFAULT_CTX` and is not read: `hashFor` drops it
- * for a detail address, and `router.go` parses the result against whichever
- * room the reader is standing in, so Escape still returns them there.
- */
-export function addressOf(item: InboxItem): string {
-  if (!item.entity_id) return hashFor({ view: "inbox", ctx: null });
-  return hashFor({
-    view: "room",
-    ctx: DEFAULT_CTX,
-    detail: { kind: null, entityId: item.entity_id },
-  });
 }
 
 /** The shape of Tauri's `listen`, narrowed to what the click channel reads. */

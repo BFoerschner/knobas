@@ -18,8 +18,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
 import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
+import { addressOf } from "./address";
 import {
-  addressOf,
   clickChannel,
   createNotifications,
   sendThrough,
@@ -584,4 +584,57 @@ test("an entity key with a hash and a slash in it survives the address", () => {
     "#/entity/gitea:acme%2Fpayouts%23144",
   );
   expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/inbox");
+});
+
+// -- the alert (#447) -------------------------------------------------------
+
+/**
+ * One alert line, as the backend derives it (`knobas_core::inbox`'s `alert!`):
+ * the **monitor** is the subject half of the key, the **asset** it watches is
+ * the entity, and the reason names the asset's whole path.
+ *
+ * The same fixture `inbox.test.svelte.ts` reads, deliberately — the two
+ * surfaces this category has are the inbox row and the desktop notification,
+ * and a fixture that differed between them is how the two addresses drifted
+ * apart in the first place.
+ */
+function alertEntry(monitor = "kuma:7", asset = "asset:hel1"): InboxEntry {
+  return {
+    item: {
+      key: `alert:${monitor}`,
+      category: "alert",
+      source_id: "kuma",
+      entity_id: asset,
+      kind: "asset",
+      title: "jira (tunnel)",
+      reason: "hel / hel1 is down",
+      occurred_at: "2026-09-07T09:00:00Z",
+      web_url: null,
+      snoozed_until: null,
+    },
+    actions: [],
+  };
+}
+
+/**
+ * **An alert's desktop notification opens the Tree at the affected asset**
+ * (spec #427 story 61), which is the address the inbox's own *Open* uses and
+ * not the `#/entity/<id>` room detail every other category opens.
+ *
+ * The click is asserted through as well as the draft: an address the store
+ * writes and never navigates to would be half a door.
+ */
+test("an alert's desktop notification opens the Tree at the affected asset", async () => {
+  const b = bench();
+  cleanup = b.store.start();
+  await b.primed(["alert"]);
+  b.store.saw([alertEntry()]);
+
+  const sent = b.calls.sent[0]!;
+  expect(sent.extra["address"], "an alert opens the Tree, not a room detail").toBe(
+    "#/asset/asset:hel1",
+  );
+
+  b.click(sent);
+  expect(b.calls.navigated).toEqual(["#/asset/asset:hel1"]);
 });

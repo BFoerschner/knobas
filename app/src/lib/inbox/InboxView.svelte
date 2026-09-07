@@ -23,10 +23,11 @@
   import Monogram from "../shell/Monogram.svelte";
   import { sourceMonogram } from "../shell/monogram";
   import { openExternal } from "../shell/open-external";
-  import { hashFor, type Router } from "../shell/router.svelte";
+  import type { Router } from "../shell/router.svelte";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import { drawable } from "./actions";
+  import { addressOf } from "./address";
   import { inbox as sharedInbox, snoozePresets, type Inbox } from "./inbox.svelte";
 
   let {
@@ -53,26 +54,14 @@
   /**
    * Open the entity behind an item.
    *
-   * Through `hashFor` rather than a template string: entity keys carry `#` and
-   * `/` (`acme/payouts#144`), and unencoded the first truncates the fragment at
-   * the browser level and the second reads as another path segment.
-   *
-   * The kind-agnostic `#/entity/<id>` alias, because an item's `kind` is the
-   * mirror's word and the router's kind segment is the view's — resolving the
-   * one from the other is `get_entity`'s job and it already does it.
+   * The rule is `addressOf`'s and is not repeated here: the desktop
+   * notification's click makes the reader the same promise this button does,
+   * and while the two computed their own addresses they disagreed about the
+   * alert (#447) — this one landed in the Tree and that one in a room detail.
    */
   function open(entry: InboxEntry) {
-    const entityId = entry.item.entity_id;
-    if (entityId === null) return;
-    // An alert's way in is the **Tree at the affected asset** (spec #427 story
-    // 61), not a room detail: its `entity_id` is the asset the monitor watches
-    // and `#/asset/<id>` re-opens the Tree at its path. Every other category's
-    // subject is a mirrored item, and a room detail is where those are read.
-    router.go(
-      entry.item.category === "alert"
-        ? hashFor({ view: "assets", tab: "tree", assetId: entityId })
-        : hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId } }),
-    );
+    if (entry.item.entity_id === null) return;
+    router.go(addressOf(entry.item));
   }
 
   async function openInBrowser(url: string) {
