@@ -1,6 +1,6 @@
 /**
- * Reading a note's markdown for the two things the editor draws: the chips,
- * and the `[[` being typed right now.
+ * Reading a note's markdown for the two things the editor draws — the chips,
+ * and the `[[` being typed right now — and writing the edits it makes to it.
  *
  * Pure, and a plain `.ts` because nothing here is reactive.
  *
@@ -131,10 +131,32 @@ export function insertRef(
   targetId: string,
 ): { body: string; caret: number } {
   const rest = body.slice(active.end);
-  const tail = rest.startsWith(CLOSE) ? rest.slice(CLOSE.length) : rest;
-  const written = `${OPEN}${targetId}${CLOSE}`;
+  const eaten = rest.startsWith(CLOSE) ? CLOSE.length : 0;
+  return replaceSpan(body, active.start, active.end + eaten, `${OPEN}${targetId}${CLOSE}`);
+}
+
+/**
+ * Write `written` over `[start, end)`, and say where the caret belongs.
+ *
+ * The caret rule is one rule for the whole editor: **just past what was
+ * written**, so typing continues after it rather than inside it. A completion
+ * lands past its `]]` ({@link insertRef}, which is this with the brackets
+ * worked out), a paste lands past the pasted text, and the reference a
+ * resolvable pasted URL turns into lands past its `]]` — three edits a reader
+ * makes to one body, none of which may leave the caret somewhere else.
+ *
+ * `start === end` is an insertion, which is what a paste with nothing selected
+ * is; a paste over a selection replaces it, which is what the platform's own
+ * paste does and the reason this takes a span rather than a point.
+ */
+export function replaceSpan(
+  body: string,
+  start: number,
+  end: number,
+  written: string,
+): { body: string; caret: number } {
   return {
-    body: body.slice(0, active.start) + written + tail,
-    caret: active.start + written.length,
+    body: body.slice(0, start) + written + body.slice(end),
+    caret: start + written.length,
   };
 }

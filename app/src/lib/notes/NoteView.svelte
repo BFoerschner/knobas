@@ -40,6 +40,7 @@
   import {
     deleteNote,
     getNote,
+    resolveUrl,
     saveNote,
     unlink,
     type LinkEntry,
@@ -50,13 +51,14 @@
   import LinkDialog from "../detail/LinkDialog.svelte";
   import LinksPanel from "../detail/LinksPanel.svelte";
   import { Session } from "../launcher/session.svelte";
+  import { pastedUrl } from "../launcher/url";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import NoteBody from "./NoteBody.svelte";
-  import { activeRef, insertRef, type ActiveRef } from "./note-body";
+  import { activeRef, insertRef, replaceSpan, type ActiveRef } from "./note-body";
 
   let {
     entityId,
@@ -297,14 +299,77 @@
   function complete(hit: SearchHit) {
     const area = editor;
     if (!area || !active) return;
-    const written = insertRef(area.value, active, hit.entity_id);
-    body = written.body;
-    area.value = written.body;
-    area.setSelectionRange(written.caret, written.caret);
+    write(area, insertRef(area.value, active, hit.entity_id));
     area.focus();
     active = null;
     session.set("");
+  }
+
+  /**
+   * Put an edit this component made into the body, the field and the caret.
+   *
+   * The textarea's `value` is written directly as well as through `body`
+   * because the caret is set in the same breath: `setSelectionRange` addresses
+   * the text the field holds *now*, and leaving the field to catch up on the
+   * next flush would put the caret at an offset into the previous body.
+   */
+  function write(area: HTMLTextAreaElement, edit: { body: string; caret: number }) {
+    body = edit.body;
+    area.value = edit.body;
+    area.setSelectionRange(edit.caret, edit.caret);
     schedule();
+  }
+
+  /* --------------------------------------------------------------- paste */
+
+  /**
+   * A pasted source URL becomes the entity's `[[ref]]` (spec #491 story 12).
+   *
+   * The note body is the one text input in knobas where this happens. Every
+   * other one — a comment, a section edit, the standup protocol, a worklog
+   * draft, the queue's amend — leaves a pasted URL alone, because what reaches
+   * a source has to be what the user typed (story 13). That is why this lives
+   * on the editor rather than in a shared action: the behaviour is the note's,
+   * and a directive would invite it onto fields that must not have it.
+   *
+   * **Two edits, not one.** The paste is written the instant it arrives, as
+   * the URL, exactly as the platform would have; the reference replaces it
+   * when the mirror answers. Waiting for the answer first would make a paste —
+   * the most ordinary thing a reader does — sit still for the length of a
+   * database read, and a resolver that failed would swallow it altogether. So
+   * a miss, a rejection and a link the mirror does not hold all leave the URL
+   * where it landed, which is the outcome the reader can see and edit.
+   *
+   * The swap is guarded on the span still holding the URL it was asked about.
+   * A reader who kept typing through the round trip has moved the text under
+   * it, and the honest answer there is to leave the paste as the text it
+   * already is rather than to splice a reference into a body that has changed.
+   */
+  async function onpaste(event: ClipboardEvent & { currentTarget: HTMLTextAreaElement }) {
+    const area = event.currentTarget;
+    const url = pastedUrl(event.clipboardData?.getData("text/plain") ?? "");
+    // Not a URL, so not this component's business: the platform pastes it,
+    // with its own handling of selections, line endings and undo.
+    if (url === null) return;
+    event.preventDefault();
+
+    const at = area.selectionStart;
+    write(area, replaceSpan(area.value, at, area.selectionEnd, url));
+    retarget(area);
+
+    const mine = token;
+    let match: Awaited<ReturnType<typeof resolveUrl>>;
+    try {
+      match = await resolveUrl(url);
+    } catch {
+      // A resolver that refused says nothing a reader can act on that the URL
+      // sitting in the body does not already say.
+      return;
+    }
+    if (mine !== token || match === null || editor !== area) return;
+    if (area.value.slice(at, at + url.length) !== url) return;
+    write(area, replaceSpan(area.value, at, at + url.length, `[[${match.entity_id}]]`));
+    retarget(area);
   }
 
   function onkeydown(event: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) {
@@ -460,6 +525,7 @@
             placeholder="Markdown. Type [[ to refer to anything knobas knows."
             oninput={ontype}
             onkeydown={onkeydown}
+            onpaste={(event) => void onpaste(event)}
             onclick={(event) => retarget(event.currentTarget)}
             onblur={() => void flush()}
           ></textarea>
