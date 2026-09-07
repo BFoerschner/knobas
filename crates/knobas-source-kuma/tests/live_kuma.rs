@@ -71,6 +71,11 @@ use knobas_source::{AuthMethod, Capability, Source, SourceError, SyncItem, Write
 const SCRATCH: &str = "knobas-live-scratch";
 const SCRATCH_URL: &str = "http://host.docker.internal:8299/";
 
+/// The monitor the **create** test makes, and the reason it is a second name:
+/// the create is the thing under test, so its monitor cannot be one the seed's
+/// helper put there. `monitors.json` names neither, so the seed sweeps both.
+const CREATED: &str = "knobas-live-created";
+
 /// The eight monitors `testenv/monitors.json` names.
 const SEEDED: [&str; 8] = [
     "knobas-teamcity",
@@ -189,19 +194,33 @@ fn kuma_monitor(args: &[&str]) {
 /// The Gitea live suite's `Litter` for the same reason: a suite that creates
 /// something in a shared environment and only removes it on the happy path
 /// ratchets that environment up on every failure.
-struct Scratch;
+///
+/// **It carries the name**, because one test in this file does not add its
+/// monitor through the seed's helper at all -- it adds it through the adapter,
+/// which is the thing under test (issue #453). What that test still needs is
+/// the removal, and a guard that only removed one fixed name would leave the
+/// other monitor behind on every failing run.
+struct Scratch(&'static str);
 
 impl Scratch {
     fn add() -> Self {
         kuma_monitor(&["add", SCRATCH, SCRATCH_URL]);
-        Self
+        Self(SCRATCH)
+    }
+
+    /// A guard over a monitor **this suite did not create through the seed**:
+    /// nothing is added here, and the `Drop` removes whatever is there under
+    /// that name.
+    fn removing(name: &'static str) -> Self {
+        Self(name)
     }
 }
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        let scratch = self.0;
         let output = Command::new("./kuma-monitor.sh")
-            .args(["delete", SCRATCH])
+            .args(["delete", scratch])
             .current_dir(testenv())
             .output();
         // A panic in `drop` during a panic aborts the process and takes the
@@ -211,10 +230,10 @@ impl Drop for Scratch {
         match output {
             Ok(done) if done.status.success() => {}
             Ok(done) => eprintln!(
-                "live_kuma: could not delete {SCRATCH}: {}",
+                "live_kuma: could not delete {scratch}: {}",
                 String::from_utf8_lossy(&done.stderr)
             ),
-            Err(error) => eprintln!("live_kuma: could not delete {SCRATCH}: {error}"),
+            Err(error) => eprintln!("live_kuma: could not delete {scratch}: {error}"),
         }
     }
 }
@@ -827,4 +846,118 @@ async fn a_refused_account_and_a_refused_write_are_different_faults() {
         other => panic!("expected Protocol, got {other:?}"),
     };
     assert!(message.contains("pauseMonitor"), "{message}");
+}
+
+/// **Create one, and watch Kuma publish it** -- issue #453's first criterion at
+/// the SPI seam, against the real server.
+///
+/// `write_op` is the whole of what is exercised here: the document this adapter
+/// composes is one Uptime Kuma 2.5.3 accepts, the `add` event is the one its
+/// `server.js` registers, and the id it answers with is the id the monitor
+/// really carries in `/metrics`. None of that can be asserted against the
+/// recording in `tests/contract.rs`, which is a scrape of a server that was
+/// never asked to create anything.
+///
+/// **The monitor is this suite's own and is deleted however the run ends.**
+/// The name is one `monitors.json` does not carry, so the seed sweeps whatever
+/// a killed run leaves; the URL is the canary's port, which is a host socket
+/// this environment already knows about and whose state is never asserted here.
+///
+/// **The receipt is checked against the mirror rather than trusted**, which is
+/// the assertion no unit test can make: `WriteReceipt::id` says what Kuma
+/// answered, and `kuma:<that id>` has to be the entity the next poll emits --
+/// otherwise the id knobas records for a withdrawn create points at nothing.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_answered() {
+    let env = env();
+    let source = env.writable();
+    // Armed **before** the create, `just kuma-live`'s own rule for the canary:
+    // a failure between the write landing and the guard existing would leave a
+    // monitor behind, which is the one thing this must not do.
+    let _litter = Scratch::removing(CREATED);
+    // And whatever a killed earlier run left under that name, so the assertion
+    // below is about the monitor this test made.
+    kuma_monitor(&["delete", CREATED]);
+
+    let receipt = source
+        .write(WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_roster("kuma"),
+            name: CREATED.to_owned(),
+            url: SCRATCH_URL.to_owned(),
+        })
+        .await
+        .expect("the account creates a monitor");
+    let minted = receipt
+        .remote_id
+        .expect("Uptime Kuma names the monitor it minted");
+    assert!(
+        minted.parse::<i64>().is_ok(),
+        "a monitor id is a number in Kuma's own spelling: {minted:?}"
+    );
+
+    let items = until(
+        source.as_ref(),
+        "the created monitor is published",
+        |items| items.iter().any(|item| item.title == CREATED),
+    )
+    .await;
+    let created = items
+        .iter()
+        .find(|item| item.title == CREATED)
+        .expect("the created monitor");
+    assert_eq!(
+        created.entity.to_string(),
+        format!("kuma:{minted}"),
+        "the receipt has to name the entity the next poll emits, or a withdrawn \
+         create's disclosure line points at nothing"
+    );
+    assert!(
+        !created.deleted,
+        "a monitor just created is not a tombstone"
+    );
+    assert_eq!(
+        created.payload.get("url").and_then(|u| u.as_str()),
+        Some(SCRATCH_URL),
+        "the URL knobas asked for is the URL Kuma is checking: {:?}",
+        created.payload
+    );
+    assert_eq!(
+        created.payload.get("type").and_then(|t| t.as_str()),
+        Some("http"),
+        "a monitor of a URL is an HTTP check: {:?}",
+        created.payload
+    );
+
+    // The refusals, against the same server: a target that is not this
+    // source's roster, and a URL an HTTP check cannot fetch. Both are refused
+    // by the adapter before Kuma is asked, so neither creates anything -- and
+    // the exact-set assertion at the top of this file is what would catch it
+    // if one did.
+    for refused in [
+        WriteOp::CreateMonitor {
+            entity: created.entity.to_string(),
+            name: "knobas-live-never".to_owned(),
+            url: SCRATCH_URL.to_owned(),
+        },
+        WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_roster("kuma"),
+            name: "knobas-live-never".to_owned(),
+            url: "postgres://127.0.0.1:5432/knobas".to_owned(),
+        },
+    ] {
+        assert!(
+            matches!(
+                source.write(refused).await,
+                Err(SourceError::Protocol { .. })
+            ),
+            "a create knobas cannot deliver must not reach Kuma"
+        );
+    }
+    let (after, _) = full_sync(source.as_ref()).await;
+    assert!(
+        !after.iter().any(|item| item.title == "knobas-live-never"),
+        "a refused create left a monitor behind: {:?}",
+        after.iter().map(|i| i.title.as_str()).collect::<Vec<_>>()
+    );
 }

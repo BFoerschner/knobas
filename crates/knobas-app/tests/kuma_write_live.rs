@@ -109,40 +109,59 @@ fn testenv() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testenv")
 }
 
-/// The scratch monitor, removed however the test ends.
-struct Scratch;
+/// One `./kuma-monitor.sh` invocation, which is how this suite writes to Kuma
+/// **outside** the path it is testing.
+fn kuma_monitor(args: &[&str]) {
+    let output = Command::new("./kuma-monitor.sh")
+        .args(args)
+        .current_dir(testenv())
+        .output()
+        .expect("testenv/kuma-monitor.sh runs (is docker up?)");
+    assert!(
+        output.status.success(),
+        "kuma-monitor.sh {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A monitor this suite owns, removed however the test ends.
+///
+/// **It carries the name**, because one test here does not add its monitor
+/// through the seed's helper at all -- it adds it through the write queue,
+/// which is the thing under test (issue #453). What that test still needs is
+/// the removal, and a guard that only removed one fixed name would leave the
+/// other monitor behind on every failing run.
+struct Scratch(&'static str);
 
 impl Scratch {
     fn add() -> Self {
-        let output = Command::new("./kuma-monitor.sh")
-            .args(["add", SCRATCH, SCRATCH_URL])
-            .current_dir(testenv())
-            .output()
-            .expect("testenv/kuma-monitor.sh runs (is docker up?)");
-        assert!(
-            output.status.success(),
-            "kuma-monitor.sh add failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Self
+        kuma_monitor(&["add", SCRATCH, SCRATCH_URL]);
+        Self(SCRATCH)
+    }
+
+    /// A guard over a monitor this suite did not create through the seed:
+    /// nothing is added, and the `Drop` removes whatever is there.
+    fn removing(name: &'static str) -> Self {
+        Self(name)
     }
 }
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        let scratch = self.0;
         // Reports rather than asserts: a panic in `drop` during a panic aborts
         // the process and takes the real failure's message with it.
         match Command::new("./kuma-monitor.sh")
-            .args(["delete", SCRATCH])
+            .args(["delete", scratch])
             .current_dir(testenv())
             .output()
         {
             Ok(done) if done.status.success() => {}
             Ok(done) => eprintln!(
-                "kuma_write_live: could not delete {SCRATCH}: {}",
+                "kuma_write_live: could not delete {scratch}: {}",
                 String::from_utf8_lossy(&done.stderr)
             ),
-            Err(error) => eprintln!("kuma_write_live: could not delete {SCRATCH}: {error}"),
+            Err(error) => eprintln!("kuma_write_live: could not delete {scratch}: {error}"),
         }
     }
 }
@@ -382,6 +401,166 @@ async fn a_pause_on_a_source_with_only_its_api_key_is_refused_before_it_is_queue
     assert!(
         open.is_empty(),
         "a refused write must leave no row behind: {open:?}"
+    );
+
+    state.scheduler.shutdown().await;
+}
+
+/// The estate as provisioned, so the create below is *for the local Gitea
+/// asset* the ticket names rather than for one this test invented.
+///
+/// `alert_chain_live.rs` reads the same bytes for the same reason: the file is
+/// the estate the products run on, and `asset:knobas-gitea` is a container in
+/// it with a route that reaches it (`route:notebook-gitea`).
+const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const GITEA_ASSET: &str = "asset:knobas-gitea";
+
+/// The monitor this test makes, through the shipped path. A name
+/// `testenv/monitors.json` does not carry, so the seed sweeps whatever a killed
+/// run leaves; the URL is the canary's port, a host socket this environment
+/// already knows about and whose state is never asserted here.
+const CREATED: &str = "knobas-write-created";
+
+/// `assets::get`'s *monitoring* list for one asset, as the pane draws it.
+async fn attached(pool: &PgPool, asset_id: &str) -> Vec<(String, String)> {
+    knobas_app::assets::get(pool, asset_id)
+        .await
+        .expect("the pane reads the asset")
+        .monitoring
+        .into_iter()
+        .map(|watch| (watch.name, watch.entity_id))
+        .collect()
+}
+
+/// **The criterion, end to end**: an HTTP monitor created for the local Gitea
+/// asset, mirrored by the next poll, and listed in that asset's pane as
+/// attached -- then deleted through the seed's helper so the seeded list is
+/// restored.
+///
+/// Every step is the shipped path and the seams above the adapter are what this
+/// adds. `assets::edit` with `AssetEdit::Monitors` is the first of the two
+/// writes the pane's dialog makes; `write_queue::submit` is the second, and it
+/// decodes the op, parses the roster, finds the source, reads that *instance's*
+/// write ops out of the keychain, writes the queue row and flushes it. Then a
+/// real poll of the real Kuma mirrors the monitor, `knobas_sync::attach`
+/// resolves the recorded name against it inside that run's transaction, and
+/// `assets::get` -- the pane's own read -- is what says the asset is watched.
+///
+/// **The import runs first**, so the asset this attaches to is the estate
+/// file's own `knobas-gitea` rather than a fixture: the ticket says *the local
+/// Gitea asset*, and an asset invented here would witness the plumbing without
+/// witnessing that it reaches the estate the model describes.
+///
+/// **The name is not one the estate file gives.** `estate.json` already names
+/// `gitea` on that asset, which the import resolves at once -- so a create
+/// under that name would be attached before this test wrote anything, and
+/// every assertion below would pass with the create deleted.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_monitor_created_through_the_write_queue_is_mirrored_and_attached_to_its_asset() {
+    let env = env();
+    let state = app(&env).await;
+    // Armed before anything is created, `Scratch`' rule: the guard has to
+    // outlive every way this can fail.
+    let _litter = Scratch::removing(CREATED);
+    // And whatever a killed earlier run left under that name.
+    kuma_monitor(&["delete", CREATED]);
+
+    let imported = knobas_app::assets::apply_import(&state.pool, ESTATE_FILE)
+        .await
+        .expect("the estate file imports into a fresh profile")
+        .value;
+    assert!(
+        imported.assets_created > 0,
+        "the estate file created nothing: {imported:?}"
+    );
+    let already = attached(&state.pool, GITEA_ASSET).await;
+    assert!(
+        already.iter().all(|(name, _)| name != CREATED),
+        "the estate file already names this monitor, so the test would prove nothing: {already:?}"
+    );
+
+    // The pane's first write: the name, which is what attaches the monitor.
+    knobas_app::assets::edit(
+        &state.pool,
+        GITEA_ASSET,
+        &[knobas_app::assets::AssetEdit::Monitors {
+            added: vec![CREATED.to_owned()],
+        }],
+    )
+    .await
+    .expect("the monitor's name is recorded on the asset");
+
+    // And the second: the create, through the queue.
+    let queued = write_queue::submit(
+        &state,
+        json!({
+            "CreateMonitor": {
+                "entity": knobas_source::monitor_roster(KUMA),
+                "name": CREATED,
+                "url": SCRATCH_URL,
+            }
+        }),
+    )
+    .await
+    .expect("the queue takes a create for a source with an account");
+    assert_eq!(queued.op, "create_monitor");
+    assert_eq!(queued.source_id, KUMA);
+    assert_eq!(queued.entity_id, format!("{KUMA}:monitors"));
+
+    // Settled, not merely queued: a row still `pending` here would pass every
+    // assertion below by accident only if Kuma had the monitor anyway, and
+    // saying so now names the failure rather than leaving a timeout to.
+    let settled = knobas_core::write_queue::get(&state.pool, queued.id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the queue row exists");
+    assert_eq!(
+        settled.state,
+        WriteState::Sent,
+        "the create did not leave the queue: {:?}",
+        settled.detail
+    );
+    // The receipt, read off the row: `QueuedWrite` does not carry it (nothing
+    // on the bridge needs it), and it is what a withdrawn create's disclosure
+    // line would point at.
+    let minted: String = sqlx::query_scalar(
+        "select remote_id from knobas.write_queue where id = $1 and remote_id is not null",
+    )
+    .bind(queued.id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("Uptime Kuma named the monitor it minted");
+
+    // The next poll mirrors it, and the resolution inside that run attaches it.
+    let deadline = Instant::now() + LEG_BUDGET;
+    let watching = loop {
+        sync(&state, KUMA).await;
+        let watching = attached(&state.pool, GITEA_ASSET).await;
+        if watching.iter().any(|(name, _)| name == CREATED) {
+            break watching;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the pane never listed the created monitor within {LEG_BUDGET:?}: {watching:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+
+    let (_, entity) = watching
+        .iter()
+        .find(|(name, _)| name == CREATED)
+        .expect("the created monitor is attached");
+    assert_eq!(
+        entity,
+        &format!("{KUMA}:{minted}"),
+        "the pane must list the monitor the receipt named"
+    );
+    // The estate file's own `gitea` monitor is still attached: the resolution
+    // adds, and a rule that assigned would have taken the import's link away.
+    assert!(
+        watching.iter().any(|(name, _)| name == "gitea"),
+        "the import's own attachment was lost: {watching:?}"
     );
 
     state.scheduler.shutdown().await;
