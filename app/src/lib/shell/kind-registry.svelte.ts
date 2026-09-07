@@ -57,6 +57,17 @@ export interface KindRegistry {
    * every other read here fails in.
    */
   writeOps(adapterKind: string): string[];
+  /**
+   * Whether this adapter can carry a second credential (#452) —
+   * `SourceDescriptor.accepts_account`.
+   *
+   * What the re-enter strip draws its optional account fields from, and the
+   * reason it is here rather than in the component: a form that decided this
+   * for itself would be the per-adapter table §3a forbids. `false` for an
+   * adapter kind the registry has not heard of, which is the same drawing an
+   * unread registry gets.
+   */
+  acceptsAccount(adapterKind: string): boolean;
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
 }
@@ -84,6 +95,10 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
     writeOps(adapterKind: string) {
       const adapter = state.adapters.find((entry) => entry.adapter_kind === adapterKind);
       return adapter?.write_ops ?? [];
+    },
+    acceptsAccount(adapterKind: string) {
+      const adapter = state.adapters.find((entry) => entry.adapter_kind === adapterKind);
+      return adapter?.accepts_account ?? false;
     },
     load() {
       if (loaded) return Promise.resolve();

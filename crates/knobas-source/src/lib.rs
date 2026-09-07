@@ -46,6 +46,27 @@ pub struct SourceDescriptor {
     /// offers these; the chosen method's secret goes to the OS keychain and
     /// never into [`Self::config_schema`]'s config blob.
     pub auth_methods: Vec<AuthMethod>,
+    /// Whether this adapter can use a **second** credential beside the one
+    /// [`auth_methods`](Self::auth_methods) names: an optional username and
+    /// password, stored in the same keychain item
+    /// ([`instance::Account`], M4.1, issue #452).
+    ///
+    /// `false` for every adapter but Uptime Kuma, and it is a *declaration*
+    /// rather than a fact the forms could work out: what the Add-source and
+    /// re-enter forms need to know is whether to draw the optional account
+    /// fields at all, and the alternative to declaring it is a
+    /// `adapter_kind === "kuma"` in a Svelte component -- the per-adapter
+    /// table §3a exists to forbid.
+    ///
+    /// **Not an [`AuthMethod`]**, for the reason `instance::Account` argues:
+    /// the auth method is how a source authenticates its ordinary traffic,
+    /// one per source, and offering the account as a rival method would let a
+    /// reader pick it *instead of* the key.
+    ///
+    /// `#[serde(default)]`, so a descriptor built by a peer that predates this
+    /// still decodes -- as the adapter with one credential it was.
+    #[serde(default)]
+    pub accepts_account: bool,
     /// Which [`WriteOp`]s this adapter supports, as the stable snake_case
     /// identifiers documented on that enum (`Comment` → `"comment"`).
     ///
@@ -541,6 +562,26 @@ pub enum WriteOp {
         base_version: i64,
         body: String,
     },
+    /// Identifier `"pause_monitor"`. Stop a monitor checking (M4.1, issue
+    /// #452). `entity` is the **monitor** (`kuma:8`).
+    ///
+    /// No second field, and the absence is the decision: Uptime Kuma's
+    /// `pauseMonitor` takes a monitor id and nothing else -- no duration, no
+    /// reason, no note. A `until` or `reason` here would be a field knobas
+    /// asks a reader for and then throws away, and a *silence for an hour*
+    /// that knobas kept locally would be a scheduler this milestone does not
+    /// have (spec #427, *Out of scope*).
+    PauseMonitor { entity: String },
+    /// Identifier `"resume_monitor"`. Start a paused monitor checking again
+    /// (M4.1, issue #452). `entity` is the **monitor**.
+    ///
+    /// The pair of [`PauseMonitor`](WriteOp::PauseMonitor) and not one op with
+    /// a flag: an action bar renders one button per identifier, a queue row
+    /// records which act is owed in its `op` column, and *pause* and *resume*
+    /// are two acts a reader chooses between rather than one act with an
+    /// argument. It is also what lets a descriptor offer one without the
+    /// other, which is what a source with a read-only account would declare.
+    ResumeMonitor { entity: String },
 }
 
 impl WriteOp {
@@ -575,6 +616,8 @@ impl WriteOp {
             WriteOp::LogWork { .. } => "log_work",
             WriteOp::CreatePage { .. } => "create_page",
             WriteOp::UpdatePage { .. } => "update_page",
+            WriteOp::PauseMonitor { .. } => "pause_monitor",
+            WriteOp::ResumeMonitor { .. } => "resume_monitor",
         }
     }
 }
@@ -693,6 +736,7 @@ mod tests {
             capabilities: vec![Capability::Search, Capability::Write, Capability::Webhooks],
             adapter_version: "0.1.0".into(),
             auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
+            accepts_account: false,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -903,6 +947,12 @@ mod tests {
                 base_version: 3,
                 body: "<h2>Backoff policy</h2><p>base 30 s.</p>".into(),
             },
+            WriteOp::PauseMonitor {
+                entity: "kuma:8".into(),
+            },
+            WriteOp::ResumeMonitor {
+                entity: "kuma:8".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -916,7 +966,9 @@ mod tests {
                 | WriteOp::RerunBuild { .. }
                 | WriteOp::LogWork { .. }
                 | WriteOp::CreatePage { .. }
-                | WriteOp::UpdatePage { .. } => {}
+                | WriteOp::UpdatePage { .. }
+                | WriteOp::PauseMonitor { .. }
+                | WriteOp::ResumeMonitor { .. } => {}
             }
         }
         probes
@@ -966,7 +1018,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 11, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 13, "a variant lost its probe in every_write_op");
     }
 
     /// ADR-0004: a failure that came from a response carries the **status** it

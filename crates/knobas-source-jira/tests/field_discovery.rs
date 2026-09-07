@@ -87,6 +87,7 @@ fn source(base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some("a-personal-access-token".to_owned()),
+        account: None,
         config,
     }) {
         Ok(s) => s,

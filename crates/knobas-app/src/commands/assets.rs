@@ -527,11 +527,60 @@ pub async fn set_monitoring_settings(
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
 /// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
 #[tauri::command]
-pub async fn monitor_roster(
+pub async fn monitor_roster<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<assets::MonitorRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::monitor_roster(&pool).await
+    let mut rows = assets::monitor_roster(&pool).await?;
+    let offered = monitor_write_ops(&app, &rows).await?;
+    assets::offer_actions(&mut rows, &offered);
+    Ok(rows)
+}
+
+/// The write ops each source in `rows` offers, for `MonitorRow::actions`
+/// (issue #452).
+///
+/// **Per source and not per row**: one keychain read for a roster of a hundred
+/// monitors watched by one Kuma, because the answer is a property of the
+/// source. `instance_write_ops` is what asks, and it asks the *instance* --
+/// for Uptime Kuma the answer depends on whether that source's keychain item
+/// carries an account, so a template descriptor could not give it.
+///
+/// **An empty answer before the sync engine is up**, rather than a refusal.
+/// The roster itself needs only the pool, so the tab draws during bring-up;
+/// what it does not have then is a keychain, and a tab with no buttons is the
+/// right drawing for a moment when knobas cannot say which buttons there are.
+///
+/// A keychain that *is* there and refuses reads the same way, and that is
+/// [`instance_write_ops`](crate::sources::crud::instance_write_ops)' doing
+/// rather than this loop's: a locked keychain must not cost the reader the
+/// whole Monitors tab, which needs nothing from it but two buttons.
+async fn monitor_write_ops<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    rows: &[assets::MonitorRow],
+) -> Result<std::collections::HashMap<String, Vec<String>>, IpcError> {
+    let Ok(state) = crate::sources::state(app) else {
+        return Ok(std::collections::HashMap::new());
+    };
+    let mut offered = std::collections::HashMap::new();
+    for source_id in rows
+        .iter()
+        .map(|row| row.source_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let Some(cfg) = knobas_sync::config::get(&state.pool, source_id)
+            .await
+            .map_err(IpcError::internal)?
+        else {
+            continue;
+        };
+        let ops =
+            crate::sources::crud::instance_write_ops(&state.secrets, state.registry.as_ref(), &cfg)
+                .await;
+        offered.insert(source_id.to_owned(), ops);
+    }
+    Ok(offered)
 }
 
 /// The Monitors tab's *Not monitored* roster: every asset with no confirmed
@@ -1028,6 +1077,7 @@ mod tests {
                 name: "gitea".to_owned(),
                 path: Some("notebook / knobas-stack".to_owned()),
             }],
+            actions: vec!["pause_monitor".to_owned()],
             samples: vec![assets::MonitorSample {
                 taken_at: "2026-09-07T08:59:00Z".parse().expect("an instant"),
                 state: Some("up".to_owned()),
@@ -1052,6 +1102,7 @@ mod tests {
                 "web_url",
                 "tombstoned",
                 "assets",
+                "actions",
                 "samples",
             ],
         );

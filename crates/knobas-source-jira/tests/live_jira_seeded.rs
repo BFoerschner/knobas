@@ -368,6 +368,7 @@ impl Seeded {
             base_url: base_url.to_owned(),
             auth: Some(auth),
             secret: Some(secret.to_owned()),
+            account: None,
             config,
         }) {
             Ok(s) => s,
@@ -1512,6 +1513,7 @@ async fn the_search_that_reads_as_an_empty_corpus_is_never_the_first_call() {
         base_url: seeded.url.clone(),
         auth: Some(AuthMethod::Pat),
         secret: Some(bad_token()),
+        account: None,
         config: serde_json::json!({}),
     };
     instance.config["username"] = serde_json::Value::String(seeded.user.clone());

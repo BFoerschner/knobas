@@ -183,13 +183,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
     let store = MemoryStore::new();
     if with_secret {
         store
-            .put(
-                &id,
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "tok".into(),
-                },
-            )
+            .put(&id, &Secret::just(AuthMethod::Pat, "tok"))
             .unwrap();
     }
     let events = Arc::new(Recorder::default());

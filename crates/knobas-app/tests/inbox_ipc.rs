@@ -99,6 +99,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         capabilities: Vec::new(),
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
         write_ops: write_ops.to_vec(),
         entity_kinds: vec![KindInfo {
             id: "pr".to_owned(),
@@ -310,13 +311,7 @@ async fn harness() -> Harness {
     let secrets = MemoryStore::new();
     for id in ["forge", "tracker", "wiki"] {
         secrets
-            .put(
-                id,
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "tok".to_owned(),
-                },
-            )
+            .put(id, &Secret::just(AuthMethod::Pat, "tok"))
             .unwrap();
     }
 

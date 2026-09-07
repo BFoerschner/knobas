@@ -101,6 +101,7 @@ pub fn instance(base_url: String, key: &str) -> SourceInstance {
         base_url,
         auth: Some(AuthMethod::ApiToken),
         secret: Some(key.to_owned()),
+        account: None,
         config: serde_json::json!({}),
     }
 }
@@ -108,4 +109,22 @@ pub fn instance(base_url: String, key: &str) -> SourceInstance {
 /// The adapter under test, built against the fake.
 pub fn adapter(base_url: String, key: &str) -> Box<dyn Source> {
     knobas_source_kuma::build(instance(base_url, key)).expect("the adapter builds")
+}
+
+/// The same source **with an account** beside its key (issue #452) -- the
+/// configuration that declares the write ops.
+///
+/// The account is never used against this fake: `/metrics` is all the
+/// recording serves, and the socket.io channel is witnessed against the real
+/// container by `just kuma-live`. What it is here for is the *declaration*,
+/// which is a property of the built instance and needs no server at all.
+pub fn adapter_with_account(base_url: String, key: &str) -> Box<dyn Source> {
+    let with_account = SourceInstance {
+        account: Some(knobas_source::instance::Account {
+            username: "knobas".to_owned(),
+            password: "knobas-dev".to_owned(),
+        }),
+        ..instance(base_url, key)
+    };
+    knobas_source_kuma::build(with_account).expect("the adapter builds")
 }

@@ -122,6 +122,7 @@ fn descriptor() -> SourceDescriptor {
         capabilities: vec![knobas_source::Capability::Write],
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
         write_ops: vec!["comment".to_owned(), "log_work".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "ticket".to_owned(),
@@ -184,13 +185,7 @@ async fn app(name: &str) -> (SourcesState, Arc<Wrote>) {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(
-            JIRA,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: "a-token".to_owned(),
-            },
-        )
+        .put(JIRA, &Secret::just(AuthMethod::Pat, "a-token"))
         .expect("the credential is stored");
 
     knobas_sync::config::insert(

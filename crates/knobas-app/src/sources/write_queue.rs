@@ -78,7 +78,13 @@ pub(crate) async fn queue(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<(QueuedWrite, String), IpcError> {
-    let (op, source_id) = submittable(&state.pool, state.registry.as_ref(), payload).await?;
+    let (op, source_id) = submittable(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        payload,
+    )
+    .await?;
     let queued = knobas_sync::write_queue::queue(state.scheduler.deps(), &source_id, op)
         .await
         .map_err(IpcError::internal)?;
@@ -133,6 +139,7 @@ pub(crate) async fn flush(
 /// As [`submit`].
 pub(crate) async fn submittable(
     pool: &sqlx::PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     payload: serde_json::Value,
 ) -> Result<(WriteOp, String), IpcError> {
@@ -152,13 +159,23 @@ pub(crate) async fn submittable(
             ))
         })?;
 
-    // The adapter's **template** descriptor, which is what `list_adapters`
-    // serves and what the action bar is rendered from. `write_ops` is a
-    // property of the adapter kind rather than of the instance, so this needs
-    // no secret and no built adapter -- and a write for a source whose
-    // credential is gone is exactly one the queue should be keeping, not one
-    // this should refuse for want of a keychain entry.
-    let declared: Vec<String> = registry
+    // **What the adapter kind offers, plus what this instance offers.**
+    //
+    // The template is what `list_adapters` serves and what most action bars
+    // are rendered from, and for every source but one it is the whole answer.
+    // It is also the half that must stay: it needs no secret, and a write for
+    // a source whose credential is gone is exactly one the queue should be
+    // keeping rather than one this should refuse for want of a keychain entry.
+    //
+    // Since issue #452 it is no longer the whole answer. An Uptime Kuma's
+    // `pause_monitor` is a property of the *instance* -- it exists only when
+    // that source's keychain item carries an account -- so a check against the
+    // template alone would refuse every pause the Monitors tab correctly
+    // offered. The union is what keeps both readings: an op is refused here
+    // only when **neither** the kind nor the instance has ever heard of it,
+    // which is the case this refusal exists for (story 13: an op absent from
+    // `write_ops` is one that should never have been offered).
+    let template: Vec<String> = registry
         .descriptors()
         .into_iter()
         .find(|d| d.adapter_kind == source.adapter_kind)
@@ -169,6 +186,12 @@ pub(crate) async fn submittable(
                 source.id, source.adapter_kind
             ))
         })?;
+    let mut declared = template;
+    for offered in crate::sources::crud::instance_write_ops(secrets, registry, &source).await {
+        if !declared.contains(&offered) {
+            declared.push(offered);
+        }
+    }
     if !declared.iter().any(|o| o == op.identifier()) {
         return Err(IpcError::invalid(format!(
             "source {:?} does not offer {:?} -- it offers {declared:?}",
@@ -377,6 +400,22 @@ mod tests {
 
     /// A source of `kind`, so `submittable` has something to find.
     async fn configured(pool: &sqlx::PgPool, id: &str, kind: &str) {
+        configured_with(pool, id, kind, knobas_source::AuthMethod::Pat).await;
+    }
+
+    /// The same, with the auth method spelled out.
+    ///
+    /// It matters for exactly one adapter: `submittable` reads an *instance's*
+    /// write ops by building it (issue #452), and Uptime Kuma refuses to build
+    /// against any method but `ApiToken` -- so a Kuma row carrying `Pat` would
+    /// answer "offers nothing" for a reason that has nothing to do with the
+    /// account this test is about.
+    async fn configured_with(
+        pool: &sqlx::PgPool,
+        id: &str,
+        kind: &str,
+        auth: knobas_source::AuthMethod,
+    ) {
         sqlx::query("delete from knobas.source_config where id = $1")
             .bind(id)
             .execute(pool)
@@ -389,7 +428,7 @@ mod tests {
                 adapter_kind: kind.to_owned(),
                 display_name: id.to_owned(),
                 base_url: "http://127.0.0.1:1".to_owned(),
-                auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::Pat),
+                auth_kind: knobas_sync::config::AuthKind::Method(auth),
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
@@ -403,6 +442,15 @@ mod tests {
         crate::sources::Registry::builtin()
     }
 
+    /// The store `submittable` reads an instance's own write ops through
+    /// (issue #452). Empty, which is the honest state for these fixtures: they
+    /// configure a source row and no credential, and what that proves is that
+    /// the *template* half of the union still carries every write these
+    /// adapters have always taken.
+    fn secrets() -> std::sync::Arc<dyn knobas_secrets::SecretStore> {
+        std::sync::Arc::new(knobas_secrets::MemoryStore::new())
+    }
+
     /// The happy path, and the reason there is no `source_id` argument: the
     /// target's namespace **is** the source, so one string decides both what is
     /// written and who is asked.
@@ -413,6 +461,7 @@ mod tests {
         configured(&pool, &id, "jira").await;
         let (op, source) = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Transition": { "entity": format!("{id}:PAY-231"), "status": "In Review" }
@@ -430,15 +479,80 @@ mod tests {
     #[tokio::test]
     async fn a_payload_that_is_not_a_write_op_is_refused_before_anything_is_queued() {
         let pool = pool().await;
-        let error = submittable(&pool, &registry(), serde_json::json!({ "Nonsense": {} }))
-            .await
-            .expect_err("not a write op");
+        let error = submittable(
+            &pool,
+            &secrets(),
+            &registry(),
+            serde_json::json!({ "Nonsense": {} }),
+        )
+        .await
+        .expect_err("not a write op");
         assert_eq!(error.code, crate::IpcErrorCode::Invalid);
         assert!(
             error.message.contains("not a write operation"),
             "{}",
             error.message
         );
+    }
+
+    /// **The union, and why it has to be one** (issue #452).
+    ///
+    /// `pause_monitor` is on no adapter *kind*'s template -- an Uptime Kuma
+    /// declares it only when its own keychain item carries an account -- so a
+    /// check against `list_adapters` alone would refuse at the button every
+    /// pause the Monitors tab correctly offered. Both directions are asserted
+    /// here, against one source, with the credential as the only difference.
+    #[tokio::test]
+    async fn a_pause_is_queueable_exactly_when_the_source_has_an_account() {
+        use knobas_secrets::SecretStore as _;
+        let pool = pool().await;
+        let id = unique("kuma-submit");
+        configured_with(
+            &pool,
+            &id,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let payload = serde_json::json!({ "PauseMonitor": { "entity": format!("{id}:8") } });
+
+        // Key only: the instance declares nothing to write, the template
+        // declares nothing to write, and the refusal names the op.
+        let store = knobas_secrets::MemoryStore::new();
+        store
+            .put(
+                &id,
+                &knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, "uk1_metrics"),
+            )
+            .unwrap();
+        let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(store);
+        let error = submittable(&pool, &secrets, &registry(), payload.clone())
+            .await
+            .expect_err("a Kuma with no account offers no pause");
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        assert!(error.message.contains("pause_monitor"), "{}", error.message);
+
+        // The same source with an account beside the key: queueable.
+        let store = knobas_secrets::MemoryStore::new();
+        store
+            .put(
+                &id,
+                &knobas_secrets::Secret {
+                    kind: knobas_source::AuthMethod::ApiToken,
+                    value: "uk1_metrics".to_owned(),
+                    account: Some(knobas_source::instance::Account {
+                        username: "knobas".to_owned(),
+                        password: "knobas-dev".to_owned(),
+                    }),
+                },
+            )
+            .unwrap();
+        let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(store);
+        let (op, source) = submittable(&pool, &secrets, &registry(), payload)
+            .await
+            .expect("a Kuma with an account offers pause_monitor");
+        assert_eq!(op.identifier(), "pause_monitor");
+        assert_eq!(source, id);
     }
 
     /// A target that is not an entity id names nothing the queue could ever
@@ -448,6 +562,7 @@ mod tests {
         let pool = pool().await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({ "Comment": { "entity": "PAY-231", "body": "hi" } }),
         )
@@ -467,6 +582,7 @@ mod tests {
         let pool = pool().await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Comment": { "entity": "jira-not-configured:PAY-231", "body": "hi" }
@@ -497,6 +613,7 @@ mod tests {
         configured(&pool, &id, "teamcity").await;
         let error = submittable(
             &pool,
+            &secrets(),
             &registry(),
             serde_json::json!({
                 "Comment": { "entity": format!("{id}:build:1187"), "body": "hi" }

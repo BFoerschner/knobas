@@ -176,7 +176,9 @@ impl Source for TeamCitySource {
             | WriteOp::Approve { .. }
             | WriteOp::LogWork { .. }
             | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),
@@ -198,6 +200,7 @@ mod tests {
             base_url: "https://ci.example.com".to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some("an-access-token".to_owned()),
+            account: None,
             config,
         }
     }

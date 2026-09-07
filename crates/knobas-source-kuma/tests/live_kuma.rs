@@ -58,8 +58,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use knobas_source::contract::VecSink;
-use knobas_source::instance::SourceInstance;
-use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
+use knobas_source::instance::{Account, SourceInstance};
+use knobas_source::{AuthMethod, Capability, Source, SourceError, SyncItem, WriteOp};
 
 /// The monitor this suite owns, and the only thing in Kuma that is its own.
 ///
@@ -83,10 +83,15 @@ const SEEDED: [&str; 8] = [
     "canary",
 ];
 
-/// Where the seeded container is, and the key to read it with.
+/// Where the seeded container is, the key to read it with, and the account to
+/// write with.
 struct Env {
     url: String,
     key: String,
+    /// The Kuma admin account (`knobas` / `knobas-dev`), which is what the
+    /// write half needs: the API key opens `/metrics` and cannot log in to
+    /// socket.io at all (issue #452).
+    account: Account,
 }
 
 /// Read from the environment rather than hardcoded, so whatever names testenv
@@ -104,12 +109,39 @@ fn env() -> Env {
     Env {
         url: need("KNOBAS_KUMA_URL").trim_end_matches('/').to_owned(),
         key: need("KNOBAS_KUMA_API_KEY"),
+        // Demanded, not defaulted (issue #351's lesson applied to the write
+        // half): an account this suite fell back to would let the pause tests
+        // run against a Kuma whose admin is something else, fail on the login,
+        // and read as a broken adapter.
+        account: Account {
+            username: need("KNOBAS_KUMA_USER"),
+            password: need("KNOBAS_KUMA_PASSWORD"),
+        },
     }
 }
 
 impl Env {
     fn source(&self) -> Box<dyn Source> {
         self.source_with(&self.key)
+    }
+
+    /// The same source **with the account**, which is the one that can write.
+    fn writable(&self) -> Box<dyn Source> {
+        self.with_account(Some(self.account.clone()))
+    }
+
+    fn with_account(&self, account: Option<Account>) -> Box<dyn Source> {
+        knobas_source_kuma::build(SourceInstance {
+            id: "kuma".to_owned(),
+            kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+            display_name: "Uptime Kuma".to_owned(),
+            base_url: self.url.clone(),
+            auth: Some(AuthMethod::ApiToken),
+            secret: Some(self.key.clone()),
+            account,
+            config: serde_json::json!({}),
+        })
+        .expect("the adapter builds against the seeded container")
     }
 
     fn source_with(&self, key: &str) -> Box<dyn Source> {
@@ -120,6 +152,7 @@ impl Env {
             base_url: self.url.clone(),
             auth: Some(AuthMethod::ApiToken),
             secret: Some(key.to_owned()),
+            account: None,
             config: serde_json::json!({}),
         })
         .expect("the adapter builds against the seeded container")
@@ -520,4 +553,275 @@ async fn test_connection_reports_the_real_kumas_version_and_roster() {
     assert_eq!(info.account, None);
     assert_eq!(info.secret_expires_at, None);
     assert!(info.discovered.is_empty());
+}
+
+// -- The write half (issue #452) ---------------------------------------------
+//
+// Everything below needs the **account**, and needs the real container twice
+// over: the socket.io channel exists nowhere else, and the fact the whole
+// feature rests on -- that a paused monitor stops being published by
+// `/metrics` -- is a property of the server rather than of anything in this
+// repository. There is no recording that could witness either.
+
+/// Poll **incrementally**, keeping the cursor the way the sync engine does,
+/// until an emitted batch satisfies `wanted`.
+///
+/// The sibling of [`until`], and the difference is the whole of what it is
+/// for: a tombstone is the difference between the stored position and the
+/// current corpus, so only a run that carries a cursor can emit one. `cursor`
+/// is advanced on every poll, exactly as a scheduled run advances the stored
+/// one -- which also means the batch that satisfies `wanted` is the *only*
+/// one that will ever carry it, and returning it is how the assertions below
+/// get to look at it.
+async fn until_from(
+    source: &dyn Source,
+    cursor: &mut String,
+    what: &str,
+    wanted: impl Fn(&[SyncItem]) -> bool,
+) -> Vec<SyncItem> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let mut sink = VecSink(Vec::new());
+        *cursor = source
+            .sync(Some(cursor.clone()), &mut sink)
+            .await
+            .expect("an incremental poll against the seeded Kuma");
+        if wanted(&sink.0) {
+            return sink.0;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Kuma never reached the state this test needs: {what}"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// The scratch monitor's Kuma id, out of the mirror.
+///
+/// The write op's target is an entity id and the entity id's key is Kuma's own
+/// monitor id, so the mirror is where a test learns which number to pause --
+/// the same route the Monitors tab takes to its button.
+fn entity_of(items: &[SyncItem], title: &str) -> String {
+    items
+        .iter()
+        .find(|item| item.title == title)
+        .map(|item| item.entity.to_string())
+        .unwrap_or_else(|| panic!("{title:?} is not in the mirror"))
+}
+
+/// **The declaration, against the real server.** The same key, the same Kuma,
+/// two instances: only the one with an account offers anything to write.
+///
+/// Asserted here as well as in `tests/contract.rs` because the contract
+/// battery's copy runs against a recording, and what this adds is that the
+/// account really is optional at *build* time against a live instance -- a
+/// source configured with one is not a source that fails to start.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn only_a_source_with_an_account_offers_the_write_ops() {
+    let env = env();
+
+    let read_only = env.source().descriptor();
+    assert!(read_only.write_ops.is_empty(), "{:?}", read_only.write_ops);
+    assert!(
+        !read_only.capabilities.contains(&Capability::Write),
+        "{:?}",
+        read_only.capabilities
+    );
+
+    let writable = env.writable().descriptor();
+    assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+    assert!(writable.capabilities.contains(&Capability::Write));
+
+    // And the read half is untouched by the account: the same roster either
+    // way. A Kuma that read differently once it could write would be a change
+    // nobody asked for.
+    let (with, _) = full_sync(env.writable().as_ref()).await;
+    let (without, _) = full_sync(env.source().as_ref()).await;
+    let names = |items: &[SyncItem]| {
+        let mut titles: Vec<String> = items.iter().map(|i| i.title.clone()).collect();
+        titles.sort();
+        titles
+    };
+    assert_eq!(names(&with), names(&without));
+}
+
+/// **Pause it, poll it, resume it** -- issue #452's second criterion, end to
+/// end against the real Kuma.
+///
+/// The scratch monitor and nothing else: every monitor `monitors.json` names
+/// watches part of the estate, and pausing one would silence a check something
+/// else is reading (the sibling M4.1 exit run reads this same Kuma). `Scratch`
+/// deletes it however this ends, so nothing is left paused even if an
+/// assertion below fails mid-way -- a deleted monitor is not a silenced one.
+///
+/// **What "its health contributes none" means here, and why the poll is
+/// incremental.** `/metrics` does not publish a paused monitor *at all* --
+/// measured on the pinned image on 2026-09-07: the eight series a monitor has
+/// are gone from the next scrape after `pauseMonitor` returns. So a paused
+/// monitor contributes no state, no response time and no uptime ratio to
+/// anything read off the roster, which is the whole of what silencing a check
+/// should do.
+///
+/// The **tombstone** that carries that into the mirror is emitted only by a
+/// poll that resumes from a stored cursor, because it is the *difference*
+/// between two corpora (`crate::cursor`): a cursor-less run simply does not
+/// mention a monitor that is not published, and there is nothing for it to
+/// compare against. A scheduled run is incremental, so that is what this
+/// drives -- `until_from` keeps the cursor the way the engine does. Asserting
+/// this over full syncs is the trap this test fell into first: it waits sixty
+/// seconds for a tombstone that a cursor-less sync can never emit.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back() {
+    let env = env();
+    let source = env.writable();
+    let _scratch = Scratch::add();
+
+    // It exists and is published, which is what makes the disappearance below
+    // a fact about the pause rather than about a monitor that was never there.
+    until(
+        source.as_ref(),
+        "the scratch monitor is published",
+        |items| items.iter().any(|item| item.title == SCRATCH),
+    )
+    .await;
+    // The position the next poll resumes from, taken while the monitor is
+    // still there -- this is the stored cursor a scheduled run would hold.
+    let (present, mut cursor) = full_sync(source.as_ref()).await;
+    let entity = entity_of(&present, SCRATCH);
+    let live = present
+        .iter()
+        .find(|item| item.title == SCRATCH)
+        .expect("the scratch monitor");
+    assert!(!live.deleted, "a running monitor is not a tombstone");
+    assert!(
+        live.payload.get("state").is_some_and(|s| !s.is_null()),
+        "a published monitor carries a state: {:?}",
+        live.payload
+    );
+
+    source
+        .write(WriteOp::PauseMonitor {
+            entity: entity.clone(),
+        })
+        .await
+        .expect("the account pauses its own monitor");
+
+    let paused = until_from(
+        source.as_ref(),
+        &mut cursor,
+        "the paused monitor is tombstoned",
+        |items| {
+            items
+                .iter()
+                .any(|item| item.title == SCRATCH && item.deleted)
+        },
+    )
+    .await;
+    let gone = paused
+        .iter()
+        .find(|item| item.title == SCRATCH)
+        .expect("the tombstone");
+    assert_eq!(gone.entity.to_string(), entity, "the same monitor");
+    assert!(
+        gone.payload
+            .get("state")
+            .is_some_and(serde_json::Value::is_null),
+        "a paused monitor contributes no state: {:?}",
+        gone.payload
+    );
+    assert!(
+        gone.payload
+            .get("response_time_ms")
+            .is_none_or(serde_json::Value::is_null),
+        "a paused monitor contributes no reading: {:?}",
+        gone.payload
+    );
+
+    // And the other reading of the same fact: a *fresh* look at the whole
+    // roster does not mention it at all. This is what "its health contributes
+    // none" means for anything that counts the corpus -- the chips, the
+    // samples, the alerts.
+    let (fresh, _) = full_sync(source.as_ref()).await;
+    assert!(
+        !fresh.iter().any(|item| item.title == SCRATCH),
+        "a paused monitor is not published at all: {:?}",
+        fresh.iter().map(|i| i.title.as_str()).collect::<Vec<_>>()
+    );
+
+    source
+        .write(WriteOp::ResumeMonitor {
+            entity: entity.clone(),
+        })
+        .await
+        .expect("the account resumes its own monitor");
+
+    let back = until_from(
+        source.as_ref(),
+        &mut cursor,
+        "the resumed monitor is published again",
+        |items| {
+            items
+                .iter()
+                .any(|item| item.title == SCRATCH && !item.deleted)
+        },
+    )
+    .await;
+    let running = back
+        .iter()
+        .find(|item| item.title == SCRATCH)
+        .expect("the resumed monitor");
+    assert_eq!(running.entity.to_string(), entity);
+    assert!(
+        running.payload.get("state").is_some_and(|s| !s.is_null()),
+        "a resumed monitor is published with a state again: {:?}",
+        running.payload
+    );
+}
+
+/// The two ways a write is refused, and the fault class each takes -- which is
+/// what decides whether the queue waits for a human or records a refusal.
+///
+/// Both are read off the real server, because both are Kuma's own answers:
+/// `authIncorrectCreds` for a wrong password, *You do not own this monitor* for
+/// an id that is not there. Nothing is created and nothing is changed.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_refused_account_and_a_refused_write_are_different_faults() {
+    let env = env();
+
+    // A wrong password: `Unauthorized`, so the sources view offers *Re-enter*
+    // and the queue keeps the write instead of losing it.
+    let wrong = env.with_account(Some(Account {
+        username: env.account.username.clone(),
+        password: "not-the-password".to_owned(),
+    }));
+    let refused = wrong
+        .write(WriteOp::PauseMonitor {
+            entity: "kuma:1".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(SourceError::Unauthorized { status: None })),
+        "a refused login is Unauthorized, got {refused:?}"
+    );
+
+    // A monitor that is not there: the login worked, so re-entering the
+    // account would change nothing and this write is refused for good.
+    let missing = env
+        .writable()
+        .write(WriteOp::PauseMonitor {
+            // Far above anything this environment has ever created; Kuma
+            // answers for an id it cannot find with the same words it uses for
+            // one belonging to somebody else.
+            entity: "kuma:999999".to_owned(),
+        })
+        .await;
+    let message = match missing {
+        Err(SourceError::Protocol { message, .. }) => message,
+        other => panic!("expected Protocol, got {other:?}"),
+    };
+    assert!(message.contains("pauseMonitor"), "{message}");
 }

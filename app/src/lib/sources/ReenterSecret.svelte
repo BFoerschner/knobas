@@ -15,26 +15,48 @@
   in an attribute, and there is no command anywhere that reads one back. The
   sentence on screen says so because it is true and because a person typing a
   password is owed it.
+
+  ## The optional account (#452)
+
+  A source whose adapter declares `accepts_account` — Uptime Kuma, and nothing
+  else — can carry a second credential in the same keychain item, and this
+  strip is where one is added. **Both fields keep what is stored when left
+  empty**, which is the rule `SecretInput` states: a reader adding an account
+  to a Kuma cannot retype an API key Kuma showed them once, and a reader
+  replacing an expired key must not lose the account beside it. That is why the
+  key field's *Save* is enabled with nothing typed in it once an account is —
+  and why this strip cannot *remove* an account: there is no credential it may
+  read back, so there is nothing it could show a reader to remove.
 -->
 <script lang="ts">
   import { setSourceSecret, syncNow } from "../ipc/sources";
   import { ipcErrorMessage } from "../ipc";
+  import { ACCOUNT_INCOMPLETE, accountHalfDone as halfDone, accountOf } from "./account";
   import type { CredentialHealth } from "../ipc/sources";
 
   let {
     sourceId,
     displayName,
+    acceptsAccount = false,
     onhealth,
     oncancel,
   }: {
     sourceId: string;
     displayName: string;
+    /**
+     * Whether this source's adapter can use a second credential (#452) —
+     * `SourceDescriptor.accepts_account`, passed in by the row rather than
+     * looked up here, so this strip knows no adapter kinds.
+     */
+    acceptsAccount?: boolean;
     /** The health the backend answered with, so the row redraws from it. */
     onhealth: (health: CredentialHealth) => void;
     oncancel: () => void;
   } = $props();
 
   let value = $state("");
+  let accountUser = $state("");
+  let accountPassword = $state("");
   let busy = $state(false);
   let error = $state<string | null>(null);
   let field = $state<HTMLInputElement | null>(null);
@@ -46,15 +68,45 @@
     field?.focus();
   });
 
+  /**
+   * Both halves of the account, or `null` for a submission that is not about
+   * one. Half an account is refused by {@link saveable} rather than stored.
+   */
+  function account() {
+    return accountOf({ username: accountUser, password: accountPassword });
+  }
+
+  const accountHalfDone = $derived(
+    halfDone({ username: accountUser, password: accountPassword }),
+  );
+
+  /**
+   * Whether there is anything to save.
+   *
+   * **Either half is enough**, which is the whole of "adding the account
+   * without re-entering the key": a submission with only an account keeps the
+   * stored secret, and one with only a secret keeps the stored account.
+   */
+  const saveable = $derived(
+    !busy && !accountHalfDone && (value !== "" || account() !== null),
+  );
+
   async function save() {
-    if (busy || value === "") return;
+    if (!saveable) return;
     busy = true;
     error = null;
     try {
-      const health = await setSourceSecret(sourceId, { value });
-      // Cleared before anything else can await: the value has served its one
-      // purpose and there is no reason for it to survive the round trip.
+      const health = await setSourceSecret(sourceId, {
+        // `null` and not `""`: absent means keep, and an empty string is a
+        // credential of no characters.
+        value: value === "" ? null : value,
+        account: account(),
+      });
+      // Cleared before anything else can await: the values have served their
+      // one purpose and there is no reason for them to survive the round trip.
       value = "";
+      accountUser = "";
+      accountPassword = "";
       onhealth(health);
       // Re-entering a password is a request to make the sync work again, not a
       // request to store a string. Doing only the storing would leave the
@@ -90,11 +142,46 @@
       }
     }}
   />
-  <button class="btn pri sm" disabled={busy || value === ""} onclick={() => void save()}>
+  {#if acceptsAccount}
+    <input
+      id="reenter-{sourceId}-user"
+      class="inp"
+      type="text"
+      autocomplete="off"
+      placeholder="Account username"
+      bind:value={accountUser}
+      disabled={busy}
+      onkeydown={(event) => {
+        if (event.key === "Enter") void save();
+      }}
+    />
+    <input
+      id="reenter-{sourceId}-password"
+      class="inp"
+      type="password"
+      autocomplete="off"
+      placeholder="Account password"
+      bind:value={accountPassword}
+      disabled={busy}
+      onkeydown={(event) => {
+        if (event.key === "Enter") void save();
+      }}
+    />
+  {/if}
+  <button class="btn pri sm" disabled={!saveable} onclick={() => void save()}>
     Save and retry sync
   </button>
   <button class="btn sm" disabled={busy} onclick={oncancel}>Cancel</button>
-  <span class="note">Stored in the OS keychain, never in the database.</span>
+  <span class="note">
+    {#if accountHalfDone}
+      {ACCOUNT_INCOMPLETE}
+    {:else if acceptsAccount}
+      Stored in the OS keychain, never in the database. Anything left empty keeps what
+      is stored.
+    {:else}
+      Stored in the OS keychain, never in the database.
+    {/if}
+  </span>
   {#if error}
     <span class="fail">{error}</span>
   {/if}

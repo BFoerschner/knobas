@@ -218,7 +218,9 @@ impl Source for GiteaSource {
             | WriteOp::RerunBuild { .. }
             | WriteOp::LogWork { .. }
             | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => Err(SourceError::protocol(format!(
                 "gitea: {:?} is not an operation this adapter supports",
                 op.identifier()
             ))),
@@ -239,6 +241,7 @@ mod tests {
             base_url: "https://gitea.tidewater.example".to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some("tidewater-pat".to_owned()),
+            account: None,
             config: serde_json::json!({}),
         }
     }

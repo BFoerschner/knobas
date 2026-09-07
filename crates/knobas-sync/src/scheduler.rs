@@ -299,15 +299,21 @@ pub(crate) async fn build_source(
     deps: &SchedulerDeps,
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {
-    let secret = match cfg.auth_kind.method() {
+    // One keychain read, both halves. The account is the optional second
+    // credential of envelope version 2 (issue #452) and rides in the same
+    // item, so asking for it is not a second trip to a store that may be
+    // locked -- and a source configured with an account gets the same instance
+    // whether a sync or a flush built it.
+    let (secret, account) = match cfg.auth_kind.method() {
         // A source that needs no credential at all: `--demo` must work against
         // an empty keychain (§14a), and the keychain is not even asked.
-        None => None,
+        None => (None, None),
         Some(_) => {
             let stored = knobas_secrets::spawn::get(&deps.secrets, &cfg.id)
                 .await
                 .map_err(|e| RunFailure::Secret(e.to_string()))?;
-            Some(stored.ok_or(RunFailure::MissingSecret)?.value)
+            let stored = stored.ok_or(RunFailure::MissingSecret)?;
+            (Some(stored.value), stored.account)
         }
     };
     let instance = SourceInstance {
@@ -317,6 +323,7 @@ pub(crate) async fn build_source(
         base_url: cfg.base_url.clone(),
         auth: cfg.auth_kind.method(),
         secret,
+        account,
         config: cfg.config.clone(),
     };
     deps.registry.build(instance).map_err(RunFailure::Source)

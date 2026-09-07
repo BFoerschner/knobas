@@ -215,6 +215,7 @@ fn configured(id: &str, base_url: &str, config: Value) -> Box<dyn Source> {
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some(knobas_mockd::JIRA_TOKEN.to_owned()),
+        account: None,
         config,
     };
     match Registry::builtin().build(instance) {
@@ -235,6 +236,7 @@ fn teamcity_adapter(id: &str, base_url: &str) -> Box<dyn Source> {
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+        account: None,
         config: serde_json::json!({}),
     };
     match Registry::builtin().build(instance) {
@@ -685,6 +687,7 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
         base_url: kuma.uri(),
         auth: Some(AuthMethod::ApiToken),
         secret: Some(KUMA_KEY.to_owned()),
+        account: None,
         config: serde_json::json!({}),
     };
     let real = Registry::builtin()
@@ -816,6 +819,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
         base_url: kuma.uri(),
         auth: Some(AuthMethod::ApiToken),
         secret: Some(KUMA_KEY.to_owned()),
+        account: None,
         config: serde_json::json!({}),
     };
     let real = match Registry::builtin().build(instance) {
@@ -953,6 +957,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
             base_url: kuma.uri(),
             auth: Some(AuthMethod::ApiToken),
             secret: Some(KUMA_KEY.to_owned()),
+            account: None,
             config: serde_json::json!({}),
         })
         .expect("the registry must build a kuma instance");

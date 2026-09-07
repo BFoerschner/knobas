@@ -54,6 +54,7 @@ vi.mock("../ipc/sources", () => ({
         capabilities: ["Write"],
         adapter_version: "0",
         auth_methods: [],
+        accepts_account: false,
         // A getter, because the registry caches its descriptors on the first
         // `load()` — see the same note in `Detail.status.test.svelte.ts`.
         get write_ops() {

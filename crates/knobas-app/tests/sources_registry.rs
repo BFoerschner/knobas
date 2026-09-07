@@ -27,6 +27,7 @@ fn instance(instance_id: &str, kind: &str, auth: AuthMethod) -> SourceInstance {
         base_url: "https://example.invalid".to_owned(),
         auth: Some(auth),
         secret: Some("not-a-real-token".to_owned()),
+        account: None,
         config: serde_json::json!({}),
     }
 }

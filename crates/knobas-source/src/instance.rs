@@ -56,8 +56,59 @@ pub struct SourceInstance {
     ///
     /// Never logged: [`Debug`] redacts it, and nothing else may print it.
     pub secret: Option<String>,
+    /// A **second** credential the same keychain item may carry: the account
+    /// whose name and password open a channel the [`secret`](Self::secret)
+    /// cannot (M4.1, issue #452).
+    ///
+    /// `None` for every source that has one credential, which is all of them
+    /// but one. Uptime Kuma is the source that made this necessary and states
+    /// the shape of the problem: its API key opens `/metrics` and *only*
+    /// `/metrics`, and pausing a monitor is a socket.io session that an API
+    /// key cannot log in to at all. So a Kuma with a key reads, and a Kuma
+    /// with a key **and** an account reads and writes -- two credentials for
+    /// one source, both optional-by-position rather than alternatives.
+    ///
+    /// **Not a second [`AuthMethod`].** The auth method is how the source
+    /// authenticates its *ordinary* traffic, one per source, and the sources
+    /// view, the credential-health strip and the re-enter form are all built
+    /// on that being a single answer. An account offered as a rival method
+    /// would make "which method is this source on" ambiguous and would let a
+    /// reader pick the account *instead of* the key, which is a Kuma that
+    /// cannot read.
+    ///
+    /// Never logged: [`Debug`] redacts the password, exactly as it redacts
+    /// [`secret`](Self::secret).
+    pub account: Option<Account>,
     /// The non-secret configuration, shaped by the adapter's `config_schema`.
     pub config: serde_json::Value,
+}
+
+/// A username and password, stored beside a source's ordinary secret.
+///
+/// One struct rather than two `Option<String>` fields on
+/// [`SourceInstance`], because half an account is not a weaker account: a
+/// username with no password logs in to nothing, and the adapter that reads
+/// it would have to invent a rule for the half-filled case. Present or
+/// absent, and the type says which.
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Account {
+    pub username: String,
+    pub password: String,
+}
+
+/// Hand-written for [`SourceInstance`]'s reason: a derived `Debug` puts the
+/// password into every `tracing` line that ever formats a struct holding one.
+///
+/// The **username survives**, and that is deliberate rather than an oversight:
+/// "which account did this source try to log in as" is the first question a
+/// refused login raises, and a line that redacts both halves cannot answer it.
+impl fmt::Debug for Account {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Account")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Hand-written so the secret cannot reach a log line through `{:?}`.
@@ -70,6 +121,7 @@ impl fmt::Debug for SourceInstance {
             .field("base_url", &self.base_url)
             .field("auth", &self.auth)
             .field("secret", &self.secret.as_ref().map(|_| "<redacted>"))
+            .field("account", &self.account)
             .field("config", &self.config)
             .finish()
     }
@@ -181,6 +233,10 @@ mod tests {
             base_url: "https://jira.example".to_owned(),
             auth: Some(crate::AuthMethod::Pat),
             secret: Some("hunter2-the-real-token".to_owned()),
+            account: Some(Account {
+                username: "knobas".to_owned(),
+                password: "hunter2-the-account-one".to_owned(),
+            }),
             config: serde_json::json!({ "flavor": "datacenter" }),
         };
         let printed = format!("{instance:?}");
@@ -193,6 +249,13 @@ mod tests {
             printed.contains("jira.example"),
             "everything else stays readable: {printed}"
         );
+        // The second credential is redacted by the same rule, and its
+        // username is not -- a refused login has to be able to say *as whom*.
+        assert!(
+            !printed.contains("hunter2-the-account-one"),
+            "Debug leaked the account password: {printed}"
+        );
+        assert!(printed.contains("knobas"), "{printed}");
     }
 
     /// P6 keeps this plain serde data, which is what preserves the SPI's
@@ -206,11 +269,27 @@ mod tests {
             base_url: "https://jira.eu.example".to_owned(),
             auth: Some(crate::AuthMethod::UserPassword),
             secret: None,
+            account: None,
             config: serde_json::json!({ "projects": ["PAY"] }),
         };
         let json = serde_json::to_value(&instance).unwrap();
         assert_eq!(json["auth"], "UserPassword");
         assert_eq!(json["secret"], serde_json::Value::Null);
+        // The second credential crosses as plain data too, so an adapter run
+        // out of process is handed the account the in-process one gets.
+        assert_eq!(json["account"], serde_json::Value::Null);
+        let with_account = SourceInstance {
+            account: Some(Account {
+                username: "knobas".to_owned(),
+                password: "knobas-dev".to_owned(),
+            }),
+            ..instance.clone()
+        };
+        let with_json = serde_json::to_value(&with_account).unwrap();
+        assert_eq!(with_json["account"]["username"], "knobas");
+        let with_back: SourceInstance = serde_json::from_value(with_json).unwrap();
+        assert_eq!(with_back.account.unwrap().password, "knobas-dev");
+
         let back: SourceInstance = serde_json::from_value(json).unwrap();
         assert_eq!(back.id, instance.id);
         // Two Jiras are `jira` and `jira-eu`, both of adapter kind `jira`:

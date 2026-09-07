@@ -89,14 +89,24 @@ export KNOBAS_GITEA_REPO=payout-service
 ```
 
 `eval "$(./seed --env)"` re-prints them without re-seeding. Once `./seed-kuma.sh`
-has run it also prints Uptime Kuma's two:
+has run it also prints Uptime Kuma's four:
 
 ```sh
 export KNOBAS_KUMA_URL=http://127.0.0.1:3001
 export KNOBAS_KUMA_API_KEY=<the seed's API key, also in kuma-api-key>
+export KNOBAS_KUMA_USER=knobas
+export KNOBAS_KUMA_PASSWORD=knobas-dev
 ```
 
-`eval "$(./seed --env-kuma)"` prints **only** those two, and needs no
+The account is the admin pair from the credentials table above, and it is
+printed because Uptime Kuma needs **two** credentials to be exercised fully
+(issue #452): the API key opens `/metrics` and nothing else, and pausing a
+monitor is a socket.io login only an account can make. Printed rather than
+defaulted in the suite, for `_require-live-env`'s reason — a suite that fell
+back to `knobas`/`knobas-dev` would run against a Kuma whose admin is something
+else and report the login failure as a broken adapter.
+
+`eval "$(./seed --env-kuma)"` prints **only** those four, and needs no
 `seed-state.json` — which is Gitea's, and re-minting it is how one worktree's
 seed 401s another's live run. `just kuma-live` uses that form for exactly that
 reason. Once `./seed
@@ -136,7 +146,7 @@ variables gate it and where those come from.
 | `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back, and then that pull request on the standup digest (M3.3's digest witness for Gitea). Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
 | `just teamcity-live-seeded` | two suites: `knobas-source-teamcity` / `live_teamcity_seeded` — the adapter against **our** seeded TeamCity — and then `knobas-app` / `teamcity_seeded_live`, read-only, which is M3.3's digest witness for this source (a seeded build the mirror attributes to the reader is on the digest for the day it ran) | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
-| `just kuma-live` | two suites: `knobas-source-kuma` / `live_kuma` — the Uptime Kuma adapter against **this** container: the estate mirrored, an idle poll that emits nothing, a monitor really deleted and reported gone, a wrong API key's 401 — and then `knobas-app` / `alert_chain_live`, **M4.1's exit witness**: the canary released, the alert in the inbox because a context holds its asset, acked, the port rebound, the alert closed. The recipe binds the canary first and rebinds it from a trap | `KNOBAS_KUMA_URL`, `KNOBAS_KUMA_API_KEY` | `./seed-kuma.sh` then `eval "$(./seed --env-kuma)"` (the recipe does both) |
+| `just kuma-live` | three suites: `knobas-source-kuma` / `live_kuma` — the Uptime Kuma adapter against **this** container: the estate mirrored, an idle poll that emits nothing, a monitor really deleted and reported gone, a wrong API key's 401, and the write half (#452) — a scratch monitor paused through `pause_monitor`, gone from the next poll, resumed back — then `knobas-app` / `kuma_write_live`, the same write half one seam higher: the pause queued through `submit_write`, settled, and read back out of `sync.item` — and then `knobas-app` / `alert_chain_live`, **M4.1's exit witness**: the canary released, the alert in the inbox because a context holds its asset, acked, the port rebound, the alert closed. The recipe binds the canary first and rebinds it from a trap | `KNOBAS_KUMA_URL`, `KNOBAS_KUMA_API_KEY`, `KNOBAS_KUMA_USER`, `KNOBAS_KUMA_PASSWORD` | `./seed-kuma.sh` then `eval "$(./seed --env-kuma)"` (the recipe does both) |
 | `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
 
 **A recipe with nothing to run against fails; it does not pass quietly.** Each

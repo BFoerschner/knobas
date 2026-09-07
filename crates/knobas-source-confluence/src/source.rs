@@ -219,7 +219,9 @@ impl Source for ConfluenceSource {
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
-            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::LogWork { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => Err(SourceError::protocol(format!(
                 "the Confluence adapter does not support {:?}",
                 op.identifier()
             ))),
@@ -241,6 +243,7 @@ mod tests {
             base_url: "https://wiki.tidewater.example".to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some("a-personal-access-token".to_owned()),
+            account: None,
             config,
         }
     }

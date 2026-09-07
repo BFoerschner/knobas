@@ -321,7 +321,9 @@ impl Source for JiraSource {
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
             | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),
@@ -344,6 +346,7 @@ mod tests {
             base_url: "https://jira.tidewater.example".to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some("a-personal-access-token".to_owned()),
+            account: None,
             config,
         }
     }

@@ -820,6 +820,17 @@ export interface MonitorRow {
   tombstoned: boolean;
   /** The assets it is attached to by a `monitored-by` link, by name. */
   assets: MonitoredAsset[];
+  /**
+   * The write ops the tab may offer on this row — `knobas_source::WriteOp`
+   * identifiers, already filtered by the backend (issue #452).
+   *
+   * The inbox's `actions` exactly: the surface renders what it is handed and
+   * decides nothing. Two filters have already run — what the source declares,
+   * which is empty for an Uptime Kuma configured with only an API key, and
+   * what this row's state has a use for: `pause_monitor` while it is live,
+   * `resume_monitor` once it is {@link tombstoned}.
+   */
+  actions: string[];
   /** Its samples inside the bar's 24-hour window, oldest first. */
   samples: MonitorSample[];
 }

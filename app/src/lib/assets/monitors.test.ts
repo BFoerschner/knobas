@@ -40,6 +40,7 @@ function monitor(name: string, state: string | null, tombstoned = false): Monito
     entity_id: `kuma:${name}`,
     source_id: "kuma",
     name,
+    actions: [],
     state,
     monitor_type: "http",
     target: null,

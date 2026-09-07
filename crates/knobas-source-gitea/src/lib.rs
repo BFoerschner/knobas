@@ -179,6 +179,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         capabilities: vec![Capability::Write],
         adapter_version: ADAPTER_VERSION.to_owned(),
         auth_methods: vec![AuthMethod::Pat],
+        // One credential. The second one of envelope version 2 is Uptime
+        // Kuma's alone (issue #452), and a form that offered account
+        // fields here would be asking for something nothing reads.
+        accepts_account: false,
         // M2's ratified Gitea set (issue #43, ADR-0006), and the whole of what
         // the action bar offers. The battery holds this and `Capability::Write`
         // to each other in both directions.

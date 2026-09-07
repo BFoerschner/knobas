@@ -24,9 +24,12 @@
 //! * **A paused monitor is not in `/metrics` at all**, so through this channel
 //!   *paused* and *deleted* are one observation. Measured, not assumed; see
 //!   [`cursor`].
-//! * **Writing is a different channel and a different ticket.** Pause, resume
-//!   and create monitor are socket.io, so this adapter declares no write ops
-//!   and refuses every one by name.
+//! * **Writing is a different channel, and a different credential.** Pause and
+//!   resume are socket.io, which an API key cannot log in to at all -- so a
+//!   source configured with only a key declares no write ops and refuses every
+//!   one by name, and a source whose keychain item also carries an *account*
+//!   declares `pause_monitor` and `resume_monitor` and performs them over
+//!   [`socket`] (issue #452).
 //!
 //! # Where the endpoint truth comes from
 //!
@@ -46,6 +49,7 @@ mod http;
 mod map;
 mod metrics;
 mod model;
+mod socket;
 mod source;
 
 pub use config::KumaConfig;

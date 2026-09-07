@@ -603,6 +603,7 @@ pub fn instance(base_url: String, token: &str, config: Value) -> SourceInstance 
         base_url,
         auth: Some(AuthMethod::Pat),
         secret: Some(token.to_owned()),
+        account: None,
         config,
     }
 }

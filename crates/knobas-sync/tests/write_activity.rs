@@ -58,6 +58,7 @@ impl Source for Fake {
             capabilities: Vec::new(),
             adapter_version: "0".to_owned(),
             auth_methods: vec![AuthMethod::Pat],
+            accepts_account: false,
             write_ops: vec!["comment".to_owned()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -236,13 +237,7 @@ async fn harness() -> Harness {
     .unwrap();
     let secrets = MemoryStore::new();
     secrets
-        .put(
-            &source,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: "tok".to_owned(),
-            },
-        )
+        .put(&source, &Secret::just(AuthMethod::Pat, "tok"))
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));

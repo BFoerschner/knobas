@@ -23,6 +23,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import { ACCOUNT_INCOMPLETE, accountHalfDone as halfDone, accountOf } from "./account";
   import {
     addSource,
     listAdapters,
@@ -78,6 +79,33 @@
   let baseUrl = $state("");
   let authKind = $state<AuthMethod | null>(null);
   let secret = $state("");
+  /**
+   * The optional second credential (#452), for the adapters that declare
+   * `accepts_account`.
+   *
+   * Two `$state`s and not one object, so a half-filled account is a state the
+   * form can be in and refuse: `account()` below is what turns them into the
+   * one thing the backend takes.
+   */
+  let accountUser = $state("");
+  let accountPassword = $state("");
+
+  /**
+   * The account as the backend takes it, or `null` for a source that has none.
+   *
+   * **Both halves or neither.** A username with no password logs in to
+   * nothing, and sending half of one would store a credential that can only
+   * fail — so the step gate below refuses a half-filled pair rather than
+   * letting it through as an account.
+   */
+  function account() {
+    return accountOf({ username: accountUser, password: accountPassword });
+  }
+
+  /** Whether the account fields are half filled in, which is not an account. */
+  const accountHalfDone = $derived(
+    halfDone({ username: accountUser, password: accountPassword }),
+  );
   let interval = $state(900);
   let enabled = $state(true);
 
@@ -161,7 +189,7 @@
           Object.keys(validated.errors).length === 0
         );
       case 2:
-        return authKind !== null && secret !== "";
+        return authKind !== null && secret !== "" && !accountHalfDone;
       case 3:
         // A source whose credential has just been refused would go into the
         // database as a row the scheduler can never run.
@@ -262,7 +290,7 @@
         base_url: baseUrl.trim(),
         auth_kind: authKind,
         config: validated.config,
-        secret: { value: secret },
+        secret: { value: secret, account: account() },
       });
       // A refused credential reports no account worth keeping, and a source
       // that cannot be saved has no config to fill in either.
@@ -289,11 +317,13 @@
         base_url: baseUrl.trim(),
         auth_kind: authKind,
         config: validated.config,
-        secret: { value: secret },
+        secret: { value: secret, account: account() },
         sync_interval_secs: interval,
         enabled,
       });
       secret = "";
+      accountUser = "";
+      accountPassword = "";
       onsaved(source);
     } catch (cause) {
       // The dialog stays open with the draft intact: closing on failure would
@@ -392,6 +422,43 @@
           <span class="msg">Stored in the OS keychain, never in the database.</span>
         </div>
       </div>
+      <!--
+        The optional second credential (#452), drawn only for an adapter that
+        declares it can use one — never for an adapter kind this component
+        recognises by name. Uptime Kuma is the only one today: its API key
+        reads every monitor, and pausing one needs an account.
+      -->
+      {#if chosen?.accepts_account}
+        <div class="form secret">
+          <label class="l" for="add-account-user">Account (optional)</label>
+          <div class="cell">
+            <input
+              class="inp"
+              id="add-account-user"
+              type="text"
+              autocomplete="off"
+              placeholder="Username"
+              bind:value={accountUser}
+            />
+            <input
+              class="inp"
+              id="add-account-password"
+              type="password"
+              autocomplete="off"
+              placeholder="Password"
+              bind:value={accountPassword}
+            />
+            <span class="msg">
+              {#if accountHalfDone}
+                {ACCOUNT_INCOMPLETE}
+              {:else}
+                Leave empty to add a read-only source. With an account, knobas can also
+                pause and resume monitors.
+              {/if}
+            </span>
+          </div>
+        </div>
+      {/if}
     {:else if stepIndex === 3}
       <p class="msg">
         knobas will connect to {baseUrl} and report what answered. Nothing is written yet — not to

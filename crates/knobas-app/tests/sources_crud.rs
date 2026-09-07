@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourceDraft, SourcePatch};
-use knobas_secrets::{MemoryStore, SecretStore};
+use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::AuthState;
@@ -162,9 +162,7 @@ fn a_new_source(id: &str) -> NewSource {
         // in `crud` parses the blob. What validates it is the adapter, at build
         // time, which is where a configuration mistake is worth catching.
         config: serde_json::json!({ "tombstone": false }),
-        secret: SecretInput {
-            value: "pat-one".to_owned(),
-        },
+        secret: SecretInput::of("pat-one"),
         sync_interval_secs: 300,
         enabled: true,
     }
@@ -293,9 +291,7 @@ async fn a_failed_insert_leaves_no_orphaned_keychain_item() {
     // Same id again: the primary key refuses it.
     let err = sources::crud::add(&f.pool, &f.secrets, &f.registry, {
         let mut second = a_new_source(&f.id);
-        second.secret = SecretInput {
-            value: "pat-two".into(),
-        };
+        second.secret = SecretInput::of("pat-two");
         second
     })
     .await
@@ -410,9 +406,7 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         &f.secrets,
         &f.registry,
         &f.id,
-        SecretInput {
-            value: "pat-two".into(),
-        },
+        SecretInput::of("pat-two"),
     )
     .await
     .unwrap();
@@ -474,9 +468,7 @@ async fn testing_a_draft_writes_nothing_at_all() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "typed-but-not-saved".into(),
-            }),
+            secret: Some(SecretInput::of("typed-but-not-saved")),
         },
     )
     .await
@@ -710,12 +702,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         "a command that reads a secret must not exist"
     );
 
-    let shown = format!(
-        "{:?}",
-        SecretInput {
-            value: "hunter2".into()
-        }
-    );
+    let shown = format!("{:?}", SecretInput::of("hunter2"));
     assert!(
         !shown.contains("hunter2"),
         "SecretInput leaked in Debug: {shown}"
@@ -784,9 +771,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
         &f.secrets,
         &refusing,
         &f.id,
-        SecretInput {
-            value: "still-wrong".into(),
-        },
+        SecretInput::of("still-wrong"),
     )
     .await
     .unwrap();
@@ -847,9 +832,7 @@ async fn an_unreachable_source_does_not_blame_the_credential_or_release_the_back
         &f.secrets,
         &refusing,
         &f.id,
-        SecretInput {
-            value: "probably-fine".into(),
-        },
+        SecretInput::of("probably-fine"),
     )
     .await
     .unwrap();
@@ -914,7 +897,7 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
             base_url: String::new(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput { value: "x".into() }),
+            secret: Some(SecretInput::of("x")),
         },
     )
     .await
@@ -951,9 +934,7 @@ async fn a_discovered_config_value_reaches_the_report() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "typed-but-not-saved".into(),
-            }),
+            secret: Some(SecretInput::of("typed-but-not-saved")),
         },
     )
     .await
@@ -982,9 +963,7 @@ async fn a_failed_test_discovers_nothing() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "refused".into(),
-            }),
+            secret: Some(SecretInput::of("refused")),
         },
     )
     .await
@@ -995,4 +974,266 @@ async fn a_failed_test_discovers_nothing() {
     // And no note: a test that did not connect has nothing to say about the
     // far end, and `error` already carries what went wrong (#326).
     assert!(report.detail.is_none(), "{report:?}");
+}
+
+// -- The optional account (issue #452) ----------------------------------------
+
+/// A Kuma source, which is the one adapter kind whose write ops depend on a
+/// credential. `mock` cannot stand in for it here: what is being asserted is
+/// that an *instance* declares differently from its kind, and only this
+/// adapter does.
+fn a_kuma_source(id: &str, account: Option<(&str, &str)>) -> NewSource {
+    NewSource {
+        id: id.to_owned(),
+        adapter_kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+        display_name: "Uptime Kuma".to_owned(),
+        base_url: "http://127.0.0.1:3001".to_owned(),
+        auth_kind: AuthMethod::ApiToken,
+        config: serde_json::json!({}),
+        secret: SecretInput {
+            value: Some("uk1_metrics".to_owned()),
+            account: account.map(|(username, password)| sources::AccountInput {
+                username: username.to_owned(),
+                password: password.to_owned(),
+            }),
+        },
+        sync_interval_secs: 300,
+        enabled: true,
+    }
+}
+
+async fn stored(f: &Fixture) -> knobas_sync::config::SourceConfigRow {
+    knobas_sync::config::get(&f.pool, &f.id)
+        .await
+        .unwrap()
+        .expect("the source row")
+}
+
+/// **Issue #452's first criterion, at the seam the app decides it on.**
+///
+/// The same key, the same base URL, the same adapter: a source added with only
+/// the key offers nothing to write, and one added with the account offers both
+/// ops. Nothing else about the source differs, which is what makes this a fact
+/// about the credential rather than about the configuration.
+#[tokio::test]
+async fn only_a_source_with_an_account_offers_write_ops() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_kuma_source(&f.id, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        Vec::<String>::new()
+    );
+
+    let g = fixture().await;
+    sources::crud::add(
+        &g.pool,
+        &g.secrets,
+        &g.registry,
+        a_kuma_source(&g.id, Some(("knobas", "knobas-dev"))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        sources::crud::instance_write_ops(&g.secrets, &g.registry, &stored(&g).await).await,
+        ["pause_monitor", "resume_monitor"]
+    );
+}
+
+/// **The other half of that criterion: "without re-entering the key".**
+///
+/// The account is added through the ordinary re-enter path with `value: None`,
+/// and both the stored key and the new account are in the item afterwards. The
+/// key assertion is the one that matters: knobas may never read a credential
+/// back, so a reader adding an account has no way to retype an API key Uptime
+/// Kuma showed them once — if absent meant *clear*, adding the account would
+/// silently stop the source reading, and the roster would go on drawing the
+/// last sync's monitors while nothing polled them.
+#[tokio::test]
+async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_kuma_source(&f.id, None))
+        .await
+        .unwrap();
+    assert!(
+        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await)
+            .await
+            .is_empty()
+    );
+
+    sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.id,
+        SecretInput {
+            value: None,
+            account: Some(sources::AccountInput {
+                username: "knobas".to_owned(),
+                password: "knobas-dev".to_owned(),
+            }),
+        },
+    )
+    .await
+    .unwrap();
+
+    let kept = f.secrets.get(&f.id).unwrap().expect("the credential");
+    assert_eq!(kept.value, "uk1_metrics", "the key was kept, not cleared");
+    assert_eq!(kept.kind, AuthMethod::ApiToken);
+    let account = kept.account.expect("the account was added");
+    assert_eq!(account.username, "knobas");
+    assert_eq!(account.password, "knobas-dev");
+
+    assert_eq!(
+        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        ["pause_monitor", "resume_monitor"],
+        "the write ops flipped on with no other change"
+    );
+}
+
+/// The same rule read the other way: replacing the key does not throw away the
+/// account beside it.
+///
+/// This is the direction a reader meets when a Kuma API key is rotated. Losing
+/// the account there would take the Pause and Resume buttons off the Monitors
+/// tab, and nothing on screen would say why.
+#[tokio::test]
+async fn re_entering_the_key_keeps_the_stored_account() {
+    let f = fixture().await;
+    sources::crud::add(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        a_kuma_source(&f.id, Some(("knobas", "knobas-dev"))),
+    )
+    .await
+    .unwrap();
+
+    sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.id,
+        SecretInput::of("uk1_rotated"),
+    )
+    .await
+    .unwrap();
+
+    let kept = f.secrets.get(&f.id).unwrap().expect("the credential");
+    assert_eq!(kept.value, "uk1_rotated");
+    assert_eq!(
+        kept.account.expect("the account survived").username,
+        "knobas"
+    );
+}
+
+/// A keychain that refuses to answer is asked which buttons to draw, not
+/// whether the app may run.
+///
+/// Absence is `Ok(None)` and is covered above; the refusals a person actually
+/// meets are not absence. A locked keychain, `errSecAuthFailed` and a *Deny*
+/// on the prompt all arrive as `SecretError::Backend`, and this asks what the
+/// two surfaces reading this function do with one. Both must survive it: the
+/// Monitors tab reads its roster out of the database and needs the keychain
+/// only to decide whether to draw Pause and Resume, and `submit_write` checks
+/// the union of the kind's ops and the instance's -- so a propagated refusal
+/// would refuse a Jira `comment`, an op the *kind* declares and no credential
+/// gates, because a keychain that write never had to open would not open.
+///
+/// `backup_ipc`'s `a_keychain_that_refuses_one_source_still_settles_the_others`
+/// is this same failure met from the other side, which is why it is worth a
+/// test of its own here rather than a comment.
+#[tokio::test]
+async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() {
+    struct Refuses;
+
+    impl SecretStore for Refuses {
+        fn get(&self, _source_id: &str) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+            Err(knobas_secrets::SecretError::Backend(
+                "the keychain is locked".to_owned(),
+            ))
+        }
+
+        fn put(&self, _: &str, _: &Secret) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("this test only reads")
+        }
+
+        fn delete(&self, _: &str) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("this test only reads")
+        }
+    }
+
+    let f = fixture().await;
+    sources::crud::add(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        a_kuma_source(&f.id, Some(("knobas", "knobas-dev"))),
+    )
+    .await
+    .unwrap();
+    // The account really is stored, so the empty answer below is the refusal
+    // and not a source that never had one.
+    assert_eq!(
+        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        ["pause_monitor", "resume_monitor"]
+    );
+
+    let locked: Arc<dyn SecretStore> = Arc::new(Refuses);
+    assert_eq!(
+        sources::crud::instance_write_ops(&locked, &f.registry, &stored(&f).await).await,
+        Vec::<String>::new(),
+        "a refused keychain offers nothing; it does not take the surface down with it"
+    );
+}
+
+/// A source that has never had a credential cannot *keep* one, and says so
+/// rather than storing an empty string.
+#[tokio::test]
+async fn a_re_enter_with_nothing_typed_and_nothing_stored_is_refused() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_kuma_source(&f.id, None))
+        .await
+        .unwrap();
+    f.secrets.delete(&f.id).unwrap();
+
+    let refused = sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.id,
+        SecretInput::default(),
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(sources::SourcesError::Invalid(_))),
+        "got {refused:?}"
+    );
+    assert!(
+        f.secrets.get(&f.id).unwrap().is_none(),
+        "a refused re-enter stores nothing"
+    );
+}
+
+/// And a brand-new source cannot *keep* one either: there is nothing stored
+/// for a source that does not exist yet.
+#[tokio::test]
+async fn adding_a_source_with_no_typed_credential_is_refused_by_name() {
+    let f = fixture().await;
+    let mut input = a_kuma_source(&f.id, Some(("knobas", "knobas-dev")));
+    input.secret.value = None;
+    let refused = sources::crud::add(&f.pool, &f.secrets, &f.registry, input).await;
+    assert!(
+        matches!(refused, Err(sources::SourcesError::Invalid(_))),
+        "got {refused:?}"
+    );
+    assert!(
+        knobas_sync::config::get(&f.pool, &f.id)
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused add writes no row"
+    );
+    assert!(f.secrets.get(&f.id).unwrap().is_none());
 }

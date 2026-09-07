@@ -208,6 +208,10 @@ impl Env {
             base_url: self.url.clone(),
             auth: Some(AuthMethod::ApiToken),
             secret: Some(self.key.clone()),
+            // The alert chain is a *read* end to end: nothing here pauses a
+            // monitor, so this source needs no account (#452) -- and one here
+            // would give it write ops the exit witness has no use for.
+            account: None,
             config: json!({}),
         })
         .expect("the adapter builds against the seeded container")
@@ -345,13 +349,7 @@ async fn app(env: &Env) -> SourcesState {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(
-            KUMA,
-            &Secret {
-                kind: AuthMethod::ApiToken,
-                value: env.key.clone(),
-            },
-        )
+        .put(KUMA, &Secret::just(AuthMethod::ApiToken, env.key.clone()))
         .expect("the Kuma API key is stored");
 
     knobas_sync::config::insert(

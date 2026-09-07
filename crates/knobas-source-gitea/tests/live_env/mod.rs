@@ -94,6 +94,7 @@ impl Env {
             base_url: self.url.clone(),
             auth: Some(AuthMethod::Pat),
             secret: Some(token.to_owned()),
+            account: None,
             config,
         })
         .expect("the adapter builds")

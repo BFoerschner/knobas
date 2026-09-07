@@ -10,13 +10,39 @@
 //!         = "dev.knobas.desktop.dev"        cfg!(debug_assertions)
 //!         = ….demo                          the --demo profile (P13)
 //! account = "source:<source_id>"
-//! value   = {"v":1,"kind":"pat","secret":"…"}
+//! value   = {"v":2,"kind":"pat","secret":"…"}
+//!         = {"v":2,"kind":"api_token","secret":"…",
+//!            "account":{"username":"…","password":"…"}}
 //! ```
 //!
 //! One item per source rather than per auth method, so changing PAT → password
 //! rewrites in place instead of orphaning an item; the envelope's `v` and
 //! `kind` leave room for OAuth (access + refresh + expiry) without a naming
 //! change.
+//!
+//! # Version 2: a second credential in the same item (M4.1, issue #452)
+//!
+//! `account` is an **optional** username and password stored beside the
+//! source's ordinary secret, for the one source that needs two credentials at
+//! once: Uptime Kuma's API key opens `/metrics` and nothing else, and pausing
+//! a monitor is a socket.io login an API key cannot make
+//! ([`knobas_source::instance::Account`] argues the shape).
+//!
+//! **In the same item and not a second one.** The service+account pair above
+//! is the keychain convention (interfaces §3), and a `source:<id>:account`
+//! beside it would be a second item to keep in step with the first: a
+//! `delete_source` that removed one and not the other leaves a credential
+//! behind for a source that no longer exists, and a re-enter that rewrote one
+//! and not the other leaves the pair disagreeing. One item has one lifetime,
+//! and [`SecretStore`]'s three methods already give it exactly one.
+//!
+//! **A v1 envelope still reads**, as the source it describes: one credential
+//! and no account. That is what makes this migration nothing -- every
+//! credential already in a developer's keychain keeps working, and the item is
+//! rewritten as v2 the next time it is stored. The refusal
+//! [`decode`] makes is of a version this build has *not heard of*, which is
+//! still the rule: a reader that guessed at a newer shape would hand an
+//! adapter half a credential.
 //!
 //! # Who names the service
 //!
@@ -44,6 +70,7 @@ pub use keyring_store::KeyringStore;
 pub use memory::MemoryStore;
 
 use knobas_source::AuthMethod;
+use knobas_source::instance::Account;
 
 /// The keychain account for one source.
 #[must_use]
@@ -56,16 +83,44 @@ pub fn account_for(source_id: &str) -> String {
 pub struct Secret {
     pub kind: AuthMethod,
     pub value: String,
+    /// The optional second credential of envelope version 2 (issue #452):
+    /// the account whose name and password open a channel [`value`](Self::value)
+    /// cannot. `None` for every source that has one credential.
+    ///
+    /// The type is the SPI's, not a copy of it, because this is exactly what
+    /// reaches an adapter as [`SourceInstance::account`]; a private twin here
+    /// would be a shape to keep in step with that one.
+    ///
+    /// [`SourceInstance::account`]: knobas_source::instance::SourceInstance::account
+    pub account: Option<Account>,
+}
+
+impl Secret {
+    /// A credential with no account beside it -- the shape every source but
+    /// Uptime Kuma has, and the one every caller wrote before issue #452.
+    #[must_use]
+    pub fn just(kind: AuthMethod, value: impl Into<String>) -> Self {
+        Self {
+            kind,
+            value: value.into(),
+            account: None,
+        }
+    }
 }
 
 /// Hand-written, and the reason is the whole point of the type: a derived
 /// `Debug` puts the credential into every `tracing` line and every panic
 /// message that ever formats a struct containing one.
+///
+/// The account is printed through [`Account`]'s own `Debug`, which redacts the
+/// password and keeps the username: whose login was refused is the question a
+/// log line is being read for.
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Secret")
             .field("kind", &self.kind)
             .field("value", &"<redacted>")
+            .field("account", &self.account)
             .finish()
     }
 }
@@ -138,13 +193,39 @@ pub trait SecretStore: Send + Sync {
 
 /// Current envelope version. Bumped only when the shape changes; a reader that
 /// meets a higher one refuses rather than guessing.
-const ENVELOPE_VERSION: u8 = 1;
+///
+/// **2 since issue #452**, when the envelope grew an optional `account`. Every
+/// version this build knows is listed in [`READABLE_VERSIONS`], and a stored
+/// item is upgraded by being written, never by a migration: there is nothing
+/// to migrate *to* -- a v1 item decodes as the credential it always was.
+const ENVELOPE_VERSION: u8 = 2;
+
+/// The envelope versions this build can read.
+///
+/// A list rather than `<= ENVELOPE_VERSION`, so that dropping support for a
+/// shape is a deletion here and reads as one, and so the refusal below can
+/// name what it does understand.
+const READABLE_VERSIONS: &[u8] = &[1, 2];
+
+/// The stored account half. Its own type, `Deserialize`d by value, because
+/// [`Envelope`] borrows from the raw string and a borrowed nested struct would
+/// refuse any item whose JSON needed unescaping.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredAccount {
+    username: String,
+    password: String,
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Envelope<'a> {
     v: u8,
     kind: &'a str,
     secret: &'a str,
+    /// Absent in v1, and absent in a v2 item for a source with one credential
+    /// -- `skip_serializing_if` so the common envelope is byte-for-byte what
+    /// it always was but for its `v`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<StoredAccount>,
 }
 
 /// The envelope name for an auth method.
@@ -173,22 +254,38 @@ fn kind_from_envelope(name: &str) -> Option<AuthMethod> {
 }
 
 /// Serialize a secret into the stored envelope.
+///
+/// Always at [`ENVELOPE_VERSION`], account or no account: the version names
+/// the *shape a reader must understand*, and a v1 item that grew an `account`
+/// would be one an older build silently read as a Kuma with no write half.
 fn encode(secret: &Secret) -> Result<String, SecretError> {
     serde_json::to_string(&Envelope {
         v: ENVELOPE_VERSION,
         kind: envelope_kind(secret.kind),
         secret: &secret.value,
+        account: secret.account.as_ref().map(|a| StoredAccount {
+            username: a.username.clone(),
+            password: a.password.clone(),
+        }),
     })
     .map_err(|e| SecretError::Backend(e.to_string()))
 }
 
 /// Parse a stored envelope. The error text never quotes the payload.
+///
+/// Every version in [`READABLE_VERSIONS`] is read as the credential it
+/// describes: a v1 item is a source with one credential, which is what it
+/// always was. Anything else is refused rather than guessed at -- an envelope
+/// from a newer knobas may carry a credential in a place this build would not
+/// look, and handing an adapter the half it happened to recognise is worse
+/// than saying so.
 fn decode(raw: &str) -> Result<Secret, SecretError> {
     let envelope: Envelope<'_> = serde_json::from_str(raw)
         .map_err(|_| SecretError::Backend("unreadable envelope".into()))?;
-    if envelope.v != ENVELOPE_VERSION {
+    if !READABLE_VERSIONS.contains(&envelope.v) {
         return Err(SecretError::Backend(format!(
-            "envelope version {} was written by a newer knobas",
+            "envelope version {} was written by a newer knobas; this build reads \
+             {READABLE_VERSIONS:?}",
             envelope.v
         )));
     }
@@ -197,6 +294,10 @@ fn decode(raw: &str) -> Result<Secret, SecretError> {
     Ok(Secret {
         kind,
         value: envelope.secret.to_owned(),
+        account: envelope.account.map(|a| Account {
+            username: a.username,
+            password: a.password,
+        }),
     })
 }
 
@@ -204,6 +305,7 @@ fn decode(raw: &str) -> Result<Secret, SecretError> {
 mod tests {
     use super::*;
     use knobas_source::AuthMethod;
+    use knobas_source::instance::Account;
 
     /// `account` is half of the keychain convention (interfaces §3) and is
     /// load-bearing: changing it strands every stored credential.
@@ -215,20 +317,66 @@ mod tests {
     /// The envelope is versioned and carries the auth method, so PAT →
     /// password rewrites one item instead of orphaning another (§3), and OAuth
     /// can add fields later without a naming change.
+    ///
+    /// A source with one credential writes **no** `account` key at all -- the
+    /// v2 envelope for the ordinary case is v1's with its version bumped, so
+    /// the shape a reader has to understand is the shape they already knew.
     #[test]
     fn the_envelope_round_trips_and_names_its_version() {
-        let secret = Secret {
-            kind: AuthMethod::Pat,
-            value: "abc123".into(),
-        };
+        let secret = Secret::just(AuthMethod::Pat, "abc123");
         let json = encode(&secret).unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
-            serde_json::json!({ "v": 1, "kind": "pat", "secret": "abc123" })
+            serde_json::json!({ "v": 2, "kind": "pat", "secret": "abc123" })
         );
         let back = decode(&json).unwrap();
         assert_eq!(back.kind, AuthMethod::Pat);
         assert_eq!(back.value, "abc123");
+        assert!(back.account.is_none());
+    }
+
+    /// The v2 addition (issue #452): the API key and the account under **one**
+    /// item, both surviving the hop.
+    #[test]
+    fn an_account_rides_beside_the_secret_in_the_same_item() {
+        let secret = Secret {
+            kind: AuthMethod::ApiToken,
+            value: "uk1_metrics".into(),
+            account: Some(Account {
+                username: "knobas".into(),
+                password: "knobas-dev".into(),
+            }),
+        };
+        let json = encode(&secret).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            serde_json::json!({
+                "v": 2,
+                "kind": "api_token",
+                "secret": "uk1_metrics",
+                "account": { "username": "knobas", "password": "knobas-dev" },
+            })
+        );
+        let back = decode(&json).unwrap();
+        assert_eq!(back.value, "uk1_metrics");
+        let account = back.account.expect("the account survives the envelope");
+        assert_eq!(account.username, "knobas");
+        assert_eq!(account.password, "knobas-dev");
+    }
+
+    /// **Nothing to migrate.** A v1 item -- every credential already in a
+    /// developer's keychain -- decodes as the source it always described: one
+    /// credential and no account. Asserted against the literal bytes v1 wrote,
+    /// not against a re-encoding, because a re-encoding would be v2.
+    #[test]
+    fn a_version_one_item_still_reads_as_a_source_with_one_credential() {
+        let back = decode(r#"{"v":1,"kind":"pat","secret":"abc123"}"#).unwrap();
+        assert_eq!(back.kind, AuthMethod::Pat);
+        assert_eq!(back.value, "abc123");
+        assert!(
+            back.account.is_none(),
+            "a v1 item describes one credential and must not invent a second"
+        );
     }
 
     #[test]
@@ -239,19 +387,27 @@ mod tests {
             AuthMethod::ApiToken,
             AuthMethod::OAuth,
         ] {
-            let s = Secret {
-                kind,
-                value: "x".into(),
-            };
+            let s = Secret::just(kind, "x");
             assert_eq!(decode(&encode(&s).unwrap()).unwrap().kind, kind);
         }
     }
 
     /// An envelope from a future knobas is not a secret we may guess at.
+    ///
+    /// The number moved with the version (issue #452): 2 is now a shape this
+    /// build writes, so the probe is 3. What the test pins is the *rule* --
+    /// a version outside [`READABLE_VERSIONS`] is refused -- and it is read
+    /// off that list rather than written out, so bumping the version again
+    /// cannot leave this asserting something the code no longer does.
     #[test]
     fn an_unknown_envelope_version_is_refused_rather_than_misread() {
-        let err = decode(r#"{"v":2,"kind":"pat","secret":"x"}"#).unwrap_err();
+        let unknown = READABLE_VERSIONS.iter().max().expect("a readable version") + 1;
+        let err = decode(&format!(r#"{{"v":{unknown},"kind":"pat","secret":"x"}}"#)).unwrap_err();
         assert!(matches!(err, SecretError::Backend(_)), "got {err:?}");
+        for readable in READABLE_VERSIONS {
+            decode(&format!(r#"{{"v":{readable},"kind":"pat","secret":"x"}}"#))
+                .unwrap_or_else(|e| panic!("version {readable} is declared readable: {e}"));
+        }
     }
 
     /// A secret that prints itself is a secret in a log file.
@@ -260,11 +416,19 @@ mod tests {
         let s = Secret {
             kind: AuthMethod::Pat,
             value: "hunter2".into(),
+            account: Some(Account {
+                username: "knobas".into(),
+                password: "hunter3".into(),
+            }),
         };
         let shown = format!("{s:?}");
         assert!(
             !shown.contains("hunter2"),
             "Debug leaked the secret: {shown}"
+        );
+        assert!(
+            !shown.contains("hunter3"),
+            "Debug leaked the account password: {shown}"
         );
         assert!(shown.contains("redacted"));
     }
@@ -281,31 +445,47 @@ mod tests {
         store.delete("jira").unwrap();
 
         store
-            .put(
-                "jira",
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "one".into(),
-                },
-            )
+            .put("jira", &Secret::just(AuthMethod::Pat, "one"))
             .unwrap();
         assert_eq!(store.get("jira").unwrap().unwrap().value, "one");
 
         // Re-entering overwrites the one item rather than adding a second.
         store
-            .put(
-                "jira",
-                &Secret {
-                    kind: AuthMethod::UserPassword,
-                    value: "two".into(),
-                },
-            )
+            .put("jira", &Secret::just(AuthMethod::UserPassword, "two"))
             .unwrap();
         let got = store.get("jira").unwrap().unwrap();
         assert_eq!(
             (got.kind, got.value.as_str()),
             (AuthMethod::UserPassword, "two")
         );
+
+        // The account is part of what a store keeps, not something `put`
+        // takes and `get` forgets -- the whole of the write half turns on
+        // this answer coming back.
+        store
+            .put(
+                "kuma",
+                &Secret {
+                    kind: AuthMethod::ApiToken,
+                    value: "uk1_metrics".into(),
+                    account: Some(Account {
+                        username: "knobas".into(),
+                        password: "knobas-dev".into(),
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .get("kuma")
+                .unwrap()
+                .unwrap()
+                .account
+                .unwrap()
+                .username,
+            "knobas"
+        );
+        store.delete("kuma").unwrap();
 
         store.delete("jira").unwrap();
         assert!(store.get("jira").unwrap().is_none());
@@ -316,22 +496,10 @@ mod tests {
     fn sources_do_not_share_an_item() {
         let store = MemoryStore::new();
         store
-            .put(
-                "jira",
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "a".into(),
-                },
-            )
+            .put("jira", &Secret::just(AuthMethod::Pat, "a"))
             .unwrap();
         store
-            .put(
-                "jira-eu",
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "b".into(),
-                },
-            )
+            .put("jira-eu", &Secret::just(AuthMethod::Pat, "b"))
             .unwrap();
         store.delete("jira").unwrap();
         assert!(store.get("jira").unwrap().is_none());
@@ -343,16 +511,9 @@ mod tests {
     #[tokio::test]
     async fn the_spawn_helpers_reach_the_store() {
         let store: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
-        spawn::put(
-            &store,
-            "jira",
-            Secret {
-                kind: AuthMethod::Pat,
-                value: "z".into(),
-            },
-        )
-        .await
-        .unwrap();
+        spawn::put(&store, "jira", Secret::just(AuthMethod::Pat, "z"))
+            .await
+            .unwrap();
         assert_eq!(
             spawn::get(&store, "jira").await.unwrap().unwrap().value,
             "z"

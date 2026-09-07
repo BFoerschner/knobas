@@ -884,13 +884,7 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
         .expect("a pool onto the scratch database");
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(
-            JIRA,
-            &Secret {
-                kind: auth,
-                value: secret.to_owned(),
-            },
-        )
+        .put(JIRA, &Secret::just(auth, secret))
         .expect("the Jira credential is stored");
 
     knobas_sync::config::insert(
@@ -1062,13 +1056,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
     let refused_secret = format!("revoked-{}", std::process::id());
     state
         .secrets
-        .put(
-            JIRA,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: refused_secret.clone(),
-            },
-        )
+        .put(JIRA, &Secret::just(AuthMethod::Pat, refused_secret.clone()))
         .expect("the replacement credential is stored");
 
     sync(&state, JIRA).await;
@@ -1991,9 +1979,7 @@ async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_sour
             base_url: env.url.clone(),
             auth_kind: AuthMethod::Pat,
             config: json!({ "username": env.user }),
-            secret: Some(SecretInput {
-                value: pat.raw.clone(),
-            }),
+            secret: Some(SecretInput::of(pat.raw.clone())),
         },
     )
     .await
@@ -2107,9 +2093,7 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
             base_url: env.url.clone(),
             auth_kind: AuthMethod::Pat,
             config: json!({ "username": env.user }),
-            secret: Some(SecretInput {
-                value: pat.raw.clone(),
-            }),
+            secret: Some(SecretInput::of(pat.raw.clone())),
         },
     )
     .await
@@ -2576,13 +2560,7 @@ async fn wiki_app(
         .expect("a pool onto the scratch database");
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(
-            CONFLUENCE,
-            &Secret {
-                kind: auth,
-                value: secret.to_owned(),
-            },
-        )
+        .put(CONFLUENCE, &Secret::just(auth, secret))
         .expect("the Confluence credential is stored");
 
     knobas_sync::config::insert(
@@ -3543,10 +3521,7 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
         .secrets
         .put(
             CONFLUENCE,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: refused_secret.clone(),
-            },
+            &Secret::just(AuthMethod::Pat, refused_secret.clone()),
         )
         .expect("the replacement credential is stored");
 

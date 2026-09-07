@@ -35,6 +35,17 @@ export interface SourceDescriptor {
   capabilities: string[];
   adapter_version: string;
   auth_methods: AuthMethod[];
+  /**
+   * Whether this adapter can use a **second** credential beside the one
+   * {@link auth_methods} names: an optional username and password, stored in
+   * the same keychain item (#452).
+   *
+   * What the Add-source and re-enter forms draw the optional account fields
+   * from. A declaration and not a fact a form could work out, for
+   * `config_schema`'s reason: the alternative is a component that knows the
+   * string `"kuma"`, which is the per-adapter table §3a forbids.
+   */
+  accepts_account: boolean;
   write_ops: string[];
   entity_kinds: KindInfo[];
   /** JSON Schema. The form is generated from it — never hand-built per adapter. */
@@ -254,9 +265,33 @@ export interface SourceSummary {
   kinds: KindInfo[];
 }
 
-/** Write-only. The backend has no way to send one back. */
+/**
+ * Write-only. The backend has no way to send one back.
+ *
+ * Both fields are optional and **absent means "keep what is stored"** (#452).
+ * One rule, read in both directions: a reader adding an account to an Uptime
+ * Kuma cannot retype an API key Kuma showed them once, and a reader replacing
+ * an expired key must not silently lose the account beside it. `add_source` is
+ * the one caller for which *keep* has no meaning, and it refuses a missing
+ * `value` by name.
+ */
 export interface SecretInput {
-  value: string;
+  value?: string | null;
+  /**
+   * The optional second credential of the version-2 keychain envelope: a
+   * username and password stored **beside** {@link value}, not instead of it.
+   *
+   * Only Uptime Kuma reads one, and only for its write half — the API key
+   * opens `/metrics`, the account opens socket.io, and a source with only the
+   * key reads every monitor and pauses none of them.
+   */
+  account?: SecretAccount | null;
+}
+
+/** A typed account on its way in — `knobas_app::sources::AccountInput`. */
+export interface SecretAccount {
+  username: string;
+  password: string;
 }
 
 /** What the Add-source form submits — `knobas_app::sources::NewSource`. */
@@ -599,7 +634,17 @@ export type WriteOpPayload =
          */
         body: string;
       };
-    };
+    }
+  /**
+   * Stop a monitor checking (#452). `entity` is the **monitor** (`kuma:8`).
+   *
+   * No second field: Uptime Kuma's `pauseMonitor` takes a monitor id and
+   * nothing else, so a duration or a reason here would be something knobas
+   * asked a reader for and threw away.
+   */
+  | { PauseMonitor: { entity: string } }
+  /** Start a paused monitor checking again (#452). */
+  | { ResumeMonitor: { entity: string } };
 
 /**
  * One write knobas still owes a source —

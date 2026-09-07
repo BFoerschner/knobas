@@ -239,6 +239,7 @@ fn wiki_descriptor(id: &str) -> SourceDescriptor {
         capabilities: vec![Capability::Write],
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
         write_ops: vec!["create_page".to_owned()],
         entity_kinds: vec![kind("page")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -254,6 +255,7 @@ fn tracker_descriptor() -> SourceDescriptor {
         capabilities: vec![Capability::Write],
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
         write_ops: vec!["create_ticket".to_owned()],
         entity_kinds: vec![kind("ticket")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -351,13 +353,7 @@ impl Harness {
             .await
             .expect("the source row is written");
             secrets
-                .put(
-                    id,
-                    &knobas_secrets::Secret {
-                        kind: AuthMethod::Pat,
-                        value: "token".to_owned(),
-                    },
-                )
+                .put(id, &knobas_secrets::Secret::just(AuthMethod::Pat, "token"))
                 .expect("a credential");
         }
 

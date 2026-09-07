@@ -1191,7 +1191,8 @@ kuma-live:
     docker compose up -d --wait uptime-kuma
     ./seed-kuma.sh
     eval "$(./seed --env-kuma)"
-    just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY
+    just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY \
+      KNOBAS_KUMA_USER KNOBAS_KUMA_PASSWORD
     # The canary bound before either suite, and rebound however this ends.
     # `|| true` because the trap must not turn a suite's failure into a
     # different exit status, and `status` is not consulted first: `up` is
@@ -1216,6 +1217,14 @@ kuma-live:
     ./canary.sh up
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
+      -- --ignored --nocapture --test-threads=1
+    # The same write half one seam higher (#452): the pause queued through
+    # `submit_write`, settled, and read back out of `sync.item`. The adapter
+    # suite above proves `Source::write` pauses a monitor; everything between
+    # the button and that call -- the op decoded, the instance's write ops read
+    # out of the keychain, the queue row, the flush, the mirror re-read -- is
+    # knobas' own and is what a reader actually runs.
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test kuma_write_live \
       -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test alert_chain_live \
       -- --ignored --nocapture --test-threads=1

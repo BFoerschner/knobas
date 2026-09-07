@@ -441,10 +441,7 @@ async fn app(name: &str, env: &Env) -> SourcesState {
     secrets
         .put(
             CONFLUENCE,
-            &Secret {
-                kind: AuthMethod::UserPassword,
-                value: env.password.clone(),
-            },
+            &Secret::just(AuthMethod::UserPassword, env.password.clone()),
         )
         .expect("the Confluence credential is stored");
 

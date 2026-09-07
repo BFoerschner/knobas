@@ -4931,3 +4931,59 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
         "and the roster above draws no monitor for it, which is the fact this pins"
     );
 }
+
+/// The two spellings the Monitors tab writes out are the **SPI's own**
+/// (issue #452).
+///
+/// A tab offering `"pauseMonitor"` -- Kuma's event name -- would draw a button
+/// whose write `submit_write` refuses by name, and the failure would read as a
+/// source that does not support pausing.
+///
+/// Asserted from `tests/` rather than beside the constants: `knobas-sync`'s
+/// `write_choke_point` proves there is one outbound write path by finding every
+/// file under `crates/*/src/` that names the SPI's write op, and a roster read
+/// is not one. This file is out of that scan's scope.
+#[test]
+fn the_monitors_tab_offers_the_ops_the_spi_names() {
+    assert_eq!(
+        assets::PAUSE_MONITOR,
+        knobas_source::WriteOp::PauseMonitor {
+            entity: "kuma:8".to_owned()
+        }
+        .identifier()
+    );
+    assert_eq!(
+        assets::RESUME_MONITOR,
+        knobas_source::WriteOp::ResumeMonitor {
+            entity: "kuma:8".to_owned()
+        }
+        .identifier()
+    );
+}
+
+/// The tab's own copy of the two spellings, which is a **third** and the only
+/// one that fails quietly.
+///
+/// `MonitorsView.svelte`'s `MONITOR_ACTIONS` is keyed by identifier and its
+/// `{#if MONITOR_ACTIONS[op]}` *skips* a key it does not know -- deliberately,
+/// so a backend that grows a third monitor op does not draw a nameless button.
+/// The cost of that design is that a renamed identifier is not an error on
+/// either side: `assets::PAUSE_MONITOR` and the mirror's `WriteOpPayload` would
+/// still agree, `sources_mirror.rs` pins the payload **tag** rather than the
+/// snake_case identifier, and every button would simply stop being drawn.
+///
+/// So the same pin the two Rust copies get (`the_monitors_tab_offers_the_ops_the_spi_names`
+/// above, and the Kuma crate's `the_declared_ops_are_the_spis_own_identifiers`),
+/// read off the file the component ships.
+#[test]
+fn the_tabs_own_action_table_is_keyed_by_those_same_spellings() {
+    const MONITORS_VIEW: &str = include_str!("../../../app/src/lib/assets/MonitorsView.svelte");
+
+    for op in [assets::PAUSE_MONITOR, assets::RESUME_MONITOR] {
+        assert!(
+            MONITORS_VIEW.contains(&format!("{op}: {{")),
+            "MonitorsView.svelte's MONITOR_ACTIONS has no {op:?} key, so the tab draws \
+             no button for it -- and skips it in silence"
+        );
+    }
+}

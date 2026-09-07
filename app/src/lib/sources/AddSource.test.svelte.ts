@@ -82,6 +82,7 @@ function descriptor(over: Partial<SourceDescriptor> = {}): SourceDescriptor {
     capabilities: [],
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
+    accepts_account: false,
     write_ops: [],
     entity_kinds: [
       { id: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", full_sync_exhaustive: false },
@@ -295,7 +296,10 @@ test("Test connection shows account, server version and elapsed time on success"
   // typed rather than something already stored.
   expect(draft.source_id).toBeNull();
   expect(draft.base_url).toBe("https://jira.tidewater.example");
-  expect(draft.secret).toEqual({ value: "s3cret" });
+  // `account: null` and not an absent key: the form always says what it means
+  // about the optional second credential (#452), and *none* is a thing a form
+  // can mean.
+  expect(draft.secret).toEqual({ value: "s3cret", account: null });
 
   const result = target.querySelector(".test-res")!;
   expect(result.textContent).toContain("mara.oyelaran");
@@ -982,4 +986,76 @@ test("a discovered key naming a property this adapter does not declare never rea
   await saveFromTest();
   expect(calls.addSource[0]!.config).toMatchObject({ epic_link_field: "customfield_10101" });
   expect(calls.addSource[0]!.config).not.toHaveProperty("not_a_property");
+});
+
+/**
+ * The optional account (#452), and the declaration that draws it.
+ *
+ * **`accepts_account` and never an adapter kind.** The Jira descriptor every
+ * other test here uses declares `false`, so the fields are absent; the same
+ * component draws them for a descriptor that declares `true`, with nothing in
+ * the component knowing the word "kuma". That is §3a's rule -- the form is
+ * generated from the descriptor -- applied to the one field the config schema
+ * may never carry, because it is a credential.
+ */
+test("an adapter that declares no account gets no account fields", async () => {
+  await toAuth();
+  expect(target.querySelector("#add-account-user")).toBeNull();
+  expect(target.querySelector("#add-account-password")).toBeNull();
+});
+
+test("an adapter that declares one gets them, with nothing knowing its name", async () => {
+  adapters = [descriptor({ accepts_account: true, auth_methods: ["ApiToken"] })];
+  await toAuth();
+  expect(target.querySelector("#add-account-user")).toBeTruthy();
+  expect(target.querySelector("#add-account-password")).toBeTruthy();
+});
+
+/**
+ * Half an account is not an account: a username with no password logs in to
+ * nothing, so the step will not advance rather than storing a credential that
+ * can only fail.
+ */
+test("a half-filled account blocks the step rather than being stored", async () => {
+  adapters = [descriptor({ accepts_account: true, auth_methods: ["ApiToken"] })];
+  await toAuth();
+  type("#add-secret", "uk1_metrics");
+  expect(button("Next")!.disabled).toBe(false);
+
+  type("#add-account-user", "knobas");
+  expect(button("Next")!.disabled).toBe(true);
+  expect(target.textContent).toContain("An account needs both a username and a password");
+
+  type("#add-account-password", "knobas-dev");
+  expect(button("Next")!.disabled).toBe(false);
+});
+
+/** The account reaches the backend beside the key, in one submission. */
+test("Save sends the account beside the key", async () => {
+  adapters = [descriptor({ accepts_account: true, auth_methods: ["ApiToken"] })];
+  await toAuth();
+  type("#add-secret", "uk1_metrics");
+  type("#add-account-user", "knobas");
+  type("#add-account-password", "knobas-dev");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  button("Next")!.click();
+  flushSync();
+  button("Save")!.click();
+  await settle();
+
+  expect(calls.addSource.length).toBe(1);
+  expect(calls.addSource[0]!.secret).toEqual({
+    value: "uk1_metrics",
+    account: { username: "knobas", password: "knobas-dev" },
+  });
+  // And the draft the *Test* before it sent carried the same pair: a form that
+  // tested the key alone would go green on a credential the saved source does
+  // not have.
+  expect(calls.testSource.at(-1)!.secret).toEqual({
+    value: "uk1_metrics",
+    account: { username: "knobas", password: "knobas-dev" },
+  });
 });

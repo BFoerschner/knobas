@@ -266,6 +266,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         "SourceDescriptor",
         &wire,
         &[
+            "accepts_account",
             "adapter_kind",
             "adapter_version",
             "auth_methods",
@@ -623,6 +624,12 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             base_version: 3,
             body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
         },
+        knobas_source::WriteOp::PauseMonitor {
+            entity: "kuma:8".to_owned(),
+        },
+        knobas_source::WriteOp::ResumeMonitor {
+            entity: "kuma:8".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -637,6 +644,8 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::LogWork { .. } => "LogWork",
             knobas_source::WriteOp::CreatePage { .. } => "CreatePage",
             knobas_source::WriteOp::UpdatePage { .. } => "UpdatePage",
+            knobas_source::WriteOp::PauseMonitor { .. } => "PauseMonitor",
+            knobas_source::WriteOp::ResumeMonitor { .. } => "ResumeMonitor",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(
