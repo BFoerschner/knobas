@@ -635,11 +635,12 @@ async fn the_database_refuses_a_second_open_alert() {
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    let refused = sqlx::query("insert into knobas.monitor_alert (entity_id, state) values ($1, $2)")
-        .bind(&canary)
-        .bind("warn")
-        .execute(&pool)
-        .await;
+    let refused =
+        sqlx::query("insert into knobas.monitor_alert (entity_id, state) values ($1, $2)")
+            .bind(&canary)
+            .bind("warn")
+            .execute(&pool)
+            .await;
     assert!(
         refused.is_err(),
         "a second open alert for one monitor was accepted"

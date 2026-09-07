@@ -2779,7 +2779,10 @@ async fn only_the_newest_sample_colours_an_asset() {
     link_as(&pool, &vm.id, &check, "monitored-by").await;
 
     sampled(&pool, &check, Some("down")).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Down
+    );
 
     sampled(&pool, &check, Some("up")).await;
     assert_eq!(
@@ -2803,7 +2806,10 @@ async fn a_paused_monitor_colours_nothing_and_is_still_listed() {
     let check = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
     link_as(&pool, &vm.id, &check, "monitored-by").await;
     sampled(&pool, &check, Some("down")).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Down
+    );
 
     sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
         .bind(&check)
@@ -2843,20 +2849,32 @@ async fn the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors() {
     // colours anything -- `alerts` takes the same reading of them.
     sampled(&pool, &slow, Some("pending")).await;
     sampled(&pool, &other, Some("maintenance")).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::None);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::None
+    );
 
     // A miss is a gap, and a gap colours nothing either.
     sampled(&pool, &slow, None).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::None);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::None
+    );
 
     // *Warn* is knobas' own state and exists only in the timeseries: the
     // mirror row still says `up`.
     sampled(&pool, &slow, Some("warn")).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Warn);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Warn
+    );
 
     // The worst of the two monitors, not the newest of them.
     sampled(&pool, &other, Some("down")).await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Down
+    );
 
     // And the worst of the asset's own status and its monitors': the asset is
     // rated `up` and stays `down`, because a monitor is not milder than a
@@ -2869,7 +2887,10 @@ async fn the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors() {
         },
     )
     .await;
-    assert_eq!(column_health(&pool, None, "vm-db-01").await.0, AssetStatus::Down);
+    assert_eq!(
+        column_health(&pool, None, "vm-db-01").await.0,
+        AssetStatus::Down
+    );
 }
 
 /// A monitor attached by a relation that is not `monitored-by`, or an item
@@ -2926,7 +2947,10 @@ async fn the_open_alert_read_names_the_monitor_and_every_asset_it_watches() {
     link_as(&pool, &estate.redis.id, &well, "monitored-by").await;
 
     assert!(
-        assets::open_alerts(&pool).await.expect("the read").is_empty(),
+        assets::open_alerts(&pool)
+            .await
+            .expect("the read")
+            .is_empty(),
         "an estate with nothing wrong in it answers with an empty list"
     );
 
@@ -2996,7 +3020,11 @@ async fn an_alert_on_a_monitor_that_watches_nothing_is_still_in_the_list() {
     opened(&pool, &loose, "down").await;
 
     let open = assets::open_alerts(&pool).await.expect("the read");
-    assert_eq!(open.len(), 1, "one alert, and one for the top strip to count");
+    assert_eq!(
+        open.len(),
+        1,
+        "one alert, and one for the top strip to count"
+    );
     assert_eq!(open[0].monitor_id, loose);
     assert!(
         open[0].assets.is_empty(),
@@ -3036,7 +3064,11 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
     assert_eq!(open.len(), 1, "the alert nobody has seen the end of stands");
     assert_eq!(open[0].monitor_name, "gitea", "with the name it had");
     assert_eq!(
-        open[0].assets.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        open[0]
+            .assets
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>(),
         ["vm-db-01"],
         "and the asset it is about"
     );
