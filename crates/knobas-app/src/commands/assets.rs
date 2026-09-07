@@ -962,7 +962,12 @@ mod tests {
             &json["uptime"][0],
             &["window", "ratio"],
         );
-        assert_shape(MIRROR, "MonitoredAsset", &json["assets"][0], &["id", "name", "path"]);
+        assert_shape(
+            MIRROR,
+            "MonitoredAsset",
+            &json["assets"][0],
+            &["id", "name", "path"],
+        );
         assert_shape(
             MIRROR,
             "MonitorSample",
