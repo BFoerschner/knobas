@@ -30,6 +30,7 @@
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
     EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef, SuggestionPage,
+    UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
@@ -592,6 +593,22 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     for field in ["author", "web_url", "deleted_at"] {
         assert_eq!(wire[field], serde_json::Value::Null, "{field} lost its key");
     }
+}
+
+/// What a pasted URL resolved to (#496).
+///
+/// Two keys and no more: a paste answers *which entity is this link*, and the
+/// frontend then opens that entity by the read that already exists. A field
+/// added here would be one the launcher fetches on every paste and draws
+/// nowhere.
+#[test]
+fn the_url_match_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(UrlMatch {
+        entity_id: "jira:PAY-231".to_owned(),
+        kind: "ticket".to_owned(),
+    })
+    .unwrap();
+    assert_shape("UrlMatch", &wire, &["entity_id", "kind"]);
 }
 
 fn note_row() -> knobas_core::note::NoteRow {

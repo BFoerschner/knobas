@@ -345,6 +345,37 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 }
 
 /**
+ * What a pasted URL named — `knobas_app::commands::entity::UrlMatch` (#496).
+ *
+ * `kind` rides along because an entity id names a namespace and a key, not a
+ * kind, and the address an entity opens at is built from both.
+ */
+export interface UrlMatch {
+  entity_id: string;
+  kind: string;
+}
+
+/**
+ * The entity a pasted URL names, or `null` for a link the mirror does not
+ * hold — `resolve_url` (#496, spec #491 stories 9-11 and 15-17).
+ *
+ * One read on the local mirror and **never a fetch from a source**: a paste
+ * while the tunnel is down is a miss and not a hang (story 16). Matching is
+ * exact on the stored `web_url` after both sides are normalised — fragment
+ * out, the path's trailing slash out, scheme and host down-cased, query kept
+ * verbatim — so a Confluence `viewpage.action?pageId=` link resolves and a
+ * different `pageId` does not.
+ *
+ * Rejects with `invalid` for anything that is not an absolute `http`/`https`
+ * URL. That is not a miss: a miss is *the mirror does not hold this link*, and
+ * it is the only outcome that earns *Open in browser*, which refuses every
+ * other scheme anyway (`lib/shell/open-external.ts`).
+ */
+export function resolveUrl(url: string): Promise<UrlMatch | null> {
+  return invoke<UrlMatch | null>("resolve_url", { url });
+}
+
+/**
  * Draw a link between two entities — `knobas_app::commands::entity::create_link`.
  *
  * `relation` defaults to `"related"` and is folded to lower case; `note` is
