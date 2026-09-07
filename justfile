@@ -1196,8 +1196,18 @@ kuma-live:
     # `|| true` because the trap must not turn a suite's failure into a
     # different exit status, and `status` is not consulted first: `up` is
     # idempotent and says so itself.
+    #
+    # INT and TERM as well as EXIT, the `check` recipe's shape and its reason:
+    # bash runs no EXIT trap for a signal it is not trapping, and a run someone
+    # ctrl-Cs during the fall is exactly the run that leaves the canary red for
+    # the next reader to explain. Each re-raises after restoring, so the caller
+    # still sees an interrupted recipe; EXIT then restores a second time, which
+    # costs a `curl` against a port that is already answering.
+    restore_canary() { cd "$root/testenv" && ./canary.sh up || true; }
     ./canary.sh up
-    trap 'cd "$root/testenv" && ./canary.sh up || true' EXIT
+    trap 'restore_canary' EXIT
+    trap 'restore_canary; trap - INT; kill -INT $$' INT
+    trap 'restore_canary; trap - TERM; kill -TERM $$' TERM
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
       -- --ignored --nocapture --test-threads=1
