@@ -15,6 +15,14 @@ _Avoid_: type, category
 **Note**:
 A knobas-owned markdown document with `[[refs]]`; a first-class searchable kind, not an annotation on something else.
 
+**Capture**:
+A [note](#note) made from the global shortcut while some other window has the focus, in a small window of its own, created on the first keystroke and never on an empty one. What it attaches is two ordinary [links](#link): `captured-in` to the [context](#context) of the last **stored** [room](#room) the reader stood in — a derived room has no context, so nothing then — and `captured-from` to the foreground entity if there was one. The in-app *New note* attaches the same two, by the same mechanism. Never a field on the note. (Ruled 2026-09-07, v1.5 grilling; spec §6)
+_Avoid_: quick note, scratch, jot, inbox (that is the stream of things to answer)
+
+**Checkout**:
+A clone of a [repo](#kind) on this machine, found under the **clones root** — a directory setting knobas scans two levels deep, matching each clone's remote to a repo entity by host and owner/repo — or set by hand per repo as an override. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no clone, no checkout, no fetch (ADR-0016). Where *Open in editor* and *open a terminal here* point. (Ruled 2026-09-07, v1.5 grilling; spec §5)
+_Avoid_: clone (as a noun for the record — the clone is the directory, the checkout is what knobas knows about it), working copy, local path, worktree (a worktree is one more checkout, set by hand)
+
 ## Sync
 
 **Source**:
@@ -153,6 +161,10 @@ Which surface takes which: the write-queue **list** and its `pending_writes` com
 **Held write**:
 A queued write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204) In the state machine it has *left* `pending`; in this glossary's wider sense it is still a pending write. See the two senses above.
 
+**Reachable transition**:
+A status a ticket's workflow offers **from where the ticket stands right now**, read from the source when the detail opens and never stored — an answer about now, not a fact the mirror holds. The status select offers these and only these; when the read fails it falls back to the statuses the source's corpus has been seen to use and stays optimistic, as it was before the read existed. The write is unchanged: it still names the status, and the adapter still resolves and refuses by name. One read on the `Source` trait, implemented by every adapter, refused by name where a source has no workflow. (Ruled 2026-09-07, v1.5 grilling; booked by spec #272 and `docs/contract.md` #179)
+_Avoid_: available transition, allowed status, workflow step, transition id (that is Jira's word and the adapter's business)
+
 **Unclaimed write**:
 Something a source made because knobas asked, that knobas has no record of. It happens in one window: a [pending write](#pending-write) withdrawn while it was in flight — one HTTP round trip wide — where the source takes the write and the row that would have recorded the delivery has already settled as withdrawn. It matters for the two ops that make something new and are not naturally idempotent, `create_ticket` and `create_page`: the ticket or the page is at the source, not in knobas' mirror until the next sync, and nothing links it to what asked for it. Withdrawing the write is not what created it and re-syncing does not adopt it — knobas has no key on it and cannot tell it from anything a colleague made.
 
@@ -212,12 +224,24 @@ Everything the Assets view holds — the whole tree of [assets](#asset), their [
 _Avoid_: inventory, topology, infrastructure (that is what the estate models, not the model)
 
 **Asset**:
-A knobas-owned entity — a server, a container, a service, a database, a runtime, a scenario — with a type, typed and custom properties, and a place in the estate's tree. Its place is its **parent**, a field of its own and never a [link](#link): the tree is structure, relations are links (ADR-0014). Never a mirrored [item](#item): a source may offer one through an [import](#import), and an accepted import makes an asset carrying an origin line, after which no sync overwrites what a person edited.
+A knobas-owned entity — a server, a container, a service, a database, a runtime — with a type, typed and custom properties, and a place in the estate's tree. Its place is its **parent**, a field of its own and never a [link](#link): the tree is structure, relations are links (ADR-0014). Never a mirrored [item](#item): a source may offer one through an [import](#import), and an accepted import makes an asset carrying an origin line, after which no sync overwrites what a person edited.
 _Avoid_: resource, node, host (that is one type of asset)
 
 **Import**:
-Loading assets from outside — an estate file, later an adapter — with a preview of what is already in the tree and what is new. What it makes are ordinary assets with an origin line; nothing imported is a mirrored item, and the file is data about a real estate, never a mock.
+Loading assets from outside — an estate file, or the file an [importer](#importer) produced — with a preview of what is already in the tree and what is new. What it makes are ordinary assets with an origin line; nothing imported is a mirrored item, and the file is data about a real estate, never a mock.
 _Avoid_: sync (that is the mirror's word), seed (that is what the test environment does to a source)
+
+**Importer**:
+A producer of an estate file from a live system — hcloud, a Docker host — offered by the [Import](#import)'s chooser and previewed and applied by the same Import. **Not a [source](#source)** (ADR-0015): it mirrors nothing, syncs nothing, and appears nowhere sources do; its credential is its own, under the `importer:` keychain namespace. Its witness is the real estate: what it produces from the live system previews as *already in the tree* against the checked-in file. (Ruled 2026-09-07, v1.5 grilling; spec §3a)
+_Avoid_: import adapter, asset adapter, asset source, connector
+
+**Origin key**:
+The property an [importer](#importer) sets that names the thing it read in the system's own terms — `hcloud_id` for a server, the docker context plus the container name for a container, since a container's id changes on every recreate and its name does not — and that the [Import](#import) matches on when the file's id is not one the tree holds. The second matching rule beside the id, and the only one. (Ruled 2026-09-07, v1.5 grilling)
+_Avoid_: external id, foreign key, source id (that is a [source](#source)'s)
+
+**Depends on this**:
+What breaks if an [asset](#asset) goes down: its descendants, since they run inside it, and every asset linked to it by `depends-on` or `runs-on`, transitively over both — the panel in the asset pane that answers *blast radius* (spec §12.2). Routes whose target is the asset are listed beneath as *reachable via routes that would break* and not counted. `depends-on` and `runs-on` are load-bearing relations from here on, beside `monitored-by`; the rest of the vocabulary stays open. (Ruled 2026-09-07, v1.5 grilling)
+_Avoid_: blast radius (that is the question, not the panel), dependents, impact, downstream
 
 **Route**:
 A knobas-owned entity an [asset](#asset) exposes: a URL or endpoint, with or without a target asset. An asset is *reachable via* the routes whose target is anywhere on its own containment path — landing on it, on something that holds it, or on something it holds. (Amended 2026-09-06, #432: this entry read *"land on it or on something that holds it"*, and the ticket's own criterion asked for the other direction as well — *"the container reads it under reachable-via, and so does the VM that holds the container"*. Both are true sentences about reachability and the real estate needs both: every route in `testenv/hetzner/estate.json` lands on a container, so under the narrower reading no server in it would read a single route.)
