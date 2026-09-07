@@ -62,7 +62,7 @@ fn announce<R: tauri::Runtime>(
 /// read: the table is a `const` in `knobas_core::asset` and the answer is the
 /// same before bring-up as after it. Everything the create dialog and the
 /// pane's property editor need to offer a type or an input is in it, and
-/// putting it on the wire is what keeps the nineteen types one list rather
+/// putting it on the wire is what keeps the sixteen types one list rather
 /// than one list and a TypeScript copy of it.
 ///
 /// **Answers without a `Result`**, which `app::ping` and `app_status` already
@@ -692,7 +692,7 @@ async fn monitor_write_ops<R: tauri::Runtime>(
 /// reader can have an empty answer to while the other is full, which is the
 /// state the tab exists to make visible.
 ///
-/// **No type argument**, although the tab filters by type: nineteen types over
+/// **No type argument**, although the tab filters by type: sixteen types over
 /// an estate a person built by hand is not a set worth paging, the filter's
 /// options are the types the answer actually holds -- so the frontend cannot
 /// draw them without the whole list -- and a filtered read would be a second

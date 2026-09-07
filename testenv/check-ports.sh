@@ -103,8 +103,8 @@ fi
 # ---------------------------------------------------------------------------
 # 3. No port is reserved any more. 8211 (a Confluence DC mock) was unreserved
 #    2026-09-03 by ADR-0013 -- the real container on 8090 is the witness --
-#    and 8213 (a Flowrun stub) 2026-09-06, when the feature left the plan
-#    (roadmap §2 M4). Both are ordinary free ports.
+#    and 8213 (a low-code-runtime stub) 2026-09-06, when that feature left
+#    the plan (roadmap §2 M4). Both are ordinary free ports.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

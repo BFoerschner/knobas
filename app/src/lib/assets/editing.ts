@@ -11,7 +11,7 @@
  *
  * Everything here that knows what a type is takes an {@link AssetType} list as
  * an argument, and that list comes off `asset_types`. There is no list of
- * nineteen types in this file and there must not be one: the ids travel in the
+ * sixteen types in this file and there must not be one: the ids travel in the
  * share export, and a second copy is the half that goes stale.
  *
  * ## Who refuses what

@@ -281,6 +281,7 @@ knobas-app	test/assets_ipc	a_route_is_renamed_re_pointed_and_re_classified_one_l
 knobas-app	test/assets_ipc	a_route_reads_from_both_ends_and_from_every_asset_on_the_path
 knobas-app	test/assets_ipc	a_route_that_could_not_be_read_back_is_refused
 knobas-app	test/assets_ipc	a_route_with_no_target_reads_under_exposes_only
+knobas-app	test/assets_ipc	a_row_whose_type_the_table_dropped_reads_back_and_edits_like_a_custom_asset
 knobas-app	test/assets_ipc	a_second_import_of_the_same_file_is_all_known_and_changes_nothing
 knobas-app	test/assets_ipc	a_second_name_keeps_the_first
 knobas-app	test/assets_ipc	a_source_rooms_tile_draws_its_worst_asset_first
@@ -742,7 +743,7 @@ knobas-core	lib/knobas_core	asset::tests::every_property_kind_spells_itself_the_
 knobas-core	lib/knobas_core	asset::tests::every_suggestion_is_a_type_that_exists
 knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_misses_for_anything_else
 knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
-knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_nineteen_types_the_spec_names
+knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_sixteen_types_the_spec_names
 knobas-core	lib/knobas_core	asset::tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time
 knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value

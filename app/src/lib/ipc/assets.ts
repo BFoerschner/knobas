@@ -115,7 +115,7 @@ export interface TypedProperty {
 /**
  * One built-in asset type — `knobas_core::asset::AssetType`.
  *
- * Read off the backend rather than declared here, so the nineteen types are
+ * Read off the backend rather than declared here, so the sixteen types are
  * one list. The **ids are wire values and never change**; the labels are
  * display and may be reworded.
  */
@@ -130,7 +130,7 @@ export interface AssetType {
    * The child types conventionally suggested under one of these, by id —
    * story 17's *usual here*.
    *
-   * A suggestion and not a constraint: the create dialog offers all nineteen
+   * A suggestion and not a constraint: the create dialog offers all sixteen
    * whatever is in here, and an empty list is a real answer.
    */
   suggests: string[];
@@ -143,7 +143,7 @@ export interface AssetType {
  * words to avoid, and every list line this app already draws is a `…Row`.
  *
  * `type_label` and `monogram` are resolved by the backend out of the built-in
- * type table, so no surface here keeps a copy of nineteen types and their
+ * type table, so no surface here keeps a copy of sixteen types and their
  * chips.
  */
 export interface AssetRow {

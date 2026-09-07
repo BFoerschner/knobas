@@ -106,7 +106,7 @@
 //! fact on the wire twice, and story 31's dashed wire is exactly that
 //! comparison.
 //!
-//! A route has **no type and therefore no typed properties**: nineteen types
+//! A route has **no type and therefore no typed properties**: sixteen types
 //! describe things that hold things, and a URL is not one of them. Its
 //! properties are the reader's own, all four kinds, which is where the
 //! certificate expiry of spec story 14 lives -- knobas does not own
@@ -1614,7 +1614,7 @@ fn inherited<T>(
 /// `knobas_core::asset`, because the half of a type that matters -- the
 /// monogram, the *ordered* property schema, and the child types conventionally
 /// suggested -- cannot be written in SQL. It is put on the wire rather than
-/// copied into TypeScript so that the nineteen types are one list, and because
+/// copied into TypeScript so that the sixteen types are one list, and because
 /// the surface #429 builds needs two things nothing else on this bridge
 /// carries:
 ///
@@ -1626,7 +1626,7 @@ fn inherited<T>(
 ///   guessing whether the backend wants text or a number.
 ///
 /// `Vec` and not `&'static [AssetType]` because a command's answer is
-/// serialized and owned; the copy is nineteen structs of pointers, once per
+/// serialized and owned; the copy is sixteen structs of pointers, once per
 /// window.
 #[must_use]
 pub fn types() -> Vec<AssetType> {
@@ -5833,10 +5833,10 @@ mod tests {
 
     #[test]
     fn a_type_no_table_declares_is_refused_by_name() {
-        let refused = vet_type("flowrun-scenario").unwrap_err();
+        let refused = vet_type("tape-library").unwrap_err();
         assert_eq!(refused.code, crate::IpcErrorCode::Invalid);
         assert!(
-            refused.message.contains("flowrun-scenario"),
+            refused.message.contains("tape-library"),
             "{}",
             refused.message
         );
@@ -6266,13 +6266,24 @@ mod tests {
     /// and so is one JSON has no property spelling for.
     #[test]
     fn a_file_value_that_is_not_the_kind_its_type_declares_is_refused() {
-        let scenario = vet_type("scenario").expect("`scenario` is a type");
-        // `last_run` is the table's one date, and `position` (on `step`) its
-        // one number -- so these are the two arms that only a real declared
-        // kind can reach.
+        // `size_mb` is a declared number. The declared *date* has no type to
+        // come from since spec #491 dropped `scenario` and its `last_run`, so
+        // the date arm is exercised against a type built here -- the alternative
+        // is leaving `property_of`'s `Some(Date)` arm asserted by nothing.
+        static DATED: AssetType = AssetType {
+            id: "dated",
+            label: "Dated",
+            monogram: "DT",
+            properties: &[knobas_core::asset::TypedProperty {
+                key: "last_run",
+                label: "Last run",
+                kind: PropertyKind::Date,
+            }],
+            suggests: &[],
+        };
         assert!(
             bag_of(
-                Some(scenario),
+                Some(&DATED),
                 &serde_json::from_str(r#"{"last_run":"yesterday"}"#).unwrap(),
                 None,
             )
@@ -6281,18 +6292,18 @@ mod tests {
         );
         assert_eq!(
             bag_of(
-                Some(scenario),
+                Some(&DATED),
                 &serde_json::from_str(r#"{"last_run":"2026-09-06"}"#).unwrap(),
                 None,
             )
             .expect("a real date")["last_run"],
             serde_json::json!({ "kind": "date", "value": "2026-09-06" })
         );
-        let step = vet_type("step").expect("`step` is a type");
+        let database = vet_type("database").expect("`database` is a type");
         assert!(
             bag_of(
-                Some(step),
-                &serde_json::from_str(r#"{"position":"third"}"#).unwrap(),
+                Some(database),
+                &serde_json::from_str(r#"{"size_mb":"third"}"#).unwrap(),
                 None,
             )
             .is_err(),
