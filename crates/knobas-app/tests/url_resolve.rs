@@ -417,9 +417,22 @@ async fn the_resolvers_statement_reaches_the_expression_index() {
         .await
         .expect("a plan");
     let plan = plan.join("\n");
+    // **An `Index Cond`, not merely the index's name.** The index is partial,
+    // so `where web_url is not null` alone lets the planner bitmap-scan the
+    // whole of it and recheck the comparison as a `Filter:` -- a plan that
+    // names the index and reads every mirrored URL in it. That is exactly what
+    // a drifted expression produces, and it is what an assertion on the name
+    // alone would call a pass (measured while mutating migration 0023: one
+    // character class changed, this test stayed green until this line).
+    let key = plan
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("Index Cond:"));
     assert!(
-        plan.contains("item_web_url_norm_idx"),
-        "the resolver must reach the expression index migration 0023 created:\n{plan}"
+        plan.contains("item_web_url_norm_idx")
+            && key.is_some_and(|line| line.contains("lower(")),
+        "the normalised URL must be the index *key* migration 0023 created, not a filter over \
+         every row of it:\n{plan}"
     );
     tx.rollback().await.expect("rollback");
 }
