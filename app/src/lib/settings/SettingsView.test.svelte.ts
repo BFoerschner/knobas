@@ -4,10 +4,11 @@
  * scrollable pane, **no tabs, no router, no section registry**.
  *
  * So what is worth pinning here is small and blunt: the view is one scrollable
- * pane, it says what it is, and both sections are in it. The second one
- * arrived with #282 and cost what the ruling said it would — one component and
- * one import, as did the fifth (#443) — which is the shape this test is protecting; a test that pinned
- * a registry or a tab strip would be pinning the thing the ruling forbade.
+ * pane, it says what it is, and every section is in it. The second one arrived
+ * with #282 and cost what the ruling said it would — one component and one
+ * import — and so did the fifth (#443, monitoring). That price is the shape
+ * this test is protecting; a test that pinned a registry or a tab strip would
+ * be pinning the thing the ruling forbade.
  *
  * Each section's own behaviour is its own file.
  */

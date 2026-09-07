@@ -438,13 +438,13 @@ pub struct MonitoringSettings {
     pub response_time_warn_ms: u32,
 }
 
-/// A stored setting as the wire carries it.
+/// A stored setting narrowed to what the wire carries, saturating.
 ///
 /// `knobas_sync::samples` clamps both into ranges no `u32` conversion can fail
 /// from, so the saturation is **unreachable** and is written rather than
 /// unwrapped because a panic is the wrong way for a settings *read* to say
 /// that a number was out of range.
-fn wire(value: i64) -> u32 {
+fn narrowed(value: i64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
@@ -475,6 +475,11 @@ pub async fn monitoring_settings(
 /// surface: the section redraws what the database holds instead of what the
 /// click asked for, so a value the clamp moved is shown moved.
 ///
+/// **Both rows move or neither does.** `samples::set_settings` writes them in
+/// one transaction, which is what makes the single DTO above honest: a save
+/// that stored the retention and then failed on the threshold would be exactly
+/// the half-saved surface that DTO exists to rule out.
+///
 /// **Nothing already sampled is rewritten.** *Warn* is derived at sample time
 /// and stored, so a new threshold decides the next poll and leaves every hour
 /// already on the Monitors tab's bar as it was recorded. A threshold that
@@ -490,20 +495,24 @@ pub async fn set_monitoring_settings(
     settings: MonitoringSettings,
 ) -> Result<MonitoringSettings, IpcError> {
     let pool = lifecycle.pool()?;
-    knobas_sync::samples::set_retention_days(&pool, i64::from(settings.sample_retention_days))
-        .await
-        .map_err(crate::IpcError::from)?;
-    knobas_sync::samples::set_threshold_ms(&pool, i64::from(settings.response_time_warn_ms))
-        .await
-        .map_err(crate::IpcError::from)?;
-    read_monitoring(&pool).await
+    let (days, ms) = knobas_sync::samples::set_settings(
+        &pool,
+        i64::from(settings.sample_retention_days),
+        i64::from(settings.response_time_warn_ms),
+    )
+    .await
+    .map_err(crate::IpcError::from)?;
+    Ok(MonitoringSettings {
+        sample_retention_days: narrowed(days),
+        response_time_warn_ms: narrowed(ms),
+    })
 }
 
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
-        sample_retention_days: wire(samples::retention_days(pool).await?),
-        response_time_warn_ms: wire(samples::threshold_ms(pool).await?),
+        sample_retention_days: narrowed(samples::retention_days(pool).await?),
+        response_time_warn_ms: narrowed(samples::threshold_ms(pool).await?),
     })
 }
 

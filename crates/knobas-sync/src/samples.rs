@@ -165,24 +165,30 @@ impl Bounded {
                 .await?;
         Ok(stored
             .and_then(|value| value.as_i64())
-            .map_or(self.default, |value| self.held(value)))
+            .map_or(self.default, |value| self.clamped(value)))
     }
 
     /// Store `value`, clamped, and answer with what is now stored.
-    async fn write(&self, pool: &PgPool, value: i64) -> Result<i64, sqlx::Error> {
-        let value = self.held(value);
+    ///
+    /// Takes an executor rather than the pool so [`set_settings`] can write
+    /// both settings inside one transaction.
+    async fn write<'e, E>(&self, db: E, value: i64) -> Result<i64, sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = Postgres>,
+    {
+        let value = self.clamped(value);
         sqlx::query(
             "insert into knobas.setting (key, value) values ($1, $2)
              on conflict (key) do update set value = excluded.value, updated_at = now()",
         )
         .bind(self.key)
         .bind(Value::from(value))
-        .execute(pool)
+        .execute(db)
         .await?;
         Ok(value)
     }
 
-    fn held(&self, value: i64) -> i64 {
+    fn clamped(&self, value: i64) -> i64 {
         value.clamp(*self.range.start(), *self.range.end())
     }
 }
@@ -400,6 +406,30 @@ pub async fn set_retention_days(pool: &PgPool, days: i64) -> Result<i64, sqlx::E
     RETENTION.write(pool, days).await
 }
 
+/// Store both settings at once, clamped, and answer with what is now stored.
+///
+/// **One transaction, because they are one save.** The settings surface edits
+/// them on one section and presses one button, so a write that stored the
+/// retention and then failed on the threshold would leave the database in a
+/// state nobody asked for and the dialog reporting a failure -- the half-saved
+/// case the single DTO on the bridge exists to rule out. Either both rows move
+/// or neither does.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if either write or the commit fails; nothing is stored.
+pub async fn set_settings(
+    pool: &PgPool,
+    retention_days: i64,
+    threshold_ms: i64,
+) -> Result<(i64, i64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let days = RETENTION.write(&mut *tx, retention_days).await?;
+    let ms = THRESHOLD.write(&mut *tx, threshold_ms).await?;
+    tx.commit().await?;
+    Ok((days, ms))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,16 +584,16 @@ mod tests {
 
     /// The clamp, on both sides of both settings, without a database.
     ///
-    /// `held` is what `read` applies to a stored row and `write` applies to
+    /// `clamped` is what `read` applies to a stored row and `write` applies to
     /// what a dialog posts, so this is the one rule and not a copy of it.
     #[test]
     fn a_setting_out_of_range_is_brought_back_into_it() {
-        assert_eq!(THRESHOLD.held(-9), 0);
-        assert_eq!(THRESHOLD.held(i64::MAX), 600_000);
-        assert_eq!(THRESHOLD.held(1500), 1500);
-        assert_eq!(RETENTION.held(0), 1, "never zero days");
-        assert_eq!(RETENTION.held(i64::MIN), 1);
-        assert_eq!(RETENTION.held(90), 90);
+        assert_eq!(THRESHOLD.clamped(-9), 0);
+        assert_eq!(THRESHOLD.clamped(i64::MAX), 600_000);
+        assert_eq!(THRESHOLD.clamped(1500), 1500);
+        assert_eq!(RETENTION.clamped(0), 1, "never zero days");
+        assert_eq!(RETENTION.clamped(i64::MIN), 1);
+        assert_eq!(RETENTION.clamped(90), 90);
         assert_eq!(
             (THRESHOLD.default, RETENTION.default),
             (DEFAULT_THRESHOLD_MS, DEFAULT_RETENTION_DAYS),

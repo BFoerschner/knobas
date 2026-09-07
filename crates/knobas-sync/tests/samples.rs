@@ -306,9 +306,16 @@ async fn a_poll_that_emits_nothing_still_samples_every_live_monitor() {
 }
 
 /// The acceptance criterion's negative: a monitor the second run does not
-/// publish gets no second sample. The adapter tombstones it (the Kuma shape --
-/// a paused or deleted monitor simply leaves `/metrics`), and a tombstoned
-/// monitor is not a live one.
+/// publish gets no second sample.
+///
+/// The monitor simply leaves the corpus, which is the Kuma shape -- a paused
+/// or deleted monitor stops appearing in `/metrics`. Both runs are full ones
+/// (cursor `None`), so it is the engine's own exhaustive **sweep** that
+/// tombstones what the run did not republish; the adapter emits no tombstone
+/// of its own. Either route ends at `knobas.entity.deleted_at`, which
+/// `sync.live_item` filters, and a tombstoned monitor is not a live one --
+/// which is the whole of the criterion, held by the view rather than by a
+/// rule anyone maintains.
 #[tokio::test]
 async fn a_monitor_the_second_run_does_not_publish_gets_no_second_sample() {
     let pool = pool("a_monitor_the_second_run").await;
@@ -640,4 +647,31 @@ async fn the_settings_default_and_survive_a_round_trip() {
     // cannot turn retention into "delete everything".
     assert_eq!(samples::set_retention_days(&pool, 0).await.unwrap(), 1);
     assert_eq!(samples::set_threshold_ms(&pool, -5).await.unwrap(), 0);
+}
+
+/// The paired write the settings section makes: one transaction, both rows,
+/// each clamped, and the stored pair answered back.
+///
+/// The pair and not two writes, because the section saves both on one button
+/// and a save that stored half of them is the state the single DTO on the
+/// bridge exists to rule out.
+#[tokio::test]
+async fn both_settings_are_stored_by_one_save() {
+    let pool = pool("both_settings_are_stored").await;
+
+    assert_eq!(
+        samples::set_settings(&pool, 30, 800).await.unwrap(),
+        (30, 800)
+    );
+    assert_eq!(samples::retention_days(&pool).await.unwrap(), 30);
+    assert_eq!(samples::threshold_ms(&pool).await.unwrap(), 800);
+
+    // Clamped on the way in, both of them, and answered as stored.
+    assert_eq!(
+        samples::set_settings(&pool, 0, -1).await.unwrap(),
+        (1, 0),
+        "the pair is clamped the same way the singles are"
+    );
+    assert_eq!(samples::retention_days(&pool).await.unwrap(), 1);
+    assert_eq!(samples::threshold_ms(&pool).await.unwrap(), 0);
 }
