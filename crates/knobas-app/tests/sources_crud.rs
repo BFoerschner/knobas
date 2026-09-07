@@ -1037,7 +1037,7 @@ async fn only_a_source_with_an_account_offers_write_ops() {
     .unwrap();
     assert_eq!(
         sources::crud::instance_write_ops(&g.secrets, &g.registry, &stored(&g).await).await,
-        ["pause_monitor", "resume_monitor"]
+        ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 }
 
@@ -1087,7 +1087,7 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
 
     assert_eq!(
         sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
-        ["pause_monitor", "resume_monitor"],
+        ["pause_monitor", "resume_monitor", "create_monitor"],
         "the write ops flipped on with no other change"
     );
 }
@@ -1177,7 +1177,7 @@ async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() 
     // and not a source that never had one.
     assert_eq!(
         sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
-        ["pause_monitor", "resume_monitor"]
+        ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 
     let locked: Arc<dyn SecretStore> = Arc::new(Refuses);

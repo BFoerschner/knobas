@@ -630,6 +630,11 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
         knobas_source::WriteOp::ResumeMonitor {
             entity: "kuma:8".to_owned(),
         },
+        knobas_source::WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_roster("kuma"),
+            name: "gitea".to_owned(),
+            url: "http://gitea:3000/api/healthz".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -646,6 +651,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::UpdatePage { .. } => "UpdatePage",
             knobas_source::WriteOp::PauseMonitor { .. } => "PauseMonitor",
             knobas_source::WriteOp::ResumeMonitor { .. } => "ResumeMonitor",
+            knobas_source::WriteOp::CreateMonitor { .. } => "CreateMonitor",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

@@ -631,7 +631,10 @@ async fn only_a_source_with_an_account_offers_the_write_ops() {
     );
 
     let writable = env.writable().descriptor();
-    assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+    assert_eq!(
+        writable.write_ops,
+        ["pause_monitor", "resume_monitor", "create_monitor"]
+    );
     assert!(writable.capabilities.contains(&Capability::Write));
 
     // And the read half is untouched by the account: the same roster either

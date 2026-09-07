@@ -249,6 +249,14 @@ async fn every_write_is_refused_by_name_without_an_account() {
             },
             "resume_monitor",
         ),
+        (
+            knobas_source::WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_roster("kuma"),
+                name: "gitea".to_owned(),
+                url: "http://gitea:3000/api/healthz".to_owned(),
+            },
+            "create_monitor",
+        ),
     ] {
         let refused = source.write(op).await;
         let message = match refused {
@@ -284,7 +292,10 @@ async fn an_account_is_what_turns_the_write_ops_on() {
     );
 
     let writable = adapter_with_account(fake.base_url(), KEY).descriptor();
-    assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+    assert_eq!(
+        writable.write_ops,
+        ["pause_monitor", "resume_monitor", "create_monitor"]
+    );
     assert!(
         writable
             .capabilities
@@ -330,6 +341,12 @@ async fn the_declared_ops_are_the_spis_own_identifiers() {
             .identifier(),
             knobas_source::WriteOp::ResumeMonitor {
                 entity: "kuma:8".to_owned(),
+            }
+            .identifier(),
+            knobas_source::WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_roster("kuma"),
+                name: "gitea".to_owned(),
+                url: "http://gitea:3000/api/healthz".to_owned(),
             }
             .identifier(),
         ],

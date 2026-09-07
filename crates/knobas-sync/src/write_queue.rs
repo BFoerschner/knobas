@@ -138,7 +138,18 @@ const ACTOR: &str = "user";
 /// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
 /// matches on `WriteOp` with no wildcard arm, so growing the enum stops that
 /// test compiling until somebody writes down the answer for the new variant.
-pub const UNCLAIMED_OPS: &[&str] = &["create_ticket", "create_page"];
+/// **`create_monitor` is in the list, and the receipt is not what decides
+/// it** (issue #453). Uptime Kuma answers `add` with the `monitorID` it
+/// minted, so the disclosure line can point at the monitor -- exactly
+/// `create_page`'s shape, which is also in this list and also answers an id.
+/// What puts an op here is the artefact, not the silence: a monitor made and
+/// then withdrawn from is a check running against somebody's estate that no
+/// knobas row claims, and the *name* it was made under is a label rather than
+/// an address -- Uptime Kuma holds any number of monitors called the same
+/// thing, which is why `testenv/kuma-monitor.sh` deletes by name before it
+/// adds. That is the `title` reading two paragraphs above, not the head
+/// branch's.
+pub const UNCLAIMED_OPS: &[&str] = &["create_ticket", "create_page", "create_monitor"];
 
 /// Why a flush could not even begin.
 ///
@@ -188,7 +199,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::LogWork { entity, .. }
         | WriteOp::UpdatePage { entity, .. }
         | WriteOp::PauseMonitor { entity }
-        | WriteOp::ResumeMonitor { entity } => entity,
+        | WriteOp::ResumeMonitor { entity }
+        | WriteOp::CreateMonitor { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See

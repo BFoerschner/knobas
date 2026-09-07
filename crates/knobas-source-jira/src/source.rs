@@ -323,7 +323,8 @@ impl Source for JiraSource {
             | WriteOp::CreatePage { .. }
             | WriteOp::UpdatePage { .. }
             | WriteOp::PauseMonitor { .. }
-            | WriteOp::ResumeMonitor { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::ResumeMonitor { .. }
+            | WriteOp::CreateMonitor { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),

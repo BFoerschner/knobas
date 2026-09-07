@@ -30,10 +30,17 @@ use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 /// `"pauseMonitor"` here, which the contract battery refuses.
 pub(crate) const PAUSE_OP: &str = "pause_monitor";
 pub(crate) const RESUME_OP: &str = "resume_monitor";
+/// The third (issue #453), and the one that needs no monitor to exist first:
+/// its target is this source's own monitor roster.
+pub(crate) const CREATE_OP: &str = "create_monitor";
 
 #[must_use]
 pub(crate) fn write_ops() -> Vec<String> {
-    vec![PAUSE_OP.to_owned(), RESUME_OP.to_owned()]
+    vec![
+        PAUSE_OP.to_owned(),
+        RESUME_OP.to_owned(),
+        CREATE_OP.to_owned(),
+    ]
 }
 
 /// The descriptor for one **configured instance**: the template under the
@@ -343,7 +350,10 @@ mod tests {
         );
 
         let writable = for_instance("kuma", "Uptime Kuma", true);
-        assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+        assert_eq!(
+            writable.write_ops,
+            ["pause_monitor", "resume_monitor", "create_monitor"]
+        );
         assert!(writable.capabilities.contains(&Capability::Write));
 
         // Everything else is the template's, under the instance's own name:

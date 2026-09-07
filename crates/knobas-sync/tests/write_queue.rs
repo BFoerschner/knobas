@@ -934,6 +934,11 @@ fn write_op_probes() -> Vec<WriteOp> {
         WriteOp::ResumeMonitor {
             entity: "kuma:8".to_owned(),
         },
+        WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_roster("kuma"),
+            name: "gitea".to_owned(),
+            url: "http://gitea:3000/api/healthz".to_owned(),
+        },
     ]
 }
 
@@ -961,7 +966,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::CreatePage { .. }
             | WriteOp::UpdatePage { .. }
             | WriteOp::PauseMonitor { .. }
-            | WriteOp::ResumeMonitor { .. } => op.identifier(),
+            | WriteOp::ResumeMonitor { .. }
+            | WriteOp::CreateMonitor { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1190,7 +1196,13 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
         let leaves_one = match op {
             // Both make something new that lives only at the source until the
             // next sync, with nothing linking it to what asked for it.
-            WriteOp::CreateTicket { .. } | WriteOp::CreatePage { .. } => true,
+            WriteOp::CreateTicket { .. }
+            | WriteOp::CreatePage { .. }
+            // A monitor made and then withdrawn from is a check running
+            // against somebody's estate that no knobas row claims, and the
+            // name it carries is a label rather than an address -- Uptime Kuma
+            // holds any number of monitors called the same thing (issue #453).
+            | WriteOp::CreateMonitor { .. } => true,
             // Changes to something the mirror already holds: the write simply
             // arrived, which is what the user asked for.
             WriteOp::Comment { .. }
