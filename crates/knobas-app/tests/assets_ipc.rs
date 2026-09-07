@@ -4960,3 +4960,30 @@ fn the_monitors_tab_offers_the_ops_the_spi_names() {
         .identifier()
     );
 }
+
+/// The tab's own copy of the two spellings, which is a **third** and the only
+/// one that fails quietly.
+///
+/// `MonitorsView.svelte`'s `MONITOR_ACTIONS` is keyed by identifier and its
+/// `{#if MONITOR_ACTIONS[op]}` *skips* a key it does not know -- deliberately,
+/// so a backend that grows a third monitor op does not draw a nameless button.
+/// The cost of that design is that a renamed identifier is not an error on
+/// either side: `assets::PAUSE_MONITOR` and the mirror's `WriteOpPayload` would
+/// still agree, `sources_mirror.rs` pins the payload **tag** rather than the
+/// snake_case identifier, and every button would simply stop being drawn.
+///
+/// So the same pin the two Rust copies get (`the_monitors_tab_offers_the_ops_the_spi_names`
+/// above, and the Kuma crate's `the_declared_ops_are_the_spis_own_identifiers`),
+/// read off the file the component ships.
+#[test]
+fn the_tabs_own_action_table_is_keyed_by_those_same_spellings() {
+    const MONITORS_VIEW: &str = include_str!("../../../app/src/lib/assets/MonitorsView.svelte");
+
+    for op in [assets::PAUSE_MONITOR, assets::RESUME_MONITOR] {
+        assert!(
+            MONITORS_VIEW.contains(&format!("{op}: {{")),
+            "MonitorsView.svelte's MONITOR_ACTIONS has no {op:?} key, so the tab draws \
+             no button for it -- and skips it in silence"
+        );
+    }
+}

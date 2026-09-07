@@ -1670,9 +1670,16 @@ its adapter kind. Here a key-only instance declares no `Capability::Write` and a
 contract battery runs against both, which is what holds the two signals together.
 
 Two things downstream had to learn it. `knobas_app::sources::crud::instance_write_ops` is the one
-place that asks — it reads the keychain and builds the instance — and it answers an **empty list**
-rather than failing for a source whose adapter cannot be built, because a surface deciding which
-buttons to draw must not be an error path. And `submit_write` now checks the **union** of the
+place that asks — it reads the keychain and builds the instance — and it is **infallible**,
+answering an empty list for a source whose adapter cannot be built, whose credential is absent,
+*and whose keychain refuses to answer*, because a surface deciding which buttons to draw must not
+be an error path. The refusal is the one worth naming: a locked keychain arrives as
+`SecretError::Backend`, and propagating it would cost the reader the whole Monitors tab — which
+needs the keychain for nothing but two buttons — and would refuse a Jira `comment`, an op the
+adapter *kind* declares and no credential gates. That is `backup`'s
+`a_keychain_that_refuses_one_source_still_settles_the_others` met from the other side: a refusal is
+this machine learning nothing, and turning it into a per-machine verdict is the bug. Pinned by
+`a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing`. And `submit_write` now checks the **union** of the
 kind's ops and the instance's: the template half must stay, since a write for a source whose
 credential is gone is one the queue should keep rather than refuse for want of a keychain entry,
 and the instance half is what stops a pause the Monitors tab correctly offered from being refused

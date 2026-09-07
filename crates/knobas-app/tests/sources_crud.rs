@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourceDraft, SourcePatch};
-use knobas_secrets::{MemoryStore, SecretStore};
+use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::AuthState;
@@ -1023,8 +1023,7 @@ async fn only_a_source_with_an_account_offers_write_ops() {
         .unwrap();
     assert_eq!(
         sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await)
-            .await
-            .unwrap(),
+            .await,
         Vec::<String>::new()
     );
 
@@ -1039,8 +1038,7 @@ async fn only_a_source_with_an_account_offers_write_ops() {
     .unwrap();
     assert_eq!(
         sources::crud::instance_write_ops(&g.secrets, &g.registry, &stored(&g).await)
-            .await
-            .unwrap(),
+            .await,
         ["pause_monitor", "resume_monitor"]
     );
 }
@@ -1063,7 +1061,6 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
     assert!(
         sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await)
             .await
-            .unwrap()
             .is_empty()
     );
 
@@ -1092,8 +1089,7 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
 
     assert_eq!(
         sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await)
-            .await
-            .unwrap(),
+            .await,
         ["pause_monitor", "resume_monitor"],
         "the write ops flipped on with no other change"
     );
@@ -1132,6 +1128,66 @@ async fn re_entering_the_key_keeps_the_stored_account() {
     assert_eq!(
         kept.account.expect("the account survived").username,
         "knobas"
+    );
+}
+
+/// A keychain that refuses to answer is asked which buttons to draw, not
+/// whether the app may run.
+///
+/// Absence is `Ok(None)` and is covered above; the refusals a person actually
+/// meets are not absence. A locked keychain, `errSecAuthFailed` and a *Deny*
+/// on the prompt all arrive as `SecretError::Backend`, and this asks what the
+/// two surfaces reading this function do with one. Both must survive it: the
+/// Monitors tab reads its roster out of the database and needs the keychain
+/// only to decide whether to draw Pause and Resume, and `submit_write` checks
+/// the union of the kind's ops and the instance's -- so a propagated refusal
+/// would refuse a Jira `comment`, an op the *kind* declares and no credential
+/// gates, because a keychain that write never had to open would not open.
+///
+/// `backup_ipc`'s `a_keychain_that_refuses_one_source_still_settles_the_others`
+/// is this same failure met from the other side, which is why it is worth a
+/// test of its own here rather than a comment.
+#[tokio::test]
+async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() {
+    struct Refuses;
+
+    impl SecretStore for Refuses {
+        fn get(&self, _source_id: &str) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+            Err(knobas_secrets::SecretError::Backend(
+                "the keychain is locked".to_owned(),
+            ))
+        }
+
+        fn put(&self, _: &str, _: &Secret) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("this test only reads")
+        }
+
+        fn delete(&self, _: &str) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("this test only reads")
+        }
+    }
+
+    let f = fixture().await;
+    sources::crud::add(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        a_kuma_source(&f.id, Some(("knobas", "knobas-dev"))),
+    )
+    .await
+    .unwrap();
+    // The account really is stored, so the empty answer below is the refusal
+    // and not a source that never had one.
+    assert_eq!(
+        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        ["pause_monitor", "resume_monitor"]
+    );
+
+    let locked: Arc<dyn SecretStore> = Arc::new(Refuses);
+    assert_eq!(
+        sources::crud::instance_write_ops(&locked, &f.registry, &stored(&f).await).await,
+        Vec::<String>::new(),
+        "a refused keychain offers nothing; it does not take the surface down with it"
     );
 }
 

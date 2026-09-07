@@ -187,10 +187,7 @@ pub(crate) async fn submittable(
             ))
         })?;
     let mut declared = template;
-    for offered in crate::sources::crud::instance_write_ops(secrets, registry, &source)
-        .await
-        .map_err(|error| crate::sources::to_ipc(&error, Some(&source.id)))?
-    {
+    for offered in crate::sources::crud::instance_write_ops(secrets, registry, &source).await {
         if !declared.contains(&offered) {
             declared.push(offered);
         }

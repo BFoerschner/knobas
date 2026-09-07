@@ -551,6 +551,11 @@ pub async fn monitor_roster<R: tauri::Runtime>(
 /// The roster itself needs only the pool, so the tab draws during bring-up;
 /// what it does not have then is a keychain, and a tab with no buttons is the
 /// right drawing for a moment when knobas cannot say which buttons there are.
+///
+/// A keychain that *is* there and refuses reads the same way, and that is
+/// [`instance_write_ops`](crate::sources::crud::instance_write_ops)' doing
+/// rather than this loop's: a locked keychain must not cost the reader the
+/// whole Monitors tab, which needs nothing from it but two buttons.
 async fn monitor_write_ops<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     rows: &[assets::MonitorRow],
@@ -572,8 +577,7 @@ async fn monitor_write_ops<R: tauri::Runtime>(
         };
         let ops =
             crate::sources::crud::instance_write_ops(&state.secrets, state.registry.as_ref(), &cfg)
-                .await
-                .map_err(|error| crate::sources::to_ipc(&error, Some(source_id)))?;
+                .await;
         offered.insert(source_id.to_owned(), ops);
     }
     Ok(offered)

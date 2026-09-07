@@ -136,26 +136,38 @@ fn instance_from(
 /// pause and resume (spec #427, story 69). So the honest answer needs the
 /// keychain, and this is the one place that asks for it.
 ///
-/// **Answers an empty list rather than failing** for a source whose adapter
-/// cannot be built -- a missing credential, a configuration the adapter
-/// refuses, an adapter kind no longer compiled in. A surface deciding which
-/// buttons to draw must not be an error path, and "offers nothing" is the
-/// right drawing for every one of those states.
+/// **Answers an empty list rather than failing**, whatever went wrong -- a
+/// missing credential, a keychain that refused to answer, a configuration the
+/// adapter rejects, an adapter kind no longer compiled in. A surface deciding
+/// which buttons to draw must not be an error path, and "offers nothing" is
+/// the right drawing for every one of those states.
 ///
-/// # Errors
-/// [`SourcesError::Secret`] if the credential store itself failed -- which is
-/// not the same as a source having no credential, and must not be swallowed
-/// into "offers nothing".
+/// **The keychain refusal is the one worth naming**, because swallowing it is
+/// a decision rather than an oversight. A locked keychain, `errSecAuthFailed`
+/// and a *Deny* on the prompt all arrive as `SecretError::Backend`, and both
+/// callers of this are surfaces that must survive one: the Monitors tab reads
+/// the roster out of the database and would otherwise refuse the whole tab
+/// over a credential it needs only to decide which two buttons to draw, and
+/// `submit_write` would refuse a Jira *comment* -- an op the adapter *kind*
+/// declares, needing no credential to be queueable at all -- because a
+/// keychain it never had to open would not open. `backup`'s
+/// `a_keychain_that_refuses_one_source_still_settles_the_others` is the same
+/// failure met from the other side: a refusal is this machine learning
+/// nothing, and turning that into a per-machine verdict is the bug.
+///
+/// So it is infallible on purpose: there is no answer this can give that a
+/// caller should propagate, and returning a `Result` is how the next caller
+/// comes to propagate one.
 pub async fn instance_write_ops(
     secrets: &Arc<dyn SecretStore>,
     registry: &dyn AdapterRegistry,
     cfg: &knobas_sync::config::SourceConfigRow,
-) -> Result<Vec<String>, SourcesError> {
+) -> Vec<String> {
     let credential = match cfg.auth_kind.method() {
         None => Credential::default(),
-        Some(_) => match knobas_secrets::spawn::get(secrets, &cfg.id).await? {
-            Some(stored) => stored.into(),
-            None => return Ok(Vec::new()),
+        Some(_) => match knobas_secrets::spawn::get(secrets, &cfg.id).await {
+            Ok(Some(stored)) => stored.into(),
+            Ok(None) | Err(_) => return Vec::new(),
         },
     };
     let built = registry.build(instance_from(
@@ -167,9 +179,9 @@ pub async fn instance_write_ops(
         credential,
         cfg.config.clone(),
     ));
-    Ok(built
+    built
         .map(|source| source.descriptor().write_ops)
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// Create a source: secret first, then the row.
