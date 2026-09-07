@@ -166,10 +166,20 @@ macro_rules! driver_head {
 /// this clause did not change.
 ///
 /// `distinct on` in the head plus this `order by` de-duplicates *within* one
-/// pass as well: `not exists` reads the snapshot the statement started from, so
-/// two candidate rows describing one undirected pair would both survive it.
-/// That is still needed after `0011` -- the index refuses the second row, and
-/// refusing it is a failed statement, not a skipped candidate.
+/// pass: `not exists` reads the snapshot the statement started from, so two
+/// candidate rows describing one undirected pair would both survive it.
+///
+/// **What actually keeps the promise is this `on conflict do nothing`, and the
+/// `distinct on` is belt to its braces.** This paragraph used to end "the index
+/// refuses the second row, and refusing it is a failed statement, not a skipped
+/// candidate", and that is wrong: the clause carries no conflict target, so the
+/// unique violation `0011`'s index raises on the second row is swallowed rather
+/// than raised, and the row `order by` puts first lands either way. Measured in
+/// #451, and corrected here rather than left standing (ADR-0011, *verify, then
+/// correct or file*): deleting the `distinct on` leaves every test in
+/// `tests/suggestions.rs` green. It stays because it says in the statement
+/// which of two duplicate candidates is meant to land, instead of leaving that
+/// to a constraint firing behind it.
 macro_rules! driver_tail {
     () => {
         ") as c(from_id, to_id, relation, reason)
@@ -190,7 +200,7 @@ macro_rules! driver_tail {
 ///
 /// A macro rather than a runtime `format!` so every statement is a
 /// `&'static str`: nothing in this crate builds SQL at run time, and the
-/// suppression is compiled into all six rather than appended by a call each of
+/// suppression is compiled into all seven rather than appended by a call each of
 /// them has to remember to make.
 macro_rules! detection {
     ($($candidates:tt)*) => {
@@ -368,6 +378,159 @@ const SOURCE_RECORDED_RELATION: &str = detection!(
         and side.relation is not null"
 );
 
+/// The host an address names, lowercased, or `null` if it names none.
+///
+/// One POSIX regular expression, and every piece of it is load-bearing:
+///
+/// * `(?:[A-Za-z][A-Za-z0-9+.-]*://)?` -- an optional scheme, because a route's
+///   `url` "carries a scheme" (`0018`) but a monitor's may be a bare
+///   `host:port` and an asset's hostname property is a bare host. Optional
+///   rather than required, so all three go through one reader.
+/// * `(?:[^@/]*@)?` -- userinfo, dropped. `https://kuma:secret@host/` is a
+///   monitor pointed at `host`, and a credential is never a hostname.
+/// * `([^:/?#]+)` -- the host, stopping at the **port**, the path, the query
+///   and the fragment. The port is what makes `http://gitea:3000` match an
+///   asset whose hostname is `gitea`, which is the whole of criterion 1.
+///
+/// Lowercased because hostnames are case-insensitive; `btrim` because a
+/// hostname property is typed by hand into a form and ` gitea ` is the same
+/// host as `gitea`; `nullif(..., '')` because a blank property and an absent
+/// one are the same fact and neither may join to the other -- which is also
+/// the whole of "an address with no host joins to nothing", since SQL equality
+/// on `null` is `null`.
+///
+/// An IPv6 literal in brackets comes back as `[2001` and therefore matches
+/// nothing rather than matching wrongly -- the failure direction ADR-0007 asks
+/// of a read like this one, and no address in the estate this milestone
+/// describes is written that way.
+macro_rules! host_of {
+    ($address:expr) => {
+        concat!(
+            "nullif(lower(btrim(substring(",
+            $address,
+            " from '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]*@)?([^:/?#]+)'))), '')"
+        )
+    };
+}
+
+/// A monitor watching a host an asset states -- the estate's own exact-key
+/// rule.
+///
+/// Spec #427: the monitor is attached to the asset by a `monitored-by` link,
+/// and this is the pass that offers to draw it. **The asset is the subject**:
+/// `monitored-by` reads *this asset is monitored by that check*, which is why
+/// the candidate's `from_id` is the asset and its `to_id` the monitor
+/// (`app/src/lib/detail/relations.ts` gives the sentence and its inverse).
+///
+/// Two ways an asset states a host, unioned rather than written as two rules,
+/// because they are one fact -- *knobas knows this asset by that name*:
+///
+/// * the **hostname property** (`knobas_core::asset::TYPES`: a hypervisor's
+///   and a VM's), and
+/// * the host of a **route**, credited to
+///   `coalesce(target_id, asset_id)` -- *the asset the route lands on, or the
+///   one that exposes it when it lands on nothing knobas knows*.
+///
+/// A pair both arms find must still produce one suggestion, and the driver
+/// guarantees that twice over: `distinct on` collapses the candidates, and `on
+/// conflict do nothing` would swallow the duplicate anyway. Measured, because
+/// the second half is easy to forget -- deleting the `distinct on` leaves
+/// every assertion in this rule's battery passing. The reason the survivor
+/// carries follows the driver's `order by`, whose last key is `c.reason`: where
+/// both arms reach one pair the route wording wins, "the host of ..." sorting
+/// before "which is ...".
+///
+/// That `coalesce` is the one place this rule reads #451's sentence -- "the
+/// host of a route the asset exposes" -- as naming *which routes are in play*
+/// rather than which end of one gets the suggestion, and the estate the
+/// milestone is developed against is why. `testenv/hetzner/estate.json`'s only
+/// route whose host a seeded monitor watches is `route:tunnel-gitea-reverse`,
+/// `http://gitea:3000/`, exposed by `asset:hetzner-teamcity` and targeting
+/// `asset:knobas-gitea`; the monitor is `gitea`,
+/// `http://gitea:3000/api/healthz`. The thing that answers at that host is
+/// Gitea. Crediting the exposing end would make the rule's *only* firing on
+/// the real estate a proposal naming the wrong asset -- and the right one is
+/// already a link, drawn from that asset's `monitors: ["gitea"]` by #439's
+/// import, so the driver's suppression drops it and the tray is left holding
+/// exactly the wrong half. `0018` is where the fallback comes from: a route
+/// with no target is "an endpoint that lands on nothing knobas knows", and
+/// then the asset that exposes it is the best answer there is.
+///
+/// **The port is not compared**, on either side: `host_of!` stops at it, which
+/// is what criterion 1 asks for on the monitor's side and what makes a host
+/// serving several ports one asset rather than several. So a monitor on
+/// `http://host:3000/` matches a route at `http://host:8080/`, and an asset
+/// exposing many routes on one host is proposed once -- the driver's
+/// `distinct on` keeps one row per pair, and the reason then names whichever
+/// of those routes sorts first.
+///
+/// The cost is **a host several assets share**, and it is the known weakness
+/// of this rule rather than an oversight: eight routes in
+/// `testenv/hetzner/estate.json` carry `127.0.0.1` and land on seven different
+/// assets, so a Kuma running on the notebook rather than in a container would
+/// watch `http://127.0.0.1:8111/` and be proposed to all seven. Nothing fires
+/// on it today -- the seeded Kuma is in a container and reaches the notebook as
+/// `host.docker.internal` -- and narrowing it is its own decision: the hostname
+/// arm has no port to compare, so comparing ports on the route arm alone would
+/// make one rule fail two ways. A proposal is dismissible and a dismissal is
+/// remembered, which is what makes the weak side of this trade survivable.
+///
+/// `route_name` carries the route's name **and** tells the two arms apart, and
+/// that is sound rather than clever: `0018` declares `name text not null` with
+/// `route_name_chk check (btrim(name) <> '')`, so a route arm's `route_name` is
+/// never null and the hostname arm's always is. A migration that relaxed either
+/// would make the `case` below tell the wrong story, which is why the constraint
+/// is named here.
+///
+/// A **payload read outside an adapter** (ADR-0007), and it takes that
+/// discipline in full, as `SOURCE_RECORDED_RELATION` does: one named
+/// statement, the `jsonb_typeof` guard, and a failure direction of *absence* --
+/// a monitor with no `url`, a `url` that is not a string, or one naming no host
+/// contributes no candidate rather than a guessed one. The same guard sits on
+/// the asset's `hostname`, which is a jsonb bag knobas writes but does not
+/// type.
+///
+/// The monitor's own `hostname` field -- what Kuma reports for a ping or a port
+/// check -- is **not** read here. #451's sentence is "a mirrored monitor's URL
+/// host", and widening it to every address a monitor carries is a decision with
+/// its own negative controls to write. It is not free, and it disagrees with a
+/// sibling: `knobas_app::assets::reading_of` draws the roster's target column
+/// from "the URL where there is one, else the hostname", because "Kuma gives an
+/// HTTP monitor a URL and no hostname and a ping a hostname and no URL, so the
+/// three keys are one fact under three spellings". Three of the eight monitors
+/// `testenv/monitors.json` seeds are `ping` checks carrying the Hetzner
+/// servers' IPs in `hostname`, and this rule cannot see them.
+const MONITOR_URL_HOST: &str = detection!(concat!(
+    "with watched as (
+         select m.entity_id, ",
+    host_of!("m.payload->>'url'"),
+    " as host
+           from sync.live_item m
+          where m.kind = 'monitor'
+            and jsonb_typeof(m.payload->'url') = 'string'
+     ),
+     stated as (
+         select a.id as asset_id, ",
+    host_of!("a.properties->>'hostname'"),
+    " as host, null::text as route_name
+           from knobas.asset a
+          where jsonb_typeof(a.properties->'hostname') = 'string'
+          union all
+         select coalesce(r.target_id, r.asset_id), ",
+    host_of!("r.url"),
+    ", r.name
+           from knobas.route r
+     )
+     select s.asset_id, w.entity_id, 'monitored-by',
+            case when s.route_name is null
+                 then format('this monitor watches %s, which is the asset''s hostname', w.host)
+                 else format('this monitor watches %s, the host of the route %s',
+                             w.host, s.route_name)
+            end
+       from watched w
+       join stated s on s.host = w.host"
+));
+
 /// How many distinct shared lexemes make two documents similar, as the literal
 /// [`SIMILAR_TEXT`] is compiled with.
 ///
@@ -467,6 +630,12 @@ pub const RULES: &[Rule] = &[
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: PAGE_TEXT_KEY,
+    },
+    Rule {
+        name: "monitor_url_host",
+        class: RuleClass::ExactKey,
+        origin: Origin::Suggested,
+        sql: MONITOR_URL_HOST,
     },
     Rule {
         name: "source_recorded_relation",
