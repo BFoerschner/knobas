@@ -18,8 +18,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
 import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
+import { addressOf } from "./address";
 import {
-  addressOf,
   clickChannel,
   createNotifications,
   sendThrough,
@@ -584,4 +584,143 @@ test("an entity key with a hash and a slash in it survives the address", () => {
     "#/entity/gitea:acme%2Fpayouts%23144",
   );
   expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/inbox");
+});
+
+// -- the alert (#447) -------------------------------------------------------
+
+/**
+ * One alert line, as the backend derives it (`knobas_core::inbox`'s `alert!`):
+ * the **monitor** is the subject half of the key, the **asset** it watches is
+ * the entity, and the reason names the asset's whole path.
+ *
+ * The same values `inbox.test.svelte.ts`' own `alertEntry` carries, written
+ * out again rather than shared: that file mocks `../ipc/entity` with a
+ * factory and this one does not, so a module either could import would have
+ * to live outside both. The values are repeated on purpose all the same —
+ * the two surfaces this category has are the inbox row and the desktop
+ * notification, they are asserted here to open at the same address, and an
+ * assertion about two surfaces reads better over one fixture than over two
+ * that merely resemble each other.
+ */
+function alertEntry(monitor = "kuma:7", asset = "asset:hel1"): InboxEntry {
+  return {
+    item: {
+      key: `alert:${monitor}`,
+      category: "alert",
+      source_id: "kuma",
+      entity_id: asset,
+      kind: "asset",
+      title: "jira (tunnel)",
+      reason: "hel / hel1 is down",
+      occurred_at: "2026-09-07T09:00:00Z",
+      web_url: null,
+      snoozed_until: null,
+    },
+    actions: [],
+  };
+}
+
+/**
+ * **An alert's desktop notification opens the Tree at the affected asset**
+ * (spec #427 story 61), which is the address the inbox's own *Open* uses and
+ * not the `#/entity/<id>` room detail every other category opens.
+ *
+ * The click is asserted through as well as the draft: an address the store
+ * writes and never navigates to would be half a door.
+ */
+test("an alert's desktop notification opens the Tree at the affected asset", async () => {
+  const b = bench();
+  cleanup = b.store.start();
+  await b.primed(["alert"]);
+  b.store.saw([alertEntry()]);
+
+  const sent = b.calls.sent[0]!;
+  expect(sent.extra["address"], "an alert opens the Tree, not a room detail").toBe(
+    "#/asset/asset:hel1",
+  );
+
+  b.click(sent);
+  expect(b.calls.navigated).toEqual(["#/asset/asset:hel1"]);
+});
+
+/**
+ * **The sixth category is off until somebody switches it on, and the same
+ * alert with it on speaks** — spec #427 story 66, *"a desktop notification
+ * for a new alert when I switch that category on, off by default like the
+ * others"*, over spec #272 story 71's default.
+ *
+ * The negative is the half that matters: five categories switched on and the
+ * alert not among them is the profile of somebody who opted in before this
+ * build existed, and an alert that notified them anyway would be knobas
+ * switching a category on by shipping it. The second half is what makes the
+ * silence attributable to the category rather than to a bench that never
+ * wired `send` -- the rule this whole file follows.
+ */
+test("an alert says nothing until its own category is switched on", async () => {
+  const off = bench();
+  await off.primed([
+    "review_request",
+    "mention",
+    "failed_build",
+    "new_assignment",
+    "credential_expiry",
+  ]);
+  off.store.saw([alertEntry()]);
+  expect(off.calls.sent, "the alert category is off, five others are on").toEqual([]);
+
+  const on = bench();
+  await on.primed(["alert"]);
+  on.store.saw([alertEntry()]);
+  expect(on.calls.sent.map((notification) => notification.body)).toEqual(["hel / hel1 is down"]);
+});
+
+/**
+ * **One desktop notification per alert, and neither the ack nor the recovery
+ * is another one** (stories 62 and 64).
+ *
+ * At this seam an ack and a recovery are the *same* event and the test says so
+ * rather than pretending to tell them apart: nobody deletes an inbox item, the
+ * rule stops matching -- `acked_at` for the one and `closed_at` for the other
+ * -- and both reach this store as an item that is no longer in the stream.
+ * Which departure is which is `crates/knobas-app/tests/inbox_ipc.rs`'
+ * `an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves_a_line`,
+ * against the database, and it is the *only* place that distinction is
+ * witnessed.
+ *
+ * The positive control is a second monitor arriving in the same stream after
+ * both departures: without it, "nothing was sent" would also be true of a
+ * store that had stopped sending anything at all.
+ *
+ * The last two lines are the session memory applied to this category, and the
+ * consequence is worth reading twice: the key is `alert:<monitor>`, so a
+ * monitor that goes down, recovers and goes down again announces **once per
+ * session**, not once per outage. That is the rule every category has had
+ * since #290 -- a restart is where the same demand gets to speak up again --
+ * and a flapping monitor is where it costs the most.
+ */
+test("an alert notifies once, and neither its ack nor its recovery notifies again", async () => {
+  const b = bench();
+  await b.primed(["alert"]);
+
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent).toHaveLength(1);
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent, "the same open alert on the next read").toHaveLength(1);
+
+  // Acked: the item leaves the stream while the alert stays open.
+  b.store.saw([]);
+  expect(b.calls.sent, "an ack is not an arrival").toHaveLength(1);
+
+  // Recovered: the alert closes and takes the item with it, by construction.
+  b.store.saw([]);
+  expect(b.calls.sent, "a recovery is not an arrival").toHaveLength(1);
+
+  // ...and the same monitor going down again is the same key, so it is still
+  // the one desktop notification this session.
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent, "one key, one desktop notification a session").toHaveLength(1);
+
+  // The control: a different monitor is a different key and does speak.
+  b.store.saw([alertEntry(), alertEntry("kuma:9", "asset:hel2")]);
+  expect(b.calls.sent).toHaveLength(2);
 });

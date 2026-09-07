@@ -160,7 +160,7 @@ The single actionable stream — mentions, review requests, failed builds, assig
 _Avoid_: notifications, feed
 
 **Desktop notification**:
-What the operating system shows for **one new [inbox](#inbox) item**, when that item's category is switched on and the window is not focused; clicking it opens the item. Per category, all off until somebody says otherwise, and once per item. Always spelled in full: the bare word *notifications* is the inbox's forbidden synonym above, and the two must not collapse — the inbox is the stream that stays until it is answered, and this is one interruption about one line of it. Nothing that is not an inbox item is ever notified. (#290, spec #272)
+What the operating system shows for **one new [inbox](#inbox) item**, when that item's category is switched on and the window is not focused; clicking it opens the item. Per category, all off until somebody says otherwise, and once per item. Always spelled in full: the bare word *notifications* is the inbox's forbidden synonym above, and the two must not collapse — the inbox is the stream that stays until it is answered, and this is one interruption about one line of it. Nothing that is not an inbox item is ever notified. (Amended 2026-09-07, #447: *opens the item* is one rule for all six categories and not one per surface — `addressOf` — because an [alert](#alert)'s way in is the Tree at the affected asset where every other category's is a room detail, and the two doors had drifted apart. Its key is `alert:<monitor>`, so a monitor that goes down, recovers and goes down again is announced once a session, not once an outage.) (#290, spec #272, #427)
 _Avoid_: notification (bare), alert, toast (that is the in-window message)
 
 ## Time
