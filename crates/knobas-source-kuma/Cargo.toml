@@ -18,6 +18,11 @@ knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# One item: `tokio::time::timeout`, the deadline `socket::CALL_BUDGET` is
+# spent through. The same single feature `knobas-http` takes for its own
+# budget, and the runtime is already the one the app runs on -- this adds
+# nothing to the lockfile.
+tokio = { workspace = true, features = ["time"] }
 # The socket.io channel logs a refused account at `warn` (issue #452): the
 # username is the first thing a reader chasing a failed pause needs, and the
 # password never reaches a line -- `Account`'s own `Debug` sees to that.
@@ -32,10 +37,13 @@ url = "2"
 [dev-dependencies]
 serde_json.workspace = true
 tokio.workspace = true
-# The docker-free stand-in for Kuma, serving a `/metrics` body recorded off the
-# pinned container. `just check` and CI run no containers (roadmap §3), so the
-# contract battery needs a server that answers without one; every shape it
-# encodes is re-asserted in `tests/live_kuma.rs` against the real Kuma, and if
-# the two disagree, the recording is what is wrong.
+# The docker-free stand-in for Kuma, and it serves two servers. The first is
+# `/metrics` recorded off the pinned container: `just check` and CI run no
+# containers (roadmap §3), so the contract battery needs a server that answers
+# without one; every shape it encodes is re-asserted in `tests/live_kuma.rs`
+# against the real Kuma, and if the two disagree, the recording is what is
+# wrong. The second is `socket::tests::PingingKuma`, an engine.io session that
+# never acknowledges -- the one fault a released Kuma cannot be asked to
+# produce, and the reason issue #486 rules a fake in for it alone.
 # It brings no `reqwest` of its own; `cargo tree -i reqwest` must stay at one.
 wiremock = "0.6"

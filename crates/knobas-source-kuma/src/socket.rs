@@ -50,6 +50,13 @@
 //! problem for ever. So [`KumaSocket::call`] waits for the login's own ack
 //! before it emits anything else.
 //!
+//! # What bounds one write
+//!
+//! **One wall-clock deadline over the whole exchange** ([`CALL_BUDGET`]), and
+//! not a count of reads: a count bounds one wait and not their sum, and every
+//! read here can cost twenty-five seconds without anything having gone wrong.
+//! The constant's own note is where that arithmetic is written out.
+//!
 //! # What it deliberately does not do
 //!
 //! **No upgrade to websocket**, although the handshake offers one: the session
@@ -60,6 +67,8 @@
 //! the same refusal a wrong password gets. **No `add`, no `deleteMonitor`,
 //! nothing else** -- spec #427 gives this channel pause, resume and create, and
 //! issue #452 is the first two.
+
+use std::time::Duration;
 
 use knobas_http::{Auth, HttpClient, HttpConfig, Method};
 use knobas_source::SourceError;
@@ -85,15 +94,33 @@ const SEPARATOR: char = '\u{1e}';
 const LOGIN_ACK: u32 = 1;
 const CALL_ACK: u32 = 2;
 
-/// How many polling reads one answer may take.
+/// How long one whole write may take: the handshake, the login and the call's
+/// own ack, measured as wall-clock time.
 ///
-/// A login pushes the whole dashboard's state before its own ack, which is
-/// about fifty-five packets and took nine reads against the pinned image, and
-/// the call after it takes another three. The cap is what stops a server that
-/// answers `2` (ping) for ever from turning one write into an unbounded loop;
-/// it is deliberately far above what a working exchange needs, because a
-/// *low* cap would fail exactly on the estate with the most monitors.
-const MAX_POLLS: usize = 200;
+/// **A deadline over the exchange, not a count of reads**, and the difference
+/// is what an unanswered ack costs. Each pass of [`Session::wait_for`] is one
+/// engine.io long-poll GET, and a session that is alive but never acks holds
+/// each of those until Kuma's ping interval (25 s) before answering with a
+/// bare ping -- so the request timeout never fires, every read is a legitimate
+/// answer, and a cap of 200 reads is eighty-three minutes. Twice, because
+/// there are two waits per write. [`knobas_http::SEND_BUDGET`] makes the same
+/// argument one level down: a per-part cap bounds one wait, not their sum.
+///
+/// The read count stays bounded without a count of its own, because the
+/// transport's rate limiter ([`POLL_RATE_PER_SEC`]) is what decides how many
+/// reads fit inside the deadline: at 25 a second for sixty seconds, a server
+/// that pings instantly and for ever costs at most 1,500 reads and a pong
+/// each -- against one that pings at Kuma's own interval it is three -- so the
+/// deadline bounds the traffic as well as the time.
+///
+/// **Sixty seconds, and a constant rather than a [`crate::KumaConfig`]
+/// field.** The measured exchange is twelve reads in a few hundred
+/// milliseconds, and a large estate adds packets to the login rather than idle
+/// waits, so there is no deployment this is tight for and nothing here for a
+/// form to tune. What tripping it costs is one minute of the scheduler --
+/// `flush_all` is awaited inline in the tick -- which is a price worth paying
+/// once for a bound that exists at all.
+const CALL_BUDGET: Duration = Duration::from_secs(60);
 
 /// Kuma's own event names, spelled as its `server.js` registers them.
 pub(crate) const PAUSE_EVENT: &str = "pauseMonitor";
@@ -108,6 +135,9 @@ pub(crate) const ADD_EVENT: &str = "add";
 pub(crate) struct KumaSocket {
     client: HttpClient,
     account: Account,
+    /// [`CALL_BUDGET`] in production; overridden only by this module's own
+    /// tests, which cannot wait a minute to watch a deadline trip.
+    budget: Duration,
 }
 
 impl KumaSocket {
@@ -144,15 +174,27 @@ impl KumaSocket {
                 auth: Auth::None,
                 requests_per_second: POLL_RATE_PER_SEC,
                 burst: POLL_BURST,
-                connect_timeout: std::time::Duration::from_secs(cfg.connect_timeout_secs),
-                request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
+                connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+                request_timeout: Duration::from_secs(cfg.request_timeout_secs),
                 // Engine.io answers a bad session with express's own text and
                 // a refused login inside a `200`; there is no error envelope
                 // to lift, and the bounded excerpt is the honest reading.
                 body_message: None,
             })?,
             account,
+            budget: CALL_BUDGET,
         })
+    }
+
+    /// The same socket with a shorter deadline, for this module's tests.
+    ///
+    /// Test-only on purpose: [`CALL_BUDGET`] is a constant and not a
+    /// configuration field (see its note), so the only thing that may shorten
+    /// it is a test that would otherwise have to wait a minute.
+    #[cfg(test)]
+    fn with_budget(mut self, budget: Duration) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// Log in, emit `event` with `argument`, and answer what Kuma said.
@@ -170,13 +212,65 @@ impl KumaSocket {
     /// what puts *Re-enter* on screen and what makes the write queue **wait**
     /// rather than record a refusal (ADR-0004). [`SourceError::Protocol`] when
     /// Kuma refuses the call itself (a monitor that is not there, an account
-    /// that may not touch it), carrying Kuma's own words; and whatever
-    /// [`knobas_http`] classified a transport failure as.
+    /// that may not touch it), carrying Kuma's own words; when the session
+    /// stays open past [`CALL_BUDGET`] without acknowledging anything; and
+    /// whatever [`knobas_http`] classified a transport failure as.
+    ///
+    /// The deadline's error is **status-less `Protocol`, which the write queue
+    /// classes as a permanent refusal of this write** (`retryable`), and that
+    /// is the deliberate reading: a session that answers its pings but never
+    /// acks is a Kuma whose protocol has moved, not a Kuma that is down, and
+    /// an `Unreachable` would spend a minute of every tick waiting for the
+    /// drift to fix itself.
     pub(crate) async fn call(
         &self,
         event: &str,
         argument: &serde_json::Value,
     ) -> Result<serde_json::Value, SourceError> {
+        let Ok(exchanged) = tokio::time::timeout(self.budget, self.exchange(event, argument)).await
+        else {
+            // `{:?}` and not `as_secs()`, which is how `knobas_http` prints
+            // its own budget: this one is shortened to milliseconds by a test,
+            // and `as_secs()` would render that deadline as `0s`.
+            return Err(SourceError::protocol(format!(
+                "Uptime Kuma held its socket.io session open for {:?} without acknowledging \
+                 {event}: the session stayed up and answered its pings, so this reads as a change \
+                 in Kuma's protocol rather than an outage",
+                self.budget
+            )));
+        };
+        let (session, answered) = exchanged?;
+
+        // Best-effort, and **outside the deadline** on purpose: a session left
+        // open is one Kuma reaps on its own ping timeout, and a write that
+        // succeeded must not be reported as failed -- or hurried -- because
+        // the goodbye did not arrive.
+        if let Err(error) = session.send("41".to_owned()).await {
+            tracing::debug!(%error, "closing the Uptime Kuma socket.io session");
+        }
+        verdict(&answered, event)
+    }
+
+    /// The session itself: open, log in, emit, and read the call's ack.
+    ///
+    /// Split out from [`KumaSocket::call`] so that one deadline can span the
+    /// whole of it -- there is no point bounding the poll loop alone when a
+    /// handshake that never answers costs the same. It hands the session back
+    /// with the ack so that the goodbye can be sent *after* the deadline is
+    /// lifted, which is the one path that has a session to hand back.
+    ///
+    /// **The other two paths do not say goodbye at all**, and that is the same
+    /// best-effort reading one line up rather than a second policy: a deadline
+    /// that fires drops this future where it stood, session and all, and an
+    /// error inside returns before there is an ack to pair a session with. A
+    /// session nobody closes is one Kuma reaps on its own ping timeout, and
+    /// spending more of a write's clock on a courtesy packet to a server that
+    /// has already failed to answer would buy nothing.
+    async fn exchange(
+        &self,
+        event: &str,
+        argument: &serde_json::Value,
+    ) -> Result<(Session<'_>, String), SourceError> {
         let opened = self.open().await?;
         let session = Session {
             socket: self,
@@ -192,14 +286,7 @@ impl KumaSocket {
 
         session.send(emit(CALL_ACK, event, argument)).await?;
         let answered = session.wait_for(CALL_ACK).await?;
-
-        // Best-effort: a session left open is one Kuma reaps on its own ping
-        // timeout, and a write that succeeded must not be reported as failed
-        // because the goodbye did not arrive.
-        if let Err(error) = session.send("41".to_owned()).await {
-            tracing::debug!(%error, "closing the Uptime Kuma socket.io session");
-        }
-        verdict(&answered, event)
+        Ok((session, answered))
     }
 
     /// The `login` payload. `token` is the two-factor code, empty because
@@ -257,11 +344,18 @@ impl Session<'_> {
 
     /// Read until the ack numbered `ack` arrives, answering pings on the way.
     ///
+    /// **No bound of its own, and that is the design**: what stops this loop
+    /// when the ack never comes is [`CALL_BUDGET`], the deadline
+    /// [`KumaSocket::call`] holds over the whole exchange, which cancels this
+    /// future wherever it happens to be waiting. A write waits here twice, and
+    /// the constant's note says why bounding each wait separately would not
+    /// have bounded the write.
+    ///
     /// Everything else in the stream is discarded on purpose: what a login
     /// pushes is the dashboard's whole state, and this module has no use for
     /// any of it -- reading a monitor is `/metrics`' job and stays so.
     async fn wait_for(&self, ack: u32) -> Result<String, SourceError> {
-        for _ in 0..MAX_POLLS {
+        loop {
             let request = self
                 .socket
                 .client
@@ -279,9 +373,6 @@ impl Session<'_> {
                 }
             }
         }
-        Err(SourceError::protocol(format!(
-            "Uptime Kuma did not answer within {MAX_POLLS} reads of its socket.io session"
-        )))
     }
 }
 
@@ -396,6 +487,184 @@ fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path, query_param, query_param_is_missing};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// **A Kuma that stays up and never acknowledges anything.**
+    ///
+    /// The one fake in this adapter, and it does **not** stand on a standing
+    /// exception, because ADR-0013 has none: "no mock is a witness for any
+    /// acceptance or exit criterion", and what certifies this adapter --
+    /// this write path included -- is still `just kuma-live` against the real
+    /// container. This is issue #486's own ruling for one fault, made for one
+    /// reason: a released Kuma cannot be asked to withhold an ack, since what
+    /// would produce one is a *future* release that renames an event. So the
+    /// bound below is the only thing in this module with no live counterpart,
+    /// and the ticket says so in as many words.
+    ///
+    /// It is faithful to the exchange in every other respect: the handshake
+    /// mints a session, `40`, the login emit and every pong are accepted, and
+    /// each poll answers a bare `2` after `hold` -- which is how a *healthy*
+    /// idle engine.io session behaves, at Kuma's own 25 s ping interval. That
+    /// is the point: nothing here is an error the transport could classify.
+    struct PingingKuma {
+        server: MockServer,
+    }
+
+    impl PingingKuma {
+        /// `hold` stands in for the ping interval, scaled down so a test can
+        /// watch several polls go by inside a sub-second deadline.
+        async fn start(hold: Duration) -> Self {
+            let server = MockServer::start().await;
+            // The handshake: the one GET that carries no session yet.
+            Mock::given(method("GET"))
+                .and(path(PATH))
+                .and(query_param_is_missing("sid"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(
+                    r#"0{"sid":"never-answers","upgrades":[],"pingInterval":25000,"pingTimeout":20000}"#,
+                ))
+                .mount(&server)
+                .await;
+            // Every read of the session: a heartbeat, for ever.
+            Mock::given(method("GET"))
+                .and(path(PATH))
+                .and(query_param("sid", "never-answers"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("2")
+                        .set_delay(hold),
+                )
+                .mount(&server)
+                .await;
+            // `40`, the emits and the pongs: engine.io answers a POST `ok`.
+            Mock::given(method("POST"))
+                .and(path(PATH))
+                .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+                .mount(&server)
+                .await;
+            Self { server }
+        }
+
+        fn base_url(&self) -> String {
+            self.server.uri()
+        }
+
+        /// How many reads of the session the client actually made -- the
+        /// handshake excluded, since it carries no `sid`.
+        async fn polls(&self) -> usize {
+            self.server
+                .received_requests()
+                .await
+                .expect("the fake records what it was asked")
+                .iter()
+                .filter(|request| {
+                    request.method.as_str() == "GET"
+                        && request.url.query().is_some_and(|q| q.contains("sid="))
+                })
+                .count()
+        }
+    }
+
+    fn socket_to(base_url: &str, budget: Duration) -> KumaSocket {
+        KumaSocket::new(
+            base_url,
+            &crate::KumaConfig::default(),
+            Account {
+                username: "knobas".to_owned(),
+                password: "knobas-dev".to_owned(),
+            },
+        )
+        .expect("the socket builds against an http url")
+        .with_budget(budget)
+    }
+
+    /// One run against the fake: how long [`KumaSocket::call`] took, how many
+    /// reads it made, and what it finally said.
+    ///
+    /// The outer `tokio::time::timeout` is ten times the budget, so the code
+    /// *without* its deadline -- [`Session::wait_for`] loops for ever -- fails
+    /// here rather than hanging `just check`, and it is loose enough that the
+    /// assertions on the deadline itself are what report a run that overshot.
+    async fn until_it_gives_up(budget: Duration, hold: Duration) -> (Duration, usize, SourceError) {
+        let kuma = PingingKuma::start(hold).await;
+        let socket = socket_to(&kuma.base_url(), budget);
+
+        let started = std::time::Instant::now();
+        let refused =
+            tokio::time::timeout(budget * 10, socket.call(PAUSE_EVENT, &serde_json::json!(8)))
+                .await
+                .expect("the call is stopped by its own deadline, not by this one")
+                .expect_err("a session that never acknowledges cannot answer a write");
+        (started.elapsed(), kuma.polls().await, refused)
+    }
+
+    /// **One write is bounded by time, and the assertion is the clock.**
+    ///
+    /// Issue #486: the loop used to run 200 reads, and against a session that
+    /// pings rather than acks each read costs a ping interval -- so the bound
+    /// was really eighty-three minutes of the scheduler, twice.
+    ///
+    /// What tells a deadline from a count is that **the budget is the only
+    /// thing that changes between the two runs below**: the same fake, the
+    /// same hold, four times the time, and the write both gives up later and
+    /// reads more. A bound of N reads would have given up after the same reads
+    /// after the same seconds both times, whatever the budget said.
+    ///
+    /// Not in `tests/contract.rs`, where issue #486 placed it, and the
+    /// deviation is recorded rather than taken quietly: [`KumaSocket`] is
+    /// `pub(crate)`, so the test-only deadline override the same paragraph
+    /// asks for is unreachable from an integration test -- which leaves a test
+    /// that waits the production minute, or this.
+    #[tokio::test]
+    async fn a_session_that_only_pings_is_given_up_on_when_the_time_is_gone() {
+        const HOLD: Duration = Duration::from_millis(100);
+        const SHORT: Duration = Duration::from_millis(500);
+        const LONG: Duration = Duration::from_millis(2_000);
+
+        let (elapsed, polls, refused) = until_it_gives_up(SHORT, HOLD).await;
+
+        let (message, status) = match refused {
+            SourceError::Protocol { message, status } => (message, status),
+            other => panic!("expected Protocol, got {other:?}"),
+        };
+        // Status-less, which is what makes it a permanent refusal of this
+        // write rather than something the queue retries every tick.
+        assert_eq!(status, None, "{message}");
+        assert!(
+            message.contains("500ms"),
+            "the message has to name the deadline it tripped: {message}"
+        );
+        assert!(message.contains(PAUSE_EVENT), "{message}");
+
+        // Both ends of both runs. The floor catches a deadline that is short
+        // of what it was given; the **ceiling** is the only thing that catches
+        // one that is longer -- a budget scaled up, or a bound that adds a
+        // wait of its own on top of it -- and a run with no ceiling cannot
+        // tell a sixty-second deadline from a six-hundred-second one. Twice
+        // the budget is the width: cancelling this future costs single-digit
+        // milliseconds, so the slack is 500 ms and 2 s against an overshoot
+        // that would have to be a doubling to survive it.
+        assert!(elapsed >= SHORT, "gave up before the deadline: {elapsed:?}");
+        assert!(
+            elapsed < SHORT * 2,
+            "gave up long after the deadline: {elapsed:?}"
+        );
+
+        let (longer, more, _) = until_it_gives_up(LONG, HOLD).await;
+        assert!(
+            longer >= LONG,
+            "the longer deadline was given up on early, after {longer:?}"
+        );
+        assert!(
+            longer < LONG * 2,
+            "the longer deadline was given up on late, after {longer:?}"
+        );
+        assert!(
+            more > polls,
+            "{polls} reads in {elapsed:?} and {more} in {longer:?}: the reads one write \
+             makes have to be whatever fit inside its own deadline, not a fixed count"
+        );
+    }
 
     /// The emit's bytes, which are not JSON and cannot be built by a JSON
     /// body: `42` is the packet type, the digit after it is the ack id, and
