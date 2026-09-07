@@ -745,7 +745,9 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
     let pool = scratch().await;
 
     // One: an ad-hoc context over a VM, whose containers ride along.
-    let payments = context::create_adhoc(&pool, "payments stack").await.unwrap();
+    let payments = context::create_adhoc(&pool, "payments stack")
+        .await
+        .unwrap();
     let vm = asset(&pool, "vm", "hel1", None).await;
     let container = asset(&pool, "container", "payouts", Some(&vm)).await;
     let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
@@ -790,7 +792,10 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
 
     let listed = context::list(&pool).await.unwrap();
     assert_eq!(
-        listed.iter().map(|row| row.id.clone()).collect::<BTreeSet<_>>(),
+        listed
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<BTreeSet<_>>(),
         set(&[&payments.id, &promoted.id]),
         "the archived context is not listed, which is the line this walk draws"
     );

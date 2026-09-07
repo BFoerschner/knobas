@@ -1248,7 +1248,12 @@ async fn an_acked_alert_and_a_recovered_one_have_both_left_the_stream() {
         }
         out
     };
-    context(pool, "payouts", &ids.iter().map(String::as_str).collect::<Vec<_>>()).await;
+    context(
+        pool,
+        "payouts",
+        &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
+    .await;
 
     let open = monitor(pool, "1", "a ping").await;
     let acked = monitor(pool, "2", "b ping").await;

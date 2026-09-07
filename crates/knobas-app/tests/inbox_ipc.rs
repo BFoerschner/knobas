@@ -945,7 +945,11 @@ impl Harness {
         .unwrap();
         for (from, to, relation) in [
             ("ctx:payouts", asset.as_str(), "related"),
-            (monitor.as_str(), asset.as_str(), knobas_app::assets::MONITORED_BY),
+            (
+                monitor.as_str(),
+                asset.as_str(),
+                knobas_app::assets::MONITORED_BY,
+            ),
         ] {
             sqlx::query(
                 "insert into knobas.link
@@ -1048,7 +1052,12 @@ async fn an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves
     assert_eq!(acked.value.monitor_id, estate.monitor);
     assert!(acked.value.acked_at.is_some());
     assert_eq!(
-        acked.value.assets.iter().map(|a| a.id.clone()).collect::<Vec<_>>(),
+        acked
+            .value
+            .assets
+            .iter()
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>(),
         vec![estate.asset.clone()],
         "the ack answers with the assets its line landed on"
     );
@@ -1139,7 +1148,10 @@ async fn recovery_removes_an_unacked_item_and_still_writes_the_line() {
         .expect("the reconcile");
     tx.commit().await.expect("the run commits");
 
-    assert_eq!(harness.alert_state(&estate.monitor).await, Some((false, true)));
+    assert_eq!(
+        harness.alert_state(&estate.monitor).await,
+        Some((false, true))
+    );
     assert!(
         !harness.stream().await.iter().any(|e| e.item.key == key),
         "a self-healed blip does not linger"

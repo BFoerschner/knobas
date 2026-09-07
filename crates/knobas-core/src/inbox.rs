@@ -870,7 +870,11 @@ pub async fn complete(pool: &PgPool, key: &str, at: DateTime<Utc>) -> Result<(),
 /// # Errors
 ///
 /// [`CoreError::Db`] if the write fails.
-pub async fn complete_with<'e, E>(executor: E, key: &str, at: DateTime<Utc>) -> Result<(), CoreError>
+pub async fn complete_with<'e, E>(
+    executor: E,
+    key: &str,
+    at: DateTime<Utc>,
+) -> Result<(), CoreError>
 where
     E: sqlx::PgExecutor<'e>,
 {

@@ -162,7 +162,8 @@ const ROSTER: &str = "select distinct on (i.entity_id)
 /// the honest answer: story 64's line goes on *the affected asset*, and a
 /// monitor nobody has finished wiring up affects none. `$1` is the monitor
 /// ids, `$2` the relation.
-const RECOVERED_ASSETS: &str = "select m.id as monitor_id, e.title as monitor_name, ast.id as asset_id
+const RECOVERED_ASSETS: &str =
+    "select m.id as monitor_id, e.title as monitor_name, ast.id as asset_id
        from unnest($1::text[]) as m(id)
        join knobas.entity e on e.id = m.id
        join knobas.confirmed_link l

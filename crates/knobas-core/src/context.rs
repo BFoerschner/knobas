@@ -523,10 +523,13 @@ macro_rules! held_by_any_context {
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn held_by_any_context(pool: &PgPool) -> Result<Vec<String>, CoreError> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as(concat!("select id from ", crate::held_by_any_context!(), " as m"))
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(String,)> = sqlx::query_as(concat!(
+        "select id from ",
+        crate::held_by_any_context!(),
+        " as m"
+    ))
+    .fetch_all(pool)
+    .await?;
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
