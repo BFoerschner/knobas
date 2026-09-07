@@ -1203,11 +1203,17 @@ kuma-live:
     # the next reader to explain. Each re-raises after restoring, so the caller
     # still sees an interrupted recipe; EXIT then restores a second time, which
     # costs a `curl` against a port that is already answering.
+    #
+    # Armed BEFORE the bind, which is `test`'s rule ("the traps are armed
+    # before anything they clean up exists, so an interrupt between `mktemp`
+    # and the server's start leaks nothing"). It costs nothing here -- an
+    # interrupt during `up` restores a port that is either bound or free, and
+    # `up` is what restores it either way.
     restore_canary() { cd "$root/testenv" && ./canary.sh up || true; }
-    ./canary.sh up
     trap 'restore_canary' EXIT
     trap 'restore_canary; trap - INT; kill -INT $$' INT
     trap 'restore_canary; trap - TERM; kill -TERM $$' TERM
+    ./canary.sh up
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
       -- --ignored --nocapture --test-threads=1

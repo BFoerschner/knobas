@@ -42,7 +42,7 @@
 //! between the readings.
 //!
 //! And the negative is made against an estate that **does** have a context in
-//! it: `ROOM_ELSEWHERE` holds an asset far away from the canary before the
+//! it: `CONTEXT_ELSEWHERE` holds an asset far away from the canary before the
 //! canary ever falls. A profile with no contexts at all would be answered by
 //! any rule that happens to return nothing when there are none; this one is
 //! answered only by a rule that walks membership.
@@ -144,14 +144,18 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 const NOTEBOOK: &str = "asset:notebook";
 const CANARY_ASSET: &str = "canary responder";
 
-/// The room the canary's asset joins, and the room it does not.
+/// The context the canary's asset joins, and the context it does not.
 ///
 /// Two, because the negative is *"an asset in no context"* and not "a profile
-/// with no contexts": `ROOM_ELSEWHERE` holds `asset:db-teamcity`, three levels
-/// down a different branch of the estate, so a context exists and holds assets
-/// while the canary's is in none of them.
-const ROOM_ELSEWHERE: &str = "the teamcity database";
-const ROOM_CANARY: &str = "the canary";
+/// with no contexts": `CONTEXT_ELSEWHERE` holds `asset:db-teamcity`, three
+/// levels down a different branch of the estate, so a context exists and holds
+/// assets while the canary's is in none of them.
+///
+/// *Context* and not *room* throughout, which is `CONTEXT.md`'s line
+/// (**Context**, *"Avoid: workspace, project, room (that is its view)"*):
+/// nothing here opens one on screen.
+const CONTEXT_ELSEWHERE: &str = "the teamcity database";
+const CONTEXT_CANARY: &str = "the canary";
 const ELSEWHERE_ASSET: &str = "asset:db-teamcity";
 
 /// How long any one leg may wait for Kuma to publish the state it was given.
@@ -327,6 +331,11 @@ async fn canary_entity(source: &dyn Source) -> String {
 ///
 /// `teamcity_seeded_live.rs`' `app`, with Kuma's auth method: one profile, one
 /// source, the real scheduler, and the scratch database's own connections.
+///
+/// **The fourth copy of it**, and `live_digest/mod.rs` now says so and why it
+/// is still a copy: hoisting it edits four live suites at once, each certified
+/// by a recipe of its own, so it belongs in a change that is about the move and
+/// not in a milestone's exit witness.
 async fn app(env: &Env) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database("kuma_alert_chain").await;
     let pool = connector
@@ -439,15 +448,18 @@ async fn stream_keys(state: &SourcesState, now: chrono::DateTime<chrono::Utc>) -
         .collect()
 }
 
-/// A room, and one asset in it — *Add to context*, which is an ordinary link
+/// A context, and one asset in it — *Add to context*, which is an ordinary link
 /// (`estate_exit.rs`' own words, and its own shape).
-async fn room_holding(pool: &PgPool, title: &str, asset: &str) -> String {
-    let room = knobas_core::context::create_adhoc(pool, title)
+///
+/// Answers with nothing: what every caller here needs is the membership, and a
+/// returned id nobody reads is one more thing to be wrong about.
+async fn context_holding(pool: &PgPool, title: &str, asset: &str) {
+    let context = knobas_core::context::create_adhoc(pool, title)
         .await
-        .expect("a room");
+        .expect("a context");
     knobas_core::link::create(
         pool,
-        &EntityRef::parse(&room.id).expect("a ref"),
+        &EntityRef::parse(&context.id).expect("a ref"),
         &EntityRef::parse(asset).expect("a ref"),
         "related",
         knobas_core::link::Origin::Manual,
@@ -456,7 +468,6 @@ async fn room_holding(pool: &PgPool, title: &str, asset: &str) -> String {
     )
     .await
     .expect("Add to context is an ordinary link");
-    room.id
 }
 
 // -- the chain --------------------------------------------------------------
@@ -488,7 +499,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     println!("the canary is {monitor}");
 
     let state = app(&env).await;
-    let pool = &state.pool.clone();
+    let pool = &state.pool;
 
     // ---- the first poll ---------------------------------------------------
     sync(&state, KUMA).await;
@@ -527,6 +538,14 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "the real estate, with every one of its seven monitor names resolved against \
          the monitors the real Kuma published"
     );
+    // The four counts are already pinned by `estate_exit.rs` and `share_exit.rs`
+    // against the same file, so nothing here is a new place to update when the
+    // estate changes. What is new is the last one: `estate_exit.rs` asserts
+    // `monitors_linked == 0`, because no adapter emitted a monitor when it was
+    // written, and `adapter_to_mirror.rs` asserts seven against a *recording* of
+    // this server -- which agrees with it by construction until somebody edits
+    // one of the two files. Seven, here, is seven names typed into `estate.json`
+    // answering to seven monitors typed into Uptime Kuma.
 
     // ---- the canary's asset, and a room somewhere else ---------------------
     let canary_asset = assets::create(
@@ -559,7 +578,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     )
     .await
     .expect("*Link to…* draws a monitored-by link");
-    room_holding(pool, ROOM_ELSEWHERE, ELSEWHERE_ASSET).await;
+    context_holding(pool, CONTEXT_ELSEWHERE, ELSEWHERE_ASSET).await;
 
     // ---- the fall ---------------------------------------------------------
     println!("canary: {}", canary_sh("down"));
@@ -600,7 +619,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
 
     // ---- THE NEGATIVE: an asset in no context ------------------------------
     //
-    // A context exists (`ROOM_ELSEWHERE`) and holds assets; it does not hold
+    // A context exists (`CONTEXT_ELSEWHERE`) and holds assets; it does not hold
     // this one. Spec #427 story 60, and the routing rule's whole point: an
     // alert reaches the inbox by *what it is about*, and nobody is working on
     // this.
@@ -613,20 +632,29 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     );
 
     // ---- the same alert, once a context holds the asset --------------------
-    room_holding(pool, ROOM_CANARY, &canary_asset).await;
+    //
+    // The negative above and this read are the **same statement over the same
+    // alert**, with membership as the only difference between them -- which is
+    // what the assertion below says out loud: the stream gains this key and
+    // nothing else. An absence on its own could be a reader that answers
+    // nothing at all; a difference of exactly one cannot.
+    context_holding(pool, CONTEXT_CANARY, &canary_asset).await;
     let now = chrono::Utc::now();
     let entries = inbox_items_inner(&state.pool, state.registry.as_ref(), now, Shelf::Stream)
         .await
         .expect("the inbox reads");
+    let after: Vec<String> = entries.iter().map(|entry| entry.item.key.clone()).collect();
+    let gained: Vec<&String> = after.iter().filter(|k| !before.contains(k)).collect();
+    assert_eq!(
+        gained,
+        vec![&key],
+        "putting the canary's asset in a context added exactly its alert to the stream \
+         (before: {before:?}, after: {after:?})"
+    );
     let item = entries
         .iter()
         .find(|entry| entry.item.key == key)
-        .unwrap_or_else(|| {
-            panic!(
-                "a context holds the canary's asset, so the alert is a demand: {:?}",
-                entries.iter().map(|e| &e.item.key).collect::<Vec<_>>()
-            )
-        });
+        .expect("the key the difference above just named");
     assert_eq!(item.item.category, Category::Alert);
     assert_eq!(item.item.source_id, KUMA);
     assert_eq!(item.item.title, CANARY, "the item is titled by the monitor");
@@ -645,12 +673,18 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "an alert asks a source for nothing: {:?}",
         item.actions
     );
-    assert!(
+    assert_eq!(
         inbox_count_inner(pool, state.registry.as_ref(), now)
             .await
-            .expect("the count reads")
-            >= 1,
-        "the badge counts the same statement the stream draws"
+            .expect("the count reads"),
+        after.len() as i64,
+        "the badge counts the same statement the stream draws -- and there is exactly \
+         one thing in this profile to count: {after:?}"
+    );
+    assert_eq!(
+        after.len(),
+        1,
+        "which is the canary's alert and nothing else"
     );
 
     // ---- ack: seen, not fixed ---------------------------------------------
@@ -722,10 +756,10 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "and the Assets view stops saying it"
     );
     let now = chrono::Utc::now();
-    let after = stream_keys(&state, now).await;
+    let at_the_end = stream_keys(&state, now).await;
     assert!(
-        !after.contains(&key),
-        "the item is gone by construction, not by anybody deleting one: {after:?}"
+        !at_the_end.contains(&key),
+        "the item is gone by construction, not by anybody deleting one: {at_the_end:?}"
     );
     assert_eq!(
         history(pool, &canary_asset).await,
@@ -735,6 +769,58 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
             (format!("sync:{KUMA}"), knobas_sync::alerts::VERB.to_owned()),
         ],
         "and the asset's history holds both lines: who saw it, and when it healed"
+    );
+
+    // ---- the timeseries the three runs left --------------------------------
+    //
+    // The roadmap's other M4.1 exit clause -- *"the timeseries holds the run's
+    // samples"* -- and the one thing the per-leg assertions above cannot say
+    // between them: each of those reads the **newest** row, so all three would
+    // pass unchanged against an engine that overwrote one row per monitor
+    // instead of appending one per poll.
+    //
+    // Three syncs ran, so the canary has three rows and they are its outage in
+    // order. And the sentence is *"one sample per poll per **monitor**"*: every
+    // other monitor Kuma published has three of its own, from the same three
+    // runs, without this suite ever mentioning them.
+    let series: Vec<Option<String>> = sqlx::query_scalar(
+        "select state from knobas.monitor_sample
+          where entity_id = $1 order by taken_at asc, id asc",
+    )
+    .bind(&monitor)
+    .fetch_all(pool)
+    .await
+    .expect("the canary's series");
+    assert_eq!(
+        series
+            .iter()
+            .map(std::option::Option::as_deref)
+            .collect::<Vec<_>>(),
+        vec![Some("up"), Some("down"), Some("up")],
+        "three runs, three samples, and they are the outage this test caused"
+    );
+
+    let per_monitor: Vec<i64> = sqlx::query_scalar(
+        "select count(*) from knobas.monitor_sample group by entity_id order by 1",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("the sample counts");
+    let live: i64 = sqlx::query_scalar(
+        "select count(*) from sync.live_item where source_id = $1 and kind = 'monitor'",
+    )
+    .bind(KUMA)
+    .fetch_one(pool)
+    .await
+    .expect("the live roster");
+    assert!(
+        live > 1,
+        "a roster of one could not witness a rule about every monitor"
+    );
+    assert_eq!(
+        per_monitor,
+        vec![3; usize::try_from(live).expect("a small roster")],
+        "every one of the {live} live monitors was sampled once per run, three runs over"
     );
 
     state.scheduler.shutdown().await;

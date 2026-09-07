@@ -41,6 +41,19 @@
 //! is the one thing a move may not do -- so the duplication is the cheaper of
 //! the two. If either ever grows a `kind`, it belongs here.
 //!
+//! **The `app` constructor is not here yet, and it is the next candidate**
+//! (noted #450). Four suites now open a scratch database, put a credential in a
+//! `MemoryStore`, write one `source_config` row, start a `Scheduler` and hand
+//! back a `SourcesState` -- `atlassian_live.rs`, `start_work_live.rs`,
+//! `teamcity_seeded_live.rs` and `alert_chain_live.rs` -- differing only in the
+//! source's id, auth method and `config`. That is this module's own hazard
+//! ("four suites could disagree ... and all four would stay green while
+//! measuring different things") pointed at a fifth thing. It stayed out of
+//! #450 because hoisting it edits four live suites at once and each of them is
+//! certified by a recipe of its own -- the Atlassian pair behind a three-hour
+//! timebomb licence -- so the move costs four live runs and belongs in a change
+//! that is about the move.
+//!
 //! Nor is anything here that only one suite has: `atlassian_live.rs` keeps its
 //! `Events` sink (it collects health events, which is a claim, not scaffolding)
 //! and its `backfill`, which triggers a backfill rather than a manual run and
