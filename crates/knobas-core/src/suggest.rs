@@ -190,7 +190,7 @@ macro_rules! driver_tail {
 ///
 /// A macro rather than a runtime `format!` so every statement is a
 /// `&'static str`: nothing in this crate builds SQL at run time, and the
-/// suppression is compiled into all six rather than appended by a call each of
+/// suppression is compiled into all seven rather than appended by a call each of
 /// them has to remember to make.
 macro_rules! detection {
     ($($candidates:tt)*) => {
@@ -368,6 +368,99 @@ const SOURCE_RECORDED_RELATION: &str = detection!(
         and side.relation is not null"
 );
 
+/// The host an address names, lowercased, or `null` if it names none.
+///
+/// One POSIX regular expression, and every piece of it is load-bearing:
+///
+/// * `(?:[A-Za-z][A-Za-z0-9+.-]*://)?` -- an optional scheme, because a route's
+///   `url` "carries a scheme" (`0018`) but a monitor's may be a bare
+///   `host:port` and an asset's hostname property is a bare host. Optional
+///   rather than required, so all three go through one reader.
+/// * `(?:[^@/]*@)?` -- userinfo, dropped. `https://kuma:secret@host/` is a
+///   monitor pointed at `host`, and a credential is never a hostname.
+/// * `([^:/?#]+)` -- the host, stopping at the **port**, the path, the query
+///   and the fragment. The port is what makes `http://gitea:3000` match an
+///   asset whose hostname is `gitea`, which is the whole of criterion 1.
+///
+/// Lowercased because hostnames are case-insensitive and an estate file is
+/// typed by hand; `nullif(..., '')` because a blank property and an absent one
+/// are the same fact and neither may join to the other.
+///
+/// An IPv6 literal in brackets comes back as `[2001` and therefore matches
+/// nothing rather than matching wrongly -- the failure direction ADR-0007 asks
+/// of a read like this one, and no address in the estate this milestone
+/// describes is written that way.
+macro_rules! host_of {
+    ($address:expr) => {
+        concat!(
+            "nullif(lower(btrim(substring(",
+            $address,
+            " from '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]*@)?([^:/?#]+)'))), '')"
+        )
+    };
+}
+
+/// A monitor watching a host an asset states -- the estate's own exact-key
+/// rule.
+///
+/// Spec #427: the monitor is attached to the asset by a `monitored-by` link,
+/// and this is the pass that offers to draw it. **The asset is the subject**:
+/// `monitored-by` reads *this asset is monitored by that check*, which is why
+/// the candidate's `from_id` is the asset and its `to_id` the monitor
+/// (`app/src/lib/detail/relations.ts` gives the sentence and its inverse).
+///
+/// Two ways an asset states a host, unioned rather than written as two rules,
+/// because they are one fact -- *knobas knows this asset by that name* -- and a
+/// pair the two both find must produce one suggestion, which the driver's
+/// `distinct on` then guarantees:
+///
+/// * the **hostname property** (`knobas_core::asset::TYPES`: a server's and a
+///   VM's), and
+/// * the host of a **route the asset exposes** (`knobas.route.asset_id`).
+///   `target_id` is deliberately not read: a route *lands on* its target, and
+///   the asset that answers at the URL's host is the one that exposes it.
+///
+/// A **payload read outside an adapter** (ADR-0007), and it takes that
+/// discipline in full, as `SOURCE_RECORDED_RELATION` does: one named
+/// statement, the `jsonb_typeof` guard, and a failure direction of *absence* --
+/// a monitor with no `url`, a `url` that is not a string, or one naming no host
+/// contributes no candidate rather than a guessed one.
+///
+/// The monitor's own `hostname` field -- what Kuma reports for a ping or a port
+/// check -- is **not** read here. #451's sentence is "a mirrored monitor's URL
+/// host", and widening it to every address a monitor carries is a decision with
+/// its own negative controls to write.
+const MONITOR_URL_HOST: &str = detection!(concat!(
+    "with watched as (
+         select m.entity_id, ",
+    host_of!("m.payload->>'url'"),
+    " as host
+           from sync.live_item m
+          where m.kind = 'monitor'
+            and jsonb_typeof(m.payload->'url') = 'string'
+     ),
+     stated as (
+         select a.id as asset_id, ",
+    host_of!("a.properties->>'hostname'"),
+    " as host, null::text as route
+           from knobas.asset a
+          where jsonb_typeof(a.properties->'hostname') = 'string'
+          union all
+         select r.asset_id, ",
+    host_of!("r.url"),
+    ", r.name
+           from knobas.route r
+     )
+     select s.asset_id, w.entity_id, 'monitored-by',
+            case when s.route is null
+                 then format('this monitor watches %s, which is the asset''s hostname', w.host)
+                 else format('this monitor watches %s, the host of the route %s', w.host, s.route)
+            end
+       from watched w
+       join stated s on s.host = w.host
+      where w.host is not null"
+));
+
 /// How many distinct shared lexemes make two documents similar, as the literal
 /// [`SIMILAR_TEXT`] is compiled with.
 ///
@@ -467,6 +560,12 @@ pub const RULES: &[Rule] = &[
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: PAGE_TEXT_KEY,
+    },
+    Rule {
+        name: "monitor_url_host",
+        class: RuleClass::ExactKey,
+        origin: Origin::Suggested,
+        sql: MONITOR_URL_HOST,
     },
     Rule {
         name: "source_recorded_relation",

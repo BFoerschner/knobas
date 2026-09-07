@@ -107,6 +107,73 @@ async fn from(
     id
 }
 
+/// The source the monitors below are mirrored under.
+///
+/// Not [`SOURCE`]: a monitor is an Uptime Kuma item, and mirroring one under
+/// `jira` would let a rule that reads the wrong column still pass.
+const KUMA: &str = "kuma";
+
+/// One mirrored monitor, with the address it watches -- the payload shape
+/// `knobas_source_kuma::map` writes, where **every key is present** and a
+/// monitor with no URL carries `null` rather than omitting it.
+async fn monitor(pool: &PgPool, key: &str, name: &str, url: Option<&str>) -> String {
+    let payload = serde_json::json!({
+        "id": key,
+        "name": name,
+        "url": url,
+        "hostname": serde_json::Value::Null,
+        "state": "up",
+    });
+    from(pool, KUMA, "monitor", key, name, "", payload).await
+}
+
+/// One asset in the estate's tree: the entity row and the asset row, written
+/// here rather than through the store because the store is
+/// `knobas_app::assets` and this crate cannot depend on it.
+async fn asset(pool: &PgPool, name: &str, hostname: Option<&str>) -> String {
+    let id = EntityRef::new("asset", name).to_string();
+    let properties = match hostname {
+        Some(host) => serde_json::json!({ "hostname": host }),
+        None => serde_json::json!({}),
+    };
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.asset (id, type_id, name, properties) values ($1,'container',$2,$3)",
+    )
+    .bind(&id)
+    .bind(name)
+    .bind(properties)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// A route the asset exposes -- the other half of what the monitor rule reads.
+async fn route(pool: &PgPool, asset_id: &str, name: &str, url: &str) -> String {
+    let id = EntityRef::new("route", name).to_string();
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'route',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.route (id, asset_id, name, url) values ($1,$2,$3,$4)")
+        .bind(&id)
+        .bind(asset_id)
+        .bind(name)
+        .bind(url)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
 /// Run one named rule. Panics on a name no rule carries, which is a typo in a
 /// test rather than a failure worth a message.
 async fn run_rule(pool: &PgPool, name: &str) -> u64 {
@@ -535,6 +602,184 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
         between(&tray(&pool).await, &one, &two).is_none(),
         "two shared stems is under the floor of {}",
         suggest::SIMILARITY_FLOOR
+    );
+}
+
+/// A monitor watching a host proposes the asset that *is* that host, and no
+/// other asset in the estate.
+///
+/// Five negative controls, and each fails a different wrong implementation:
+///
+/// * an asset whose hostname nothing watches, so the rule cannot be "every
+///   asset, every monitor";
+/// * a monitor whose host no asset carries, the same test from the other end;
+/// * `gitea.example.com` against a monitor on `gitea` -- host **equality**,
+///   not a prefix, a suffix or a `like`;
+/// * an asset whose hostname is `3000`, which a split on the wrong colon piece
+///   would match;
+/// * an asset whose hostname is `http`, which a URL read that forgot to strip
+///   the scheme would match.
+#[tokio::test]
+async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else() {
+    let pool = scratch().await;
+    let watching = monitor(&pool, "1", "knobas-gitea", Some("http://gitea:3000")).await;
+    let off_estate = monitor(&pool, "2", "status page", Some("https://status.invalid/")).await;
+    let addressless = monitor(&pool, "3", "a ping check", None).await;
+
+    let gitea = asset(&pool, "knobas-gitea", Some("gitea")).await;
+    let namesake = asset(&pool, "gitea-mirror", Some("gitea.example.com")).await;
+    let porty = asset(&pool, "three-thousand", Some("3000")).await;
+    let schemey = asset(&pool, "scheme", Some("http")).await;
+    let hostless = asset(&pool, "no-hostname", None).await;
+
+    let written = run_rule(&pool, "monitor_url_host").await;
+    assert_eq!(written, 1, "one host match, one proposal");
+
+    let entries = tray(&pool).await;
+    assert_eq!(
+        pairs(&entries),
+        [(gitea.clone(), watching.clone())].into_iter().collect(),
+        "only the asset whose hostname the monitor watches is proposed"
+    );
+
+    let proposal = between(&entries, &gitea, &watching).expect("the monitor watches this asset");
+    assert_eq!(
+        proposal.link.relation, "monitored-by",
+        "the asset is monitored by the monitor, not the other way round"
+    );
+    assert_eq!(proposal.link.from_id, gitea, "the asset is the subject");
+    assert_eq!(proposal.link.to_id, watching);
+    assert_eq!(proposal.link.rule.as_deref(), Some("monitor_url_host"));
+    assert_eq!(proposal.link.rule_class, Some(RuleClass::ExactKey));
+    assert_eq!(proposal.link.origin, Origin::Suggested);
+    assert!(proposal.link.confirmed_at.is_none());
+    let reason = proposal.link.reason.clone().unwrap();
+    assert!(
+        reason.contains("gitea") && reason.contains("hostname"),
+        "the reason names the host it matched and where the asset states it: {reason}"
+    );
+
+    for (other, why) in [
+        (&namesake, "gitea.example.com is not gitea"),
+        (&porty, "3000 is the port, not the host"),
+        (&schemey, "http is the scheme, not the host"),
+        (&hostless, "an asset with no hostname matches nothing"),
+    ] {
+        assert!(between(&entries, other, &watching).is_none(), "{why}");
+    }
+    for monitor_id in [&off_estate, &addressless] {
+        assert!(
+            entries
+                .iter()
+                .all(|e| e.link.from_id != *monitor_id && e.link.to_id != *monitor_id),
+            "a monitor with no host match proposes nothing"
+        );
+    }
+}
+
+/// The other half of the rule: the host may be stated by a route the asset
+/// exposes rather than by a hostname property.
+///
+/// The negative is a route on a *different* asset, so a rule that joined
+/// routes to the estate rather than to the asset that exposes them would
+/// propose the wrong end.
+#[tokio::test]
+async fn a_monitor_proposes_the_asset_exposing_the_route_it_watches() {
+    let pool = scratch().await;
+    let watching = monitor(&pool, "1", "kuma-status", Some("https://kuma.knobas.test/status")).await;
+
+    let proxy = asset(&pool, "caddy", None).await;
+    route(&pool, &proxy, "kuma", "https://kuma.knobas.test/dashboard").await;
+    let bystander = asset(&pool, "postgres", None).await;
+    route(&pool, &bystander, "pgadmin", "https://pgadmin.knobas.test/").await;
+
+    let written = run_rule(&pool, "monitor_url_host").await;
+    assert_eq!(written, 1, "one route host match, one proposal");
+
+    let entries = tray(&pool).await;
+    assert_eq!(
+        pairs(&entries),
+        [(proxy.clone(), watching.clone())].into_iter().collect(),
+        "the asset that exposes the route is the one proposed"
+    );
+    let reason = between(&entries, &proxy, &watching)
+        .unwrap()
+        .link
+        .reason
+        .clone()
+        .unwrap();
+    assert!(
+        reason.contains("kuma.knobas.test") && reason.contains("route"),
+        "the reason names the host and the route that states it: {reason}"
+    );
+    assert!(between(&entries, &bystander, &watching).is_none());
+}
+
+/// Confirming a monitor suggestion draws the link; dismissing one is
+/// remembered, and a later pass does not propose it back.
+///
+/// Both halves in one corpus so that the pass which must resurrect nothing is
+/// the same pass that must leave the confirmed link alone.
+#[tokio::test]
+async fn a_monitor_suggestion_is_confirmed_or_dismissed_like_any_other() {
+    let pool = scratch().await;
+    let kept = monitor(&pool, "1", "knobas-gitea", Some("http://gitea:3000")).await;
+    let refused = monitor(&pool, "2", "knobas-redis", Some("http://redis:6379")).await;
+    let gitea = asset(&pool, "knobas-gitea", Some("gitea")).await;
+    let redis = asset(&pool, "knobas-redis", Some("redis")).await;
+
+    assert_eq!(run_rule(&pool, "monitor_url_host").await, 2);
+    let entries = tray(&pool).await;
+    let accept_me = between(&entries, &gitea, &kept).unwrap().link.clone();
+    let dismiss_me = between(&entries, &redis, &refused).unwrap().link.clone();
+
+    suggest::accept(&pool, accept_me.id)
+        .await
+        .unwrap()
+        .expect("there was a proposal to accept");
+    suggest::dismiss(&pool, dismiss_me.id)
+        .await
+        .unwrap()
+        .expect("there was a proposal to dismiss");
+
+    // The confirmed one is an ordinary link, on the asset's panel and on the
+    // monitor's.
+    let on_asset = link::entries_of(&pool, &EntityRef::parse(&gitea).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        on_asset
+            .iter()
+            .map(|e| (e.link.id, e.link.relation.clone()))
+            .collect::<Vec<_>>(),
+        vec![(accept_me.id, "monitored-by".to_owned())],
+        "confirm draws the monitored-by link"
+    );
+    assert_eq!(
+        link::entries_of(&pool, &EntityRef::parse(&kept).unwrap())
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "and the monitor is linked from its end too"
+    );
+    assert!(
+        link::entries_of(&pool, &EntityRef::parse(&redis).unwrap())
+            .await
+            .unwrap()
+            .is_empty(),
+        "dismissing draws nothing"
+    );
+
+    // A second pass over the same mirror re-proposes neither.
+    assert_eq!(
+        run_rule(&pool, "monitor_url_host").await,
+        0,
+        "an answered pair is not proposed again"
+    );
+    assert!(
+        tray(&pool).await.is_empty(),
+        "the tray is empty: one pair is a link, the other is dismissed"
     );
 }
 
