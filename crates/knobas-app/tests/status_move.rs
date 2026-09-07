@@ -44,6 +44,9 @@ use serde_json::json;
 /// The instance id every fixture below is synced under.
 const JIRA: &str = "jira";
 
+/// The workflow-less source the read is refused by (#498).
+const MOCK: &str = "mock";
+
 /// The issue this file moves.
 ///
 /// `PAY-240`, and the choice is load-bearing in both directions: the fixture
@@ -124,6 +127,27 @@ async fn app(jira_url: &str) -> SourcesState {
     )
     .await
     .expect("the source row is written");
+
+    // A second source with **no workflow**, for the read's other half (#498).
+    // The mock, because it is the one adapter compiled in that needs no remote
+    // system and no credential -- so the refusal this file asserts is the
+    // adapter's own answer over the real command path, not a fixture standing
+    // in for one.
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: MOCK.to_owned(),
+            adapter_kind: "mock".to_owned(),
+            display_name: "Tidewater (mock)".to_owned(),
+            base_url: String::new(),
+            auth_kind: knobas_sync::config::AuthKind::None,
+            config: json!({}),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the mock source row is written");
 
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
@@ -308,6 +332,89 @@ async fn a_legal_move_lands_and_an_illegal_one_is_refused_by_name() {
         Some(LEGAL),
         "a refused move changes nothing at the source and nothing on the board"
     );
+
+    jira.assert_no_violations();
+}
+
+// -- the read the select is offered (#498) -----------------------------------
+
+/// Ask the way the detail asks: through `crud::reachable_transitions`, which is
+/// the whole of what the `reachable_transitions` command does once its state is
+/// resolved.
+async fn reachable(state: &SourcesState, entity: &str) -> Result<Vec<String>, String> {
+    knobas_app::sources::crud::reachable_transitions(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        entity,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// **The read is the workflow's, and the workflow has a shape.**
+///
+/// `MockState::jira_transitions` is not a list of statuses: from *To Do* the
+/// only move is to *In Progress*, and from *In Progress* there are two, neither
+/// of them *Done*. So an adapter that answered "every status this corpus shows"
+/// -- which is exactly what the select offered before this read existed -- fails
+/// the first assertion here, and one that answered the transitions' own *names*
+/// rather than the statuses they land on fails it too: mockd's names are *Start
+/// Progress*, *Send to Review*, *Stop Progress*, and no status is called that.
+///
+/// Both states are read over **one** fixture and the second after a real move,
+/// because the point of the read is that the answer depends on where the ticket
+/// stands: two assertions against one state could both pass on an adapter that
+/// ignored the ticket entirely.
+#[tokio::test]
+async fn the_read_offers_the_workflow_and_a_source_without_one_refuses_by_name() {
+    let jira = spawn_mock_jira().await;
+    let state = app(&jira.base_url()).await;
+    sync(&state).await;
+
+    let target = format!("{JIRA}:{KEY}");
+    assert_eq!(
+        mirrored_status(&state).await.as_deref(),
+        Some(FROM),
+        "the fixture has to start where the workflow's one legal move begins"
+    );
+    assert_eq!(
+        reachable(&state, &target).await.expect("the read answers"),
+        vec![LEGAL.to_owned()],
+        "from {FROM:?} this workflow reaches exactly one status, and the read says which"
+    );
+
+    // Move it, and ask again: the answer follows the ticket.
+    let legal = queue_move(&state, LEGAL).await;
+    assert_eq!(in_queue(&state, legal).await.state, WriteState::Sent);
+    let now = reachable(&state, &target).await.expect("the read answers");
+    assert!(
+        now.contains(&OFFERED_FROM_LEGAL.to_owned()) && now.contains(&FROM.to_owned()),
+        "from {LEGAL:?} the workflow offers {OFFERED_FROM_LEGAL:?} and a way back to {FROM:?}: {now:?}"
+    );
+    assert!(
+        !now.contains(&ILLEGAL.to_owned()),
+        "{ILLEGAL:?} is a status this corpus shows and this workflow does not reach from \
+         {LEGAL:?} -- offering it is the guess this read exists to stop: {now:?}"
+    );
+
+    // The other half: a source with no workflow refuses, and names itself. Not
+    // an empty list -- an empty answer is a workflow with nowhere left to go,
+    // and the shell draws those two differently.
+    let refused = reachable(&state, &format!("{MOCK}:PAY-231"))
+        .await
+        .expect_err("a source with no workflow refuses the read");
+    assert!(
+        refused.to_lowercase().contains("mock"),
+        "the refusal names the adapter that has no workflow: {refused}"
+    );
+
+    // And an entity whose namespace is no configured source is `not_found`
+    // rather than a refusal from some adapter that happened to be built.
+    let unknown = reachable(&state, "nowhere:PAY-231")
+        .await
+        .expect_err("an unconfigured source has nothing to ask");
+    assert!(unknown.contains("nowhere"), "{unknown}");
 
     jira.assert_no_violations();
 }

@@ -425,6 +425,50 @@ async fn a_status_the_workflow_does_not_offer_is_refused_by_name() {
     jira.assert_no_violations();
 }
 
+/// The reachable-transition read's **DTO shape**, and only that (#498, spec
+/// #491: "a mockd case in the Jira crate pins the DTO shape only").
+///
+/// What is asserted here is that the adapter reads `to.name` -- the status a
+/// transition *lands on* -- and not `name`, which is the transition's own label
+/// and is a different string in mockd's fixture by construction (*Send to
+/// Review* lands on *In Review*, *Stop Progress* on *To Do*). That is a shape
+/// question and a mock can answer it.
+///
+/// What it deliberately does **not** assert is that the answer is *right*: this
+/// workflow is `MockState::jira_transitions`, a fixture, and a fixture agreeing
+/// with itself certifies nothing (ADR-0013). The real Jira's four seeded states
+/// are the witness, in `knobas-app/tests/atlassian_live.rs`.
+#[tokio::test]
+async fn the_reachable_transitions_read_answers_the_statuses_moves_land_on() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+
+    let reachable = source
+        .reachable_transitions("jira:PAY-231")
+        .await
+        .expect("the read answers for a ticket this instance has");
+
+    // PAY-231 is `In Progress`; this workflow's two moves from there land on
+    // `In Review` and `To Do`.
+    assert_eq!(reachable, vec!["In Review".to_owned(), "To Do".to_owned()]);
+    for label in ["Send to Review", "Stop Progress"] {
+        assert!(
+            !reachable.iter().any(|status| status == label),
+            "{label:?} is the transition's name, not the status it lands on: {reachable:?}"
+        );
+    }
+
+    // An id belonging to another source is refused here as it is on every
+    // write, rather than sent to this Jira as somebody else's key.
+    let refused = source.reachable_transitions("gitea:PAY-231").await;
+    let Err(SourceError::Protocol { message, .. }) = &refused else {
+        panic!("an id from another source must be refused, got {refused:?}");
+    };
+    assert!(message.contains("gitea"), "{message}");
+
+    jira.assert_no_violations();
+}
+
 /// The status the user picked comes back through a payload a person may have
 /// typed, so the match is trimmed and case-insensitive rather than byte-equal.
 #[tokio::test]
