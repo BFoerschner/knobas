@@ -7765,7 +7765,12 @@ From this commit on, each of the following requires an orchestrator decision **a
     from the process's working directory.
   * `entity_checkout(entity_id) -> CheckoutView` — the override, else the scan, else *no
     checkout*. Read on every open and **stored nowhere**: a clone that moved between two opens
-    would leave a cached path pointing at nothing.
+    would leave a cached path pointing at nothing. Its two statements read `sync.item` and not
+    `sync.live_item`, which makes `checkout::repo_of` the **fourth** reader to reach past the
+    view: the panel is mounted inside `get_entity`'s detail, which is exempt from both halves for
+    the same reason, and the clone is still on the disk after the source withdrew the repository
+    or somebody turned it off. `CONTEXT.md`'s **Live item** entry names it beside the other
+    three, per that entry's own rule.
   * `set_checkout_override(entity_id, path: Option<String>) -> CheckoutView` — set or clear, keyed
     on the **repository** even when a branch was the address, answering the fresh view so clearing
     an override *shows* the scan taking over.
@@ -7804,12 +7809,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   refuses every other kind by name); `commands::entity`'s
   `the_mirror_invokes_the_commands_by_their_registered_names` and `tests/wiring.rs`'s
   `every_command_is_in_the_handler_list`, which is what makes the four reachable from the window;
-  thirteen tests in `crates/knobas-app/tests/checkout_ipc.rs` over scratch databases — the
+  fourteen tests in `crates/knobas-app/tests/checkout_ipc.rs` over scratch databases — the
   setting's round trip, the scan, the override winning and giving the scan back, a branch
   answering its repository's, the three refusals,
   `a_branch_resolves_to_the_longest_repo_id_it_starts_with` and
   `an_underscore_in_a_repo_name_is_not_a_wildcard` for the two ways the branch-to-repo lookup can
-  claim the wrong repository, and `purging_the_repo_takes_its_override_with_it` for the cascade; and, on the rendered side, eight in `CheckoutPanel.test.svelte.ts` and five in
+  claim the wrong repository, and `purging_the_repo_takes_its_override_with_it` for the cascade,
+  and `a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout` for the two halves
+  of the view this read is exempt from; and, on the rendered side, eight in `CheckoutPanel.test.svelte.ts` and five in
   `CheckoutsSection.test.svelte.ts`.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**

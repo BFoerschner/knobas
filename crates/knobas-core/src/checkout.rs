@@ -79,15 +79,20 @@ impl std::fmt::Display for RemoteKey {
 ///
 /// # What is deliberately refused
 ///
-/// A Windows path (`C:\src\payout-service`) reads as a scp-like remote to a
-/// naive split on `:`. **One** guard is what keeps it out: a scp-like host must
-/// be longer than one character, so a drive letter is not a host. The other
-/// spellings are refused by rules that are there anyway -- `C:/src/a/b` by the
-/// leading slash, `C:\src\a\b` by having no `/` and therefore one path
-/// segment, where an owner *and* a repository are wanted. A third guard on
-/// "the path must carry a `/`" was written and removed: mutation-checked, it
-/// killed nothing that the one-segment miss did not already kill, and armour no
-/// test can see go is armour nobody can maintain.
+/// A Windows path reads as a scp-like remote to a naive split on `:`, and
+/// **one** guard is what keeps the dangerous spelling out: a scp-like host must
+/// be longer than one character, so a drive letter is not a host. The spelling
+/// that needs it is the drive-*relative* one with forward slashes,
+/// `C:src/tidewater/payout-service`, whose path splits into segments an owner
+/// and a repository could be read out of; mutation-checking says so, since it
+/// is the one negative that fails when the guard is removed. Every other
+/// Windows spelling is refused by rules that are there anyway -- `C:/src/a/b`
+/// by the leading slash, and `C:\src\payout-service` and `C:\src\a\b` by
+/// having no `/` and therefore one path segment, where an owner *and* a
+/// repository are wanted. A third guard on "the path must carry a `/`" was
+/// written and removed: mutation-checked, it killed nothing that the
+/// one-segment miss did not already kill, and armour no test can see go is
+/// armour nobody can maintain.
 #[must_use]
 pub fn remote_key(url: &str) -> Option<RemoteKey> {
     let url = url.trim();
@@ -136,10 +141,12 @@ fn split_remote(url: &str) -> Option<(&str, &str)> {
     // The scp-like form. `rsplit` would take the last colon, which an IPv6
     // literal is made of; the *first* colon is the separator git uses.
     let (authority, path) = url.split_once(':')?;
-    // `C:\src\payout-service` is not a remote: a one-character authority is a
-    // drive letter, not a host. `C:/src/a/b` is refused by the leading slash,
-    // and `C:\src\a\b` by having one path segment where two are wanted --
-    // see the doc comment for why there is no third guard here.
+    // `C:src/tidewater/payout-service` is not a remote: a one-character
+    // authority is a drive letter, not a host, and that drive-relative
+    // spelling is the one this guard alone refuses. `C:/src/a/b` is refused by
+    // the leading slash, and the backslash spellings by having one path
+    // segment where two are wanted -- see the doc comment for why there is no
+    // third guard here.
     if authority.chars().count() < 2 || path.starts_with('/') {
         return None;
     }

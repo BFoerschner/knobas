@@ -574,3 +574,56 @@ async fn purging_the_repo_takes_its_override_with_it() {
             .unwrap();
     assert_eq!(left, 0);
 }
+
+/// **A withdrawn repo and a turned-off source still answer their checkout** --
+/// the reason `repo_of` reads `sync.item` rather than `sync.live_item`.
+///
+/// The panel is mounted inside the detail, and `get_entity`'s `DETAIL` is
+/// exempt from both of the view's halves (`CONTEXT.md`, **Live item**, reader
+/// 2) precisely so a withdrawn or turned-off entity's detail opens and says so.
+/// A checkout read that went through the view would draw *not in the local
+/// index* on a page the app can open -- and the clone is still on the disk
+/// either way, which is the whole point of knowing where it is.
+#[tokio::test]
+async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() {
+    let pool = pool().await;
+
+    let withdrawn = repo(&pool).await;
+    set_override(&pool, &withdrawn.id, Some("/Users/mara/src/withdrawn"))
+        .await
+        .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&withdrawn.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let answer = view(&pool, &withdrawn.id).await.unwrap();
+    assert_eq!(
+        answer.found_by,
+        FoundBy::Override,
+        "a tombstoned repo keeps its entity row, its override and its clone"
+    );
+    assert_eq!(answer.path.as_deref(), Some("/Users/mara/src/withdrawn"));
+
+    let turned_off = repo(&pool).await;
+    let root = clones_root_with(&turned_off);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
+         values ($1,'gitea','Turned off','http://gitea','pat','{}'::jsonb, 60, false)",
+    )
+    .bind(&turned_off.source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let answer = view(&pool, &turned_off.id).await.unwrap();
+    assert_eq!(
+        answer.found_by,
+        FoundBy::Scan,
+        "turning a source off hides its items from readers, not the clone from its owner"
+    );
+    assert_eq!(path_of(&answer), root.path().join(&turned_off.name));
+}

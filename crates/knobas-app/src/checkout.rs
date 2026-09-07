@@ -294,6 +294,22 @@ struct RepoOf {
 /// view with no repo id, no URL and no clone command, which the panel draws as
 /// *no checkout* -- and `set_override` refuses, because there is nothing to key
 /// the override on.
+///
+/// # Why both statements read `sync.item` and not `sync.live_item`
+///
+/// This is the **fourth** reader to reach past the view, and `CONTEXT.md`'s
+/// **Live item** entry names it beside the other three. Exempt from both of
+/// the view's halves, and for the detail read's own reason (reader 2): the
+/// panel is mounted *inside* `get_entity`'s detail, which is exempt so that a
+/// withdrawn or turned-off entity's page still opens and says which. A
+/// checkout read that went through the view would answer *not in the local
+/// index* on a page the app can open -- and the clone is still on the disk
+/// after the server withdrew the repository or somebody turned its source off,
+/// which is exactly when knowing where it is helps. `0024`'s cascade is the
+/// same rule from the other side: a tombstoned repo keeps its entity row and
+/// therefore its override; only a purge takes it.
+/// `a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout` pins
+/// both halves.
 async fn repo_of(pool: &PgPool, entity_id: &str) -> Result<RepoOf, IpcError> {
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let id = entity.to_string();
