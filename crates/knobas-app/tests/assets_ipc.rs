@@ -4499,7 +4499,8 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
 /// until the pool came up would be a dialog that draws empty on a cold start.
 ///
 /// The three assertions are the three things the dialog reads: the **count**
-/// (spec #427's nineteen), the **schema in its declared order** -- which is
+/// (sixteen, since spec #491 dropped three of spec #427's nineteen), the
+/// **schema in its declared order** -- which is
 /// what tells a reader filling in a VM's `ip` that the backend wants text --
 /// and the **suggestions**, which are story 17's *usual here*.
 #[test]
@@ -4507,7 +4508,11 @@ fn the_type_table_answers_with_no_pool_and_carries_the_schema_and_the_suggestion
     let answered = invoke("asset_types", serde_json::json!({}))
         .expect("`asset_types` needs no pool and answers before bring-up");
     let types = answered.as_array().expect("a list of types");
-    assert_eq!(types.len(), 19, "spec #427 names nineteen types");
+    assert_eq!(
+        types.len(),
+        16,
+        "spec #427 named nineteen types and spec #491 dropped three"
+    );
 
     let vm = types
         .iter()

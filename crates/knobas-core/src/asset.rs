@@ -44,7 +44,7 @@
 //! here and any type allowed"*. #428 left it out because a table of
 //! suggestions with no reader would have been untested prose; #429's create
 //! dialog is that reader, and it draws the list as *usual here: ...* above a
-//! picker that still offers all nineteen.
+//! picker that still offers all sixteen.
 //!
 //! **A suggestion is never a constraint.** [`crate::asset`] does not enforce
 //! it and neither does `knobas_app::assets::create`: the estate is somebody's

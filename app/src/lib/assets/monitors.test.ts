@@ -232,7 +232,7 @@ const UNWATCHED = [
 
 /**
  * **The filter's options are the types the answer holds**, each with how many
- * of them there are — never the whole nineteen-row type table. An option
+ * of them there are — never the whole sixteen-row type table. An option
  * behind which there is nothing can only empty the list, and a roster of gaps
  * that offered sixteen dead filters would hide the four live ones.
  *

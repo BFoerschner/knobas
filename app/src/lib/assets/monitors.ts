@@ -242,9 +242,9 @@ export interface TypeCount {
  * place this list deliberately differs from {@link chipCounts} above. The
  * chips are six fixed states and a chip that vanished at zero would move its
  * neighbour under the reader's pointer at the moment something recovered;
- * these are up to nineteen types over an estate somebody built by hand, and an
+ * these are up to sixteen types over an estate somebody built by hand, and an
  * option with nothing behind it can only empty the list. A roster of gaps
- * offering sixteen dead filters would hide the four live ones.
+ * offering twelve dead filters would hide the four live ones.
  *
  * **By label and not by count.** A filter is found by reading its name, and
  * count order would rearrange the row every time somebody attached a monitor.

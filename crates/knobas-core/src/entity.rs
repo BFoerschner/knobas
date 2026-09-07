@@ -135,7 +135,7 @@ pub struct OwnedKind {
 ///
 /// `asset` joined in M4.0 (issue #428) and is **the kind, not the type**: an
 /// asset's *type* -- VM, container, database -- is [`crate::asset::TYPES`],
-/// nineteen of them with monograms of their own,
+/// sixteen of them with monograms of their own,
 /// and the chip a column row draws is the type's. `AS` is what the launcher
 /// and a room tile put on an asset, where the question is which kind of thing
 /// this is among tickets, pages and notes.

@@ -106,7 +106,7 @@
 //! fact on the wire twice, and story 31's dashed wire is exactly that
 //! comparison.
 //!
-//! A route has **no type and therefore no typed properties**: nineteen types
+//! A route has **no type and therefore no typed properties**: sixteen types
 //! describe things that hold things, and a URL is not one of them. Its
 //! properties are the reader's own, all four kinds, which is where the
 //! certificate expiry of spec story 14 lives -- knobas does not own
@@ -1614,7 +1614,7 @@ fn inherited<T>(
 /// `knobas_core::asset`, because the half of a type that matters -- the
 /// monogram, the *ordered* property schema, and the child types conventionally
 /// suggested -- cannot be written in SQL. It is put on the wire rather than
-/// copied into TypeScript so that the nineteen types are one list, and because
+/// copied into TypeScript so that the sixteen types are one list, and because
 /// the surface #429 builds needs two things nothing else on this bridge
 /// carries:
 ///
@@ -1626,7 +1626,7 @@ fn inherited<T>(
 ///   guessing whether the backend wants text or a number.
 ///
 /// `Vec` and not `&'static [AssetType]` because a command's answer is
-/// serialized and owned; the copy is nineteen structs of pointers, once per
+/// serialized and owned; the copy is sixteen structs of pointers, once per
 /// window.
 #[must_use]
 pub fn types() -> Vec<AssetType> {

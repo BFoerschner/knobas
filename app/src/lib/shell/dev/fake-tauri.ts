@@ -380,7 +380,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
  *
  * The types the estate below uses and the ones they suggest, with the ids,
  * monograms, schemas and `suggests` lists `knobas_core::asset` declares.
- * **Not all nineteen**: this is a fixture a browser is pointed at, and nine
+ * **Not all sixteen**: this is a fixture a browser is pointed at, and nine
  * types is what it takes to see a *usual here* line and a typed-property
  * editor. The `suggests` lists are nonetheless the **whole** lists the real
  * table declares, so one of them names a type this subset omits (`container`
