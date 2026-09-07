@@ -931,3 +931,39 @@ export function openAlerts(): Promise<OpenAlert[]> {
 export function ackAlert(monitorId: string): Promise<OpenAlert> {
   return invoke<OpenAlert>("ack_alert", { monitorId });
 }
+
+/**
+ * One row of the Monitors tab's *Not monitored* roster —
+ * `assets::UnmonitoredAsset` (#449).
+ *
+ * Not an `AssetRow`: this is a line in a list of gaps, so it carries what the
+ * list draws — where the asset sits and what kind of thing it is — and none of
+ * the rollup an `AssetRow` would drag with it.
+ */
+export interface UnmonitoredAsset {
+  /** `asset:<uuid>` — the `#/asset/<id>` address the name opens. */
+  id: string;
+  /** One of the built-in types; what the tab's type filter narrows by. */
+  type_id: string;
+  /** What that type is called, resolved by the backend. */
+  type_label: string;
+  /** The type's two-character chip. */
+  monogram: string;
+  name: string;
+  /** The ancestors' names, outermost first; `null` at the top of the estate. */
+  path: string | null;
+}
+
+/**
+ * Every asset with no confirmed `monitored-by` link to a monitor.
+ *
+ * **A statement about attachment, not about attention.** An asset whose only
+ * monitor Kuma has paused is not here: somebody wired a check to it and then
+ * silenced it, which the roster above says with the Paused chip.
+ *
+ * Unfiltered, for the reason `monitorRoster` is: the type filter's options are
+ * the types this answer holds, so the tab cannot draw them without the list.
+ */
+export function unmonitoredAssets(): Promise<UnmonitoredAsset[]> {
+  return invoke<UnmonitoredAsset[]>("unmonitored_assets");
+}

@@ -534,6 +534,37 @@ pub async fn monitor_roster(
     assets::monitor_roster(&pool).await
 }
 
+/// The Monitors tab's *Not monitored* roster: every asset with no confirmed
+/// `monitored-by` link to a monitor (spec #427 story 68, issue #449).
+///
+/// **A read of its own and not a field on `monitor_roster`.** The roster is a
+/// list of *monitors* and this is a list of *assets*; they have no row in
+/// common, and the one shape that could carry both would be an answer whose
+/// two halves are read for two different surfaces. It is also the read a
+/// reader can have an empty answer to while the other is full, which is the
+/// state the tab exists to make visible.
+///
+/// **No type argument**, although the tab filters by type: nineteen types over
+/// an estate a person built by hand is not a set worth paging, the filter's
+/// options are the types the answer actually holds -- so the frontend cannot
+/// draw them without the whole list -- and a filtered read would be a second
+/// answer that could disagree with the counts beside it. The chips' argument
+/// on `monitor_roster`, applied to the other list.
+///
+/// **A read, so no `AppHandle`**: nothing here announces.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn unmonitored_assets(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<assets::UnmonitoredAsset>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::unmonitored_assets(&pool).await
+}
+
 /// Every open alert in the estate, newest first (spec #427 stories 57 and 58,
 /// issue #444).
 ///
@@ -1048,6 +1079,29 @@ mod tests {
         );
     }
 
+    /// One row of the *Not monitored* roster (#449).
+    ///
+    /// With a `path`, which is the field that tells the two languages apart:
+    /// `None` serializes to a shape any declared type accepts, and the path is
+    /// the one thing on this row the criterion names.
+    #[test]
+    fn the_unmonitored_asset_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "UnmonitoredAsset",
+            &serde_json::to_value(assets::UnmonitoredAsset {
+                id: "asset:7f2c".to_owned(),
+                type_id: "container".to_owned(),
+                type_label: "Container".to_owned(),
+                monogram: "CT".to_owned(),
+                name: "postgres".to_owned(),
+                path: Some("notebook / knobas-stack".to_owned()),
+            })
+            .unwrap(),
+            &["id", "type_id", "type_label", "monogram", "name", "path"],
+        );
+    }
+
     /// The two numbers monitoring is shaped by, in both directions, with the
     /// ratified defaults asserted as values.
     ///
@@ -1142,8 +1196,9 @@ mod tests {
         );
     }
 
-    /// The twenty commands are invoked from the mirror by the names they are
-    /// registered under, and registered under the names they are declared with.
+    /// The twenty-one commands are invoked from the mirror by the names they
+    /// are registered under, and registered under the names they are declared
+    /// with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
     /// this proves the *frontend* calls them by those names. A typo on either
@@ -1172,6 +1227,7 @@ mod tests {
             "monitor_roster",
             "open_alerts",
             "ack_alert",
+            "unmonitored_assets",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),

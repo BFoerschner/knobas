@@ -3974,6 +3974,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::monitor_roster,
             knobas_app::commands::assets::open_alerts,
             knobas_app::commands::assets::ack_alert,
+            knobas_app::commands::assets::unmonitored_assets,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4142,6 +4143,7 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         // monitor has at most one open alert, and it is what the inbox item's
         // subject already is.
         ("ack_alert", serde_json::json!({ "monitorId": "kuma:7" })),
+        ("unmonitored_assets", serde_json::json!({})),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
@@ -4675,4 +4677,255 @@ async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
         row(&roster, "canary").assets.is_empty(),
         "a `related` link is not monitoring, so this monitor watches nothing"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The Monitors tab's "Not monitored" roster (#449, spec #427 story 68)
+// ---------------------------------------------------------------------------
+
+/// The roster as the tab draws it: `(name, path, type label)`.
+async fn unmonitored(pool: &PgPool) -> Vec<(String, Option<String>, String)> {
+    assets::unmonitored_assets(pool)
+        .await
+        .expect("the not-monitored roster")
+        .into_iter()
+        .map(|row| (row.name, row.path, row.type_label))
+        .collect()
+}
+
+/// **Criterion 2, both halves at once**: an asset nobody has attached a
+/// monitor to is on the roster with the path that says where it sits, and an
+/// asset that has one is not.
+///
+/// Three levels rather than two, because *excludes those with one* is only a
+/// claim worth making when the excluded asset has a parent still on the list:
+/// a fixture of one monitored asset and one unmonitored one at the top would
+/// pass a read that dropped every descendant of a monitored asset.
+///
+/// The type rides with the name because the roster's filter is a type filter,
+/// and the label and the monogram are resolved here for the same reason
+/// [`AssetRow`] resolves them: no surface keeps a second copy of the table.
+#[tokio::test]
+async fn the_roster_lists_the_assets_nothing_watches_and_leaves_out_the_ones_it_does() {
+    let pool = pool("assets-unmonitored-roster").await;
+    let (site, _, container) = three_levels(&pool).await;
+    let watching = kuma_monitor(
+        &pool,
+        "kuma",
+        "postgres",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    link_as(&pool, &container.id, &watching, "monitored-by").await;
+
+    assert_eq!(
+        unmonitored(&pool).await,
+        [
+            ("hel1".to_owned(), None, "Site".to_owned()),
+            (
+                "vm-db-01".to_owned(),
+                Some("hel1".to_owned()),
+                "VM".to_owned()
+            ),
+        ],
+        "the container has a monitor and its site and VM do not"
+    );
+
+    let roster = assets::unmonitored_assets(&pool)
+        .await
+        .expect("the not-monitored roster");
+    assert_eq!(
+        roster
+            .iter()
+            .map(|row| (row.type_id.as_str(), row.monogram.as_str()))
+            .collect::<Vec<_>>(),
+        [("site", "SI"), ("vm", "VM")],
+        "the filter narrows by type, so the type is on the row with its chip"
+    );
+    assert_eq!(
+        roster.first().map(|row| row.id.as_str()),
+        Some(site.id.as_str()),
+        "the row carries the asset's own address, so a reader can open it"
+    );
+}
+
+/// **What does *not* take an asset off the roster**, which is the whole of
+/// what "no `monitored-by` link" means. Four ways a looser read would go
+/// wrong, each on an asset of its own so a single miss is nameable:
+///
+/// * a `related` link to a monitor is not monitoring;
+/// * a `monitored-by` link whose other end is a **ticket** is not a monitor,
+///   the same guard `assets::attached_monitors` makes for the pane;
+/// * an **unconfirmed** proposal is a machine's guess and nobody has agreed to
+///   it, so the asset is still unwatched -- and the roster is what tells
+///   somebody to go and confirm it;
+/// * a `monitored-by` link an asset draws **to itself** is not a monitor
+///   either.
+///
+/// The fifth case is the one that goes the other way and is stated as a
+/// decision rather than a consequence: an asset whose only monitor is
+/// **tombstoned** -- Kuma paused or deleted it -- is *off* the roster. This
+/// list answers "has anybody wired a monitor to this", not "is anybody looking
+/// right now"; the second question is the *Paused* chip's, on the roster
+/// above, where the monitor is drawn with its own history. An asset that
+/// appeared here the moment somebody paused a check would say nobody had ever
+/// attached one.
+#[tokio::test]
+async fn only_a_confirmed_monitored_by_link_to_a_monitor_takes_an_asset_off_the_roster() {
+    let pool = pool("assets-unmonitored-negatives").await;
+    let related = make(&pool, None, "vm", "a-related", &[]).await;
+    let ticketed = make(&pool, None, "vm", "b-ticketed", &[]).await;
+    let proposed = make(&pool, None, "vm", "c-proposed", &[]).await;
+    let selfish = make(&pool, None, "vm", "d-selfish", &[]).await;
+    let paused = make(&pool, None, "vm", "e-paused", &[]).await;
+
+    let monitor = kuma_monitor(
+        &pool,
+        "kuma",
+        "canary",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    let gone = kuma_monitor(
+        &pool,
+        "kuma",
+        "silenced",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    tombstone(&pool, &gone).await;
+    let not_a_monitor = ticket(&pool, "PAY-9").await;
+
+    link_as(&pool, &related.id, &monitor, "related").await;
+    link_as(&pool, &ticketed.id, &not_a_monitor, "monitored-by").await;
+    sqlx::query(
+        "insert into knobas.link
+             (from_id, to_id, relation, origin, created_by, confirmed_at,
+              rule, rule_class, reason)
+         values ($1,$2,'monitored-by','suggested','knobas',null,
+              'monitor_url_host','source_relation','the monitor watches this host')",
+    )
+    .bind(&proposed.id)
+    .bind(&monitor)
+    .execute(&pool)
+    .await
+    .expect("the proposal");
+    // A link from an asset to itself. `knobas.link` allows it and
+    // `ROSTER_ASSETS` guards against it with `a.id <> m.id`; the roster owes
+    // the same guard, or an asset could take itself off this list.
+    sqlx::query(
+        "insert into knobas.link
+             (from_id, to_id, relation, origin, created_by, confirmed_at)
+         values ($1,$1,'monitored-by','manual','user', now())",
+    )
+    .bind(&selfish.id)
+    .execute(&pool)
+    .await
+    .expect("the self link");
+    link_as(&pool, &paused.id, &gone, "monitored-by").await;
+
+    assert_eq!(
+        unmonitored(&pool)
+            .await
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect::<Vec<_>>(),
+        ["a-related", "b-ticketed", "c-proposed", "d-selfish"],
+        "only the asset watched by a real, confirmed, agreed monitor is off the roster"
+    );
+}
+
+/// **The roster is ordered by where an asset sits, then by what it is
+/// called** -- the order the inbox's own pick uses (#446) and, for the same
+/// reason, one a second read cannot disagree with: a list a reader scrolls
+/// looking for gaps has to come back in the same order every time.
+///
+/// Names chosen so that alphabetical-by-name and alphabetical-by-path
+/// disagree: `alpha` sits deepest and `zulu` at the top, so a read that
+/// ordered by name alone would answer in the opposite order.
+#[tokio::test]
+async fn the_roster_is_ordered_by_where_an_asset_sits_and_then_by_name() {
+    let pool = pool("assets-unmonitored-order").await;
+    let zulu = make(&pool, None, "site", "zulu", &[]).await;
+    make(&pool, Some(&zulu.id), "vm", "alpha", &[]).await;
+    make(&pool, Some(&zulu.id), "vm", "bravo", &[]).await;
+    make(&pool, None, "site", "yankee", &[]).await;
+
+    assert_eq!(
+        unmonitored(&pool)
+            .await
+            .into_iter()
+            .map(|(name, path, _)| (name, path))
+            .collect::<Vec<_>>(),
+        [
+            ("yankee".to_owned(), None),
+            ("zulu".to_owned(), None),
+            ("alpha".to_owned(), Some("zulu".to_owned())),
+            ("bravo".to_owned(), Some("zulu".to_owned())),
+        ],
+        "the top of the estate first, then each level by name"
+    );
+}
+
+/// **An asset watched only by a monitor whose source the reader turned off is
+/// still *off* the roster** — a decision, and the one place this list is
+/// deliberately quieter than a reader might expect.
+///
+/// The roster above drops such a monitor (`a_disabled_sources_monitors_leave_
+/// the_roster`, `0012`'s `coalesce(s.enabled, true)`), so the asset is drawn in
+/// **neither** list, and that is the point of writing this test rather than
+/// leaving it to be discovered: it is not an oversight.
+///
+/// The alternative is worse. Making this read source-aware would put the
+/// **whole estate** on the *Not monitored* roster the moment somebody turned
+/// their one Uptime Kuma source off — a wall of rows telling a reader to go and
+/// attach monitors they have already attached, at the exact moment the roster
+/// above is saying "nothing is mirrored yet" and the Sources view is saying
+/// why. *Not monitored* asks what is **attached**, and disabling a source is a
+/// statement about what the reader wants to look at, not about what is wired
+/// up — the reading `0012` records for the mirror and #448's roster for the
+/// Paused chip.
+#[tokio::test]
+async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached() {
+    let pool = pool("assets-unmonitored-disabled").await;
+    let watched = make(&pool, None, "vm", "watched-by-a-disabled-source", &[]).await;
+    let bare = make(&pool, None, "vm", "watched-by-nothing", &[]).await;
+    let monitor = kuma_monitor(
+        &pool,
+        "kuma-eu",
+        "jira (tunnel)",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sqlx::query(
+        "insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
+         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)",
+    )
+    .execute(&pool)
+    .await
+    .expect("the disabled source");
+    link_as(&pool, &watched.id, &monitor, "monitored-by").await;
+
+    assert_eq!(
+        unmonitored(&pool)
+            .await
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect::<Vec<_>>(),
+        ["watched-by-nothing"],
+        "a link to a monitor is an attachment whether or not the reader is reading that source"
+    );
+    assert!(
+        assets::monitor_roster(&pool)
+            .await
+            .expect("the roster")
+            .is_empty(),
+        "and the roster above draws no monitor for it, which is the fact this pins"
+    );
+    assert_eq!(bare.name, "watched-by-nothing");
 }

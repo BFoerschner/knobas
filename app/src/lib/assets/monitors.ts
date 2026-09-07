@@ -30,7 +30,7 @@
  * what exists" fall out of the bucketing rather than needing a rule of its
  * own.
  */
-import type { MonitorRow, MonitorSample } from "../ipc/assets";
+import type { MonitorRow, MonitorSample, UnmonitoredAsset } from "../ipc/assets";
 
 /**
  * The chips the tab draws, in the order it draws them.
@@ -218,4 +218,64 @@ export function bar(samples: MonitorSample[], now: number): Bucket[] {
     if (worse) bucket.state = sample.state;
   }
   return buckets;
+}
+
+/**
+ * One option of the *Not monitored* roster's type filter (#449).
+ *
+ * The label and the monogram ride on it rather than being looked up: the
+ * backend resolved them from the one type table (`assets::UnmonitoredAsset`),
+ * so nothing here keeps a second copy of it.
+ */
+export interface TypeCount {
+  type_id: string;
+  label: string;
+  monogram: string;
+  count: number;
+}
+
+/**
+ * The filter's options: **the types the roster holds**, each with how many of
+ * them are in it, alphabetically by label.
+ *
+ * *The types the roster holds*, and not the whole type table, which is the one
+ * place this list deliberately differs from {@link chipCounts} above. The
+ * chips are six fixed states and a chip that vanished at zero would move its
+ * neighbour under the reader's pointer at the moment something recovered;
+ * these are up to nineteen types over an estate somebody built by hand, and an
+ * option with nothing behind it can only empty the list. A roster of gaps
+ * offering sixteen dead filters would hide the four live ones.
+ *
+ * **By label and not by count.** A filter is found by reading its name, and
+ * count order would rearrange the row every time somebody attached a monitor.
+ * The roster re-reads on mount rather than on a signal, so the order a reader
+ * is looking at is the order it stays in.
+ */
+export function typeCounts(rows: UnmonitoredAsset[]): TypeCount[] {
+  const tally = new Map<string, TypeCount>();
+  for (const row of rows) {
+    const seen = tally.get(row.type_id);
+    if (seen) {
+      seen.count += 1;
+      continue;
+    }
+    tally.set(row.type_id, {
+      type_id: row.type_id,
+      label: row.type_label,
+      monogram: row.monogram,
+      count: 1,
+    });
+  }
+  return [...tally.values()].sort((left, right) => left.label.localeCompare(right.label));
+}
+
+/**
+ * The roster narrowed to one type, or the whole of it for no filter.
+ *
+ * Keyed on `type_id` and not on the label, which is what makes a count and its
+ * list one statement: two types could in principle be labelled alike, and the
+ * id is what the backend counted.
+ */
+export function byType(rows: UnmonitoredAsset[], typeId: string | null): UnmonitoredAsset[] {
+  return typeId === null ? rows : rows.filter((row) => row.type_id === typeId);
 }
