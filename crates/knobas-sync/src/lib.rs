@@ -710,14 +710,21 @@ async fn run_locked(
         // and what is live here is this poll's answer. `attach` records why a
         // resolution is the sync's business at all.
         //
-        // **Being inside this gate is a saved round trip, not a safety
-        // check**, `sweep_kinds`' clause above and its reason: `attach`'s own
-        // statement filters on `kind = 'monitor'`, and a source that declares
-        // no `monitor` kind cannot emit an item of one either -- the sink
-        // refuses an undeclared kind. So moving this line outside the `if`
-        // would change only whether a Jira poll issues one statement that
-        // matches nothing. `tests/attach.rs`' negative control says the same
-        // from the other side, and says which of the two guards it witnesses.
+        // **Being inside this gate is a safety check and not only a saved
+        // round trip**, which is where it differs from `sweep_kinds`' clause
+        // above. A source that declares no `monitor` kind cannot *emit* an
+        // item of one -- the sink refuses an undeclared kind -- but `attach`
+        // reads the mirror rather than this run's items, and the mirror can
+        // hold monitor rows under an id whose current descriptor has no such
+        // kind: `sync.item.source_id` has no foreign key to
+        // `knobas.source_config` (`0002`, restated in `0012`),
+        // `delete_source`'s `purge_items` is the reader's choice, `0012` keeps
+        // unconfigured rows visible in `sync.live_item`, and `add_source`
+        // plans for "something exists under this id again" (#127). Outside the
+        // `if`, a poll of the adapter that reused the id would draw
+        // `monitored-by` links to a deleted source's monitors.
+        // `tests/attach.rs`' two controls witness the two guards separately
+        // and say which is which.
         attach::resolve(tx, source_id).await?;
     }
 

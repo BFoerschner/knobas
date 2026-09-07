@@ -177,7 +177,7 @@ fn offends(relative: &str, source: &str) -> bool {
 const EXEMPT: &[&str] = &[LINK, SUGGEST, ATTACH];
 
 #[test]
-fn only_the_two_link_modules_read_the_base_table() {
+fn only_the_exempt_modules_read_the_base_table() {
     let crates = workspace_crates();
 
     let mut scanned = 0_usize;

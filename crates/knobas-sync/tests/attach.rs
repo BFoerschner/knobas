@@ -506,13 +506,13 @@ async fn a_run_attaches_only_its_own_sources_monitors() {
 /// What this witnesses is the read's own `kind = 'monitor'` filter, and it is
 /// worth being exact about which of the two guards that is. The resolution
 /// also sits inside `run_locked`'s descriptor gate -- the one `samples` and
-/// `alerts` share -- and **that gate is a saved round trip rather than a
-/// safety check**: a source that declares no `monitor` kind cannot emit an
-/// item of it either (the engine refuses an undeclared kind), so the filter
-/// below is what makes this true and moving the call outside the gate would
-/// leave every assertion in this file standing. `run_locked` says the same of
-/// its `!sweep_kinds.is_empty()`, verified the same way and written down for
-/// the same reason.
+/// `alerts` share -- and **that gate is a second, independent guard**, so
+/// moving the call outside it would leave every assertion in *this* test
+/// standing: here the mirror holds no monitor at all, and the filter below is
+/// the whole of why nothing is drawn.
+/// `a_poll_ignores_monitor_rows_its_descriptor_does_not_declare` is the gate's
+/// own control, over a mirror that does hold one, and it says why the gate is
+/// a safety check rather than `!sweep_kinds.is_empty()`'s saved round trip.
 #[tokio::test]
 async fn a_source_that_emits_no_monitors_attaches_nothing() {
     let pool = pool("a_source_that_emits_no_m").await;
@@ -524,5 +524,67 @@ async fn a_source_that_emits_no_monitors_attaches_nothing() {
     assert!(
         attachments(&pool).await.is_empty(),
         "an issue called `gitea` is not a monitor watching anything"
+    );
+}
+
+/// The **other** guard, and this one is a safety check: a source whose
+/// descriptor declares no monitor kind attaches nothing even when the mirror
+/// still holds monitor rows under its id.
+///
+/// The control above witnesses `attach`'s own `kind = 'monitor'` filter, over
+/// a mirror that never held a monitor. This one witnesses `run_locked`'s
+/// descriptor gate, over a mirror that does -- and that is a state the app can
+/// really be in, reached with no exotic history at all:
+///
+/// * `sync.item.source_id` has **no foreign key** to `knobas.source_config`
+///   (`0002`, restated in `0012`), and `delete_source`'s `purge_items` is the
+///   reader's own choice, so a source deleted without a purge leaves its rows
+///   in `sync.item`;
+/// * `0012` keeps them in `sync.live_item` -- its join is `left` and its
+///   filter is `coalesce(s.enabled, true)`, so *"no config row at all leaves
+///   them visible"*;
+/// * a source id is a string the reader supplies, and `add_source` says in as
+///   many words that *"something exists under this id again"* is a state it
+///   plans for (#127).
+///
+/// A Kuma deleted without a purge and another adapter added under the same id
+/// is therefore the fixture below, and without the gate that source's poll
+/// would draw `monitored-by` links to the monitors of a source that is gone.
+/// The sweep does not rescue it either: `sweep_kinds` is `emitted ∩
+/// exhaustive`, and a kind this source never emits is in neither set -- which
+/// the mid-test assertion checks rather than assumes, since an empty mirror
+/// would pass this test while witnessing nothing.
+#[tokio::test]
+async fn a_poll_ignores_monitor_rows_its_descriptor_does_not_declare() {
+    let pool = pool("a_poll_ignores_monitor_r").await;
+
+    // The holder that put them there, polled before the asset exists so that
+    // its own run draws no link and the rows are all it leaves behind.
+    let (gone, _g) = source("kuma", &[("9", "gitea")]);
+    knobas_sync::run_once(&pool, &gone, None).await.unwrap();
+    asset(&pool, "asset:gitea", "knobas-gitea", &["gitea"]).await;
+
+    // The id, reused by an adapter that mirrors issues. Its own sweep is over
+    // `issue` alone, so the monitor rows stay live -- asserted after the run,
+    // because it is what makes the assertion below about the gate.
+    let (reused, _r) = source_of("kuma", "issue", &[("2", "payout")]);
+    knobas_sync::run_once(&pool, &reused, None).await.unwrap();
+
+    let live: i64 = sqlx::query_scalar(
+        "select count(*) from sync.live_item where source_id = 'kuma' and kind = 'monitor'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the mirror is readable");
+    assert_eq!(
+        live, 1,
+        "the fixture must still hold a live monitor row under the reused id, \
+         or this test witnesses nothing"
+    );
+
+    assert!(
+        attachments(&pool).await.is_empty(),
+        "a poll whose descriptor declares no monitor kind must not attach the \
+         monitor rows a previous holder of its id left in the mirror"
     );
 }
