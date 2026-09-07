@@ -107,33 +107,33 @@ fn monitor_id(entity: &str) -> Result<i64, SourceError> {
     })
 }
 
-/// Check that a create's target is **this** source's monitor roster.
+/// Check that a create's target is **this** source's own.
 ///
 /// `create_monitor`'s entity is the container the new monitor goes into, and
 /// for a monitoring source that container is the source itself
-/// ([`knobas_source::monitor_roster`]). Two things can be wrong with it and
+/// ([`knobas_source::monitor_target`]). Two things can be wrong with it and
 /// each would be silent:
 ///
 /// * **a monitor id** (`kuma:8`), which reads as *create a monitor inside
 ///   monitor 8*. Kuma would happily make the monitor -- the id is not sent at
 ///   all -- and the write would meanwhile have been ordered behind monitor 8's
 ///   own writes and held whenever monitor 8 left the mirror;
-/// * **another source's roster** (`kuma-eu:monitors`), which cannot reach here
+/// * **another source's** (`kuma-eu:monitors`), which cannot reach here
 ///   through `submit_write` (it routes by namespace) and can reach here
 ///   through the scheduler's flush of a row written when this source had a
 ///   different id. Refusing says which two ids disagree.
 ///
 /// # Errors
 ///
-/// [`SourceError::Protocol`] for anything that is not this source's roster.
-fn roster(source_id: &str, entity: &str) -> Result<(), SourceError> {
-    let wanted = knobas_source::monitor_roster(source_id);
+/// [`SourceError::Protocol`] for anything that is not this source's own.
+fn create_target(source_id: &str, entity: &str) -> Result<(), SourceError> {
+    let wanted = knobas_source::monitor_target(source_id);
     if entity == wanted {
         return Ok(());
     }
     Err(SourceError::protocol(format!(
-        "{entity:?} is not this Uptime Kuma's monitor roster: a create targets {wanted:?}, \
-         which is the container a new monitor goes into"
+        "{entity:?} is not this Uptime Kuma's own: a create targets {wanted:?}, which is \
+         the container a new monitor goes into"
     )))
 }
 
@@ -265,22 +265,14 @@ impl Source for KumaSource {
                 op.identifier()
             )));
         };
-        match &op {
-            WriteOp::PauseMonitor { entity } => {
-                socket
-                    .call(socket::PAUSE_EVENT, &serde_json::json!(monitor_id(entity)?))
-                    .await?;
-                Ok(WriteReceipt::none())
-            }
-            WriteOp::ResumeMonitor { entity } => {
-                socket
-                    .call(
-                        socket::RESUME_EVENT,
-                        &serde_json::json!(monitor_id(entity)?),
-                    )
-                    .await?;
-                Ok(WriteReceipt::none())
-            }
+        // Pause and resume are one shape -- a monitor id and an event name --
+        // so they name their event here and share the send below, which is
+        // #452's arrangement with one arm added. The create takes a document
+        // rather than an id, checks a different target and answers a receipt,
+        // so it does its own work and returns from inside the match.
+        let (event, entity) = match &op {
+            WriteOp::PauseMonitor { entity } => (socket::PAUSE_EVENT, entity),
+            WriteOp::ResumeMonitor { entity } => (socket::RESUME_EVENT, entity),
             // **The one op here that answers a receipt** (issue #453). Kuma's
             // `add` names the monitor it minted, and that id is what a
             // withdrawn create's disclosure line points at
@@ -289,11 +281,13 @@ impl Source for KumaSource {
             // the next poll -- because the receipt exists only on the machine
             // that made the write and only until the row settles.
             WriteOp::CreateMonitor { entity, name, url } => {
-                roster(&self.id, entity)?;
+                create_target(&self.id, entity)?;
                 let answered = socket
                     .call(socket::ADD_EVENT, &create::document(name, url)?)
                     .await?;
-                Ok(create::minted_id(&answered).map_or_else(WriteReceipt::none, WriteReceipt::id))
+                return Ok(
+                    create::minted_id(&answered).map_or_else(WriteReceipt::none, WriteReceipt::id)
+                );
             }
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
@@ -305,12 +299,18 @@ impl Source for KumaSource {
             | WriteOp::RerunBuild { .. }
             | WriteOp::LogWork { .. }
             | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
-                "the Uptime Kuma adapter offers pause, resume and create, so it cannot perform \
-                 {:?}",
-                op.identifier()
-            ))),
-        }
+            | WriteOp::UpdatePage { .. } => {
+                return Err(SourceError::protocol(format!(
+                    "the Uptime Kuma adapter offers pause, resume and create, so it cannot \
+                     perform {:?}",
+                    op.identifier()
+                )));
+            }
+        };
+        socket
+            .call(event, &serde_json::json!(monitor_id(entity)?))
+            .await?;
+        Ok(WriteReceipt::none())
     }
 }
 
@@ -467,7 +467,7 @@ mod tests {
         assert!(!message.contains("no account"), "{message}");
     }
 
-    /// **A create's target is this source's monitor roster**, and everything
+    /// **A create's target is this source's own**, and everything
     /// else is refused before Kuma is asked (issue #453).
     ///
     /// The direction that matters is the first refusal below. `kuma:8` reads
@@ -477,13 +477,13 @@ mod tests {
     /// and held every time monitor 8 was paused, for a monitor that has
     /// nothing to do with it.
     #[test]
-    fn a_creates_target_is_this_sources_roster_or_it_is_refused_here() {
-        roster("kuma", "kuma:monitors").unwrap();
-        roster("kuma-eu", "kuma-eu:monitors").unwrap();
+    fn a_creates_target_is_this_sources_own_or_it_is_refused_here() {
+        create_target("kuma", "kuma:monitors").unwrap();
+        create_target("kuma-eu", "kuma-eu:monitors").unwrap();
         for refused in [
-            // A monitor, not the roster.
+            // A monitor, not the source.
             "kuma:8",
-            // Another Kuma's roster.
+            // Another Kuma's.
             "kuma-eu:monitors",
             // The source id with no key, and a key with no namespace.
             "kuma:",
@@ -491,12 +491,15 @@ mod tests {
             "",
         ] {
             assert!(
-                matches!(roster("kuma", refused), Err(SourceError::Protocol { .. })),
-                "{refused:?} must not read as this source\'s monitor roster"
+                matches!(
+                    create_target("kuma", refused),
+                    Err(SourceError::Protocol { .. })
+                ),
+                "{refused:?} must not read as a create target for this source"
             );
         }
         // And the refusal names both, so a reader can see which two disagree.
-        let message = match roster("kuma", "kuma-eu:monitors") {
+        let message = match create_target("kuma", "kuma-eu:monitors") {
             Err(SourceError::Protocol { message, .. }) => message,
             other => panic!("expected Protocol, got {other:?}"),
         };
@@ -512,7 +515,7 @@ mod tests {
         let key_only = build(instance(serde_json::json!({}), Some("uk1_secret"))).unwrap();
         let refused = key_only
             .write(WriteOp::CreateMonitor {
-                entity: knobas_source::monitor_roster("kuma"),
+                entity: knobas_source::monitor_target("kuma"),
                 name: "gitea".to_owned(),
                 url: "http://gitea:3000/api/healthz".to_owned(),
             })

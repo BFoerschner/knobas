@@ -935,7 +935,7 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "kuma:8".to_owned(),
         },
         WriteOp::CreateMonitor {
-            entity: knobas_source::monitor_roster("kuma"),
+            entity: knobas_source::monitor_target("kuma"),
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
         },

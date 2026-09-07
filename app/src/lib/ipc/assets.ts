@@ -333,18 +333,18 @@ export interface AssetDetail {
 /**
  * One source a new monitor could be created in — `assets::MonitorTarget`.
  *
- * `roster` is the `entity` a `CreateMonitor` carries, composed by the backend
- * from `knobas_source::monitor_roster`. Never build it here: the entity id of
- * a source's monitor roster is the SPI's to spell, and a template string in a
- * component is the per-adapter table §3a forbids.
+ * `entity` is what a `CreateMonitor` against this source targets, composed by
+ * the backend from `knobas_source::monitor_target`. Never build it here: what
+ * a create targets is the SPI's to spell, and a template string in a component
+ * is the per-adapter table §3a forbids.
  */
 export interface MonitorTarget {
   /** The configured source's id, which is also its entities' namespace. */
   source_id: string;
   /** What the reader called it when they added it. */
   display_name: string;
-  /** `<source_id>:monitors` — the create's target. */
-  roster: string;
+  /** The `entity` the create carries. */
+  entity: string;
 }
 
 /**

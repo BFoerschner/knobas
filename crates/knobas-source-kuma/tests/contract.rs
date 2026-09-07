@@ -251,7 +251,7 @@ async fn every_write_is_refused_by_name_without_an_account() {
         ),
         (
             knobas_source::WriteOp::CreateMonitor {
-                entity: knobas_source::monitor_roster("kuma"),
+                entity: knobas_source::monitor_target("kuma"),
                 name: "gitea".to_owned(),
                 url: "http://gitea:3000/api/healthz".to_owned(),
             },
@@ -344,7 +344,7 @@ async fn the_declared_ops_are_the_spis_own_identifiers() {
             }
             .identifier(),
             knobas_source::WriteOp::CreateMonitor {
-                entity: knobas_source::monitor_roster("kuma"),
+                entity: knobas_source::monitor_target("kuma"),
                 name: "gitea".to_owned(),
                 url: "http://gitea:3000/api/healthz".to_owned(),
             }

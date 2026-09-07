@@ -107,7 +107,7 @@
       // half-done state this order leaves is the one the pane can already say
       // out loud.
       await record(detail.asset.id, [{ field: "monitors", added: [wanted] }]);
-      await queue({ CreateMonitor: { entity: chosen.roster, name: wanted, url: url.trim() } });
+      await queue({ CreateMonitor: { entity: chosen.entity, name: wanted, url: url.trim() } });
       oncreated({ name: wanted, source: chosen.display_name });
     } catch (rejection) {
       // In place and in the backend's own words: a URL with no scheme is

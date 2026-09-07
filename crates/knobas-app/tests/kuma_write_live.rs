@@ -417,9 +417,54 @@ const GITEA_ASSET: &str = "asset:knobas-gitea";
 
 /// The monitor this test makes, through the shipped path. A name
 /// `testenv/monitors.json` does not carry, so the seed sweeps whatever a killed
-/// run leaves; the URL is the canary's port, a host socket this environment
-/// already knows about and whose state is never asserted here.
+/// run leaves.
+///
+/// Its **URL is not a constant**: it is the URL the pane's form would open on
+/// for this asset, taken out of the estate the import just loaded. See
+/// [`prefilled_url`].
 const CREATED: &str = "knobas-write-created";
+
+/// The URL *Create monitor for this asset* would open on, for this asset.
+///
+/// **The ticket says *"prefilled from the asset's route or hostname"*, and a
+/// live test that passed a constant would witness the plumbing without
+/// witnessing that.** So this is `app/src/lib/assets/create-monitor.ts`'
+/// `urlFor` applied to the real estate: the first fetchable route among the
+/// ones the asset exposes, then among the ones that reach it. The Gitea
+/// container exposes none and is reached by `route:notebook-gitea`, which is
+/// the branch a container behind a published port takes.
+///
+/// The rule is not re-implemented here beyond that first step -- the hostname
+/// fallbacks have six unit tests of their own -- and the assertion below is
+/// what makes this a reading of the file rather than a guess: it names the
+/// route the estate really carries.
+///
+/// **Kuma cannot reach `127.0.0.1:3000` from inside its own container**, and
+/// that is fine and deliberately unasserted: the criterion is that the monitor
+/// is mirrored and attached, and what a monitor *reports* is a fact about the
+/// network rather than about the create. A reader looking at the estate would
+/// meet exactly this, which is the point of using the estate's own URL.
+async fn prefilled_url(pool: &PgPool) -> String {
+    let detail = knobas_app::assets::get(pool, GITEA_ASSET)
+        .await
+        .expect("the pane reads the asset");
+    assert!(
+        detail.exposes.is_empty(),
+        "the Gitea container exposes routes now, so the prefill's first branch \
+         applies and this test is reading the second: {:?}",
+        detail.exposes
+    );
+    let route = detail
+        .reachable_via
+        .iter()
+        .find(|route| route.url.starts_with("http://") || route.url.starts_with("https://"))
+        .expect("the estate file gives the Gitea container an http route that reaches it");
+    assert_eq!(
+        route.id, "route:notebook-gitea",
+        "the estate file's own route is what the form would open on"
+    );
+    route.url.clone()
+}
 
 /// `assets::get`'s *monitoring* list for one asset, as the pane draws it.
 async fn attached(pool: &PgPool, asset_id: &str) -> Vec<(String, String)> {
@@ -440,7 +485,7 @@ async fn attached(pool: &PgPool, asset_id: &str) -> Vec<(String, String)> {
 /// Every step is the shipped path and the seams above the adapter are what this
 /// adds. `assets::edit` with `AssetEdit::Monitors` is the first of the two
 /// writes the pane's dialog makes; `write_queue::submit` is the second, and it
-/// decodes the op, parses the roster, finds the source, reads that *instance's*
+/// decodes the op, parses the target, finds the source, reads that *instance's*
 /// write ops out of the keychain, writes the queue row and flushes it. Then a
 /// real poll of the real Kuma mirrors the monitor, `knobas_sync::attach`
 /// resolves the recorded name against it inside that run's transaction, and
@@ -491,14 +536,16 @@ async fn a_monitor_created_through_the_write_queue_is_mirrored_and_attached_to_i
     .await
     .expect("the monitor's name is recorded on the asset");
 
-    // And the second: the create, through the queue.
+    // And the second: the create, through the queue, at the URL the form would
+    // have opened on for this asset.
+    let url = prefilled_url(&state.pool).await;
     let queued = write_queue::submit(
         &state,
         json!({
             "CreateMonitor": {
-                "entity": knobas_source::monitor_roster(KUMA),
+                "entity": knobas_source::monitor_target(KUMA),
                 "name": CREATED,
-                "url": SCRATCH_URL,
+                "url": url,
             }
         }),
     )

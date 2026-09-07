@@ -34,12 +34,12 @@ const NOW = new Date(2026, 8, 7, 12, 0, 0, 0);
 const KUMA: MonitorTarget = {
   source_id: "kuma",
   display_name: "Uptime Kuma",
-  roster: "kuma:monitors",
+  entity: "kuma:monitors",
 };
 const KUMA_EU: MonitorTarget = {
   source_id: "kuma-eu",
   display_name: "Kuma EU",
-  roster: "kuma-eu:monitors",
+  entity: "kuma-eu:monitors",
 };
 
 function row(over: Partial<AssetRow> = {}): AssetRow {
@@ -317,15 +317,15 @@ test("create records the name first and then queues the write", async () => {
 });
 
 /**
- * The name and the URL are the reader's to change, and the **roster** is not.
+ * The name and the URL are the reader's to change, and the **entity** is not.
  *
- * The entity a create targets is composed by the backend
- * (`assets::MonitorTarget.roster`); a form that built `` `${id}:monitors` ``
+ * What a create targets is composed by the backend
+ * (`assets::MonitorTarget.entity`); a form that built `` `${id}:monitors` ``
  * would be a per-adapter table in a component. So this presses the second of
- * two sources and asserts the entity is *that source's* roster rather than the
+ * two sources and asserts the entity is *that source's* rather than the
  * first's — which a hardcoded string could not get right.
  */
-test("a second source is picked, and its own roster is what the write targets", async () => {
+test("a second source is picked, and its own entity is what the write targets", async () => {
   const store = estate([KUMA, KUMA_EU]);
   render(store);
   await vi.waitFor(() =>

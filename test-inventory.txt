@@ -69,7 +69,6 @@ knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_sends_the_argument
 knobas-app	lib/knobas_app	commands::assets::tests::the_monitor_roster_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_monitoring_settings_match_their_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_open_alert_matches_its_typescript_mirror
-knobas-app	lib/knobas_app	commands::assets::tests::the_pane_offers_the_op_the_spi_names_at_the_roster_the_spi_spells
 knobas-app	lib/knobas_app	commands::assets::tests::the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary
 knobas-app	lib/knobas_app	commands::assets::tests::the_route_detail_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::the_route_row_matches_its_typescript_mirror
@@ -318,6 +317,7 @@ knobas-app	test/assets_ipc	the_linked_work_badge_counts_confirmed_links_to_work_
 knobas-app	test/assets_ipc	the_monitors_tab_offers_the_ops_the_spi_names
 knobas-app	test/assets_ipc	the_open_alert_read_names_the_monitor_and_every_asset_it_watches
 knobas-app	test/assets_ipc	the_pane_lists_the_monitors_watching_an_asset_with_their_state_and_a_link_to_kuma
+knobas-app	test/assets_ipc	the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells
 knobas-app	test/assets_ipc	the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors
 knobas-app	test/assets_ipc	the_roster_draws_each_monitors_type_target_reading_uptime_and_certificate
 knobas-app	test/assets_ipc	the_roster_is_ordered_by_where_an_asset_sits_and_then_by_name
@@ -1413,7 +1413,7 @@ knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_statu
 knobas-source	lib/knobas_source	tests::descriptor_serializes_to_plain_json
 knobas-source	lib/knobas_source	tests::every_op_has_its_own_snake_case_identifier
 knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
-knobas-source	lib/knobas_source	tests::the_roster_is_not_a_monitor_id
+knobas-source	lib/knobas_source	tests::the_create_target_is_not_a_monitor_id
 knobas-source	lib/knobas_source	tests::write_op_round_trips
 knobas-source-confluence	lib/knobas_source_confluence	config::tests::a_page_size_past_the_servers_own_cap_is_refused
 knobas-source-confluence	lib/knobas_source_confluence	config::tests::a_username_is_ordinary_configuration
@@ -1898,7 +1898,7 @@ knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_unreadable_answer_is
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_session_id_comes_out_of_the_open_packet
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_configuration_that_cannot_work_is_refused_at_build_time
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_create_without_an_account_is_refused_by_the_same_sentence
-knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_creates_target_is_this_sources_roster_or_it_is_refused_here
+knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_creates_target_is_this_sources_own_or_it_is_refused_here
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_writes_target_is_a_monitor_id_or_it_is_refused_here
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::an_account_is_what_gives_an_instance_its_write_ops
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::an_op_kuma_does_not_perform_says_so_rather_than_blaming_the_account

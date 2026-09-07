@@ -631,7 +631,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: "kuma:8".to_owned(),
         },
         knobas_source::WriteOp::CreateMonitor {
-            entity: knobas_source::monitor_roster("kuma"),
+            entity: knobas_source::monitor_target("kuma"),
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
         },

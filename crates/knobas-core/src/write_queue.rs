@@ -457,8 +457,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// **`"create_monitor"` is in that group and its hold clause has no teeth at
 /// all** (issue #453), which is worth saying rather than leaving to be
-/// discovered. Its target is the source's own *monitor roster*
-/// (`knobas_source::monitor_roster`), a container knobas never mirrors -- so
+/// discovered. Its target is the source itself
+/// (`knobas_source::monitor_target`), a container knobas never mirrors -- so
 /// it projects `{"live": false}` at queue time and again at flush time, the
 /// two are equal, and the write always sends. That is `"create_ticket"`'s
 /// reading exactly, and it is the intended one: nothing that can happen to a

@@ -23,6 +23,24 @@
 //! One rule serves both, and it is the import's own: **a name becomes a
 //! `monitored-by` link the moment the mirror holds a monitor called that.**
 //!
+//! # One rule, two encodings
+//!
+//! The import's half is `knobas_app::assets`' `monitor_plan` -- `LIVE_MONITORS`
+//! and `MONITOR_LINKS` -- and it is a *preview* over a caller's transaction in
+//! a crate this one cannot see, so the statement below is not shared with it.
+//! What must stay shared is the **predicate**: a name matches a live monitor's
+//! `title`, and a pair that already has a link is left alone. A change to
+//! either side is a change to both, and neither compiler will say so; this
+//! paragraph and its twin in `monitor_plan`'s doc are what a reader has.
+//!
+//! **A name matches whatever carries it, in both directions**, which is that
+//! rule taken literally and is the import's behaviour too: two monitors called
+//! `gitea` attach an asset naming `gitea` twice, and two assets naming `gitea`
+//! are both attached to the one monitor. Neither is a mistake -- an asset
+//! really is watched by two checks of that name, and one check really does
+//! watch both assets -- and the alternative would be knobas choosing which of
+//! two live monitors counts.
+//!
 //! # What it will not do
 //!
 //! * **It never removes a link.** A name is added to an asset and never taken

@@ -620,8 +620,8 @@ export type WriteOpPayload =
   | {
       CreateMonitor: {
         /**
-         * The **monitor roster** of the source that will make it —
-         * `assets::MonitorTarget.roster`, never composed here (#453).
+         * What the create targets: the source that will make it, as
+         * `assets::MonitorTarget.entity` gives it. Never composed here (#453).
          */
         entity: string;
         /**

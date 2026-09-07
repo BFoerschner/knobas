@@ -133,9 +133,9 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         crate::WriteOp::ResumeMonitor {
             entity: target.clone(),
         },
-        // Not a monitor **roster** either, for the same reason and one more:
-        // `create_monitor`'s target is the source's own roster
-        // (`crate::monitor_roster`), and this is deliberately not that string.
+        // Not a **create target** either, for the same reason and one more:
+        // `create_monitor` addresses the source itself
+        // (`crate::monitor_target`), and this is deliberately not that string.
         // A create is the one probe here whose success would leave something
         // behind -- a monitor knobas then reports and nobody asked for -- so
         // the battery aims it at a container no source has.

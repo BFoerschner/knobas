@@ -4961,6 +4961,32 @@ fn the_monitors_tab_offers_the_ops_the_spi_names() {
     );
 }
 
+/// The third op's spelling, and **what it addresses** (issue #453).
+///
+/// The same pin as the two above, plus the half they have no equivalent of: a
+/// pause names a monitor the mirror already holds, and a create names a
+/// container that is nowhere in the mirror at all. So the target is composed
+/// rather than read, and both halves fail quietly if they drift -- an
+/// identifier nothing draws, and a write `submit_write` would route at a source
+/// that is not configured.
+#[test]
+fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
+    assert_eq!(
+        assets::CREATE_MONITOR,
+        knobas_source::WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: "gitea".to_owned(),
+            url: "http://gitea:3000/api/healthz".to_owned(),
+        }
+        .identifier()
+    );
+    assert_eq!(
+        knobas_source::monitor_target("kuma-eu"),
+        "kuma-eu:monitors",
+        "a second source addresses its own, or a create reaches the wrong Kuma"
+    );
+}
+
 /// The tab's own copy of the two spellings, which is a **third** and the only
 /// one that fails quietly.
 ///

@@ -119,17 +119,6 @@ pub async fn get_asset<R: tauri::Runtime>(
     Ok(detail)
 }
 
-/// The `WriteOp` identifier the pane's *Create monitor for this asset* queues.
-///
-/// Spelled out beside `assets::PAUSE_MONITOR` and `assets::RESUME_MONITOR` and
-/// for the same two reasons: what a *surface* offers is a choice made here,
-/// and `knobas-sync`'s `write_choke_point` proves there is one outbound write
-/// path by finding every file under `crates/*/src/` that names the SPI's write
-/// op -- a read that decides which button to draw is not one and must not look
-/// like one. `tests/assets_ipc.rs` holds this spelling to `WriteOp::identifier`
-/// from a file that scan does not read.
-const CREATE_MONITOR: &str = "create_monitor";
-
 /// The configured sources a new monitor could be created in, by source id.
 ///
 /// **Narrowed before the keychain is opened.** A source's ops are read out of
@@ -191,7 +180,7 @@ fn worth_asking(
 ) -> std::collections::BTreeSet<String> {
     templates
         .iter()
-        .filter(|d| d.accepts_account || d.write_ops.iter().any(|op| op == CREATE_MONITOR))
+        .filter(|d| d.accepts_account || d.write_ops.iter().any(|op| op == assets::CREATE_MONITOR))
         .map(|d| d.adapter_kind.clone())
         .collect()
 }
@@ -204,17 +193,16 @@ fn worth_asking(
 /// declares an empty `write_ops`, and is not a target -- so the pane draws no
 /// control rather than one `submit_write` would refuse by name.
 ///
-/// The roster comes from `knobas_source::monitor_roster` and never from a
-/// format string here: the entity id of a source's monitor roster is the SPI's
-/// to spell.
+/// The entity comes from `knobas_source::monitor_target` and never from a
+/// format string here: what a create targets is the SPI's to spell.
 fn target_of(
     cfg: &knobas_sync::config::SourceConfigRow,
     ops: &[String],
 ) -> Option<assets::MonitorTarget> {
     ops.iter()
-        .any(|op| op == CREATE_MONITOR)
+        .any(|op| op == assets::CREATE_MONITOR)
         .then(|| assets::MonitorTarget {
-            roster: knobas_source::monitor_roster(&cfg.id),
+            entity: knobas_source::monitor_target(&cfg.id),
             source_id: cfg.id.clone(),
             display_name: cfg.display_name.clone(),
         })
@@ -1498,7 +1486,7 @@ mod tests {
             monitor_targets: vec![assets::MonitorTarget {
                 source_id: "kuma".to_owned(),
                 display_name: "Uptime Kuma".to_owned(),
-                roster: "kuma:monitors".to_owned(),
+                entity: "kuma:monitors".to_owned(),
             }],
         };
         assert_shape(
@@ -1511,7 +1499,7 @@ mod tests {
             MIRROR,
             "MonitorTarget",
             &serde_json::to_value(&detail.monitor_targets[0]).unwrap(),
-            &["source_id", "display_name", "roster"],
+            &["source_id", "display_name", "entity"],
         );
         assert_shape(
             MIRROR,
@@ -1585,24 +1573,24 @@ mod tests {
                 &[
                     "pause_monitor".to_owned(),
                     "resume_monitor".to_owned(),
-                    CREATE_MONITOR.to_owned(),
+                    assets::CREATE_MONITOR.to_owned(),
                 ]
             ),
             Some(assets::MonitorTarget {
                 source_id: "kuma".to_owned(),
                 display_name: "Uptime Kuma".to_owned(),
-                roster: "kuma:monitors".to_owned(),
+                entity: "kuma:monitors".to_owned(),
             })
         );
-        // A second Kuma addresses its **own** roster: the entity is composed
-        // from the source's id, so a create in one never reaches the other.
+        // A second Kuma addresses its **own**: the entity is composed from the
+        // source's id, so a create in one never reaches the other.
         assert_eq!(
             target_of(
                 &configured("kuma-eu", "kuma", "Kuma EU"),
-                &[CREATE_MONITOR.to_owned()]
+                &[assets::CREATE_MONITOR.to_owned()]
             )
             .expect("a target")
-            .roster,
+            .entity,
             "kuma-eu:monitors"
         );
     }
@@ -1641,32 +1629,6 @@ mod tests {
                 quiet.write_ops
             );
         }
-    }
-
-    /// The identifier this module offers is the **SPI's**, and the roster it
-    /// addresses is the SPI's too.
-    ///
-    /// `assets::PAUSE_MONITOR`'s pin, applied to the third op. Both halves are
-    /// spelled out in `src/` on purpose (see [`CREATE_MONITOR`]) and both
-    /// would fail silently: an identifier that drifted would be a control
-    /// nothing ever draws, and a roster composed by hand would be a write
-    /// `submit_write` routes at a source that is not there.
-    #[test]
-    fn the_pane_offers_the_op_the_spi_names_at_the_roster_the_spi_spells() {
-        assert_eq!(
-            CREATE_MONITOR,
-            knobas_source::WriteOp::CreateMonitor {
-                entity: knobas_source::monitor_roster("kuma"),
-                name: "gitea".to_owned(),
-                url: "http://gitea:3000/".to_owned(),
-            }
-            .identifier()
-        );
-        assert_eq!(
-            knobas_source::monitor_roster("kuma-eu"),
-            "kuma-eu:monitors",
-            "a target the form submits must be the roster the adapter refuses everything else for"
-        );
     }
 
     /// The Import's six shapes, every one exercised **populated** (#439).

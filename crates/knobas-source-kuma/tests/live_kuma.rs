@@ -882,7 +882,7 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
 
     let receipt = source
         .write(WriteOp::CreateMonitor {
-            entity: knobas_source::monitor_roster("kuma"),
+            entity: knobas_source::monitor_target("kuma"),
             name: CREATED.to_owned(),
             url: SCRATCH_URL.to_owned(),
         })
@@ -930,18 +930,19 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
     );
 
     // The refusals, against the same server: a target that is not this
-    // source's roster, and a URL an HTTP check cannot fetch. Both are refused
+    // source, and a URL an HTTP check cannot fetch. Both are refused
     // by the adapter before Kuma is asked, so neither creates anything -- and
     // the exact-set assertion at the top of this file is what would catch it
     // if one did.
     for refused in [
+        // A monitor, which is not what a create targets.
         WriteOp::CreateMonitor {
             entity: created.entity.to_string(),
             name: "knobas-live-never".to_owned(),
             url: SCRATCH_URL.to_owned(),
         },
         WriteOp::CreateMonitor {
-            entity: knobas_source::monitor_roster("kuma"),
+            entity: knobas_source::monitor_target("kuma"),
             name: "knobas-live-never".to_owned(),
             url: "postgres://127.0.0.1:5432/knobas".to_owned(),
         },

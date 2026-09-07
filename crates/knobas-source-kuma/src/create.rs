@@ -10,7 +10,7 @@
 //! `accepted_statuscodes` fails `.every(...)` inside the server (it runs that
 //! for **every** monitor of **every** type, with no type check first), and one
 //! created with no `active` never starts checking. So this module sends the
-//! same complete document `testenv/kuma-seed.mjs` sends, which is the shape
+//! same complete document `testenv/kuma-monitor.mjs` sends, which is the shape
 //! read off the pinned image (2.5.3) rather than recalled -- and
 //! [`tests::the_document_is_the_seeds_own`] holds the two in step by reading
 //! the seed's file.

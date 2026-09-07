@@ -1758,7 +1758,7 @@ never read a credential back — deleting and re-adding the source is how an acc
 
 The third and last of the write half's ops, and the one whose consequences reach furthest from
 the adapter: **a create needs somewhere to put the thing it made.** Its §10.8 entry is at
-**§10.8, *The create, the roster it targets, and the name that attaches it***; what follows is
+**§10.8, *The create, what it targets, and the name that attaches it***; what follows is
 the argument, in the order a reader meets it.
 
 **A create's target is a container, and a monitoring source's container is itself.** The `WriteOp`
@@ -1766,15 +1766,17 @@ doc has said since M1 that a create's `entity` is the container the new thing go
 in the source's own namespace — `jira:PAY`, `gitea:tidewater/payout-service`. Uptime Kuma has
 nothing above a monitor that knobas mirrors: its only container is a monitor *group*, and spec #427
 puts groups out of scope. So the container is the instance, and the address is
-`<source id>:monitors` — spelled once, in the SPI, as `knobas_source::monitor_roster`.
+`<source id>:monitors` — spelled once, in the SPI, as `knobas_source::monitor_target`.
+**Deliberately not called a *roster***: `CONTEXT.md` gives that word to the Monitors tab's list of
+rows (`assets::monitor_roster`), and this is an address rather than a list.
 
 **In the SPI and not in the app**, which is the decision worth recording. The alternative was the
 app composing that string, and the only way to compose it is to know that this adapter kind spells
 its roster that way — a per-adapter table in `commands/assets.rs`, which is exactly the coupling
 `config_schema`, `write_ops` and `accepts_account` exist to forbid. What the app does instead is
 ask which sources declare `create_monitor` and ask the SPI what to address; the word *Kuma* does
-not appear in it. `the_roster_is_not_a_monitor_id` pins the other half: the key is not decimal, and
-a monitor id in Kuma is, so a roster can never collide with a monitor.
+not appear in it. `the_create_target_is_not_a_monitor_id` pins the other half: the key is not decimal, and
+a monitor id in Kuma is, so a create's target can never collide with a monitor.
 
 **A URL and no type.** `CreateMonitor { entity, name, url }` carries no `monitor_type`, and the
 absence is the decision. A monitor of a URL is an HTTP check, which is what the pane's form has to
@@ -1819,6 +1821,14 @@ Two consequences, both deliberate:
   confirmed *or proposed*: `0011`'s unique index is over the unordered pair whatever its
   confirmation state, so `monitor_url_host`'s proposal (#478) is not something to insert over. It
   is the reader's to accept, and the name waits.
+
+  **It changes what an existing profile does, and that is worth stating rather than leaving to be
+  noticed.** A name an import left unresolved months ago — the ordinary state of an estate file
+  written before its Kuma source was configured — is drawn as a link by the next poll, with no
+  second import. That is the spec sentence being honoured for the first time rather than a new
+  rule; what is new is that a reader who imported and moved on will find attachments appearing
+  without having asked again. The pane's *Named by the import, not in Kuma yet* list is where they
+  disappear from, which is a list that exists to say exactly this.
 * **`AssetEdit::Monitors { added }`** is the write that puts the name there, and it is the one edit
   in that enum that appends rather than sets. It reaches the same column, the same `array_cat` and
   the same `edited`/`field: "monitors"` line the import writes, from the other of the two surfaces
@@ -7457,8 +7467,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   file, that is an estate-file edit plus a type-table one, and it is his call and not this
   ticket's.
 
-- **`crates/knobas-source/src/**` and the IPC schema — issue #453 (2026-09-07): the create, the
-  roster it targets, and the name that attaches it.**
+- **`crates/knobas-source/src/**` and the IPC schema — issue #453 (2026-09-07): the create, what
+  it targets, and the name that attaches it.**
 
   The last of the Uptime Kuma write half's three ops, and the one whose consequences reach past the
   adapter: a create needs somewhere to put what it made, and something has to join it to the asset
@@ -7485,12 +7495,13 @@ From this commit on, each of the following requires an orchestrator decision **a
      `contract::known_write_ops`' probes, `every_write_op_has_a_stated_projection`,
      `every_write_op_says_whether_a_withdrawal_can_leave_one`, and the four sibling adapters'
      exhaustive `write` matches, which refuse it by name.
-  2. `knobas_source::MONITOR_ROSTER_KEY` and `knobas_source::monitor_roster(source_id)` — the
-     entity id of a source's monitor roster, `<source id>:monitors`, spelled **once and in the
-     SPI**. The alternative was every producer of the op composing it, which is a per-adapter table
+  2. `knobas_source::monitor_target(source_id)` — the entity id a create against that source
+     addresses, `<source id>:monitors`, spelled **once and in the SPI** (its key half is a private
+     constant: nothing outside that module has a use for half an address). The alternative was every producer of the op composing it, which is a per-adapter table
      in the app of exactly the kind `config_schema` and `accepts_account` exist to forbid. The key
-     is not decimal and a Kuma monitor id is, so a roster cannot collide with a monitor
-     (`the_roster_is_not_a_monitor_id`).
+     is not decimal and a Kuma monitor id is, so a create's target cannot collide with a monitor
+     (`the_create_target_is_not_a_monitor_id`). **Not called a *roster***: that word is the
+     Monitors tab's list of rows in `CONTEXT.md`, and this is an address.
   3. `contract::battery`'s probe list grows a `CreateMonitor` aimed at a container **no source
      has** — a create is the one probe whose success would leave something behind.
 
@@ -7501,8 +7512,8 @@ From this commit on, each of the following requires an orchestrator decision **a
     criterion**: a Kuma with only its API key declares no write ops, so it is not in the list and
     the pane draws no control. Filled by `commands::assets::get_asset`, which gains an injected
     `AppHandle` — `monitor_roster`'s arrangement since #452, supplied by Tauri, nothing on the wire.
-  * `MonitorTarget { source_id, display_name, roster }` — a new DTO. `roster` is composed by the
-    backend from `monitor_roster`, so the form submits an entity it never spelled.
+  * `MonitorTarget { source_id, display_name, entity }` — a new DTO. `entity` is composed by the
+    backend from `monitor_target`, so the form submits an entity it never spelled.
   * `AssetEdit` gains `Monitors { added: string[] }` — the **one variant in that union that
     appends**. It reaches `0020`'s column, `ADD_MONITORS`' `array_cat` and the `edited` /
     `field: "monitors"` line the import already writes, from the other of the two surfaces that
@@ -7525,7 +7536,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   `crates/knobas-http/**` and `crates/knobas-app/src/{error,profile}.rs` are untouched. The
   keychain envelope is unchanged at version 2.
 
-  Pinned by: `knobas_source`'s `the_roster_is_not_a_monitor_id`, `write_op_round_trips` and
+  Pinned by: `knobas_source`'s `the_create_target_is_not_a_monitor_id`, `write_op_round_trips` and
   `every_op_has_its_own_snake_case_identifier` (now fourteen); `knobas-sync`'s
   `every_write_op_has_a_stated_projection` and
   `every_write_op_says_whether_a_withdrawal_can_leave_one`; `sources_mirror.rs`'s
@@ -7533,11 +7544,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   `the_asset_detail_matches_its_typescript_mirror`,
   `only_an_instance_that_offers_the_op_is_a_create_target`,
   `only_a_kind_whose_ops_could_include_it_is_worth_a_keychain_read` and
-  `the_pane_offers_the_op_the_spi_names_at_the_roster_the_spi_spells`; the Kuma crate's
+  `the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells`; the Kuma crate's
   `the_document_is_the_seeds_own` (which parses `testenv/kuma-monitor.mjs`),
   `a_create_knobas_cannot_deliver_is_refused_here`,
   `the_minted_id_is_read_out_of_kumas_own_answer`,
-  `a_creates_target_is_this_sources_roster_or_it_is_refused_here` and
+  `a_creates_target_is_this_sources_own_or_it_is_refused_here` and
   `a_create_without_an_account_is_refused_by_the_same_sentence`; nine tests in
   `knobas-sync`'s `tests/attach.rs`, all driven through `run_once` rather than through the
   resolver; five in `tests/assets_ipc.rs` for the append, the duplicate, the blank and the absent

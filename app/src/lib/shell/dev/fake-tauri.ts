@@ -1103,7 +1103,7 @@ function assetDetail(args: Record<string, unknown>) {
     // `AssetsView.monitor.test.svelte.ts`, and a fixture that answered nothing
     // here would leave the control unreachable in the browser.
     monitor_targets: [
-      { source_id: "kuma", display_name: "Uptime Kuma", roster: "kuma:monitors" },
+      { source_id: "kuma", display_name: "Uptime Kuma", entity: "kuma:monitors" },
     ],
     history: [
       // This session's own writes first, newest first, which is what makes

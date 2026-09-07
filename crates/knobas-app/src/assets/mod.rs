@@ -712,23 +712,23 @@ pub struct AssetDetail {
 ///
 /// Three fields and each is used by a different part of the form: the id is
 /// what tells two Kumas apart in a list nobody has to read, the display name
-/// is what the reader picked when they added the source, and the roster is the
+/// is what the reader picked when they added the source, and the entity is the
 /// [`WriteOp::CreateMonitor`](knobas_source::WriteOp::CreateMonitor) target
 /// the form submits.
 ///
-/// **The roster is composed here and not in the webview**, which is the whole
-/// reason this is a struct rather than a list of ids: the entity id of a
-/// source's monitor roster is the SPI's to spell
-/// ([`knobas_source::monitor_roster`]), and a frontend that composed
-/// `` `${id}:monitors` `` would be a per-adapter table in a Svelte component.
+/// **The entity is composed here and not in the webview**, which is the whole
+/// reason this is a struct rather than a list of ids: what a create targets is
+/// the SPI's to spell ([`knobas_source::monitor_target`]), and a frontend that
+/// composed `` `${id}:monitors` `` would be a per-adapter table in a Svelte
+/// component.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct MonitorTarget {
     /// The configured source's id, which is also its entities' namespace.
     pub source_id: String,
     /// What the reader called it when they added it.
     pub display_name: String,
-    /// `<source_id>:monitors` -- the `entity` a `create_monitor` carries.
-    pub roster: String,
+    /// The `entity` a `create_monitor` against this source carries.
+    pub entity: String,
 }
 
 /// One monitor watching an asset, as the pane's monitoring section draws it.
@@ -1085,10 +1085,18 @@ pub struct RouteDetail {
 ///
 /// A tagged union rather than a struct of optionals, and for the reason
 /// `time::TimerTarget` is one: an edit is *one* field changing, every edit
-/// writes its own history line with a `from` and a `to`, and a bag of
-/// `Option`s would make "cleared" and "not mentioned" the same value on the
-/// wire. `null` on the three nullable fields is therefore an unambiguous
-/// **clear**.
+/// writes its own history line, and a bag of `Option`s would make "cleared"
+/// and "not mentioned" the same value on the wire. `null` on the three
+/// nullable fields is therefore an unambiguous **clear**.
+///
+/// **The line is a `from` and a `to` for every variant but one** (issue #453).
+/// [`Monitors`](AssetEdit::Monitors) appends to a list rather than setting a
+/// field, so its line says `added` and there is no `from` to state: an asset's
+/// monitor names are added by two surfaces and taken away by neither, and a
+/// `from` carrying the whole previous list would be a copy of the column in
+/// the log. That variant argues the exception where it is declared; this is
+/// the header saying it exists, so a reader does not take the rule above for a
+/// rule the enum keeps.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "field", rename_all = "snake_case")]
 pub enum AssetEdit {
@@ -2004,6 +2012,12 @@ pub fn offer_actions(rows: &mut [MonitorRow], offered: &HashMap<String, Vec<Stri
 /// not read. `pub` for that test's sake and no other caller's.
 pub const PAUSE_MONITOR: &str = "pause_monitor";
 pub const RESUME_MONITOR: &str = "resume_monitor";
+/// The third, and the one the **Tree's pane** offers rather than this tab
+/// (issue #453): *Create monitor for this asset*. Here beside its two siblings
+/// for their reason -- one place in this crate spells what a surface offers,
+/// and `write_choke_point` must not read a roster or a pane read as a write
+/// path. `tests/assets_ipc.rs` holds it to `WriteOp::identifier`.
+pub const CREATE_MONITOR: &str = "create_monitor";
 
 /// What the *Not monitored* roster draws: an asset nothing watches, with where
 /// it sits and what it is (spec #427 story 68, issue #449).
@@ -4571,6 +4585,12 @@ struct MonitorPlan {
 /// name an earlier import kept is resolved by this one and reported by this one
 /// -- spec #427's *"resolved by the next import"* and issue #445's *"kept and
 /// reported in the preview"* are two readings of that same map.
+/// **One rule, two encodings** (issue #453). `knobas_sync::attach::resolve` is
+/// the same rule applied on every poll rather than on an import, in SQL rather
+/// than in a `HashSet` here, in a crate this one cannot see. What the two must
+/// keep in step is the *predicate* -- a name matches a live monitor's `title`,
+/// and a pair that already carries a link is left alone -- and no compiler will
+/// say when one moves. Its module doc carries the twin of this paragraph.
 async fn monitor_plan(
     tx: &mut Transaction<'_, Postgres>,
     wanted: &HashMap<String, Vec<String>>,
