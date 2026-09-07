@@ -12,6 +12,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { Candidate, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
+import { paste } from "../shell/test-paste";
 import { offsetMinutes } from "./draft";
 import WorklogDraft from "./WorklogDraft.svelte";
 
@@ -343,4 +344,25 @@ test("a draft with no candidates says so rather than showing an empty list", () 
   expect(boxes()).toHaveLength(0);
   expect(target.textContent).toContain("knobas saw nothing else in that time");
   expect(commentBox().value).toBe("");
+});
+
+/**
+ * Spec #491 story 13. The comment goes to Jira as a worklog comment, so a URL
+ * pasted into it has to arrive there as the link that was pasted. Only the
+ * note body substitutes a `[[ref]]` for one (story 12,
+ * `notes/NoteView.svelte`); a worklog comment that did would send Jira a
+ * spelling only knobas can read.
+ */
+test("a URL pasted into the comment is left as text and is logged as typed", () => {
+  const link = "https://jira.example/browse/PAY-231";
+  const { sent } = render();
+
+  expect(paste(commentBox(), link), "something took the paste over").toBe(false);
+
+  type(`- Retry SEPA payouts\n- see ${link}`);
+  logButton().click();
+  flushSync();
+
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.comment).toBe(`- Retry SEPA payouts\n- see ${link}`);
 });

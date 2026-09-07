@@ -18,6 +18,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { NoteDetail, Protocol, PublishTarget } from "../ipc/entity";
 import { createRouter } from "../shell/router.svelte";
+import { paste } from "../shell/test-paste";
 import ProtocolPanel from "./ProtocolPanel.svelte";
 
 const DAY = "2026-09-03";
@@ -396,4 +397,35 @@ test("a save that failed publishes nothing", async () => {
   expect(text()).toContain("the note would not save");
   // And the words are still in the box, which is what makes retrying free.
   expect(target.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain("Attendees");
+});
+
+/**
+ * Spec #491 story 13. A protocol is published to Confluence, so what a reader
+ * pastes into it has to arrive on the wiki as the link they pasted — a
+ * `[[ref]]` substituted here would reach the team as a knobas-only spelling
+ * nothing on that page can resolve.
+ *
+ * The panel edits a note through `saveNote`, which is what makes the rule
+ * worth pinning rather than assuming: the note *editor* turns a resolvable URL
+ * into a reference (story 12, `notes/NoteView.svelte`), and this panel edits
+ * the same kind of row without inheriting that.
+ */
+test("a URL pasted into the protocol is left as text and published as typed", async () => {
+  const link = "https://jira.example/browse/PAY-231";
+  const { calls } = render(protocol(), {
+    stored: { source_id: "wiki", parent: "wiki:98400" },
+  });
+  await settle();
+
+  const editor = target.querySelector<HTMLTextAreaElement>("textarea")!;
+  expect(paste(editor, link), "something took the paste over").toBe(false);
+
+  editor.value = `${BODY}\n- context: ${link}\n`;
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Publish to Confluence")?.click();
+  await settle();
+
+  expect(calls.saved.at(-1)?.body).toContain(link);
+  expect(calls.saved.at(-1)?.body).not.toContain("[[");
+  expect(calls.published).toHaveLength(1);
 });

@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type { LinkEnd, LinkEntry, NoteDetail } from "../ipc/entity";
 import type { SearchResponse } from "../ipc/search";
+import { paste } from "../shell/test-paste";
 
 /**
  * The note editor, driven the way a person drives it.
@@ -191,22 +192,6 @@ beforeEach(() => {
   stored = detail();
 });
 
-/**
- * A paste, as the browser delivers one.
- *
- * Built by hand rather than with `ClipboardEvent`: jsdom's `DataTransfer` is
- * not constructible, and — more to the point — jsdom performs no default paste
- * at all, so a handler that let the event through would insert nothing and a
- * test that trusted the platform would be testing the absence of jsdom. The
- * event carries `cancelable`, which is what makes `defaultPrevented` mean
- * something.
- */
-function pasteEvent(text: string): Event {
-  const event = new Event("paste", { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
-  return event;
-}
-
 // ------------------------------------------------------------------ the harness
 
 /** Let every queued promise and zero-delay timer run. */
@@ -258,12 +243,10 @@ function render(saveAfterMs = 0) {
     },
     /** Paste into the body at the caret, and answer whether it was handled. */
     async paste(text: string) {
-      const area = this.editor()!;
-      const event = pasteEvent(text);
-      area.dispatchEvent(event);
+      const handled = paste(this.editor()!, text);
       flushSync();
       await settle();
-      return event.defaultPrevented;
+      return handled;
     },
     done: () => {
       unmount(app);
