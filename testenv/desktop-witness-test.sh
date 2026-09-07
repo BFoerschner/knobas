@@ -38,6 +38,18 @@ check_matches() {
     check "$1" "$2" "$outcome"
 }
 
+# check_contains <what> <needle> <haystack> -- so that a passing assertion is
+# counted like any other. An assertion that only reports itself when it fails
+# makes the run's own total move around, which is the one number a reader uses
+# to tell a suite that shrank from a suite that passed.
+check_contains() {
+    local outcome=no
+    case $3 in
+    *"$2"*) outcome=yes ;;
+    esac
+    check "$1" yes "$outcome"
+}
+
 # --- normalise_app_path -----------------------------------------------------
 
 built=/Users/dev/Projects/knobas/target/debug/bundle/macos/knobas.app
@@ -116,23 +128,21 @@ screen-locked 0')"
 # --- readiness_message ------------------------------------------------------
 
 for classification in not-trusted cannot-post-events screen-locked unreadable; do
-    message=$(readiness_message "$classification")
-    case "$message" in
-    *'testenv/README.md, "The desktop witness (macOS)"'*) ;;
-    *)
-        check "the $classification message names the README section" yes no
-        ;;
-    esac
+    check_contains "the $classification message names the README section" \
+        'testenv/README.md, "The desktop witness (macOS)"' \
+        "$(readiness_message "$classification")"
 done
 
-case "$(readiness_message not-trusted)" in
-*Accessibility*) ;;
-*) check "the not-trusted message names Accessibility" yes no ;;
-esac
-case "$(readiness_message screen-locked)" in
-*"screen is locked"*) ;;
-*) check "the screen-locked message says the screen is locked" yes no ;;
-esac
+# Each refusal names the permission by the string somebody has to search for
+# in System Settings. "Permission denied" would send a reader to the wrong
+# pane: two TCC grants are in play, and this witness needs Accessibility and
+# deliberately avoids Automation.
+check_contains "the not-trusted message names Accessibility" \
+    "Accessibility" "$(readiness_message not-trusted)"
+check_contains "the screen-locked message says the screen is locked" \
+    "screen is locked" "$(readiness_message screen-locked)"
+check_contains "the cannot-post-events message names keyboard events" \
+    "post keyboard events" "$(readiness_message cannot-post-events)"
 
 # --- verdict ----------------------------------------------------------------
 
