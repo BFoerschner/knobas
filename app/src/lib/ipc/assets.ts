@@ -791,11 +791,11 @@ export interface MonitorRow {
    * the bar one statement.
    */
   state: string | null;
-  /** `http`, `ping`, `docker`, `port` — Kuma's word for the kind of check. */
+  /** `http`, `ping`, `docker`, `port` — Kuma's word for the kind of monitor. */
   monitor_type: string | null;
   /** What it watches: the URL, else the hostname with its port. */
   target: string | null;
-  /** Kuma's last reading in milliseconds; `null` for a check that did not answer. */
+  /** Kuma's last reading in milliseconds; `null` for a poll that did not answer. */
   response_time_ms: number | null;
   /**
    * When knobas last read this monitor — RFC 3339.
@@ -806,7 +806,7 @@ export interface MonitorRow {
   checked_at: string;
   /** Kuma's sliding-window uptime ratios, by its own labels, in label order. */
   uptime: UptimeRatio[];
-  /** Days until the watched certificate expires; `null` for a check with none. */
+  /** Days until the watched certificate expires; `null` for a monitor with none. */
   cert_days_remaining: number | null;
   /** Its own page in Uptime Kuma; `null` when there is none left. */
   web_url: string | null;

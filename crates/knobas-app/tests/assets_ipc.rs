@@ -4237,9 +4237,14 @@ async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
     // monitor-first.
     link_as(&pool, &container.id, &watching, "monitored-by").await;
     link_as(&pool, &watching, &vm.id, "monitored-by").await;
-    // Neither of these is monitoring: a `related` link to the same monitor,
-    // and a `monitored-by` link to something that is not a monitor at all.
+    // Neither of these is an asset this monitor watches. A `related` link is
+    // not monitoring, whatever it points at; and a `monitored-by` link whose
+    // other end is a **ticket** is not an attachment, which is what the read's
+    // `join knobas.asset` is there for -- without it the roster would list a
+    // ticket key in the column that names servers.
     link_as(&pool, &vm.id, &lonely, "related").await;
+    let not_an_asset = ticket(&pool, "PAY-9").await;
+    link_as(&pool, &watching, &not_an_asset, "monitored-by").await;
 
     let roster = assets::monitor_roster(&pool).await.expect("the roster");
     assert_eq!(

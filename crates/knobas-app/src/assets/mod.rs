@@ -766,9 +766,9 @@ pub struct MonitorRow {
     /// **What it watches**: the URL where there is one, else the hostname with
     /// its port where there is one. One field and not three, because it is one
     /// column of the roster and the three are never all present -- an HTTP
-    /// check has a URL and no hostname, a ping has a hostname and no URL.
+    /// monitor has a URL and no hostname, a ping has a hostname and no URL.
     pub target: Option<String>,
-    /// The reading Kuma last published, in milliseconds. `null` for a check
+    /// The reading Kuma last published, in milliseconds. `null` for a poll
     /// that did not answer -- Kuma's `-1` sentinel, which the adapter already
     /// carries as an absence.
     pub response_time_ms: Option<f64>,
@@ -786,8 +786,8 @@ pub struct MonitorRow {
     /// map: the windows are Kuma's choice and a release that adds a fourth
     /// should widen the payload rather than need a field here.
     pub uptime: Vec<UptimeRatio>,
-    /// Days until the watched certificate expires, for a check that watches
-    /// one. `null` for every check that does not, which is most of them.
+    /// Days until the watched certificate expires, for a monitor that watches
+    /// one. `null` for every monitor that does not, which is most of them.
     pub cert_days_remaining: Option<f64>,
     /// Its own page in Uptime Kuma (story 71); `null` when there is none left.
     pub web_url: Option<String>,
@@ -797,7 +797,7 @@ pub struct MonitorRow {
     /// name; *Paused* is what the chip says, because pausing is what a reader
     /// did to make it true. A tombstoned monitor is still a row here: it keeps
     /// its samples, so the hours before it vanished are still drawable, and a
-    /// roster that dropped it would say nothing about a check somebody
+    /// roster that dropped it would say nothing about a monitor somebody
     /// silenced.
     pub tombstoned: bool,
     /// The assets this monitor is attached to by a `monitored-by` link, by
@@ -1515,10 +1515,18 @@ const BAR_WINDOW_HOURS: i32 = 24;
 /// no longer publishes, which is what *paused* looks like from `/metrics`
 /// (#442) -- is a row the roster has to draw: it keeps its samples, so the
 /// hours before it went quiet are still there, and a roster that dropped it
-/// would say nothing about a check somebody deliberately silenced. The
+/// would say nothing about a monitor somebody deliberately silenced. The
 /// **other** half of the view is kept and kept deliberately: a disabled
 /// source's items are hidden here as everywhere else (`0012`), because turning
-/// a source off is a statement about what the reader wants to see.
+/// a source off is a statement about what the reader wants to see, and it is a
+/// different statement from Kuma pausing a monitor.
+///
+/// **It is `sync.live_item`'s body minus one clause, and this names the drift
+/// rather than preventing it**: `coalesce(s.enabled, true)` is now written in
+/// two places, here and in `0012`. A shared `sync.item_of_enabled_source` view
+/// would keep one spelling and is a migration and a §10.8 conversation;
+/// `CONTEXT.md`'s **Live item** entry carries the exception, so the next
+/// reader tempted to copy this finds the reason before the statement.
 ///
 /// By name, then by id: the tab is a list a person reads down, and two
 /// monitors named the same still draw in a fixed order.
@@ -1710,9 +1718,9 @@ struct Reading {
 /// # The target is one column
 ///
 /// The URL where there is one, else the hostname, with `:port` after it where
-/// there is a port. Kuma gives an HTTP check a URL and no hostname and a ping
-/// a hostname and no URL, so the three keys are one fact under three spellings
-/// and the roster draws it in one column.
+/// there is a port. Kuma gives an HTTP monitor a URL and no hostname and a
+/// ping a hostname and no URL, so the three keys are one fact under three
+/// spellings and the roster draws it in one column.
 fn reading_of(payload: &serde_json::Value) -> Reading {
     let hostname = text_at(payload, "hostname");
     let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {

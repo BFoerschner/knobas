@@ -88,7 +88,7 @@ Marking an item deleted-at-source while keeping the row. Tombstoned items leave 
 _Avoid_: delete, remove
 
 **Live item**:
-An item that is not tombstoned **and whose source is enabled** — the only thing any reader reads. Both halves are enforced by `sync.live_item`, never by a reader, so a reader cannot forget one. A source with no configuration row at all (`run_once` syncs unconfigured sources) is not "disabled": its items stay live. (#202)
+An item that is not tombstoned **and whose source is enabled** — the only thing any reader reads. Both halves are enforced by `sync.live_item`, never by a reader, so a reader cannot forget one. A source with no configuration row at all (`run_once` syncs unconfigured sources) is not "disabled": its items stay live. (#202) **One reader is exempt from the first half and from that half only**: the [Monitors](#monitors) tab's roster (`assets::monitor_roster`, #448) reads `sync.item` and keeps the enabled clause itself, because a *paused* monitor **is** a tombstone — Uptime Kuma drops it from `/metrics` and the adapter tombstones it — and a roster that inherited the view would silently lose the Paused chip and the monitor's history with it. It is the only such reader; a second one needs a reason of its own and an entry here. (Amended 2026-09-07, #448.)
 
 **Watermark**:
 A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.

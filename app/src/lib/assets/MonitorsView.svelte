@@ -151,7 +151,7 @@
 <section class="view mons">
   <div class="room-bar">
     <h1>Assets</h1>
-    <AssetsTabs {router} tab="monitors" />
+    <AssetsTabs {router} />
   </div>
 
   <!--
@@ -180,11 +180,12 @@
   <ol class="roster">
     {#each shown as monitor (monitor.entity_id)}
       {@const drawn = bar(monitor.samples, clock.getTime())}
+      {@const chipHere = chipOf(monitor)}
       <li class="mon">
         <div class="head">
-          <span class="st {chipOf(monitor)}" aria-hidden="true"></span>
+          <span class="st {chipHere}" aria-hidden="true"></span>
           <span class="nm">{monitor.name}</span>
-          <span class="state {chipOf(monitor)}">{CHIP_LABELS[chipOf(monitor)]}</span>
+          <span class="state {chipHere}">{CHIP_LABELS[chipHere]}</span>
           <span class="meta faint">
             {monitor.monitor_type ?? "—"}
             {#if monitor.target}<span class="tgt">{monitor.target}</span>{/if}
@@ -264,8 +265,13 @@
         Nothing is mirrored yet. Monitors arrive from an Uptime Kuma source —
         configure one in Sources and the roster fills on its next sync.
       </li>
-    {:else if loaded && shown.length === 0}
-      <li class="none">No monitor is {CHIP_LABELS[chip ?? "up"].toLowerCase()}.</li>
+    {:else if loaded && chip !== null && shown.length === 0}
+      <!--
+        Named by the chip and not by the state, because one of the six is not a
+        state: "No monitor is other" is a sentence about nothing, and the chip
+        is visibly pressed above this line either way.
+      -->
+      <li class="none">No monitor matches the {CHIP_LABELS[chip]} filter.</li>
     {/if}
   </ol>
 </section>

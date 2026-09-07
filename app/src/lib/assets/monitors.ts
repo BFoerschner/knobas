@@ -66,6 +66,16 @@ export const CHIP_LABELS: Record<ChipState, string> = {
  * `up` for ever; counting it among the healthy is the one wrong answer this
  * tab must not give, because the whole point of pausing is that nobody is
  * looking.
+ *
+ * **`paused` is a chip and not a state**, which is why it is excluded from the
+ * match below. The five words a sample can carry are
+ * `knobas_sync::samples::STATES` — up, down, warn, pending, maintenance — and
+ * *paused* is none of them: it is what a **tombstone** means, and the line
+ * above is the only thing that may put a monitor on that chip. A future Kuma
+ * publishing the literal word `paused` would therefore land in *Other* rather
+ * than be counted as tombstoned, which is the honest answer: knobas would know
+ * the monitor is still in the mirror, and *Paused* on this tab means it is
+ * not.
  */
 export function chipOf(row: MonitorRow): ChipState {
   if (row.tombstoned) return "paused";
@@ -139,7 +149,7 @@ export interface Bucket {
  * never show an outage shorter than thirty minutes, and most outages are.
  *
  * `maintenance` sorts above `up` because it is not up — somebody suppressed
- * the check — and below everything that is a problem, because suppressing it
+ * the monitor — and below everything that is a problem, because suppressing it
  * was deliberate.
  */
 const SEVERITY: Record<string, number> = {

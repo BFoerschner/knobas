@@ -1344,7 +1344,7 @@
       #448 and is a view of its own, which is why the strip is a component
       rather than markup here.
     -->
-    <AssetsTabs {router} tab="tree" />
+    <AssetsTabs {router} />
 
     <!--
       Beside the tab strip, not on a column header: an import is about the
