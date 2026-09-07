@@ -340,11 +340,16 @@
     color: var(--muted);
   }
 
+  /* No markers: the roster is a list of monitors and not a numbered one, and
+     `app.css`' reset zeroes the padding without touching `list-style` — so an
+     `ol` here draws `1.` beside every monitor unless it is said. `ol` and not
+     `ul` because the order is the answer's, by name. */
   .roster {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 4px 14px 14px;
+    list-style: none;
   }
 
   .mon {

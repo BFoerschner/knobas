@@ -135,6 +135,8 @@ const ESTATE_ON_DISK = JSON.parse(ESTATE_TEXT) as {
     parent?: string;
     description?: string;
     properties?: Record<string, string | number>;
+    /** The Uptime Kuma names this asset's monitors answer to (#439, story 25). */
+    monitors?: string[];
   }[];
   routes: { id: string; asset: string; target?: string }[];
 };
@@ -347,4 +349,50 @@ test("an asset deleted here comes back as new, and the import brings it back", (
   expect(
     (handlers["preview_estate_import"]!({ file: ESTATE_TEXT }) as { new: unknown[] }).new,
   ).toEqual([]);
+});
+
+/**
+ * The roster the Monitors tab draws under `?fake-ipc` (#448).
+ *
+ * Read against the **file on disk**, like the estate tests above and for their
+ * reason: what a QA screenshot of that tab is evidence about is the mapping,
+ * so a fixture compared to its own input would agree with itself. The file
+ * names each asset's monitors (story 25), so the set of monitors the tab
+ * should show is already written down once.
+ *
+ * The three properties a screenshot of it has to be able to show: every chip
+ * has something in it, a paused monitor has no page left in Kuma to open, and
+ * the row's state is the last sample's — which is the rule the backend follows
+ * and the reason the chip and the bar's right-hand end cannot disagree.
+ */
+test("the fixture roster is the file's monitors, with every chip reachable", () => {
+  const handlers = demoHandlers();
+  const roster = handlers["monitor_roster"]!({}) as {
+    name: string;
+    state: string | null;
+    tombstoned: boolean;
+    web_url: string | null;
+    assets: { id: string }[];
+    samples: { taken_at: string; state: string | null }[];
+  }[];
+
+  const named = ESTATE_ON_DISK.assets.flatMap((asset) => asset.monitors ?? []);
+  expect(named.length).toBeGreaterThan(0);
+  expect(roster.map((row) => row.name).sort()).toEqual([...named].sort());
+
+  // Every chip has something in it: a roster where everything is `up` can be
+  // photographed without showing that the chips do anything.
+  const chips = new Set(roster.map((row) => (row.tombstoned ? "paused" : row.state)));
+  for (const state of ["up", "warn", "down", "pending", "paused", "maintenance"]) {
+    expect(chips.has(state), `nothing in the fixture is ${state}`).toBe(true);
+  }
+
+  for (const row of roster) {
+    expect(row.state, `${row.name} is not its last sample`).toBe(row.samples.at(-1)?.state ?? null);
+    expect(row.assets.length, `${row.name} watches nothing`).toBeGreaterThan(0);
+    // A monitor Kuma no longer publishes has no page left to open, so the
+    // button is absent rather than dead.
+    if (row.tombstoned) expect(row.web_url, `${row.name} is paused and still links`).toBeNull();
+  }
+  expect(roster.some((row) => row.tombstoned), "no paused monitor in the fixture").toBe(true);
 });
