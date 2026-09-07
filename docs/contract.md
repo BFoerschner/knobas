@@ -1997,8 +1997,19 @@ move to the status the ticket is already in. It is also a shape mockd does not h
 workflow offers one move out of *To Do* and two out of *In Progress* — so the two witnesses are not
 the same witness, and this suite's header already records why that matters (ADR-0013).
 
+**And it is the direction the live suite cannot witness, measured rather than assumed.** Against
+this fixture the read's answer cannot be told from *every status the project has*: `GET
+/rest/api/2/status` — this Jira's whole status list, workflow or no workflow — answers **exactly**
+those four, and the transitions' own `name`s equal their `to.name`s, so neither a status left out
+nor a label preferred over a destination is observable here. The live test asserts that equality
+rather than assuming it, so the day the instance grows a fifth status the gap closes with a red test
+instead of staying quietly open. Until then the **narrowing** is witnessed only by mockd's shaped
+workflow, which ADR-0013 says certifies nothing about a real Jira; closing it for real means a
+second workflow in the seed, which is a seeding change and a ticket of its own.
+
 **A bearer token this Jira cannot resolve is a clean 401 on `/transitions`**, measured the same run:
-`source: unauthorized`. Worth recording because the neighbouring measurement is the opposite —
+`source: unauthorized`, and the live test asserts that **class** rather than merely that the read
+failed — a regression to `not_found` or `invalid` would pass a bare "it errored". Worth recording because the neighbouring measurement is the opposite —
 `GET /rest/api/2/search` under the same unresolvable token proceeds **anonymously** and answers
 `200` with `total: 0`, the hazard
 `a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives` exists for. The read

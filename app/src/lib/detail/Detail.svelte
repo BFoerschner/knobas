@@ -488,14 +488,23 @@
    * the one this ticket is already in taken out -- it is rendered separately,
    * marked and unselectable, the way the terminal group already was.
    *
-   * The workflow's answer where there is one and the corpus offer where there
-   * is not. **Never both merged**: a corpus status the workflow does not reach
-   * is exactly what this read exists to stop offering, and a union would put
-   * every one of them back.
+   * Three answers, not two, and the third is why this is a `$derived.by`:
+   *
+   * * the **workflow answered**, and its answer is the offer. **Never merged
+   *   with the corpus**: a corpus status the workflow does not reach is exactly
+   *   what this read exists to stop offering, and a union would put every one
+   *   of them back;
+   * * the read was **tried and failed**, and the corpus offer is the fallback,
+   *   labelled *offer unverified* beside the select;
+   * * nothing has answered **yet**, and the honest offer is none. The corpus is
+   *   the fallback for a read that failed, not for one still in flight: showing
+   *   it here would offer statuses nobody has checked in the one window where
+   *   the note that says so has not been earned.
    */
-  const offered = $derived(
-    (reachable ?? statusBoard?.offered ?? []).filter((status) => status !== statusBoard?.current),
-  );
+  const offered = $derived.by(() => {
+    const offer = reachable ?? (offerUnverified ? (statusBoard?.offered ?? []) : []);
+    return offer.filter((status) => status !== statusBoard?.current);
+  });
 
   /**
    * Whether this ticket can be moved from here.

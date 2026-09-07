@@ -437,7 +437,11 @@ async fn a_status_the_workflow_does_not_offer_is_refused_by_name() {
 /// What it deliberately does **not** assert is that the answer is *right*: this
 /// workflow is `MockState::jira_transitions`, a fixture, and a fixture agreeing
 /// with itself certifies nothing (ADR-0013). The real Jira's four seeded states
-/// are the witness, in `knobas-app/tests/atlassian_live.rs`.
+/// are the witness, in `knobas-app/tests/atlassian_live.rs`. Nor does it assert
+/// the entity vetting, which reaches no server and is a unit test beside its
+/// write-side twin (`a_workflow_read_for_another_source_is_refused_rather_than_asked_here`):
+/// spec #491 licenses **one** mockd case here and scopes it to the DTO shape,
+/// and ADR-0013 is why that scope is worth keeping to.
 #[tokio::test]
 async fn the_reachable_transitions_read_answers_the_statuses_moves_land_on() {
     let jira = spawn_mock_jira().await;
@@ -457,14 +461,6 @@ async fn the_reachable_transitions_read_answers_the_statuses_moves_land_on() {
             "{label:?} is the transition's name, not the status it lands on: {reachable:?}"
         );
     }
-
-    // An id belonging to another source is refused here as it is on every
-    // write, rather than sent to this Jira as somebody else's key.
-    let refused = source.reachable_transitions("gitea:PAY-231").await;
-    let Err(SourceError::Protocol { message, .. }) = &refused else {
-        panic!("an id from another source must be refused, got {refused:?}");
-    };
-    assert!(message.contains("gitea"), "{message}");
 
     jira.assert_no_violations();
 }

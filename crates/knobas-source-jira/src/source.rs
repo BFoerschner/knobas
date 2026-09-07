@@ -566,6 +566,27 @@ mod tests {
         assert!(message.contains("jira"), "{message}");
     }
 
+    /// The same rule on the **read** the select is offered (#498), and the
+    /// same reason: `jira-eu:PAY-231` names a ticket on the other instance, and
+    /// asking this one about its key half would answer with a workflow that
+    /// belongs to a different ticket.
+    ///
+    /// The base URL is a dead port, so the refusal is also proof that no
+    /// request was made -- a read that reached the network would fail as
+    /// `Unreachable` here rather than as the refusal asserted below.
+    #[tokio::test]
+    async fn a_workflow_read_for_another_source_is_refused_rather_than_asked_here() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        let refused = source.reachable_transitions("jira-eu:PAY-231").await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a foreign namespace must be refused, got {refused:?}");
+        };
+        assert!(message.contains("jira-eu"), "{message}");
+        assert!(message.contains("jira"), "{message}");
+    }
+
     /// A create is aimed at a **project**, so an id naming a ticket is a
     /// mistake the adapter can see: `PAY-231` is not a project key, and sending
     /// it would ask Jira to file the ticket in a project that does not exist.

@@ -1479,6 +1479,20 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
 /// test above leaves PAY-240 moved, and `live_jira_seeded.rs`'s
 /// `Seeded::clear_leftovers` is what puts it back.
 ///
+/// **What it cannot witness, and why that is not fixable here.** It cannot tell
+/// *the workflow's reply* from *every status the project has*, because on this
+/// fixture they are the same set: measured 2026-09-08, this Jira's whole status
+/// list (`GET /rest/api/2/status`) is exactly those four, and the seeded
+/// template's workflow reaches all four from every one of them -- there is no
+/// status in existence here for a narrowing read to leave out, and the
+/// transitions' own `name`s equal their `to.name`s, so that route is closed
+/// too. The body asserts that equality rather than assuming it, so the day the
+/// instance grows a fifth status the gap closes with a red test rather than
+/// quietly staying open. Until then **narrowing is witnessed only by mockd's
+/// shaped workflow** in `tests/status_move.rs`, and ADR-0013 is clear that a
+/// mock certifies nothing: closing it for real means a second workflow in the
+/// seed, which is a seeding change and a ticket of its own.
+///
 /// **This test writes nothing.** Every call it makes is a `GET`, including the
 /// refusal at the end -- an unreachable status never reaches the `POST`.
 #[tokio::test(flavor = "multi_thread")]
@@ -1511,6 +1525,45 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         &env.password,
     )
     .await;
+
+    // **What this fixture cannot witness, measured rather than assumed.** The
+    // question a reader will ask of the assertions below is whether they can
+    // tell "the workflow's reply" from "every status the project has" -- and
+    // against this fixture they cannot, because the two are the same set. That
+    // is not an oversight in how they are written, it is what the server is:
+    // `GET /rest/api/2/status`, a third endpoint listing every status this Jira
+    // has at all, answers **exactly** these four, and the seeded template's
+    // workflow reaches all four from every one of them. So there is no status
+    // in existence here that a narrowing read could leave out.
+    //
+    // Recorded here so the gap is on the record and checked, rather than
+    // assumed by the next reader: the day this instance grows a fifth status
+    // this assertion fails, and the read gains a direction it can witness.
+    // Until then, **narrowing is witnessed only by mockd's shaped workflow**
+    // (`tests/status_move.rs`), which ADR-0013 says certifies nothing about a
+    // real Jira. Closing it means a second workflow in the seed, which is a
+    // seeding change and a different ticket.
+    let (status, body) = env
+        .api(reqwest::Method::GET, "rest/api/2/status", None)
+        .await;
+    assert_eq!(status, 200, "GET the instance's statuses: {body}");
+    let on_the_instance: std::collections::BTreeSet<String> = body
+        .as_array()
+        .expect("a status array")
+        .iter()
+        .filter_map(|s| s["name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        on_the_instance, expected,
+        "this Jira used to have exactly the four statuses this workflow reaches, which is why the \
+         assertions below cannot witness narrowing; it now has {on_the_instance:?}, so they can, \
+         and one of them should be asked to"
+    );
+    println!(
+        "SEEDED this instance has exactly the {} statuses this workflow reaches, so narrowing is \
+         not witnessable here: {on_the_instance:?}",
+        on_the_instance.len()
+    );
 
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for key in ["PAY-240", COMMENTED, "PAY-228", "PAY-219"] {
@@ -1571,6 +1624,21 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
     )
     .await
     .expect_err("a token Jira cannot resolve must not read a workflow");
+    // **Which** error, not merely that there was one. `unauthorized` is what
+    // puts *Re-enter* in front of the reader (ADR-0004), and it is not the
+    // obvious answer on this server: the same unresolvable token on
+    // `GET /rest/api/2/search` proceeds *anonymously* and answers 200 with
+    // `total: 0`, which is the hazard
+    // `a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives`
+    // exists for. `/transitions` is a clean 401, and a regression to
+    // `not_found` or `invalid` would pass a bare `expect_err`.
+    assert!(
+        matches!(
+            &error,
+            knobas_app::sources::SourcesError::Source(SourceError::Unauthorized { .. })
+        ),
+        "a token this Jira cannot resolve is an unauthorized read, got {error:?}"
+    );
     println!("SEEDED the read under a token Jira cannot resolve: {error}");
 
     // -- and the write side is unchanged ------------------------------------

@@ -1,12 +1,17 @@
-//! Moving a ticket to another status, end to end (#179).
+//! Moving a ticket to another status, end to end (#179) -- and, since #498,
+//! reading first what the workflow offers to move it to.
 //!
-//! The detail's status select is optimistic by design: knobas has no read of
-//! which transitions a ticket's workflow offers from where it stands (that seam
-//! is M3's descriptor growth, ADR-0007), so the select offers what the source's
-//! corpus has been *seen* to use and the **adapter** resolves the target at
-//! write time. Which means the interesting behaviour is not in the shell at
-//! all — it is what happens when a move the workflow does not allow reaches a
-//! real Jira. That is what this file is about, and both directions are here:
+//! The detail's status select was optimistic by construction until #498: knobas
+//! had no read of which transitions a ticket's workflow offers from where it
+//! stands, so the select offered what the source's corpus had been *seen* to
+//! use and the **adapter** discovered the truth at write time. `Source::
+//! reachable_transitions` is that read, and the last test here is its half of
+//! this file; the write half is unchanged and is what the first test is about.
+//!
+//! Which means the interesting behaviour is not in the shell at all -- it is
+//! what happens when a move the workflow does not allow reaches a real Jira,
+//! and what the same workflow says when it is *asked* instead. Both directions
+//! of the write are here:
 //!
 //! * a legal move lands at the source, and a sync brings the new status back
 //!   into the mirror, which is what makes the board show it (story 17);

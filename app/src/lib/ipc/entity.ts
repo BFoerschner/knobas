@@ -137,10 +137,7 @@ export interface ActivityRow {
  * History panel); omitting it is the global stream the status bar reads. A
  * malformed id rejects with `invalid`, not `internal`.
  */
-export function recentActivity(
-  limit: number,
-  entityId?: string,
-): Promise<ActivityRow[]> {
+export function recentActivity(limit: number, entityId?: string): Promise<ActivityRow[]> {
   return invoke<ActivityRow[]>("recent_activity", { limit, entityId });
 }
 
@@ -496,10 +493,7 @@ export function getNote(noteId: string): Promise<NoteDetail> {
  * Both arguments are optional: *New note* creates the row before the first
  * keystroke, so nothing typed into it can be lost to a closed window.
  */
-export function createNote(
-  title?: string,
-  bodyMd?: string,
-): Promise<NoteDetail> {
+export function createNote(title?: string, bodyMd?: string): Promise<NoteDetail> {
   return invoke<NoteDetail>("create_note", { title, bodyMd });
 }
 
@@ -515,11 +509,7 @@ export function createNote(
  * `not_found` for a note that no longer exists — an editor open on a deleted
  * note does not resurrect it.
  */
-export function saveNote(
-  noteId: string,
-  title: string,
-  bodyMd: string,
-): Promise<NoteDetail> {
+export function saveNote(noteId: string, title: string, bodyMd: string): Promise<NoteDetail> {
   return invoke<NoteDetail>("save_note", { noteId, title, bodyMd });
 }
 
@@ -702,7 +692,10 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * record.
  */
 export type StartWorkStepKind =
-  "create_branch" | "create_pull_request" | "link_pull_request" | "transition";
+  | "create_branch"
+  | "create_pull_request"
+  | "link_pull_request"
+  | "transition";
 
 /**
  * What happened to one step — `knobas_core::start_work::StepOutcome`.
@@ -713,7 +706,12 @@ export type StartWorkStepKind =
  * drew them the same way would report work that has not happened.
  */
 export type StartWorkOutcome =
-  "pending" | "running" | "succeeded" | "queued" | "failed" | "skipped";
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "queued"
+  | "failed"
+  | "skipped";
 
 /**
  * One step of a flow — `knobas_core::start_work::FlowStep`.
@@ -752,10 +750,7 @@ export interface StartWorkStep {
  * Rejects with `invalid` for an id that is not an entity id, and `not_found` if
  * the ticket is not in the mirror.
  */
-export function startWorkFlow(
-  entityId: string,
-  repoId: string | null,
-): Promise<StartWorkStep[]> {
+export function startWorkFlow(entityId: string, repoId: string | null): Promise<StartWorkStep[]> {
   return invoke<StartWorkStep[]>("start_work_flow", { entityId, repoId });
 }
 
@@ -806,10 +801,7 @@ export function startWorkSkip(stepId: number): Promise<StartWorkStep[]> {
  * the step has already happened: editing it then would change nothing at the
  * source and everything on screen.
  */
-export function startWorkAmend(
-  stepId: number,
-  payload: unknown,
-): Promise<StartWorkStep[]> {
+export function startWorkAmend(stepId: number, payload: unknown): Promise<StartWorkStep[]> {
   return invoke<StartWorkStep[]>("start_work_amend", { stepId, payload });
 }
 
@@ -1171,9 +1163,7 @@ export function notificationKinds(): Promise<InboxCategory[]> {
  * strict where the read side is forgiving, because the only caller is a
  * surface sending back words it was given.
  */
-export function setNotificationKinds(
-  kinds: InboxCategory[],
-): Promise<InboxCategory[]> {
+export function setNotificationKinds(kinds: InboxCategory[]): Promise<InboxCategory[]> {
   return invoke<InboxCategory[]>("set_notification_kinds", { kinds });
 }
 
@@ -1367,10 +1357,7 @@ export function publishStandupProtocol(
   day: string,
   target?: PublishTarget,
 ): Promise<Protocol> {
-  return invoke<Protocol>("publish_standup_protocol", {
-    day,
-    target: target ?? null,
-  });
+  return invoke<Protocol>("publish_standup_protocol", { day, target: target ?? null });
 }
 
 /** Where protocols are published, or `null` until somebody has said. */
@@ -1379,9 +1366,7 @@ export function standupPublishTarget(): Promise<PublishTarget | null> {
 }
 
 /** Change where protocols are published — settings' half of story 67. */
-export function setStandupPublishTarget(
-  target: PublishTarget,
-): Promise<PublishTarget> {
+export function setStandupPublishTarget(target: PublishTarget): Promise<PublishTarget> {
   return invoke<PublishTarget>("set_standup_publish_target", { target });
 }
 

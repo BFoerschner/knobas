@@ -664,12 +664,16 @@ pub async fn test(
 /// `WriteOp::Transition`'s write-time resolution exists because knobas cannot
 /// have.
 ///
-/// **In `crud` and not in a module of its own**, because this is the third
-/// caller of the same three steps -- read the stored row, open the keychain,
-/// build the adapter -- and [`instance_from`] and [`Credential::keeping`] are
-/// what make an adapter built here identical to the one a scheduled run
-/// builds. A module beside this one would have to widen both to reach them,
-/// for one function.
+/// **In `crud` and not in a module of its own**, because the part that must not
+/// drift is already extracted: [`instance_from`] and [`Credential::keeping`]
+/// are what make the adapter built here identical to the one `set_secret`,
+/// `test` and a scheduled run build, and both are private to this module. What
+/// is *not* shared is the reading around them, and deliberately -- `set_secret`
+/// stores a typed credential first and records the verdict after, `test`
+/// resolves a draft against a saved row, and this one reads a stored row and
+/// nothing else. Lifting those into one function would need a parameter per
+/// difference; lifting this one out of the module would need both helpers
+/// widened, for one caller.
 ///
 /// # Errors
 ///
