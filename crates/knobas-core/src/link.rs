@@ -31,6 +31,22 @@ use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// The relation a [`monitor`](crate::inbox::Category::Alert) is attached to
+/// the asset it watches by.
+///
+/// `CONTEXT.md`, **Monitor**: *"Attached to an asset by a `monitored-by`
+/// link"*. Here, in the crate every other one depends on, because **three**
+/// places have to agree on the spelling and two of them are SQL: the inbox's
+/// alert rule (`knobas_core::inbox`), the recovery line the sync engine writes
+/// (`knobas_sync::alerts`), and `knobas_app::assets`, which is what draws the
+/// link in the first place. A fourth spelling of it would be a monitor that is
+/// attached and reaches nothing, with nothing failing anywhere.
+///
+/// The rest of the relation vocabulary is a *rendering* decision and stays in
+/// `app/src/lib/detail/relations.ts`; this one is load-bearing in a `where`
+/// clause, which is a different thing.
+pub const MONITORED_BY: &str = "monitored-by";
+
 use crate::CoreError;
 use crate::entity::EntityRef;
 

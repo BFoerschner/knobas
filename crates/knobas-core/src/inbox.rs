@@ -905,6 +905,22 @@ mod tests {
         assert!(COUNT_ALL.contains(ALL_RULES));
     }
 
+    /// The alert rule reads the relation the estate actually draws.
+    ///
+    /// The rule is a compile-time `concat!`, so the relation is a literal in
+    /// it and cannot be the constant itself. Three modules have to agree on
+    /// that word -- this rule, `knobas_sync::alerts`' recovery line and
+    /// `knobas_app::assets`, which draws the link -- and a fourth spelling
+    /// would be a monitor attached to an asset that reaches no inbox, with
+    /// nothing failing anywhere.
+    #[test]
+    fn the_alert_rule_reads_the_relation_the_estate_draws() {
+        assert!(
+            ALL_RULES.contains(&format!("l.relation = '{}'", crate::link::MONITORED_BY)),
+            "the alert rule does not join on knobas_core::link::MONITORED_BY"
+        );
+    }
+
     /// Round-trips, because the wire form and the key's first half are the
     /// same spelling and a decoder that could not read what the encoder wrote
     /// would be an item nobody can snooze.

@@ -232,7 +232,7 @@ const PATH_SEPARATOR: &str = " / ";
 /// `app/src/lib/detail/relations.ts`, which is where `monitored-by` is given
 /// its two readings. The two spellings are pinned together by
 /// `commands::assets`' mirror test, the way `DEFAULT_RELATION` is.
-pub const MONITORED_BY: &str = "monitored-by";
+pub const MONITORED_BY: &str = knobas_core::link::MONITORED_BY;
 
 /// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
 ///
