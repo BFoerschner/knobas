@@ -6549,7 +6549,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Björn keeps the gate for frozen contracts and this entry is flagged for his review**, and in
   particular the new command and the four DTOs.
 
-- **Migration `0022` and an eighteenth `assets` command, issue #444 (2026-09-07):** the alert a
+- **Migration `0022` and a nineteenth `assets` command, issue #444 (2026-09-07):** the alert a
   monitor's crossing into down or warn opens, the recovery that closes it, and the estate's list of
   what is open. **Ratified in advance by the spec (#427) Björn approved** — "Migrations from the
   next free number: asset, route (M4.0); sample, **alert** (M4.1)" and, of the module pair, "the
@@ -6558,9 +6558,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   #428's, #431's, #434's, #435's, #439's and #443's pattern.
 
   **`0022` is claimed here; `0023` is the next free number**, and #446's inbox category is expected
-  to need none. This supersedes the #443 entry's sentence naming `0022` as free; the old sentence
-  is left as history rather than rewritten, the treatment #53, #278, #428, #439 and #443 give the
-  sentences they supersede.
+  to need none. This supersedes both the #443 entry's sentence naming `0022` as free and the #448
+  entry's above, which repeats it and names this table as the one expected to take the number; the
+  old sentences are left as history rather than rewritten, the treatment #53, #278, #428, #439 and
+  #443 give the sentences they supersede.
 
   **The migration.** `0022_the_alert_a_monitor_opens.sql` adds one table and edits nothing.
 
@@ -6723,7 +6724,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   `the_rollup_ranks_the_statuses_the_way_rust_does` (now over both `case` expressions) and
   `the_rollup_counts_only_what_is_underneath_and_only_the_two_bad_statuses`;
   `commands::assets::tests::the_open_alert_matches_its_typescript_mirror` and the registration and
-  argument-name loops (now eighteen commands); `tests/assets_ipc.rs`' handler list;
+  argument-name loops (now nineteen commands); `tests/assets_ipc.rs`' handler list;
   `backup::share::tests::nothing_carries_the_activity_stream_the_queue_or_the_mirror`; and on the
   frontend `alerts.test.svelte.ts` (four), `AssetsView.alerts.test.svelte.ts` (eight) and four new
   tests in `TopStrip.test.svelte.ts`.

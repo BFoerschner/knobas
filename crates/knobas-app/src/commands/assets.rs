@@ -1105,7 +1105,7 @@ mod tests {
         );
     }
 
-    /// The eighteen commands are invoked from the mirror by the names they are
+    /// The nineteen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
