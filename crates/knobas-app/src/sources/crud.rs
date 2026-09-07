@@ -649,6 +649,77 @@ pub async fn test(
     })
 }
 
+/// What this entity's workflow offers from where it stands right now (#498).
+///
+/// The **source is the entity's namespace** and is not asked for, on
+/// `write_queue::submit`'s reasoning: interfaces §4.1 makes the instance id and
+/// the `EntityRef` namespace one string, so a second argument could only agree
+/// or contradict, and a contradiction would ask one source about another's
+/// ticket.
+///
+/// **Nothing is stored and nothing is cached.** A *reachable transition*
+/// (`CONTEXT.md`) is an answer about now: it is read when a detail opens, it is
+/// offered, and it is gone. A cache would be knobas holding a copy of a
+/// workflow's state, which is the thing the glossary entry rules out and which
+/// `WriteOp::Transition`'s write-time resolution exists because knobas cannot
+/// have.
+///
+/// **In `crud` and not in a module of its own**, because the part that must not
+/// drift is already extracted: [`instance_from`] and [`Credential::keeping`]
+/// are what make the adapter built here identical to the one `set_secret`,
+/// `test` and a scheduled run build, and both are private to this module. What
+/// is *not* shared is the reading around them, and deliberately -- `set_secret`
+/// stores a typed credential first and records the verdict after, `test`
+/// resolves a draft against a saved row, and this one reads a stored row and
+/// nothing else. Lifting those into one function would need a parameter per
+/// difference; lifting this one out of the module would need both helpers
+/// widened, for one caller.
+///
+/// # Errors
+///
+/// [`SourcesError::NotFound`] for an entity whose namespace is not a
+/// configured source, [`SourcesError::Invalid`] for something that is not an
+/// entity id at all, [`SourcesError::Secret`] when the keychain will not
+/// answer, [`SourcesError::UnknownAdapter`] and [`SourcesError::Source`] from
+/// the build -- and, the ordinary case, whatever the adapter's own read maps
+/// to: a source with no workflow refuses with
+/// [`SourceError::Protocol`](knobas_source::SourceError::Protocol), and a dead
+/// credential is
+/// [`Unauthorized`](knobas_source::SourceError::Unauthorized). Every one of
+/// them reaches the shell as a rejection, and the select falls back to the
+/// corpus-observed offer rather than showing an empty list.
+pub async fn reachable_transitions(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<Vec<String>, SourcesError> {
+    let parsed = knobas_core::entity::EntityRef::parse(entity_id)
+        .map_err(|error| SourcesError::Invalid(error.to_string()))?;
+    let cfg = config::get(pool, &parsed.namespace)
+        .await?
+        .ok_or_else(|| SourcesError::NotFound(parsed.namespace.clone()))?;
+    let method = cfg.auth_kind.method();
+    // The keychain is asked only where the configuration says a credential is
+    // needed at all, which is `build_source`'s rule: a source that
+    // authenticates nothing -- the mock, `--demo` against an empty keychain --
+    // must not be turned into a keychain prompt by a select opening.
+    let stored = match method {
+        None => None,
+        Some(_) => knobas_secrets::spawn::get(secrets, &parsed.namespace).await?,
+    };
+    let source = registry.build(instance_from(
+        &parsed.namespace,
+        &cfg.adapter_kind,
+        &cfg.display_name,
+        &cfg.base_url,
+        method,
+        Credential::keeping(&SecretInput::default(), stored),
+        cfg.config.clone(),
+    ))?;
+    Ok(source.reachable_transitions(entity_id).await?)
+}
+
 /// The credential health of every source -- the cheap poll the top strip's
 /// monograms read (interfaces §2.2).
 ///

@@ -1111,6 +1111,58 @@ pub async fn submit_write<R: tauri::Runtime>(
     crate::sources::write_queue::submit(&state, payload).await
 }
 
+/// The statuses this ticket's workflow offers from where it stands **right
+/// now** (#498, spec #491's stream 3).
+///
+/// The read the status select was built without. Until this existed the select
+/// offered the statuses the source's *corpus* had been seen to use -- every
+/// column the mini board draws for that source -- and the adapter discovered at
+/// write time that half of them were unreachable, which reached the reader as a
+/// refused row in the write queue rather than as an offer that was never made.
+/// This asks the source instead.
+///
+/// **A read straight through to the adapter, with no mirror in it and nothing
+/// stored.** `CONTEXT.md`'s *reachable transition* is an answer about now, so
+/// there is no row to cache it in and no event to invalidate one with; the
+/// answer is good for as long as the detail is open, and the write's own
+/// resolution -- unchanged -- is what still decides whether the move happens.
+///
+/// **A rejection is the ordinary case, not a fault.** A source with no workflow
+/// refuses by name (battery clause 8), which is what a Gitea pull request, a
+/// build, a page and a monitor get; a source whose credential died answers
+/// `unauthorized`. The shell draws no select for a kind that has no workflow
+/// and falls back to the corpus-observed offer, marked *offer unverified*, for
+/// a read that failed on a ticket that does have one. Neither is an empty list:
+/// an empty answer is a real workflow with no moves left, and the two must not
+/// collapse.
+///
+/// **There is no `source_id` argument**, for `submit_write`'s reason above: the
+/// entity id already names the source.
+///
+/// # Errors
+///
+/// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
+/// is not a configured source, `unauthorized` / `unreachable` / `internal` as
+/// the adapter's own failure maps -- including the refusal of a source with no
+/// workflow, which is `internal` because it is a caller asking the wrong
+/// question rather than anything the user can act on;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn reachable_transitions<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+) -> Result<Vec<String>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::crud::reachable_transitions(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &entity_id,
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))
+}
+
 /// Everything the note view draws for one note (#46).
 ///
 /// Deliberately **not** [`EntityDetail`], and the difference is not tidiness:

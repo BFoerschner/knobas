@@ -648,6 +648,35 @@ export function submitWrite(payload: WriteOpPayload): Promise<QueuedWrite> {
   return invoke<QueuedWrite>("submit_write", { payload });
 }
 
+/**
+ * What this ticket's workflow offers from where it stands **right now** —
+ * `knobas_app::commands::entity::reachable_transitions` (#498).
+ *
+ * The statuses in the source's own spelling, straight from the source: nothing
+ * is stored, so this is an answer about now and is good only for as long as the
+ * detail is open. The status select offers these and only these, and the write
+ * is unchanged — {@link submitWrite}'s `Transition` still names the status and
+ * the adapter still resolves and refuses it at write time.
+ *
+ * **Only ask it of a ticket whose source declares `transition`.** A source with
+ * no workflow — Gitea, TeamCity, Confluence, Uptime Kuma, the mock — rejects
+ * this by name rather than answering an empty list, because the two mean
+ * different things: an empty answer is a real workflow with nowhere left to go.
+ * A rejection of any kind is the caller's cue to fall back to the
+ * corpus-observed offer ({@link MiniBoard.sources}) and say the offer is
+ * unverified, never to show an empty select.
+ *
+ * **There is no source argument**, for {@link submitWrite}'s reason: the
+ * entity id already names the source.
+ *
+ * Rejects with `invalid` for something that is not an entity id, `not_found`
+ * when its namespace is not a configured source, and `unauthorized` /
+ * `unreachable` / `internal` as the source's own failure maps.
+ */
+export function reachableTransitions(entityId: string): Promise<string[]> {
+  return invoke<string[]>("reachable_transitions", { entityId });
+}
+
 // ---------------------------------------------------------------------------
 // The start-work flow — `knobas_app::commands::entity`'s start-work block and
 // `knobas_core::start_work` (issue #44).
@@ -1048,7 +1077,9 @@ export interface MiniBoard {
   columns: MiniBoardColumn[];
   /**
    * Per source that put a card on this board, the statuses its own corpus
-   * shows — what the ticket detail's status select offers (#179).
+   * shows — what the ticket detail's status select falls back to when the
+   * workflow read fails (#179, and {@link reachableTransitions} for why it is
+   * the fallback rather than the offer).
    */
   sources: SourceStatuses[];
 }

@@ -330,6 +330,26 @@ impl Source for JiraSource {
             ))),
         }
     }
+
+    /// What this issue's workflow offers from where it stands (#498).
+    ///
+    /// **The request the write already makes** -- literally
+    /// [`crate::write::offered_transitions`], which `transition` calls to
+    /// resolve the status it was handed. That sharing is the whole design: the
+    /// select is offered one list and the write resolves against the same one,
+    /// so the two cannot disagree about what this workflow does, and the two
+    /// remaining ways a move still fails -- the ticket moved between the read
+    /// and the flush, or the workflow itself changed -- are answered where they
+    /// always were, by the adapter at write time and by the queue's refusal.
+    ///
+    /// The entity is vetted the way every write's is, through
+    /// [`Self::issue_key`]: an id belonging to another source is refused here
+    /// rather than turned into a request against this Jira with somebody
+    /// else's key.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        let offered = write::offered_transitions(&self.http, &self.issue_key(entity)?).await?;
+        Ok(offered.into_iter().map(|t| t.status).collect())
+    }
 }
 
 #[cfg(test)]
@@ -539,6 +559,27 @@ mod tests {
                 body: "meant for the other one".to_owned(),
             })
             .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a foreign namespace must be refused, got {refused:?}");
+        };
+        assert!(message.contains("jira-eu"), "{message}");
+        assert!(message.contains("jira"), "{message}");
+    }
+
+    /// The same rule on the **read** the select is offered (#498), and the
+    /// same reason: `jira-eu:PAY-231` names a ticket on the other instance, and
+    /// asking this one about its key half would answer with a workflow that
+    /// belongs to a different ticket.
+    ///
+    /// The base URL is a dead port, so the refusal is also proof that no
+    /// request was made -- a read that reached the network would fail as
+    /// `Unreachable` here rather than as the refusal asserted below.
+    #[tokio::test]
+    async fn a_workflow_read_for_another_source_is_refused_rather_than_asked_here() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        let refused = source.reachable_transitions("jira-eu:PAY-231").await;
         let Err(SourceError::Protocol { message, .. }) = &refused else {
             panic!("a foreign namespace must be refused, got {refused:?}");
         };

@@ -202,6 +202,28 @@ impl Source for TeamCitySource {
             ))),
         }
     }
+
+    /// Refused: TeamCity has no workflow (#498).
+    ///
+    /// A build's status is something that *happened to it* -- queued, running,
+    /// then whatever the agent reported -- and nothing a person moves it to.
+    /// The two write ops this adapter declares say the same thing from the
+    /// other side: it can start a build and run one again, and neither is a
+    /// transition of an existing record.
+    ///
+    /// **Refused rather than answered empty**: an empty list is a workflow
+    /// with no moves left, and this is a source with no workflow at all. A
+    /// build's detail draws no select either way, but not for the same reason
+    /// -- an empty answer is a ticket with nothing to move to, while this
+    /// adapter is never asked at all, the read being gated on the descriptor's
+    /// `transition` op it does not declare. Contract battery clause 8 is what
+    /// holds the refusal in place for any other caller.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Err(SourceError::protocol(format!(
+            "the TeamCity adapter has no workflow, so there are no reachable transitions to read \
+             for {entity:?}"
+        )))
+    }
 }
 
 #[cfg(test)]

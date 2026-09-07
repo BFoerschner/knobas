@@ -773,6 +773,40 @@ pub trait Source: Send + Sync {
     /// edit or delete would need (issue #280) -- and an adapter that has
     /// nothing to say answers `none` rather than inventing an id.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
+    /// The statuses this entity's workflow offers **from where it stands right
+    /// now**, in the source's own spelling (`CONTEXT.md`: *reachable
+    /// transition*).
+    ///
+    /// `entity` is an [`EntityRef`] in string form, the same address every
+    /// [`WriteOp`] carries, and the answer is about *now*: it is read when a
+    /// detail opens and nothing stores it. A source that answers `["In
+    /// Progress", "Done"]` is not promising those two will still be reachable
+    /// when the write is flushed -- [`WriteOp::Transition`] still names the
+    /// status it wants and the adapter still resolves and refuses that name
+    /// against the source's answer at write time. This read is what the
+    /// **select** offers; it is not a substitute for that resolution and
+    /// nothing may treat it as one.
+    ///
+    /// **No default implementation, and that is the point** (ADR-0006's
+    /// forcing function applied to a read). A default returning "nothing" would
+    /// be an adapter silently declining to answer, which reads downstream
+    /// exactly like a workflow with no moves left; a default returning an error
+    /// would let a new adapter with a real workflow ship a select that offers
+    /// nothing until somebody noticed. So every adapter answers, and one
+    /// without a workflow at all refuses **by name** -- the message says which
+    /// adapter has no workflow -- the way [`write`](Source::write) refuses an
+    /// op the descriptor does not declare. [`contract::battery`] holds an
+    /// adapter to it: a source that does not declare the `"transition"` write
+    /// op must refuse this read.
+    ///
+    /// A refusal is [`SourceError::Protocol`], as it is for an undeclared
+    /// write. A source that *has* a workflow reports whatever its request maps
+    /// to -- an expired credential is [`SourceError::Unauthorized`] here as
+    /// everywhere else, and the shell falls back to the corpus-observed offer
+    /// rather than showing an empty select.
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;

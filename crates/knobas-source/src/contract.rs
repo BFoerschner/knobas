@@ -328,6 +328,59 @@ where
         matches!(aborted, Err(crate::SourceError::Sink(_))),
         "a sink error must be propagated out of sync as SourceError::Sink, got {aborted:?}"
     );
+    // 8. The reachable-transition read (#498): a source with no workflow
+    //    refuses it **by name**, the way clause 5's undeclared write is
+    //    refused.
+    check_reachable_transitions(&*s, &d).await;
+}
+
+/// Clause 8: an adapter without a workflow refuses the reachable-transition
+/// read, and says which adapter that is.
+///
+/// **`write_ops` is the question this asks**, and it is the only honest one the
+/// battery has: a workflow is not something the SPI can see, but an adapter
+/// that cannot move a ticket at all is one that does not declare the
+/// `"transition"` write op -- and an adapter that *does* declare it has a
+/// workflow to read by definition, since `WriteOp::Transition` is resolved
+/// against exactly that list at write time. So the two are one fact, and
+/// letting them disagree would be a source offering *Move to …* over a read
+/// that refuses, or a select that offers nothing on a source whose action bar
+/// moves tickets.
+///
+/// **The declared side is skipped, not asserted**, for clause 5's reason: an
+/// adapter runs this battery against its real backend, and the probe target
+/// exists on no instance, so the only thing a call could witness is a 404
+/// dressed as a refusal. Covering the answering side is the adapter's own job
+/// -- `knobas-source-jira`'s mockd suite and the Atlassian live suite are
+/// where it is done. The skip is control flow rather than an assertion, so the
+/// mutation sweep cannot see it; `accepts_an_adapter_that_answers_the_read`
+/// pins it with an adapter whose read panics if reached.
+///
+/// The refusal must name the adapter because a message that did not would
+/// leave a reader with "protocol error" and no way to tell which of a
+/// four-source room said it -- the same argument clause 5's "it must say which
+/// op it refused" makes.
+async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDescriptor) {
+    if d.write_ops.iter().any(|w| w == "transition") {
+        return;
+    }
+    let probe = format!("{}:contract-battery", d.id);
+    let refused = s.reachable_transitions(&probe).await;
+    let Err(crate::SourceError::Protocol { message, .. }) = &refused else {
+        panic!(
+            "an adapter that does not declare the \"transition\" write op has no workflow to \
+             read, so reachable_transitions must be refused with SourceError::Protocol, got \
+             {refused:?}"
+        );
+    };
+    assert!(
+        message
+            .to_lowercase()
+            .contains(&d.adapter_kind.to_lowercase()),
+        "the refusal must name the adapter that has no workflow -- descriptor.adapter_kind is \
+         {:?} and the message was {message:?}",
+        d.adapter_kind
+    );
 }
 
 /// Clause 6: an adapter's declared payload paths against its own corpus.
@@ -657,6 +710,18 @@ mod tests {
         WriteOpsWithoutCapability,
         /// Accepts a write op it never declared instead of refusing it.
         AcceptsUndeclaredWrite,
+        /// Declares `transition` -- so it has a workflow -- and its
+        /// reachable-transition read panics if reached. The battery accepting
+        /// it is what proves clause 8 skips the answering side instead of
+        /// probing a live instance with a target that exists nowhere.
+        DeclaresTransition,
+        /// Has no workflow and answers the reachable-transition read anyway,
+        /// with a list it made up.
+        AnswersTheTransitionRead,
+        /// Refuses the reachable-transition read without saying which adapter
+        /// refused, leaving a four-source room with an unattributable
+        /// "protocol error".
+        RefusesTheReadAnonymously,
         /// Swallows the sink's error and reports a successful sync.
         SwallowsSinkError,
         /// Declares payload paths for a kind absent from `entity_kinds`.
@@ -732,6 +797,7 @@ mod tests {
                 // the two that exist to violate exactly that.
                 capabilities: match self.behavior {
                     Behavior::DeclaresAWriteOp
+                    | Behavior::DeclaresTransition
                     | Behavior::UnknownWriteOpId
                     | Behavior::WriteCapabilityWithoutOps => {
                         vec![Capability::Search, Capability::Write]
@@ -748,6 +814,7 @@ mod tests {
                     Behavior::DeclaresAWriteOp | Behavior::WriteOpsWithoutCapability => {
                         vec!["comment".into()]
                     }
+                    Behavior::DeclaresTransition => vec!["transition".into()],
                     _ => Vec::new(),
                 },
                 entity_kinds: {
@@ -941,6 +1008,23 @@ mod tests {
                 return Ok(crate::WriteReceipt::none());
             }
             Err(SourceError::protocol(format!("unsupported op: {op:?}")))
+        }
+
+        async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
+            match self.behavior {
+                // A real adapter with a workflow would ask its source here.
+                // Clause 8 skips this side, and this is what says so.
+                Behavior::DeclaresTransition => {
+                    unreachable!("battery must not read the workflow of an adapter that has one")
+                }
+                Behavior::AnswersTheTransitionRead => Ok(vec!["In Progress".into()]),
+                Behavior::RefusesTheReadAnonymously => {
+                    Err(SourceError::protocol("no workflow here"))
+                }
+                _ => Err(SourceError::protocol(
+                    "the test adapter has no workflow to read",
+                )),
+            }
         }
     }
 
@@ -1295,6 +1379,45 @@ mod tests {
         rejects(
             Behavior::SwallowsSinkError,
             "must be propagated out of sync",
+        )
+        .await;
+    }
+
+    // -- clause 8: the reachable-transition read (#498) -----------------------
+
+    /// The mirror image of `accepts_a_declared_write_op_without_calling_write`,
+    /// and it exists for the same reason: the skip is control flow, so nothing
+    /// else can witness it. This adapter declares `transition` and panics if
+    /// its workflow is read; the battery accepting it is the proof the read was
+    /// never made. Delete the guard and this goes red -- which is what stops
+    /// the battery from asking a live Jira about an issue key no instance has,
+    /// and being told "no such issue" in a shape it would then have to decide
+    /// was a refusal.
+    #[tokio::test]
+    async fn accepts_an_adapter_that_answers_the_read() {
+        run(Behavior::DeclaresTransition)
+            .await
+            .expect("an adapter with a workflow must pass clause 8 unread");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_source_with_no_workflow_that_answers_the_read() {
+        rejects(
+            Behavior::AnswersTheTransitionRead,
+            "reachable_transitions must be refused",
+        )
+        .await;
+    }
+
+    /// A refusal that does not say who refused. The message is a real refusal
+    /// -- `Protocol`, and it even says there is no workflow -- so only the
+    /// naming clause can reject it, which is what makes this a test of that
+    /// clause rather than of the one above.
+    #[tokio::test]
+    async fn rejects_a_refusal_that_does_not_name_the_adapter() {
+        rejects(
+            Behavior::RefusesTheReadAnonymously,
+            "must name the adapter that has no workflow",
         )
         .await;
     }

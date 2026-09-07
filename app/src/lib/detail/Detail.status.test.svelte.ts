@@ -1,6 +1,6 @@
 /**
- * The ticket detail's status select (#179), and the one rule it lives under:
- * **it never says a status the mirror does not hold.**
+ * The ticket detail's status select (#179, #498), and the one rule it lives
+ * under: **it never says a status the mirror does not hold.**
  *
  * Picking a status queues a `Transition` through the write queue and stops
  * there. The queue decides send, pend or hold; the source's workflow decides
@@ -10,9 +10,16 @@
  * landed write. A select that jumped to the new value would be reporting a
  * hope.
  *
+ * Since #498 the **offer** comes from the workflow rather than from the
+ * corpus: `reachableTransitions` asks the source what it can reach from where
+ * it stands, and the two reads answer different questions — the board says
+ * where the ticket *is* and the workflow read says where it can *go*. The
+ * corpus offer is still here as the fallback, and a fallback says so on
+ * screen.
+ *
  * Its own file rather than more of `Detail.test.svelte.ts`: that one is about
  * the three answers a read can have, and this needs a loaded kind registry and
- * two commands of its own.
+ * three commands of its own.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -23,7 +30,16 @@ import type { SourceDescriptor } from "../ipc/sources";
 /** Plain functions, not `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const queued: unknown[] = [];
 const boardCalls: Pick<EntityFilter, "sources" | "context" | "project">[] = [];
+/** Every entity the workflow read was asked about, in order (#498). */
+const workflowCalls: string[] = [];
 let board: () => Promise<MiniBoard> = () => Promise.resolve(BOARD);
+/**
+ * What the workflow answers. The default is the seeded Jira shape: every other
+ * status, **plus the one the ticket is already in** — Jira's simplified
+ * workflow offers a move to the current status, and the select has to be the
+ * thing that takes it out.
+ */
+let workflow: () => Promise<string[]> = () => Promise.resolve(["In Progress", "In Review", "Done"]);
 let submitFails = false;
 
 vi.mock("../ipc/entity", () => ({
@@ -37,6 +53,10 @@ vi.mock("../ipc/entity", () => ({
   miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
     boardCalls.push(filter);
     return board();
+  },
+  reachableTransitions: (entityId: string) => {
+    workflowCalls.push(entityId);
+    return workflow();
   },
   submitWrite: (payload: unknown) => {
     queued.push(payload);
@@ -183,25 +203,132 @@ function pick(select: HTMLSelectElement, status: string) {
 beforeEach(async () => {
   queued.length = 0;
   boardCalls.length = 0;
+  workflowCalls.length = 0;
   toasts.items = [];
   submitFails = false;
   writeOps = ["comment", "transition"];
   board = () => Promise.resolve(BOARD);
+  workflow = () => Promise.resolve(["In Progress", "In Review", "Done"]);
   entity = () => detail();
   await kindRegistry.load();
 });
 
-test("offers the statuses that source's corpus shows, with the mirrored one selected", async () => {
+/**
+ * The offer is the **workflow's**, and the corpus is not merged into it (#498).
+ *
+ * The fixture is built so the two disagree in both directions and one
+ * assertion can see it: the corpus shows *To Do*, which this workflow does not
+ * reach from *In Progress*, so an offer built from the corpus — or from a
+ * union of the two — would still list it. And the workflow answers with *In
+ * Progress* itself, so a select that offered the reply verbatim would let a
+ * reader queue a move to where the ticket already is.
+ */
+test("offers the statuses the workflow reaches, with the current one marked and unselectable", async () => {
   const screen = render();
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   flushSync();
 
-  expect(screen.options()).toEqual(["To Do", "In Progress", "In Review", "Done"]);
+  expect(screen.options()).toEqual(["In Progress", "In Review", "Done"]);
+  expect(screen.options(), "a corpus status the workflow does not reach").not.toContain("To Do");
   expect(screen.select()?.value).toBe("In Progress");
-  // The offer is the source's corpus, not the room's columns — so the read is
-  // scoped to the source and to no context (#177), and to no project either
-  // (#208): a project room with nothing finished still has to offer Done.
+  // Where it stands: shown, so the control says something, and unselectable,
+  // because a move to the status a ticket is already in is not a move.
+  expect(screen.select()?.querySelector("option")?.disabled).toBe(true);
+  expect([...(screen.select()?.querySelectorAll("option:not(:disabled)") ?? [])]).toHaveLength(2);
+  // Asked about this ticket, by its entity id and nothing else: the source is
+  // the namespace (interfaces §4.1), so there is no second argument to get
+  // wrong.
+  expect(workflowCalls).toEqual(["mock:PAY-231"]);
+  // The board is still read, and still for what only it can answer — where the
+  // ticket stands, and the corpus offer that is the fallback below. Scoped to
+  // the source and to no context (#177) or project (#208).
   expect(boardCalls).toEqual([{ sources: ["mock"], context: null, project: null }]);
+
+  screen.done();
+});
+
+/**
+ * The fallback, and the whole reason it is labelled.
+ *
+ * A workflow read can fail for something the reader cannot act on from this
+ * panel — an expired credential, a Jira that is down — and the honest drawing
+ * is the offer knobas had before the read existed, plus a word saying nobody
+ * checked it. Silently showing the corpus would be the pre-#498 behaviour
+ * wearing this ticket's clothes.
+ */
+test("a failed workflow read falls back to the corpus offer and says it is unverified", async () => {
+  workflow = () =>
+    Promise.reject({ code: "unauthorized", message: "the PAT expired", source_id: "mock" });
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("offer unverified"));
+  flushSync();
+
+  expect(screen.options()).toEqual(["In Progress", "To Do", "In Review", "Done"]);
+  expect(screen.select()?.value).toBe("In Progress");
+  // No toast: one per opened ticket over a source that is down is noise, and
+  // the note beside the select is what the reader is owed instead.
+  expect(toasts.items).toEqual([]);
+
+  screen.done();
+});
+
+/**
+ * **Nothing is offered until something has answered.** The corpus is the
+ * fallback for a read that *failed*, not for one still in flight: a select that
+ * showed it while the workflow was being read would offer statuses nobody has
+ * checked, with no note saying so, in the one window where the note is the
+ * whole point.
+ */
+test("a workflow read still in flight offers nothing yet", async () => {
+  let land!: (statuses: string[]) => void;
+  workflow = () => new Promise<string[]>((resolve) => (land = resolve));
+  const screen = render();
+  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  flushSync();
+
+  expect(screen.select(), "the board has answered and the workflow has not").toBeNull();
+  expect(screen.text()).not.toContain("offer unverified");
+
+  land(["In Review"]);
+  await vi.waitFor(() => expect(screen.select()).not.toBeNull());
+  expect(screen.options()).toEqual(["In Progress", "In Review"]);
+
+  screen.done();
+});
+
+/**
+ * A workflow that answered and has nowhere to go draws **no select** — and it
+ * must not be confused with a read that failed, which is why the two cases sit
+ * next to each other. An empty answer is a fact about this ticket; a failed
+ * read is a fact about the connection.
+ */
+test("a workflow with nowhere left to go draws no select and no note", async () => {
+  workflow = () => Promise.resolve([]);
+  const screen = render();
+  await vi.waitFor(() => expect(workflowCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  flushSync();
+
+  expect(screen.select()).toBeNull();
+  expect(screen.text()).not.toContain("offer unverified");
+
+  screen.done();
+});
+
+/**
+ * The read is not made where the source cannot move a ticket at all: such a
+ * source has no workflow and refuses the call by name (contract battery clause
+ * 8), so making it would be spending a round trip on an answer that is already
+ * known — and the select is absent for the reason it always was.
+ */
+test("no read where the adapter does not declare the transition op", async () => {
+  writeOps = ["comment"];
+  const screen = render();
+  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  flushSync();
+
+  expect(screen.select()).toBeNull();
+  expect(workflowCalls).toEqual([]);
 
   screen.done();
 });
@@ -271,6 +398,7 @@ test("a ticket in the terminal group shows No status, unselectable, and can stil
       ],
       sources: [{ source_id: "mock", statuses: ["To Do"] }],
     });
+  workflow = () => Promise.resolve(["To Do"]);
   const screen = render();
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   flushSync();
@@ -337,6 +465,7 @@ test("opening another ticket never leaves the previous one's status on screen", 
  * land on the second ticket's panel and offer a move against the wrong status.
  */
 test("a slow board answer from the previous ticket is discarded, not shown", async () => {
+  workflow = () => Promise.resolve(["In Progress"]);
   let first!: (board: MiniBoard) => void;
   board = () => new Promise<MiniBoard>((resolve) => (first = resolve));
   const screen = render();
@@ -375,21 +504,34 @@ test("a slow board answer from the previous ticket is discarded, not shown", asy
   screen.done();
 });
 
-test("no select where the adapter does not offer the transition op", async () => {
-  writeOps = ["comment"];
+/**
+ * What #498 buys, stated as the case that used to have no answer: a source
+ * whose corpus shows no status at all — a fresh instance, a room where every
+ * ticket sits in the terminal group — offered nothing before, because the offer
+ * was the corpus. The workflow knows better, and now it is asked.
+ */
+test("the workflow's offer stands where the corpus shows nothing", async () => {
+  board = () => Promise.resolve({ columns: [], sources: [] });
   const screen = render();
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   flushSync();
 
-  expect(screen.select()).toBeNull();
-  expect(screen.text()).toContain("Retry failed SEPA payouts");
+  expect(screen.options()).toEqual(["No status", "In Progress", "In Review", "Done"]);
+  expect(screen.text()).not.toContain("offer unverified");
 
   screen.done();
 });
 
-test("no select where the source's corpus has shown no status at all", async () => {
+/**
+ * And the other half: no workflow answer *and* no corpus is nothing to offer,
+ * which draws no select — the rule the panel has always followed, that an
+ * absence is honest and a disabled control claims there is something to do.
+ */
+test("no select where neither the workflow nor the corpus offers anything", async () => {
   board = () => Promise.resolve({ columns: [], sources: [] });
+  workflow = () => Promise.reject({ code: "unreachable", message: "no route", source_id: "mock" });
   const screen = render();
+  await vi.waitFor(() => expect(workflowCalls).toHaveLength(1));
   await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
   flushSync();
 
@@ -401,30 +543,41 @@ test("no select where the source's corpus has shown no status at all", async () 
 /**
  * Every other kind's detail is unchanged — the select is a ticket's.
  *
- * And unchanged means the read is not made either. The board read brings back
- * the whole of a source's cards; a note or a page can never show a select, so
- * making it there would be that cost paid for nothing, and an absence nobody
- * asserted is one a later refactor restores without noticing.
+ * And unchanged means **neither read is made**. The board read brings back the
+ * whole of a source's cards and the workflow read is a round trip to the
+ * source; a pull request, a build, a page and a monitor can never show a
+ * select, so making either there would be that cost paid for nothing — and an
+ * absence nobody asserted is one a later refactor restores without noticing.
+ *
+ * All four kinds and not one of them, because the gate is *is it a ticket*
+ * rather than a list of exceptions: a fixture of one kind would pass against a
+ * gate that excluded that one kind by name.
  */
-test("no select on a kind that is not a ticket", async () => {
+test.each([
+  ["pr", "mock:tidewater/payout-service#142", "Retry SEPA payouts"],
+  ["build", "mock:build:1187", "Nightly payout build"],
+  ["page", "mock:ENG-SEPA", "SEPA retry runbook"],
+  ["monitor", "mock:8", "payout-api"],
+])("no select and no read on a %s", async (kind, entityId, title) => {
   entity = () =>
     detail({
       row: {
-        entity_id: "mock:ENG-SEPA",
-        kind: "page",
+        entity_id: entityId,
+        kind,
         source_id: "mock",
-        title: "SEPA retry runbook",
+        title,
         updated_at: null,
         synced_at: "2026-08-22T14:30:00Z",
         path: null,
       },
     });
-  const screen = render("mock:ENG-SEPA", "page");
-  await vi.waitFor(() => expect(screen.text()).toContain("SEPA retry runbook"));
+  const screen = render(entityId, kind);
+  await vi.waitFor(() => expect(screen.text()).toContain(title));
   flushSync();
 
   expect(screen.select()).toBeNull();
   expect(boardCalls, "a kind with no select must not read the board").toEqual([]);
+  expect(workflowCalls, "a kind with no select must not read the workflow").toEqual([]);
 
   screen.done();
 });

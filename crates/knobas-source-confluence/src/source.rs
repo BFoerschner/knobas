@@ -228,6 +228,26 @@ impl Source for ConfluenceSource {
             ))),
         }
     }
+
+    /// Refused: Confluence has no workflow (#498).
+    ///
+    /// A page has versions, not statuses: what changes about it is its body
+    /// and who wrote which version, and there is no set of next states anybody
+    /// picks from. The three write ops this adapter declares are a reply, an
+    /// edit and a create, none of which moves a record along anything.
+    ///
+    /// **Refused rather than answered empty**, because the two say different
+    /// things: an empty answer is a ticket whose workflow has nowhere left to
+    /// go, and this is a kind with no workflow to ask about. A page's detail
+    /// makes no read at all -- it is gated on the descriptor's `transition`
+    /// op, which this adapter does not declare -- and contract battery clause
+    /// 8 is what holds the refusal in place for any other caller.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Err(SourceError::protocol(format!(
+            "the Confluence adapter has no workflow, so there are no reachable transitions to \
+             read for {entity:?}"
+        )))
+    }
 }
 
 #[cfg(test)]
