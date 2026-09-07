@@ -13,6 +13,7 @@
  *
  * So it is one function, and neither surface computes an address of its own.
  */
+import { addressOf as assetAddress } from "../assets/tree";
 import type { InboxItem } from "../ipc/entity";
 import { DEFAULT_CTX, hashFor } from "../shell/router.svelte";
 
@@ -25,7 +26,10 @@ import { DEFAULT_CTX, hashFor } from "../shell/router.svelte";
  * 61. Its `entity_id` is the asset the monitor watches (the monitor is the
  * item's *subject*, the other half of its key), and the Tree re-opens at that
  * asset's path with the monitor in the pane. A room detail over an asset would
- * be a slide-over with no estate around it.
+ * be a slide-over with no estate around it. Through the Tree's own
+ * {@link assetAddress} rather than a fourth spelling of that address: a module
+ * whose thesis is *one rule behind both doors* has no business hand-rolling
+ * the rule another module already owns.
  *
  * **A credential expiry has no entity, so its door is the inbox itself.** Its
  * subject is a source; inventing an `#/entity/<source id>` address would land
@@ -36,10 +40,10 @@ import { DEFAULT_CTX, hashFor } from "../shell/router.svelte";
  * `kind` is the mirror's word and the router's kind segment is the view's;
  * resolving one from the other is `get_entity`'s job and it already does it.
  *
- * Built with `hashFor` rather than a template string in every branch: entity
- * keys carry `#` and `/` (`acme/payouts#144`), and unencoded the first
- * truncates the fragment at the browser level and the second reads as another
- * path segment.
+ * Built with `hashFor` — directly here, and through `assets/tree` for the
+ * alert — rather than a template string in any branch: entity keys carry `#`
+ * and `/` (`acme/payouts#144`), and unencoded the first truncates the fragment
+ * at the browser level and the second reads as another path segment.
  *
  * The room in the detail route is {@link DEFAULT_CTX} and is not read:
  * `hashFor` drops the room for a detail address, and `router.go` parses the
@@ -48,9 +52,7 @@ import { DEFAULT_CTX, hashFor } from "../shell/router.svelte";
  */
 export function addressOf(item: InboxItem): string {
   if (!item.entity_id) return hashFor({ view: "inbox", ctx: null });
-  if (item.category === "alert") {
-    return hashFor({ view: "assets", tab: "tree", assetId: item.entity_id });
-  }
+  if (item.category === "alert") return assetAddress({ id: item.entity_id });
   return hashFor({
     view: "room",
     ctx: DEFAULT_CTX,

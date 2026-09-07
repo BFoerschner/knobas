@@ -1356,8 +1356,9 @@ export function createActionItemTicket(
 /**
  * What `notify` shows — `knobas_app::notify::NotificationDraft` (#339).
  *
- * `address` is where the click goes, the notifier store's own `addressOf`
- * hash; the backend carries it unread and hands it back on
+ * `address` is where the click goes, the inbox's own `addressOf` hash
+ * (`lib/inbox/address.ts`, shared with the inbox row's *Open* since #447);
+ * the backend carries it unread and hands it back on
  * `EVENTS.notificationClicked`, so both ends of the click path stay the
  * frontend's.
  */
