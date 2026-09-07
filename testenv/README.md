@@ -1236,9 +1236,10 @@ answer against the bundle it built, and how it reads the accessibility probe.
    `/Applications/knobas.app`. Which copy LS prefers among several carrying
    one identifier is not a documented API and the installed one wins, so the
    harness refuses rather than launching a copy LS does not name. Move or
-   remove the installed knobas for the length of the run. The harness never
-   moves it for you, and it re-registers whatever was registered before on its
-   way out.
+   remove the installed knobas for the length of the run — that is the
+   runner's job, not the harness's, and #525 carries it as a precondition. The
+   harness never moves it for you, and it re-registers whatever was registered
+   before on its way out.
 
 5. **`swiftc`**, from the Command Line Tools. The accessibility helper is one
    Swift file compiled into a scratch directory on each run (about 2 s);
@@ -1249,12 +1250,20 @@ points back at this section, and exits non-zero.
 
 ### What is not witnessed yet
 
-As of 2026-09-08 **no green driver run exists**. The dev Mac has been locked
-since 22:47 CEST with no HID input for nearly three hours, and Björn is away
-for the milestone; the harness refuses at its first probe, which is the
-correct behaviour and is not a witness of the ⌘K assertion. Three things are
-therefore still open, and none should be read as proven by this file
-existing:
+As of 2026-09-08 **no green driver run exists**, and the debt has a number:
+**issue #525**, *Desktop witness: the first unlocked run*, which carries the
+run for every driver this harness gains and which the v1.5 exit waits on. The
+dev Mac has been locked since 22:47 CEST with no HID input for nearly three
+hours, and Björn is away for the milestone; the harness refuses at its first
+probe, which is the correct behaviour and is **not** a witness of the ⌘K
+assertion — a refusal is not a witness of the assertion. The deputy's ruling
+of 2026-09-08 on #500 settles what follows from that: the ticket merges with
+its run-criterion open and disclosed, nothing stands in for the run (no fake,
+no dry-run mode, no hand checklist — ADR-0013), and ADR-0016 now carries the
+dated consequence that *"No human step" is not "no human precondition"*.
+
+Three things are therefore still open, and none should be read as proven by
+this file existing:
 
 * whether a Tauri window's `WKWebView` exposes the launcher's input to the
   accessibility API at all. Some web views build their tree only when an
@@ -1279,6 +1288,10 @@ What *is* witnessed, on 2026-09-08, and by what:
   prerequisite 4 above.
 
 Nothing between the probe and the quit has run at all.
+
+**A merge-manager re-running `just desktop-witness` on this Mac gets the same
+`screen-locked` refusal, exit 1.** That is the expected result here, not a
+regression; #525 is where it stops being.
 
 ## Scripts
 
