@@ -52,9 +52,14 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
-  import { launcherHome as defaultHome, search as defaultSearch } from "../ipc";
+  import {
+    launcherHome as defaultHome,
+    resolveUrl as defaultResolveUrl,
+    search as defaultSearch,
+  } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import { addressOf as assetAddress, routeAddressOf as routeAddress } from "../assets/tree";
+  import { openExternal as realOpenExternal } from "../shell/open-external";
   import { hashFor } from "../shell/router.svelte";
   import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
@@ -79,6 +84,7 @@
     ontimer,
     ports,
     now,
+    openExternal = realOpenExternal,
   }: {
     open?: boolean;
     /**
@@ -152,17 +158,36 @@
     /**
      * The IPC, injectable. Production passes nothing and gets the real
      * bridge; a test passes fakes and needs no `window.__TAURI_INTERNALS__`.
+     *
+     * **Partial**, since #496: a caller overrides the ports it cares about and
+     * the rest stay the real ones. What that costs is a test that forgets a
+     * port reaching the bridge, which throws where it is used; what it buys is
+     * that a port added here is a *compile* error in the defaults below rather
+     * than a silently missing capability, which is the failure `ontimer`
+     * records above.
      */
-    ports?: SessionPorts;
+    ports?: Partial<SessionPorts>;
     /** Injectable clock, so the age column is testable. */
     now?: Date | undefined;
+    /**
+     * How *Open in browser* on an unresolved paste reaches the OS. Injectable
+     * for the same reason `AssetsView`'s is: the assertion is that the button
+     * hands the **raw URL** to the shared opener, and a test cannot watch a
+     * real one.
+     */
+    openExternal?: (url: string) => Promise<void>;
   } = $props();
 
   // svelte-ignore state_referenced_locally
   // The bridge is read once, on purpose: a `Session` owns a debounce timer and
   // a request counter, so swapping its ports mid-life would drop both. Nothing
   // changes this prop -- production omits it and tests pass fakes at mount.
-  const session = new Session(ports ?? { search: defaultSearch, launcherHome: defaultHome });
+  const session = new Session({
+    search: defaultSearch,
+    launcherHome: defaultHome,
+    resolveUrl: defaultResolveUrl,
+    ...ports,
+  });
 
   /**
    * The credential health the chips and the result rows are drawn from.
@@ -380,6 +405,45 @@
     }
   }
 
+  /**
+   * A pasted link that resolved goes straight to the entity (#496, spec #491
+   * story 9: *"one paste away from its detail"*).
+   *
+   * An effect rather than a call inside the session, for the division this
+   * component's header states: the session says *what the box holds*, and
+   * navigating is the shell's, reached through `onnavigate` exactly as a
+   * chosen row is. The launcher closes first so the address lands on a shell
+   * with nothing over it.
+   *
+   * `session.dispose()` inside `close()` forgets the paste, which is what
+   * stops this effect from firing a second time on the same answer.
+   */
+  $effect(() => {
+    const found = session.urlAnswer?.match;
+    if (!found) return;
+    const hash = addressForEntity(found.kind, found.entity_id);
+    close();
+    onnavigate(hash);
+  });
+
+  /**
+   * *Open in browser* on a link the mirror does not hold — the other half of
+   * story 10, so that a paste never dead-ends.
+   *
+   * The **raw** URL, the one the reader pasted, and not the normalised value
+   * the resolver compared: normalisation exists to make two spellings match a
+   * stored row, and handing a stripped fragment to the browser would open the
+   * page somewhere other than where the link pointed.
+   */
+  async function openTheMiss(url: string) {
+    try {
+      await openExternal(url);
+      close();
+    } catch (cause) {
+      session.error = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
   function activate(row: LauncherRow) {
     if (row.kind === "list") {
       session.set(`list:${row.list.id}`);
@@ -422,6 +486,14 @@
         event.preventDefault();
         if (chain) {
           chain.actions[chain.selected]?.run();
+          return;
+        }
+        // A miss has one thing to do and no row to do it from, so the key
+        // that opens everything else opens it too -- otherwise a paste that
+        // missed would be the one state in this box the keyboard cannot leave.
+        const missed = session.mode === "url" && session.urlAnswer?.match === null;
+        if (missed && session.url) {
+          void openTheMiss(session.url);
           return;
         }
         const row = session.current;
@@ -504,6 +576,23 @@
       <div class="rlist" role="listbox" tabindex="-1" aria-label="Results">
         {#if session.error}
           <p class="none err">{session.error}</p>
+        {:else if session.mode === "url"}
+          <!--
+            A pasted link. A hit never draws: the effect above navigates on the
+            answer, so what is left here is the wait and the miss.
+          -->
+          {#if !session.urlAnswer}
+            <p class="none">Looking up the link…</p>
+          {:else}
+            <div class="miss">
+              <p class="none">Not in the mirror</p>
+              <p class="none raw">{session.url}</p>
+              <button class="pfx" onclick={() => session.url && void openTheMiss(session.url)}>
+                <span class="nm">Open in browser</span>
+                <span class="s">The link is not in the local index — open it where it lives.</span>
+              </button>
+            </div>
+          {/if}
         {:else if session.mode === "board"}
           {#if session.home}
             <Board
@@ -667,6 +756,13 @@
   }
   .pfx .nm {
     color: var(--text);
+  }
+  /* The paste that missed: a sentence, the link as it was typed, and the one
+     thing left to do with it. */
+  .miss .raw {
+    padding-top: 0;
+    font: 400 11px var(--mono);
+    word-break: break-all;
   }
   .none {
     padding: 14px 12px;

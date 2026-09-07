@@ -23,8 +23,15 @@ export type LauncherRow =
   | { kind: "action"; id: string; action: LauncherAction }
   | { kind: "syntax"; id: string; entry: SyntaxEntry };
 
-/** Which panel the body draws. */
-export type LauncherMode = "board" | "results" | "actions" | "help";
+/**
+ * Which panel the body draws.
+ *
+ * `"url"` is the one the *session* decides rather than `modeOf`: the box holds
+ * an absolute URL, so what is on screen is a link being resolved, not a query
+ * being answered (#496). It has no selectable rows — a hit navigates on its
+ * own and a miss offers one button — so `flatten` returns nothing for it.
+ */
+export type LauncherMode = "board" | "results" | "actions" | "help" | "url";
 
 /**
  * The panel a state is in.
@@ -61,6 +68,10 @@ export function flatten(input: {
   syntax: readonly SyntaxEntry[];
 }): LauncherRow[] {
   switch (input.mode) {
+    // A pasted link is not a list: the entity it names is opened, and a link
+    // the mirror does not hold offers *Open in browser* and nothing to walk.
+    case "url":
+      return [];
     case "help":
       return input.syntax.map((entry) => ({
         kind: "syntax",
