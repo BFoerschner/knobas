@@ -202,6 +202,7 @@ mod tests {
             base_url: "http://127.0.0.1:3001/".to_owned(),
             auth: Some(AuthMethod::ApiToken),
             secret: secret.map(str::to_owned),
+            account: None,
             config,
         }
     }

@@ -541,6 +541,26 @@ pub enum WriteOp {
         base_version: i64,
         body: String,
     },
+    /// Identifier `"pause_monitor"`. Stop a monitor checking (M4.1, issue
+    /// #452). `entity` is the **monitor** (`kuma:8`).
+    ///
+    /// No second field, and the absence is the decision: Uptime Kuma's
+    /// `pauseMonitor` takes a monitor id and nothing else -- no duration, no
+    /// reason, no note. A `until` or `reason` here would be a field knobas
+    /// asks a reader for and then throws away, and a *silence for an hour*
+    /// that knobas kept locally would be a scheduler this milestone does not
+    /// have (spec #427, *Out of scope*).
+    PauseMonitor { entity: String },
+    /// Identifier `"resume_monitor"`. Start a paused monitor checking again
+    /// (M4.1, issue #452). `entity` is the **monitor**.
+    ///
+    /// The pair of [`PauseMonitor`](WriteOp::PauseMonitor) and not one op with
+    /// a flag: an action bar renders one button per identifier, a queue row
+    /// records which act is owed in its `op` column, and *pause* and *resume*
+    /// are two acts a reader chooses between rather than one act with an
+    /// argument. It is also what lets a descriptor offer one without the
+    /// other, which is what a source with a read-only account would declare.
+    ResumeMonitor { entity: String },
 }
 
 impl WriteOp {
@@ -575,6 +595,8 @@ impl WriteOp {
             WriteOp::LogWork { .. } => "log_work",
             WriteOp::CreatePage { .. } => "create_page",
             WriteOp::UpdatePage { .. } => "update_page",
+            WriteOp::PauseMonitor { .. } => "pause_monitor",
+            WriteOp::ResumeMonitor { .. } => "resume_monitor",
         }
     }
 }
@@ -903,6 +925,12 @@ mod tests {
                 base_version: 3,
                 body: "<h2>Backoff policy</h2><p>base 30 s.</p>".into(),
             },
+            WriteOp::PauseMonitor {
+                entity: "kuma:8".into(),
+            },
+            WriteOp::ResumeMonitor {
+                entity: "kuma:8".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -916,7 +944,9 @@ mod tests {
                 | WriteOp::RerunBuild { .. }
                 | WriteOp::LogWork { .. }
                 | WriteOp::CreatePage { .. }
-                | WriteOp::UpdatePage { .. } => {}
+                | WriteOp::UpdatePage { .. }
+                | WriteOp::PauseMonitor { .. }
+                | WriteOp::ResumeMonitor { .. } => {}
             }
         }
         probes

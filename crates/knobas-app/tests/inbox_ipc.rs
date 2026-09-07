@@ -310,13 +310,7 @@ async fn harness() -> Harness {
     let secrets = MemoryStore::new();
     for id in ["forge", "tracker", "wiki"] {
         secrets
-            .put(
-                id,
-                &Secret {
-                    kind: AuthMethod::Pat,
-                    value: "tok".to_owned(),
-                },
-            )
+            .put(id, &Secret::just(AuthMethod::Pat, "tok"))
             .unwrap();
     }
 

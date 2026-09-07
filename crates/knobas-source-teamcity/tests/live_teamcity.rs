@@ -193,6 +193,7 @@ impl Live {
             base_url: base_url.to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some(self.secret.clone()),
+            account: None,
             config,
         }) {
             Ok(s) => s,

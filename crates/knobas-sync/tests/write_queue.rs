@@ -475,13 +475,7 @@ async fn harness() -> Harness {
     .unwrap();
     let secrets = MemoryStore::new();
     secrets
-        .put(
-            &source,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: "tok".to_owned(),
-            },
-        )
+        .put(&source, &Secret::just(AuthMethod::Pat, "tok"))
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));
@@ -933,6 +927,12 @@ fn write_op_probes() -> Vec<WriteOp> {
             base_version: 3,
             body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
         },
+        WriteOp::PauseMonitor {
+            entity: "kuma:8".to_owned(),
+        },
+        WriteOp::ResumeMonitor {
+            entity: "kuma:8".to_owned(),
+        },
     ]
 }
 
@@ -958,7 +958,9 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::RerunBuild { .. }
             | WriteOp::LogWork { .. }
             | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. } => op.identifier(),
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1204,7 +1206,14 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // is the address the artefact is found by. #353 decided it and
             // `UNCLAIMED_OPS`'s doc argues it.
             | WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. } => false,
+            | WriteOp::CreatePullRequest { .. }
+            // A monitor's own state, changed at the source: pausing a check
+            // leaves a *paused check*, which is the thing the reader asked
+            // for and which the next poll reads back. Nothing new exists that
+            // knobas cannot name -- and withdrawing one that never went
+            // leaves the monitor exactly as it was.
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. } => false,
         };
         assert_eq!(
             flusher::UNCLAIMED_OPS.contains(&op.identifier()),

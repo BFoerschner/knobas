@@ -351,13 +351,7 @@ impl Harness {
             .await
             .expect("the source row is written");
             secrets
-                .put(
-                    id,
-                    &knobas_secrets::Secret {
-                        kind: AuthMethod::Pat,
-                        value: "token".to_owned(),
-                    },
-                )
+                .put(id, &knobas_secrets::Secret::just(AuthMethod::Pat, "token"))
                 .expect("a credential");
         }
 

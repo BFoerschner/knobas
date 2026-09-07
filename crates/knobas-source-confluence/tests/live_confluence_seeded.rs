@@ -342,6 +342,7 @@ impl Seeded {
             base_url: base_url.to_owned(),
             auth: Some(auth),
             secret: Some(secret.to_owned()),
+            account: None,
             config,
         }) {
             Ok(s) => s,

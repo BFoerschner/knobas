@@ -105,10 +105,7 @@ async fn app(jira_url: &str) -> SourcesState {
     secrets
         .put(
             JIRA,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: knobas_mockd::JIRA_TOKEN.to_owned(),
-            },
+            &Secret::just(AuthMethod::Pat, knobas_mockd::JIRA_TOKEN),
         )
         .expect("the Jira token is stored");
 

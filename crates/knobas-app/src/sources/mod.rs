@@ -139,9 +139,56 @@ pub struct SourcePatch {
 }
 
 /// A typed credential on its way in. Never logged, never returned.
-#[derive(Clone, serde::Deserialize)]
+///
+/// Both fields are optional and **absent means "keep what is stored"**
+/// (issue #452). That is one rule, and it is read in both directions: a reader
+/// adding an account to an Uptime Kuma cannot retype an API key Kuma showed
+/// them once, and a reader replacing an expired key must not silently lose the
+/// account beside it. `add_source` is the one caller for which "keep" has no
+/// meaning -- nothing is stored yet -- and it refuses a `value` of `None` by
+/// name.
+#[derive(Clone, Default, serde::Deserialize)]
 pub struct SecretInput {
-    pub value: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    /// The optional second credential of the version-2 keychain envelope: a
+    /// username and password stored *beside* [`value`](Self::value), not
+    /// instead of it. Only Uptime Kuma reads one today (spec #427, story 69).
+    #[serde(default)]
+    pub account: Option<AccountInput>,
+}
+
+/// A typed account on its way in -- the wire twin of
+/// [`knobas_source::instance::Account`].
+///
+/// Its own type rather than that one re-used, because this is an IPC argument
+/// and the SPI's struct is a frozen surface: the day a stored account grows a
+/// field, the form and the keychain should be able to move one at a time.
+#[derive(Clone, serde::Deserialize)]
+pub struct AccountInput {
+    pub username: String,
+    pub password: String,
+}
+
+impl SecretInput {
+    /// A credential typed with no account beside it -- what every form but
+    /// Uptime Kuma's submits, and what every caller wrote before issue #452.
+    #[must_use]
+    pub fn of(value: impl Into<String>) -> Self {
+        Self {
+            value: Some(value.into()),
+            account: None,
+        }
+    }
+}
+
+impl From<AccountInput> for knobas_source::instance::Account {
+    fn from(input: AccountInput) -> Self {
+        Self {
+            username: input.username,
+            password: input.password,
+        }
+    }
 }
 
 /// Hand-written for the reason `knobas_secrets::Secret`'s is: a derived
@@ -151,6 +198,19 @@ impl std::fmt::Debug for SecretInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SecretInput")
             .field("value", &"<redacted>")
+            .field("account", &self.account)
+            .finish()
+    }
+}
+
+/// The username survives and the password does not, for
+/// [`knobas_source::instance::Account`]'s reason: a refused login has to be
+/// able to say *as whom*.
+impl std::fmt::Debug for AccountInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountInput")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
             .finish()
     }
 }

@@ -47,6 +47,28 @@ fn template_for(
         .ok_or_else(|| SourcesError::UnknownAdapter(kind.to_owned()))
 }
 
+/// What the keychain holds for one source, or what a draft typed: the
+/// ordinary secret and the optional account beside it (issue #452).
+///
+/// A pair rather than two parameters on [`instance_from`], because the two
+/// always travel together -- they are one keychain item -- and because a
+/// seventh and eighth positional `Option` on that function is exactly how a
+/// caller comes to pass the account where the secret goes.
+#[derive(Default)]
+struct Credential {
+    secret: Option<String>,
+    account: Option<knobas_source::instance::Account>,
+}
+
+impl From<knobas_secrets::Secret> for Credential {
+    fn from(stored: knobas_secrets::Secret) -> Self {
+        Self {
+            secret: Some(stored.value),
+            account: stored.account,
+        }
+    }
+}
+
 /// The instance an adapter is built from.
 ///
 /// One place, so `crud` and the scheduler route and shape instances
@@ -58,7 +80,7 @@ fn instance_from(
     display_name: &str,
     base_url: &str,
     auth: Option<knobas_source::AuthMethod>,
-    secret: Option<String>,
+    credential: Credential,
     config: serde_json::Value,
 ) -> SourceInstance {
     SourceInstance {
@@ -67,9 +89,58 @@ fn instance_from(
         display_name: display_name.to_owned(),
         base_url: base_url.to_owned(),
         auth,
-        secret,
+        secret: credential.secret,
+        account: credential.account,
         config,
     }
+}
+
+/// The write ops **this instance** offers, which is not always what its
+/// adapter kind offers (issue #452).
+///
+/// `list_adapters` serves a descriptor per adapter *kind*, and for every
+/// source but one that is the whole answer: a Jira offers what the Jira
+/// adapter offers. Uptime Kuma is the exception the SPI always allowed and
+/// nothing had yet used -- `Source::descriptor` is a method on a *built*
+/// instance -- because whether it can write at all depends on a credential:
+/// with only the API key it reads, and with the account beside it it can also
+/// pause and resume (spec #427, story 69). So the honest answer needs the
+/// keychain, and this is the one place that asks for it.
+///
+/// **Answers an empty list rather than failing** for a source whose adapter
+/// cannot be built -- a missing credential, a configuration the adapter
+/// refuses, an adapter kind no longer compiled in. A surface deciding which
+/// buttons to draw must not be an error path, and "offers nothing" is the
+/// right drawing for every one of those states.
+///
+/// # Errors
+/// [`SourcesError::Secret`] if the credential store itself failed -- which is
+/// not the same as a source having no credential, and must not be swallowed
+/// into "offers nothing".
+pub async fn instance_write_ops(
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    cfg: &knobas_sync::config::SourceConfigRow,
+) -> Result<Vec<String>, SourcesError> {
+    let credential = match cfg.auth_kind.method() {
+        None => Credential::default(),
+        Some(_) => match knobas_secrets::spawn::get(secrets, &cfg.id).await? {
+            Some(stored) => stored.into(),
+            None => return Ok(Vec::new()),
+        },
+    };
+    let built = registry.build(instance_from(
+        &cfg.id,
+        &cfg.adapter_kind,
+        &cfg.display_name,
+        &cfg.base_url,
+        cfg.auth_kind.method(),
+        credential,
+        cfg.config.clone(),
+    ));
+    Ok(built
+        .map(|source| source.descriptor().write_ops)
+        .unwrap_or_default())
 }
 
 /// Create a source: secret first, then the row.
@@ -105,12 +176,20 @@ pub async fn add(
         )));
     }
 
+    // The Add-source form always types a credential; `SecretInput::value` is
+    // an `Option` for the *re-enter* path, where absent means "keep the one
+    // that is stored" -- and there is nothing stored for a source that does
+    // not exist yet.
+    let typed = input.secret.value.clone().ok_or_else(|| {
+        SourcesError::Invalid("a new source needs the credential typed in".to_owned())
+    })?;
     knobas_secrets::spawn::put(
         secrets,
         &input.id,
         knobas_secrets::Secret {
             kind: input.auth_kind,
-            value: input.secret.value.clone(),
+            value: typed,
+            account: input.secret.account.clone().map(Into::into),
         },
     )
     .await?;
@@ -317,12 +396,39 @@ pub async fn set_secret(
         .method()
         .ok_or_else(|| SourcesError::Invalid(format!("source {id:?} needs no credential")))?;
 
+    // **Absent means keep, for both halves** (issue #452). The form submits
+    // what the reader typed, and a reader adding an account to a Kuma has no
+    // way to retype an API key Kuma showed them once -- story 69's "adding the
+    // account flips both without re-entering the key" is that sentence. The
+    // other direction is the same rule read the other way: re-entering an
+    // expired key must not silently throw away the account beside it, which is
+    // what "absent means clear" would do to the one credential the form cannot
+    // show. Removing an account is therefore not something this call can do;
+    // deleting and re-adding the source is, and it is the honest cost of a
+    // form that may never read a credential back.
+    let stored = knobas_secrets::spawn::get(secrets, id).await?;
+    let value = match (secret.value.clone(), stored.as_ref()) {
+        (Some(typed), _) => typed,
+        (None, Some(kept)) => kept.value.clone(),
+        (None, None) => {
+            return Err(SourcesError::Invalid(format!(
+                "source {id:?} has no stored credential to keep -- type one in"
+            )));
+        }
+    };
+    let account = secret
+        .account
+        .clone()
+        .map(Into::into)
+        .or_else(|| stored.and_then(|kept| kept.account));
+
     knobas_secrets::spawn::put(
         secrets,
         id,
         knobas_secrets::Secret {
             kind: method,
-            value: secret.value.clone(),
+            value: value.clone(),
+            account: account.clone(),
         },
     )
     .await?;
@@ -333,7 +439,10 @@ pub async fn set_secret(
         &cfg.display_name,
         &cfg.base_url,
         Some(method),
-        Some(secret.value),
+        Credential {
+            secret: Some(value),
+            account,
+        },
         cfg.config.clone(),
     ))?;
     let outcome = source.test_connection().await;
@@ -442,21 +551,36 @@ pub async fn test(
     };
     let template = template_for(registry, &kind)?;
 
-    let secret = match (&draft.secret, &draft.source_id) {
+    // The stored credential, read once: it is both the fallback for a draft
+    // that typed no secret and the source of the account a draft that typed
+    // only an account is testing *against* (issue #452).
+    let stored = match &draft.source_id {
+        Some(id) if auth.is_some() => knobas_secrets::spawn::get(secrets, id).await?,
+        _ => None,
+    };
+    let typed_value = draft.secret.as_ref().and_then(|typed| typed.value.clone());
+    let secret = match (typed_value, &stored, &draft.source_id) {
         // A typed secret is the point of *Test* before *Save*: it is held in
         // memory for this call and written nowhere.
-        (Some(typed), _) => Some(typed.value.clone()),
+        (Some(typed), _, _) => Some(typed),
         // No typed secret and a saved source: the stored one. Absent is an
         // error rather than an anonymous attempt -- "you never entered one" is
         // the `missing_secret` offer, not a 401.
-        (None, Some(id)) if auth.is_some() => Some(
-            knobas_secrets::spawn::get(secrets, id)
-                .await?
-                .ok_or(knobas_secrets::SecretError::NotFound)?
-                .value,
-        ),
-        (None, _) => None,
+        (None, Some(kept), _) => Some(kept.value.clone()),
+        (None, None, Some(_)) if auth.is_some() => {
+            return Err(knobas_secrets::SecretError::NotFound.into());
+        }
+        (None, None, _) => None,
     };
+    // Same rule as `set_secret`: a typed account wins, and absent keeps the
+    // stored one -- so *Test* on a saved source exercises the credential the
+    // scheduled run will use, account included.
+    let account = draft
+        .secret
+        .as_ref()
+        .and_then(|typed| typed.account.clone())
+        .map(Into::into)
+        .or_else(|| stored.and_then(|kept| kept.account));
 
     // The instance id only matters to an adapter that emits items; nothing here
     // does. A draft for a saved source uses its real id all the same, so an
@@ -471,7 +595,7 @@ pub async fn test(
         display_name,
         &base_url,
         auth,
-        secret,
+        Credential { secret, account },
         config,
     ))?;
 

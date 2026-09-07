@@ -186,7 +186,9 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::TriggerBuild { entity }
         | WriteOp::RerunBuild { entity }
         | WriteOp::LogWork { entity, .. }
-        | WriteOp::UpdatePage { entity, .. } => entity,
+        | WriteOp::UpdatePage { entity, .. }
+        | WriteOp::PauseMonitor { entity }
+        | WriteOp::ResumeMonitor { entity } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -848,6 +850,18 @@ mod tests {
                     entity: "teamcity:build:1187".to_owned(),
                 },
                 "teamcity:build:1187",
+            ),
+            (
+                WriteOp::PauseMonitor {
+                    entity: "kuma:8".to_owned(),
+                },
+                "kuma:8",
+            ),
+            (
+                WriteOp::ResumeMonitor {
+                    entity: "kuma:8".to_owned(),
+                },
+                "kuma:8",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

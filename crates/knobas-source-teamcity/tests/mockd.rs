@@ -42,6 +42,7 @@ fn instance(base_url: &str, config: serde_json::Value) -> SourceInstance {
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+        account: None,
         config,
     }
 }

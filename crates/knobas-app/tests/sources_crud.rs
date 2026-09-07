@@ -162,9 +162,7 @@ fn a_new_source(id: &str) -> NewSource {
         // in `crud` parses the blob. What validates it is the adapter, at build
         // time, which is where a configuration mistake is worth catching.
         config: serde_json::json!({ "tombstone": false }),
-        secret: SecretInput {
-            value: "pat-one".to_owned(),
-        },
+        secret: SecretInput::of("pat-one"),
         sync_interval_secs: 300,
         enabled: true,
     }
@@ -293,9 +291,7 @@ async fn a_failed_insert_leaves_no_orphaned_keychain_item() {
     // Same id again: the primary key refuses it.
     let err = sources::crud::add(&f.pool, &f.secrets, &f.registry, {
         let mut second = a_new_source(&f.id);
-        second.secret = SecretInput {
-            value: "pat-two".into(),
-        };
+        second.secret = SecretInput::of("pat-two");
         second
     })
     .await
@@ -410,9 +406,7 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         &f.secrets,
         &f.registry,
         &f.id,
-        SecretInput {
-            value: "pat-two".into(),
-        },
+        SecretInput::of("pat-two"),
     )
     .await
     .unwrap();
@@ -474,9 +468,7 @@ async fn testing_a_draft_writes_nothing_at_all() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "typed-but-not-saved".into(),
-            }),
+            secret: Some(SecretInput::of("typed-but-not-saved")),
         },
     )
     .await
@@ -710,12 +702,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         "a command that reads a secret must not exist"
     );
 
-    let shown = format!(
-        "{:?}",
-        SecretInput {
-            value: "hunter2".into()
-        }
-    );
+    let shown = format!("{:?}", SecretInput::of("hunter2"));
     assert!(
         !shown.contains("hunter2"),
         "SecretInput leaked in Debug: {shown}"
@@ -784,9 +771,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
         &f.secrets,
         &refusing,
         &f.id,
-        SecretInput {
-            value: "still-wrong".into(),
-        },
+        SecretInput::of("still-wrong"),
     )
     .await
     .unwrap();
@@ -847,9 +832,7 @@ async fn an_unreachable_source_does_not_blame_the_credential_or_release_the_back
         &f.secrets,
         &refusing,
         &f.id,
-        SecretInput {
-            value: "probably-fine".into(),
-        },
+        SecretInput::of("probably-fine"),
     )
     .await
     .unwrap();
@@ -914,7 +897,7 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
             base_url: String::new(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput { value: "x".into() }),
+            secret: Some(SecretInput::of("x")),
         },
     )
     .await
@@ -951,9 +934,7 @@ async fn a_discovered_config_value_reaches_the_report() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "typed-but-not-saved".into(),
-            }),
+            secret: Some(SecretInput::of("typed-but-not-saved")),
         },
     )
     .await
@@ -982,9 +963,7 @@ async fn a_failed_test_discovers_nothing() {
             base_url: "https://jira.example.invalid".into(),
             auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
-            secret: Some(SecretInput {
-                value: "refused".into(),
-            }),
+            secret: Some(SecretInput::of("refused")),
         },
     )
     .await

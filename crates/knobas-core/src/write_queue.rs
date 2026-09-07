@@ -346,6 +346,8 @@ pub const PROJECTED_OPS: &[&str] = &[
     "log_work",
     "create_page",
     "update_page",
+    "pause_monitor",
+    "resume_monitor",
 ];
 
 /// What `op` counts as its target having changed.
@@ -403,7 +405,7 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
-/// `"create_page"`. These do not
+/// `"create_page"`, `"pause_monitor"`, `"resume_monitor"`. These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
 /// container is not a change to what the write would replace -- there is
@@ -424,6 +426,32 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// the two versions the hold dialog would show them would differ in a comment
 /// that has nothing to do with the time. What does still hold it is the ticket
 /// leaving the mirror -- there is then nothing to log against.
+///
+/// **`"pause_monitor"` and `"resume_monitor"` are in that group for a reason
+/// of their own** (issue #452), and it is the only entry here where liveness
+/// is not the weaker reading but the *exact* question. Through Uptime Kuma's
+/// `/metrics` -- the one door its read half has -- **a paused monitor is not
+/// published at all**, so the adapter tombstones it and it leaves the mirror
+/// (`knobas_source_kuma::cursor`). "The target stopped being live" and
+/// "somebody already paused it" are therefore the same observation, which is
+/// precisely what a queued pause must be held on. The whole-record shape would
+/// be worse than conservative, it would be unusable: Kuma writes a new
+/// response time for every monitor on every heartbeat, so a `payload` snapshot
+/// taken at queue time differs from the one at flush time on **every** write
+/// that outlives one poll -- a hold on all of them, which is not a false hold
+/// in the safe direction but a queue that never delivers.
+///
+/// Both ops get the same shape and it reads differently in each direction,
+/// which is the intended behaviour rather than an oversight. A *pause* queued
+/// against a live monitor holds if the monitor vanished in between -- somebody
+/// got there first. A *resume* is queued against a monitor that is already
+/// tombstoned, so it projects `{"live": false}` at queue time and again at
+/// flush time, which is equal, and it sends -- the same reading a create's
+/// unmirrored container gets, and for the same reason. What it does not do is
+/// tell a *paused* monitor from a *deleted* one, because nothing on this
+/// channel can: `/metrics` publishes neither. A resume aimed at a monitor
+/// somebody deleted goes to Kuma and comes back refused by name, which is the
+/// source's answer to give (ADR-0004) and not a hold to invent here.
 ///
 /// `"create_page"` is in that group for the additive reason and not by
 /// analogy: a new page goes *beside* whatever else sits under its parent, so a
@@ -491,7 +519,9 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "trigger_build"
         | "rerun_build"
         | "log_work"
-        | "create_page" => serde_json::json!({
+        | "create_page"
+        | "pause_monitor"
+        | "resume_monitor" => serde_json::json!({
             "op": op,
             "live": live,
         }),

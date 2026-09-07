@@ -236,13 +236,7 @@ async fn harness() -> Harness {
     .unwrap();
     let secrets = MemoryStore::new();
     secrets
-        .put(
-            &source,
-            &Secret {
-                kind: AuthMethod::Pat,
-                value: "tok".to_owned(),
-            },
-        )
+        .put(&source, &Secret::just(AuthMethod::Pat, "tok"))
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));

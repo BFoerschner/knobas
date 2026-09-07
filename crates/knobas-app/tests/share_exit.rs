@@ -679,9 +679,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         &sharer_keys,
         sharer_engine.registry.as_ref(),
         JIRA,
-        knobas_app::sources::SecretInput {
-            value: env.password.clone(),
-        },
+        knobas_app::sources::SecretInput::of(env.password.clone()),
     )
     .await
     .expect("the sharer's credential is accepted by the real Jira");
@@ -762,9 +760,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         &colleague_keys,
         colleague_engine.registry.as_ref(),
         JIRA,
-        knobas_app::sources::SecretInput {
-            value: env.password.clone(),
-        },
+        knobas_app::sources::SecretInput::of(env.password.clone()),
     )
     .await
     .expect("the colleague enters their own credential");

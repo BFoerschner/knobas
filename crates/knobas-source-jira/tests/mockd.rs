@@ -30,6 +30,7 @@ fn instance(base_url: &str, secret: &str, config: serde_json::Value) -> SourceIn
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some(secret.to_owned()),
+        account: None,
         config,
     }
 }

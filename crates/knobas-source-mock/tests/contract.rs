@@ -542,6 +542,7 @@ async fn build_honours_the_instance_id() {
         base_url: String::new(),
         auth: None,
         secret: None,
+        account: None,
         config: serde_json::json!({}),
     };
     let source = knobas_source_mock::build(instance.clone()).expect("built");
@@ -575,6 +576,7 @@ async fn build_refuses_an_unusable_instance_id() {
             base_url: String::new(),
             auth: None,
             secret: None,
+            account: None,
             config: serde_json::json!({}),
         };
         assert!(
@@ -694,6 +696,7 @@ fn configured(config: serde_json::Value) -> knobas_source::instance::SourceInsta
         base_url: String::new(),
         auth: None,
         secret: None,
+        account: None,
         config,
     }
 }

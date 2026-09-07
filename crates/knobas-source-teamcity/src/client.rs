@@ -333,6 +333,7 @@ mod tests {
             base_url: mock.base_url(),
             auth: Some(knobas_source::AuthMethod::Pat),
             secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+            account: None,
             config: serde_json::json!({}),
         };
         let rest = HttpRest::new(&instance, &TeamCityConfig::default())

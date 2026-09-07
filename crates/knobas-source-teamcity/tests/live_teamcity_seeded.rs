@@ -271,6 +271,7 @@ impl Seeded {
             base_url: base_url.to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some(token.to_owned()),
+            account: None,
             config,
         }) {
             Ok(s) => s,

@@ -101,6 +101,7 @@ pub fn instance(base_url: String, key: &str) -> SourceInstance {
         base_url,
         auth: Some(AuthMethod::ApiToken),
         secret: Some(key.to_owned()),
+        account: None,
         config: serde_json::json!({}),
     }
 }

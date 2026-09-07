@@ -140,9 +140,7 @@ async fn an_unconfigured_source_cannot_be_reached() {
         &secrets,
         &registry,
         &missing,
-        knobas_app::sources::SecretInput {
-            value: "pat".to_owned(),
-        },
+        knobas_app::sources::SecretInput::of("pat"),
     )
     .await
     .expect_err("there is no such source");

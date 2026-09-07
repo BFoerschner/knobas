@@ -120,6 +120,7 @@ impl Env {
             base_url: self.url.clone(),
             auth: Some(AuthMethod::ApiToken),
             secret: Some(key.to_owned()),
+            account: None,
             config: serde_json::json!({}),
         })
         .expect("the adapter builds against the seeded container")

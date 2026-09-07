@@ -1014,10 +1014,7 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
     knobas_secrets::spawn::put(
         &sharer_secrets,
         &estate.source,
-        knobas_secrets::Secret {
-            kind: knobas_source::AuthMethod::Pat,
-            value: PAT.to_owned(),
-        },
+        knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, PAT),
     )
     .await
     .expect("the sharer's own credential");
@@ -1101,10 +1098,7 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
     knobas_secrets::spawn::put(
         &secrets,
         &estate.source,
-        knobas_secrets::Secret {
-            kind: knobas_source::AuthMethod::Pat,
-            value: "still-here".to_owned(),
-        },
+        knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "still-here"),
     )
     .await
     .expect("the credential this machine already holds");
