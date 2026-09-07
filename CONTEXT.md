@@ -228,7 +228,7 @@ One reading of one [monitor](#monitor) at one poll — its state, its response t
 _Avoid_: heartbeat (that is Uptime Kuma's word for its own check, and knobas' word for the app's own beat — see [passive attribution](#passive-attribution)), datapoint, metric
 
 **Alert**:
-A [monitor](#monitor)'s transition to down or warn, open until the monitor recovers; at most one open per monitor. Every open alert shows in the Assets view and the top strip; it reaches the [inbox](#inbox) only when some [context](#context) holds the affected asset, directly or through an ancestor. **Ack** is knobas-local — Uptime Kuma has no ack — and clears the inbox item while the alert stays open.
+A [monitor](#monitor)'s transition to down or warn, open until the monitor recovers; at most one open per monitor. Every open alert shows in the Assets view and the top strip; it reaches the [inbox](#inbox) only when some [context](#context) holds the affected asset, directly or through an ancestor. **Ack** is knobas-local — Uptime Kuma has no ack — and clears the inbox item while the alert stays open. **Only a return to *up* closes one**: a [sample](#sample) reading `pending` or `maintenance` neither opens an alert nor closes one, because silencing a check is not fixing it and an alert that closed itself when somebody paused the monitor would be knobas reporting a recovery nobody made. (Amended 2026-09-07, #444: `monitor_sample`'s state column allows two words beyond the down/warn/up vocabulary this entry was written in, and the #443 merge review left the reading of them open; this is it, and the health rollup takes the same one — both words colour nothing.)
 _Avoid_: incident, notification (bare), problem (that is the rolled-up count on a closed branch)
 
 ## Export
