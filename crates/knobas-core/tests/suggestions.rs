@@ -680,9 +680,15 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
         assert!(between(&entries, other, &watching).is_none(), "{why}");
     }
     for (id, why) in [
-        (&off_estate, "a monitor whose host no asset carries proposes nothing"),
+        (
+            &off_estate,
+            "a monitor whose host no asset carries proposes nothing",
+        ),
         (&addressless, "a monitor with no URL proposes nothing"),
-        (&not_a_monitor, "a repository is not a monitor, whatever its payload says"),
+        (
+            &not_a_monitor,
+            "a repository is not a monitor, whatever its payload says",
+        ),
     ] {
         assert!(
             entries
@@ -702,7 +708,13 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
 #[tokio::test]
 async fn a_monitor_proposes_the_asset_exposing_the_route_it_watches() {
     let pool = scratch().await;
-    let watching = monitor(&pool, "1", "kuma-status", Some("https://kuma.knobas.test/status")).await;
+    let watching = monitor(
+        &pool,
+        "1",
+        "kuma-status",
+        Some("https://kuma.knobas.test/status"),
+    )
+    .await;
 
     let proxy = asset(&pool, "caddy", None).await;
     route(&pool, &proxy, "kuma", "https://kuma.knobas.test/dashboard").await;
