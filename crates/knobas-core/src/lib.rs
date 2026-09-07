@@ -11,6 +11,7 @@ pub mod payload;
 pub mod project;
 pub mod start_work;
 pub mod suggest;
+pub mod web_url;
 pub mod write_queue;
 
 pub use error::CoreError;

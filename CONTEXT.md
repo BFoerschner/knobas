@@ -41,7 +41,7 @@ _Avoid_: container, space (as a synonym for project; it stays as Confluence's ow
 The whole-corpus report of every [project](#project) a source's live items show (`list_projects`), which is what the switcher builds project rooms from. Deliberately not a room's own read — that scans the newest 200 items and is a window, not a census, so a quiet project would silently lose its room. (#208)
 
 **Mirror**:
-The local synced copy of every source's data, with provenance. Readers only ever see its live items. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
+The local synced copy of every source's data, with provenance. Readers see its [live items](#live-item); the readers that reach past them are named under [Live item](#live-item), and each says why. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
 _Avoid_: cache, index
 
 **Item**:
@@ -92,11 +92,17 @@ Dropping a deleted source's items from the [Mirror](#mirror) and tombstoning the
 _Avoid_: sweep, cleanup, delete (entities are tombstoned, never deleted)
 
 **Tombstone**:
-Marking an item deleted-at-source while keeping the row. Tombstoned items leave every reader's view.
+Marking an item deleted-at-source while keeping the row. Tombstoned items leave every reader's view but the ones [Live item](#live-item) names.
 _Avoid_: delete, remove
 
 **Live item**:
-An item that is not tombstoned **and whose source is enabled** — the only thing any reader reads. Both halves are enforced by `sync.live_item`, never by a reader, so a reader cannot forget one. A source with no configuration row at all (`run_once` syncs unconfigured sources) is not "disabled": its items stay live. (#202) **One reader is exempt from the first half and from that half only**: the [Monitors](#monitors) tab's roster (`assets::monitor_roster`, #448) reads `sync.item` and keeps the enabled clause itself, because a *paused* monitor **is** a tombstone — Uptime Kuma drops it from `/metrics` and the adapter tombstones it — and a roster that inherited the view would silently lose the Paused chip and the monitor's history with it. It is the only such reader; a second one needs a reason of its own and an entry here. (Amended 2026-09-07, #448.)
+An item that is not tombstoned **and whose source is enabled** — what a reader reads unless it is one of the three named below. Both halves are enforced by `sync.live_item`, never by a reader, so a reader that goes through the view cannot forget one, and a reader that does not has to say so here. A source with no configuration row at all (`run_once` syncs unconfigured sources) is not "disabled": its items stay live. (#202) **Three readers reach past the view, and this is the list of them** — each reads `sync.item` and each carries its reason:
+
+1. The [Monitors](#monitors) tab's roster (`assets::monitor_roster`, #448) — exempt from the **tombstone half only**, keeping the enabled clause itself, because a *paused* monitor **is** a tombstone: Uptime Kuma drops it from `/metrics` and the adapter tombstones it, so a roster that inherited the view would silently lose the Paused chip and the monitor's history with it.
+2. The detail read (`get_entity`'s `DETAIL`, §5a, #204, migration `0012`) — exempt from **both** halves, because [links](#link) and [notes](#note) point at an entity whether its source withdrew it or the reader turned its source off, and the panel they open has to draw it and say which. Neither dropped clause is a hole: each leaves its own marker in its place, `deleted_at` for the withdrawn banner and the derived enabled flag for the turned-off one, and the two are different banners because the remedies differ.
+3. The paste resolver (`resolve_url`, #496, spec #491 story 15) — exempt from **both** halves, for the detail's reason and one of its own: it answers a URL with an entity's id and nothing else, and the entity then opens through the detail read above. So it has to reach exactly what that read can show, or a stale link would be told *Not in the mirror* about an entity the app can open — which is the opposite of the story, *"a stale link explains itself"*.
+
+Those three, and a fourth needs a reason of its own and a line here. (Amended 2026-09-07, #448; amended 2026-09-08, #496, when the second and third readers were counted — the entry had claimed one since #204 shipped the detail's own exemption.)
 
 **Watermark**:
 A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.

@@ -180,6 +180,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
     get_entity: (args) => getEntity(args),
+    resolve_url: (args) => resolveUrl(args),
     recent_activity: (args) => recentActivity(args),
 
     // The sources cockpit. Three sources, one of them refusing its credential
@@ -1782,6 +1783,32 @@ function listEntities(args: Record<string, unknown>) {
   );
 
   return { rows: rows.slice(offset, offset + limit).map(mirrorRow), total: rows.length };
+}
+
+/**
+ * `resolve_url` (#496): what a pasted link names, over this fixture's corpus.
+ *
+ * A **second** implementation of the normalisation rule, and deliberately so:
+ * the rule itself is SQL (`knobas_core::web_url_normalized!`) and there is no
+ * database here. What this owes is not fidelity to the SQL but the two
+ * outcomes a QA walk has to be able to see — a link that opens its entity, and
+ * one that offers the browser — so it does the three things the rule does to
+ * the URLs this corpus actually holds and no more.
+ */
+function resolveUrl(args: Record<string, unknown>) {
+  const url = String(args["url"] ?? "");
+  if (!/^https?:\/\//i.test(url)) {
+    throw { code: "invalid", message: `${url} is not an http or https URL`, source_id: null };
+  }
+  const key = (raw: string) => {
+    const parsed = new URL(raw);
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.href.replace(/\/$/, "");
+  };
+  const wanted = key(url);
+  const found = CORPUS.find((entry) => entry.web_url !== null && key(entry.web_url) === wanted);
+  return found ? { entity_id: found.entity_id, kind: found.kind } : null;
 }
 
 /** `get_entity`, including the two refusals the detail view branches on. */

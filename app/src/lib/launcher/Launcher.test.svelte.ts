@@ -1313,3 +1313,143 @@ test("the standing room's own row is not offered Add to context", async () => {
   expect(chain?.textContent).toContain("Link to PAY-999");
   expect(chain?.textContent).not.toContain("Add to Payments");
 });
+
+// -- a pasted link (#496, spec #491 stories 9 and 10) ------------------------
+
+const PASTED = "https://jira.example/browse/PAY-231";
+
+// Typed through `search` above: what makes a paste a paste is the *text*, not
+// a different gesture, and using the same helper is how this file says so.
+
+/**
+ * Story 9: *"a link from chat is one paste away from its detail"*.
+ *
+ * The seam is the whole overlay: text into the box, and the address the shell
+ * is handed out. What the shell then does with that address is the shell's,
+ * which is the same division every other row in this component follows.
+ */
+test("a pasted link that resolves opens the entity it names", async () => {
+  const navigated: string[] = [];
+  const closed = vi.fn();
+  open({
+    onnavigate: (hash: string) => navigated.push(hash),
+    onclose: closed,
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => HOME,
+      resolveUrl: async () => ({ entity_id: "jira:PAY-231", kind: "ticket" }),
+    },
+  });
+  await settle();
+  await search(PASTED);
+
+  expect(navigated).toEqual(["#/ticket/jira:PAY-231"]);
+  expect(closed, "the overlay gets out of the way first").toHaveBeenCalled();
+});
+
+/** An asset resolves through the Tree's own encoder, not the room's. */
+test("a pasted link to an asset opens the Tree at it", async () => {
+  const navigated: string[] = [];
+  open({
+    onnavigate: (hash: string) => navigated.push(hash),
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => HOME,
+      resolveUrl: async () => ({ entity_id: "asset:hel1", kind: "asset" }),
+    },
+  });
+  await settle();
+  await search("https://kuma.example/dashboard/8");
+
+  expect(navigated).toEqual(["#/asset/asset:hel1"]);
+});
+
+/**
+ * Story 10: the paste never dead-ends. What is on screen says the mirror does
+ * not hold the link, and the one thing left to do with it is offered.
+ */
+test("a pasted link the mirror does not hold offers the browser instead", async () => {
+  const opened: string[] = [];
+  const navigated: string[] = [];
+  open({
+    onnavigate: (hash: string) => navigated.push(hash),
+    openExternal: async (url: string) => {
+      opened.push(url);
+    },
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => HOME,
+      resolveUrl: async () => null,
+    },
+  });
+  await settle();
+  // A fragment on the way in, so the assertion below can see which URL the
+  // button hands over: the raw one, not the normalised one the resolver used.
+  await search(`${PASTED}#comment-42`);
+
+  expect(target.textContent).toContain("Not in the mirror");
+  // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
+  // says to avoid: this panel is the reader's only account of why the
+  // launcher has nothing. Scoped to the panel, because the box's own footnote
+  // has said "local index" since M1 and correcting it is not this ticket's.
+  expect(
+    target.querySelector(".miss")?.textContent,
+    "`index` is not the word for the mirror",
+  ).not.toContain("index");
+  expect(navigated, "there is nothing to open in the app").toEqual([]);
+
+  const button = [...target.querySelectorAll("button")].find((element) =>
+    element.textContent?.includes("Open in browser"),
+  );
+  expect(button, "the miss offers the browser").toBeDefined();
+  button!.click();
+  await settle();
+
+  expect(opened).toEqual([`${PASTED}#comment-42`]);
+});
+
+/** The same, from the keyboard: a miss is not a state the box cannot leave. */
+test("Enter on a missed paste opens it in the browser", async () => {
+  const opened: string[] = [];
+  open({
+    openExternal: async (url: string) => {
+      opened.push(url);
+    },
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => HOME,
+      resolveUrl: async () => null,
+    },
+  });
+  await settle();
+  await search(PASTED);
+  press("Enter");
+  await settle();
+
+  expect(opened).toEqual([PASTED]);
+});
+
+/**
+ * The wiring, and the reason it is a test rather than a type.
+ *
+ * `resolveUrl` is optional on `SessionPorts` — a session without one searches
+ * a link like any other query, which is what the two link pickers want. That
+ * makes the launcher's own default the only thing standing between this
+ * feature and silence, and dropping it would be a component that compiles,
+ * type-checks and quietly goes back to searching for the words in a hostname.
+ *
+ * So the ports here deliberately supply **no** resolver: the real one is what
+ * the component must reach for, and in a test environment with no Tauri bridge
+ * reaching for it fails. What is asserted is that the search engine was not
+ * asked — which is true only if the paste took the resolver's path.
+ */
+test("the launcher's own default resolver is what a paste reaches", async () => {
+  const searchPort = vi.fn(async () => response());
+  open({
+    ports: { search: searchPort, launcherHome: async () => HOME },
+  });
+  await settle();
+  await search(PASTED);
+
+  expect(searchPort, "a pasted link must not reach the search engine").not.toHaveBeenCalled();
+});

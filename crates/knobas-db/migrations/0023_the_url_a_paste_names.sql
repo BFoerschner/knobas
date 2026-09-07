@@ -1,0 +1,61 @@
+-- 0023_the_url_a_paste_names.sql -- one expression index, and nothing else.
+--
+-- Issue #496 (spec #491 stories 9-11, 15-17): a link pasted into the launcher
+-- resolves to the entity it names. The address it names is already in the
+-- mirror -- `sync.item.web_url`, added by `0002` for *Open in browser* -- and
+-- until now **no query read that column at all**. Reading it by equality over
+-- a corpus is a sequential scan per keystroke, which is the one thing the
+-- launcher's 100 ms budget cannot afford, so the column gets the index this
+-- read needs and nothing more: no table, no constraint, no column, no view.
+--
+-- Single-writer (orchestrator), like every migration: a stream that needs more
+-- schema requests 0024 and never edits this file or its predecessors -- sqlx
+-- checksums applied migrations and an edit fails startup on every existing
+-- database. Recorded as a ratified exception in `docs/contract.md` section
+-- 10.8, under this issue.
+--
+-- ## Why the index is on an expression
+--
+-- Two spellings of one link have to compare equal: a pasted URL carries a
+-- fragment, a trailing slash and whatever case autocomplete gave the host,
+-- and the stored one carries the source's own. So the comparison is not on
+-- `web_url` but on the **normalised** value, and an index on the raw column
+-- would never be reached by it. The rule -- fragment out, the path's trailing
+-- slash out, scheme and host down-cased, **query kept verbatim** -- is
+-- documented once, in `crates/knobas-core/src/web_url.rs`, and expanded into
+-- the resolver's statement by `web_url_normalized!`.
+--
+-- The expression below is a **copy** of that macro's expansion, because an
+-- index definition cannot expand a Rust macro. The copy is not load-bearing
+-- for correctness: were it to drift, the resolver would still answer exactly
+-- as it does now and would merely stop using this index. It is load-bearing
+-- for speed, and two tests in `crates/knobas-app/tests/url_resolve.rs` hold
+-- it -- one compares these characters against the macro's expansion, the
+-- other asks the planner whether the shipped statement still reaches this
+-- index, which is what `the_view_still_reaches_the_fts_index` does for the
+-- launcher's GIN index.
+--
+-- Every function in it is `IMMUTABLE` (`regexp_replace`, `substring`, `lower`,
+-- `||`), which is what an index expression may contain; a scalar subquery,
+-- which is how `ancestor_path_read!` is written, is not.
+--
+-- ## Why it is partial
+--
+-- `web_url` is null for every note, every context and every kind whose adapter
+-- reported no page (interfaces section 8 P5) -- the mirror is full of rows a
+-- paste can never name. `where web_url is not null` keeps them out of the
+-- index, and the resolver's statement carries the same predicate so the
+-- planner may use it.
+--
+-- ## Not unique
+--
+-- Nothing says two mirrored items cannot report one address, and a unique
+-- index would turn that into a failed sync rather than an ambiguous paste.
+-- The resolver orders by `entity_id` and takes one row, so an ambiguous URL
+-- answers the same entity every time instead of a different one per plan.
+
+create index item_web_url_norm_idx
+    on sync.item (
+      (lower(substring(regexp_replace(web_url, '/*(\?[^#]*)?(#.*)?$', '\1') from '^[^:/?#]+://[^/?#]*')) || substring(regexp_replace(web_url, '/*(\?[^#]*)?(#.*)?$', '\1') from '^[^:/?#]+://[^/?#]*(.*)$'))
+    )
+ where web_url is not null;

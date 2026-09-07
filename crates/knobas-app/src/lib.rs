@@ -327,6 +327,10 @@ pub fn run() {
             // list the Monitors tab draws, and a list of assets rather than
             // of monitors.
             commands::assets::unmonitored_assets,
+            // #496's URL resolver, appended after those for the same
+            // reason: it is stream E's read but the list is one list,
+            // append-only (§10.8) and never re-sorted.
+            commands::entity::resolve_url,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
