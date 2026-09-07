@@ -178,6 +178,18 @@ const MONITORING: AttachedMonitor[] = [
     web_url: null,
     tombstoned: true,
   },
+  // Still in the mirror — it has a page — but with no state word: the reading
+  // is missing on its own, which is the third of the three things this row can
+  // say and not the same as the tombstone above. `AttachedMonitor.state` is
+  // null for a state code the adapter has no word for, and a blank here would
+  // read as "up" beside a live row exactly as a blank on a paused one would.
+  {
+    entity_id: "kuma:6",
+    name: "postgres-wal",
+    state: null,
+    web_url: "http://127.0.0.1:3001/dashboard/6",
+    tombstoned: false,
+  },
 ];
 
 /**
@@ -1400,7 +1412,9 @@ test("switches the wires' fade off under reduced motion rather than hiding them"
  * state Kuma last published, and one click to its own page in Kuma. The
  * paused one is the row that makes the section honest — it is still attached,
  * it has no state and no page, and it says so rather than rendering as a blank
- * beside a live one.
+ * beside a live one. The third row separates the two halves of that: a monitor
+ * the mirror still holds, with a page to open and no state word, is not the
+ * same fact as one that has left it, and one row cannot witness both branches.
  */
 test("the pane lists the monitors watching the asset, with their state", async () => {
   render(`#/asset/${CONTAINER.id}`);
@@ -1413,6 +1427,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
   expect(rows).toEqual([
     "postgres-check down Open in Kuma",
     "postgres-slow-query Paused or gone from Kuma",
+    "postgres-wal no reading Open in Kuma",
   ]);
 });
 

@@ -3235,6 +3235,105 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
     );
 }
 
+/// **A name one import kept becomes a link on the next one, once the monitor
+/// arrives** -- issue #445's first criterion in the order it spells it out.
+///
+/// Its siblings all seed the mirror *before* the first import, so every one of
+/// them resolves a name on an asset that import is creating. The sequence the
+/// criterion actually describes is the other one: the name is kept while Kuma
+/// holds nothing, the monitor turns up later, and the re-import draws the link
+/// on an asset already in the estate and otherwise unchanged.
+///
+/// That is a direction none of them can witness *drawing a link* in.
+/// `monitor_plan` walks the assets **the file names**, new and known alike,
+/// and narrowing it to the assets an import is about to write leaves the
+/// re-import that asserts `monitors_linked == 0` passing for the wrong reason
+/// -- nothing was drawn because nothing was looked at. The sibling above
+/// catches that mutant on its *report* (a second preview stops naming the six
+/// waiting names); this is the only test that catches it on the link, which is
+/// the half the criterion is about.
+#[tokio::test]
+async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
+    let pool = pool("assets-import-monitor-arrives").await;
+
+    // No Kuma yet: every name is kept and nothing is drawn.
+    let first = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first import")
+        .value;
+    assert_eq!(first.monitors_linked, 0, "there is no monitor to link to");
+    assert!(
+        links_of(&pool, "asset:knobas-jira").await.is_empty(),
+        "nothing is attached to the container yet"
+    );
+
+    // ...and now Kuma publishes one of the names the file gave.
+    monitor_reading(
+        &pool,
+        "kuma",
+        "jira (tunnel)",
+        Some("up"),
+        Some("http://127.0.0.1:3001/dashboard/2"),
+    )
+    .await;
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second preview");
+    assert_eq!(
+        preview
+            .monitor_links
+            .iter()
+            .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
+            .collect::<Vec<_>>(),
+        [("asset:knobas-jira", "jira (tunnel)")],
+        "the name that was waiting is the link this import offers, on an asset \
+         the file changes in no other way"
+    );
+    assert!(
+        !preview
+            .unresolved
+            .iter()
+            .any(|waiting| waiting.monitor_name == "jira (tunnel)"),
+        "the name that found its monitor is off the waiting list: {:?}",
+        preview.unresolved
+    );
+
+    let second = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second import")
+        .value;
+    assert_eq!(second.monitors_linked, 1);
+    assert_eq!(
+        links_of(&pool, "asset:knobas-jira").await,
+        [(
+            "monitored-by".to_owned(),
+            "kuma:jira (tunnel)".to_owned(),
+            "monitor".to_owned(),
+        )],
+        "the kept name is now a monitored-by link"
+    );
+
+    // And out through the pane, which is where the reader learns it happened.
+    let pane = assets::get(&pool, "asset:knobas-jira")
+        .await
+        .expect("Jira's container");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| (watch.name.as_str(), watch.state.as_deref()))
+            .collect::<Vec<_>>(),
+        [("jira (tunnel)", Some("up"))],
+        "the monitoring section draws the monitor that arrived"
+    );
+    assert_eq!(
+        pane.monitors,
+        ["jira (tunnel)"],
+        "the file still says the name, and a resolved name is not deleted from \
+         the column -- the pane is what stops drawing it as still waiting"
+    );
+}
+
 /// A file may hang a new subtree under an asset **a person made by hand**, and
 /// an asset the reader deleted comes back when a file still names it.
 ///
