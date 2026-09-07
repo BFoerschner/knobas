@@ -829,6 +829,29 @@ impl Source for MockSource {
         // nothing to hand back -- see `WriteReceipt`.
         Ok(WriteReceipt::none())
     }
+
+    /// Refused: the fixture has statuses but no workflow (#498).
+    ///
+    /// The distinction is the whole reason this refuses. `fixtures/tidewater`
+    /// gives every ticket a status and the demo board draws columns from them,
+    /// so it is tempting to answer with the other statuses the fixture uses --
+    /// and that answer would be a **corpus**, which is exactly the guess the
+    /// select made before this read existed and exactly what a *reachable
+    /// transition* is not: an answer about now, from a source that knows what
+    /// its workflow offers from where the ticket stands. The fixture knows no
+    /// such thing, and a mock certifies nothing anyway (ADR-0013). So the mock
+    /// refuses, the demo ticket draws no select, and the corpus-observed offer
+    /// stays where it belongs -- in the shell, as the fallback, labelled
+    /// *offer unverified*.
+    ///
+    /// Consistent with the descriptor either way: the mock declares `comment`
+    /// and no `transition`, so the contract battery requires this refusal.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Err(SourceError::protocol(format!(
+            "the mock adapter has no workflow -- its fixture has statuses, not a set of moves -- \
+             so there are no reachable transitions to read for {entity:?}"
+        )))
+    }
 }
 
 // -- construction, the shape every adapter crate exposes ---------------------

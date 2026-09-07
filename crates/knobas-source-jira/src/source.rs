@@ -330,6 +330,26 @@ impl Source for JiraSource {
             ))),
         }
     }
+
+    /// What this issue's workflow offers from where it stands (#498).
+    ///
+    /// **The request the write already makes** -- literally
+    /// [`crate::write::offered_transitions`], which `transition` calls to
+    /// resolve the status it was handed. That sharing is the whole design: the
+    /// select is offered one list and the write resolves against the same one,
+    /// so the two cannot disagree about what this workflow does, and the two
+    /// remaining ways a move still fails -- the ticket moved between the read
+    /// and the flush, or the workflow itself changed -- are answered where they
+    /// always were, by the adapter at write time and by the queue's refusal.
+    ///
+    /// The entity is vetted the way every write's is, through
+    /// [`Self::issue_key`]: an id belonging to another source is refused here
+    /// rather than turned into a request against this Jira with somebody
+    /// else's key.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        let offered = write::offered_transitions(&self.http, &self.issue_key(entity)?).await?;
+        Ok(offered.into_iter().map(|t| t.status).collect())
+    }
 }
 
 #[cfg(test)]

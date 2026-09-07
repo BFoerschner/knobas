@@ -227,6 +227,27 @@ impl Source for GiteaSource {
             ))),
         }
     }
+
+    /// Refused: Gitea has no workflow (#498).
+    ///
+    /// A pull request and an issue have **states**, not a workflow -- open,
+    /// closed, merged are what happened to the thing rather than a
+    /// configurable set of moves somebody may take next -- and Gitea offers no
+    /// endpoint that answers "what can this move to from here". Which is why
+    /// this adapter declares no `transition` write op either: the two are one
+    /// fact, and the contract battery holds them together.
+    ///
+    /// **Refused rather than answered empty**, and the difference is what a
+    /// reader sees. An empty list is a workflow with nowhere left to go, which
+    /// is a real state a real Jira ticket can be in; this is a source that was
+    /// asked the wrong question. The shell reads the refusal as "draw no
+    /// select" and an empty answer as "draw a select with nothing in it".
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Err(SourceError::protocol(format!(
+            "gitea: this adapter has no workflow, so there are no reachable transitions to read \
+             for {entity:?}"
+        )))
+    }
 }
 
 #[cfg(test)]

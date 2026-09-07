@@ -167,6 +167,17 @@ impl Source for FakeSource {
     async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only".to_owned()))
     }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
+    }
 }
 
 /// An adapter that looks the engine's transaction up in `pg_locks` from a
@@ -208,6 +219,17 @@ impl Source for LockProbingSource {
 
     async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only".to_owned()))
+    }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
     }
 }
 

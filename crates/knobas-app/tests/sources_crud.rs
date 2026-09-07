@@ -64,6 +64,17 @@ impl Source for Refusing {
     ) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
+    }
 }
 
 /// An adapter that *discovers* something about its instance, so the pass-through
@@ -120,6 +131,17 @@ impl Source for Discovering {
         _op: knobas_source::WriteOp,
     ) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
+    }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
     }
 }
 

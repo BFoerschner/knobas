@@ -367,6 +367,14 @@ impl Source for Observed<'_> {
     ) -> Result<knobas_source::WriteReceipt, SourceError> {
         self.inner.write(op).await
     }
+
+    /// Delegated, and deliberately unreported: this decorator narrates a *sync
+    /// run* -- a run id, a phase, a growing item count -- and the workflow read
+    /// belongs to a detail somebody opened, which has no run and no progress
+    /// bar to move.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        self.inner.reachable_transitions(entity).await
+    }
 }
 
 /// The sink the adapter is really handed.

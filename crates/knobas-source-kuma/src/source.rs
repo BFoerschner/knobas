@@ -312,6 +312,24 @@ impl Source for KumaSource {
             .await?;
         Ok(WriteReceipt::none())
     }
+
+    /// Refused: Uptime Kuma has no workflow (#498).
+    ///
+    /// A monitor is up, down or paused because of what the checks found and
+    /// what the account asked for -- there is no configured set of next states
+    /// and nothing to read one from. Pause and resume are the two moves this
+    /// source has and they are **writes**, declared as such, which is why this
+    /// refusal holds for an instance with an account exactly as it does for one
+    /// with only an API key: an account buys write ops, not a workflow.
+    ///
+    /// **Refused rather than answered empty**, so a monitor's detail draws no
+    /// status select at all instead of an empty one.
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Err(SourceError::protocol(format!(
+            "the Uptime Kuma adapter has no workflow, so there are no reachable transitions to \
+             read for {entity:?}"
+        )))
+    }
 }
 
 #[cfg(test)]

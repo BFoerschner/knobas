@@ -177,6 +177,17 @@ impl Source for Wiki {
             ))),
         }
     }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
+    }
 }
 
 /// One mirrored page, shaped like a Confluence record: the space key is where

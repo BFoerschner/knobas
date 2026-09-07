@@ -152,6 +152,17 @@ impl Source for Inert {
         // *record* of one, which the fixtures write directly.
         Ok(knobas_source::WriteReceipt::none())
     }
+
+    /// No workflow: this fake declares no `transition` write op, which is the
+    /// contract battery's rule for when the read is refused (#498).
+    async fn reachable_transitions(
+        &self,
+        entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol(format!(
+            "this fake has no workflow, so there are no reachable transitions for {entity:?}"
+        )))
+    }
 }
 
 fn kind(id: &str) -> KindInfo {

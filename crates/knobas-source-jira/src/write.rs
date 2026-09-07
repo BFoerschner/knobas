@@ -1,5 +1,11 @@
 //! The writes ratified for Jira: transition, comment, create (M2) and the
-//! worklog (M3.1, issue #280).
+//! worklog (M3.1, issue #280) -- and, since #498, the one **read** a write of
+//! this crate makes on its own account: [`offered_transitions`], which is the
+//! request `transition` has always made to resolve a status and which
+//! `Source::reachable_transitions` now also serves the select from. It lives
+//! here rather than beside the sync's reads because it is that request and not
+//! a second one; a copy of it in a read module would be the two-lists problem
+//! the shared function exists to prevent.
 //!
 //! Deliberately free of [`WriteOp`]: this module takes the values already
 //! unpacked, and [`crate::source`] -- which is where `impl Source for
@@ -57,6 +63,81 @@ pub(crate) async fn transition(
     key: &str,
     status: &str,
 ) -> Result<(), SourceError> {
+    let path = transitions_path(key);
+    let offered = offered_transitions(http, key).await?;
+    let wanted = status.trim();
+
+    let Some(id) = offered
+        .iter()
+        .find(|t| t.status.trim().eq_ignore_ascii_case(wanted))
+        .map(|t| t.id.clone())
+    else {
+        let named: Vec<&str> = offered.iter().map(|t| t.status.as_str()).collect();
+        return Err(SourceError::protocol(format!(
+            "{key} cannot move to {wanted:?} from where it stands: this workflow offers {named:?}"
+        )));
+    };
+
+    // 204, no body. Nothing is decoded, deliberately -- see `post_json`.
+    http.post_json(&path, &serde_json::json!({ "transition": { "id": id } }))
+        .await
+        .map(|_| ())
+}
+
+/// One move this issue's workflow offers from where it stands: the transition
+/// knobas would post, and the status it lands on.
+///
+/// Both halves, because the two callers want different ones and asking twice
+/// would be two requests where Jira answers both in one: [`transition`] posts
+/// the `id`, and [`Source::reachable_transitions`] offers the `status`.
+///
+/// [`Source::reachable_transitions`]: knobas_source::Source::reachable_transitions
+pub(crate) struct Offered {
+    pub(crate) id: String,
+    /// The status the move lands on, in Jira's own spelling (`"In Progress"`).
+    pub(crate) status: String,
+}
+
+/// The one endpoint, spelled once: a `GET` reads the offer and a `POST` to the
+/// same path takes it.
+fn transitions_path(key: &str) -> String {
+    format!("rest/api/2/issue/{key}/transitions")
+}
+
+/// What this issue's workflow offers **from where the issue stands right now**.
+///
+/// **This is the read the write already made** (`CONTEXT.md`: *reachable
+/// transition*, issue #498). Before the SPI grew
+/// [`Source::reachable_transitions`] this request had one caller,
+/// [`transition`], which made it a step inside a write; the select upstream had
+/// no read at all and offered whatever the source's corpus had been seen to
+/// use. Nothing about the request changed when the second caller arrived --
+/// same path, same decoding, same `to.name` -- which is what makes the offer
+/// the reader is shown and the list the write resolves against **one answer
+/// from one endpoint**, and not two lists that can disagree.
+///
+/// A transition Jira does not say the destination of is dropped rather than
+/// reported under some placeholder: `to` is optional in the response and a move
+/// with no landing status is one neither caller can do anything with -- the
+/// write cannot match a name against it and the select cannot offer it.
+///
+/// Deliberately **not** deduplicated and not sorted. Two transitions may land
+/// on one status (Jira's workflows routinely have several routes to *Done*),
+/// and the order is the workflow's own, which is the order a Jira user sees in
+/// the issue view. Collapsing either would be knobas editing the source's
+/// answer.
+///
+/// # Errors
+///
+/// Whatever the request maps to: a dead credential is
+/// [`SourceError::Unauthorized`] here as everywhere else, and an issue key this
+/// instance does not have is the 404 the request answered.
+///
+/// [`Source::reachable_transitions`]: knobas_source::Source::reachable_transitions
+pub(crate) async fn offered_transitions(
+    http: &JiraHttp,
+    key: &str,
+) -> Result<Vec<Offered>, SourceError> {
     #[derive(serde::Deserialize)]
     struct Available {
         #[serde(default)]
@@ -74,27 +155,15 @@ pub(crate) async fn transition(
         name: Option<String>,
     }
 
-    let path = format!("rest/api/2/issue/{key}/transitions");
-    let available: Available = http.get_json(&path, &[]).await?;
-    let wanted = status.trim();
-    let named = |t: &Transition| t.to.as_ref().and_then(|to| to.name.clone());
-
-    let Some(id) = available
+    let available: Available = http.get_json(&transitions_path(key), &[]).await?;
+    Ok(available
         .transitions
-        .iter()
-        .find(|t| named(t).is_some_and(|name| name.trim().eq_ignore_ascii_case(wanted)))
-        .map(|t| t.id.clone())
-    else {
-        let offered: Vec<String> = available.transitions.iter().filter_map(named).collect();
-        return Err(SourceError::protocol(format!(
-            "{key} cannot move to {wanted:?} from where it stands: this workflow offers {offered:?}"
-        )));
-    };
-
-    // 204, no body. Nothing is decoded, deliberately -- see `post_json`.
-    http.post_json(&path, &serde_json::json!({ "transition": { "id": id } }))
-        .await
-        .map(|_| ())
+        .into_iter()
+        .filter_map(|t| {
+            t.to.and_then(|to| to.name)
+                .map(|status| Offered { id: t.id, status })
+        })
+        .collect())
 }
 
 /// Reply on a ticket.
