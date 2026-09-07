@@ -52,7 +52,7 @@ check:
     #!/usr/bin/env bash
     set -euo pipefail
     front_log= cargo_log= front_pid= cargo_pid=
-    cargo_recipes=(fmt shell clippy clippy-libs inventory test)
+    cargo_recipes=(fmt shell witness-unit clippy clippy-libs inventory test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -370,6 +370,19 @@ shell:
         echo "  brew install shellcheck (or start Docker)." >&2
         exit 1
     fi
+
+# The desktop witness's own unit tests (issue #500).
+#
+# `desktop-witness` itself cannot be in the gate: it takes over the screen for
+# minutes, and it needs a code-signing identity and a TCC grant that a fresh
+# checkout does not have. What can be in the gate is the part of that harness
+# which is a decision rather than a side effect -- how it compares Launch
+# Services' answer against the bundle it built, and how it reads the
+# accessibility probe's three lines. Both are pure text, both have been wrong
+# in this shape before, and neither needs a Mac: this recipe runs wherever
+# bash does.
+witness-unit:
+    testenv/desktop-witness-test.sh
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
@@ -823,6 +836,27 @@ dev: deps
 # `profile demo=true` is the acceptance test for that.
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
+
+# The desktop witness (issue #500, ADR-0016): the signed bundle, launched from
+# the path Launch Services registered, driven by desktop automation.
+#
+# `just desktop-witness launcher-hotkey` builds and signs a debug bundle with
+# the `knobas-dev` identity, registers it, launches it on the demo profile,
+# waits for its window, runs the named driver against the real accessibility
+# tree, and quits it. The drivers live in testenv/desktop-witness/drivers/;
+# running with no argument lists them.
+#
+# NOT part of `just check`, and it must not become part of it. It takes the
+# screen away from whoever is at the Mac for the length of a run, it needs a
+# code-signing identity and an Accessibility grant, and at most one may run on
+# this machine at a time. The gate carries `witness-unit` instead.
+#
+# Scope, from the v1.5 grilling: OS-level features only -- the editor, the
+# terminal, the hotkey -- because those have no instance to run a suite
+# against. A rendered panel is witnessed by headless Chrome against the
+# `?fake-ipc` dev server (deputy's ruling of 2026-09-08 on #496), not here.
+desktop-witness driver="":
+    testenv/desktop-witness.sh {{ driver }}
 
 # Where the three Gitea-backed live recipes get their gate variables, in one
 # place because all three obtain them the same way: the lines this text names
