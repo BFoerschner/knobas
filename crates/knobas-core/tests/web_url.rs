@@ -51,7 +51,10 @@ async fn normalized(pool: &PgPool, url: &str) -> Option<String> {
 async fn a_fragment_a_trailing_slash_and_a_shouted_host_are_the_same_link() {
     let pool = scratch().await;
     let stored = normalized(&pool, "https://jira.example/browse/PAY-231").await;
-    assert_eq!(stored.as_deref(), Some("https://jira.example/browse/PAY-231"));
+    assert_eq!(
+        stored.as_deref(),
+        Some("https://jira.example/browse/PAY-231")
+    );
 
     for pasted in [
         "https://jira.example/browse/PAY-231#comment-42",
@@ -89,7 +92,11 @@ async fn the_query_is_kept_verbatim_and_two_page_ids_stay_two_pages() {
     }
 
     assert_ne!(
-        normalized(&pool, "https://confluence.example/pages/viewpage.action?pageId=98308").await,
+        normalized(
+            &pool,
+            "https://confluence.example/pages/viewpage.action?pageId=98308"
+        )
+        .await,
         normalized(&pool, page).await,
         "a different pageId is a different page, and the query is what says so"
     );
@@ -109,7 +116,9 @@ async fn a_slash_inside_the_query_is_part_of_the_query() {
 
     // And the path's own trailing slash still goes, with the query in place.
     assert_eq!(
-        normalized(&pool, "https://kuma.example/dashboard/?id=8").await.as_deref(),
+        normalized(&pool, "https://kuma.example/dashboard/?id=8")
+            .await
+            .as_deref(),
         Some("https://kuma.example/dashboard?id=8"),
     );
 }
@@ -121,7 +130,12 @@ async fn a_slash_inside_the_query_is_part_of_the_query() {
 async fn the_path_keeps_its_case_and_the_port_survives() {
     let pool = scratch().await;
     assert_eq!(
-        normalized(&pool, "https://GITEA.example:3000/Acme/Payments-SVC/issues/7").await.as_deref(),
+        normalized(
+            &pool,
+            "https://GITEA.example:3000/Acme/Payments-SVC/issues/7"
+        )
+        .await
+        .as_deref(),
         Some("https://gitea.example:3000/Acme/Payments-SVC/issues/7"),
     );
     assert_ne!(
@@ -149,7 +163,13 @@ async fn two_hosts_never_collapse_onto_each_other() {
 #[tokio::test]
 async fn anything_that_is_not_an_absolute_url_misses_rather_than_guesses() {
     let pool = scratch().await;
-    for unusable in ["", "/browse/PAY-231", "browse/PAY-231", "jira.example/browse/PAY-231", "  "] {
+    for unusable in [
+        "",
+        "/browse/PAY-231",
+        "browse/PAY-231",
+        "jira.example/browse/PAY-231",
+        "  ",
+    ] {
         assert_eq!(
             normalized(&pool, unusable).await,
             None,
@@ -157,4 +177,3 @@ async fn anything_that_is_not_an_absolute_url_misses_rather_than_guesses() {
         );
     }
 }
-

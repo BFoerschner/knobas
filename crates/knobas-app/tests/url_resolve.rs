@@ -342,14 +342,7 @@ async fn a_row_with_no_address_is_unreachable_by_paste() {
     mirror_without_url(&pool, "gitea:acme/payments-svc@main", "branch", "gitea").await;
     // A stored value that is not an absolute URL: the mirror holds whatever an
     // adapter reported, and the rule misses rather than guessing (ADR-0007).
-    mirror(
-        &pool,
-        "mock:relative",
-        "ticket",
-        "mock",
-        "/browse/PAY-231",
-    )
-    .await;
+    mirror(&pool, "mock:relative", "ticket", "mock", "/browse/PAY-231").await;
 
     assert_eq!(
         resolved(&pool, "https://jira.example/browse/PAY-231")
@@ -380,7 +373,8 @@ async fn a_row_with_no_address_is_unreachable_by_paste() {
 /// half of the question.
 #[test]
 fn the_migration_carries_the_macros_expression_verbatim() {
-    const MIGRATION: &str = include_str!("../../knobas-db/migrations/0023_the_url_a_paste_names.sql");
+    const MIGRATION: &str =
+        include_str!("../../knobas-db/migrations/0023_the_url_a_paste_names.sql");
     let expression = knobas_core::web_url_normalized!("web_url");
     assert!(
         MIGRATION.contains(expression),
@@ -411,11 +405,12 @@ async fn the_resolvers_statement_reaches_the_expression_index() {
         .execute(&mut *tx)
         .await
         .expect("seqscan off");
-    let plan: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("explain {RESOLVE_URL}")))
-        .bind("https://jira.example/browse/PAY-231")
-        .fetch_all(&mut *tx)
-        .await
-        .expect("a plan");
+    let plan: Vec<String> =
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("explain {RESOLVE_URL}")))
+            .bind("https://jira.example/browse/PAY-231")
+            .fetch_all(&mut *tx)
+            .await
+            .expect("a plan");
     let plan = plan.join("\n");
     // **An `Index Cond`, not merely the index's name.** The index is partial,
     // so `where web_url is not null` alone lets the planner bitmap-scan the
@@ -429,8 +424,7 @@ async fn the_resolvers_statement_reaches_the_expression_index() {
         .map(str::trim)
         .find(|line| line.starts_with("Index Cond:"));
     assert!(
-        plan.contains("item_web_url_norm_idx")
-            && key.is_some_and(|line| line.contains("lower(")),
+        plan.contains("item_web_url_norm_idx") && key.is_some_and(|line| line.contains("lower(")),
         "the normalised URL must be the index *key* migration 0023 created, not a filter over \
          every row of it:\n{plan}"
     );
