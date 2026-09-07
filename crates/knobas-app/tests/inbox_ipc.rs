@@ -766,15 +766,18 @@ async fn what_comes_back_is_the_stored_set_deduplicated_and_in_one_order() {
 /// **Every category this build has can actually be switched on** -- including
 /// the sixth (#447).
 ///
-/// The round trip above walks two words. This one walks `Category::ALL`, which
-/// is the list the settings section draws its checkboxes from: the section
-/// sends the words back, the write side is the strict one, and a category
-/// whose spelling the write refused would be a checkbox that ticks itself off
-/// again with an `invalid` toast and nothing failing in any test. It is a loop
-/// rather than six literals so a seventh category is carried by it on the day
+/// The round trip above walks two words. This one walks `Category::ALL`, and
+/// what makes that worth a test is the *other* end: the settings section draws
+/// one checkbox per category and sends the whole set back, the write side is
+/// the strict one, and a category whose spelling the write refused would be a
+/// checkbox that ticks itself off again with an `invalid` toast and nothing
+/// failing anywhere. That the section draws exactly this list is
+/// `knobas_app::inbox`'s `every_inbox_category_has_a_toggle_in_the_interface`;
+/// this is the half that says every word on it survives the setting. A loop
+/// rather than six literals, so a seventh category is carried by it on the day
 /// it is added.
 #[tokio::test]
-async fn every_category_the_section_can_send_is_stored_and_read_back() {
+async fn every_category_this_build_has_is_stored_and_read_back() {
     let harness = harness().await;
     let every: Vec<String> = knobas_core::inbox::Category::ALL
         .iter()

@@ -593,10 +593,14 @@ test("an entity key with a hash and a slash in it survives the address", () => {
  * the **monitor** is the subject half of the key, the **asset** it watches is
  * the entity, and the reason names the asset's whole path.
  *
- * The same fixture `inbox.test.svelte.ts` reads, deliberately — the two
- * surfaces this category has are the inbox row and the desktop notification,
- * and a fixture that differed between them is how the two addresses drifted
- * apart in the first place.
+ * The same values `inbox.test.svelte.ts`' own `alertEntry` carries, written
+ * out again rather than shared: that file mocks `../ipc/entity` with a
+ * factory and this one does not, so a module either could import would have
+ * to live outside both. The values are repeated on purpose all the same —
+ * the two surfaces this category has are the inbox row and the desktop
+ * notification, they are asserted here to open at the same address, and an
+ * assertion about two surfaces reads better over one fixture than over two
+ * that merely resemble each other.
  */
 function alertEntry(monitor = "kuma:7", asset = "asset:hel1"): InboxEntry {
   return {
@@ -641,7 +645,9 @@ test("an alert's desktop notification opens the Tree at the affected asset", asy
 
 /**
  * **The sixth category is off until somebody switches it on, and the same
- * alert with it on speaks** (spec #427 story 63, and story 71's default).
+ * alert with it on speaks** — spec #427 story 66, *"a desktop notification
+ * for a new alert when I switch that category on, off by default like the
+ * others"*, over spec #272 story 71's default.
  *
  * The negative is the half that matters: five categories switched on and the
  * alert not among them is the profile of somebody who opted in before this

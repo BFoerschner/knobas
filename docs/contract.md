@@ -6949,14 +6949,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   same way — so the "sixth category joins the per-category settings" of this ticket was, on the
   frozen surfaces, already done, and #446's toggle line in `NotificationsSection.svelte` (added to
   keep `every_inbox_category_has_a_toggle_in_the_interface` green) was the whole of it.
-  `every_category_the_section_can_send_is_stored_and_read_back` in `tests/inbox_ipc.rs` now walks
+  `every_category_this_build_has_is_stored_and_read_back` in `tests/inbox_ipc.rs` now walks
   `Category::ALL` through the write and the read, so the day a seventh category arrives, a spelling
   the strict write side refuses fails here rather than as an `invalid` toast on a checkbox that
   ticks itself off again.
 
   **What did change is not frozen, and is one function.** `addressOf` moves out of
   `app/src/lib/inbox/notify.svelte.ts` into `app/src/lib/inbox/address.ts`, and `InboxView`'s *Open*
-  reads it instead of computing its own. The two had drifted on exactly one category: the button
+  reads it instead of computing its own — spec #427 story 61. The two had drifted on exactly one
+  category: the button
   opened an alert at `#/asset/<id>` (the Tree at the affected asset, spec #427 story 61) and the
   desktop notification's click opened `#/entity/<asset id>`, a room detail over an asset. One
   mutant — deleting the alert branch — now kills a test on each surface, which is the property

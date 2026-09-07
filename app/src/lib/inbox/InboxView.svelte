@@ -54,13 +54,16 @@
   /**
    * Open the entity behind an item.
    *
-   * The rule is `addressOf`'s and is not repeated here: the desktop
-   * notification's click makes the reader the same promise this button does,
-   * and while the two computed their own addresses they disagreed about the
-   * alert (#447) — this one landed in the Tree and that one in a room detail.
+   * The rule is `addressOf`'s and is not repeated here — the null case
+   * included: the desktop notification's click makes the reader the same
+   * promise this button does, and while the two computed their own addresses
+   * they disagreed about the alert (#447), this one landing in the Tree and
+   * that one in a room detail. The button is drawn only for an item that has
+   * an entity, so the item with none never reaches this at all; what
+   * `addressOf` answers for it (the inbox) is the notifier's case and is
+   * stated once, there.
    */
   function open(entry: InboxEntry) {
-    if (entry.item.entity_id === null) return;
     router.go(addressOf(entry.item));
   }
 
