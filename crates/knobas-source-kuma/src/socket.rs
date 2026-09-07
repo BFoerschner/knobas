@@ -256,8 +256,16 @@ impl KumaSocket {
     /// Split out from [`KumaSocket::call`] so that one deadline can span the
     /// whole of it -- there is no point bounding the poll loop alone when a
     /// handshake that never answers costs the same. It hands the session back
-    /// with the ack because the goodbye is sent *after* the deadline, so the
-    /// caller needs the session the cancelled future was holding.
+    /// with the ack so that the goodbye can be sent *after* the deadline is
+    /// lifted, which is the one path that has a session to hand back.
+    ///
+    /// **The other two paths do not say goodbye at all**, and that is the same
+    /// best-effort reading one line up rather than a second policy: a deadline
+    /// that fires drops this future where it stood, session and all, and an
+    /// error inside returns before there is an ack to pair a session with. A
+    /// session nobody closes is one Kuma reaps on its own ping timeout, and
+    /// spending more of a write's clock on a courtesy packet to a server that
+    /// has already failed to answer would buy nothing.
     async fn exchange(
         &self,
         event: &str,
@@ -628,9 +636,17 @@ mod tests {
         );
         assert!(message.contains(PAUSE_EVENT), "{message}");
 
+        // Both ends of both runs. The floor catches a deadline that is short
+        // of what it was given; the **ceiling** is the only thing that catches
+        // one that is longer -- a budget scaled up, or a bound that adds a
+        // wait of its own on top of it -- and a run with no ceiling cannot
+        // tell a sixty-second deadline from a six-hundred-second one. Twice
+        // the budget is the width: cancelling this future costs single-digit
+        // milliseconds, so the slack is 500 ms and 2 s against an overshoot
+        // that would have to be a doubling to survive it.
         assert!(elapsed >= SHORT, "gave up before the deadline: {elapsed:?}");
         assert!(
-            elapsed < SHORT * 8,
+            elapsed < SHORT * 2,
             "gave up long after the deadline: {elapsed:?}"
         );
 
@@ -638,6 +654,10 @@ mod tests {
         assert!(
             longer >= LONG,
             "the longer deadline was given up on early, after {longer:?}"
+        );
+        assert!(
+            longer < LONG * 2,
+            "the longer deadline was given up on late, after {longer:?}"
         );
         assert!(
             more > polls,
