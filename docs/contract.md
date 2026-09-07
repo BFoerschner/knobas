@@ -7951,6 +7951,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   and `a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout` for the two halves
   of the view this read is exempt from; and, on the rendered side, eight in `CheckoutPanel.test.svelte.ts` and five in
   `CheckoutsSection.test.svelte.ts`.
+
 - **One argument on one command — issue #502 (2026-09-08): a new note is born with its links.**
 
   A note started from a room carries `captured-in` to that room's context and `captured-from` to

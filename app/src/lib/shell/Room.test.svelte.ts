@@ -541,6 +541,19 @@ test("New note in an ad-hoc room with nothing open is born linked to the room al
 });
 
 /**
+ * The one place the two rungs compete, and the only one where their **order**
+ * is observable from here: a promoted room with a detail open over it. What
+ * the reader is reading wins over what the room is about, which is the same
+ * answer the timer gives in that room and the reason the ladder is a ladder.
+ */
+test("an open detail outranks the room's anchor", async () => {
+  expect(await bornWithFrom("#/ctx/ctx:pay-epic", true)).toEqual([
+    { target_id: "ctx:pay-epic", relation: CAPTURED_IN },
+    { target_id: "mock:INC-1", relation: CAPTURED_FROM },
+  ]);
+});
+
+/**
  * The negative, and the one worth three rooms rather than one: *All work*, a
  * source room and a project room are all derived, all have an id, and none has
  * a context to be captured in (`CONTEXT.md`, **Room**).
