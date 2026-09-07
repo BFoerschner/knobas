@@ -6,19 +6,19 @@ them, and knobas does not narrow that.
 
 ## Why this is out of scope
 
-The rule reads one fact — *knobas knows this asset by that name* — from two
-places an asset states it: its `hostname` property and the host of a route.
-Neither side carries a port it could compare on. A hostname property has no
-port at all, and #451's first criterion requires the monitor side to drop its
+The rule reads one fact — *knobas knows this asset by that name* — from the
+places an asset states an address: its address properties and the host of a
+route. Neither side carries a port it could compare on. An address property has
+no port at all, and #451's first criterion requires the monitor side to drop its
 port so that `http://gitea:3000` matches an asset whose hostname is `gitea`.
 Comparing ports on the route arm alone would make one rule fail two ways:
 the hostname arm would stay wide while the route arm narrowed, and a reader
 could not predict from the reason which behaviour they were looking at.
 
 The cost is real and named in the rule's own docstring. Eight routes in
-`testenv/hetzner/estate.json` carry `127.0.0.1` and land on seven different
+`testenv/hetzner/estate.json` carry `127.0.0.1` and land on six different
 assets. A Kuma running on the notebook rather than in a container would watch
-`http://127.0.0.1:8111/` and be proposed to all seven, six of them wrong.
+`http://127.0.0.1:8111/` and be proposed to all six, five of them wrong.
 
 Three things make that survivable rather than worth a mechanism:
 
