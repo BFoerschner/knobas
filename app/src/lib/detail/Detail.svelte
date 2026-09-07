@@ -14,6 +14,7 @@
     getEntity,
     miniBoard,
     promoteContext,
+    reachableTransitions,
     submitWrite,
     unlink,
     type EntityDetail,
@@ -320,14 +321,27 @@
     }
   }
 
-  // -- the status select (#179) ----------------------------------------------
+  // -- the status select (#179, #498) -----------------------------------------
   //
-  // Moving a ticket without leaving knobas. Optimistic by design: knobas has no
-  // read of which transitions this ticket's workflow actually offers from where
-  // it stands -- that seam is M3's descriptor growth (ADR-0007) -- so the select
-  // offers what the source's corpus has been *seen* to use, the adapter resolves
-  // the target at write time, and a move the workflow refuses comes back by name
-  // through the write queue's own pending/held UI.
+  // Moving a ticket without leaving knobas. It was optimistic by construction
+  // until #498: knobas had no read of which transitions a ticket's workflow
+  // offers from where it stands, so the select offered whatever the source's
+  // *corpus* had been seen to use and the reader learnt which of those were
+  // real from a refusal in the write queue. `reachableTransitions` is that
+  // read, and the select now offers its answer and nothing else.
+  //
+  // **Two reads, and each answers something the other cannot.** The board says
+  // where this ticket *stands* -- the mirrored status, which is what the select
+  // shows and what a move is measured against -- and carries the corpus offer
+  // that is still the fallback when the workflow read fails. The workflow read
+  // says where it can *go*, which no mirror holds and nothing stores.
+  //
+  // The write is unchanged: `Transition` still names the status, the adapter
+  // still resolves that name against the source's own answer at flush time, and
+  // a move refused between the read and the flush still comes back by name
+  // through the queue. This read narrows the offer; it does not replace that
+  // resolution, and treating it as a guarantee is exactly what the queue's
+  // refusal exists to catch.
 
   /** The source half of the address is the source id (interfaces §4.1). */
   const sourceId = $derived(entityId.slice(0, entityId.indexOf(":")));
@@ -411,19 +425,90 @@
   });
 
   /**
+   * Whether this source can move a ticket at all.
+   *
+   * Read off the adapter's declared `write_ops`, which is what the action bar
+   * is drawn from everywhere else: `submit_write` refuses an op the source does
+   * not declare, and the surface that offered it is what is at fault. It is
+   * also the gate on the workflow read below -- a source with no `transition`
+   * has no workflow to read and refuses the call by name (battery clause 8), so
+   * making it would be asking a question whose answer is known.
+   */
+  const declaresTransition = $derived(
+    kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("transition"),
+  );
+
+  /**
+   * What this ticket's workflow offers from where it stands, or `null` while
+   * nothing has been read (#498).
+   *
+   * `null` and an empty array are two different answers and must stay that
+   * way: `null` is "not read, or the read failed", which falls back to the
+   * corpus offer below; `[]` is a workflow that answered and has nowhere left
+   * to go, which draws no select at all.
+   */
+  let reachable = $state<string[] | null>(null);
+
+  /**
+   * Whether the workflow read was *tried and failed*, which is the only thing
+   * that puts *offer unverified* on screen.
+   *
+   * Not the same as `reachable === null`: that is also true for the moment
+   * before the answer lands, and a note that flickered on during every open
+   * would be telling the reader something untrue about a read still in flight.
+   */
+  let offerUnverified = $state(false);
+
+  /** The workflow read's own generation -- `boardToken`'s reason, twice over. */
+  let workflowToken = 0;
+
+  $effect(() => {
+    const id = entityId;
+    const mine = ++workflowToken;
+    reachable = null;
+    offerUnverified = false;
+    if (!isTicket || !declaresTransition) return;
+    void reachableTransitions(id)
+      .then((statuses) => {
+        if (mine === workflowToken) reachable = statuses;
+      })
+      .catch(() => {
+        // **Swallowed, and this is the one swallow that shows.** A workflow
+        // read can fail for reasons the reader can do nothing about from here
+        // -- a credential that expired, a Jira that is down -- and a toast per
+        // opened ticket would be noise. What the reader is owed is that the
+        // offer on screen is then the old optimistic one, which is what the
+        // note beside the select says.
+        if (mine === workflowToken) offerUnverified = true;
+      });
+  });
+
+  /**
+   * The statuses the select offers, in the order their source gave them, with
+   * the one this ticket is already in taken out -- it is rendered separately,
+   * marked and unselectable, the way the terminal group already was.
+   *
+   * The workflow's answer where there is one and the corpus offer where there
+   * is not. **Never both merged**: a corpus status the workflow does not reach
+   * is exactly what this read exists to stop offering, and a union would put
+   * every one of them back.
+   */
+  const offered = $derived(
+    (reachable ?? statusBoard?.offered ?? []).filter((status) => status !== statusBoard?.current),
+  );
+
+  /**
    * Whether this ticket can be moved from here.
    *
    * Three things have to be true, and each absence is honest rather than a
    * disabled control: it is a ticket, its adapter declares the `transition`
-   * write op (`submit_write` refuses one that does not, and the surface that
-   * offered it is what is at fault), and the source's corpus has shown at
-   * least one status to move to.
+   * write op, and there is at least one status to move to. The third now
+   * carries a second case it did not have before #498 -- a workflow that
+   * answered with nothing -- and the same drawing is right for it: a select
+   * whose only entry is the status the ticket is already in is a control with
+   * nothing to do.
    */
-  const canTransition = $derived(
-    isTicket &&
-      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("transition") &&
-      (statusBoard?.offered.length ?? 0) > 0,
-  );
+  const canTransition = $derived(isTicket && declaresTransition && offered.length > 0);
 
   /** True while a move is being queued, so the select cannot double-fire. */
   let moving = $state(false);
@@ -768,18 +853,35 @@
                 onchange={(event) => void move(event)}
               >
                 <!--
-                  The terminal group, and only when the ticket is in it: the
-                  mirrored status has to be selectable for the control to show
-                  it, but "no status" is somewhere a ticket can be and not
-                  somewhere it can be moved to, so it cannot be chosen.
+                  Where the ticket stands, first and unselectable. It has to be
+                  in the list for the control to show it at all, and it is not
+                  somewhere the ticket can be moved *to*: "no status" is a place
+                  a ticket can be and not one anything moves to, and a workflow
+                  that offers the status a ticket is already in (Jira's
+                  simplified workflow does) is offering a move that changes
+                  nothing.
                 -->
                 {#if statusBoard.current === null}
                   <option value="" disabled>No status</option>
+                {:else}
+                  <option value={statusBoard.current} disabled>{statusBoard.current}</option>
                 {/if}
-                {#each statusBoard.offered as status (status)}
+                {#each offered as status (status)}
                   <option value={status}>{status}</option>
                 {/each}
               </select>
+              <!--
+                The offer is the corpus one and nobody has checked it against
+                the workflow (#498). Said rather than hidden: the select still
+                works and the write still resolves, so what changes is only how
+                much the reader should trust the list -- and a list that quietly
+                went back to guessing is the thing this read was added to stop.
+              -->
+              {#if offerUnverified}
+                <span class="unverified" title="the workflow could not be read; this is what this source's tickets have been seen to use">
+                  offer unverified
+                </span>
+              {/if}
             </div>
           </div>
         {/if}
@@ -1032,6 +1134,17 @@
     margin-top: 12px;
     display: flex;
     gap: 6px;
+  }
+
+  /*
+    The offer beside it is the corpus one, unchecked against the workflow
+    (#498). Quiet on purpose: it qualifies a control that still works, so it
+    reads as a footnote to the select rather than as a failure of the panel.
+  */
+  .unverified {
+    margin-left: 6px;
+    font: 500 11px var(--mono);
+    color: var(--muted);
   }
 
   /*
