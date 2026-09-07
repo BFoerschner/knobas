@@ -9,7 +9,7 @@ use knobas_source::{
 use crate::cursor::Position;
 use crate::http::KumaHttp;
 use crate::socket::KumaSocket;
-use crate::{KumaConfig, descriptor, http, map, metrics, model, socket};
+use crate::{KumaConfig, create, descriptor, http, map, metrics, model, socket};
 
 /// One configured Uptime Kuma instance.
 pub struct KumaSource {
@@ -105,6 +105,36 @@ fn monitor_id(entity: &str) -> Result<i64, SourceError> {
             parsed.key
         ))
     })
+}
+
+/// Check that a create's target is **this** source's own.
+///
+/// `create_monitor`'s entity is the container the new monitor goes into, and
+/// for a monitoring source that container is the source itself
+/// ([`knobas_source::monitor_target`]). Two things can be wrong with it and
+/// each would be silent:
+///
+/// * **a monitor id** (`kuma:8`), which reads as *create a monitor inside
+///   monitor 8*. Kuma would happily make the monitor -- the id is not sent at
+///   all -- and the write would meanwhile have been ordered behind monitor 8's
+///   own writes and held whenever monitor 8 left the mirror;
+/// * **another source's** (`kuma-eu:monitors`), which cannot reach here
+///   through `submit_write` (it routes by namespace) and can reach here
+///   through the scheduler's flush of a row written when this source had a
+///   different id. Refusing says which two ids disagree.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for anything that is not this source's own.
+fn create_target(source_id: &str, entity: &str) -> Result<(), SourceError> {
+    let wanted = knobas_source::monitor_target(source_id);
+    if entity == wanted {
+        return Ok(());
+    }
+    Err(SourceError::protocol(format!(
+        "{entity:?} is not this Uptime Kuma's own: a create targets {wanted:?}, which is \
+         the container a new monitor goes into"
+    )))
 }
 
 #[async_trait::async_trait]
@@ -206,8 +236,9 @@ impl Source for KumaSource {
         Ok(current.encode())
     }
 
-    /// Pause or resume one monitor, over the socket.io channel the account
-    /// opens (issue #452); everything else refused by name.
+    /// Pause or resume one monitor, or create one, over the socket.io channel
+    /// the account opens (issues #452 and #453); everything else refused by
+    /// name.
     ///
     /// **The no-account arm comes first**, and it is a different sentence from
     /// the unsupported-op one: a source with only an API key declares an empty
@@ -221,10 +252,11 @@ impl Source for KumaSource {
     /// `WriteOp::identifier` uses: a new SPI variant must stop this adapter
     /// compiling until somebody decides whether Kuma performs it.
     ///
-    /// **`WriteReceipt::none()`**, because Kuma's answer carries nothing to
-    /// keep: `{"ok":true,"msg":"successPaused"}` names no record and mints no
-    /// id -- what changed is the monitor's own state, and the next poll reads
-    /// it back.
+    /// **`WriteReceipt::none()` for the two that change a monitor**, because
+    /// Kuma's answer carries nothing to keep: `{"ok":true,"msg":"successPaused"}`
+    /// names no record and mints no id -- what changed is the monitor's own
+    /// state, and the next poll reads it back. The create is the exception and
+    /// says why at its own arm.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         let Some(socket) = self.socket.as_ref() else {
             return Err(SourceError::protocol(format!(
@@ -233,9 +265,30 @@ impl Source for KumaSource {
                 op.identifier()
             )));
         };
+        // Pause and resume are one shape -- a monitor id and an event name --
+        // so they name their event here and share the send below, which is
+        // #452's arrangement with one arm added. The create takes a document
+        // rather than an id, checks a different target and answers a receipt,
+        // so it does its own work and returns from inside the match.
         let (event, entity) = match &op {
             WriteOp::PauseMonitor { entity } => (socket::PAUSE_EVENT, entity),
             WriteOp::ResumeMonitor { entity } => (socket::RESUME_EVENT, entity),
+            // **The one op here that answers a receipt** (issue #453). Kuma's
+            // `add` names the monitor it minted, and that id is what a
+            // withdrawn create's disclosure line points at
+            // (`knobas_sync::write_queue::UNCLAIMED_OPS`). It is not how the
+            // monitor is attached to an asset -- that is the name, resolved by
+            // the next poll -- because the receipt exists only on the machine
+            // that made the write and only until the row settles.
+            WriteOp::CreateMonitor { entity, name, url } => {
+                create_target(&self.id, entity)?;
+                let answered = socket
+                    .call(socket::ADD_EVENT, &create::document(name, url)?)
+                    .await?;
+                return Ok(
+                    create::minted_id(&answered).map_or_else(WriteReceipt::none, WriteReceipt::id)
+                );
+            }
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
@@ -248,7 +301,8 @@ impl Source for KumaSource {
             | WriteOp::CreatePage { .. }
             | WriteOp::UpdatePage { .. } => {
                 return Err(SourceError::protocol(format!(
-                    "the Uptime Kuma adapter offers pause and resume, so it cannot perform {:?}",
+                    "the Uptime Kuma adapter offers pause, resume and create, so it cannot \
+                     perform {:?}",
                     op.identifier()
                 )));
             }
@@ -368,7 +422,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             with_account.descriptor().write_ops,
-            ["pause_monitor", "resume_monitor"]
+            ["pause_monitor", "resume_monitor", "create_monitor"]
         );
 
         // And the refusal a key-only source gives names the remedy. No
@@ -411,6 +465,67 @@ mod tests {
         };
         assert!(message.contains("comment"), "{message}");
         assert!(!message.contains("no account"), "{message}");
+    }
+
+    /// **A create's target is this source's own**, and everything
+    /// else is refused before Kuma is asked (issue #453).
+    ///
+    /// The direction that matters is the first refusal below. `kuma:8` reads
+    /// as *create a monitor inside monitor 8*, and Kuma would make the monitor
+    /// anyway -- the entity is never sent, only the document is -- so a target
+    /// that slipped through would leave a write ordered behind monitor 8's own
+    /// and held every time monitor 8 was paused, for a monitor that has
+    /// nothing to do with it.
+    #[test]
+    fn a_creates_target_is_this_sources_own_or_it_is_refused_here() {
+        create_target("kuma", "kuma:monitors").unwrap();
+        create_target("kuma-eu", "kuma-eu:monitors").unwrap();
+        for refused in [
+            // A monitor, not the source.
+            "kuma:8",
+            // Another Kuma's.
+            "kuma-eu:monitors",
+            // The source id with no key, and a key with no namespace.
+            "kuma:",
+            "monitors",
+            "",
+        ] {
+            assert!(
+                matches!(
+                    create_target("kuma", refused),
+                    Err(SourceError::Protocol { .. })
+                ),
+                "{refused:?} must not read as a create target for this source"
+            );
+        }
+        // And the refusal names both, so a reader can see which two disagree.
+        let message = match create_target("kuma", "kuma-eu:monitors") {
+            Err(SourceError::Protocol { message, .. }) => message,
+            other => panic!("expected Protocol, got {other:?}"),
+        };
+        assert!(message.contains("kuma-eu:monitors"), "{message}");
+        assert!(message.contains("kuma:monitors"), "{message}");
+    }
+
+    /// A key-only source refuses the **create** with the same sentence it
+    /// refuses a pause with, and no network: the arm is taken before a session
+    /// is opened, so this holds against a base URL nothing is listening on.
+    #[tokio::test]
+    async fn a_create_without_an_account_is_refused_by_the_same_sentence() {
+        let key_only = build(instance(serde_json::json!({}), Some("uk1_secret"))).unwrap();
+        let refused = key_only
+            .write(WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_target("kuma"),
+                name: "gitea".to_owned(),
+                url: "http://gitea:3000/api/healthz".to_owned(),
+            })
+            .await;
+        let message = match refused {
+            Err(SourceError::Protocol { message, .. }) => message,
+            other => panic!("expected Protocol, got {other:?}"),
+        };
+        assert!(message.contains("no account"), "{message}");
+        assert!(message.contains("create_monitor"), "{message}");
     }
 
     /// The base URL a monitor's link is composed onto: the trailing slash a

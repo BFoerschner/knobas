@@ -368,6 +368,7 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
         : [],
     monitors: asset.id === CONTAINER.id ? NAMED_BY_THE_FILE : [],
     monitoring: asset.id === CONTAINER.id ? MONITORING : [],
+    monitor_targets: [],
   };
 }
 

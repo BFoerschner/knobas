@@ -4961,6 +4961,32 @@ fn the_monitors_tab_offers_the_ops_the_spi_names() {
     );
 }
 
+/// The third op's spelling, and **what it addresses** (issue #453).
+///
+/// The same pin as the two above, plus the half they have no equivalent of: a
+/// pause names a monitor the mirror already holds, and a create names a
+/// container that is nowhere in the mirror at all. So the target is composed
+/// rather than read, and both halves fail quietly if they drift -- an
+/// identifier nothing draws, and a write `submit_write` would route at a source
+/// that is not configured.
+#[test]
+fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
+    assert_eq!(
+        assets::CREATE_MONITOR,
+        knobas_source::WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: "gitea".to_owned(),
+            url: "http://gitea:3000/api/healthz".to_owned(),
+        }
+        .identifier()
+    );
+    assert_eq!(
+        knobas_source::monitor_target("kuma-eu"),
+        "kuma-eu:monitors",
+        "a second source addresses its own, or a create reaches the wrong Kuma"
+    );
+}
+
 /// The tab's own copy of the two spellings, which is a **third** and the only
 /// one that fails quietly.
 ///
@@ -4986,4 +5012,158 @@ fn the_tabs_own_action_table_is_keyed_by_those_same_spellings() {
              no button for it -- and skips it in silence"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The monitor names a create records (issue #453)
+// ---------------------------------------------------------------------------
+
+/// The monitor names an asset carries, as the pane reads them back.
+async fn named_monitors(pool: &PgPool, id: &str) -> Vec<String> {
+    assets::get(pool, id).await.expect("the pane").monitors
+}
+
+/// **The half of *Create monitor for this asset* that is knobas' own**: the
+/// name goes onto the asset, and `knobas_sync::attach` is what turns it into a
+/// `monitored-by` link when the next poll mirrors a monitor called that.
+///
+/// The line is the import's own -- `edited`, `field: "monitors"`, `added` --
+/// minus its `estate` key, because there is no file here.
+#[tokio::test]
+async fn recording_a_monitor_name_appends_it_and_says_so() {
+    let pool = pool("assets-name-monitor").await;
+    let (_, vm, _) = three_levels(&pool).await;
+
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Monitors {
+            added: vec!["  gitea (local)  ".to_owned()],
+        },
+    )
+    .await;
+
+    assert_eq!(named_monitors(&pool, &vm.id).await, ["gitea (local)"]);
+    let (verb, detail) = history(&pool, &vm.id).await.remove(0);
+    assert_eq!(verb, "edited");
+    assert_eq!(detail["field"], "monitors");
+    assert_eq!(detail["added"], serde_json::json!(["gitea (local)"]));
+    assert!(
+        detail.get("estate").is_none(),
+        "a name typed into the pane came from no file: {detail}"
+    );
+}
+
+/// It **appends**, and the direction that matters is the second name.
+///
+/// A set would have dropped the first, which is what an estate file's six
+/// names would be worth after one create -- and nothing in the pane would say
+/// they had gone.
+#[tokio::test]
+async fn a_second_name_keeps_the_first() {
+    let pool = pool("assets-name-monitor-two").await;
+    let (_, vm, _) = three_levels(&pool).await;
+
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Monitors {
+            added: vec!["gitea".to_owned()],
+        },
+    )
+    .await;
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Monitors {
+            added: vec!["canary".to_owned()],
+        },
+    )
+    .await;
+
+    assert_eq!(named_monitors(&pool, &vm.id).await, ["gitea", "canary"]);
+}
+
+/// A name the asset already carries changes nothing and writes no line.
+///
+/// `monitor_plan` and `attach` both match names, so a duplicate would draw a
+/// second link to the same monitor -- refused by `0011`'s unordered unique
+/// index, which would take a poll down rather than a button. And the entry
+/// would be one a reader could never remove: nothing in the pane deletes a
+/// name.
+#[tokio::test]
+async fn a_name_the_asset_already_carries_is_not_added_twice() {
+    let pool = pool("assets-name-monitor-dup").await;
+    let (_, vm, _) = three_levels(&pool).await;
+
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Monitors {
+            added: vec!["gitea".to_owned()],
+        },
+    )
+    .await;
+    let before = history(&pool, &vm.id).await.len();
+
+    edit_one(
+        &pool,
+        &vm.id,
+        AssetEdit::Monitors {
+            added: vec!["gitea".to_owned(), "gitea".to_owned()],
+        },
+    )
+    .await;
+
+    assert_eq!(named_monitors(&pool, &vm.id).await, ["gitea"]);
+    assert_eq!(
+        history(&pool, &vm.id).await.len(),
+        before,
+        "a create that changed nothing wrote a line saying it did"
+    );
+}
+
+/// A blank name is refused by name rather than stored.
+///
+/// The import refuses one for the same reason and through the same helper: a
+/// blank in `knobas.asset.monitors` is a name no monitor can ever match and
+/// one nothing in the pane can remove.
+#[tokio::test]
+async fn a_blank_monitor_name_is_refused() {
+    let pool = pool("assets-name-monitor-blank").await;
+    let (_, vm, _) = three_levels(&pool).await;
+
+    let refused = assets::edit(
+        &pool,
+        &vm.id,
+        &[AssetEdit::Monitors {
+            added: vec!["   ".to_owned()],
+        }],
+    )
+    .await
+    .expect_err("a blank monitor name");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+    assert!(named_monitors(&pool, &vm.id).await.is_empty());
+}
+
+/// **The pane offers no create when nothing offers one** (#453's second
+/// criterion), read at the seam a reader meets it: `assets::get` fills no
+/// targets, so a profile whose sources cannot write draws no control.
+///
+/// The command above it is what fills the list from the keychain, and the
+/// live suite is what witnesses the filled direction against a real Kuma --
+/// there is no keychain in this test and that is the point: the *absence* is
+/// what has to hold on every machine.
+#[tokio::test]
+async fn an_asset_read_without_a_keychain_offers_no_create() {
+    let pool = pool("assets-no-create-target").await;
+    let (_, vm, _) = three_levels(&pool).await;
+
+    assert!(
+        assets::get(&pool, &vm.id)
+            .await
+            .expect("the pane")
+            .monitor_targets
+            .is_empty()
+    );
 }

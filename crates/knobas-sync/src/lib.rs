@@ -36,6 +36,7 @@
 //! the descriptor never declared.
 
 pub mod alerts;
+pub mod attach;
 pub mod config;
 pub mod health;
 #[cfg(any(test, feature = "test-util"))]
@@ -701,6 +702,30 @@ async fn run_locked(
         // what trouble is -- and adjacent so that no run can ever leave a
         // sample behind without having decided about it.
         alerts::reconcile(tx, source_id).await?;
+        // And the attachments (spec #427's *Import*, issue #453): every
+        // monitor name an asset carries that this run's roster now answers to
+        // becomes a `monitored-by` link. Third and last of the three because
+        // it is the only one that reads `sync.live_item` for *identity*
+        // rather than for state -- the sweep has run, the tombstones are in,
+        // and what is live here is this poll's answer. `attach` records why a
+        // resolution is the sync's business at all.
+        //
+        // **Being inside this gate is a safety check and not only a saved
+        // round trip**, which is where it differs from `sweep_kinds`' clause
+        // above. A source that declares no `monitor` kind cannot *emit* an
+        // item of one -- the sink refuses an undeclared kind -- but `attach`
+        // reads the mirror rather than this run's items, and the mirror can
+        // hold monitor rows under an id whose current descriptor has no such
+        // kind: `sync.item.source_id` has no foreign key to
+        // `knobas.source_config` (`0002`, restated in `0012`),
+        // `delete_source`'s `purge_items` is the reader's choice, `0012` keeps
+        // unconfigured rows visible in `sync.live_item`, and `add_source`
+        // plans for "something exists under this id again" (#127). Outside the
+        // `if`, a poll of the adapter that reused the id would draw
+        // `monitored-by` links to a deleted source's monitors.
+        // `tests/attach.rs`' two controls witness the two guards separately
+        // and say which is which.
+        attach::resolve(tx, source_id).await?;
     }
 
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")

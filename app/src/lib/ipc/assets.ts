@@ -317,6 +317,34 @@ export interface AssetDetail {
    * section (#445).
    */
   monitoring: AttachedMonitor[];
+  /**
+   * The sources a *Create monitor for this asset* would go to (#453, story
+   * 70).
+   *
+   * **Empty is the ordinary answer**, and drawing nothing when it is empty is
+   * the criterion: an Uptime Kuma configured with only its API key declares no
+   * write ops, so it is not here and the pane offers no control. Filled from
+   * the keychain by `commands::assets::get_asset`, so it says what *this*
+   * machine can do rather than what the adapter kind could.
+   */
+  monitor_targets: MonitorTarget[];
+}
+
+/**
+ * One source a new monitor could be created in — `assets::MonitorTarget`.
+ *
+ * `entity` is what a `CreateMonitor` against this source targets, composed by
+ * the backend from `knobas_source::monitor_target`. Never build it here: what
+ * a create targets is the SPI's to spell, and a template string in a component
+ * is the per-adapter table §3a forbids.
+ */
+export interface MonitorTarget {
+  /** The configured source's id, which is also its entities' namespace. */
+  source_id: string;
+  /** What the reader called it when they added it. */
+  display_name: string;
+  /** The `entity` the create carries. */
+  entity: string;
 }
 
 /**
@@ -512,13 +540,32 @@ export interface PropertyEdit {
 }
 
 /**
+ * Add Uptime Kuma monitor names — `assets::AssetEdit::Monitors` (#453).
+ *
+ * The one edit that **appends**: an asset's monitor names are added by the
+ * estate import and by *Create monitor for this asset*, and taken away by
+ * neither. A name the asset already carries changes nothing and writes no
+ * history line.
+ */
+export interface MonitorsEdit {
+  field: "monitors";
+  added: string[];
+}
+
+/**
  * One field changing — `assets::AssetEdit`.
  *
  * A discriminated union rather than a bag of optionals, because each edit
  * writes its own history line with a `from` and a `to`, and a bag would make
  * "cleared" and "not mentioned" the same value on the wire.
  */
-export type AssetEdit = NameEdit | StatusEdit | EnvironmentEdit | OwnerEdit | PropertyEdit;
+export type AssetEdit =
+  | NameEdit
+  | StatusEdit
+  | EnvironmentEdit
+  | OwnerEdit
+  | PropertyEdit
+  | MonitorsEdit;
 
 /** Rename a route — `assets::RouteEdit::Name`. */
 export interface RouteNameEdit {

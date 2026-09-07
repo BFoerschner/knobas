@@ -164,6 +164,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // The Tree's pane withdraws a link through this (#435). Nothing here does,
   // so it refuses rather than answering.
   unlink: () => Promise.reject(new Error("no unlink in this test")),
+  // And queues a `create_monitor` through this (#453). Same shape and same
+  // reason: this file walks the shell, never that dialog.
+  submitWrite: () => Promise.reject(new Error("no write in this test")),
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve(contextRows),
@@ -344,6 +347,7 @@ vi.mock("./lib/ipc/assets", () => ({
       // The monitor names an import kept (#439). Nothing here is imported.
       monitors: [],
       monitoring: [],
+      monitor_targets: [],
     });
   },
   // The type table the create/edit dialogs read (#429). Answered rather than

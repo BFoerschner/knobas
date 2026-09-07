@@ -348,6 +348,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "update_page",
     "pause_monitor",
     "resume_monitor",
+    "create_monitor",
 ];
 
 /// What `op` counts as its target having changed.
@@ -405,7 +406,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
-/// `"create_page"`, `"pause_monitor"`, `"resume_monitor"`. These do not
+/// `"create_page"`, `"pause_monitor"`, `"resume_monitor"`, `"create_monitor"`.
+/// These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
 /// container is not a change to what the write would replace -- there is
@@ -452,6 +454,18 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// channel can: `/metrics` publishes neither. A resume aimed at a monitor
 /// somebody deleted goes to Kuma and comes back refused by name, which is the
 /// source's answer to give (ADR-0004) and not a hold to invent here.
+///
+/// **`"create_monitor"` is in that group and its hold clause has no teeth at
+/// all** (issue #453), which is worth saying rather than leaving to be
+/// discovered. Its target is the source itself
+/// (`knobas_source::monitor_target`), a container knobas never mirrors -- so
+/// it projects `{"live": false}` at queue time and again at flush time, the
+/// two are equal, and the write always sends. That is `"create_ticket"`'s
+/// reading exactly, and it is the intended one: nothing that can happen to a
+/// Kuma between the button and the flush makes *watch this URL* the wrong
+/// request. A duplicate is not a hold either -- Uptime Kuma holds any number
+/// of monitors under one name, so a second create makes a second monitor, and
+/// the queue's own per-entity ordering is what keeps two creates from racing.
 ///
 /// `"create_page"` is in that group for the additive reason and not by
 /// analogy: a new page goes *beside* whatever else sits under its parent, so a
@@ -521,7 +535,8 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "log_work"
         | "create_page"
         | "pause_monitor"
-        | "resume_monitor" => serde_json::json!({
+        | "resume_monitor"
+        | "create_monitor" => serde_json::json!({
             "op": op,
             "live": live,
         }),

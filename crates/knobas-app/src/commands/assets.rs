@@ -94,19 +94,118 @@ pub async fn asset_tree(
 }
 
 /// One asset with everything the pane draws: its properties, its held-by path,
-/// what it holds, and its history.
+/// what it holds, its history -- and which sources, if any, it could have a
+/// monitor created in (issue #453).
+///
+/// **The `AppHandle` is for that last field alone**, and it is `monitor_roster`'s
+/// arrangement for `monitor_roster`'s reason: whether a source offers
+/// `create_monitor` is a property of the *instance* and lives in the keychain,
+/// which `assets::get` -- a module that reads the database -- has no business
+/// opening. Nothing on the wire changes; Tauri supplies the handle.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no asset carries.
 #[tauri::command]
-pub async fn get_asset(
+pub async fn get_asset<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     asset_id: String,
 ) -> Result<AssetDetail, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::get(&pool, &asset_id).await
+    let mut detail = assets::get(&pool, &asset_id).await?;
+    detail.monitor_targets = monitor_targets(&app).await?;
+    Ok(detail)
+}
+
+/// The configured sources a new monitor could be created in, by source id.
+///
+/// **Narrowed before the keychain is opened.** A source's ops are read out of
+/// its credential, and this read runs on every selection in the Tree -- so
+/// asking every configured source would be a keychain read per source per
+/// click. The narrowing is generic and not a table of adapter kinds: a source
+/// is worth asking about when its *kind* either already declares
+/// `create_monitor` or declares `accepts_account`, which is the SPI's way of
+/// saying "what this instance offers depends on a credential". Every other
+/// source's template answer is the whole answer, and it does not name the op.
+///
+/// **An empty list rather than a refusal** when the sync engine has not
+/// started, `monitor_write_ops`' rule: the pane draws during bring-up, and a
+/// moment when knobas cannot say which sources can write is a moment for no
+/// button rather than for no pane.
+async fn monitor_targets<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Vec<assets::MonitorTarget>, IpcError> {
+    let Ok(state) = crate::sources::state(app) else {
+        return Ok(Vec::new());
+    };
+    let could = worth_asking(&state.registry.descriptors());
+
+    let mut targets = Vec::new();
+    for cfg in knobas_sync::config::list(&state.pool)
+        .await
+        .map_err(IpcError::internal)?
+    {
+        if !could.contains(&cfg.adapter_kind) {
+            continue;
+        }
+        let ops =
+            crate::sources::crud::instance_write_ops(&state.secrets, state.registry.as_ref(), &cfg)
+                .await;
+        if let Some(target) = target_of(&cfg, &ops) {
+            targets.push(target);
+        }
+    }
+    // By id, so a profile with two Kumas draws the same order every time and
+    // the form's default target does not move between reads.
+    targets.sort_by(|a, b| a.source_id.cmp(&b.source_id));
+    Ok(targets)
+}
+
+/// The adapter kinds whose *instances* are worth a keychain read.
+///
+/// A kind either already declares `create_monitor` in its template -- so every
+/// instance of it offers one -- or declares `accepts_account`, which is the
+/// SPI's way of saying "what this instance offers depends on a credential".
+/// Every other kind's template answer is the whole answer and it does not name
+/// the op, so asking its instance would open a keychain to be told what the
+/// template already said.
+///
+/// A rule about the SPI and not a table of adapter kinds: the word *Kuma* does
+/// not appear, and an adapter added later joins this set by declaring, not by
+/// being listed.
+fn worth_asking(
+    templates: &[knobas_source::SourceDescriptor],
+) -> std::collections::BTreeSet<String> {
+    templates
+        .iter()
+        .filter(|d| d.accepts_account || d.write_ops.iter().any(|op| op == assets::CREATE_MONITOR))
+        .map(|d| d.adapter_kind.clone())
+        .collect()
+}
+
+/// One configured source as a create target, or `None` when this instance does
+/// not offer the op.
+///
+/// **`ops` is the *instance's*, not the kind's**, and that is the whole of the
+/// criterion's negative: an Uptime Kuma with only its API key builds fine,
+/// declares an empty `write_ops`, and is not a target -- so the pane draws no
+/// control rather than one `submit_write` would refuse by name.
+///
+/// The entity comes from `knobas_source::monitor_target` and never from a
+/// format string here: what a create targets is the SPI's to spell.
+fn target_of(
+    cfg: &knobas_sync::config::SourceConfigRow,
+    ops: &[String],
+) -> Option<assets::MonitorTarget> {
+    ops.iter()
+        .any(|op| op == assets::CREATE_MONITOR)
+        .then(|| assets::MonitorTarget {
+            entity: knobas_source::monitor_target(&cfg.id),
+            source_id: cfg.id.clone(),
+            display_name: cfg.display_name.clone(),
+        })
 }
 
 /// Create an asset under `parentId`, or at the top of the estate.
@@ -1381,12 +1480,26 @@ mod tests {
                 web_url: Some("http://127.0.0.1:3001/dashboard/7".to_owned()),
                 tombstoned: false,
             }],
+            // Populated for the same reason again: the pane branches on this
+            // list being empty, so a fixture that left it so would let the
+            // mirror declare the target shape anything at all (#453).
+            monitor_targets: vec![assets::MonitorTarget {
+                source_id: "kuma".to_owned(),
+                display_name: "Uptime Kuma".to_owned(),
+                entity: "kuma:monitors".to_owned(),
+            }],
         };
         assert_shape(
             MIRROR,
             "AttachedMonitor",
             &serde_json::to_value(&detail.monitoring[0]).unwrap(),
             &["entity_id", "name", "state", "web_url", "tombstoned"],
+        );
+        assert_shape(
+            MIRROR,
+            "MonitorTarget",
+            &serde_json::to_value(&detail.monitor_targets[0]).unwrap(),
+            &["source_id", "display_name", "entity"],
         );
         assert_shape(
             MIRROR,
@@ -1405,8 +1518,117 @@ mod tests {
                 "links",
                 "monitors",
                 "monitoring",
+                "monitor_targets",
             ],
         );
+    }
+
+    /// One configured source, as `monitor_targets` reads it.
+    fn configured(id: &str, kind: &str, name: &str) -> knobas_sync::config::SourceConfigRow {
+        knobas_sync::config::SourceConfigRow {
+            id: id.to_owned(),
+            adapter_kind: kind.to_owned(),
+            display_name: name.to_owned(),
+            base_url: "http://127.0.0.1:3001/".to_owned(),
+            auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::ApiToken),
+            config: serde_json::json!({}),
+            sync_interval_secs: 60,
+            enabled: true,
+            cursor: None,
+            health: knobas_sync::health::CredentialHealth {
+                source_id: id.to_owned(),
+                state: knobas_sync::health::AuthState::Ok,
+                checked_at: None,
+                detail: None,
+                secret_expires_at: None,
+            },
+            backoff_until: None,
+        }
+    }
+
+    /// **The criterion's negative, at the seam that decides it**: the ops read
+    /// are the *instance's*, so an Uptime Kuma with only its API key is not a
+    /// target and the pane draws no control.
+    ///
+    /// Which ops a key-only instance declares is the Kuma crate's claim
+    /// (`an_account_is_what_gives_an_instance_its_write_ops`) and
+    /// `sources_crud.rs`' over a real keychain; what is asserted here is the
+    /// one line downstream of them -- that an empty list, or a list of the two
+    /// ops #452 added, is not a create target.
+    #[test]
+    fn only_an_instance_that_offers_the_op_is_a_create_target() {
+        let kuma = configured("kuma", "kuma", "Uptime Kuma");
+        assert_eq!(target_of(&kuma, &[]), None);
+        assert_eq!(
+            target_of(
+                &kuma,
+                &["pause_monitor".to_owned(), "resume_monitor".to_owned()]
+            ),
+            None,
+            "the write half #452 added is not a create"
+        );
+        assert_eq!(
+            target_of(
+                &kuma,
+                &[
+                    "pause_monitor".to_owned(),
+                    "resume_monitor".to_owned(),
+                    assets::CREATE_MONITOR.to_owned(),
+                ]
+            ),
+            Some(assets::MonitorTarget {
+                source_id: "kuma".to_owned(),
+                display_name: "Uptime Kuma".to_owned(),
+                entity: "kuma:monitors".to_owned(),
+            })
+        );
+        // A second Kuma addresses its **own**: the entity is composed from the
+        // source's id, so a create in one never reaches the other.
+        assert_eq!(
+            target_of(
+                &configured("kuma-eu", "kuma", "Kuma EU"),
+                &[assets::CREATE_MONITOR.to_owned()]
+            )
+            .expect("a target")
+            .entity,
+            "kuma-eu:monitors"
+        );
+    }
+
+    /// Which *kinds* are worth opening a keychain for, against the **real**
+    /// registry.
+    ///
+    /// The narrowing runs on every selection in the Tree, so being wrong in
+    /// one direction costs a keychain read per configured source per click and
+    /// in the other costs a control that never appears. Asserted against
+    /// `Registry::builtin` rather than against a fixture, because the claim is
+    /// about what the compiled-in adapters declare -- and it is the rule that
+    /// makes this a statement about the SPI rather than a table of kinds.
+    #[test]
+    fn only_a_kind_whose_ops_could_include_it_is_worth_a_keychain_read() {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        let templates = crate::sources::Registry::builtin().descriptors();
+        assert!(
+            templates.len() >= 5,
+            "the builtin registry lost its adapters: {}",
+            templates.len()
+        );
+        let asking = worth_asking(&templates);
+        assert!(
+            asking.contains(knobas_source_kuma::ADAPTER_KIND),
+            "the one adapter whose ops depend on a credential is not asked: {asking:?}"
+        );
+        for quiet in templates
+            .iter()
+            .filter(|d| d.adapter_kind != knobas_source_kuma::ADAPTER_KIND)
+        {
+            assert!(
+                !asking.contains(&quiet.adapter_kind),
+                "{:?} is asked, and its template already answers: {:?}",
+                quiet.adapter_kind,
+                quiet.write_ops
+            );
+        }
     }
 
     /// The Import's six shapes, every one exercised **populated** (#439).

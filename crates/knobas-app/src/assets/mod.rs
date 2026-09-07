@@ -149,6 +149,12 @@
 //!   [`monitor_plan`], which since #442's Kuma adapter answers with real links
 //!   -- and reports the names that still find nothing, so a reader is told on
 //!   every preview and not only on the one that first kept a name (#445).
+//!   Since #453 the import is neither the only writer of a name nor the only
+//!   resolver of one: [`AssetEdit::Monitors`] is what *Create monitor for this
+//!   asset* records before it queues its write, and `knobas_sync::attach`
+//!   resolves whatever the mirror can answer to on **every poll** of a
+//!   monitoring source -- which is the rest of that import sentence
+//!   (*"or the M4.1 sync"*) and what makes a created monitor attach itself.
 //! * **The file's plain scalars become tagged values here.** #428 chose
 //!   `{"kind":…,"value":…}` and left the translation to this ticket;
 //!   [`property_of`] is it, and the kind a type declares is what decides.
@@ -175,7 +181,11 @@
 //! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
 //! the estate's own list of what is wrong, one read that the top strip counts
 //! and the Assets view draws. The **ack** on an alert is #446's, with the
-//! inbox category it clears; the Monitors tab's cards are #449's.
+//! inbox category it clears; the Monitors tab's cards are #449's. Story 70's
+//! *Create monitor for this asset* is #453's: [`AssetDetail::monitor_targets`]
+//! is how the pane knows whether to offer one, filled by
+//! `commands::assets::get_asset` because the answer is in the keychain and this
+//! module reads the database.
 
 use std::collections::{HashMap, HashSet};
 
@@ -676,6 +686,49 @@ pub struct AssetDetail {
     /// [`links`]: AssetDetail::links
     /// [`monitors`]: AssetDetail::monitors
     pub monitoring: Vec<AttachedMonitor>,
+    /// The sources a *Create monitor for this asset* would go to -- empty when
+    /// there are none, which is when the pane offers nothing (spec #427 story
+    /// 70, issue #453).
+    ///
+    /// **A property of the profile and not of the asset**, carried on this
+    /// read because this read is the one the pane makes. The alternative was a
+    /// command of its own, which would be a second round trip per selection
+    /// for a list that is almost always empty or one long.
+    ///
+    /// **Empty is the ordinary answer, and it is the criterion.** *"Without
+    /// the account the action is absent"*: an Uptime Kuma configured with only
+    /// its API key declares no write ops at all, so it is not in this list and
+    /// the pane draws no control -- rather than drawing one that queues a
+    /// write only to have `submit_write` refuse it by name.
+    ///
+    /// Filled by `commands::assets::get_asset` rather than by [`get`], for the
+    /// reason `MonitorRow::actions` is filled there: the answer is in the
+    /// keychain and this module reads the database.
+    #[serde(default)]
+    pub monitor_targets: Vec<MonitorTarget>,
+}
+
+/// One source a new monitor could be created in (issue #453).
+///
+/// Three fields and each is used by a different part of the form: the id is
+/// what tells two Kumas apart in a list nobody has to read, the display name
+/// is what the reader picked when they added the source, and the entity is the
+/// [`WriteOp::CreateMonitor`](knobas_source::WriteOp::CreateMonitor) target
+/// the form submits.
+///
+/// **The entity is composed here and not in the webview**, which is the whole
+/// reason this is a struct rather than a list of ids: what a create targets is
+/// the SPI's to spell ([`knobas_source::monitor_target`]), and a frontend that
+/// composed `` `${id}:monitors` `` would be a per-adapter table in a Svelte
+/// component.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct MonitorTarget {
+    /// The configured source's id, which is also its entities' namespace.
+    pub source_id: String,
+    /// What the reader called it when they added it.
+    pub display_name: String,
+    /// The `entity` a `create_monitor` against this source carries.
+    pub entity: String,
 }
 
 /// One monitor watching an asset, as the pane's monitoring section draws it.
@@ -1032,10 +1085,18 @@ pub struct RouteDetail {
 ///
 /// A tagged union rather than a struct of optionals, and for the reason
 /// `time::TimerTarget` is one: an edit is *one* field changing, every edit
-/// writes its own history line with a `from` and a `to`, and a bag of
-/// `Option`s would make "cleared" and "not mentioned" the same value on the
-/// wire. `null` on the three nullable fields is therefore an unambiguous
-/// **clear**.
+/// writes its own history line, and a bag of `Option`s would make "cleared"
+/// and "not mentioned" the same value on the wire. `null` on the three
+/// nullable fields is therefore an unambiguous **clear**.
+///
+/// **The line is a `from` and a `to` for every variant but one** (issue #453).
+/// [`Monitors`](AssetEdit::Monitors) appends to a list rather than setting a
+/// field, so its line says `added` and there is no `from` to state: an asset's
+/// monitor names are added by two surfaces and taken away by neither, and a
+/// `from` carrying the whole previous list would be a copy of the column in
+/// the log. That variant argues the exception where it is declared; this is
+/// the header saying it exists, so a reader does not take the rule above for a
+/// rule the enum keeps.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "field", rename_all = "snake_case")]
 pub enum AssetEdit {
@@ -1054,6 +1115,33 @@ pub enum AssetEdit {
     Property {
         key: String,
         value: Option<PropertyValue>,
+    },
+    /// Add Uptime Kuma monitor names to [`AssetDetail::monitors`] (issue
+    /// #453).
+    ///
+    /// **The one variant that appends rather than sets**, and the only one
+    /// whose field is a list. It is the same write the import makes -- `0020`'s
+    /// column, [`ADD_MONITORS`]' `array_cat`, an `edited` line spelling
+    /// `field: "monitors"` -- reached from the other of the two surfaces that
+    /// put a name there. *Create monitor for this asset* records the name here
+    /// **before** it queues the write, because the name is what attaches the
+    /// monitor when the next poll mirrors it (`knobas_sync::attach`), and a
+    /// create whose write landed with no name on the asset would be a monitor
+    /// nothing joins to anything.
+    ///
+    /// **Append, because a name is never taken away by anything but the
+    /// reader** -- which is the import's own rule ([`ADD_MONITORS`]: *"an
+    /// import never removes a monitor name"*) and the reason a set would be
+    /// wrong here too: this edit knows about one name, and assigning would
+    /// drop the six an estate file put there. Removing one is not this
+    /// ticket's, and the pane offers no control for it.
+    ///
+    /// A name the asset already carries is dropped rather than refused, so
+    /// pressing *Create* twice for one name leaves one name: `array_cat`
+    /// cannot deduplicate and [`monitor_plan`] matches by name, so a duplicate
+    /// would be an entry a reader could never get rid of.
+    Monitors {
+        added: Vec<String>,
     },
 }
 
@@ -1611,6 +1699,12 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         monitoring,
         links,
         monitors,
+        // Filled by the command above this, which has the `AppHandle` the
+        // keychain read needs. Empty here so that every other caller of this
+        // function -- the demo profile, the tests, `--demo` -- gets an asset
+        // whose pane offers no create, which is the honest answer for a read
+        // that never asked a keychain anything.
+        monitor_targets: Vec::new(),
     })
 }
 
@@ -1918,6 +2012,12 @@ pub fn offer_actions(rows: &mut [MonitorRow], offered: &HashMap<String, Vec<Stri
 /// not read. `pub` for that test's sake and no other caller's.
 pub const PAUSE_MONITOR: &str = "pause_monitor";
 pub const RESUME_MONITOR: &str = "resume_monitor";
+/// The third, and the one the **Tree's pane** offers rather than this tab
+/// (issue #453): *Create monitor for this asset*. Here beside its two siblings
+/// for their reason -- one place in this crate spells what a surface offers,
+/// and `write_choke_point` must not read a roster or a pane read as a write
+/// path. `tests/assets_ipc.rs` holds it to `WriteOp::identifier`.
+pub const CREATE_MONITOR: &str = "create_monitor";
 
 /// What the *Not monitored* roster draws: an asset nothing watches, with where
 /// it sits and what it is (spec #427 story 68, issue #449).
@@ -2937,6 +3037,32 @@ pub async fn edit(
                 Some((
                     "edited",
                     serde_json::json!({ "field": "property", "key": key, "from": before, "to": after }),
+                ))
+            }
+            // **The append**, and the only edit here whose `continue` is the
+            // ordinary path: pressing *Create monitor* for a name the asset
+            // already carries changes nothing and writes no line, exactly as
+            // renaming an asset to the name it has does.
+            AssetEdit::Monitors { added } => {
+                let added = vet_monitors(added, id)?;
+                let missing: Vec<String> = added
+                    .into_iter()
+                    .filter(|name| !current.monitors.contains(name))
+                    .collect();
+                if missing.is_empty() {
+                    continue;
+                }
+                sqlx::query(ADD_MONITORS)
+                    .bind(id)
+                    .bind(&missing)
+                    .execute(&mut *tx)
+                    .await?;
+                // The import's own line, minus its `estate` key -- which is
+                // the file a name came from, and there is no file here. The
+                // Tree's history renders both from `added`.
+                Some((
+                    "edited",
+                    serde_json::json!({ "field": "monitors", "added": missing }),
                 ))
             }
         };
@@ -4459,6 +4585,12 @@ struct MonitorPlan {
 /// name an earlier import kept is resolved by this one and reported by this one
 /// -- spec #427's *"resolved by the next import"* and issue #445's *"kept and
 /// reported in the preview"* are two readings of that same map.
+/// **One rule, two encodings** (issue #453). `knobas_sync::attach::resolve` is
+/// the same rule applied on every poll rather than on an import, in SQL rather
+/// than in a `HashSet` here, in a crate this one cannot see. What the two must
+/// keep in step is the *predicate* -- a name matches a live monitor's `title`,
+/// and a pair that already carries a link is left alone -- and no compiler will
+/// say when one moves. Its module doc carries the twin of this paragraph.
 async fn monitor_plan(
     tx: &mut Transaction<'_, Postgres>,
     wanted: &HashMap<String, Vec<String>>,
@@ -4866,6 +4998,9 @@ struct Stored {
     environment: Option<Environment>,
     owner: Option<String>,
     properties: serde_json::Map<String, serde_json::Value>,
+    /// The Uptime Kuma monitor names already on this asset -- read so that
+    /// [`AssetEdit::Monitors`] can drop the ones it would repeat.
+    monitors: Vec<String>,
 }
 
 /// Read an asset inside a transaction and hold it until the transaction ends.
@@ -4875,7 +5010,7 @@ struct Stored {
 /// history line saying it changed from the value the *other* one replaced.
 async fn locked(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<Stored, IpcError> {
     let row = sqlx::query(
-        "select parent_id, type_id, name, status, environment, owner, properties
+        "select parent_id, type_id, name, status, environment, owner, properties, monitors
            from knobas.asset where id = $1 for update",
     )
     .bind(id)
@@ -4897,6 +5032,7 @@ async fn locked(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<Stored, 
             serde_json::Value::Object(map) => map,
             _ => serde_json::Map::new(),
         },
+        monitors: row.try_get("monitors")?,
     })
 }
 

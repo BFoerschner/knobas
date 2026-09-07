@@ -98,6 +98,10 @@ const MAX_POLLS: usize = 200;
 /// Kuma's own event names, spelled as its `server.js` registers them.
 pub(crate) const PAUSE_EVENT: &str = "pauseMonitor";
 pub(crate) const RESUME_EVENT: &str = "resumeMonitor";
+/// The create (issue #453). One word, and `server.js` really does register it
+/// as `add` rather than `addMonitor` -- the odd one out among the three, which
+/// is why it is spelled here beside its siblings instead of at the call site.
+pub(crate) const ADD_EVENT: &str = "add";
 
 /// One Kuma instance's socket.io access, as an account.
 #[derive(Debug)]
@@ -153,6 +157,13 @@ impl KumaSocket {
 
     /// Log in, emit `event` with `argument`, and answer what Kuma said.
     ///
+    /// The answer is Kuma's own acknowledgement object, already checked for
+    /// `ok` -- `{"ok":true,"msg":"successPaused"}` for a pause, and
+    /// `{"ok":true,"msg":"successAdded","monitorID":31}` for a create, whose
+    /// caller reads that id out as the write's receipt. Handing the object
+    /// back rather than `()` is what lets a call that *made* something name it
+    /// without this module growing a second entry point per event.
+    ///
     /// # Errors
     ///
     /// [`SourceError::Unauthorized`] when the account is refused -- which is
@@ -165,7 +176,7 @@ impl KumaSocket {
         &self,
         event: &str,
         argument: &serde_json::Value,
-    ) -> Result<(), SourceError> {
+    ) -> Result<serde_json::Value, SourceError> {
         let opened = self.open().await?;
         let session = Session {
             socket: self,
@@ -364,16 +375,17 @@ fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
     Err(SourceError::unauthorized())
 }
 
-/// The call's verdict: [`SourceError::Protocol`] carrying Kuma's own words.
+/// The call's verdict: Kuma's own answer, or [`SourceError::Protocol`]
+/// carrying Kuma's own words.
 ///
 /// Protocol and not `Unauthorized`, even for *You do not own this monitor* --
 /// the account logged in, so re-entering it changes nothing, and a write that
 /// waits for a credential that is already right would wait for ever. It is a
 /// refusal of this write, which is what the queue records and shows.
-fn verdict(payload: &str, event: &str) -> Result<(), SourceError> {
+fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError> {
     let answered = answer(payload)?;
     if went_well(&answered) {
-        return Ok(());
+        return Ok(answered);
     }
     Err(SourceError::protocol(format!(
         "Uptime Kuma refused {event}: {}",

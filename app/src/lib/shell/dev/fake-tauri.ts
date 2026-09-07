@@ -894,6 +894,22 @@ function editAsset(args: Record<string, unknown>) {
       });
       continue;
     }
+    if (edit.field === "monitors") {
+      // The append `assets::AssetEdit::Monitors` makes, duplicates dropped:
+      // the name is what attaches the monitor, so a fixture that stored it
+      // twice would draw two waiting entries for one check (#453).
+      const added = ((edit.added ?? []) as string[])
+        .map((name) => name.trim())
+        .filter((name) => name !== "" && !asset.monitors.includes(name));
+      if (added.length === 0) continue;
+      asset.monitors.push(...added);
+      ASSET_HISTORY.push({
+        entity_id: asset.id,
+        verb: "edited",
+        detail: { field: "monitors", added },
+      });
+      continue;
+    }
     if (edit.field !== "property") continue;
     const key = String(edit.key);
     const at = asset.properties.findIndex((property) => property.key === key);
@@ -1081,6 +1097,14 @@ function assetDetail(args: Record<string, unknown>) {
     // graph and no mirror, so every name the file gave is still a name (#445).
     // The pane therefore draws the waiting list and no *Monitoring* section.
     monitoring: [],
+    // **One target**, so `?fake-ipc` can walk *Create monitor for this asset*
+    // (#453). The fixture's Uptime Kuma is the one a reader configured with an
+    // account -- the absent direction has its own witness in
+    // `AssetsView.monitor.test.svelte.ts`, and a fixture that answered nothing
+    // here would leave the control unreachable in the browser.
+    monitor_targets: [
+      { source_id: "kuma", display_name: "Uptime Kuma", entity: "kuma:monitors" },
+    ],
     history: [
       // This session's own writes first, newest first, which is what makes
       // *every mutation appears in the pane's history immediately* (#429)

@@ -28,8 +28,8 @@
 //!   resume are socket.io, which an API key cannot log in to at all -- so a
 //!   source configured with only a key declares no write ops and refuses every
 //!   one by name, and a source whose keychain item also carries an *account*
-//!   declares `pause_monitor` and `resume_monitor` and performs them over
-//!   [`socket`] (issue #452).
+//!   declares `pause_monitor`, `resume_monitor` and `create_monitor` and
+//!   performs them over [`socket`] (issues #452 and #453).
 //!
 //! # Where the endpoint truth comes from
 //!
@@ -43,6 +43,7 @@
 //! docker-free; **if the two disagree, the stand-in is what is wrong.**
 
 mod config;
+mod create;
 mod cursor;
 mod descriptor;
 mod http;

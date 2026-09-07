@@ -618,6 +618,23 @@ export type WriteOpPayload =
       };
     }
   | {
+      CreateMonitor: {
+        /**
+         * What the create targets: the source that will make it, as
+         * `assets::MonitorTarget.entity` gives it. Never composed here (#453).
+         */
+        entity: string;
+        /**
+         * What the monitor is called, and therefore what attaches it: the
+         * next poll mirrors it, and `knobas_sync::attach` draws the
+         * `monitored-by` link to every asset carrying this name.
+         */
+        name: string;
+        /** The http(s) URL it will check. A monitor of a URL is an HTTP check. */
+        url: string;
+      };
+    }
+  | {
       UpdatePage: {
         entity: string;
         /**

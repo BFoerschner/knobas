@@ -76,6 +76,7 @@ function detail(
     history: [],
     monitors: [],
     monitoring: [],
+    monitor_targets: [],
   };
 }
 

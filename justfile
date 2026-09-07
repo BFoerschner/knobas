@@ -1148,12 +1148,17 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # can witness: that a monitor really deleted in Kuma really leaves the mirror.
 # The suite's own header says what it deliberately does not run, and why.
 #
-# WHAT IT CREATES AND WHAT IT REMOVES. One monitor, `knobas-live-scratch`,
-# added and deleted through `testenv/kuma-monitor.sh` -- the same socket.io
-# channel the seed uses. It is removed however the test ends, and anything a
-# killed run leaves behind is removed by the `./seed-kuma.sh` above, which
-# deletes every monitor `monitors.json` does not name. **No shared container is
-# stopped by anything here** (M4 spec, issue #427).
+# WHAT IT CREATES AND WHAT IT REMOVES. Four monitors, none of them named by
+# `monitors.json` and each owned by one test: `knobas-live-scratch` and
+# `knobas-write-scratch` are *added* through `testenv/kuma-monitor.sh` -- the
+# same socket.io channel the seed uses -- and `knobas-live-created` and
+# `knobas-write-created` are added by **knobas itself**, which is what issue
+# #453's create is (a monitor the seed's helper made would witness nothing
+# about the op under test). All four are deleted through that helper however
+# the test ends, and anything a killed run leaves behind is removed by the
+# `./seed-kuma.sh` above, which deletes every monitor `monitors.json` does not
+# name. **No shared container is stopped by anything here** (M4 spec, issue
+# #427).
 #
 # AND WHAT IT KNOCKS DOWN: `127.0.0.1:8299`, the canary's port, and nothing
 # else. The exit suite releases it to make the estate's one red on purpose and

@@ -22,6 +22,12 @@ serde_json.workspace = true
 # username is the first thing a reader chasing a failed pause needs, and the
 # password never reaches a line -- `Account`'s own `Debug` sees to that.
 tracing = "0.1"
+# One parse, for the URL a `create_monitor` asks Kuma to watch (issue #453).
+# The same crate `knobas-http` vets a base URL with, and the same two schemes:
+# a monitor pointed at anything else is a check that never runs, reported down
+# for ever. Already in the tree through `knobas-http`, so this adds nothing to
+# the lockfile.
+url = "2"
 
 [dev-dependencies]
 serde_json.workspace = true

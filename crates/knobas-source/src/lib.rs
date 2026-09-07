@@ -582,6 +582,67 @@ pub enum WriteOp {
     /// argument. It is also what lets a descriptor offer one without the
     /// other, which is what a source with a read-only account would declare.
     ResumeMonitor { entity: String },
+    /// Identifier `"create_monitor"`. Ask a monitoring source to start
+    /// watching a URL (M4.1, issue #453).
+    ///
+    /// `entity` is the container the new thing goes into, like every other
+    /// create in this enum, and for this op that container is **the source
+    /// itself**: a monitoring system has nothing above a monitor that knobas
+    /// mirrors -- Uptime Kuma's only one is a monitor group, and spec #427
+    /// puts groups out of scope. [`monitor_target`] spells it, and no call
+    /// site invents it. Like a create's container elsewhere here (`jira:PAY`)
+    /// it is one knobas does not mirror, so it projects `{"live": false}` at
+    /// queue time and again at flush time, holds nothing, and sends.
+    ///
+    /// **Deliberately not called a *roster***: `CONTEXT.md` gives that word to
+    /// the Monitors tab's list of rows (`assets::monitor_roster`), and this is
+    /// an address rather than a list.
+    ///
+    /// **A URL and no type.** A monitor of a URL is an HTTP check, and that is
+    /// the whole of what a reader is offered: the pane's form is prefilled
+    /// from an asset's route or its hostname (spec #427, story 70). A
+    /// `monitor_type` field would be a string with one legal value that every
+    /// adapter would then have to vet, and the day knobas offers a ping or a
+    /// TCP check is the day this op grows the field that says which -- with a
+    /// vocabulary decided then rather than left open now.
+    ///
+    /// **`name` is what attaches it.** The new monitor reaches knobas the
+    /// ordinary way, through the next poll, and what draws the `monitored-by`
+    /// link is the name: `knobas_sync::attach` resolves the names an asset
+    /// carries against the monitors the mirror holds, which is the rule the
+    /// estate import already uses (issue #439). So the name is not decoration
+    /// -- it is the address the attachment is made through, which is why the
+    /// caller records it on the asset *before* queueing the write.
+    CreateMonitor {
+        entity: String,
+        name: String,
+        url: String,
+    },
+}
+
+/// The key half of what a [`CreateMonitor`](WriteOp::CreateMonitor) targets.
+///
+/// Private, because nothing outside this module has a use for half an address:
+/// [`monitor_target`] is what callers want, and a key on its own would be an
+/// invitation to compose the other half by hand.
+///
+/// A monitor id in every adapter that has one is the source's own, and Uptime
+/// Kuma's are decimal, so `"monitors"` cannot collide with a mirrored monitor
+/// -- pinned by `the_create_target_is_not_a_monitor_id`.
+const MONITOR_TARGET_KEY: &str = "monitors";
+
+/// The entity id a [`CreateMonitor`](WriteOp::CreateMonitor) against
+/// `source_id` targets: that source's own address for the monitors it holds.
+///
+/// **Spelled once, here, and not in the app.** The alternative is every
+/// producer of the op composing the string itself, which is a per-adapter
+/// table in the app (`adapter_kind == "kuma"`) of exactly the kind
+/// `config_schema` and `accepts_account` exist to forbid: the app asks which
+/// sources offer `create_monitor` and asks the SPI what to address, and it
+/// never learns the word *Kuma*.
+#[must_use]
+pub fn monitor_target(source_id: &str) -> String {
+    format!("{source_id}:{MONITOR_TARGET_KEY}")
 }
 
 impl WriteOp {
@@ -618,6 +679,7 @@ impl WriteOp {
             WriteOp::UpdatePage { .. } => "update_page",
             WriteOp::PauseMonitor { .. } => "pause_monitor",
             WriteOp::ResumeMonitor { .. } => "resume_monitor",
+            WriteOp::CreateMonitor { .. } => "create_monitor",
         }
     }
 }
@@ -953,6 +1015,11 @@ mod tests {
             WriteOp::ResumeMonitor {
                 entity: "kuma:8".into(),
             },
+            WriteOp::CreateMonitor {
+                entity: monitor_target("kuma"),
+                name: "gitea".into(),
+                url: "http://gitea:3000/api/healthz".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -968,7 +1035,8 @@ mod tests {
                 | WriteOp::CreatePage { .. }
                 | WriteOp::UpdatePage { .. }
                 | WriteOp::PauseMonitor { .. }
-                | WriteOp::ResumeMonitor { .. } => {}
+                | WriteOp::ResumeMonitor { .. }
+                | WriteOp::CreateMonitor { .. } => {}
             }
         }
         probes
@@ -1018,7 +1086,33 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 13, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 14, "a variant lost its probe in every_write_op");
+    }
+
+    /// A create's target is an entity id, and it is one no monitor can also
+    /// carry.
+    ///
+    /// Both halves matter. The first is what makes a `create_monitor`
+    /// submittable at all: `submit_write` parses the target and routes the
+    /// write by its namespace, so a target that did not parse would be an op
+    /// nothing could ever deliver. The second is what makes it safe to be a
+    /// *literal* key: an adapter's monitor ids are the source's own, Uptime
+    /// Kuma's are decimal, and a collision would be a create ordered behind
+    /// one monitor's writes and held against that monitor leaving the mirror.
+    #[test]
+    fn the_create_target_is_not_a_monitor_id() {
+        let target = monitor_target("kuma");
+        assert_eq!(target, "kuma:monitors");
+        let parsed = knobas_core::entity::EntityRef::parse(&target).expect("the target parses");
+        assert_eq!(parsed.namespace, "kuma");
+        assert_eq!(parsed.key, MONITOR_TARGET_KEY);
+        assert!(
+            MONITOR_TARGET_KEY.parse::<i64>().is_err(),
+            "a decimal key could be a monitor id"
+        );
+        // The namespace is the source id verbatim, which is what routes the
+        // write: a second Kuma addresses its own and never the first's.
+        assert_eq!(monitor_target("kuma-eu"), "kuma-eu:monitors");
     }
 
     /// ADR-0004: a failure that came from a response carries the **status** it

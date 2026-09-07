@@ -204,6 +204,7 @@ function detailOf(assetId: string): AssetDetail {
     // its own fixture in `AssetsView.test.svelte.ts`.
     monitors: [],
     monitoring: [],
+    monitor_targets: [],
   };
 }
 

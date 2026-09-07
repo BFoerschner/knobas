@@ -155,6 +155,7 @@ function detailOf(assetId: string): AssetDetail {
     // has not synced, which is what makes both names still a *queue*. The
     // resolved case is `AssetsView.test.svelte.ts`'.
     monitoring: [],
+    monitor_targets: [],
   };
 }
 

@@ -75,10 +75,9 @@
 //! scope of the claim. This test covers SQL written as text, which is all of
 //! the SQL there is right now.
 //!
-//! ## The two exemptions
+//! ## The three exemptions
 //!
-//! Both are in `knobas-core`, both read the base table on purpose, and both say
-//! why in place:
+//! All three read the base table on purpose, and all three say why in place:
 //!
 //! * [`LINK`] -- `link::unlink` re-reads the row by id to tell "already gone"
 //!   from "never existed", a question about the row rather than about which
@@ -87,6 +86,19 @@
 //!   and **ignores every filter**, which is what makes a dismissal and an
 //!   unlink the same fact to the detector (#40 story 12). Reading a view there
 //!   would re-propose what the user threw away.
+//! * [`ATTACH`] -- the sync engine's monitor-name resolution (issue #453) asks
+//!   whether a pair already carries an **active row of any kind** before it
+//!   inserts one. That is `link_pair_active_idx`'s own question (`0011`:
+//!   unique over the unordered pair `where deleted_at is null`, which does not
+//!   care about `confirmed_at`), and it is the *only* reader here that is
+//!   asking about the index rather than about a population. Reading
+//!   `knobas.confirmed_link` there would insert over `monitor_url_host`'s
+//!   proposal (#478) and take the whole poll down with a unique violation
+//!   every minute -- pinned, from the other side, by `knobas-sync`'s
+//!   `a_proposal_over_the_same_pair_is_left_alone`. The first exemption
+//!   outside `knobas-core`, and the reason it can be is that it reads the
+//!   table to *avoid* deciding which population a row is in rather than to
+//!   decide it.
 //!
 //! Growing this list is allowed; doing it without noticing is not. Each entry
 //! is a decision a reviewer sees in a diff, the same treatment
@@ -108,6 +120,11 @@ const LINK: &str = "knobas-core/src/link.rs";
 
 /// Detection's unfiltered, both-directions suppression, relative to `crates/`.
 const SUGGEST: &str = "knobas-core/src/suggest.rs";
+
+/// The sync engine's monitor-name resolution, relative to `crates/` -- the
+/// reader that asks `link_pair_active_idx`'s question rather than a
+/// population's (issue #453). See the header.
+const ATTACH: &str = "knobas-sync/src/attach.rs";
 
 /// The two spellings of the table in a read position.
 const READS: &[&str] = &["from knobas.link", "join knobas.link"];
@@ -149,11 +166,18 @@ fn reads_the_base_table(source: &str) -> bool {
 /// Pure, so the rule can be checked against inputs that do not have to exist in
 /// the tree -- see `the_rule_actually_rejects_a_read_of_the_base_table`.
 fn offends(relative: &str, source: &str) -> bool {
-    relative != LINK && relative != SUGGEST && reads_the_base_table(source)
+    !EXEMPT.contains(&relative) && reads_the_base_table(source)
 }
 
+/// The three modules allowed to read the base table, in the header's order.
+///
+/// A list rather than a chain of `!=`, now that there are three: growing it is
+/// allowed and is meant to be one line a reviewer sees, which is
+/// `write_choke_point.rs`' `HANDS_TO_THE_QUEUE` treatment.
+const EXEMPT: &[&str] = &[LINK, SUGGEST, ATTACH];
+
 #[test]
-fn only_the_two_link_modules_read_the_base_table() {
+fn only_the_exempt_modules_read_the_base_table() {
     let crates = workspace_crates();
 
     let mut scanned = 0_usize;
@@ -167,8 +191,10 @@ fn only_the_two_link_modules_read_the_base_table() {
             .replace('\\', "/");
         scanned += 1;
         let source = std::fs::read_to_string(&path).expect("a readable source file");
-        if (relative == LINK || relative == SUGGEST) && reads_the_base_table(&source) {
-            exempt_still_read.push(if relative == LINK { LINK } else { SUGGEST });
+        if let Some(exempt) = EXEMPT.iter().find(|allowed| **allowed == relative)
+            && reads_the_base_table(&source)
+        {
+            exempt_still_read.push(*exempt);
         }
         if offends(&relative, &source) {
             offenders.push(relative);
@@ -192,10 +218,11 @@ fn only_the_two_link_modules_read_the_base_table() {
         "the scan walked only {scanned} files -- it is not looking at the workspace"
     );
     assert!(
-        exempt_still_read.len() == 2,
-        "only {exempt_still_read:?} of the two exempt modules still read the base table -- \
+        exempt_still_read.len() == EXEMPT.len(),
+        "only {exempt_still_read:?} of the {} exempt modules still read the base table -- \
          either the read moved and the exemption is now a hole, or the matcher stopped matching \
-         and this test is checking nothing"
+         and this test is checking nothing",
+        EXEMPT.len()
     );
 }
 
@@ -223,6 +250,10 @@ fn the_rule_actually_rejects_a_read_of_the_base_table() {
     assert!(
         !offends(SUGGEST, planned),
         "detection's suppression reads the table on purpose"
+    );
+    assert!(
+        !offends(ATTACH, planned),
+        "the monitor-name resolution reads the table to ask the unique index's own question"
     );
 
     // A read broken across lines is the normal shape of a multi-line SQL
