@@ -2763,6 +2763,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   | `get_note` | `(note_id: String) -> NoteDetail` | `getNote(noteId)` |
   | `delete_note` | `(note_id: String) -> bool` | `deleteNote(noteId)` |
 
+  *`create_note`'s row is the signature as of #46 and is left as the record it was: the command
+  grew a third argument in issue #502 (2026-09-08) — see **One argument on one command — issue
+  #502** below, which carries the current signature.*
+
   Additive on every axis: no existing command's arguments, return type or name changes, no event
   name changes, and `EntityDetail` keeps the shape #53 left it in. Two new DTOs ride on the new
   commands — `NoteDetail { note, refs, links }` and `knobas_core::note::{NoteRow, NoteRef}` — pinned
@@ -7947,6 +7951,98 @@ From this commit on, each of the following requires an orchestrator decision **a
   and `a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout` for the two halves
   of the view this read is exempt from; and, on the rendered side, eight in `CheckoutPanel.test.svelte.ts` and five in
   `CheckoutsSection.test.svelte.ts`.
+- **One argument on one command — issue #502 (2026-09-08): a new note is born with its links.**
+
+  A note started from a room carries `captured-in` to that room's context and `captured-from` to
+  the entity whose detail is open (spec #491, v1.5 stream 5, stories 40--43; `CONTEXT.md`,
+  **Capture**). One frozen surface, additive, and both the ticket and the stream map name it in
+  advance: the ticket's own words are *"`create_note` grows an optional list of links to draw at
+  creation (§10.8 entry)"* and its third criterion asks for this entry by name; #491's stream map
+  row 5 says *"`create_note` grows its two links"*. **Björn keeps the gate for frozen contracts
+  and this entry is flagged for his review.** No fork arose on this ticket, so no deputy ruling
+  ratifies it; what authorises the touch is the ticket text above, and the entry below is the
+  record the freeze asks for in exchange.
+
+  **The IPC schema — one argument and one input DTO, on a command that already exists:**
+
+  ```rust
+  #[tauri::command]
+  pub async fn create_note(title: Option<String>, body_md: Option<String>,
+                           links: Option<Vec<NoteLinkInput>>) -> Result<NoteDetail, IpcError>;
+
+  pub struct NoteLinkInput { pub target_id: String, pub relation: String }
+  ```
+
+  mirrored in `app/src/lib/ipc/entity.ts` as `createNote(title?, bodyMd?, links?)` and
+  `interface NoteLinkInput { target_id: string; relation: string }`. Absent `links` reads exactly
+  as an empty list, so *New note* in a derived room sends nothing rather than sending emptiness,
+  and every existing caller decodes unchanged --- `serde` reads a missing `Option` as `None`, which
+  is what makes this additive rather than a version of the command.
+
+  **A list of pairs, not two named fields.** `capturedIn` and `capturedFrom` would put the
+  *capture's* vocabulary into the command, and the command's job is *draw these links with the
+  note* --- the same latitude `create_link` takes when it accepts a relation rather than knowing
+  what `blocks` means (§5a: relations are open). The two words live where the rest of the relation
+  vocabulary lives, `app/src/lib/detail/relations.ts`, which is also where they join the curated
+  menu with both of their readings (`captured in` / `captured here`, `captured from` /
+  `captured from here`) --- the ticket asks for that, and an uncurated relation reads the same word
+  from both ends, so a context's own panel would say the room was captured in the note. #503's
+  capture window passes the same two through the same argument, and a third caller with a third
+  relation needs no further change here.
+
+  **The four rules the argument carries**, all of them stated because each is a thing a later
+  reader could reasonably decide the other way:
+
+  1. **Origin is `manual`, not `implied`.** `implied` is `knobas_core::note::reconcile_refs`'
+     population and nothing else's, and both link panels refuse to unlink an `implied` row out of a
+     note with the words *"This link comes from a `[[reference]]` in the note"*
+     (`notes/NoteView.svelte`, `detail/Detail.svelte`). That sentence is false of a capture link,
+     and under it the reader could never withdraw one. A capture link is an ordinary link: drawn
+     because the reader wrote a note there, withdrawn from the panel like any other.
+  2. **They are drawn in the note's own transaction** (`knobas_core::note::create` grows a
+     `&[BornLink]`), which is the whole of the ticket's title. A note that existed for a moment
+     without its `captured-in` link would be, for that moment, a thought belonging to no context.
+  3. **A malformed target is `invalid`; a well-formed target with no `knobas.entity` row draws no
+     link and the note is written anyway.** The first is a caller bug and deterministic. The second
+     is a race --- a room the capture window remembered, a detail whose source was purged --- and
+     refusing there would make *New note* a button that stays broken while the reader can do
+     nothing about it. It is the same rule, written as the same `select ... from knobas.entity`,
+     that `reconcile_refs` applies to a `[[ref]]` naming nothing.
+  4. **The relation is folded by `relation_of`**, like every other relation this module writes, so
+     `Captured-In` and `captured-in` cannot become two group headers neither of which sees the
+     other.
+
+  **No field on the note, and no membership write.** `CONTEXT.md`'s **Capture** says the first;
+  the second is ADR-0008, whose seed is *"every confirmed link touching the context's own `ctx:`
+  entity"* --- the `captured-in` link **is** the explicit add, so `context::member_ids` answers
+  with the note without a second statement anywhere. `NoteDetail`, `NoteRow`, `NoteRef` and
+  `LinkEntry` are untouched: the links come back through the `links` list the note view already
+  draws.
+
+  **What is not touched.** **No migration** --- `knobas.link` is `0001`'s and the born links are
+  ordinary rows. **No new command, no new module, no barrel line**: `create_note` has been in
+  `crates/knobas-app/src/lib.rs`'s handler list since #46 and `app/src/lib/ipc/index.ts` already
+  re-exports `entity.ts`, so the `commands/` + `ipc/` module layout is unchanged and neither
+  append-only barrel grows. No event. Nothing in `crates/knobas-source/src/**` --- no `WriteOp`
+  grows and no descriptor gains a slot, and a link is never written back to a source
+  (`CONTEXT.md`, **Link**). Nothing in `crates/knobas-http/**`;
+  `crates/knobas-app/src/{error,profile}.rs` untouched; the keychain envelope unchanged at
+  version 2. The **glossary** needs nothing: `CONTEXT.md`'s **Capture** entry (added 2026-09-07 by
+  #494) already states this behaviour, including *"The in-app New note attaches the same two, by
+  the same mechanism"*, and nothing here reaches past `sync.live_item`, so **Live item**'s census
+  of three readers is unchanged.
+
+  Pinned by: three tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
+  `a_note_born_in_a_stored_room_carries_both_links_and_is_a_member` (both relations, both origins,
+  the note as the `from` end, `context::member_ids`, and the backlink from the ticket),
+  `a_note_born_with_no_links_is_born_with_none` and
+  `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one`;
+  `entity_mirror.rs`'s `the_note_link_input_shape_matches_its_typescript_mirror`, which round-trips
+  the input DTO so a Rust-only field cannot hide; and, on the frontend, four in
+  `shell/Room.test.svelte.ts` for what *New note* sends from a stored room, over an open detail,
+  from the three derived rooms and over a detail in a derived room, plus two in
+  `detail/relations.test.ts` for the two readings of each word and the grouping they produce on the
+  context's own panel.
 
 - **`crates/knobas-source/src/**` and the IPC command schema — issue #498 (2026-09-08): the
   reachable-transition read, one trait method and one IPC command.**
