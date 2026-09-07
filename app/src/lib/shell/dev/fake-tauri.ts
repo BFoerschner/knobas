@@ -182,6 +182,9 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     mini_board: (args) => miniBoard(args),
     get_entity: (args) => getEntity(args),
     resolve_url: (args) => resolveUrl(args),
+    create_note: () => createNote(),
+    get_note: (args) => getNote(args),
+    save_note: (args) => saveNote(args),
     recent_activity: (args) => recentActivity(args),
 
     // Checkouts (#499). The fixture has no filesystem, so what stands in for
@@ -1846,6 +1849,87 @@ function listEntities(args: Record<string, unknown>) {
   );
 
   return { rows: rows.slice(offset, offset + limit).map(mirrorRow), total: rows.length };
+}
+
+/* ----------------------------------------------------------------- notes */
+
+/**
+ * The notes this session has written, by id. **Fixture only.**
+ *
+ * A note is the one kind knobas owns rather than mirrors (#46), so there is
+ * nothing in `CORPUS` to answer from: the browser walk that shows a pasted URL
+ * turning into a chip (#497) needs somewhere to write one. Stateful within the
+ * session, like `LOCAL_LINKS` above and for the same reason — a walk that
+ * typed a note and then could not read it back would show a bug this app does
+ * not have.
+ */
+const NOTES = new Map<string, { title: string; body_md: string; created_at: string }>();
+
+/** `create_note`, minting an id the way the backend's `note:<hex>` does. */
+function createNote() {
+  const id = `note:${Math.random().toString(16).slice(2, 6)}`;
+  NOTES.set(id, { title: "", body_md: "", created_at: SYNCED_AT });
+  return noteDetail(id);
+}
+
+/** `get_note`. A note this session did not write is a `not_found`, as it is. */
+function getNote(args: Record<string, unknown>) {
+  const id = String(args["noteId"] ?? "");
+  if (!NOTES.has(id)) {
+    throw { code: "not_found", message: `there is no note ${id}`, source_id: null };
+  }
+  return noteDetail(id);
+}
+
+/** `save_note`: idempotent, and the answer carries the reconciled refs. */
+function saveNote(args: Record<string, unknown>) {
+  const id = String(args["noteId"] ?? "");
+  const existing = NOTES.get(id);
+  if (!existing) {
+    throw { code: "not_found", message: `there is no note ${id}`, source_id: null };
+  }
+  NOTES.set(id, {
+    ...existing,
+    title: String(args["title"] ?? ""),
+    body_md: String(args["bodyMd"] ?? ""),
+  });
+  return noteDetail(id);
+}
+
+/**
+ * One note, with its `[[refs]]` resolved against the corpus.
+ *
+ * A **second, fixture-only** implementation of `knobas_core::note`'s
+ * `parse_refs` and `reconcile_refs`, on the same terms as {@link resolveUrl}
+ * below: the rule that decides what a reference *is* lives in Rust and is
+ * tested against a real database, and there is no database here. What this
+ * owes is the one outcome a walk has to be able to see — a body naming an
+ * entity comes back with a chip to draw, and a body naming nothing does not.
+ * `links` stays empty: the panel a link would fill is not what the walk is
+ * looking at, and inventing rows for it would be a third copy of a rule.
+ */
+function noteDetail(id: string) {
+  const note = NOTES.get(id)!;
+  const refs = [...note.body_md.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {
+    const targetId = found[1]!.trim();
+    const target = CORPUS.find((entry) => entry.entity_id === targetId);
+    return {
+      target_id: targetId,
+      target: target
+        ? {
+            entity_id: target.entity_id,
+            kind: target.kind,
+            title: target.title,
+            deleted_at: target.deleted_at,
+          }
+        : null,
+    };
+  });
+  return {
+    note: { id, title: note.title, body_md: note.body_md, created_at: note.created_at, updated_at: SYNCED_AT },
+    refs,
+    links: [],
+  };
 }
 
 /**
