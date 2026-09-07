@@ -4094,7 +4094,7 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
             .await
             .expect("the tray")
             .is_empty(),
-        "and nothing else in the file proposes anything either"
+        "and this pass wrote nothing the count could have missed"
     );
 
     // The control: the same pass over the same estate with the links gone.

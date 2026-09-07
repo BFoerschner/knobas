@@ -547,11 +547,14 @@ macro_rules! host_of {
 ///
 /// A **payload read outside an adapter**, and it takes that discipline in
 /// full, as `SOURCE_RECORDED_RELATION` does: one named statement, a
-/// `jsonb_typeof` guard on every one of the four keys, and a failure direction
-/// of *absence* -- a monitor with neither `url` nor `hostname`, either of them
-/// not a string, or one naming no host contributes no candidate rather than a
-/// guessed one. The same guard sits on the asset's two properties, whose bag
-/// knobas writes and the database does not type.
+/// `jsonb_typeof` guard on each of the four keys it reads -- the monitor's
+/// `url` and its `hostname`, the asset's `hostname` and its `ip` -- and a
+/// failure direction of *absence*. A monitor with neither key, with either of
+/// them not a string, or with one naming no host contributes no candidate
+/// rather than a guessed one, and so does an asset whose property carries a
+/// `value` that is not a string. Neither bag is a typed column: `payload` is
+/// what a source sent and `properties` is what knobas wrote, and the database
+/// vouches for the shape of neither.
 const MONITOR_URL_HOST: &str = detection!(concat!(
     "with watched as (
          select m.entity_id, ",
