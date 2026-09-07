@@ -370,6 +370,7 @@
           status={statuses[source.id] ?? null}
           test={tests[source.id] ?? null}
           testing={testing[source.id] ?? false}
+          acceptsAccount={kindRegistry.acceptsAccount(source.adapter_kind)}
           onsync={() => void sync(source)}
           ontest={() => void test(source)}
           onreenter={() => (fixing = source.id)}

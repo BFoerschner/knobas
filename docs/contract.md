@@ -1716,13 +1716,31 @@ draft of it did not: a tombstone is the difference between a stored position and
 corpus, so a cursor-less run simply does not mention a monitor that is not published. A scheduled
 run is incremental; the suite drives one.
 
-**The live run is the witness** (ADR-0013): `just kuma-live`, now eight tests, three of them this
-half's — the declaration against the real server, a scratch monitor paused through `pause_monitor`
-and resumed back, and the two refusals with the fault class each takes (`authIncorrectCreds` →
+**The live run is the witness** (ADR-0013), and it takes **two** suites because the criterion says
+*through the queue*. `crates/knobas-source-kuma/tests/live_kuma.rs` grew three tests — the
+declaration against the real server, a scratch monitor paused through `pause_monitor` and resumed
+back, and the two refusals with the fault class each takes (`authIncorrectCreds` →
 `Unauthorized`, so the queue waits; *You do not own this monitor* → `Protocol`, so it does not).
+That is the **SPI seam**. Everything between the button and it is knobas' own — the op decoded, the
+target parsed, the source found, the *instance's* write ops read out of the keychain, the queue row
+written, the flush, the mirror re-read — and none of it is exercised by an adapter test. So
+`crates/knobas-app/tests/kuma_write_live.rs` is the app-level half over a real profile with a real
+scheduler and a real Postgres: `write_queue::submit` for the pause, the row settled `sent`, the
+tombstone read out of `sync.item`, the resume back, and the negative — a Kuma with only its API key
+refused before anything is queued. `just kuma-live` runs both, then #483's exit witness.
+
 The recipe gained `KNOBAS_KUMA_USER` and `KNOBAS_KUMA_PASSWORD`, demanded rather than defaulted for
-issue #351's reason. **No live run pauses anything but its own scratch monitor**, and `Scratch`'s
-`Drop` deletes that however the run ends — a deleted monitor is not a silenced one.
+issue #351's reason. **No live run pauses anything but its own scratch monitor** — each suite adds
+one under a name `monitors.json` does not carry — and `Drop` deletes it however the run ends, so a
+deleted monitor is not a silenced one.
+
+**The door on a healthy row.** The credential strip (`ReenterSecret.svelte`) is offered by
+`SourceRow.svelte` to a source that is *failing* — `unauthorized`, `missing_secret`, or a test the
+far end refused — because *Re-enter* is what a refused credential is offered. A working key-only
+Uptime Kuma is none of those, and it is exactly the source story 69 describes, so the row grows a
+second word for the same strip: **Account**, drawn only where the adapter declares
+`accepts_account`. Without it, "adding the account" would be a thing a reader could do only by
+breaking their Kuma first.
 
 **What this half does not do.** No `create_monitor`: spec #427 gives this channel pause, resume and
 create, and #452 is the first two. No *remove the account*: `set_source_secret` reads absent as
@@ -1993,11 +2011,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   `commands::assets`' `the_monitor_roster_matches_its_typescript_mirror`; the Kuma crate's
   `an_account_is_what_turns_the_write_ops_on` (the battery over **both** instances) and
   `an_account_is_what_gives_an_instance_its_write_ops`; `assets::offer_actions`'
-  `a_row_is_offered_the_action_its_state_has_a_use_for`; and, for the halves no test can reach
-  without the real server, `just kuma-live`'s
+  `a_row_is_offered_the_action_its_state_has_a_use_for`; `SourceRow.test.svelte.ts`'s
+  *a healthy source whose adapter takes an account is offered one*; and, for the halves no test can
+  reach without the real server, `just kuma-live`'s
   `a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back`,
-  `only_a_source_with_an_account_offers_the_write_ops` and
-  `a_refused_account_and_a_refused_write_are_different_faults`.
+  `only_a_source_with_an_account_offers_the_write_ops`,
+  `a_refused_account_and_a_refused_write_are_different_faults` and — one seam higher, which is what
+  the criterion's *through the queue* asks for — `kuma_write_live.rs`'s
+  `a_pause_queued_through_the_write_queue_reaches_kuma_and_the_mirror` and
+  `a_pause_on_a_source_with_only_its_api_key_is_refused_before_it_is_queued`.
 
 - **IPC schema**, issue #409 (2026-09-05): `time::worklog::CandidateSource` grows from
   `mirror` | `activity` to `mirror` | `activity` | `write` | `note`, mirrored in

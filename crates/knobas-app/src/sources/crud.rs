@@ -69,6 +69,35 @@ impl From<knobas_secrets::Secret> for Credential {
     }
 }
 
+impl Credential {
+    /// **Absent means keep**, for both halves (issue #452), applied once.
+    ///
+    /// `typed` is what a form submitted and `stored` is what the keychain
+    /// holds; the answer is what the source should authenticate with. The rule
+    /// reads in both directions and both are met by real readers: adding an
+    /// account to an Uptime Kuma cannot retype an API key Kuma showed once, and
+    /// replacing an expired key must not throw away the account beside it.
+    ///
+    /// **One function because it is one rule.** [`set_secret`] resolves it in
+    /// order to *store* the answer and [`test`] in order to *try* it, and a
+    /// second copy is how a *Test connection* comes to go green over a
+    /// credential the saved source does not have.
+    ///
+    /// The secret may still come back `None` -- a source that needs none, or a
+    /// draft for one not yet saved. What a caller may not do is read that as
+    /// "clear it"; `set_secret` refuses by name instead.
+    fn keeping(typed: &SecretInput, stored: Option<knobas_secrets::Secret>) -> Self {
+        let (kept_value, kept_account) = match stored {
+            Some(kept) => (Some(kept.value), kept.account),
+            None => (None, None),
+        };
+        Self {
+            secret: typed.value.clone().or(kept_value),
+            account: typed.account.clone().map(Into::into).or(kept_account),
+        }
+    }
+}
+
 /// The instance an adapter is built from.
 ///
 /// One place, so `crud` and the scheduler route and shape instances
@@ -406,29 +435,20 @@ pub async fn set_secret(
     // show. Removing an account is therefore not something this call can do;
     // deleting and re-adding the source is, and it is the honest cost of a
     // form that may never read a credential back.
-    let stored = knobas_secrets::spawn::get(secrets, id).await?;
-    let value = match (secret.value.clone(), stored.as_ref()) {
-        (Some(typed), _) => typed,
-        (None, Some(kept)) => kept.value.clone(),
-        (None, None) => {
-            return Err(SourcesError::Invalid(format!(
-                "source {id:?} has no stored credential to keep -- type one in"
-            )));
-        }
+    let credential = Credential::keeping(&secret, knobas_secrets::spawn::get(secrets, id).await?);
+    let Some(value) = credential.secret.clone() else {
+        return Err(SourcesError::Invalid(format!(
+            "source {id:?} has no stored credential to keep -- type one in"
+        )));
     };
-    let account = secret
-        .account
-        .clone()
-        .map(Into::into)
-        .or_else(|| stored.and_then(|kept| kept.account));
 
     knobas_secrets::spawn::put(
         secrets,
         id,
         knobas_secrets::Secret {
             kind: method,
-            value: value.clone(),
-            account: account.clone(),
+            value,
+            account: credential.account.clone(),
         },
     )
     .await?;
@@ -439,10 +459,7 @@ pub async fn set_secret(
         &cfg.display_name,
         &cfg.base_url,
         Some(method),
-        Credential {
-            secret: Some(value),
-            account,
-        },
+        credential,
         cfg.config.clone(),
     ))?;
     let outcome = source.test_connection().await;
@@ -551,36 +568,24 @@ pub async fn test(
     };
     let template = template_for(registry, &kind)?;
 
-    // The stored credential, read once: it is both the fallback for a draft
-    // that typed no secret and the source of the account a draft that typed
-    // only an account is testing *against* (issue #452).
+    // **The same rule `set_secret` applies**, through the same function: a
+    // typed half wins and an absent one keeps what is stored (issue #452). A
+    // typed secret is the point of *Test* before *Save* -- it is held in memory
+    // for this call and written nowhere -- and a saved source with nothing
+    // typed is tested with the credential its scheduled run will use, account
+    // included. A *Test* that resolved this differently would go green over a
+    // credential the saved source does not have.
     let stored = match &draft.source_id {
         Some(id) if auth.is_some() => knobas_secrets::spawn::get(secrets, id).await?,
         _ => None,
     };
-    let typed_value = draft.secret.as_ref().and_then(|typed| typed.value.clone());
-    let secret = match (typed_value, &stored, &draft.source_id) {
-        // A typed secret is the point of *Test* before *Save*: it is held in
-        // memory for this call and written nowhere.
-        (Some(typed), _, _) => Some(typed),
-        // No typed secret and a saved source: the stored one. Absent is an
-        // error rather than an anonymous attempt -- "you never entered one" is
-        // the `missing_secret` offer, not a 401.
-        (None, Some(kept), _) => Some(kept.value.clone()),
-        (None, None, Some(_)) if auth.is_some() => {
-            return Err(knobas_secrets::SecretError::NotFound.into());
-        }
-        (None, None, _) => None,
-    };
-    // Same rule as `set_secret`: a typed account wins, and absent keeps the
-    // stored one -- so *Test* on a saved source exercises the credential the
-    // scheduled run will use, account included.
-    let account = draft
-        .secret
-        .as_ref()
-        .and_then(|typed| typed.account.clone())
-        .map(Into::into)
-        .or_else(|| stored.and_then(|kept| kept.account));
+    let had_stored = stored.is_some();
+    let credential = Credential::keeping(&draft.secret.clone().unwrap_or_default(), stored);
+    // Absent is an error rather than an anonymous attempt for a **saved**
+    // source: "you never entered one" is the `missing_secret` offer, not a 401.
+    if credential.secret.is_none() && !had_stored && draft.source_id.is_some() && auth.is_some() {
+        return Err(knobas_secrets::SecretError::NotFound.into());
+    }
 
     // The instance id only matters to an adapter that emits items; nothing here
     // does. A draft for a saved source uses its real id all the same, so an
@@ -595,7 +600,7 @@ pub async fn test(
         display_name,
         &base_url,
         auth,
-        Credential { secret, account },
+        credential,
         config,
     ))?;
 

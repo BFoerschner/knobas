@@ -1218,6 +1218,14 @@ kuma-live:
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
       -- --ignored --nocapture --test-threads=1
+    # The same write half one seam higher (#452): the pause queued through
+    # `submit_write`, settled, and read back out of `sync.item`. The adapter
+    # suite above proves `Source::write` pauses a monitor; everything between
+    # the button and that call -- the op decoded, the instance's write ops read
+    # out of the keychain, the queue row, the flush, the mirror re-read -- is
+    # knobas' own and is what a reader actually runs.
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test kuma_write_live \
+      -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test alert_chain_live \
       -- --ignored --nocapture --test-threads=1
 

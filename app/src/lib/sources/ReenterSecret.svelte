@@ -31,6 +31,7 @@
 <script lang="ts">
   import { setSourceSecret, syncNow } from "../ipc/sources";
   import { ipcErrorMessage } from "../ipc";
+  import { ACCOUNT_INCOMPLETE, accountHalfDone as halfDone, accountOf } from "./account";
   import type { CredentialHealth } from "../ipc/sources";
 
   let {
@@ -72,13 +73,11 @@
    * one. Half an account is refused by {@link saveable} rather than stored.
    */
   function account() {
-    return accountUser !== "" && accountPassword !== ""
-      ? { username: accountUser, password: accountPassword }
-      : null;
+    return accountOf({ username: accountUser, password: accountPassword });
   }
 
   const accountHalfDone = $derived(
-    (accountUser === "") !== (accountPassword === ""),
+    halfDone({ username: accountUser, password: accountPassword }),
   );
 
   /**
@@ -175,7 +174,7 @@
   <button class="btn sm" disabled={busy} onclick={oncancel}>Cancel</button>
   <span class="note">
     {#if accountHalfDone}
-      An account needs both a username and a password.
+      {ACCOUNT_INCOMPLETE}
     {:else if acceptsAccount}
       Stored in the OS keychain, never in the database. Anything left empty keeps what
       is stored.

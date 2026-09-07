@@ -35,6 +35,7 @@
     now,
     test = null,
     testing = false,
+    acceptsAccount = false,
     onsync,
     ontest,
     onreenter,
@@ -62,6 +63,17 @@
     test?: ConnectionReport | null;
     /** A test is in flight for this row: one at a time. */
     testing?: boolean;
+    /**
+     * Whether this source's adapter can carry a second credential (#452) —
+     * `SourceDescriptor.accepts_account`, passed in by the view rather than
+     * looked up here, so the row knows no adapter kinds.
+     *
+     * It is what puts *Account* on a **healthy** row. Without it the credential
+     * strip is reachable only from a source that is failing, and story 69's
+     * "adding the account" would be a thing a reader could do only by breaking
+     * their Kuma first.
+     */
+    acceptsAccount?: boolean;
     onsync: () => void;
     ontest: () => void;
     onreenter: () => void;
@@ -207,8 +219,24 @@
     </button>
     {#if needsSecret}
       <button class="btn sm pri" onclick={onreenter}>Re-enter</button>
-    {:else if source.enabled && !running}
-      <button class="btn sm" onclick={onsync}>Sync now</button>
+    {:else}
+      <!--
+        The same strip under a different word, on a source that is *working*
+        (#452). *Re-enter* is what a refused credential is offered and would be
+        a lie here — nothing is wrong with this one. What a reader wants on a
+        healthy Uptime Kuma is to add the account that turns pause and resume
+        on, and this is the only door to it: the strip is otherwise reachable
+        only from a failing source.
+
+        Only where the adapter says it can use one, so no other source grows a
+        button for a credential nothing would read.
+      -->
+      {#if acceptsAccount}
+        <button class="btn sm" onclick={onreenter}>Account</button>
+      {/if}
+      {#if source.enabled && !running}
+        <button class="btn sm" onclick={onsync}>Sync now</button>
+      {/if}
     {/if}
     <button class="btn sm ghost" onclick={ondelete}>Delete</button>
   </span>

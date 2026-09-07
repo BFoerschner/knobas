@@ -23,6 +23,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import { ACCOUNT_INCOMPLETE, accountHalfDone as halfDone, accountOf } from "./account";
   import {
     addSource,
     listAdapters,
@@ -98,14 +99,12 @@
    * letting it through as an account.
    */
   function account() {
-    return accountUser !== "" && accountPassword !== ""
-      ? { username: accountUser, password: accountPassword }
-      : null;
+    return accountOf({ username: accountUser, password: accountPassword });
   }
 
   /** Whether the account fields are half filled in, which is not an account. */
   const accountHalfDone = $derived(
-    (accountUser === "") !== (accountPassword === ""),
+    halfDone({ username: accountUser, password: accountPassword }),
   );
   let interval = $state(900);
   let enabled = $state(true);
@@ -451,7 +450,7 @@
             />
             <span class="msg">
               {#if accountHalfDone}
-                An account needs both a username and a password.
+                {ACCOUNT_INCOMPLETE}
               {:else}
                 Leave empty to add a read-only source. With an account, knobas can also
                 pause and resume monitors.
