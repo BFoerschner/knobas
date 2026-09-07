@@ -267,3 +267,31 @@ test("a read that failed offers Retry rather than drawing every switch off", asy
     expect(box("Mentions").checked).toBe(true);
   });
 });
+
+/**
+ * **The sixth switch stores the sixth word** (#447).
+ *
+ * The category the alert arrived with (#446) is the one whose label says
+ * nothing a wire word can be guessed from, so this is the assertion that the
+ * box a reader ticks and the word `set_notification_kinds` is given are the
+ * same category. It also fixes the box's *position*: sixth, after the five
+ * that were there before, because the section draws `Category::ALL`'s order
+ * and a reader who has learnt where their switches are should not find them
+ * renumbered by a new one.
+ */
+test("switching the alert category on stores the sixth word", async () => {
+  const { calls, store } = render();
+  await vi.waitFor(() => expect(boxes()).toHaveLength(6));
+
+  const alert = "A monitor down on something in a context";
+  expect(boxes()[5]).toBe(alert);
+  expect(box(alert).checked, "the sixth category is on before anybody asked").toBe(false);
+
+  box(alert).click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(calls.stored).toEqual([["alert"]]);
+  });
+  expect(box(alert).checked).toBe(true);
+  expect(store.kinds).toEqual(["alert"]);
+});

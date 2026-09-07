@@ -638,3 +638,83 @@ test("an alert's desktop notification opens the Tree at the affected asset", asy
   b.click(sent);
   expect(b.calls.navigated).toEqual(["#/asset/asset:hel1"]);
 });
+
+/**
+ * **The sixth category is off until somebody switches it on, and the same
+ * alert with it on speaks** (spec #427 story 63, and story 71's default).
+ *
+ * The negative is the half that matters: five categories switched on and the
+ * alert not among them is the profile of somebody who opted in before this
+ * build existed, and an alert that notified them anyway would be knobas
+ * switching a category on by shipping it. The second half is what makes the
+ * silence attributable to the category rather than to a bench that never
+ * wired `send` -- the rule this whole file follows.
+ */
+test("an alert says nothing until its own category is switched on", async () => {
+  const off = bench();
+  await off.primed([
+    "review_request",
+    "mention",
+    "failed_build",
+    "new_assignment",
+    "credential_expiry",
+  ]);
+  off.store.saw([alertEntry()]);
+  expect(off.calls.sent, "the alert category is off, five others are on").toEqual([]);
+
+  const on = bench();
+  await on.primed(["alert"]);
+  on.store.saw([alertEntry()]);
+  expect(on.calls.sent.map((notification) => notification.body)).toEqual(["hel / hel1 is down"]);
+});
+
+/**
+ * **One desktop notification per alert, and neither the ack nor the recovery
+ * is another one** (stories 62 and 64).
+ *
+ * At this seam an ack and a recovery are the *same* event and the test says so
+ * rather than pretending to tell them apart: nobody deletes an inbox item, the
+ * rule stops matching -- `acked_at` for the one and `closed_at` for the other
+ * -- and both reach this store as an item that is no longer in the stream.
+ * Which departure is which is `crates/knobas-app/tests/inbox_ipc.rs`'
+ * `an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves_a_line`,
+ * against the database, and it is the *only* place that distinction is
+ * witnessed.
+ *
+ * The positive control is a second monitor arriving in the same stream after
+ * both departures: without it, "nothing was sent" would also be true of a
+ * store that had stopped sending anything at all.
+ *
+ * The last two lines are the session memory applied to this category, and the
+ * consequence is worth reading twice: the key is `alert:<monitor>`, so a
+ * monitor that goes down, recovers and goes down again announces **once per
+ * session**, not once per outage. That is the rule every category has had
+ * since #290 -- a restart is where the same demand gets to speak up again --
+ * and a flapping monitor is where it costs the most.
+ */
+test("an alert notifies once, and neither its ack nor its recovery notifies again", async () => {
+  const b = bench();
+  await b.primed(["alert"]);
+
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent).toHaveLength(1);
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent, "the same open alert on the next read").toHaveLength(1);
+
+  // Acked: the item leaves the stream while the alert stays open.
+  b.store.saw([]);
+  expect(b.calls.sent, "an ack is not an arrival").toHaveLength(1);
+
+  // Recovered: the alert closes and takes the item with it, by construction.
+  b.store.saw([]);
+  expect(b.calls.sent, "a recovery is not an arrival").toHaveLength(1);
+
+  // ...and the same monitor going down again is the same key, so it is still
+  // the one desktop notification this session.
+  b.store.saw([alertEntry()]);
+  expect(b.calls.sent, "one key, one desktop notification a session").toHaveLength(1);
+
+  // The control: a different monitor is a different key and does speak.
+  b.store.saw([alertEntry(), alertEntry("kuma:9", "asset:hel2")]);
+  expect(b.calls.sent).toHaveLength(2);
+});

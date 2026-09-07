@@ -763,6 +763,45 @@ async fn what_comes_back_is_the_stored_set_deduplicated_and_in_one_order() {
     );
 }
 
+/// **Every category this build has can actually be switched on** -- including
+/// the sixth (#447).
+///
+/// The round trip above walks two words. This one walks `Category::ALL`, which
+/// is the list the settings section draws its checkboxes from: the section
+/// sends the words back, the write side is the strict one, and a category
+/// whose spelling the write refused would be a checkbox that ticks itself off
+/// again with an `invalid` toast and nothing failing in any test. It is a loop
+/// rather than six literals so a seventh category is carried by it on the day
+/// it is added.
+#[tokio::test]
+async fn every_category_the_section_can_send_is_stored_and_read_back() {
+    let harness = harness().await;
+    let every: Vec<String> = knobas_core::inbox::Category::ALL
+        .iter()
+        .map(|category| category.as_str().to_owned())
+        .collect();
+    assert!(
+        every.contains(&"alert".to_owned()),
+        "the sixth category is not in the list this test walks: {every:?}"
+    );
+
+    let answered = knobas_app::inbox::set_notification_kinds(&harness.deps.pool, &every)
+        .await
+        .expect("every category this build has is a word the write side knows");
+    assert_eq!(
+        answered,
+        knobas_core::inbox::Category::ALL.to_vec(),
+        "the write stored something other than every category"
+    );
+    assert_eq!(
+        knobas_app::inbox::notification_kinds(&harness.deps.pool)
+            .await
+            .expect("the setting reads back"),
+        knobas_core::inbox::Category::ALL.to_vec(),
+        "a stored category did not survive the read"
+    );
+}
+
 /// Switching every kind off again stores the empty set rather than leaving the
 /// last one on.
 ///
