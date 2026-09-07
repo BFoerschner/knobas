@@ -856,7 +856,7 @@ demo: deps
 # against. A rendered panel is witnessed by headless Chrome against the
 # `?fake-ipc` dev server (deputy's ruling of 2026-09-08 on #496), not here.
 desktop-witness driver="":
-    testenv/desktop-witness.sh {{ driver }}
+    testenv/desktop-witness.sh {{ quote(driver) }}
 
 # Where the three Gitea-backed live recipes get their gate variables, in one
 # place because all three obtain them the same way: the lines this text names

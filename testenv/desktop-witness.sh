@@ -61,7 +61,11 @@ drivers() {
         [ -e "$path" ] || continue
         name+=("$(basename "$path" .sh)")
     done
-    printf '%s\n' "${name[*]}"
+    # `${name[*]-}`, not `${name[*]}`: /usr/bin/env bash on this Mac is 3.2.57,
+    # where an empty array expansion is an unbound variable under `set -u` --
+    # so an empty drivers directory would kill the usage message instead of
+    # printing an empty list.
+    printf '%s\n' "${name[*]-}"
 }
 
 driver_name=${1-}
@@ -79,6 +83,19 @@ for tool in swiftc codesign security open pgrep; do
 done
 [ -x "$LSREGISTER" ] || fail "lsregister is not where it is expected ($LSREGISTER)."
 
+# One witness at a time, enforced rather than asked for. Two runs on this
+# machine would fight over one screen, one bundle identifier and one Launch
+# Services registration, and the loser would report the winner's app as its
+# own. `mkdir` because it is the atomic test-and-set that every shell has;
+# `just test`'s slot guard is the same idea with more slots.
+readonly LOCK="${TMPDIR:-/tmp}/knobas-desktop-witness.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+    printf 'desktop-witness: FAILED -- another desktop witness holds %s.\n' "$LOCK" >&2
+    printf 'desktop-witness:   One runs at a time on this machine. If nothing is\n' >&2
+    printf 'desktop-witness:   running, a killed run left it behind: rmdir it.\n' >&2
+    exit 1
+fi
+
 # Per-invocation scratch, like every other recipe here: several worktrees and
 # several agents share one /tmp on this machine.
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-desktop-witness.XXXXXX")
@@ -95,10 +112,17 @@ cleanup() {
     # says so: re-registering the copy that answered before this run is the
     # most a script can do about it.
     if [ -n "$previous_registration" ] && [ -d "$previous_registration" ]; then
-        "$LSREGISTER" -f "$previous_registration" 2>/dev/null || true
-        note "re-registered $previous_registration with Launch Services"
+        # The message follows the outcome rather than the attempt: a `note`
+        # printed unconditionally after a command that may have failed is a
+        # check that measures a representation of the thing.
+        if "$LSREGISTER" -f "$previous_registration" 2>/dev/null; then
+            note "re-registered $previous_registration with Launch Services"
+        else
+            note "could not re-register $previous_registration with Launch Services"
+        fi
     fi
     rm -rf "$scratch"
+    rmdir "$LOCK" 2>/dev/null || true
     exit "$status"
 }
 trap cleanup EXIT
@@ -198,10 +222,8 @@ previous_registration=$("$ax" registered-path "$BUNDLE_ID" 2>/dev/null || true)
 registered=$("$ax" registered-path "$BUNDLE_ID") \
     || fail "Launch Services has no application for $BUNDLE_ID even after registering one."
 note "now: $registered"
-if paths_match "$app" "$registered"; then
-    :
-else
-    fail "Launch Services still resolves $BUNDLE_ID to another copy." \
+paths_match "$app" "$registered" \
+    || fail "Launch Services still resolves $BUNDLE_ID to another copy." \
         "registered: $registered" \
         "built:      $app" \
         "Which copy LS prefers among several with one identifier is not a" \
@@ -209,7 +231,6 @@ else
         "/Applications is the usual one) and run this again -- launching the" \
         "build anyway is how a notification click starts a second instance." \
         "See ${WITNESS_README_SECTION}."
-fi
 
 step "re-checking that the desktop is still drivable after the build"
 check_readiness

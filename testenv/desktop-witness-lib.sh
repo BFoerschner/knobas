@@ -68,9 +68,9 @@ paths_match() {
 # pipe) must never read as permission having been granted.
 classify_readiness() {
     local output=$1 trusted post_events locked
-    trusted=$(_probe_field "$output" trusted)
-    post_events=$(_probe_field "$output" post-events)
-    locked=$(_probe_field "$output" screen-locked)
+    trusted=$(tsv_field "$output" trusted)
+    post_events=$(tsv_field "$output" post-events)
+    locked=$(tsv_field "$output" screen-locked)
 
     if [[ -z $trusted || -z $post_events || -z $locked ]]; then
         printf 'unreadable\n'
@@ -85,8 +85,15 @@ classify_readiness() {
     fi
 }
 
-# _probe_field <probe output> <name> -- the value of one tab-separated line.
-_probe_field() {
+# tsv_field <output> <name>
+#
+# The value of one tab-separated line, or nothing. Every subcommand of the
+# accessibility helper answers in this shape, so the harness and the drivers
+# read it the same way and there is one copy of the reader to be wrong -- the
+# tested one. A value may contain spaces (an accessibility description is a
+# sentence), which is why the field separator is a tab and why this is `awk`
+# rather than `read` or `cut -d' '`.
+tsv_field() {
     printf '%s\n' "$1" | awk -F'\t' -v key="$2" '$1 == key { print $2; exit }'
 }
 

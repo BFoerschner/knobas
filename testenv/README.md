@@ -1162,8 +1162,13 @@ resolves `dev.knobas.desktop` to** on the demo profile, waits for its window,
 asserts that exactly one instance is running, runs the named driver, and quits
 the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`; the first
 one presses ⌘K, asserts through the accessibility tree that the launcher's
-query box has focus (`AXTextField`, described *Search or act*, which is the
-`aria-label` in `QueryBox.svelte`), and presses Escape.
+query box has focus (`AXTextField`, labelled *Search or act*, which is the
+`aria-label` in `QueryBox.svelte`), and presses Escape -- after which the box
+must be gone from the tree, because `Launcher.svelte` renders the overlay
+under `{#if open}` and a closed launcher takes its input out of the DOM. That
+the label still says *Search or act* is pinned by `just witness-unit`, so an
+edit to it reads as a stale driver at the gate rather than as a failed run
+minutes into somebody's screen.
 
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
@@ -1171,6 +1176,12 @@ A rendered panel is witnessed by headless Chrome against the `?fake-ipc` dev
 server -- the deputy's ruling of 2026-09-08 on #496, which seven tickets
 depend on -- and not here. This harness takes the screen and runs one at a
 time; putting panel QA on it would serialise the milestone behind it.
+
+One witness runs on a machine at a time, and the harness enforces it rather
+than asking: it takes `$TMPDIR/knobas-desktop-witness.lock` with `mkdir` and
+refuses if another run holds it. Two runs would fight over one screen, one
+bundle identifier and one Launch Services registration, and the loser would
+report the winner's app as its own.
 
 `just desktop-witness` is **not** part of `just check` and must not become
 part of it. What the gate carries is `just witness-unit`
@@ -1241,8 +1252,8 @@ points back at this section, and exits non-zero.
 As of 2026-09-08 **no green driver run exists**. The dev Mac has been locked
 since 22:47 CEST with no HID input for nearly three hours, and Björn is away
 for the milestone; the harness refuses at its first probe, which is the
-correct behaviour and is not a witness of the ⌘K assertion. Two things are
-therefore still open, and neither should be read as proven by this file
+correct behaviour and is not a witness of the ⌘K assertion. Three things are
+therefore still open, and none should be read as proven by this file
 existing:
 
 * whether a Tauri window's `WKWebView` exposes the launcher's input to the
@@ -1252,13 +1263,22 @@ existing:
   unlocked run diagnoses itself rather than needing a second.
 * the launch, single-instance, driver and quit steps, which begin after the
   probe the harness stops at.
+* which of `AXDescription` and `AXTitle` a WebKit text field carries an
+  `aria-label` on. The driver accepts either, and asserts the role separately,
+  so this cannot make it pass on the wrong element -- but it has not been seen.
 
-What *is* witnessed, from the run on 2026-09-08: the refusal (`screen-locked`,
-naming the permission and this section, exit 1); the build and signing step
-(`Authority=knobas-dev`, `Identifier=dev.knobas.desktop`,
-`codesign --verify --deep --strict` clean, bundle at
-`target/debug/bundle/macos/knobas.app`); and the Launch Services measurement
-in prerequisite 4 above.
+What *is* witnessed, on 2026-09-08, and by what:
+
+* **from a harness run**, `just desktop-witness launcher-hotkey`: the refusal.
+  `screen-locked`, naming the permission and this section, exit 1.
+* **from its own commands run by hand**, because the harness refuses before it
+  reaches them: the build and signing step -- `Authority=knobas-dev`,
+  `Identifier=dev.knobas.desktop`, `codesign --verify --deep --strict` clean,
+  the bundle at `target/debug/bundle/macos/knobas.app`, which is the first of
+  the two paths the harness looks in -- and the Launch Services measurement in
+  prerequisite 4 above.
+
+Nothing between the probe and the quit has run at all.
 
 ## Scripts
 

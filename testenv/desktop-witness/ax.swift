@@ -156,20 +156,57 @@ func focused(pid: pid_t) -> Int32 {
     return 0
 }
 
-func dump(pid: pid_t, depth: Int) -> Int32 {
+/// Walk every element under a window, depth-first.
+///
+/// Bounded twice over, because an accessibility tree is not a tree: Finder's
+/// desktop element lists the *application* among its children, and a walk that
+/// trusted the shape would recurse until it ran out of stack. The budget is
+/// the second wall, for a cycle that hides below the depth limit.
+func visit(_ root: AXUIElement, maxDepth: Int, _ body: (AXUIElement, Int) -> Void) {
+    var budget = 5000
     func walk(_ element: AXUIElement, _ level: Int) {
-        let indent = String(repeating: "  ", count: level)
-        let line = describe(element).split(separator: "\n").joined(separator: " ")
-        print(indent + line)
-        guard level < depth else { return }
+        guard budget > 0 else { return }
+        budget -= 1
+        body(element, level)
+        guard level < maxDepth else { return }
         for child in children(element, kAXChildrenAttribute as String) { walk(child, level + 1) }
     }
+    walk(root, 0)
+}
+
+/// How many elements under this app's windows carry `label`.
+///
+/// Description *or* title: WebKit is the thing under a Tauri window, and which
+/// of the two an `aria-label` arrives as is a WebKit detail rather than a
+/// promise. A driver that insisted on one would fail on a correct app for a
+/// reason that has nothing to do with what it is witnessing.
+func find(pid: pid_t, label: String) -> Int32 {
+    var count = 0
+    for window in windows(of: pid) {
+        visit(window, maxDepth: 25) { element, _ in
+            if text(element, kAXDescriptionAttribute as String) == label
+                || text(element, kAXTitleAttribute as String) == label
+            {
+                count += 1
+            }
+        }
+    }
+    print(count)
+    return 0
+}
+
+func dump(pid: pid_t, depth: Int) -> Int32 {
     let found = windows(of: pid)
     if found.isEmpty {
         print("(no window: the app exposes none, or the screen is locked)")
         return 1
     }
-    for window in found { walk(window, 0) }
+    for window in found {
+        visit(window, maxDepth: depth) { element, level in
+            let indent = String(repeating: "  ", count: level)
+            print(indent + describe(element).split(separator: "\n").joined(separator: " "))
+        }
+    }
     return 0
 }
 
@@ -202,24 +239,39 @@ func key(code: CGKeyCode, command: Bool) -> Int32 {
 // MARK: - Entry point
 
 let arguments = Array(CommandLine.arguments.dropFirst())
-func number(_ index: Int) -> Int? { Int(arguments[index]) }
+
+/// A numeric argument, or `nil`. Nothing here force-unwraps: a mistyped pid
+/// would crash with a Swift trap, and a harness reads a trap as "the app is
+/// broken" rather than "the command line was". Bad arguments land on the usage
+/// block below like an unknown subcommand does.
+func integer(_ index: Int) -> Int? {
+    index < arguments.count ? Int(arguments[index]) : nil
+}
+func seconds(_ index: Int) -> Double? {
+    index < arguments.count ? Double(arguments[index]) : nil
+}
 
 var status: Int32 = 0
 switch arguments.first {
-case "probe":
+case "probe" where arguments.count == 1:
     probe()
 case "registered-path" where arguments.count == 2:
     status = registeredPath(bundleID: arguments[1])
-case "wait-window" where arguments.count == 3:
-    status = waitForWindow(pid: pid_t(number(1)!), seconds: Double(arguments[2])!)
-case "activate" where arguments.count == 2:
-    status = activate(pid: pid_t(number(1)!))
-case "focused" where arguments.count == 2:
-    status = focused(pid: pid_t(number(1)!))
-case "dump" where arguments.count == 3:
-    status = dump(pid: pid_t(number(1)!), depth: number(2)!)
-case "key" where arguments.count >= 2:
-    status = key(code: CGKeyCode(number(1)!), command: arguments.contains("command"))
+case "wait-window" where arguments.count == 3 && integer(1) != nil && seconds(2) != nil:
+    status = waitForWindow(pid: pid_t(integer(1)!), seconds: seconds(2)!)
+case "activate" where arguments.count == 2 && integer(1) != nil:
+    status = activate(pid: pid_t(integer(1)!))
+case "focused" where arguments.count == 2 && integer(1) != nil:
+    status = focused(pid: pid_t(integer(1)!))
+case "find" where arguments.count == 3 && integer(1) != nil:
+    status = find(pid: pid_t(integer(1)!), label: arguments[2])
+case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
+    status = dump(pid: pid_t(integer(1)!), depth: integer(2)!)
+// The modifier is spelled out rather than taken from "any second word", so a
+// typo is a refusal instead of a keystroke sent without ⌘.
+case "key" where (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "command"))
+    && integer(1) != nil:
+    status = key(code: CGKeyCode(integer(1)!), command: arguments.count == 3)
 default:
     FileHandle.standardError.write(
         Data(
@@ -229,6 +281,7 @@ default:
                    ax wait-window <pid> <seconds>
                    ax activate <pid>
                    ax focused <pid>
+                   ax find <pid> <label>
                    ax dump <pid> <depth>
                    ax key <keycode> [command]
 
