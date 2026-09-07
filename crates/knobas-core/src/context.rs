@@ -308,6 +308,57 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
     .await?)
 }
 
+/// The three layers every membership walk shares, whatever seeded it.
+///
+/// Written once because there are two seeds -- [`MEMBER_IDS`]' one context and
+/// [`held_by_any_context!`]'s every context at once -- and the expansion over
+/// them is the *same rule*: a seed's links, one hop further, and everything
+/// held under whatever that reached. Two copies of it would be two answers to
+/// "who is in a context" the day one was amended, which is the failure the
+/// module header's *one statement* sentence exists to prevent.
+///
+/// It expects a CTE named `seed(id)` before it and defines `direct`, `hop` and
+/// `held` after it, ending without a trailing comma so a caller appends its
+/// own `select`. Exported only because [`held_by_any_context!`] is a macro too
+/// and a macro's body resolves at its call site -- `declared_candidates`'
+/// arrangement, and its reason.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! context_expansion {
+    () => {
+        "    direct(id) as (
+        select id from seed
+        union
+        select o.id
+          from seed s
+          join knobas.confirmed_link l on l.from_id = s.id or l.to_id = s.id
+          join knobas.entity o
+            on o.id = case when l.from_id = s.id then l.to_id else l.from_id end
+         where o.kind <> 'ctx'
+    ),
+    hop(id) as (
+        select id from direct
+        union
+        select o.id
+          from direct d
+          join knobas.confirmed_link l on l.from_id = d.id or l.to_id = d.id
+          join knobas.entity o
+            on o.id = case when l.from_id = d.id then l.to_id else l.from_id end
+         where o.kind <> 'ctx'
+    ),
+    -- ADR-0008's asset clause, over ADR-0014's column: everything held by
+    -- something the walk reached, at any depth, and nothing that merely links
+    -- to it.
+    held(id) as (
+        select id from hop
+        union
+        select c.id
+          from held h
+          join knobas.asset c on c.parent_id = h.id
+    )"
+    };
+}
+
 /// The membership rule, as one statement (§16.11, ADR-0008).
 ///
 /// Four terms. The three **link** layers are plain CTEs rather than a
@@ -363,7 +414,8 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// parent, so a context cannot enter through it. Those three steps read
 /// `knobas.confirmed_link` at every step -- see the module note for why that
 /// is load-bearing and not a style choice.
-const MEMBER_IDS: &str = "
+const MEMBER_IDS: &str = concat!(
+    "
     with recursive seed(id) as (
         select o.id
           from knobas.confirmed_link l
@@ -385,37 +437,98 @@ const MEMBER_IDS: &str = "
            and i.source_id = $3::text
            and i.payload->'fields'->'parent'->>'key' = $4::text
     ),
-    direct(id) as (
-        select id from seed
-        union
+",
+    crate::context_expansion!(),
+    "
+    select id from held where id <> $1"
+);
+
+/// Every entity **some** context holds, as a parenthesised subquery -- the same
+/// walk [`MEMBER_IDS`] makes, seeded from every context at once (#446).
+///
+/// The inbox's alert rule needs one question answered — *is this asset a member
+/// of some context, directly or through an ancestor?* — inside a statement that
+/// binds no context id, because the inbox is one derivation over the whole
+/// mirror and not a read per context. Asking [`member_ids`] once per context
+/// from Rust would be a second walk beside this one, which #434's third
+/// criterion forbids in as many words.
+///
+/// **Merging the seeds is exact, not an approximation**, and that is worth
+/// stating because it looks like one. Every layer after the seed is a
+/// *neighbour* expansion, and taking neighbours distributes over union:
+/// `N(A ∪ B) = N(A) ∪ N(B)`. So the walk from every context's seeds at once
+/// reaches exactly the union of the walks from each context's seeds — the same
+/// three layers, the same depth, the same `held` recursion. It is checked
+/// rather than argued: `the_merged_walk_is_the_union_of_every_contexts_members`
+/// in `tests/contexts.rs` compares this against [`member_ids`] over
+/// [`list`]'s own contexts on a fixture that has several.
+///
+/// **Archived contexts are left out**, which is the one place this and
+/// [`member_ids`] deliberately differ: `member_ids` is asked about a context by
+/// name and answers about *that* context whatever its state, while this asks
+/// "is anyone still working on this?" — and an archived context is one the
+/// reader put away. [`list`] draws the same line for the switcher, and an alert
+/// that went on interrupting somebody because of a context they archived last
+/// spring would be the inbox failing its own promise. It is why the comparison
+/// above is against `list`'s contexts rather than every row.
+///
+/// A subquery and not a `const`, because the one caller `concat!`s it into a
+/// compile-time statement; `declared_list!` is the same shape for the same
+/// reason.
+#[macro_export]
+macro_rules! held_by_any_context {
+    () => {
+        concat!(
+            "(with recursive seed(id) as (
         select o.id
-          from seed s
-          join knobas.confirmed_link l on l.from_id = s.id or l.to_id = s.id
+          from knobas.context c
+          join knobas.confirmed_link l on l.from_id = c.id or l.to_id = c.id
           join knobas.entity o
-            on o.id = case when l.from_id = s.id then l.to_id else l.from_id end
-         where o.kind <> 'ctx'
-    ),
-    hop(id) as (
-        select id from direct
+            on o.id = case when l.from_id = c.id then l.to_id else l.from_id end
+         where c.archived_at is null and o.kind <> 'ctx'
         union
-        select o.id
-          from direct d
-          join knobas.confirmed_link l on l.from_id = d.id or l.to_id = d.id
-          join knobas.entity o
-            on o.id = case when l.from_id = d.id then l.to_id else l.from_id end
-         where o.kind <> 'ctx'
-    ),
-    -- ADR-0008's asset clause, over ADR-0014's column: everything held by
-    -- something the walk reached, at any depth, and nothing that merely links
-    -- to it.
-    held(id) as (
-        select id from hop
+        select e.id
+          from knobas.context c
+          join knobas.entity e on e.id = c.anchor_id
+         where c.archived_at is null and e.kind <> 'ctx'
         union
-        select c.id
-          from held h
-          join knobas.asset c on c.parent_id = h.id
-    )
-    select id from held where id <> $1";
+        -- A promoted epic's children, by the source-recorded parent key, in
+        -- the anchor's own namespace -- `member_ids` binds the two halves and
+        -- here they are split out of the anchor id, which is the same
+        -- `<namespace>:<key>` split `knobas_core::entity::EntityRef` makes.
+        select i.entity_id
+          from knobas.context c
+          join sync.live_item i
+            on i.source_id = split_part(c.anchor_id, ':', 1)
+           and i.payload->'fields'->'parent'->>'key'
+             = substr(c.anchor_id, strpos(c.anchor_id, ':') + 1)
+         where c.archived_at is null and c.kind = 'epic'
+    ),
+",
+            $crate::context_expansion!(),
+            "
+    select id from held)"
+        )
+    };
+}
+
+/// Every entity some context holds, as a list -- [`held_by_any_context!`] run.
+///
+/// Nothing in the app reads this: it exists so the merged walk has a name a
+/// test can call, and `the_merged_walk_is_the_union_of_every_contexts_members`
+/// is the test. A subquery nobody can run on its own is a rule nobody can write
+/// a control for, which is [`RULES`](crate::inbox::RULES)' own argument.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn held_by_any_context(pool: &PgPool) -> Result<Vec<String>, CoreError> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as(concat!("select id from ", crate::held_by_any_context!(), " as m"))
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
 
 /// Who is in this context, by the fixed rule -- computed, never stored.
 ///

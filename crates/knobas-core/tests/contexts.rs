@@ -718,3 +718,101 @@ async fn a_one_hop_asset_neighbour_brings_the_subtree_below_it() {
     );
     assert_eq!(got, set(&[&ticket, &container, &vm, &database]));
 }
+
+// ---------------------------------------------------------------------------
+// The same walk, seeded from every context at once (#446)
+// ---------------------------------------------------------------------------
+
+/// `held_by_any_context` answers exactly the union of `member_ids` over the
+/// contexts the switcher lists, on a fixture where the two could disagree.
+///
+/// The inbox's alert rule (#446) needs *"is this asset a member of some
+/// context"* inside one statement that binds no context id, and the macro
+/// answers it by merging the seeds rather than by walking once per context.
+/// That merge is exact only because every layer after the seed is a
+/// **neighbour** expansion and neighbours distribute over union -- an argument
+/// that is easy to state and easy to break, so it is checked here rather than
+/// trusted.
+///
+/// The fixture is built so that a wrong merge is visible from three
+/// directions at once: two contexts whose walks **overlap** (both reach the
+/// shared build), an **epic** whose children come in through the payload seed
+/// rather than through a link, an **archived** context whose whole subtree
+/// must be absent, and an asset subtree hanging off each of the three so the
+/// `held` recursion has something to do in every branch.
+#[tokio::test]
+async fn the_merged_walk_is_the_union_of_every_contexts_members() {
+    let pool = scratch().await;
+
+    // One: an ad-hoc context over a VM, whose containers ride along.
+    let payments = context::create_adhoc(&pool, "payments stack").await.unwrap();
+    let vm = asset(&pool, "vm", "hel1", None).await;
+    let container = asset(&pool, "container", "payouts", Some(&vm)).await;
+    let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
+    let build = entity_only(&pool, "teamcity", "build", "Payout_Main/41").await;
+    draw(&pool, &payments.id, &vm).await;
+    draw(&pool, &vm, &ticket).await;
+    draw(&pool, &ticket, &build).await;
+
+    // Two: a promoted epic, seeded through `fields.parent`, reaching the same
+    // build from the other side -- so the union is genuinely a union.
+    let epic = with_payload(
+        &pool,
+        "ticket",
+        "EPIC-1",
+        serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
+    )
+    .await;
+    let child = with_payload(
+        &pool,
+        "ticket",
+        "PAY-2",
+        serde_json::json!({"fields": {"parent": {"key": "EPIC-1"}}}),
+    )
+    .await;
+    draw(&pool, &child, &build).await;
+    let promoted = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
+
+    // Three: archived, and everything it alone reaches is out.
+    let old = context::create_adhoc(&pool, "last spring").await.unwrap();
+    let retired = asset(&pool, "vm", "fsn1", None).await;
+    let retired_db = asset(&pool, "database", "old-db", Some(&retired)).await;
+    draw(&pool, &old.id, &retired).await;
+    sqlx::query("update knobas.context set archived_at = now() where id = $1")
+        .bind(&old.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let listed = context::list(&pool).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|row| row.id.clone()).collect::<BTreeSet<_>>(),
+        set(&[&payments.id, &promoted.id]),
+        "the archived context is not listed, which is the line this walk draws"
+    );
+    let mut want = BTreeSet::new();
+    for row in &listed {
+        want.extend(members(&pool, &row.id).await);
+    }
+
+    let got: BTreeSet<String> = context::held_by_any_context(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(got, want);
+    assert!(
+        got.contains(&container) && got.contains(&child) && got.contains(&build),
+        "the fixture has to reach a held asset, an epic child and the shared build: {got:?}"
+    );
+    for absent in [&retired, &retired_db] {
+        assert!(
+            !got.contains(absent),
+            "{absent} is held only by an archived context"
+        );
+    }
+}
