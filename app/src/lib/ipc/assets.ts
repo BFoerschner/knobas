@@ -764,3 +764,98 @@ export function setMonitoringSettings(
 ): Promise<MonitoringSettings> {
   return invoke<MonitoringSettings>("set_monitoring_settings", { settings });
 }
+
+/**
+ * One row of the Monitors tab's roster — `assets::MonitorRow` (#448).
+ *
+ * The whole tab in one shape. The three groups of fields are worth telling
+ * apart: the identity and the address are the mirror's; `monitor_type`,
+ * `target`, `response_time_ms`, `uptime` and `cert_days_remaining` are read
+ * out of the mirrored payload; and `state` and `samples` are knobas' own
+ * timeseries — *warn* exists nowhere in Uptime Kuma and is derived at sample
+ * time, so a chip counting warns counts samples and not the mirror.
+ */
+export interface MonitorRow {
+  /** `<source>:<monitor id in Kuma>` — the entity id, and its detail address. */
+  entity_id: string;
+  /** The source that mirrored it. */
+  source_id: string;
+  /** Its name in Uptime Kuma — the name an estate file uses to ask for it. */
+  name: string;
+  /**
+   * The state knobas last recorded: the newest sample in the window, and the
+   * mirror's own reading where the window holds none.
+   *
+   * `up`, `warn`, `down`, `pending`, `maintenance`, or `null` for a genuine
+   * miss. This is the bar's right-hand end, which is what makes the chip and
+   * the bar one statement.
+   */
+  state: string | null;
+  /** `http`, `ping`, `docker`, `port` — Kuma's word for the kind of check. */
+  monitor_type: string | null;
+  /** What it watches: the URL, else the hostname with its port. */
+  target: string | null;
+  /** Kuma's last reading in milliseconds; `null` for a check that did not answer. */
+  response_time_ms: number | null;
+  /**
+   * When knobas last read this monitor — RFC 3339.
+   *
+   * `/metrics` carries no clock at all, so there is no "last checked" to
+   * mirror and this is when knobas looked.
+   */
+  checked_at: string;
+  /** Kuma's sliding-window uptime ratios, by its own labels, in label order. */
+  uptime: UptimeRatio[];
+  /** Days until the watched certificate expires; `null` for a check with none. */
+  cert_days_remaining: number | null;
+  /** Its own page in Uptime Kuma; `null` when there is none left. */
+  web_url: string | null;
+  /**
+   * Whether it has left the mirror — paused in Kuma, or deleted.
+   *
+   * *Tombstoned* is the word `CONTEXT.md` gives the state and
+   * {@link AttachedMonitor} uses; *Paused* is what the chip says, because
+   * pausing is what a reader did to make it true.
+   */
+  tombstoned: boolean;
+  /** The assets it is attached to by a `monitored-by` link, by name. */
+  assets: MonitoredAsset[];
+  /** Its samples inside the bar's 24-hour window, oldest first. */
+  samples: MonitorSample[];
+}
+
+/** One uptime ratio at the window Kuma computed it over — `assets::UptimeRatio`. */
+export interface UptimeRatio {
+  /** Kuma's own label: `1d`, `30d`, `365d`. */
+  window: string;
+  /** `0` to `1`, as Kuma publishes it — not a percentage. */
+  ratio: number;
+}
+
+/** One asset a monitor watches — `assets::MonitoredAsset`. */
+export interface MonitoredAsset {
+  /** `asset:<uuid>` — and the `#/asset/<id>` address the name links to. */
+  id: string;
+  name: string;
+  /** The ancestors' names, outermost first; `null` at the top of the estate. */
+  path: string | null;
+}
+
+/** One sample as the bar draws it — `assets::MonitorSample`. */
+export interface MonitorSample {
+  /** RFC 3339. */
+  taken_at: string;
+  /** `up`, `warn`, `down`, `pending`, `maintenance`, or `null` — a gap. */
+  state: string | null;
+}
+
+/**
+ * The Monitors tab's roster: every mirrored monitor, tombstones included.
+ *
+ * One read for the whole tab. The chip counts are counts of these rows, so a
+ * second command answering counts would be a second answer that could
+ * disagree with the list beside it.
+ */
+export function monitorRoster(): Promise<MonitorRow[]> {
+  return invoke<MonitorRow[]>("monitor_roster");
+}

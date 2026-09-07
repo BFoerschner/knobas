@@ -508,6 +508,32 @@ pub async fn set_monitoring_settings(
     })
 }
 
+/// The Monitors tab's roster: every mirrored monitor with its state, its last
+/// day of samples, its last check, its uptime, its certificate days, the
+/// assets it watches and its page in Uptime Kuma (spec #427 story 68, issue
+/// #448).
+///
+/// **One read for the whole tab**, chips included. The counts on the state
+/// chips are counts of these rows, so a command that answered counts as well
+/// would be answering a question the caller can only ask by having the list --
+/// and two answers that could disagree.
+///
+/// Takes no room filter, unlike `context_assets` and `source_assets`: the tab
+/// is a destination of its own (`#/assets/monitors`) and the estate is not
+/// scoped by the room the reader came from.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn monitor_roster(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<assets::MonitorRow>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::monitor_roster(&pool).await
+}
+
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
@@ -875,6 +901,80 @@ mod tests {
         }
     }
 
+    /// The Monitors tab's roster and the three shapes it carries (#448).
+    ///
+    /// A row with **every** field filled: a shape assertion over `None`s and
+    /// empty lists cannot tell a field that is spelled differently on the two
+    /// sides from one that is merely absent, and half this shape is optional.
+    #[test]
+    fn the_monitor_roster_matches_its_typescript_mirror() {
+        let row = assets::MonitorRow {
+            entity_id: "kuma:7".to_owned(),
+            source_id: "kuma".to_owned(),
+            name: "gitea".to_owned(),
+            state: Some("warn".to_owned()),
+            monitor_type: Some("http".to_owned()),
+            target: Some("http://gitea:3000/api/healthz".to_owned()),
+            response_time_ms: Some(1_900.0),
+            checked_at: "2026-09-07T09:00:00Z".parse().expect("an instant"),
+            uptime: vec![assets::UptimeRatio {
+                window: "1d".to_owned(),
+                ratio: 0.98,
+            }],
+            cert_days_remaining: Some(9.0),
+            web_url: Some("http://127.0.0.1:3001/dashboard/7".to_owned()),
+            tombstoned: false,
+            assets: vec![assets::MonitoredAsset {
+                id: "asset:7f2c".to_owned(),
+                name: "gitea".to_owned(),
+                path: Some("notebook / knobas-stack".to_owned()),
+            }],
+            samples: vec![assets::MonitorSample {
+                taken_at: "2026-09-07T08:59:00Z".parse().expect("an instant"),
+                state: Some("up".to_owned()),
+            }],
+        };
+        let json = serde_json::to_value(&row).expect("MonitorRow serializes");
+        assert_shape(
+            MIRROR,
+            "MonitorRow",
+            &json,
+            &[
+                "entity_id",
+                "source_id",
+                "name",
+                "state",
+                "monitor_type",
+                "target",
+                "response_time_ms",
+                "checked_at",
+                "uptime",
+                "cert_days_remaining",
+                "web_url",
+                "tombstoned",
+                "assets",
+                "samples",
+            ],
+        );
+        assert_shape(
+            MIRROR,
+            "UptimeRatio",
+            &json["uptime"][0],
+            &["window", "ratio"],
+        );
+        assert_shape(MIRROR, "MonitoredAsset", &json["assets"][0], &["id", "name", "path"]);
+        assert_shape(
+            MIRROR,
+            "MonitorSample",
+            &json["samples"][0],
+            &["taken_at", "state"],
+        );
+        assert_eq!(
+            json["checked_at"], "2026-09-07T09:00:00Z",
+            "the mirror declares a string, and chrono has to be writing RFC 3339 into it"
+        );
+    }
+
     /// The two numbers monitoring is shaped by, in both directions, with the
     /// ratified defaults asserted as values.
     ///
@@ -912,7 +1012,7 @@ mod tests {
         );
     }
 
-    /// The seventeen commands are invoked from the mirror by the names they are
+    /// The eighteen commands are invoked from the mirror by the names they are
     /// registered under, and registered under the names they are declared with.
     ///
     /// `tests/wiring.rs` proves every declared command is in the handler list;
@@ -939,6 +1039,7 @@ mod tests {
             "apply_estate_import",
             "monitoring_settings",
             "set_monitoring_settings",
+            "monitor_roster",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),

@@ -291,6 +291,7 @@ const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const MonitorsView = (await import("../assets/MonitorsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
@@ -691,6 +692,24 @@ const CASES: Case[] = [
             getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
             assetTypes: () => deferred([]),
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The Monitors tab (#448). One effect -- the roster read -- and the whole
+     * tab is drawn from it, so a reader who opens `#/assets/monitors` and
+     * switches straight back to the Tree unmounts inside exactly that window.
+     */
+    name: "MonitorsView",
+    source: "lib/assets/MonitorsView.svelte",
+    open: (target) => ({
+      app: mount(MonitorsView, {
+        target,
+        props: {
+          router: createRouter(),
+          ports: { monitorRoster: () => deferred([]) },
         },
       }),
     }),

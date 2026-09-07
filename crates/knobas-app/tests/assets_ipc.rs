@@ -3845,3 +3845,411 @@ fn an_argument_the_mirror_spells_differently_never_arrives() {
     .expect_err("`secret` is a property kind knobas deliberately does not carry");
     assert!(!unknown_kind.contains("not_ready"), "{unknown_kind}");
 }
+
+// ---------------------------------------------------------------------------
+// The Monitors tab's roster (#448, spec #427 story 68)
+// ---------------------------------------------------------------------------
+
+/// A mirrored monitor carrying the payload #442's adapter actually writes.
+///
+/// The keys are `knobas_source_kuma::map::payload`'s, copied here rather than
+/// imported because what these tests pin is that *this module* reads the shape
+/// the adapter emits — an import would make the two agree by construction and
+/// prove nothing about the read.
+async fn kuma_monitor(
+    pool: &PgPool,
+    source: &str,
+    key: &str,
+    payload: serde_json::Value,
+    web_url: Option<&str>,
+) -> String {
+    let id = format!("{source}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .expect("the entity row");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,$2,'monitor',$3,'',$4,$5)",
+    )
+    .bind(&id)
+    .bind(source)
+    .bind(key)
+    .bind(&payload)
+    .bind(web_url)
+    .execute(pool)
+    .await
+    .expect("the mirror row");
+    id
+}
+
+/// One sample, placed `minutes` before now on the database's own clock — the
+/// clock the read's window is measured against.
+async fn sample(pool: &PgPool, monitor: &str, minutes: i64, state: Option<&str>) {
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state)
+         values ($1, now() - make_interval(mins => $2::int), $3)",
+    )
+    .bind(monitor)
+    .bind(i32::try_from(minutes).expect("minutes fit an int"))
+    .bind(state)
+    .execute(pool)
+    .await
+    .expect("the sample");
+}
+
+/// What a monitor Kuma stopped publishing looks like: the adapter tombstones
+/// it, and the engine's tombstone is a `deleted_at` on the entity row.
+async fn tombstone(pool: &PgPool, monitor: &str) {
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(monitor)
+        .execute(pool)
+        .await
+        .expect("the tombstone");
+}
+
+/// The roster by name, which is the order the tab draws it in.
+fn names(roster: &[assets::MonitorRow]) -> Vec<&str> {
+    roster.iter().map(|row| row.name.as_str()).collect()
+}
+
+fn row<'a>(roster: &'a [assets::MonitorRow], name: &str) -> &'a assets::MonitorRow {
+    roster
+        .iter()
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("{name} is not on the roster: {:?}", names(roster)))
+}
+
+/// **What the roster draws beside each monitor** (criterion: the tab lists
+/// every mirrored monitor with its name, type, target, last check, uptime and
+/// certificate days).
+///
+/// Two monitors and not one, because *target* is one column over three payload
+/// keys: an HTTP check has a URL and no hostname, a ping has a hostname and no
+/// URL, and a check with a port has to read `host:port`. A fixture of one
+/// could not tell a read that always takes `url` from one that reads the
+/// fact.
+#[tokio::test]
+async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certificate() {
+    let pool = pool("monitors-roster-reading").await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({
+            "id": "7", "name": "gitea", "type": "http",
+            "url": "http://gitea:3000/api/healthz",
+            "hostname": null, "port": null,
+            "state": "up", "state_code": 1.0, "response_time_ms": 13.0,
+            "uptime": { "1d": 1.0, "30d": 0.5 },
+            "cert_days_remaining": 9.0,
+        }),
+        Some("http://127.0.0.1:3001/dashboard/7"),
+    )
+    .await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "knobas-teamcity",
+        serde_json::json!({
+            "id": "1", "name": "knobas-teamcity", "type": "port",
+            "url": null, "hostname": "46.224.117.158", "port": "8111",
+            "state": "down", "state_code": 0.0, "response_time_ms": null,
+            "uptime": {}, "cert_days_remaining": null,
+        }),
+        None,
+    )
+    .await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(
+        names(&roster),
+        ["gitea", "knobas-teamcity"],
+        "every mirrored monitor, by name"
+    );
+
+    let gitea = row(&roster, "gitea");
+    assert_eq!(gitea.entity_id, "kuma:gitea");
+    assert_eq!(gitea.source_id, "kuma");
+    assert_eq!(gitea.monitor_type.as_deref(), Some("http"));
+    assert_eq!(
+        gitea.target.as_deref(),
+        Some("http://gitea:3000/api/healthz"),
+        "an HTTP check is watched at its URL"
+    );
+    assert_eq!(gitea.response_time_ms, Some(13.0));
+    assert_eq!(gitea.cert_days_remaining, Some(9.0));
+    assert_eq!(
+        gitea
+            .uptime
+            .iter()
+            .map(|ratio| (ratio.window.as_str(), ratio.ratio))
+            .collect::<Vec<_>>(),
+        [("1d", 1.0), ("30d", 0.5)],
+        "Kuma's own window labels, in label order"
+    );
+    assert_eq!(
+        gitea.web_url.as_deref(),
+        Some("http://127.0.0.1:3001/dashboard/7"),
+        "story 71: one click to its page in Kuma"
+    );
+    assert!(!gitea.tombstoned);
+
+    let teamcity = row(&roster, "knobas-teamcity");
+    assert_eq!(teamcity.monitor_type.as_deref(), Some("port"));
+    assert_eq!(
+        teamcity.target.as_deref(),
+        Some("46.224.117.158:8111"),
+        "a check with no URL is watched at its host and port"
+    );
+    assert_eq!(teamcity.response_time_ms, None);
+    assert!(teamcity.uptime.is_empty());
+    assert_eq!(teamcity.web_url, None);
+}
+
+/// **A payload that says nothing reads as absence** (ADR-0007's interim
+/// discipline, requirement 3: the failure direction is absence).
+///
+/// Every key drifted, of the wrong type, or blank. Nothing here may be
+/// coerced: a `type` that is a number is not the string `"7"`, a `uptime` that
+/// is an array carries no ratios, and a blank hostname is *nothing here*
+/// rather than a target called the empty string.
+#[tokio::test]
+async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
+    let pool = pool("monitors-roster-absence").await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "drifted",
+        serde_json::json!({
+            "type": 7, "url": "", "hostname": "   ", "port": "8111",
+            "response_time_ms": "13", "uptime": ["1d", 1.0],
+            "cert_days_remaining": "nine",
+        }),
+        None,
+    )
+    .await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let drifted = row(&roster, "drifted");
+    assert_eq!(drifted.monitor_type, None, "a number is not a type");
+    assert_eq!(
+        drifted.target, None,
+        "a blank URL and a blank hostname are nothing here, port or no port"
+    );
+    assert_eq!(drifted.response_time_ms, None, "a string is not a reading");
+    assert!(drifted.uptime.is_empty(), "an array carries no windows");
+    assert_eq!(drifted.cert_days_remaining, None);
+    assert_eq!(drifted.state, None, "and no state was invented either");
+}
+
+/// **The chip's state is the bar's right-hand end.**
+///
+/// *warn* is knobas' own and exists in no Kuma payload, so a roster that took
+/// its state from the mirror would count no warns for ever while drawing amber
+/// in every bar. The newest sample wins; the mirror answers only where the
+/// window holds no sample at all.
+#[tokio::test]
+async fn a_monitors_state_is_its_newest_sample_and_the_mirror_only_without_one() {
+    let pool = pool("monitors-roster-state").await;
+    let slow = kuma_monitor(
+        &pool,
+        "kuma",
+        "slow",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "unsampled",
+        serde_json::json!({ "state": "pending" }),
+        None,
+    )
+    .await;
+    // Out of order on purpose: "newest" has to be the newest and not the last
+    // row inserted.
+    sample(&pool, &slow, 5, Some("warn")).await;
+    sample(&pool, &slow, 90, Some("up")).await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(
+        row(&roster, "slow").state.as_deref(),
+        Some("warn"),
+        "the newest sample, which is where warn can come from at all"
+    );
+    assert_eq!(
+        row(&roster, "unsampled").state.as_deref(),
+        Some("pending"),
+        "the mirror's own reading is the fallback, not the first choice"
+    );
+}
+
+/// **The bar's window is the last day, and nothing older rides with it.**
+///
+/// A sample 23 hours old is in the bar; one 25 hours old is history the tab
+/// does not draw and must not pay to send. Oldest first, because that is left
+/// to right.
+#[tokio::test]
+async fn the_bar_carries_the_last_days_samples_oldest_first_and_no_older_one() {
+    let pool = pool("monitors-roster-window").await;
+    let watched = kuma_monitor(
+        &pool,
+        "kuma",
+        "watched",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sample(&pool, &watched, 25 * 60, Some("down")).await;
+    sample(&pool, &watched, 23 * 60, Some("up")).await;
+    sample(&pool, &watched, 60, None).await;
+    sample(&pool, &watched, 1, Some("warn")).await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let watched = row(&roster, "watched");
+    assert_eq!(
+        watched
+            .samples
+            .iter()
+            .map(|sample| sample.state.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("up"), None, Some("warn")],
+        "the last day's samples, oldest first, the 25-hour-old one left behind"
+    );
+    assert!(
+        watched.samples[0].taken_at < watched.samples[2].taken_at,
+        "and they carry the instants the bar places them at"
+    );
+}
+
+/// **A paused monitor stays on the roster, with the hours before it went
+/// quiet.**
+///
+/// Kuma drops a paused monitor from `/metrics` and the adapter tombstones it
+/// (#442), so `sync.live_item` — the view every other read in this module goes
+/// through — no longer holds it. A roster that inherited that filter would say
+/// nothing at all about a check somebody deliberately silenced, and would lose
+/// the samples that are the only record it was ever up.
+#[tokio::test]
+async fn a_paused_monitor_stays_on_the_roster_with_its_samples() {
+    let pool = pool("monitors-roster-paused").await;
+    let paused = kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({ "id": "7", "name": "gitea", "state": null }),
+        None,
+    )
+    .await;
+    sample(&pool, &paused, 120, Some("up")).await;
+    tombstone(&pool, &paused).await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(names(&roster), ["gitea"]);
+    let paused = row(&roster, "gitea");
+    assert!(paused.tombstoned, "the chip that says Paused reads this");
+    assert_eq!(
+        paused.samples.len(),
+        1,
+        "and the hours before it went quiet are still drawable"
+    );
+}
+
+/// **A disabled source's monitors leave the roster**, the rule `0012` gives
+/// every reader in this app: turning a source off is a statement about what
+/// the reader wants to see, and it is a different statement from Kuma pausing
+/// a check.
+#[tokio::test]
+async fn a_disabled_sources_monitors_leave_the_roster() {
+    let pool = pool("monitors-roster-disabled").await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    kuma_monitor(
+        &pool,
+        "kuma-eu",
+        "jira (tunnel)",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sqlx::query(
+        "insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
+         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)",
+    )
+    .execute(&pool)
+    .await
+    .expect("the disabled source");
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(
+        names(&roster),
+        ["gitea"],
+        "a source nobody configured stays visible; one turned off does not"
+    );
+}
+
+/// **A monitor links to the assets it watches; one without says so by carrying
+/// none** (criterion 3).
+///
+/// The path is what tells two containers called `postgres` apart, so it rides
+/// with the name. The link is read **undirected**, which is `0011`'s rule: the
+/// import writes it from the asset and *Link to…* writes it from either end,
+/// and no read is allowed to depend on which.
+#[tokio::test]
+async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
+    let pool = pool("monitors-roster-assets").await;
+    let (_, vm, container) = three_levels(&pool).await;
+    let watching = kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    let lonely = kuma_monitor(
+        &pool,
+        "kuma",
+        "canary",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    // One from each end, so the read cannot be passing by reading one
+    // direction: the container's link is written asset-first and the VM's
+    // monitor-first.
+    link_as(&pool, &container.id, &watching, "monitored-by").await;
+    link_as(&pool, &watching, &vm.id, "monitored-by").await;
+    // Neither of these is monitoring: a `related` link to the same monitor,
+    // and a `monitored-by` link to something that is not a monitor at all.
+    link_as(&pool, &vm.id, &lonely, "related").await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(
+        row(&roster, "gitea")
+            .assets
+            .iter()
+            .map(|asset| (asset.name.as_str(), asset.path.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("postgres", Some("hel1 / vm-db-01")),
+            ("vm-db-01", Some("hel1")),
+        ],
+        "both ends of the relation, by name, each with where it sits"
+    );
+    assert!(
+        row(&roster, "canary").assets.is_empty(),
+        "a `related` link is not monitoring, so this monitor watches nothing"
+    );
+}
