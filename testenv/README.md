@@ -55,7 +55,7 @@ Two ports were once reserved here and both are free now. 8211, reserved for
 a Confluence mock until 2026-09-03, is unreserved by ADR-0013; the real
 Confluence on 8090 is the witness. 8213, reserved for a Flowrun stub until
 2026-09-06, is unreserved because the feature left the plan (the real system
-is Orchestra, a later feature; roadmap §2 M4).
+is Orchestra, for which no adapter is planned; roadmap §2 M4).
 
 ## Credentials
 

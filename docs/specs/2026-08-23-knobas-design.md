@@ -270,7 +270,7 @@ Links are what knobas adds that no source system has. They are **local**: create
 
 ### 12.4 Low-code runtime (Flowrun-style adapter) — **deferred out of every milestone, 2026-09-06**
 
-**Addendum 2026-09-06 (M4 grilling, Björn):** the runtime is not Flowrun — the real system is called **Orchestra** — and its adapter is a later feature booked in the roadmap's v1.5 list for the day an instance is reachable, to be certified against it (ADR-0013) and never against a stub. The table below is kept as the feature's description; nothing in it is scheduled. What M4 keeps: the asset **types** *runtime* and *scenario* (generic, not Flowrun-branded), so the estate's tree holds an Orchestra instance and its scenarios by hand until the adapter exists.
+**Addendum 2026-09-06 (M4 grilling, Björn):** the runtime is not Flowrun — the real system is called **Orchestra** — and no adapter for it is planned: the v1.5 booking made that day was struck by Björn on 2026-09-07 (adapters are added by demand, none is booked), and any adapter that ever comes is certified against a reachable instance (ADR-0013), never against a stub. The table below is kept as the feature's description; nothing in it is scheduled. What M4 keeps: the asset **types** *runtime* and *scenario* (generic, not Flowrun-branded), so the estate's tree holds an Orchestra instance and its scenarios by hand.
 
 | Feature | Status | Notes |
 |---|---|---|
