@@ -381,6 +381,111 @@ async fn a_branch_with_no_repository_in_the_mirror_is_no_checkout() {
     assert_eq!(refused.code, IpcErrorCode::NotFound);
 }
 
+/// A branch resolves to the **longest** repo id its own id starts with.
+///
+/// One source may hold `tidewater/payout` and `tidewater/payout-service`, and
+/// the first is a strict prefix of the second — so a branch of
+/// `payout-service` starts with *both* repo ids, and the shorter one is a
+/// different repository with a different clone. Nothing else in this binary
+/// can see it: every other test gives its source one repo, and the ordering
+/// clause is invisible while that is true.
+#[tokio::test]
+async fn a_branch_resolves_to_the_longest_repo_id_it_starts_with() {
+    let pool = pool().await;
+    let token = unique();
+    let source = format!("gitea-{token}");
+    let owner = "tidewater";
+    let short = format!("payout-{token}");
+    let long = format!("{short}-service");
+
+    let short_id = item(
+        &pool,
+        &source,
+        "repo",
+        &format!("{owner}/{short}"),
+        Some(&format!("https://{HOST}/{owner}/{short}")),
+    )
+    .await;
+    let long_id = item(
+        &pool,
+        &source,
+        "repo",
+        &format!("{owner}/{long}"),
+        Some(&format!("https://{HOST}/{owner}/{long}")),
+    )
+    .await;
+    let branch = item(
+        &pool,
+        &source,
+        "branch",
+        &format!("{owner}/{long}@refs/heads/main"),
+        None,
+    )
+    .await;
+    assert!(
+        long_id.starts_with(&short_id),
+        "the shorter repo id has to be a strict prefix or this test proves nothing: \
+         {short_id} / {long_id}"
+    );
+
+    let answer = view(&pool, &branch).await.unwrap();
+    assert_eq!(
+        answer.repo_entity_id.as_deref(),
+        Some(long_id.as_str()),
+        "a branch of {long} belongs to {long} and not to {short}"
+    );
+    assert_eq!(
+        answer.repo_url.as_deref(),
+        Some(format!("https://{HOST}/{owner}/{long}").as_str())
+    );
+}
+
+/// An entity id is a source's string, not a pattern.
+///
+/// A Gitea repository may be called `payout_svc`, and `_` is SQL's
+/// single-character wildcard: written as `$2 like entity_id || '%'`, the
+/// repository lookup would match a branch of `payoutXsvc` -- a *different*
+/// repository, with a different clone on the disk -- and the panel would show
+/// somebody the wrong working tree. `starts_with` has no pattern in it, and
+/// this is the only test in the binary that can tell the two apart, because
+/// every other fixture's ids are wildcard-free.
+#[tokio::test]
+async fn an_underscore_in_a_repo_name_is_not_a_wildcard() {
+    let pool = pool().await;
+    let token = unique();
+    let source = format!("gitea-{token}");
+    let owner = "tidewater";
+    let underscored = format!("payout_svc{token}");
+
+    item(
+        &pool,
+        &source,
+        "repo",
+        &format!("{owner}/{underscored}"),
+        Some(&format!("https://{HOST}/{owner}/{underscored}")),
+    )
+    .await;
+
+    // A branch of a repository the mirror does not hold, whose key differs
+    // from the one above in exactly the character `_` would match.
+    let stranger = underscored.replacen('_', "X", 1);
+    let branch = item(
+        &pool,
+        &source,
+        "branch",
+        &format!("{owner}/{stranger}@refs/heads/main"),
+        None,
+    )
+    .await;
+
+    let answer = view(&pool, &branch).await.unwrap();
+    assert_eq!(
+        answer.repo_entity_id, None,
+        "{stranger} is not {underscored}, and matching them would point an editor at the wrong tree"
+    );
+    assert_eq!(answer.found_by, FoundBy::Nothing);
+}
+
 /// A repo the adapter reported no page for has no clone command, and the scan
 /// has nothing to match on -- the P5 miss, met the same way *Open in browser*
 /// meets it: by being absent rather than by inventing a URL.
