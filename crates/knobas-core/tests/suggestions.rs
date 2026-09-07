@@ -641,7 +641,7 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
 /// A monitor watching a host proposes the asset that *is* that host, and no
 /// other asset in the estate.
 ///
-/// Seven negative controls, and each fails a different wrong implementation:
+/// Eight negative controls, and each fails a different wrong implementation:
 ///
 /// * an asset with no hostname at all, so the rule cannot be "every asset,
 ///   every monitor";
