@@ -1904,13 +1904,20 @@ pub fn offer_actions(rows: &mut [MonitorRow], offered: &HashMap<String, Vec<Stri
 
 /// The two identifiers the Monitors tab knows by name.
 ///
-/// Spelled out rather than built from `WriteOp::identifier`, because this file
-/// is about what a *surface* offers and the ops it offers are a choice made
-/// here: the tab draws pause and resume, and a future `create_monitor` on the
-/// same source would need a control of its own before it belonged in this
-/// list. `the_tab_offers_the_ops_the_spi_names` holds the spellings to the SPI.
-const PAUSE_MONITOR: &str = "pause_monitor";
-const RESUME_MONITOR: &str = "resume_monitor";
+/// Spelled out rather than built from `WriteOp::identifier`, for two reasons
+/// that point the same way. This file is about what a *surface* offers, and
+/// the ops it offers are a choice made here: the tab draws pause and resume,
+/// and a future `create_monitor` on the same source would need a control of
+/// its own before it belonged in this list. And `knobas-sync`'s
+/// `write_choke_point` proves there is one outbound write path by finding
+/// every file under `crates/*/src/` that names the SPI's write op -- a roster
+/// read is not one, and must not look like one.
+///
+/// `tests/assets_ipc.rs`'s `the_monitors_tab_offers_the_ops_the_spi_names`
+/// holds both spellings to `WriteOp::identifier`, from a file that scan does
+/// not read. `pub` for that test's sake and no other caller's.
+pub const PAUSE_MONITOR: &str = "pause_monitor";
+pub const RESUME_MONITOR: &str = "resume_monitor";
 
 /// What the *Not monitored* roster draws: an asset nothing watches, with where
 /// it sits and what it is (spec #427 story 68, issue #449).
@@ -5343,29 +5350,6 @@ mod tests {
         offer_actions(&mut rows, &half);
         assert_eq!(rows[0].actions, [PAUSE_MONITOR]);
         assert!(rows[1].actions.is_empty(), "{:?}", rows[1].actions);
-    }
-
-    /// The two spellings this file writes out are the SPI's own.
-    ///
-    /// A tab offering `"pauseMonitor"` -- Kuma's event name -- would draw a
-    /// button whose write `submit_write` refuses, and the failure would read
-    /// as a source that does not support pausing.
-    #[test]
-    fn the_tab_offers_the_ops_the_spi_names() {
-        assert_eq!(
-            PAUSE_MONITOR,
-            knobas_source::WriteOp::PauseMonitor {
-                entity: "kuma:8".to_owned()
-            }
-            .identifier()
-        );
-        assert_eq!(
-            RESUME_MONITOR,
-            knobas_source::WriteOp::ResumeMonitor {
-                entity: "kuma:8".to_owned()
-            }
-            .identifier()
-        );
     }
 
     const MIGRATION: &str =

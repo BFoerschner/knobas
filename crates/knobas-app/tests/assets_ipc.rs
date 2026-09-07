@@ -4931,3 +4931,32 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
         "and the roster above draws no monitor for it, which is the fact this pins"
     );
 }
+
+/// The two spellings the Monitors tab writes out are the **SPI's own**
+/// (issue #452).
+///
+/// A tab offering `"pauseMonitor"` -- Kuma's event name -- would draw a button
+/// whose write `submit_write` refuses by name, and the failure would read as a
+/// source that does not support pausing.
+///
+/// Asserted from `tests/` rather than beside the constants: `knobas-sync`'s
+/// `write_choke_point` proves there is one outbound write path by finding every
+/// file under `crates/*/src/` that names the SPI's write op, and a roster read
+/// is not one. This file is out of that scan's scope.
+#[test]
+fn the_monitors_tab_offers_the_ops_the_spi_names() {
+    assert_eq!(
+        assets::PAUSE_MONITOR,
+        knobas_source::WriteOp::PauseMonitor {
+            entity: "kuma:8".to_owned()
+        }
+        .identifier()
+    );
+    assert_eq!(
+        assets::RESUME_MONITOR,
+        knobas_source::WriteOp::ResumeMonitor {
+            entity: "kuma:8".to_owned()
+        }
+        .identifier()
+    );
+}

@@ -14,27 +14,26 @@
 //! #427's *The Kuma room and tiles* in full: "No switcher exception: the Kuma
 //! source has its room; it declares no projects."
 
-use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor, WriteOp};
+use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 
 /// The ops a Kuma with an account offers, in the SPI's own spelling.
 ///
-/// Built from [`WriteOp::identifier`] rather than written out, because a
-/// descriptor listing an identifier the SPI does not define is refused by the
-/// contract battery -- and the way that happens is somebody spelling
-/// `"pauseMonitor"` here, which is Kuma's event name and not knobas'.
+/// **Literals, and held to the SPI from `tests/`** rather than built from
+/// `WriteOp::identifier` here. Reading them off the enum would be the better
+/// spelling but for one thing: `knobas-sync`'s `write_choke_point` proves
+/// there is exactly one outbound write path by finding every production file
+/// that so much as *names* the SPI's write op, and this file is a descriptor
+/// rather than a write path. So the strings are written out, and
+/// `the_declared_ops_are_the_spis_own_identifiers` in `tests/contract.rs`
+/// holds them to `WriteOp::identifier` from a file that scan does not read.
+/// The failure that would otherwise be silent is spelling Kuma's event name
+/// `"pauseMonitor"` here, which the contract battery refuses.
+pub(crate) const PAUSE_OP: &str = "pause_monitor";
+pub(crate) const RESUME_OP: &str = "resume_monitor";
+
 #[must_use]
 pub(crate) fn write_ops() -> Vec<String> {
-    [
-        WriteOp::PauseMonitor {
-            entity: String::new(),
-        },
-        WriteOp::ResumeMonitor {
-            entity: String::new(),
-        },
-    ]
-    .iter()
-    .map(|op| op.identifier().to_owned())
-    .collect()
+    vec![PAUSE_OP.to_owned(), RESUME_OP.to_owned()]
 }
 
 /// The descriptor for one **configured instance**: the template under the
@@ -357,29 +356,6 @@ mod tests {
             serde_json::to_value(d).expect("a descriptor serializes")
         };
         assert_eq!(without_writes(writable), without_writes(read_only));
-    }
-
-    /// The identifiers are the SPI's, not Kuma's event names.
-    ///
-    /// `pauseMonitor` is what the socket.io channel is emitted as and
-    /// `pause_monitor` is what a descriptor declares; a copy of either spelling
-    /// in the other's place is a descriptor the contract battery refuses, or an
-    /// emit Kuma ignores.
-    #[test]
-    fn the_declared_ops_are_the_spis_own_identifiers() {
-        assert_eq!(
-            write_ops(),
-            vec![
-                WriteOp::PauseMonitor {
-                    entity: "kuma:8".to_owned()
-                }
-                .identifier(),
-                WriteOp::ResumeMonitor {
-                    entity: "kuma:8".to_owned()
-                }
-                .identifier(),
-            ]
-        );
     }
 
     /// The descriptor crosses the IPC bridge as plain data (spec §3a): the

@@ -302,3 +302,37 @@ async fn an_account_is_what_turns_the_write_ops_on() {
     })
     .await;
 }
+
+/// The identifiers this adapter declares are the **SPI's**, not Kuma's event
+/// names.
+///
+/// `pauseMonitor` is what the socket.io channel emits and `pause_monitor` is
+/// what a descriptor declares; a copy of either spelling in the other's place
+/// is a descriptor the contract battery refuses, or an emit Kuma ignores.
+///
+/// Asserted from `tests/` rather than beside the constants, and that is not
+/// preference: `knobas-sync`'s `write_choke_point` proves there is one
+/// outbound write path by finding every file under `crates/*/src/` that names
+/// the SPI's write op, and `descriptor.rs` is a descriptor rather than a write
+/// path. This file is out of that scan's scope, so the pin lives here.
+#[tokio::test]
+async fn the_declared_ops_are_the_spis_own_identifiers() {
+    let fake = Fake::start().await;
+    let declared = adapter_with_account(fake.base_url(), KEY)
+        .descriptor()
+        .write_ops;
+    assert_eq!(
+        declared,
+        [
+            knobas_source::WriteOp::PauseMonitor {
+                entity: "kuma:8".to_owned(),
+            }
+            .identifier(),
+            knobas_source::WriteOp::ResumeMonitor {
+                entity: "kuma:8".to_owned(),
+            }
+            .identifier(),
+        ],
+        "the descriptor must declare the SPI's identifiers, not Kuma's event names"
+    );
+}

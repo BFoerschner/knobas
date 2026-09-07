@@ -24,7 +24,6 @@ knobas-app	lib/knobas_app	assets::tests::the_rollup_counts_only_what_is_undernea
 knobas-app	lib/knobas_app	assets::tests::the_rollup_ranks_the_statuses_the_way_rust_does
 knobas-app	lib/knobas_app	assets::tests::the_route_namespace_is_one_knobas_core_reserves
 knobas-app	lib/knobas_app	assets::tests::the_shells_asset_namespace_is_the_one_the_estate_mints
-knobas-app	lib/knobas_app	assets::tests::the_tab_offers_the_ops_the_spi_names
 knobas-app	lib/knobas_app	backup::policy::tests::a_backup_taken_after_the_boundary_settles_the_night
 knobas-app	lib/knobas_app	backup::policy::tests::a_database_that_has_never_been_backed_up_is_due_at_once
 knobas-app	lib/knobas_app	backup::policy::tests::a_disabled_schedule_is_never_due
@@ -308,6 +307,7 @@ knobas-app	test/assets_ipc	only_the_newest_sample_colours_an_asset
 knobas-app	test/assets_ipc	the_bar_carries_the_last_days_samples_oldest_first_and_no_older_one
 knobas-app	test/assets_ipc	the_first_import_creates_the_real_estate_with_the_files_own_ids
 knobas-app	test/assets_ipc	the_linked_work_badge_counts_confirmed_links_to_work_items_only
+knobas-app	test/assets_ipc	the_monitors_tab_offers_the_ops_the_spi_names
 knobas-app	test/assets_ipc	the_open_alert_read_names_the_monitor_and_every_asset_it_watches
 knobas-app	test/assets_ipc	the_pane_lists_the_monitors_watching_an_asset_with_their_state_and_a_link_to_kuma
 knobas-app	test/assets_ipc	the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors
@@ -1847,7 +1847,6 @@ knobas-source-kuma	lib/knobas_source_kuma	cursor::tests::an_unreadable_cursor_is
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::a_full_sync_is_every_monitor_kuma_publishes
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::a_monitor_belongs_to_no_project_and_the_declaration_says_so
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::only_an_instance_with_an_account_advertises_the_write_ops
-knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_declared_ops_are_the_spis_own_identifiers
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_schema_and_the_config_struct_agree
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_schema_asks_for_no_secret
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_schema_defaults_are_a_valid_configuration
@@ -1894,6 +1893,7 @@ knobas-source-kuma	test/contract	an_account_is_what_turns_the_write_ops_on
 knobas-source-kuma	test/contract	every_write_is_refused_by_name_without_an_account
 knobas-source-kuma	test/contract	passes_the_contract_battery
 knobas-source-kuma	test/contract	test_connection_reports_the_version_and_the_roster_size
+knobas-source-kuma	test/contract	the_declared_ops_are_the_spis_own_identifiers
 knobas-source-kuma	test/live_kuma	a_full_sync_mirrors_every_seeded_monitor
 knobas-source-kuma	test/live_kuma	a_monitor_deleted_through_the_seeds_helper_is_swept
 knobas-source-kuma	test/live_kuma	a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back
