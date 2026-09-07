@@ -14,28 +14,94 @@
 //! #427's *The Kuma room and tiles* in full: "No switcher exception: the Kuma
 //! source has its room; it declares no projects."
 
-use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
+use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor, WriteOp};
+
+/// The ops a Kuma with an account offers, in the SPI's own spelling.
+///
+/// Built from [`WriteOp::identifier`] rather than written out, because a
+/// descriptor listing an identifier the SPI does not define is refused by the
+/// contract battery -- and the way that happens is somebody spelling
+/// `"pauseMonitor"` here, which is Kuma's event name and not knobas'.
+#[must_use]
+pub(crate) fn write_ops() -> Vec<String> {
+    [
+        WriteOp::PauseMonitor {
+            entity: String::new(),
+        },
+        WriteOp::ResumeMonitor {
+            entity: String::new(),
+        },
+    ]
+    .iter()
+    .map(|op| op.identifier().to_owned())
+    .collect()
+}
+
+/// The descriptor for one **configured instance**: the template under the
+/// instance's own id and name, and -- this is the whole of issue #452's first
+/// criterion -- carrying the write half only when there is an account behind
+/// it.
+///
+/// **A descriptor that depends on a credential**, which no other adapter's
+/// does. The SPI always allowed it (`Source::descriptor` is a method on a
+/// *built* instance, not a `const`) and nothing had used it: for every other
+/// source what an instance can do is a property of its adapter kind. Uptime
+/// Kuma is not, and the reason is in the product: the API key opens
+/// `/metrics`, the account opens socket.io, and a source with only the key can
+/// read every monitor and pause none of them (spec #427, stories 50 and 69).
+///
+/// So a key-only Kuma declares **no** `Capability::Write` and an **empty**
+/// `write_ops`, which is what makes the Monitors tab draw no buttons and
+/// `submit_write` refuse a pause by name rather than queueing one that can
+/// only ever be refused.
+#[must_use]
+pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescriptor {
+    let template = descriptor_template();
+    SourceDescriptor {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        // The two signals the battery holds together: `Write` without ops is a
+        // source that offers nothing, ops without `Write` is a source that
+        // reads as read-only. Both grow here or neither does.
+        capabilities: if writes {
+            vec![Capability::Write]
+        } else {
+            template.capabilities.clone()
+        },
+        write_ops: if writes { write_ops() } else { Vec::new() },
+        ..template
+    }
+}
 
 /// The static, instance-free descriptor: `id == adapter_kind` (contract §4.2).
 /// A configured instance's descriptor is this with `id` and `name` replaced by
-/// the instance's own.
+/// the instance's own -- and, since issue #452, with the write half added when
+/// that instance has an account ([`for_instance`]).
 #[must_use]
 pub fn descriptor_template() -> SourceDescriptor {
     SourceDescriptor {
         id: crate::ADAPTER_KIND.to_owned(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         name: "Uptime Kuma".to_owned(),
-        // **None**, which is what a read-only adapter declares: `Search` is
+        // **None**, and the template is the honest place for that: `Search` is
         // reserved for a server-side `Source::search` the SPI does not have,
         // `Webhooks` for a receiver knobas does not have, and `Write` must be
-        // accompanied by the ops it offers. Pause, resume and create are
-        // socket.io and are the write half's ticket; the day they land, this
-        // grows `Write` and a `write_ops` list together.
+        // accompanied by the ops it offers. A *template* describes the adapter
+        // kind before any instance exists, and this adapter kind cannot say
+        // whether it will be able to write -- that depends on whether the
+        // instance has an account (issue #452). So the template declares the
+        // read-only shape, and [`for_instance`] is where the write half is
+        // added for the instances that have earned it.
         capabilities: Vec::new(),
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
-        // One method, because `/metrics` accepts one thing: an API key, sent as
-        // HTTP Basic with an empty username. There is no account password to
-        // offer (spec #427, story 50).
+        // **One method, and the account is not a second one** (issue #452).
+        // `/metrics` accepts one thing -- an API key, sent as HTTP Basic with
+        // an empty username -- and that is what this source authenticates its
+        // ordinary traffic with (spec #427, story 50). The account added for
+        // the write half rides beside the key in the same keychain item
+        // (`knobas_source::instance::Account`); offering it here as a rival
+        // `AuthMethod` would let a reader choose it *instead of* the key,
+        // which is a Kuma that cannot read.
         auth_methods: vec![AuthMethod::ApiToken],
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
@@ -256,6 +322,59 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Issue #452's first criterion, in the adapter's own terms: **the same
+    /// adapter kind, two instances, two descriptors.** A key-only Kuma
+    /// advertises nothing to write, and adding the account flips both signals
+    /// -- the capability and the op list -- together.
+    #[test]
+    fn only_an_instance_with_an_account_advertises_the_write_ops() {
+        let read_only = for_instance("kuma", "Uptime Kuma", false);
+        assert!(read_only.write_ops.is_empty(), "{:?}", read_only.write_ops);
+        assert!(
+            !read_only.capabilities.contains(&Capability::Write),
+            "{:?}",
+            read_only.capabilities
+        );
+
+        let writable = for_instance("kuma", "Uptime Kuma", true);
+        assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+        assert!(writable.capabilities.contains(&Capability::Write));
+
+        // Everything else is the template's, under the instance's own name:
+        // the account changes what a source may *do*, never what it emits.
+        // Compared as JSON because that is the shape both cross the bridge in,
+        // and `KindInfo` has no `PartialEq` to compare them by.
+        let without_writes = |mut d: SourceDescriptor| {
+            d.capabilities = Vec::new();
+            d.write_ops = Vec::new();
+            serde_json::to_value(d).expect("a descriptor serializes")
+        };
+        assert_eq!(without_writes(writable), without_writes(read_only));
+    }
+
+    /// The identifiers are the SPI's, not Kuma's event names.
+    ///
+    /// `pauseMonitor` is what the socket.io channel is emitted as and
+    /// `pause_monitor` is what a descriptor declares; a copy of either spelling
+    /// in the other's place is a descriptor the contract battery refuses, or an
+    /// emit Kuma ignores.
+    #[test]
+    fn the_declared_ops_are_the_spis_own_identifiers() {
+        assert_eq!(
+            write_ops(),
+            vec![
+                WriteOp::PauseMonitor {
+                    entity: "kuma:8".to_owned()
+                }
+                .identifier(),
+                WriteOp::ResumeMonitor {
+                    entity: "kuma:8".to_owned()
+                }
+                .identifier(),
+            ]
+        );
     }
 
     /// The descriptor crosses the IPC bridge as plain data (spec §3a): the

@@ -18,6 +18,10 @@ knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# The socket.io channel logs a refused account at `warn` (issue #452): the
+# username is the first thing a reader chasing a failed pause needs, and the
+# password never reaches a line -- `Account`'s own `Debug` sees to that.
+tracing = "0.1"
 
 [dev-dependencies]
 serde_json.workspace = true

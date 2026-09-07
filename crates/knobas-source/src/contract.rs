@@ -114,13 +114,23 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             body: "<p>contract battery probe</p>".into(),
         },
         crate::WriteOp::UpdatePage {
-            entity: target,
+            entity: target.clone(),
             // Version 0 exists on no Confluence page -- the first version is
             // 1 -- so an adapter that attempted this probe would be refused by
             // the server rather than overwrite a real page's body.
             base_version: 0,
             body: "<p>contract battery probe</p>".into(),
         },
+        // The battery's own target is not a monitor id -- Uptime Kuma's are
+        // integers -- so an adapter that attempted either of these against a
+        // real instance is refused before anything is silenced. That matters
+        // more here than elsewhere in this list: pausing a monitor is the one
+        // probe whose success would be *invisible*, since a paused monitor
+        // simply stops being published.
+        crate::WriteOp::PauseMonitor {
+            entity: target.clone(),
+        },
+        crate::WriteOp::ResumeMonitor { entity: target },
     ]
     .into_iter()
     .map(|op| (op.identifier(), op))

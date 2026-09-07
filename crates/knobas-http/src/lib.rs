@@ -533,6 +533,43 @@ impl Request {
             inner: self.inner.json(body),
         }
     }
+
+    /// Send `body` verbatim, with `Content-Type: text/plain;charset=UTF-8`.
+    ///
+    /// Added for M4.1's Uptime Kuma write half (issue #452), and for a
+    /// protocol rather than for a preference: **engine.io's polling transport
+    /// posts a packet, not a document**. A socket.io emit goes out as the
+    /// bytes `42["pauseMonitor",8]`, which is not JSON -- the leading `42` is
+    /// the packet type and the ack id -- so [`Request::json`] cannot carry it
+    /// in any spelling. Handed a `String` it would send `"42[…]"`, quotes
+    /// included, which engine.io reads as a packet of type `"`.
+    ///
+    /// The alternative was a second `reqwest` client inside the adapter, past
+    /// the rate limiter, the retry budget and the status → [`SourceError`]
+    /// mapping -- which is the one thing this crate exists to prevent, and the
+    /// reason [`Request`] has no `send` of its own. So the body method belongs
+    /// here, ten lines beside `json`, rather than a transport belonging to an
+    /// adapter.
+    ///
+    /// Buffered, not streamed, for `json`'s reason: a `String` body clones, so
+    /// [`HttpClient::send`] can still retry it.
+    ///
+    /// **A caller must know what a retry means for its protocol.** `send`
+    /// retries a transient failure, and a retried emit is a second emit; the
+    /// Kuma adapter is safe under that because pause and resume are
+    /// idempotent, and because a retry that reaches a server whose session
+    /// already closed is answered rather than silently doubled. A future
+    /// caller whose packet is not idempotent has to say so where it builds
+    /// one.
+    #[must_use]
+    pub fn text(self, body: String) -> Self {
+        Self {
+            inner: self
+                .inner
+                .header(reqwest::header::CONTENT_TYPE, "text/plain;charset=UTF-8")
+                .body(body),
+        }
+    }
 }
 
 /// A response body, or an empty string if it cannot be read -- this is only

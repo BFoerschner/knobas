@@ -8,7 +8,7 @@
 mod support;
 
 use knobas_source::contract::{Fault, VecSink, battery};
-use support::{Fake, KEY, METRICS, adapter, dead_url};
+use support::{Fake, KEY, METRICS, adapter, adapter_with_account, dead_url};
 
 #[tokio::test]
 async fn passes_the_contract_battery() {
@@ -218,24 +218,87 @@ async fn test_connection_reports_the_version_and_the_roster_size() {
     assert!(info.discovered.is_empty());
 }
 
-/// Every write op is refused, because this adapter declares none. The battery
-/// checks the refusal; this checks that the refusal *names the op*, so a
-/// descriptor that ever declares one has a diagnosable failure rather than a
+/// Every write op is refused on a source with only an API key, because such a
+/// source declares none. The battery checks the refusal; this checks that the
+/// refusal *names the op and says why*, so a reader who somehow reached the
+/// action gets the fact they can act on -- add the account -- rather than a
 /// silent 404.
 #[tokio::test]
-async fn every_write_is_refused_by_name() {
+async fn every_write_is_refused_by_name_without_an_account() {
     let fake = Fake::start().await;
     let source = adapter(fake.base_url(), KEY);
-    let refused = source
-        .write(knobas_source::WriteOp::Comment {
-            entity: "kuma:8".to_owned(),
-            body: "nothing to say to a monitor".to_owned(),
-        })
-        .await;
-    let message = match refused {
-        Err(knobas_source::SourceError::Protocol { message, .. }) => message,
-        other => panic!("expected Protocol, got {other:?}"),
-    };
-    assert!(message.contains("comment"), "{message}");
-    assert!(message.contains("read-only"), "{message}");
+    for (op, named) in [
+        (
+            knobas_source::WriteOp::Comment {
+                entity: "kuma:8".to_owned(),
+                body: "nothing to say to a monitor".to_owned(),
+            },
+            "comment",
+        ),
+        // The two this adapter performs *when it can*: refused here for a
+        // different reason from the one above, and the message has to say so.
+        (
+            knobas_source::WriteOp::PauseMonitor {
+                entity: "kuma:8".to_owned(),
+            },
+            "pause_monitor",
+        ),
+        (
+            knobas_source::WriteOp::ResumeMonitor {
+                entity: "kuma:8".to_owned(),
+            },
+            "resume_monitor",
+        ),
+    ] {
+        let refused = source.write(op).await;
+        let message = match refused {
+            Err(knobas_source::SourceError::Protocol { message, .. }) => message,
+            other => panic!("expected Protocol, got {other:?}"),
+        };
+        assert!(message.contains(named), "{message}");
+        assert!(message.contains("no account"), "{message}");
+    }
+}
+
+/// Issue #452's first criterion at the adapter's own seam: **the same key, the
+/// same server, two instances.** Only the one with an account advertises the
+/// write ops, and the source that does not is not merely quiet about them --
+/// it refuses them (above).
+///
+/// The battery runs against *both*, because clause 5 is what holds the two
+/// signals together: a descriptor listing ops without `Capability::Write`, or
+/// declaring an identifier the SPI does not know, fails it. A declared op is
+/// skipped rather than performed, so no socket.io session is opened here.
+#[tokio::test]
+async fn an_account_is_what_turns_the_write_ops_on() {
+    let fake = Fake::start().await;
+
+    let read_only = adapter(fake.base_url(), KEY).descriptor();
+    assert!(read_only.write_ops.is_empty(), "{:?}", read_only.write_ops);
+    assert!(
+        !read_only
+            .capabilities
+            .contains(&knobas_source::Capability::Write),
+        "{:?}",
+        read_only.capabilities
+    );
+
+    let writable = adapter_with_account(fake.base_url(), KEY).descriptor();
+    assert_eq!(writable.write_ops, ["pause_monitor", "resume_monitor"]);
+    assert!(
+        writable
+            .capabilities
+            .contains(&knobas_source::Capability::Write)
+    );
+
+    // The battery again, this time over the instance that declares writes:
+    // clause 5 is what holds the two signals together, and `passes_the_contract_battery`
+    // above only ever exercised the read-only shape.
+    let base_url = fake.base_url();
+    battery(move |fault| match fault {
+        Fault::None => adapter_with_account(base_url.clone(), KEY),
+        Fault::Unauthorized => adapter_with_account(base_url.clone(), "uk1_rotated-away"),
+        Fault::Unreachable => adapter_with_account(dead_url(), KEY),
+    })
+    .await;
 }
