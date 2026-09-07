@@ -145,8 +145,9 @@
 //!   the column, and it is the *"a name the mirror does not hold yet is kept on
 //!   the asset"* half of spec #427's import sentence; the other half, drawing
 //!   `monitored-by` links for the names the mirror does hold, is
-//!   [`monitor_links`] and answers with nothing until M4.1's Kuma adapter
-//!   emits a monitor.
+//!   [`monitor_plan`], which since #442's Kuma adapter answers with real links
+//!   -- and reports the names that still find nothing, so a reader is told on
+//!   every preview and not only on the one that first kept a name (#445).
 //! * **The file's plain scalars become tagged values here.** #428 chose
 //!   `{"kind":…,"value":…}` and left the translation to this ticket;
 //!   [`property_of`] is it, and the kind a type declares is what decides.
@@ -165,8 +166,11 @@
 //! create. The wires story 31 draws between a route row and its target are
 //! #433's.
 //!
-//! Monitors themselves are **M4.1**, so [`monitored_by`] answers with nothing
-//! until the Kuma adapter emits the kind it reads.
+//! Monitors arrived with #442's Kuma adapter, so [`monitored_by`] fills a
+//! source room and [`AssetDetail::monitoring`] fills the pane's *monitoring*
+//! section (#445). What is **not** here is health taking a monitor's state --
+//! story 37's other half, and #444's, along with the alert an asset's monitor
+//! opens.
 
 use std::collections::{HashMap, HashSet};
 
@@ -227,12 +231,10 @@ pub const MONITORED_BY: &str = "monitored-by";
 
 /// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
 ///
-/// **Nothing writes it yet.** The Kuma adapter is M4.1's, so a source room's
-/// tile is empty today -- and it is empty *by this read answering nothing*
-/// rather than by a stub, which is why the word is here now: the day the
-/// adapter lands, the room fills with no change to this module. It is one of
-/// `knobas_core::entity::RESERVED_NAMESPACES` for the separate reason that
-/// `monitor:` ids are knobas' to give.
+/// Written before anything emitted it, so that a source room's tile would fill
+/// with no change to this module the day the adapter landed -- which is what
+/// happened in #442. It is one of `knobas_core::entity::RESERVED_NAMESPACES`
+/// for the separate reason that `monitor:` ids are knobas' to give.
 const MONITOR_KIND: &str = "monitor";
 
 // ---------------------------------------------------------------------------
@@ -652,6 +654,57 @@ pub struct AssetDetail {
     /// [`links`]: AssetDetail::links
     /// [`properties`]: AssetDetail::properties
     pub monitors: Vec<String>,
+    /// The monitors watching this asset, by name -- the pane's *monitoring*
+    /// section (spec #427 story 33, issue #445).
+    ///
+    /// [`monitors`] and this are the two halves of one sentence: that list is
+    /// what the estate file *said*, this is what has been found. A name in
+    /// both is a name whose monitor has arrived; a name in only the first is
+    /// one still waiting, and it is what the import's preview reports as
+    /// [`UnresolvedMonitor`].
+    ///
+    /// Read out of [`links`] rather than by a second walk of `knobas.link`, so
+    /// this section and the *Linked* panel under it cannot disagree about what
+    /// is attached.
+    ///
+    /// [`links`]: AssetDetail::links
+    /// [`monitors`]: AssetDetail::monitors
+    pub monitoring: Vec<AttachedMonitor>,
+}
+
+/// One monitor watching an asset, as the pane's monitoring section draws it.
+///
+/// The attachment is the link; the state and the address are the mirror's, and
+/// both are optional because both can honestly be missing -- a monitor Kuma
+/// paused is a tombstone with neither (#442, `knobas_source_kuma::map`), and a
+/// monitor whose source the reader disabled leaves the mirror without leaving
+/// the link.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct AttachedMonitor {
+    /// The monitor's entity id -- `<source>:<monitor id in Kuma>`, and the
+    /// address the *Linked* panel opens.
+    pub entity_id: String,
+    /// Its name, which is the name an estate file uses to ask for it.
+    pub name: String,
+    /// The state word the adapter last recorded: `up`, `down`, `pending`,
+    /// `maintenance`. `null` when the mirror holds no reading -- a tombstone,
+    /// or a state code the adapter has no word for.
+    pub state: Option<String>,
+    /// Its own page in Uptime Kuma, straight from the mirror row's `web_url`
+    /// (spec #427 story 71). `null` when there is no page left to open.
+    pub web_url: Option<String>,
+    /// Whether the monitor has left the mirror -- paused in Kuma, or deleted.
+    ///
+    /// `CONTEXT.md`'s word for this state is **tombstone**: "marking an item
+    /// deleted-at-source while keeping the row", against *withdraw*, which
+    /// that glossary gives to a queued write pulled back. The fact itself is
+    /// [`knobas_core::link::LinkEnd::deleted_at`], which the *Linked* panel
+    /// under this section renders with the older spelling.
+    ///
+    /// A fact the reader is shown rather than a filter, for that field's own
+    /// reason: a section that silently dropped a paused monitor would tell an
+    /// asset somebody deliberately silenced a check on that nothing watches it.
+    pub tombstoned: bool,
 }
 
 /// One route, as both ends read it.
@@ -1203,6 +1256,7 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
     // asset is an entity, so "what is this linked to" has one answer in this
     // app and the pane draws it through the panel the slide-over draws.
     let links = knobas_core::link::entries_of(pool, &entity).await?;
+    let monitoring = attached_monitors(pool, &links).await?;
 
     Ok(AssetDetail {
         properties: properties_of(&asset.type_id, &stored),
@@ -1214,9 +1268,86 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
         exposes,
         reachable_via,
         history,
+        monitoring,
         links,
         monitors,
     })
+}
+
+/// The state and the page in Kuma of the monitors the mirror still holds.
+///
+/// Keyed on entity id, and every column read from `sync.live_item` so a
+/// monitor of a source the reader disabled contributes no reading -- the
+/// filter every reader in this app inherits (`0012`). The *attachment* is not
+/// read here: that is the link, and a link survives both the tombstone and the
+/// disabled source.
+const MONITOR_READINGS: &str = "select entity_id, payload->>'state' as state, web_url
+  from sync.live_item
+ where kind = $2 and entity_id = any($1::text[])";
+
+/// The monitors watching an asset, out of the links it already takes part in.
+///
+/// **The link is the attachment and the mirror is only the reading.** So the
+/// walk is over `links` -- narrowed to [`MONITORED_BY`] and to the `monitor`
+/// kind, which are two conditions and not one: a `related` link to a monitor
+/// is not monitoring, and a `monitored-by` link to a ticket is not a monitor.
+/// `entries_of` has already resolved each other end's kind and title, so the
+/// name on every row is here whether or not the mirror still answers for it.
+///
+/// By name, then by id: the section is a list a person reads down, and
+/// `entries_of`'s own order is newest-link-first, which is an order about when
+/// somebody attached things rather than about what is being watched.
+async fn attached_monitors(
+    pool: &PgPool,
+    links: &[LinkEntry],
+) -> Result<Vec<AttachedMonitor>, IpcError> {
+    let attached: Vec<&LinkEntry> = links
+        .iter()
+        .filter(|entry| entry.link.relation == MONITORED_BY && entry.other.kind == MONITOR_KIND)
+        .collect();
+    if attached.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids: Vec<String> = attached
+        .iter()
+        .map(|entry| entry.other.entity_id.clone())
+        .collect();
+    let mut readings: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for row in sqlx::query(MONITOR_READINGS)
+        .bind(&ids)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?
+    {
+        readings.insert(
+            row.try_get("entity_id")?,
+            (row.try_get("state")?, row.try_get("web_url")?),
+        );
+    }
+
+    let mut out: Vec<AttachedMonitor> = attached
+        .iter()
+        .map(|entry| {
+            let (state, web_url) = readings
+                .get(&entry.other.entity_id)
+                .cloned()
+                .unwrap_or_default();
+            AttachedMonitor {
+                entity_id: entry.other.entity_id.clone(),
+                name: entry.other.title.clone(),
+                state,
+                web_url,
+                tombstoned: entry.other.deleted_at.is_some(),
+            }
+        })
+        .collect();
+    out.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.entity_id.cmp(&right.entity_id))
+    });
+    Ok(out)
 }
 
 /// One route, with its own history -- what `#/route/<id>` opens on.
@@ -1416,12 +1547,11 @@ pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>,
 /// which is what keeps a Jira room from listing the assets its *tickets*
 /// happen to be linked to.
 ///
-/// **It answers nothing today, and that is the read working.** No adapter
-/// emits `monitor` until M4.1, so the mirror holds none and the join matches
-/// none. Written as the real statement rather than as an empty `Vec` because
-/// the difference is not visible from the tile and is the whole difference
-/// between a room that fills itself the day the adapter lands and a room
-/// somebody has to remember to come back to.
+/// **Written before there was a monitor to find**, as the real statement
+/// rather than an empty `Vec`, on the argument that the difference is not
+/// visible from the tile and is the whole difference between a room that fills
+/// itself the day the adapter lands and a room somebody has to remember to
+/// come back to. #442's adapter landed and it did.
 ///
 /// **Not membership's rule.** A monitor watches the thing it was pointed at;
 /// that a VM holds the container somebody is monitoring does not make the VM
@@ -2428,11 +2558,36 @@ pub struct MonitorLink {
     pub monitor_id: String,
 }
 
+/// One monitor name on one asset that answers to nothing in the mirror.
+///
+/// [`MonitorLink`]'s negative, and a group of its own because the reader's
+/// second question about the file's monitor names is *which of them found
+/// nothing* -- the names spec #427 keeps on the asset for the next import to
+/// resolve.
+///
+/// **Neither [`ImportPreview::changes`] nor [`ImportPreview::monitor_links`]
+/// can answer it.** `changes` lists what an apply would *write*, so a name
+/// already on the asset is absent from it by construction; the second preview
+/// of an unchanged file has an empty `changes`, an empty `monitor_links` and
+/// every unresolved name still unresolved. Reported on every preview, then,
+/// and not only on the one that first kept the name.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct UnresolvedMonitor {
+    pub asset_id: String,
+    pub asset_name: String,
+    /// The Uptime Kuma name, as the file spells it. Nothing in the mirror
+    /// carries it -- which is a fact about *this moment*: the M4.1 sync or the
+    /// next import resolves it the instant Kuma publishes a monitor by that
+    /// name.
+    pub monitor_name: String,
+}
+
 /// What an import would do, before it has done any of it.
 ///
 /// The three groups the dialog draws -- already in the tree, new, and what
 /// would change -- plus the monitor links, which are a write and therefore
-/// have to be announced by the same read that announces the others.
+/// have to be announced by the same read that announces the others, and the
+/// names that found no monitor, which are the same announcement's other half.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ImportPreview {
     /// What the file calls the estate.
@@ -2447,6 +2602,15 @@ pub struct ImportPreview {
     pub changes: Vec<AssetChange>,
     /// The `monitored-by` links an apply would draw.
     pub monitor_links: Vec<MonitorLink>,
+    /// The monitor names the file's assets carry that the mirror does not
+    /// hold, by asset and then by name. See [`UnresolvedMonitor`].
+    ///
+    /// **Over the assets the file names, and no others.** A preview is a
+    /// sentence about a file, so a name kept on an asset the file has since
+    /// stopped listing is not reported here -- it is on the asset, where the
+    /// pane draws it, and the next file that names that asset again picks it
+    /// up.
+    pub unresolved: Vec<UnresolvedMonitor>,
 }
 
 /// What an import did.
@@ -2796,10 +2960,9 @@ const HAND_EDITED: &str = "select distinct entity_id, detail->>'key' as key
 /// source or a tombstoned one draws no link -- the filter every other reader in
 /// this app inherits (`0012`).
 ///
-/// **It answers nothing today**, because no adapter emits the `monitor` kind
-/// until M4.1; the statement is the real one all the same, for
-/// [`MONITORED_ASSETS`]' reason. What the import does with a name that resolves
-/// to nothing is keep it (`0020`), which is spec #427's own sentence.
+/// What the import does with a name that resolves to nothing is keep it
+/// (`0020`) and report it ([`UnresolvedMonitor`]), which is spec #427's own
+/// sentence and issue #445's.
 const LIVE_MONITORS: &str =
     "select entity_id, title from sync.live_item where kind = $2 and title = any($1::text[])";
 
@@ -3065,7 +3228,7 @@ async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, Ip
         });
     }
 
-    let links = monitor_links(tx, &wanted, &stored, &inserts).await?;
+    let MonitorPlan { links, unresolved } = monitor_plan(tx, &wanted, &stored, &inserts).await?;
 
     Ok(Plan {
         preview: ImportPreview {
@@ -3074,6 +3237,7 @@ async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, Ip
             new,
             changes,
             monitor_links: links,
+            unresolved,
         },
         assets: inserts,
         routes: route_inserts,
@@ -3194,22 +3358,42 @@ fn ordered<'a>(
     Ok(out)
 }
 
-/// The `monitored-by` links an apply would draw.
+/// What the monitor half of one import comes to: the links it would draw, and
+/// the names that found nothing.
+///
+/// One walk answers both, because they are one question asked of each name --
+/// *does the mirror hold a monitor called this* -- and two walks would be two
+/// chances for a name to be in neither list or in both.
+struct MonitorPlan {
+    links: Vec<MonitorLink>,
+    unresolved: Vec<UnresolvedMonitor>,
+}
+
+/// The `monitored-by` links an apply would draw, and the names it would leave
+/// waiting.
 ///
 /// Over every asset the file names -- the new ones as well as the known ones,
 /// because a monitor the mirror already holds should be joined to the asset the
 /// same import created a moment earlier.
-async fn monitor_links(
+///
+/// `wanted` is every name each asset would carry *after* this import, so a
+/// name an earlier import kept is resolved by this one and reported by this one
+/// -- spec #427's *"resolved by the next import"* and issue #445's *"kept and
+/// reported in the preview"* are two readings of that same map.
+async fn monitor_plan(
     tx: &mut Transaction<'_, Postgres>,
     wanted: &HashMap<String, Vec<String>>,
     stored: &HashMap<String, StoredAsset>,
     inserts: &[AssetInsert],
-) -> Result<Vec<MonitorLink>, IpcError> {
+) -> Result<MonitorPlan, IpcError> {
     let mut names: Vec<String> = wanted.values().flatten().cloned().collect();
     names.sort_unstable();
     names.dedup();
     if names.is_empty() {
-        return Ok(Vec::new());
+        return Ok(MonitorPlan {
+            links: Vec::new(),
+            unresolved: Vec::new(),
+        });
     }
 
     let mut mirrored: HashMap<String, Vec<String>> = HashMap::new();
@@ -3224,10 +3408,11 @@ async fn monitor_links(
             .or_default()
             .push(row.try_get("entity_id")?);
     }
-    if mirrored.is_empty() {
-        return Ok(Vec::new());
-    }
 
+    // **No early return on an empty mirror.** Before the Kuma source is
+    // configured that is every file's ordinary state, and it is exactly the
+    // state the unresolved list exists to report; returning here would make
+    // the report empty precisely when it has the most to say.
     let ids: Vec<String> = wanted.keys().cloned().collect();
     let mut drawn: HashSet<(String, String)> = HashSet::new();
     for row in sqlx::query(MONITOR_LINKS)
@@ -3260,9 +3445,18 @@ async fn monitor_links(
     let mut assets: Vec<&String> = wanted.keys().collect();
     assets.sort();
     let mut links: Vec<MonitorLink> = Vec::new();
+    let mut unresolved: Vec<UnresolvedMonitor> = Vec::new();
     for asset_id in assets {
         for monitor_name in &wanted[asset_id] {
-            for monitor_id in mirrored.get(monitor_name).into_iter().flatten() {
+            let Some(monitor_ids) = mirrored.get(monitor_name) else {
+                unresolved.push(UnresolvedMonitor {
+                    asset_id: asset_id.clone(),
+                    asset_name: name_of(asset_id),
+                    monitor_name: monitor_name.clone(),
+                });
+                continue;
+            };
+            for monitor_id in monitor_ids {
                 if drawn.contains(&(asset_id.clone(), monitor_id.clone())) {
                     continue;
                 }
@@ -3275,7 +3469,7 @@ async fn monitor_links(
             }
         }
     }
-    Ok(links)
+    Ok(MonitorPlan { links, unresolved })
 }
 
 /// The file's plain scalars as the tagged values everything else in this module

@@ -23,7 +23,13 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
-import type { AssetDetail, AssetProperty, AssetRow, RouteRow } from "../ipc/assets";
+import type {
+  AssetDetail,
+  AssetProperty,
+  AssetRow,
+  AttachedMonitor,
+  RouteRow,
+} from "../ipc/assets";
 import { DEBOUNCE_MS } from "../launcher";
 import { createRouter } from "../shell/router.svelte";
 import AssetsView from "./AssetsView.svelte";
@@ -147,6 +153,54 @@ const DASHBOARD_ROUTE: RouteRow = {
   properties: [],
 };
 const ROUTES = [DASHBOARD_ROUTE, GITEA_ROUTE];
+
+/**
+ * The monitors watching the container, as `get_asset` resolves them (#445).
+ *
+ * Two, and deliberately unalike: one Kuma is publishing, one it is not. The
+ * second is what a **paused** monitor looks like from here -- #442 tombstones
+ * a monitor that leaves `/metrics`, so it has no state left to report and no
+ * page left to open -- and it is the row a section that simply printed
+ * `state` would render as a blank.
+ */
+const MONITORING: AttachedMonitor[] = [
+  {
+    entity_id: "kuma:4",
+    name: "postgres-check",
+    state: "down",
+    web_url: "http://127.0.0.1:3001/dashboard/4",
+    tombstoned: false,
+  },
+  {
+    entity_id: "kuma:5",
+    name: "postgres-slow-query",
+    state: null,
+    web_url: null,
+    tombstoned: true,
+  },
+  // Still in the mirror — it has a page — but with no state word: the reading
+  // is missing on its own, which is the third of the three things this row can
+  // say and not the same as the tombstone above. `AttachedMonitor.state` is
+  // null for a state code the adapter has no word for, and a blank here would
+  // read as "up" beside a live row exactly as a blank on a paused one would.
+  {
+    entity_id: "kuma:6",
+    name: "postgres-wal",
+    state: null,
+    web_url: "http://127.0.0.1:3001/dashboard/6",
+    tombstoned: false,
+  },
+];
+
+/**
+ * The names the estate file kept on the container.
+ *
+ * `postgres-check` is **also** in {@link MONITORING}: it is the name that
+ * found its monitor, and the pane must not say it twice -- once as something
+ * watching this asset and once as something still waiting to. `pgbouncer` is
+ * the one still waiting.
+ */
+const NAMED_BY_THE_FILE = ["postgres-check", "pgbouncer"];
 
 /**
  * `assets::ROUTES_REACHABLE`'s rule, as the fake bridge answers it: every
@@ -312,7 +366,8 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
             },
           ]
         : [],
-    monitors: [],
+    monitors: asset.id === CONTAINER.id ? NAMED_BY_THE_FILE : [],
+    monitoring: asset.id === CONTAINER.id ? MONITORING : [],
   };
 }
 
@@ -1348,4 +1403,80 @@ test("switches the wires' fade off under reduced motion rather than hiding them"
       hiding,
     );
   }
+});
+
+/**
+ * **The pane's monitoring section** (issue #445, spec #427 stories 33 and 71).
+ *
+ * What the reader is owed for each monitor watching this asset: its name, the
+ * state Kuma last published, and one click to its own page in Kuma. The
+ * paused one is the row that makes the section honest — it is still attached,
+ * it has no state and no page, and it says so rather than rendering as a blank
+ * beside a live one. The third row separates the two halves of that: a monitor
+ * the mirror still holds, with a page to open and no state word, is not the
+ * same fact as one that has left it, and one row cannot witness both branches.
+ */
+test("the pane lists the monitors watching the asset, with their state", async () => {
+  render(`#/asset/${CONTAINER.id}`);
+  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+
+  const section = target.querySelector(".watch");
+  const rows = [...section!.querySelectorAll("li")].map((row) =>
+    (row.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
+  expect(rows).toEqual([
+    "postgres-check down Open in Kuma",
+    "postgres-slow-query Paused or gone from Kuma",
+    "postgres-wal no reading Open in Kuma",
+  ]);
+});
+
+/**
+ * Story 71: *a deep link from a monitor to its page in Uptime Kuma, so that
+ * what knobas does not do is one click away.*
+ *
+ * The URL handed over is the **mirror's own** `web_url`, which is the adapter's
+ * — nothing here builds one out of a base URL and an id.
+ */
+test("Open in Kuma hands the monitor's own URL to the browser", async () => {
+  const { opened } = render(`#/asset/${CONTAINER.id}`);
+  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+
+  const open = [...target.querySelectorAll<HTMLButtonElement>(".watch button")].find(
+    (candidate) => candidate.textContent?.trim() === "Open in Kuma",
+  );
+  expect(open).toBeDefined();
+  open!.click();
+  await vi.waitFor(() => expect(opened).toHaveLength(1));
+
+  expect(opened).toEqual(["http://127.0.0.1:3001/dashboard/4"]);
+});
+
+/**
+ * The two halves of one sentence: what the file *said* and what has been
+ * *found*. A name that found its monitor is in the section above and must not
+ * be repeated below it — the list underneath is the queue, not the roster.
+ */
+test("only the names still waiting for a monitor are listed as named by the import", async () => {
+  render(`#/asset/${CONTAINER.id}`);
+  await vi.waitFor(() => expect(target.querySelector(".named")).not.toBeNull());
+
+  const waiting = target.querySelector(".named");
+  expect(
+    [...waiting!.querySelectorAll("li")].map((row) => (row.textContent ?? "").trim()),
+  ).toEqual(["pgbouncer"]);
+});
+
+/**
+ * An asset nothing watches draws neither section. A *Monitoring* heading with
+ * "nothing" under it on every hand-made asset would be a sentence about a file
+ * nobody imported — the reason #439 drew the names conditionally, kept.
+ */
+test("an asset with no monitors draws no monitoring section at all", async () => {
+  render(`#/asset/${VM.id}`);
+  await vi.waitFor(() => expect(text()).toContain("vm-db-01"));
+
+  expect(target.querySelector(".watch")).toBeNull();
+  expect(target.querySelector(".named")).toBeNull();
+  expect(text()).not.toContain("Monitoring");
 });

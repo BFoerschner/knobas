@@ -84,7 +84,7 @@ function response(hits: ReturnType<typeof hit>[]): SearchResponse {
   };
 }
 
-function render() {
+function render(over: { fromId?: string; fromTitle?: string } = {}) {
   const target = document.createElement("div");
   document.body.append(target);
   const onclose = vi.fn();
@@ -92,8 +92,8 @@ function render() {
   const app = mount(LinkDialog, {
     target,
     props: {
-      fromId: "mock:PAY-231",
-      fromTitle: "Retry failed SEPA payouts",
+      fromId: over.fromId ?? "mock:PAY-231",
+      fromTitle: over.fromTitle ?? "Retry failed SEPA payouts",
       onclose,
       oncreated,
     },
@@ -335,6 +335,62 @@ test("a result title is text, whatever a source put in it", async () => {
 
   expect(screen.text()).toContain("<em>Payout</em>");
   expect(screen.target.querySelector("em")).toBeNull();
+
+  screen.done();
+});
+
+/**
+ * Issue #445: attaching a monitor **from the monitor's end**.
+ *
+ * One relation reaches the database — `monitored-by`, the word the import
+ * writes and every estate read filters on — and the row runs from the asset,
+ * because that is the direction the sentence goes. The dialog was opened over
+ * the monitor, so the ends come back swapped: a dialog that stored `monitors`,
+ * or stored `monitored-by` from the monitor, would put a link in the panel
+ * that reads *this monitor is monitored by that container*.
+ */
+test("picking monitors from a monitor writes monitored-by, drawn from the asset", async () => {
+  answer = () =>
+    Promise.resolve(response([hit({ id: "asset:knobas-gitea", title: "knobas-gitea" })]));
+  const screen = render({ fromId: "kuma:7", fromTitle: "gitea" });
+
+  screen.type(screen.picker(), "gitea");
+  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  screen.press(screen.picker(), "Enter");
+
+  screen.button("monitors").click();
+  screen.button("Link").click();
+
+  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    fromId: "asset:knobas-gitea",
+    toId: "kuma:7",
+    relation: "monitored-by",
+    note: "",
+  });
+
+  screen.done();
+});
+
+/** The same attachment asked for from the asset, which needs no swap. */
+test("picking monitored-by from an asset writes the same row", async () => {
+  answer = () => Promise.resolve(response([hit({ id: "kuma:7", title: "gitea" })]));
+  const screen = render({ fromId: "asset:knobas-gitea", fromTitle: "knobas-gitea" });
+
+  screen.type(screen.picker(), "gitea");
+  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  screen.press(screen.picker(), "Enter");
+
+  screen.button("monitored-by").click();
+  screen.button("Link").click();
+
+  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    fromId: "asset:knobas-gitea",
+    toId: "kuma:7",
+    relation: "monitored-by",
+    note: "",
+  });
 
   screen.done();
 });

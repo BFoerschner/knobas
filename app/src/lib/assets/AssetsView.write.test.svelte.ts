@@ -312,9 +312,11 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
           // `AssetsView.links.test.svelte.ts`.
           links: [],
           history: lines.filter((line) => line.entity_id === assetId).reverse(),
-          // #439's monitor names: this fixture is about the write surface and
-          // nothing in it has been imported, so every asset carries none.
+          // #439's monitor names and #445's resolved monitors: this fixture
+          // is about the write surface and nothing in it has been imported, so
+          // every asset carries neither.
           monitors: [],
+          monitoring: [],
         });
       } catch (cause) {
         return Promise.reject(cause);

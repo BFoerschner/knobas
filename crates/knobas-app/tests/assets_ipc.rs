@@ -2181,6 +2181,22 @@ async fn link_as(pool: &PgPool, from: &str, to: &str, relation: &str) -> uuid::U
 /// the read -- a read that always answered with nothing would pass this
 /// file's negatives and fail nothing.
 async fn monitor(pool: &PgPool, source: &str, key: &str) -> String {
+    monitor_reading(pool, source, key, None, None).await
+}
+
+/// The same monitor, with the two facts the pane's monitoring section draws:
+/// the state word Kuma last published and the page it sits on in Kuma.
+///
+/// `web_url` is `sync.item`'s own column -- the one *Open in browser* renders
+/// from everywhere else in this app -- so the deep link the pane offers is the
+/// adapter's, not a URL this module builds out of parts.
+async fn monitor_reading(
+    pool: &PgPool,
+    source: &str,
+    key: &str,
+    state: Option<&str>,
+    web_url: Option<&str>,
+) -> String {
     let id = format!("{source}:{key}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
         .bind(&id)
@@ -2189,12 +2205,14 @@ async fn monitor(pool: &PgPool, source: &str, key: &str) -> String {
         .await
         .expect("the entity row");
     sqlx::query(
-        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1,$2,'monitor',$3,'','{}'::jsonb)",
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,$2,'monitor',$3,'',jsonb_build_object('state',$4::text),$5)",
     )
     .bind(&id)
     .bind(source)
     .bind(key)
+    .bind(state)
+    .bind(web_url)
     .execute(pool)
     .await
     .expect("the mirror row");
@@ -2401,6 +2419,142 @@ async fn propose(pool: &PgPool, from: &str, to: &str) {
     .execute(pool)
     .await
     .expect("the proposal");
+}
+
+/// **The pane's monitoring section: the monitors attached to an asset, each
+/// with its state and its page in Kuma** (issue #445, spec #427 story 33's
+/// *monitoring* row of the pane).
+///
+/// Read out of the `monitored-by` links this asset already takes part in, so
+/// the section and the *Linked* panel below it can never disagree about what
+/// is attached. Three negatives make that claim mean something, and each of
+/// them is a way a looser read would go wrong:
+///
+/// * a `related` link to a monitor is **not** monitoring -- a read filtering
+///   only on the other end's kind would list it;
+/// * a `monitored-by` link to a **ticket** is not a monitor -- a read
+///   filtering only on the relation would list it;
+/// * a monitor attached to a **different** asset is not attached to this one.
+///
+/// The state and the deep link come from the mirror row, which is why the
+/// second monitor here reads `down` and the first `up`: a section that showed
+/// the same word on every row would pass a fixture of one.
+#[tokio::test]
+async fn the_pane_lists_the_monitors_watching_an_asset_with_their_state_and_a_link_to_kuma() {
+    let pool = pool("assets-pane-monitoring").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let other = make(&pool, None, "vm", "vm-web-01", &[]).await;
+
+    let up = monitor_reading(
+        &pool,
+        "kuma",
+        "gitea",
+        Some("up"),
+        Some("http://127.0.0.1:3001/dashboard/7"),
+    )
+    .await;
+    let down = monitor_reading(
+        &pool,
+        "kuma",
+        "confluence (tunnel)",
+        Some("down"),
+        Some("http://127.0.0.1:3001/dashboard/6"),
+    )
+    .await;
+    let merely_related = monitor_reading(&pool, "kuma", "canary", Some("up"), None).await;
+    let elsewhere = monitor_reading(&pool, "kuma", "jira (tunnel)", Some("up"), None).await;
+    let not_a_monitor = ticket(&pool, "PAY-9").await;
+
+    link_as(&pool, &vm.id, &up, "monitored-by").await;
+    link_as(&pool, &vm.id, &down, "monitored-by").await;
+    link_as(&pool, &vm.id, &merely_related, "related").await;
+    link_as(&pool, &vm.id, &not_a_monitor, "monitored-by").await;
+    link_as(&pool, &other.id, &elsewhere, "monitored-by").await;
+
+    let pane = assets::get(&pool, &vm.id).await.expect("the pane");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| {
+                (
+                    watch.entity_id.as_str(),
+                    watch.name.as_str(),
+                    watch.state.as_deref(),
+                    watch.web_url.as_deref(),
+                    watch.tombstoned,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (
+                "kuma:confluence (tunnel)",
+                "confluence (tunnel)",
+                Some("down"),
+                Some("http://127.0.0.1:3001/dashboard/6"),
+                false,
+            ),
+            (
+                "kuma:gitea",
+                "gitea",
+                Some("up"),
+                Some("http://127.0.0.1:3001/dashboard/7"),
+                false,
+            ),
+        ],
+        "the two monitors watching this asset, by name, each with its state \
+         and its own page in Kuma"
+    );
+
+    assert_eq!(
+        assets::get(&pool, &other.id)
+            .await
+            .expect("the other pane")
+            .monitoring
+            .len(),
+        1,
+        "a monitor watches the asset it was attached to and no other"
+    );
+}
+
+/// **A paused monitor is still attached, and says so.**
+///
+/// #442's own sentence: a paused monitor is absent from `/metrics`, so the
+/// adapter tombstones it -- and a `monitored-by` link then points at a
+/// tombstone. Dropping the row would make the pane say *nothing watches this*
+/// about an asset somebody deliberately silenced a check on, which is the
+/// opposite of true; `sync.live_item`'s tombstone filter would do exactly
+/// that, and this read joins `knobas.entity` for the reason
+/// `knobas_core::link::entries_of` does.
+///
+/// No state and no deep link, because a monitor Kuma no longer publishes has
+/// neither -- `map::tombstone` drops the `web_url` at the source.
+#[tokio::test]
+async fn a_paused_monitor_stays_in_the_section_with_no_state_and_no_link() {
+    let pool = pool("assets-pane-paused").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    let paused = monitor_reading(&pool, "kuma", "gitea", None, None).await;
+    link_as(&pool, &vm.id, &paused, "monitored-by").await;
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&paused)
+        .execute(&pool)
+        .await
+        .expect("the tombstone");
+
+    let pane = assets::get(&pool, &vm.id).await.expect("the pane");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| (
+                watch.name.as_str(),
+                watch.state.as_deref(),
+                watch.tombstoned
+            ))
+            .collect::<Vec<_>>(),
+        [("gitea", None, true)],
+        "still attached, and marked as no longer in Kuma"
+    );
+    assert!(pane.monitoring[0].web_url.is_none());
 }
 
 /// Story 44: a source room's tile lists the assets **that source's monitors**
@@ -2970,6 +3124,214 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
         .value;
     assert_eq!(again.monitors_linked, 0);
     assert_eq!(links_of(&pool, "asset:knobas-gitea").await.len(), 1);
+}
+
+/// **An estate with no Kuma at all reports all seven names, not none.**
+///
+/// The state every profile is in before the Kuma source is configured, and the
+/// one an empty-mirror short circuit would answer wrongly: a `return` taken
+/// when no monitor matches any name is a `return` taken *exactly* when the
+/// report has the most to say. Its sibling below seeds one monitor, so it
+/// cannot see that branch at all.
+#[tokio::test]
+async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() {
+    let pool = pool("assets-import-no-kuma").await;
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the preview");
+    assert!(preview.monitor_links.is_empty(), "there is nothing to link");
+    assert_eq!(
+        preview
+            .unresolved
+            .iter()
+            .map(|entry| entry.monitor_name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "knobas-confluence",
+            "knobas-jira",
+            "knobas-teamcity",
+            "confluence (tunnel)",
+            "gitea",
+            "jira (tunnel)",
+            "teamcity (tunnel)",
+        ],
+        "all seven of the file's names, because nothing in the mirror answers \
+         to any of them"
+    );
+}
+
+/// **A name that resolves to nothing is reported by *every* preview, not only
+/// the one that first put it on the asset.**
+///
+/// Spec #427's *"a name the mirror does not hold yet is kept on the asset and
+/// resolved by the next import"* has a reader on the other end of it, and
+/// issue #445 says where they read it: *a name the mirror lacks is kept and
+/// **reported in the preview***. `changes` cannot be that report -- it lists
+/// what an apply would *write*, so a name already on the asset is absent from
+/// it by construction, and the second preview of an unchanged file has an
+/// empty `changes` and an empty `monitor_links` while six of the file's seven
+/// names still answer to nothing.
+///
+/// The positive control is `gitea`: the one name the mirror holds is a link
+/// and is **not** in this list, so a list that simply echoed the file's names
+/// would fail here.
+#[tokio::test]
+async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_first() {
+    let pool = pool("assets-import-unresolved").await;
+    monitor(&pool, "kuma", "gitea").await;
+
+    let first = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first preview");
+    assert_eq!(
+        first
+            .unresolved
+            .iter()
+            .map(|entry| (entry.asset_id.as_str(), entry.monitor_name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("asset:hetzner-confluence", "knobas-confluence"),
+            ("asset:hetzner-jira", "knobas-jira"),
+            ("asset:hetzner-teamcity", "knobas-teamcity"),
+            ("asset:knobas-confluence", "confluence (tunnel)"),
+            ("asset:knobas-jira", "jira (tunnel)"),
+            ("asset:knobas-teamcity", "teamcity (tunnel)"),
+        ],
+        "every name but the one the mirror holds, by asset and then by name"
+    );
+
+    assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the import");
+
+    let again = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second preview");
+    assert!(
+        again.changes.is_empty() && again.monitor_links.is_empty(),
+        "an unchanged file writes nothing the second time -- which is exactly \
+         why the report cannot live in either of those lists"
+    );
+    assert_eq!(
+        again.unresolved, first.unresolved,
+        "the six names are still kept and still reported"
+    );
+    assert_eq!(
+        again
+            .unresolved
+            .iter()
+            .map(|entry| entry.asset_name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "knobas-confluence",
+            "knobas-jira",
+            "knobas-teamcity",
+            "knobas-confluence",
+            "knobas-jira",
+            "knobas-teamcity",
+        ],
+        "the asset each name is waiting on, named as the tree names it"
+    );
+}
+
+/// **A name one import kept becomes a link on the next one, once the monitor
+/// arrives** -- issue #445's first criterion in the order it spells it out.
+///
+/// Its siblings all seed the mirror *before* the first import, so every one of
+/// them resolves a name on an asset that import is creating. The sequence the
+/// criterion actually describes is the other one: the name is kept while Kuma
+/// holds nothing, the monitor turns up later, and the re-import draws the link
+/// on an asset already in the estate and otherwise unchanged.
+///
+/// That is a direction none of them can witness *drawing a link* in.
+/// `monitor_plan` walks the assets **the file names**, new and known alike,
+/// and narrowing it to the assets an import is about to write leaves the
+/// re-import that asserts `monitors_linked == 0` passing for the wrong reason
+/// -- nothing was drawn because nothing was looked at. The sibling above
+/// catches that mutant on its *report* (a second preview stops naming the six
+/// waiting names); this is the only test that catches it on the link, which is
+/// the half the criterion is about.
+#[tokio::test]
+async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
+    let pool = pool("assets-import-monitor-arrives").await;
+
+    // No Kuma yet: every name is kept and nothing is drawn.
+    let first = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the first import")
+        .value;
+    assert_eq!(first.monitors_linked, 0, "there is no monitor to link to");
+    assert!(
+        links_of(&pool, "asset:knobas-jira").await.is_empty(),
+        "nothing is attached to the container yet"
+    );
+
+    // ...and now Kuma publishes one of the names the file gave.
+    monitor_reading(
+        &pool,
+        "kuma",
+        "jira (tunnel)",
+        Some("up"),
+        Some("http://127.0.0.1:3001/dashboard/2"),
+    )
+    .await;
+
+    let preview = assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second preview");
+    assert_eq!(
+        preview
+            .monitor_links
+            .iter()
+            .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
+            .collect::<Vec<_>>(),
+        [("asset:knobas-jira", "jira (tunnel)")],
+        "the name that was waiting is the link this import offers, on an asset \
+         the file changes in no other way"
+    );
+    assert!(
+        !preview
+            .unresolved
+            .iter()
+            .any(|waiting| waiting.monitor_name == "jira (tunnel)"),
+        "the name that found its monitor is off the waiting list: {:?}",
+        preview.unresolved
+    );
+
+    let second = assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the second import")
+        .value;
+    assert_eq!(second.monitors_linked, 1);
+    assert_eq!(
+        links_of(&pool, "asset:knobas-jira").await,
+        [(
+            "monitored-by".to_owned(),
+            "kuma:jira (tunnel)".to_owned(),
+            "monitor".to_owned(),
+        )],
+        "the kept name is now a monitored-by link"
+    );
+
+    // And out through the pane, which is where the reader learns it happened.
+    let pane = assets::get(&pool, "asset:knobas-jira")
+        .await
+        .expect("Jira's container");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| (watch.name.as_str(), watch.state.as_deref()))
+            .collect::<Vec<_>>(),
+        [("jira (tunnel)", Some("up"))],
+        "the monitoring section draws the monitor that arrived"
+    );
+    assert_eq!(
+        pane.monitors,
+        ["jira (tunnel)"],
+        "the file still says the name, and a resolved name is not deleted from \
+         the column -- the pane is what stops drawing it as still waiting"
+    );
 }
 
 /// A file may hang a new subtree under an asset **a person made by hand**, and

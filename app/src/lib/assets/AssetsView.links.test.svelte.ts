@@ -200,7 +200,10 @@ function detailOf(assetId: string): AssetDetail {
     reachable_via: [],
     history: [],
     links: linksFor(assetId),
+    // Nothing here is monitored: attaching a monitor is #445's surface and has
+    // its own fixture in `AssetsView.test.svelte.ts`.
     monitors: [],
+    monitoring: [],
   };
 }
 

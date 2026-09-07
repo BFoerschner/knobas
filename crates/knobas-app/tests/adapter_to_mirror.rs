@@ -768,3 +768,117 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
         );
     }
 }
+
+/// **After the Kuma source syncs, the estate file's monitor names become
+/// links** (issue #445, spec #427's import sentence).
+///
+/// The one criterion of #445 that no seam can answer alone. `assets_ipc.rs`
+/// pins the import against a mirror **seeded by hand**, which proves the
+/// resolution rule and takes the monitor names on trust; `map.rs` pins what
+/// the adapter calls a monitor and takes the estate file on trust. Both are
+/// green while the two vocabularies disagree -- and the whole join is a string
+/// comparison between a name somebody typed into `testenv/hetzner/estate.json`
+/// and a name somebody typed into Uptime Kuma, which is the single most
+/// likely thing in this milestone to be off by a space or a case.
+///
+/// So: the real adapter, over real HTTP against the recording, into the
+/// mirror, and then the **real estate file** imported over it -- with the
+/// count asserted as a literal seven rather than counted out of the file,
+/// which would agree with the file by construction however wrong the names
+/// were.
+///
+/// A scratch database of its own, unlike the rest of this file: the import
+/// resolves a name against *every* monitor the mirror holds, and this binary's
+/// shared database has another test's Kuma in it.
+#[tokio::test]
+async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
+    /// The file the demo profile and `estate_exit.rs` load -- the real estate.
+    const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+
+    let kuma = spawn_mock_kuma().await;
+    let scratch = knobas_db::test_util::scratch_database("kuma-estate-import").await;
+    let pool = scratch
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    let id = unique_id();
+    configure(&pool, &id, "kuma", &kuma.uri()).await;
+
+    let real = Registry::builtin()
+        .build(SourceInstance {
+            id: id.clone(),
+            kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+            display_name: "Uptime Kuma".to_owned(),
+            base_url: kuma.uri(),
+            auth: Some(AuthMethod::ApiToken),
+            secret: Some(KUMA_KEY.to_owned()),
+            config: serde_json::json!({}),
+        })
+        .expect("the registry must build a kuma instance");
+
+    let mut conn = scratch
+        .connect()
+        .await
+        .expect("a connection outside every pool");
+    let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, real.as_ref())
+        .await
+        .unwrap();
+    assert_eq!(run.upserted, 8, "the recording holds eight monitors");
+
+    let preview = knobas_app::assets::preview_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the preview");
+    assert_eq!(
+        preview
+            .monitor_links
+            .iter()
+            .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("asset:hetzner-confluence", "knobas-confluence"),
+            ("asset:hetzner-jira", "knobas-jira"),
+            ("asset:hetzner-teamcity", "knobas-teamcity"),
+            ("asset:knobas-confluence", "confluence (tunnel)"),
+            ("asset:knobas-gitea", "gitea"),
+            ("asset:knobas-jira", "jira (tunnel)"),
+            ("asset:knobas-teamcity", "teamcity (tunnel)"),
+        ],
+        "every one of the file's seven monitor names answers to a monitor \
+         Kuma published"
+    );
+    assert!(
+        preview.unresolved.is_empty(),
+        "nothing is left waiting: {:?}",
+        preview.unresolved
+    );
+
+    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the import")
+        .value;
+    assert_eq!(outcome.monitors_linked, 7);
+
+    // ...and out again through the pane the reader looks at, which is the far
+    // end of story 33's *monitoring* row: the state Kuma published and the
+    // page in Kuma to open, on a monitor nobody attached by hand.
+    let pane = knobas_app::assets::get(&pool, "asset:knobas-gitea")
+        .await
+        .expect("the container's pane");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| (
+                watch.name.as_str(),
+                watch.state.as_deref(),
+                watch.tombstoned
+            ))
+            .collect::<Vec<_>>(),
+        [("gitea", Some("up"), false)],
+        "the monitor the file named, with the state the adapter parsed"
+    );
+    assert_eq!(
+        pane.monitoring[0].web_url.as_deref(),
+        Some(format!("{}/dashboard/7", kuma.uri()).as_str()),
+        "the deep link is the adapter's own, not one this read built"
+    );
+}

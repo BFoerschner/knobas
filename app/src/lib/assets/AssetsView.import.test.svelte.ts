@@ -112,6 +112,17 @@ const PREVIEW: ImportPreview = {
       monitor_id: "monitor:kuma:3",
     },
   ],
+  // The other half of the same announcement (#445): a name the mirror does
+  // not hold. Populated beside a link that *did* resolve, because a preview
+  // that put every name in one list or the other would satisfy either
+  // assertion alone.
+  unresolved: [
+    {
+      asset_id: "asset:knobas-estate",
+      asset_name: "knobas test estate",
+      monitor_name: "jira (tunnel)",
+    },
+  ],
 };
 
 const OUTCOME: ImportOutcome = {
@@ -140,6 +151,10 @@ function detailOf(assetId: string): AssetDetail {
     // them, and a fixture with none could not tell a pane that draws the list
     // from one that does not.
     monitors: ["gitea", "jira (tunnel)"],
+    // None of them has found a monitor: this fixture is an estate whose Kuma
+    // has not synced, which is what makes both names still a *queue*. The
+    // resolved case is `AssetsView.test.svelte.ts`'.
+    monitoring: [],
   };
 }
 
@@ -258,12 +273,15 @@ test("the pane lists the monitor names an import kept", async () => {
   render(null, `#/asset/${SITE.id}`);
   await settle();
 
-  const section = [...target.querySelectorAll(".grp")].find(
-    (group) => group.querySelector("h3")?.textContent?.includes("Monitors") ?? false,
+  const section = target.querySelector(".named");
+  expect(section?.querySelector("h3")?.textContent?.trim()).toBe(
+    "Named by the import, not in Kuma yet",
   );
   expect(
     [...(section?.querySelectorAll("li") ?? [])].map((row) => row.textContent?.trim()),
   ).toEqual(["gitea", "jira (tunnel)"]);
+  // Nothing is attached, so there is no *Monitoring* section over it (#445).
+  expect(target.querySelector(".watch")).toBeNull();
 });
 
 /**
@@ -291,6 +309,11 @@ test("choosing a file previews it and draws the three groups", async () => {
     "New — 2",
     "Would change — 1",
     "Monitors to attach — 1",
+    // Issue #445: a name the mirror lacks is kept **and reported**. Reported
+    // on every preview, not only on the one that first kept it — an unchanged
+    // file previewed a second time has nothing in the two groups above and
+    // still has this one.
+    "Named but not in Kuma — 1",
     "Already in the tree — 1",
   ]);
 
@@ -302,7 +325,21 @@ test("choosing a file previews it and draws the three groups", async () => {
     "Jira (tunnel)",
     "knobas test estate",
     "knobas test estate",
+    // The unresolved group's own row (#445), which names the asset waiting on
+    // the name — the fourth `.nm` in the dialog and the fifth entry here.
+    "knobas test estate",
   ]);
+
+  // The unresolved row names the asset and the name that found nothing, so a
+  // reader can go and look at either.
+  const waiting = [...target.querySelectorAll(".grp")].find(
+    (group) => group.querySelector("h3")?.textContent?.includes("Named but not in Kuma") ?? false,
+  );
+  expect(
+    [...(waiting?.querySelectorAll("li") ?? [])].map((row) =>
+      (row.textContent ?? "").replace(/\s+/g, " ").trim(),
+    ),
+  ).toEqual(["knobas test estate jira (tunnel)"]);
 });
 
 /**

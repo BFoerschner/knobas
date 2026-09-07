@@ -890,7 +890,24 @@ mod tests {
             // estate file's monitor names rather than being a spelling that
             // happens to serialize.
             monitors: vec!["knobas-jira".to_owned()],
+            // Populated for the same reason, and with `state` and `web_url`
+            // *present*: both are `Option`, so an empty one would let the
+            // mirror declare them anything at all -- the rule
+            // `the_asset_property_matches_its_typescript_mirror` states.
+            monitoring: vec![assets::AttachedMonitor {
+                entity_id: "kuma:7".to_owned(),
+                name: "gitea".to_owned(),
+                state: Some("up".to_owned()),
+                web_url: Some("http://127.0.0.1:3001/dashboard/7".to_owned()),
+                tombstoned: false,
+            }],
         };
+        assert_shape(
+            MIRROR,
+            "AttachedMonitor",
+            &serde_json::to_value(&detail.monitoring[0]).unwrap(),
+            &["entity_id", "name", "state", "web_url", "tombstoned"],
+        );
         assert_shape(
             MIRROR,
             "AssetDetail",
@@ -907,6 +924,7 @@ mod tests {
                 "history",
                 "links",
                 "monitors",
+                "monitoring",
             ],
         );
     }
@@ -951,12 +969,18 @@ mod tests {
             monitor_name: "gitea".to_owned(),
             monitor_id: "monitor:kuma:3".to_owned(),
         };
+        let waiting = assets::UnresolvedMonitor {
+            asset_id: "asset:knobas-jira".to_owned(),
+            asset_name: "knobas-jira".to_owned(),
+            monitor_name: "jira (tunnel)".to_owned(),
+        };
         let preview = ImportPreview {
             name: "knobas test estate".to_owned(),
             known: vec![entry.clone()],
             new: vec![entry.clone()],
             changes: vec![change.clone()],
             monitor_links: vec![link.clone()],
+            unresolved: vec![waiting.clone()],
         };
 
         assert_shape(
@@ -985,9 +1009,22 @@ mod tests {
         );
         assert_shape(
             MIRROR,
+            "UnresolvedMonitor",
+            &serde_json::to_value(&waiting).unwrap(),
+            &["asset_id", "asset_name", "monitor_name"],
+        );
+        assert_shape(
+            MIRROR,
             "ImportPreview",
             &serde_json::to_value(&preview).unwrap(),
-            &["name", "known", "new", "changes", "monitor_links"],
+            &[
+                "name",
+                "known",
+                "new",
+                "changes",
+                "monitor_links",
+                "unresolved",
+            ],
         );
         assert_shape(
             MIRROR,
@@ -1037,6 +1074,18 @@ mod tests {
         assert!(
             RELATIONS.contains(&format!("id: \"{}\"", assets::MONITORED_BY)),
             "{} is not a curated relation, so it would read the same from both ends",
+            assets::MONITORED_BY
+        );
+        // #445: *Link to…* offers `monitors` on a monitor's own detail and
+        // stores this word with the ends swapped, so that one relation covers
+        // both ends and every estate read keeps filtering on one word. If the
+        // frontend named a different one there, the dialog would draw a link
+        // no tile and no pane could see -- and nothing on that side of the
+        // bridge would notice.
+        assert!(
+            RELATIONS.contains(&format!("inverseOf: \"{}\"", assets::MONITORED_BY)),
+            "nothing in relations.ts is drawn as the inverse of {}, so linking \
+             from a monitor would store some other word",
             assets::MONITORED_BY
         );
     }

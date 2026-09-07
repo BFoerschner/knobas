@@ -234,6 +234,34 @@
           </section>
         {/if}
 
+        <!--
+          The names that found no monitor (#445).
+
+          Its own group and not a line in *Would change*, because it is not a
+          change: the name is already on the asset, or is about to be, and what
+          this says is that nothing in the mirror answers to it. That is also
+          why it survives a second import of an unchanged file, when every
+          group above it is empty — which is exactly when a reader wonders why
+          their monitors are not attached.
+
+          Not a fault, and it does not read as one: the estate file names the
+          monitors it expects, and a name resolves the moment Kuma publishes
+          one called that.
+        -->
+        {#if preview.unresolved.length > 0}
+          <section class="grp">
+            <h3 class="l">Named but not in Kuma — {preview.unresolved.length}</h3>
+            <ul class="lst">
+              {#each preview.unresolved as waiting (waiting.asset_id + waiting.monitor_name)}
+                <li>
+                  <span class="nm">{waiting.asset_name}</span>
+                  <span class="faint">{waiting.monitor_name}</span>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
         <section class="grp">
           <!--
             A count and not a list. On a second import this group is the whole

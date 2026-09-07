@@ -31,7 +31,7 @@
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { linkFailureMessage } from "./links.svelte";
-  import { DEFAULT_RELATION, RELATIONS } from "./relations";
+  import { DEFAULT_RELATION, RELATIONS, drawn } from "./relations";
 
   let {
     fromId,
@@ -127,7 +127,11 @@
     writing = true;
     failure = null;
     try {
-      await createLink(fromId, target.entity_id, relation, note);
+      // The ends come from `drawn`, not from this dialog: a relation offered
+      // as the inverse reading of another is one row asked for from the other
+      // side, and which end it starts at is a fact about the vocabulary.
+      const row = drawn(relation, fromId, target.entity_id);
+      await createLink(row.fromId, row.toId, row.relation, note);
       oncreated();
     } catch (rejection) {
       // Inline, and in the dialog's own words: "already linked" is an ordinary
