@@ -407,8 +407,8 @@ async fn the_threshold_decides_which_polls_open_a_warn_alert() {
 /// **A paused monitor contributes nothing**: it gets no sample (#443) and its
 /// alert is left exactly as it was.
 ///
-/// The conservative half is the second assertion. Pausing a check in Uptime
-/// Kuma is not the monitor recovering, and an alert that closed itself because
+/// The conservative half is the second assertion. Pausing a monitor in Uptime
+/// Kuma is not it recovering, and an alert that closed itself because
 /// somebody silenced the thing watching it would be knobas reporting a fix
 /// nobody made. It closes when the monitor comes back and is *up*.
 #[tokio::test]

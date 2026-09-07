@@ -118,13 +118,6 @@ pub fn decide(newest: Option<&str>, already_open: bool) -> Reconciled {
     Reconciled::Nothing
 }
 
-/// What one run's reconcile did, for the log and for a test to read.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Reconcile {
-    pub opened: u64,
-    pub closed: u64,
-}
-
 /// The newest sample of every live monitor of one source, and whether that
 /// monitor already has an alert open.
 ///
@@ -156,6 +149,12 @@ const ROSTER: &str = "select distinct on (i.entity_id)
 /// just took. Three round trips at most, whatever the roster size: the roster
 /// read, one insert of everything to open, one update of everything to close.
 ///
+/// Answers with nothing: the run has no use for a count and nothing logs one,
+/// so a shape carrying two numbers would be a shape nothing could be wrong
+/// about -- the reason `OpenAlert` carries no `web_url`. What the reconcile
+/// did is read back from the table, which is where the twelve tests in
+/// `tests/alerts.rs` read it.
+///
 /// # Errors
 ///
 /// [`sqlx::Error`] if any of the three statements fails; the caller rolls the
@@ -164,7 +163,7 @@ const ROSTER: &str = "select distinct on (i.entity_id)
 pub(crate) async fn reconcile(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
-) -> Result<Reconcile, sqlx::Error> {
+) -> Result<(), sqlx::Error> {
     let roster = sqlx::query(ROSTER)
         .bind(source_id)
         .bind(crate::samples::KIND)
@@ -188,36 +187,33 @@ pub(crate) async fn reconcile(
         }
     }
 
-    let mut done = Reconcile::default();
     if !opening.is_empty() {
         // `opened_at` is left to the column default, which is `now()` -- the
         // transaction timestamp, and therefore the same instant the samples
         // this decision was made from carry.
-        done.opened = sqlx::query(
+        sqlx::query(
             "insert into knobas.monitor_alert (entity_id, state)
              select * from unnest($1::text[], $2::text[])",
         )
         .bind(&opening)
         .bind(&states)
         .execute(&mut **tx)
-        .await?
-        .rows_affected();
+        .await?;
     }
     if !closing.is_empty() {
         // `closed_at is null` again, although `decide` only asked to close
         // monitors that had one open: the statement is what is true of the
         // rows, and a closed alert must not have its `closed_at` moved by a
         // later run.
-        done.closed = sqlx::query(
+        sqlx::query(
             "update knobas.monitor_alert set closed_at = now()
               where closed_at is null and entity_id = any($1::text[])",
         )
         .bind(&closing)
         .execute(&mut **tx)
-        .await?
-        .rows_affected();
+        .await?;
     }
-    Ok(done)
+    Ok(())
 }
 
 #[cfg(test)]

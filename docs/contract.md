@@ -6729,7 +6729,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   frontend `alerts.test.svelte.ts` (four), `AssetsView.alerts.test.svelte.ts` (eight) and four new
   tests in `TopStrip.test.svelte.ts`.
 
-  **Two consequences named rather than hidden**, both surfaced by this PR's spec review and neither
+  **Three consequences named rather than hidden**, all surfaced by a review of this PR and none
   owned by a later ticket as things stand:
 
   * **The first poll after `0022` opens an alert for every monitor that is already down.** That is
@@ -6745,10 +6745,18 @@ From this commit on, each of the following requires an orchestrator decision **a
     common case; the uncommon one has no owner. A close-by-hand — or a close when the monitor has
     been out of the mirror for N polls — is a rule neither the ticket nor the spec states, so it is
     recorded here rather than invented in the implementing PR.
+  * **An alert opened on `warn` keeps the word `warn` when the monitor later goes `down`.** "One
+    open per monitor" and "opens an alert **if none is open**" are the spec's own two clauses, and
+    together they say the second crossing changes nothing; `the_rule_is_the_whole_table`'s
+    `(down, already_open) → Nothing` is where that is written. So the strip's row draws an amber
+    dot over an asset the rollup has already turned red — the alert says *when this monitor first
+    got into trouble*, the rollup says *what is true now*, and they are two statements rather than
+    one disagreeing with itself. Re-stating the row on the worse crossing would be a widening of
+    the spec's sentence, and it is left to #449's cards to want rather than taken here.
 
   **Björn keeps the gate for frozen contracts and this entry is flagged for his review**, and in
   particular the migration, the command, the `pending`/`maintenance` ruling, the one-sample
-  reconcile and the two consequences above.
+  reconcile and the three consequences above.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

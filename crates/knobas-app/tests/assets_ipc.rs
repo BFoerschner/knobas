@@ -2715,8 +2715,8 @@ async fn column_health(
 async fn an_asset_whose_monitor_is_down_reads_down_and_its_ancestors_show_it_inside() {
     let pool = pool("assets-health-monitor").await;
     let estate = two_branches(&pool).await;
-    let check = monitor_reading(&pool, "kuma", "postgres (tunnel)", Some("down"), None).await;
-    link_as(&pool, &estate.postgres.id, &check, "monitored-by").await;
+    let monitor = monitor_reading(&pool, "kuma", "postgres (tunnel)", Some("down"), None).await;
+    link_as(&pool, &estate.postgres.id, &monitor, "monitored-by").await;
 
     // Attached, and not yet sampled: an asset whose monitor knobas has never
     // read is not an asset that is down.
@@ -2726,7 +2726,7 @@ async fn an_asset_whose_monitor_is_down_reads_down_and_its_ancestors_show_it_ins
         "a monitor with no reading behind it colours nothing"
     );
 
-    sampled(&pool, &check, Some("down")).await;
+    sampled(&pool, &monitor, Some("down")).await;
 
     assert_eq!(
         column_health(&pool, Some(&estate.db.id), "postgres").await,
@@ -2775,16 +2775,16 @@ async fn an_asset_whose_monitor_is_down_reads_down_and_its_ancestors_show_it_ins
 async fn only_the_newest_sample_colours_an_asset() {
     let pool = pool("assets-health-newest").await;
     let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
-    let check = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
-    link_as(&pool, &vm.id, &check, "monitored-by").await;
+    let monitor = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    link_as(&pool, &vm.id, &monitor, "monitored-by").await;
 
-    sampled(&pool, &check, Some("down")).await;
+    sampled(&pool, &monitor, Some("down")).await;
     assert_eq!(
         column_health(&pool, None, "vm-db-01").await.0,
         AssetStatus::Down
     );
 
-    sampled(&pool, &check, Some("up")).await;
+    sampled(&pool, &monitor, Some("up")).await;
     assert_eq!(
         column_health(&pool, None, "vm-db-01").await.0,
         AssetStatus::Up,
@@ -2803,16 +2803,16 @@ async fn only_the_newest_sample_colours_an_asset() {
 async fn a_paused_monitor_colours_nothing_and_is_still_listed() {
     let pool = pool("assets-health-paused").await;
     let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
-    let check = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
-    link_as(&pool, &vm.id, &check, "monitored-by").await;
-    sampled(&pool, &check, Some("down")).await;
+    let monitor = monitor_reading(&pool, "kuma", "gitea", Some("down"), None).await;
+    link_as(&pool, &vm.id, &monitor, "monitored-by").await;
+    sampled(&pool, &monitor, Some("down")).await;
     assert_eq!(
         column_health(&pool, None, "vm-db-01").await.0,
         AssetStatus::Down
     );
 
     sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
-        .bind(&check)
+        .bind(&monitor)
         .execute(&pool)
         .await
         .expect("the tombstone");
