@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2813,7 +2813,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "knobas-db",
@@ -2827,7 +2827,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-db"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "knobas-db",
@@ -2846,7 +2846,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-http"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "governor",
  "knobas-http",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-mockd"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2877,7 +2877,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-search"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-secrets"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -2912,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-confluence"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2940,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-gitea"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2957,7 +2957,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-jira"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-kuma"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "knobas-core",
@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-mock"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3002,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-source-teamcity"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-sync"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
