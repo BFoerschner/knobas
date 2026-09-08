@@ -804,6 +804,34 @@ export function deleteRoute(routeId: string): Promise<void> {
   return invoke<void>("delete_route", { routeId });
 }
 
+/** One entry of the Import dialog's chooser — `assets::Producer` (#508). */
+export interface ImportProducer {
+  /** What the two Import commands are sent as their `producer`. */
+  id: string;
+  /** What the chooser calls it. */
+  label: string;
+}
+
+/**
+ * The chooser's entries: where an estate file can come from (#508).
+ *
+ * **One entry today**, and that is the point of having the list at all — the
+ * hcloud and Docker importers (spec #491, streams 9 and 10) each add one, and
+ * each is a producer the backend already has to know an origin key for. The
+ * ids here are the authority on what the chooser may send, and
+ * `commands::assets`' `the_chooser_offers_producers_this_build_knows` reads
+ * this list and checks every id against `assets::PRODUCERS`. The reverse is
+ * deliberately not checked: the backend declares `hcloud`'s origin key before
+ * anything can produce an hcloud file.
+ *
+ * A **non-empty tuple** rather than an array, so the dialog can open on the
+ * first entry without a fallback for a chooser with nothing in it — a state
+ * this list is never in and no code should be written for.
+ */
+export const IMPORT_PRODUCERS: readonly [ImportProducer, ...ImportProducer[]] = [
+  { id: "estate_file", label: "Estate file" },
+];
+
 /**
  * What importing this estate file would do, having written nothing (#439).
  *
@@ -812,12 +840,18 @@ export function deleteRoute(routeId: string): Promise<void> {
  * capability. The parse is the backend's, so a file that is not an estate file
  * is refused once, in one voice.
  *
- * Rejects with `invalid` for a file that is not JSON, carries a key the format
- * does not define, names a type nobody declares, names a parent or a target
- * that is nowhere, or whose assets hold each other.
+ * `producer` is which of {@link IMPORT_PRODUCERS} the reader chose (#508). It
+ * is not in the file — a producer returns an estate file in the checked-in
+ * shape — and what the backend takes from it is the origin key it declares,
+ * the matching rule used when the file's id is not one the tree holds.
+ *
+ * Rejects with `invalid` for a producer the backend does not know, or for a
+ * file that is not JSON, carries a key the format does not define, names a type
+ * nobody declares, names a parent or a target that is nowhere, whose assets
+ * hold each other, or whose origin key matches two assets at once.
  */
-export function previewEstateImport(file: string): Promise<ImportPreview> {
-  return invoke<ImportPreview>("preview_estate_import", { file });
+export function previewEstateImport(file: string, producer: string): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_estate_import", { file, producer });
 }
 
 /**
@@ -827,8 +861,8 @@ export function previewEstateImport(file: string): Promise<ImportPreview> {
  * recomputed inside the write's own transaction, which is what makes what is
  * written and what was shown two runs of one rule.
  */
-export function applyEstateImport(file: string): Promise<ImportOutcome> {
-  return invoke<ImportOutcome>("apply_estate_import", { file });
+export function applyEstateImport(file: string, producer: string): Promise<ImportOutcome> {
+  return invoke<ImportOutcome>("apply_estate_import", { file, producer });
 }
 
 /**

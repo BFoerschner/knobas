@@ -137,7 +137,23 @@
 //! and `monitor_links` to know what to write, so *"the preview said it would"*
 //! is a property of the code rather than a pair of rules kept in step.
 //!
-//! Four decisions worth finding here rather than in a diff:
+//! ## Two matching rules, and no third (#508)
+//!
+//! An entry the estate already holds is an entry it **updates**; everything
+//! else it creates. Which of the two an entry is, is decided by its id first
+//! and by its **origin key** second (`CONTEXT.md`, **Origin key**;
+//! ADR-0015) -- the property a [`Producer`] declares because it *"names the
+//! thing it read in the system's own terms"*, matched only when the file's id
+//! is not one the tree holds. [`matched_by_origin_key`] answers it and
+//! [`rename_matched`] applies the answer to the parse, so everything after
+//! that line in [`plan`] sees one file with one kind of id in it -- which is
+//! why the second rule adds no branch to the groups, the ordering or the
+//! writes.
+//!
+//! The estate file a person picks off the disk declares no origin key, so for
+//! it there is still exactly one rule and the M4.0 import is untouched.
+//!
+//! Five decisions worth finding here rather than in a diff:
 //!
 //! * **What the file may overwrite is a property nobody has claimed.** Spec
 //!   #427: *"a hand edit is any activity line by the user on that property"*.
@@ -173,6 +189,12 @@
 //! * **The file's plain scalars become tagged values here.** #428 chose
 //!   `{"kind":…,"value":…}` and left the translation to this ticket;
 //!   [`property_of`] is it, and the kind a type declares is what decides.
+//! * **Which producer made the file is an argument, not a field of the file.**
+//!   A producer returns an estate file *in the checked-in shape* (spec #491),
+//!   so there is nothing in it to read; the Import dialog's chooser is what
+//!   knows, and it sends the producer's id beside the text. [`PRODUCERS`] is
+//!   the registry and [`find_producer`] the door, and an id no producer
+//!   carries is refused rather than taken as the estate file's.
 //!
 //! # What this module deliberately does not do yet
 //!
@@ -3886,6 +3908,110 @@ const FILE_VERSION: i64 = 1;
 /// author meant.
 const DESCRIPTION_KEY: &str = "description";
 
+/// One producer of an estate file, and the origin key its files carry.
+///
+/// **Producer, not importer, and the two are not the same set.**
+/// `CONTEXT.md`, **Importer**, is *"a producer of an estate file from a live
+/// system -- hcloud, a Docker host"*, and **not a source** (ADR-0015). *Producer* is that entry's own wider word, amended into it by
+/// this ticket: every importer is one, and [`ESTATE_FILE_PRODUCER`] -- the
+/// file a person picks off the disk -- is the one producer that is not an
+/// importer, because there is no live system on the other end of it. It is the
+/// word #508 uses (*"the file-import producer declares none"*) and spec #491's
+/// (*"App-side producers in the assets module"*), and it is what the chooser
+/// chooses between.
+///
+/// A producer returns *"an estate file's text in the checked-in shape"* (spec
+/// #491's Implementation Decisions), so the file itself says nothing about
+/// where it came from; which producer made it is the chooser's answer, and it
+/// travels beside the text as the `producer` argument of the two Import
+/// commands.
+///
+/// The only thing the planner asks a producer is its **origin key**
+/// (`CONTEXT.md`): *"the property an importer sets that names the thing it read
+/// in the system's own terms ... and that the Import matches on when the file's
+/// id is not one the tree holds. The second matching rule beside the id, and
+/// the only one."*
+pub struct Producer {
+    /// The id the chooser sends over the bridge.
+    pub id: &'static str,
+    /// What the chooser calls it.
+    pub label: &'static str,
+    /// The property keys whose values together are one asset's origin key, or
+    /// **empty** for a producer that declares none.
+    ///
+    /// A list rather than one key, because an origin key is not always one
+    /// property: spec #491's story 67 gives a container's as its docker context
+    /// plus its name, against `hcloud_id` alone for a server (story 64).
+    /// [`origin_key_of`] is what an asset carrying only some of these comes to,
+    /// on both sides.
+    origin_key: &'static [&'static str],
+}
+
+/// The estate file a person picks off the disk: the Import as M4.0 shipped it.
+///
+/// **It declares no origin key**, and that is not an omission. A hand-typed
+/// file's ids are its own, and they are what a second import of it recognises
+/// (#439); there is no live system on the other end of it whose terms an origin
+/// key could name. So for this producer the planner keeps its one matching
+/// rule, and `testenv/hetzner/estate.json` imports exactly as it did before.
+pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
+
+/// The hcloud importer's files: one entry per server, keyed by `hcloud_id`
+/// (spec #491, stories 63--64).
+///
+/// **Declared before anything produces one**, which is this ticket's half of a
+/// pair: #508 gives the planner the rule and gives the three checked-in servers
+/// their `hcloud_id` property, and v1.5's stream 9 gives the chooser its entry
+/// and the produce command behind it. Until then the registry knows this
+/// producer and the chooser's own list -- `IMPORT_PRODUCERS` in
+/// `app/src/lib/ipc/assets.ts` -- does not, which is why `commands::assets`'
+/// `the_chooser_offers_producers_this_build_knows` reads in that direction
+/// only: every id the chooser sends is one of these, and not the reverse.
+pub const HCLOUD_PRODUCER: &str = "hcloud";
+
+/// Every producer this build knows.
+///
+/// **No Docker producer yet.** Its origin key is a container's docker context
+/// plus its name (spec #491, story 67) and no container in
+/// `testenv/hetzner/estate.json` carries either as a property -- the context is
+/// on the engine above it -- so declaring one here would be a key that matches
+/// nothing and a promise this build cannot keep. Stream 10 declares it together
+/// with the properties it needs, the way this ticket declares hcloud's together
+/// with the three `hcloud_id` values.
+pub const PRODUCERS: &[Producer] = &[
+    Producer {
+        id: ESTATE_FILE_PRODUCER,
+        label: "Estate file",
+        origin_key: &[],
+    },
+    Producer {
+        id: HCLOUD_PRODUCER,
+        label: "Hetzner Cloud",
+        origin_key: &["hcloud_id"],
+    },
+];
+
+/// The producer the chooser named.
+///
+/// # Errors
+///
+/// [`IpcError::invalid`] for an id no producer carries. Named rather than
+/// silently taken as the estate file's: a caller asking for a matching rule
+/// this build does not have would otherwise get the rule that matches on
+/// nothing, and its import would quietly create a second copy of every asset.
+fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
+    PRODUCERS.iter().find(|it| it.id == id).ok_or_else(|| {
+        IpcError::invalid(format!(
+            "{id:?} is not one of the producers this build knows: {}",
+            PRODUCERS
+                .iter()
+                .map(|it| it.id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    })
+}
+
 /// The estate file, as the Import reads it.
 ///
 /// `deny_unknown_fields` on all three shapes, and it is the decision
@@ -4195,13 +4321,22 @@ struct RouteInsert {
 ///
 /// # Errors
 ///
-/// [`IpcError::invalid`] for a file that is not JSON, carries a key the format
-/// does not define, names a type nobody declares, names a parent or a target
-/// that is neither in the file nor in the estate, or whose assets hold each
-/// other in a cycle; [`IpcError`] if a read fails.
-pub async fn preview_import(pool: &PgPool, file: &str) -> Result<ImportPreview, IpcError> {
+/// [`IpcError::invalid`] for a producer this build does not know
+/// ([`find_producer`]), or for a file that is not JSON, carries a key the
+/// format does not define, names a type nobody declares, names a parent or a
+/// target that is neither in the file nor in the estate, whose assets hold each
+/// other in a cycle, whose origin key matches two assets at once, or which
+/// names one asset twice once its origin key has matched
+/// ([`matched_by_origin_key`], [`rename_matched`]); [`IpcError`] if a read
+/// fails.
+pub async fn preview_import(
+    pool: &PgPool,
+    file: &str,
+    producer: &str,
+) -> Result<ImportPreview, IpcError> {
+    let producer = find_producer(producer)?;
     let mut tx = pool.begin().await?;
-    let plan = plan(&mut tx, file).await?;
+    let plan = plan(&mut tx, file, producer).await?;
     tx.rollback().await?;
     Ok(plan.preview)
 }
@@ -4242,13 +4377,18 @@ pub async fn preview_import(pool: &PgPool, file: &str) -> Result<ImportPreview, 
 /// # Errors
 ///
 /// [`preview_import`]'s, plus [`IpcError`] if a write fails.
-pub async fn apply_import(pool: &PgPool, file: &str) -> Result<Written<ImportOutcome>, IpcError> {
+pub async fn apply_import(
+    pool: &PgPool,
+    file: &str,
+    producer: &str,
+) -> Result<Written<ImportOutcome>, IpcError> {
+    let producer = find_producer(producer)?;
     let mut tx = pool.begin().await?;
     let Plan {
         preview,
         assets,
         routes,
-    } = plan(&mut tx, file).await?;
+    } = plan(&mut tx, file, producer).await?;
     let from = preview.name.clone();
     let mut outcome = ImportOutcome::default();
 
@@ -4436,6 +4576,25 @@ const KNOWN_ASSETS: &str =
 /// The routes the file names that the estate already holds.
 const KNOWN_ROUTES: &str = "select id from knobas.route where id = any($1::text[])";
 
+/// The assets the estate holds that carry **every** property of an origin key.
+///
+/// `?&` is jsonb's *has all of these keys*. Narrow on purpose: for `hcloud_id`
+/// it reads the servers and nothing else, and the alternative -- one statement
+/// per entry the file's ids did not find -- asks the same question as many
+/// times as the file is long. The key's *values* are compared in
+/// [`matched_by_origin_key`], where the tagged shape they are stored in is
+/// already the vocabulary.
+///
+/// **This `?&` and [`origin_key_of`]'s length check are one rule in two
+/// places** -- *every part or nothing* -- said once about the estate and once
+/// about a file entry. Either alone gives the right answer, which is why a
+/// mutant to either one alone survives and a mutant to both dies together
+/// (#508's mutation round). Keep both: the SQL one is what stops this reading
+/// the whole table, and the Rust one is what holds when a producer's key grows
+/// a second part.
+const ORIGIN_KEYED_ASSETS: &str =
+    "select id, name, properties from knobas.asset where properties ?& $1::text[]";
+
 /// The assets the file *refers to* without describing, that the estate holds.
 ///
 /// A file may hang a new subtree under something a person created by hand, and
@@ -4499,8 +4658,12 @@ struct StoredAsset {
 ///
 /// Runs against the caller's transaction, so that the plan and whatever is done
 /// with it see one snapshot of the estate.
-async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, IpcError> {
-    let parsed: EstateFile = serde_json::from_str(file).map_err(|error| {
+async fn plan(
+    tx: &mut Transaction<'_, Postgres>,
+    file: &str,
+    producer: &'static Producer,
+) -> Result<Plan, IpcError> {
+    let mut parsed: EstateFile = serde_json::from_str(file).map_err(|error| {
         IpcError::invalid(format!(
             "this is not an estate file: {error}. An estate file is JSON with an \
              `assets` list and a `routes` list."
@@ -4537,27 +4700,29 @@ async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, Ip
         }
     }
 
-    let asset_ids: Vec<String> = parsed.assets.iter().map(|a| a.id.clone()).collect();
+    let mut asset_ids: Vec<String> = parsed.assets.iter().map(|a| a.id.clone()).collect();
     let route_ids: Vec<String> = parsed.routes.iter().map(|r| r.id.clone()).collect();
 
-    let mut stored: HashMap<String, StoredAsset> = HashMap::new();
-    for row in sqlx::query(KNOWN_ASSETS)
-        .bind(&asset_ids)
-        .fetch_all(&mut **tx)
-        .await?
-    {
-        let properties: serde_json::Value = row.try_get("properties")?;
-        stored.insert(
-            row.try_get("id")?,
-            StoredAsset {
-                name: row.try_get("name")?,
-                properties: match properties {
-                    serde_json::Value::Object(map) => map,
-                    _ => serde_json::Map::new(),
-                },
-                monitors: row.try_get("monitors")?,
-            },
-        );
+    let mut stored = stored_assets(tx, &asset_ids).await?;
+
+    // The **second matching rule** (issue #508, `CONTEXT.md`, **Origin key**).
+    // The id above is the first and it wins: only the entries `stored` has no
+    // row for are asked about here. What it answers with is a rename, applied
+    // to the parse before anything below reads it -- so from this line on there
+    // is one kind of entry the estate holds and one kind it does not, exactly
+    // as there was before this rule existed, and every group, every order and
+    // every write downstream is the one #439 wrote.
+    let matched = matched_by_origin_key(tx, producer, &parsed, &stored).await?;
+    if !matched.is_empty() {
+        rename_matched(&mut parsed, &matched)?;
+        asset_ids = parsed.assets.iter().map(|a| a.id.clone()).collect();
+        // Re-read under the ids the file will now be planned by.
+        // `ORIGIN_KEYED_ASSETS` answered a different question and selected
+        // what that question needed -- it has no `monitors` column in it, and
+        // it is keyed by an origin key rather than by the file's ids -- so
+        // what the *changes* half compares against is still `KNOWN_ASSETS`'
+        // answer, asked again now that the ids are settled.
+        stored = stored_assets(tx, &asset_ids).await?;
     }
 
     let mut known_routes: HashSet<String> = HashSet::new();
@@ -4754,6 +4919,226 @@ async fn plan(tx: &mut Transaction<'_, Postgres>, file: &str) -> Result<Plan, Ip
         assets: inserts,
         routes: route_inserts,
     })
+}
+
+/// The assets the file names that the estate already holds, as the plan reads
+/// them.
+///
+/// Its own function because the plan asks it twice: once by the ids the file
+/// wrote, and again by the ids the origin key found
+/// ([`matched_by_origin_key`]).
+async fn stored_assets(
+    tx: &mut Transaction<'_, Postgres>,
+    ids: &[String],
+) -> Result<HashMap<String, StoredAsset>, IpcError> {
+    let mut stored: HashMap<String, StoredAsset> = HashMap::new();
+    for row in sqlx::query(KNOWN_ASSETS)
+        .bind(ids)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        let properties: serde_json::Value = row.try_get("properties")?;
+        stored.insert(
+            row.try_get("id")?,
+            StoredAsset {
+                name: row.try_get("name")?,
+                properties: match properties {
+                    serde_json::Value::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                },
+                monitors: row.try_get("monitors")?,
+            },
+        );
+    }
+    Ok(stored)
+}
+
+/// The tree's id for each file entry whose own id the estate does not hold and
+/// whose origin key names an asset it does.
+///
+/// The Import's **second and only other matching rule** (`CONTEXT.md`, **Origin
+/// key**; ADR-0015). A producer that declares no key -- the estate file a
+/// person picked off the disk -- returns here immediately, which is what makes
+/// *"the file import behaves exactly as before"* structural rather than a
+/// promise: no query runs, and nothing can be renamed.
+///
+/// **The comparison is between two *stored* values, not two file ones.** The
+/// file writes `"164750187"` and the estate carries
+/// `{"kind":"text","value":"164750187"}`, so an entry's key is put through
+/// [`property_of`] and [`stored_value`] -- the same translation `bag_of` makes
+/// -- before it is compared. The tag travels with it, so a number and a string
+/// that looks like one are two different origin keys, which is
+/// [`PropertyValue`]'s own rule and not a second one.
+async fn matched_by_origin_key(
+    tx: &mut Transaction<'_, Postgres>,
+    producer: &'static Producer,
+    parsed: &EstateFile,
+    stored: &HashMap<String, StoredAsset>,
+) -> Result<HashMap<String, String>, IpcError> {
+    if producer.origin_key.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // What each entry the estate does not already hold by id asks for.
+    let mut asking: Vec<(&str, String)> = Vec::new();
+    for asset in &parsed.assets {
+        if stored.contains_key(&asset.id) {
+            continue;
+        }
+        let declared = vet_type(&asset.type_id)?;
+        // The entry's key properties in the shape the estate stores them, so
+        // that one function reads both sides.
+        let mut translated = serde_json::Map::new();
+        for part in producer.origin_key {
+            let Some(raw) = asset.properties.get(*part) else {
+                continue;
+            };
+            let value = property_of(Some(declared), part, raw)?;
+            value.vet(part)?;
+            translated.insert((*part).to_owned(), stored_value(&value)?);
+        }
+        if let Some(key) = origin_key_of(&translated, producer.origin_key) {
+            asking.push((asset.id.as_str(), key));
+        }
+    }
+    if asking.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // The estate's side, read once for the whole file rather than once per
+    // entry, and narrowed to the assets that carry every property of the key.
+    let keys: Vec<String> = producer
+        .origin_key
+        .iter()
+        .map(|part| (*part).to_owned())
+        .collect();
+    let mut holders: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for row in sqlx::query(ORIGIN_KEYED_ASSETS)
+        .bind(&keys)
+        .fetch_all(&mut **tx)
+        .await?
+    {
+        let properties: serde_json::Value = row.try_get("properties")?;
+        let serde_json::Value::Object(properties) = properties else {
+            continue;
+        };
+        let Some(key) = origin_key_of(&properties, producer.origin_key) else {
+            continue;
+        };
+        holders
+            .entry(key)
+            .or_default()
+            .push((row.try_get("id")?, row.try_get("name")?));
+    }
+
+    let mut matched: HashMap<String, String> = HashMap::new();
+    for (entry, key) in asking {
+        match holders.get(&key).map(Vec::as_slice) {
+            None | Some([]) => {}
+            Some([(id, _)]) => {
+                matched.insert(entry.to_owned(), id.clone());
+            }
+            // Two assets carrying one origin key is a broken estate, not a
+            // choice to make: an origin key names one thing. Refused by name,
+            // and refused only when a file actually asks -- a latent pair the
+            // file never mentions is not this import's business, and stopping
+            // an import over it would report it against whichever file
+            // happened to be next.
+            Some(many) => {
+                let mut named: Vec<String> = many
+                    .iter()
+                    .map(|(id, name)| format!("{name} ({id})"))
+                    .collect();
+                named.sort();
+                return Err(IpcError::invalid(format!(
+                    "`{entry}` matches {} assets on its `{}` origin key: {}. An \
+                     origin key names one thing, so there is no answer to which \
+                     of them this entry is.",
+                    many.len(),
+                    producer.origin_key.join("`, `"),
+                    named.join(", ")
+                )));
+            }
+        }
+    }
+    Ok(matched)
+}
+
+/// One property bag's origin key, or `None` if it does not carry every part.
+///
+/// **Every part or nothing**, said once and read by both sides: half a key
+/// would match on half a question. [`ORIGIN_KEYED_ASSETS`]' `?&` is the same
+/// sentence in SQL, and its doc says why both stay. The bag is a bag of
+/// *stored* values on either side -- the estate's own, or a file entry's put
+/// through [`property_of`] and [`stored_value`] first -- so the tag travels
+/// with the value and a number is not a string that looks like one
+/// ([`PropertyValue`]).
+///
+/// A `String` and not the values themselves, because [`serde_json::Value`] is
+/// not hashable -- it carries an `f64` -- and this is a map key. The spelling
+/// is JSON's own, produced from both sides by this same call, so a key of two
+/// parts cannot collide with a one-part key that happens to contain a comma.
+fn origin_key_of(
+    properties: &serde_json::Map<String, serde_json::Value>,
+    key: &[&str],
+) -> Option<String> {
+    let parts: Vec<serde_json::Value> = key
+        .iter()
+        .filter_map(|part| properties.get(*part).cloned())
+        .collect();
+    (parts.len() == key.len()).then(|| serde_json::Value::Array(parts).to_string())
+}
+
+/// Replace every mention of a file id with the tree id its origin key found.
+///
+/// **Every mention, not just the entry's own.** Another entry may hold it as
+/// its parent, and a route may be exposed by it or land on it; an id left
+/// behind in one of those would name nothing at all and the file would be
+/// refused for a dangling reference it does not have.
+///
+/// # Errors
+///
+/// [`IpcError::invalid`] if two entries end up with one id -- the file
+/// describes an asset under its own id *and* another entry whose origin key
+/// finds the same asset. That is the file saying two things about one asset,
+/// and the ids it was vetted for at the top of [`plan`] are unique again only
+/// if it is refused here.
+fn rename_matched(
+    parsed: &mut EstateFile,
+    matched: &HashMap<String, String>,
+) -> Result<(), IpcError> {
+    let mut taken: HashMap<&str, &str> = HashMap::new();
+    for asset in &parsed.assets {
+        let after = matched
+            .get(&asset.id)
+            .map_or(asset.id.as_str(), String::as_str);
+        if let Some(first) = taken.insert(after, asset.id.as_str()) {
+            return Err(IpcError::invalid(format!(
+                "`{first}` and `{}` are both `{after}` once the origin key has \
+                 matched, so this file describes one asset twice",
+                asset.id
+            )));
+        }
+    }
+
+    let rename = |id: &mut String| {
+        if let Some(to) = matched.get(id.as_str()) {
+            id.clone_from(to);
+        }
+    };
+    for asset in &mut parsed.assets {
+        rename(&mut asset.id);
+        if let Some(parent) = asset.parent.as_mut() {
+            rename(parent);
+        }
+    }
+    for route in &mut parsed.routes {
+        rename(&mut route.asset);
+        if let Some(target) = route.target.as_mut() {
+            rename(target);
+        }
+    }
+    Ok(())
 }
 
 /// The ids the file points at without describing, that the estate holds.

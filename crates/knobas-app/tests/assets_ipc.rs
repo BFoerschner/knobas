@@ -21,7 +21,10 @@
 //! deleted leaf leaves a column of two would be an assertion about whichever
 //! test ran first.
 
-use knobas_app::assets::{self, AssetEdit, AssetRow, AssetStatus, Environment, PropertyValue};
+use knobas_app::assets::{
+    self, AssetEdit, AssetRow, AssetStatus, ESTATE_FILE_PRODUCER, Environment, HCLOUD_PRODUCER,
+    PropertyValue,
+};
 use knobas_app::{IpcError, IpcErrorCode};
 use sqlx::{PgPool, Row};
 use tauri::ipc::CallbackFn;
@@ -3282,7 +3285,7 @@ async fn property(pool: &PgPool, id: &str, key: &str) -> Option<PropertyValue> {
 #[tokio::test]
 async fn a_preview_writes_nothing_at_all() {
     let pool = pool("assets-import-preview-writes-nothing").await;
-    assets::apply_import(&pool, ESTATE_FILE)
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import");
     let moved_on = estate_with(
@@ -3291,7 +3294,7 @@ async fn a_preview_writes_nothing_at_all() {
     );
 
     let before = tables(&pool).await;
-    let preview = assets::preview_import(&pool, &moved_on)
+    let preview = assets::preview_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
     assert_eq!(
@@ -3318,7 +3321,7 @@ async fn a_preview_writes_nothing_at_all() {
 #[tokio::test]
 async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     let pool = pool("assets-import-first").await;
-    let written = assets::apply_import(&pool, ESTATE_FILE)
+    let written = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate imports");
     let outcome = written.value;
@@ -3464,7 +3467,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
 #[tokio::test]
 async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it_would() {
     let pool = pool("assets-import-hand-edit").await;
-    assets::apply_import(&pool, ESTATE_FILE)
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import");
 
@@ -3489,7 +3492,7 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
         ],
     );
 
-    let preview = assets::preview_import(&pool, &moved_on)
+    let preview = assets::preview_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
     assert_eq!(
@@ -3523,7 +3526,7 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
     assert_eq!(role.to, text("teamcity-only"));
     assert_eq!(role.label, "role", "a custom key is labelled by itself");
 
-    let outcome = assets::apply_import(&pool, &moved_on)
+    let outcome = assets::apply_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second import")
         .value;
@@ -3565,11 +3568,11 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
 #[tokio::test]
 async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
     let pool = pool("assets-import-idempotent").await;
-    assets::apply_import(&pool, ESTATE_FILE)
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import");
 
-    let preview = assets::preview_import(&pool, ESTATE_FILE)
+    let preview = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second preview");
     assert_eq!(
@@ -3583,7 +3586,7 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
     assert_eq!(preview.name, "knobas test estate");
 
     let (assets_before, routes_before, activity_before, links_before) = tables(&pool).await;
-    let outcome = assets::apply_import(&pool, ESTATE_FILE)
+    let outcome = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second import")
         .value;
@@ -3628,7 +3631,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
     let pool = pool("assets-import-monitors").await;
     monitor(&pool, "kuma", "gitea").await;
 
-    let preview = assets::preview_import(&pool, ESTATE_FILE)
+    let preview = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
     assert_eq!(
@@ -3641,7 +3644,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
         "the one name the mirror holds is the one link the preview offers"
     );
 
-    let outcome = assets::apply_import(&pool, ESTATE_FILE)
+    let outcome = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the import")
         .value;
@@ -3671,7 +3674,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
     // Run it again: the link is already there and is not drawn twice, which is
     // what `knobas.link`'s unordered uniqueness would otherwise refuse in the
     // middle of a transaction that had already done its work.
-    let again = assets::apply_import(&pool, ESTATE_FILE)
+    let again = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second import")
         .value;
@@ -3690,7 +3693,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
 async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() {
     let pool = pool("assets-import-no-kuma").await;
 
-    let preview = assets::preview_import(&pool, ESTATE_FILE)
+    let preview = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
     assert!(preview.monitor_links.is_empty(), "there is nothing to link");
@@ -3734,7 +3737,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
     let pool = pool("assets-import-unresolved").await;
     monitor(&pool, "kuma", "gitea").await;
 
-    let first = assets::preview_import(&pool, ESTATE_FILE)
+    let first = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first preview");
     assert_eq!(
@@ -3754,11 +3757,11 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
         "every name but the one the mirror holds, by asset and then by name"
     );
 
-    assets::apply_import(&pool, ESTATE_FILE)
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the import");
 
-    let again = assets::preview_import(&pool, ESTATE_FILE)
+    let again = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second preview");
     assert!(
@@ -3810,7 +3813,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
     let pool = pool("assets-import-monitor-arrives").await;
 
     // No Kuma yet: every name is kept and nothing is drawn.
-    let first = assets::apply_import(&pool, ESTATE_FILE)
+    let first = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import")
         .value;
@@ -3830,7 +3833,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
     )
     .await;
 
-    let preview = assets::preview_import(&pool, ESTATE_FILE)
+    let preview = assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second preview");
     assert_eq!(
@@ -3852,7 +3855,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
         preview.unresolved
     );
 
-    let second = assets::apply_import(&pool, ESTATE_FILE)
+    let second = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the second import")
         .value;
@@ -3918,7 +3921,7 @@ async fn a_file_reaches_an_asset_made_by_hand_and_brings_a_deleted_one_back() {
         by_hand.id
     );
 
-    let preview = assets::preview_import(&pool, &under_it)
+    let preview = assets::preview_import(&pool, &under_it, ESTATE_FILE_PRODUCER)
         .await
         .expect("a subtree under an asset the estate already holds");
     assert_eq!(
@@ -3930,7 +3933,7 @@ async fn a_file_reaches_an_asset_made_by_hand_and_brings_a_deleted_one_back() {
         ["asset:wing", "asset:wing-docker"],
         "the parent-first order reaches through an id the file does not describe"
     );
-    assets::apply_import(&pool, &under_it)
+    assets::apply_import(&pool, &under_it, ESTATE_FILE_PRODUCER)
         .await
         .expect("the subtree writes");
     assert_eq!(
@@ -3957,7 +3960,7 @@ async fn a_file_reaches_an_asset_made_by_hand_and_brings_a_deleted_one_back() {
     .await;
     assert_eq!(tombstoned, 1, "delete leaves the entity row marked");
 
-    let outcome = assets::apply_import(&pool, &under_it)
+    let outcome = assets::apply_import(&pool, &under_it, ESTATE_FILE_PRODUCER)
         .await
         .expect("a file that still names a deleted asset brings it back")
         .value;
@@ -3999,10 +4002,10 @@ async fn a_file_whose_assets_hold_each_other_is_refused_before_a_row_is_written(
 
     let before = tables(&pool).await;
     let refusals = [
-        assets::preview_import(&pool, looping)
+        assets::preview_import(&pool, looping, ESTATE_FILE_PRODUCER)
             .await
             .expect_err("a cycle has no order"),
-        assets::apply_import(&pool, looping)
+        assets::apply_import(&pool, looping, ESTATE_FILE_PRODUCER)
             .await
             .expect_err("a cycle has no order"),
     ];
@@ -4069,7 +4072,7 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
             "two entries",
         ),
     ] {
-        let refusal = match assets::preview_import(&pool, file).await {
+        let refusal = match assets::preview_import(&pool, file, ESTATE_FILE_PRODUCER).await {
             Ok(preview) => panic!("{why} was accepted: {preview:?}"),
             Err(refusal) => refusal,
         };
@@ -4082,8 +4085,427 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
     }
 
     assert!(
-        assets::preview_import(&pool, ESTATE_FILE).await.is_ok(),
+        assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+            .await
+            .is_ok(),
         "the real estate file is not one of the seven"
+    );
+    assert_eq!(tables(&pool).await, before, "a refused preview wrote a row");
+}
+
+// ---------------------------------------------------------------------------
+// The origin key: the Import's second matching rule (#508)
+// ---------------------------------------------------------------------------
+
+/// A produced file's shape (spec #491, story 63): an id of the producer's own
+/// invention, and the `hcloud_id` that is its **origin key**.
+///
+/// `hcloud_id` is optional so that the *same* file can be asked for with the
+/// key and without it, everything else identical -- which is what makes a test
+/// about the key a test about the key. The engine hung off the entry, the route
+/// exposed by the entry and the route that *lands* on it are not things hcloud
+/// reads; they are here because the rename has to reach every mention of an id
+/// -- an entry's own, another entry's `parent`, a route's `asset` and a route's
+/// `target` -- and only another entry can witness one of them. There are four
+/// mentions in this file because there are four fields in the format that carry
+/// an asset id, and a rename that missed any one of them would leave an id
+/// naming nothing.
+///
+/// The server's name is deliberately **not** the one the tree carries. The
+/// import never renames, so the preview reports the file's name for the entry
+/// and the tree's for the change, and two names are what tell those apart.
+fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
+    let key = match hcloud_id {
+        Some(id) => format!(r#""hcloud_id":"{id}","#),
+        None => String::new(),
+    };
+    format!(
+        r#"{{"name":"Hetzner Cloud","assets":[
+             {{"id":"{entry_id}","type":"vm","name":"renamed in hcloud",
+               "parent":"asset:hetzner-nbg1",
+               "properties":{{{key}"server_type":"cx33"}}}},
+             {{"id":"asset:hcloud-engine","type":"container_engine",
+               "name":"Docker engine (read from hcloud)","parent":"{entry_id}"}}],
+           "routes":[
+             {{"id":"route:hcloud-ssh","asset":"{entry_id}","name":"SSH",
+               "url":"ssh://knobas-teamcity"}},
+             {{"id":"route:hcloud-agent","asset":"asset:hcloud-engine",
+               "target":"{entry_id}","name":"Build agent",
+               "url":"http://knobas-teamcity:9090"}}]}}"#
+    )
+}
+
+/// **The second matching rule** (`CONTEXT.md`, **Origin key**; ADR-0015): an
+/// entry whose id the tree does not hold, whose origin key names an asset it
+/// does, *is* that asset.
+///
+/// The file is the shape stream 9's producer will emit -- hcloud's own id for
+/// the server, which knobas has never seen -- against the checked-in estate,
+/// whose three servers carry their `hcloud_id`. What is asserted is every
+/// consequence the rule has, because the rename it makes is upstream of all of
+/// them:
+///
+/// * the entry previews as **already in the tree, under the tree's id**, and
+///   nothing in the file is new but the two entries that really are;
+/// * the change it would make is drawn against the *stored* asset, by the name
+///   the tree calls it and not the name the file does;
+/// * the apply is an **update**: no asset is created for the entry, the row
+///   count under `asset:hetzner-nbg1` does not move, and the file's own id
+///   names nothing afterwards;
+/// * and **every mention** of the file's id is rewritten, not just the entry's
+///   own -- the child hung off it lands under the tree's asset, the route
+///   exposed by it is exposed by the tree's asset, and the route that lands on
+///   it lands on the tree's asset. Those are the four fields in the format that
+///   carry an asset id (`FileAsset::id`, `FileAsset::parent`, `FileRoute::asset`
+///   and `FileRoute::target`) and there is an assertion for each, because a
+///   rename that reaches three of them passes every other test here. An id left
+///   behind in any of them would have been refused as a dangling reference,
+///   which is the failure this file is shaped to catch.
+#[tokio::test]
+async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second_one() {
+    let pool = pool("assets-import-origin-key").await;
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the checked-in estate");
+    let file = produced("asset:hcloud-164750187", Some("164750187"));
+
+    let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("a produced file previews");
+    assert_eq!(
+        preview
+            .known
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry.name.as_str()))
+            .collect::<Vec<_>>(),
+        [("asset:hetzner-teamcity", "renamed in hcloud")],
+        "the entry previews as already in the tree, under the tree's id and \
+         under its own name -- an entry is a line about the file"
+    );
+    assert_eq!(
+        preview
+            .new
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "asset:hcloud-engine",
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
+        ],
+        "and only what the tree really has never seen is new"
+    );
+    assert_eq!(
+        preview
+            .changes
+            .iter()
+            .map(|change| (change.id.as_str(), change.name.as_str()))
+            .collect::<Vec<_>>(),
+        [("asset:hetzner-teamcity", "knobas-teamcity")],
+        "what would change is the stored asset, under the name the tree calls \
+         it: the import does not rename, and the file calls it something else"
+    );
+    assert_eq!(
+        preview.changes[0]
+            .properties
+            .iter()
+            .map(|property| (property.key.as_str(), property.plan))
+            .collect::<Vec<_>>(),
+        [("server_type", assets::PropertyPlan::Set)],
+        "the one property whose file value differs -- `hcloud_id` is already \
+         the value the file gives it, so it is not a change"
+    );
+
+    let servers = rows(
+        &pool,
+        "select count(*) as n from knobas.asset where parent_id = 'asset:hetzner-nbg1'",
+    )
+    .await;
+    let outcome = assets::apply_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("the produced file applies")
+        .value;
+    assert_eq!(
+        outcome.assets_created, 1,
+        "the engine is new; the server is an update and not a second server"
+    );
+    assert_eq!(outcome.routes_created, 2);
+    assert_eq!(outcome.properties_set, 1, "the one property that differed");
+    assert_eq!(
+        rows(
+            &pool,
+            "select count(*) as n from knobas.asset where parent_id = 'asset:hetzner-nbg1'",
+        )
+        .await,
+        servers,
+        "a duplicate server would be a fourth row under the site"
+    );
+    assert!(
+        assets::get(&pool, "asset:hcloud-164750187").await.is_err(),
+        "the id the producer invented names nothing: the tree's id won"
+    );
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "server_type").await,
+        Some(text("cx33")),
+        "the file's value was written to the asset the origin key found"
+    );
+    assert_eq!(
+        assets::get(&pool, "asset:hetzner-teamcity")
+            .await
+            .expect("the matched asset")
+            .asset
+            .name,
+        "knobas-teamcity",
+        "and its name is untouched: a matched entry is an update of properties, \
+         not a rename"
+    );
+
+    // Every mention, not just the entry's own.
+    assert_eq!(
+        assets::get(&pool, "asset:hcloud-engine")
+            .await
+            .expect("the child the produced file hung off its own id")
+            .held_by
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "knobas test estate",
+            "Hetzner Cloud nbg1",
+            "knobas-teamcity"
+        ],
+        "the child follows its parent's rename into the tree"
+    );
+    assert_eq!(
+        rows(
+            &pool,
+            "select count(*) as n from knobas.route
+              where id = 'route:hcloud-ssh' and asset_id = 'asset:hetzner-teamcity'",
+        )
+        .await,
+        1,
+        "and the route is exposed by the asset the origin key found"
+    );
+    assert_eq!(
+        rows(
+            &pool,
+            "select count(*) as n from knobas.route
+              where id = 'route:hcloud-agent' and target_id = 'asset:hetzner-teamcity'",
+        )
+        .await,
+        1,
+        "and the route that lands on it lands on that asset too -- `target` is \
+         the fourth field in the format that carries an asset id, and the \
+         rename that misses it is the one the other three assertions cannot see"
+    );
+}
+
+/// The same entry **without** the property is new, which is what says the match
+/// was the origin key and not the neighbouring facts.
+///
+/// The file is identical in every other respect -- the same invented id, the
+/// same name, the same parent, the same type -- so a planner matching on a name
+/// or on a type would still find the server here and this would be red.
+#[tokio::test]
+async fn the_same_entry_without_its_origin_key_is_new() {
+    let pool = pool("assets-import-origin-key-absent").await;
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the checked-in estate");
+
+    let preview = assets::preview_import(
+        &pool,
+        &produced("asset:hcloud-164750187", None),
+        HCLOUD_PRODUCER,
+    )
+    .await
+    .expect("a produced file with no key on its entry");
+    assert!(
+        preview
+            .known
+            .iter()
+            .all(|entry| entry.id != "asset:hetzner-teamcity"),
+        "nothing matched: {:?}",
+        preview.known
+    );
+    assert_eq!(
+        preview
+            .new
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "asset:hcloud-164750187",
+            "asset:hcloud-engine",
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
+        ],
+        "an entry carrying no origin key is matched by its id alone, and its id \
+         is one the tree has never held"
+    );
+}
+
+/// A producer that declares **no** origin key matches by id and by nothing else
+/// -- the estate file a person picked off the disk, and the reason #439's
+/// import is untouched by any of this.
+///
+/// The *same file* as the test above it, under the other producer. That is what
+/// makes this a statement about the producer rather than about the file: the
+/// entry carries `hcloud_id` and the tree's server carries the same value, and
+/// the entry is still new.
+#[tokio::test]
+async fn a_producer_that_declares_no_origin_key_matches_by_id_and_nothing_else() {
+    let pool = pool("assets-import-no-origin-key").await;
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the checked-in estate");
+    let file = produced("asset:hcloud-164750187", Some("164750187"));
+
+    let preview = assets::preview_import(&pool, &file, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the estate-file producer reads the same text");
+    assert_eq!(
+        preview
+            .new
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "asset:hcloud-164750187",
+            "asset:hcloud-engine",
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
+        ],
+        "the estate file declares no origin key, so the id is the whole rule"
+    );
+    assert!(
+        preview.changes.is_empty(),
+        "and nothing already in the tree would change: {:?}",
+        preview.changes
+    );
+}
+
+/// An origin key **two** assets carry is refused, by name.
+///
+/// An origin key names one thing (`CONTEXT.md`), so a tree holding two assets
+/// under one is a tree the rule has no answer over -- and picking either would
+/// be an import that silently updated whichever row came back first. The
+/// refusal names both, because the reader's next move is to go and look at
+/// them.
+///
+/// Refused only when a file **asks**: the pair below is created before the file
+/// mentions it, and the assertion beneath is that an import naming neither of
+/// them still goes through. An import stopped by a duplicate it never touches
+/// would report the estate's problem against whichever file happened to be
+/// next.
+#[tokio::test]
+async fn an_origin_key_two_assets_carry_is_refused_by_name() {
+    let pool = pool("assets-import-origin-key-twice").await;
+    let site = make(&pool, None, "site", "hel1", &[]).await;
+    for name in ["the first copy", "the second copy"] {
+        make(
+            &pool,
+            Some(&site.id),
+            "vm",
+            name,
+            &[("hcloud_id".to_owned(), text("164750187"))],
+        )
+        .await;
+    }
+
+    let refusal = assets::preview_import(
+        &pool,
+        &produced("asset:hcloud-164750187", Some("164750187")),
+        HCLOUD_PRODUCER,
+    )
+    .await
+    .expect_err("two assets under one origin key");
+    for named in ["the first copy", "the second copy", "hcloud_id"] {
+        assert!(
+            refusal.message.contains(named),
+            "the refusal does not name {named:?}: {}",
+            refusal.message
+        );
+    }
+
+    let elsewhere = format!(
+        r#"{{"name":"Hetzner Cloud","assets":[
+             {{"id":"asset:hcloud-999","type":"vm","name":"another server",
+               "parent":"{}","properties":{{"hcloud_id":"164750999"}}}}],
+           "routes":[]}}"#,
+        site.id
+    );
+    let preview = assets::preview_import(&pool, &elsewhere, HCLOUD_PRODUCER)
+        .await
+        .expect("a file asking about another key is not stopped by a pair it never names");
+    assert_eq!(
+        preview
+            .new
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        ["asset:hcloud-999"],
+        "and it is planned as the new server it is"
+    );
+}
+
+/// A file that names one asset **twice** -- once by the tree's id and once by
+/// an id whose origin key finds the same asset -- is refused by name.
+///
+/// The ids were vetted as unique at the top of the plan; the rename can make
+/// two of them one again, and an import that let it through would create the
+/// entry and then update it with the other in the same transaction, leaving
+/// whichever came second. Both entries are named, because the answer is to
+/// decide which of the two the file meant.
+#[tokio::test]
+async fn a_file_naming_one_asset_by_id_and_by_origin_key_is_refused_by_name() {
+    let pool = pool("assets-import-origin-key-collapses").await;
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the checked-in estate");
+
+    let twice = r#"{"name":"Hetzner Cloud","assets":[
+        {"id":"asset:hetzner-teamcity","type":"vm","name":"knobas-teamcity",
+         "parent":"asset:hetzner-nbg1","properties":{"server_type":"cx33"}},
+        {"id":"asset:hcloud-164750187","type":"vm","name":"knobas-teamcity",
+         "parent":"asset:hetzner-nbg1",
+         "properties":{"hcloud_id":"164750187","server_type":"cx43"}}],
+      "routes":[]}"#;
+
+    let refusal = assets::preview_import(&pool, twice, HCLOUD_PRODUCER)
+        .await
+        .expect_err("one asset named twice");
+    for named in ["asset:hetzner-teamcity", "asset:hcloud-164750187"] {
+        assert!(
+            refusal.message.contains(named),
+            "the refusal does not name {named:?}: {}",
+            refusal.message
+        );
+    }
+    assert_eq!(
+        property(&pool, "asset:hetzner-teamcity", "server_type").await,
+        Some(text("cx23")),
+        "and neither of the two was written"
+    );
+}
+
+/// A producer this build does not know is refused, and not read as the estate
+/// file's.
+///
+/// The quiet failure this closes: a caller asking for a matching rule that is
+/// not here would otherwise get the rule that matches on nothing, and its
+/// import would create a second copy of every asset it meant to update.
+#[tokio::test]
+async fn a_producer_this_build_does_not_know_is_refused_by_name() {
+    let pool = pool("assets-import-unknown-producer").await;
+    let before = tables(&pool).await;
+    let refusal = assets::preview_import(&pool, ESTATE_FILE, "proxmox")
+        .await
+        .expect_err("a producer nothing declares");
+    assert!(
+        refusal.message.contains("proxmox") && refusal.message.contains(ESTATE_FILE_PRODUCER),
+        "the refusal names neither the ask nor what is on offer: {}",
+        refusal.message
     );
     assert_eq!(tables(&pool).await, before, "a refused preview wrote a row");
 }
@@ -4198,7 +4620,7 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
          the reason this rule reads `hostname` and `ip` at all"
     );
 
-    let imported = assets::apply_import(&pool, ESTATE_FILE)
+    let imported = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the import")
         .value;
@@ -4456,11 +4878,11 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         ("source_assets", serde_json::json!({ "sourceId": "kuma" })),
         (
             "preview_estate_import",
-            serde_json::json!({ "file": ESTATE_FILE }),
+            serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),
         ),
         (
             "apply_estate_import",
-            serde_json::json!({ "file": ESTATE_FILE }),
+            serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),
         ),
         ("monitoring_settings", serde_json::json!({})),
         (
@@ -5532,7 +5954,7 @@ async fn an_asset_read_without_a_keychain_offers_no_create() {
 /// and that is the half a made-up fixture could not supply (ADR-0013).
 async fn imported(label: &str) -> PgPool {
     let pool = pool(label).await;
-    assets::apply_import(&pool, ESTATE_FILE)
+    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate file imports");
     pool

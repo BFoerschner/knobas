@@ -65,10 +65,21 @@ an absent one. It also parses the host-list table above and the compose file's
 service list, so adding a fourth server or a new service and forgetting the
 estate file is a red gate rather than a discovery months later, and a server
 whose type or profile changes in one place and not the other is too, as is a
-service recorded on the wrong host. The one thing it cannot check is the
-addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
-the only committed copy of them, and `hcloud server list` is what settles a
-disagreement.
+service recorded on the wrong host. The two things it cannot check are the
+addresses and the `hcloud_id`s: `hosts.env` is gitignored, so the public IPs in
+`estate.json` are the only committed copy of them, and the ids have no other
+copy at all -- `hcloud server list` is what settles a disagreement about
+either. The `hcloud_id` on each server (#508) is that server's **origin key**
+(`CONTEXT.md`): what the hcloud importer's produced file matches this server on
+when the id it invented is not one the tree holds.
+
+A wrong one is invisible to `just check` -- a missing or a duplicated one is
+red there, but no gate can read hcloud -- and it is **not** invisible to the
+milestone. The witness is stream 9's `just estate-live` (#509): a server whose
+`hcloud_id` here is wrong is unknown by id and unmatched by key, so the
+produced file previews it as *new* against an estate that must preview
+all-known, and the recipe goes red. So a red `estate-live` naming one server is
+read as a wrong value in this file before it is read as a bug in the producer.
 
 Nothing in the file is provisional any more, and the two things that were are
 named here because their settling is what the surrounding tests now rest on.

@@ -90,7 +90,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use knobas_app::assets::{self, AlertState, PropertyValue};
+use knobas_app::assets::{self, AlertState, ESTATE_FILE_PRODUCER, PropertyValue};
 use knobas_app::commands::entity::{inbox_count_inner, inbox_items_inner};
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_core::entity::EntityRef;
@@ -521,7 +521,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     // against `support/metrics.txt`, which is a recording of this server and
     // therefore agrees with it by construction until somebody edits one of the
     // two files.
-    let imported = assets::apply_import(pool, ESTATE_FILE)
+    let imported = assets::apply_import(pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate file imports into a fresh profile")
         .value;

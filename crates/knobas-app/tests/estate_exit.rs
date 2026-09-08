@@ -40,7 +40,7 @@
 //! everything between the two: the store, the merge rule, the corpus, the
 //! membership walk and the wire's two ends.
 
-use knobas_app::assets;
+use knobas_app::assets::{self, ESTATE_FILE_PRODUCER};
 use knobas_app::commands::search::search_inner;
 use knobas_app::time::{self, TimerTarget};
 use knobas_search::{SearchFilters, SearchQuery};
@@ -98,7 +98,7 @@ async fn estate() -> PgPool {
             let connector = knobas_db::test_util::scratch_database("m4-exit").await;
             let pool = connector.pool(4).await.expect("a fresh profile");
 
-            let outcome = assets::apply_import(&pool, ESTATE_FILE)
+            let outcome = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
                 .await
                 .expect("the estate file imports into an empty profile")
                 .value;
@@ -568,7 +568,7 @@ async fn the_tunnels_teamcity_forward_has_both_ends_and_the_wire_can_be_drawn() 
 async fn a_re_import_previews_every_entry_as_already_in_the_tree() {
     let pool = &estate().await;
 
-    let preview = assets::preview_import(pool, ESTATE_FILE)
+    let preview = assets::preview_import(pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
 

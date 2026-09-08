@@ -166,11 +166,13 @@ let app: Record<string, unknown> | undefined;
 interface Calls {
   previewed: string[];
   applied: string[];
+  /** The producer sent with each call, preview and apply alike (#508). */
+  producers: string[];
   reads: number;
 }
 
 function render(refusal: unknown = null, hash = "#/assets/tree") {
-  const calls: Calls = { previewed: [], applied: [], reads: 0 };
+  const calls: Calls = { previewed: [], applied: [], producers: [], reads: 0 };
   location.hash = hash;
   const router = createRouter();
   app = mount(AssetsView, {
@@ -195,12 +197,14 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
             return Promise.reject(cause);
           }
         },
-        previewEstateImport: (file: string) => {
+        previewEstateImport: (file: string, producer: string) => {
           calls.previewed.push(file);
+          calls.producers.push(producer);
           return refusal === null ? Promise.resolve(PREVIEW) : Promise.reject(refusal);
         },
-        applyEstateImport: (file: string) => {
+        applyEstateImport: (file: string, producer: string) => {
           calls.applied.push(file);
+          calls.producers.push(producer);
           return Promise.resolve(OUTCOME);
         },
       },
@@ -400,6 +404,47 @@ test("Import applies the chosen file and the Tree re-reads", async () => {
   expect(calls.applied).toEqual(['{"assets":[]}']);
   expect(target.querySelector('input[type="file"]')).toBeNull();
   expect(calls.reads).toBeGreaterThan(before);
+});
+
+/**
+ * The chooser (#508): **where the estate file comes from**, and its id on both
+ * calls.
+ *
+ * One entry today — the file a person picks off the disk — and the hcloud and
+ * Docker importers (spec #491, streams 9 and 10) each add one. What is
+ * asserted is the option's *value* as well as its label, because the value is
+ * what crosses the bridge and a chooser drawing the right words over the wrong
+ * id would be a preview matched by the wrong rule.
+ *
+ * And on **both** calls, because the producer is half of what decides the
+ * plan: an apply that dropped it would write a plan the reader was never
+ * shown. `assets::preview_import` and `assets::apply_import` refuse a producer
+ * they do not know, so the id itself is checked at its own seam
+ * (`crates/knobas-app/tests/assets_ipc.rs`) and not spelled out twice here.
+ */
+test("the chooser offers the estate file and sends it with both calls", async () => {
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+
+  const chooser = target.querySelector<HTMLSelectElement>(".dlg select");
+  expect(chooser).not.toBeNull();
+  expect([...(chooser?.options ?? [])].map((option) => [option.value, option.text])).toEqual([
+    ["estate_file", "Estate file"],
+  ]);
+  expect(chooser?.value).toBe("estate_file");
+
+  await choose('{"assets":[]}');
+  const apply = [...target.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".dlg") !== null,
+  );
+  apply?.click();
+  await settle();
+
+  expect(calls.previewed.length).toBe(1);
+  expect(calls.applied.length).toBe(1);
+  expect(calls.producers).toEqual(["estate_file", "estate_file"]);
 });
 
 /**

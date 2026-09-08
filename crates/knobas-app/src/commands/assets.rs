@@ -499,20 +499,30 @@ pub async fn depends_on_this(
 /// same way a person can. The parse is Rust's all the same -- one refusal
 /// story, in one place, for a file that is not an estate file.
 ///
+/// **`producer` is the chooser's answer**, not a field of the file (#508). A
+/// producer returns an estate file in the checked-in shape (ADR-0015: an
+/// importer produces an estate file and is not a source), so the text says
+/// nothing about where it came from, and what the planner needs from it is one
+/// thing: the **origin key** it declares, which is the Import's second matching
+/// rule. `assets::ESTATE_FILE_PRODUCER` is the file a person picked off the
+/// disk and declares none.
+///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for a file that is not JSON,
-/// carries a key the format does not define, names a type nobody declares,
-/// names a parent or a target that is nowhere, or whose assets hold each
-/// other.
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a producer this build does
+/// not know, or for a file that is not JSON, carries a key the format does not
+/// define, names a type nobody declares, names a parent or a target that is
+/// nowhere, whose assets hold each other, or whose origin key matches two
+/// assets at once.
 #[tauri::command]
 pub async fn preview_estate_import(
     lifecycle: State<'_, Lifecycle>,
     file: String,
+    producer: String,
 ) -> Result<ImportPreview, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::preview_import(&pool, &file).await
+    assets::preview_import(&pool, &file, &producer).await
 }
 
 /// Apply the import [`preview_estate_import`] previewed.
@@ -520,7 +530,8 @@ pub async fn preview_estate_import(
 /// The file is sent again rather than a plan being sent back: the plan is
 /// recomputed inside the write's own transaction, so what is applied is what
 /// the file says at the moment it is applied and no caller can hand over a
-/// plan the reader never saw.
+/// plan the reader never saw. `producer` is sent again for the same reason --
+/// it is half of what decides the plan.
 ///
 /// **One line is announced**, the per-run summary, though every created asset
 /// and every property set writes a line of its own -- the first import of the
@@ -536,9 +547,10 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     file: String,
+    producer: String,
 ) -> Result<ImportOutcome, IpcError> {
     let pool = lifecycle.pool()?;
-    let written = assets::apply_import(&pool, &file).await?;
+    let written = assets::apply_import(&pool, &file, &producer).await?;
     announce(&app, written.activity);
     Ok(written.value)
 }
@@ -1418,6 +1430,60 @@ mod tests {
         }
     }
 
+    /// **Every producer the chooser can send is one this build declares.**
+    ///
+    /// `IMPORT_PRODUCERS` in the mirror is the Import dialog's chooser -- the
+    /// list of entries a reader picks from -- and each entry's `id` is what
+    /// arrives as the `producer` argument. An id `assets::PRODUCERS` does not
+    /// carry is an entry that refuses every file the reader chooses under it,
+    /// and nothing else in the tree would notice: the two lists are in
+    /// different languages and no compiler reads both.
+    ///
+    /// **One direction only, deliberately.** `assets::HCLOUD_PRODUCER` is
+    /// declared before anything can produce an hcloud file (#508 gives the
+    /// planner the rule; v1.5's stream 9 gives the chooser its entry), so a
+    /// producer with no entry is the expected state and not a fault.
+    ///
+    /// The ids are read **out of the list** rather than looked for anywhere in
+    /// the file, so a `"hcloud"` written in a comment somewhere else in the
+    /// mirror cannot make this pass, and the list is asserted to be non-empty
+    /// so that a renamed or moved declaration fails as a broken parse instead
+    /// of checking nothing. **Non-empty and not a count**: stream 9 adds the
+    /// hcloud entry and stream 10 the Docker one, and a number here would go
+    /// red on the day the chooser grew the entry this test exists to check.
+    #[test]
+    fn the_chooser_offers_producers_this_build_knows() {
+        let at = MIRROR
+            .find("export const IMPORT_PRODUCERS")
+            .expect("the mirror declares the chooser's entries");
+        // `= [` and not the first `[`, which is the type annotation's
+        // `ImportProducer[]` and would make this read an empty list.
+        let opens = MIRROR[at..].find("= [").expect("the list opens") + at;
+        let closes = MIRROR[opens..].find(']').expect("the list closes") + opens;
+        let list = &MIRROR[opens..closes];
+
+        let offered: Vec<&str> = list
+            .match_indices("id: ")
+            .map(|(at, keyword)| {
+                let rest = &list[at + keyword.len()..];
+                let quoted = rest.strip_prefix('"').expect("an id is a string literal");
+                &quoted[..quoted.find('"').expect("an unterminated id")]
+            })
+            .collect();
+        assert!(
+            !offered.is_empty(),
+            "this parse found no producer in the chooser's list; if the \
+             declaration moved, fix the parse rather than deleting the check"
+        );
+        for id in offered {
+            assert!(
+                assets::PRODUCERS.iter().any(|producer| producer.id == id),
+                "the chooser offers {id:?} and no producer in this build carries \
+                 that id, so every file chosen under it is refused"
+            );
+        }
+    }
+
     /// Tauri renames a command's *arguments* to camelCase and leaves struct
     /// fields alone. Both spellings are on this surface at once -- the
     /// `assetId` argument and the `parent_id` field inside the row it answers
@@ -1442,7 +1508,9 @@ mod tests {
             ("edit_route", "edits"),
             ("delete_route", "routeId"),
             ("preview_estate_import", "file"),
+            ("preview_estate_import", "producer"),
             ("apply_estate_import", "file"),
+            ("apply_estate_import", "producer"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
         ] {

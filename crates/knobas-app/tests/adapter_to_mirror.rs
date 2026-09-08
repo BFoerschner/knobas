@@ -53,6 +53,7 @@
 //! to the docker-gated container layer.
 
 use async_trait::async_trait;
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::sources::Registry;
 use knobas_mockd::{spawn_mock_jira, spawn_mock_teamcity};
 use knobas_source::contract::VecSink;
@@ -982,7 +983,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
         .unwrap();
     assert_eq!(run.upserted, 8, "the recording holds eight monitors");
 
-    let preview = knobas_app::assets::preview_import(&pool, ESTATE_FILE)
+    let preview = knobas_app::assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the preview");
     assert_eq!(
@@ -1009,7 +1010,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
         preview.unresolved
     );
 
-    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE)
+    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the import")
         .value;

@@ -1393,6 +1393,15 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
  * answers that group is `crates/knobas-app/tests/assets_ipc.rs`, over a real
  * PostgreSQL, and the dialog's rendering of all three groups is
  * `AssetsView.import.test.svelte.ts`.
+ *
+ * **`args.producer` is read by nothing here, and that is deliberate** (#508).
+ * The producer decides the **origin key** — the second matching rule, used
+ * when a file entry's id is not one the tree holds — and honouring it would be
+ * a second implementation of `assets::matched_by_origin_key` living in a
+ * fixture, which is the copy that goes stale. So this replay matches by id
+ * alone, whichever producer the chooser sent, and what witnesses the rule is
+ * the IPC-seam suite over a real PostgreSQL. A walk through this harness
+ * certifies the chooser's layout and never the rule behind it.
  */
 function estatePreview(args: Record<string, unknown>) {
   const file = estateFileOf(args);

@@ -54,6 +54,7 @@ mod live_digest;
 
 use std::sync::Arc;
 
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::{assets, backup};
 use knobas_core::entity::EntityRef;
@@ -147,7 +148,7 @@ async fn service_with(
 /// fixture that returned the ids it made would let an assertion pass on a row
 /// this function invented rather than on the estate file's own.
 async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
-    let outcome = assets::apply_import(pool, ESTATE_FILE)
+    let outcome = assets::apply_import(pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate file imports into an empty profile")
         .value;

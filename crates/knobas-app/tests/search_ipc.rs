@@ -14,6 +14,7 @@
 //! absolute row count of anything global.
 
 use knobas_app::IpcErrorCode;
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::search::{
     create_smart_list_inner, delete_smart_list_inner, launcher_home_inner, rename_smart_list_inner,
     search_inner, smart_list_items_inner, smart_lists_inner,
@@ -828,7 +829,7 @@ async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
     mirror_monitor(&pool, "knobas-jira", Some(31.0)).await;
     mirror_monitor(&pool, "jira (tunnel)", None).await;
 
-    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE)
+    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate imports")
         .value;

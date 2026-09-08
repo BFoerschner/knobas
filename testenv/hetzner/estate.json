@@ -103,6 +103,7 @@
       "parent": "asset:hetzner-nbg1",
       "description": "The TeamCity server's host. Reached over SSH; nothing but 22 and ICMP is open, which is why its monitor is a ping.",
       "properties": {
+        "hcloud_id": "164750187",
         "ip": "46.224.117.158",
         "server_type": "cx23",
         "vcpu": 2,
@@ -172,6 +173,7 @@
       "parent": "asset:hetzner-nbg1",
       "description": "Jira's host. cpx22 (AMD) rather than a cx type: Jira's start is single-threaded and took 72 s here against 147 s on a cx23.",
       "properties": {
+        "hcloud_id": "164750202",
         "ip": "46.224.125.111",
         "server_type": "cpx22",
         "vcpu": 2,
@@ -241,6 +243,7 @@
       "parent": "asset:hetzner-nbg1",
       "description": "Confluence's host.",
       "properties": {
+        "hcloud_id": "164750224",
         "ip": "2.28.72.189",
         "server_type": "cpx22",
         "vcpu": 2,
