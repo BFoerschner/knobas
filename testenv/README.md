@@ -1464,8 +1464,8 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   `unreadable`, never *absent*: the helper prints nothing when it can see no
   window, and read as *absent* that would make the before-half of every
   waypoint pass on a helper that had stopped working.
-* **A driver may not type a quote.** The template it typed was `"<stub>
-  {path}"`, quoted against a `TMPDIR` with a space in it — and macOS' *Smart
+* **A driver may not type a quote.** The template it typed was `"<stub>"
+  {path}`, quoted against a `TMPDIR` with a space in it — and macOS' *Smart
   Quotes* substitution rewrote the straight quotes on their way into the WebKit
   field, so knobas stored `“/var/…/stub” {path}` and refused to run a program
   of that name, correctly and with the reason in the toast. **`ax type` posts

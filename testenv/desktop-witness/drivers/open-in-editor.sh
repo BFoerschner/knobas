@@ -74,8 +74,8 @@ readonly VSCODE_FIELD
 # `matching()` reads -- come back empty on it. Measured on the dev Mac
 # (2026-09-08, #525's runner): a branch detail was open with its checkout panel
 # and its three buttons on screen, and `ax find CHECKOUT` answered **0** for as
-# long as it was. So this is read with `ax values` through `reads`, like the
-# capture driver's headings, and never with `ax find`.
+# long as it was. So this is read with `ax values`, like the capture driver's
+# headings, and never with `ax find`.
 CHECKOUT_PANEL=$(rendered_label 'Checkout')
 readonly CHECKOUT_PANEL
 
@@ -154,13 +154,12 @@ exactly_one() { [ "$(count_of "$1")" = 1 ]; }
 # `find` for one and got the answer that question deserves (#547).
 screen() { "$ax" values "$pid" 2>/dev/null || true; }
 
-# reads <line> -- the screen carries <line> as a whole line.
-#
-# Whole line, through `has_reading`: `CHECKOUT` and the settings pane's
-# `CHECKOUTS` differ by one character at the end, and a substring test would
-# let the pane this driver has just been typing into answer for the panel it
-# has not opened yet.
-reads() { has_reading "$(screen)" "$1"; }
+# A reading is turned into a verdict with `reading_verdict` and never with a
+# bare `has_reading`: two answers where three are needed is the shape this
+# driver was fixed out of. Whole-line matching is why the settings pane's
+# `CHECKOUTS`, which this driver has just been typing into, cannot answer for
+# the panel's `CHECKOUT`; the third answer is why an `ax values` that saw no
+# window at all cannot answer *absent* for either.
 
 # The launcher has finished searching for what was typed.
 #
