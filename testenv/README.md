@@ -1161,7 +1161,7 @@ actually drive a desktop, launches the bundle **from the path Launch Services
 resolves `dev.knobas.desktop` to** on the demo profile, waits for its window,
 asserts that exactly one instance is running, runs the named driver, and quits
 the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`, and there
-are two.
+are three.
 
 `launcher-hotkey` (#500) presses ⌘K, asserts through the accessibility tree
 that the launcher's query box has focus (`AXTextField`, labelled *Search or
@@ -1178,9 +1178,23 @@ asserts that the stub ran with **exactly one** argument and that it is the
 checkout path. Exactly one is the assertion ADR-0016 asks for: what the
 program received is what the disk answered, and nothing the mirror holds.
 
-Every accessible name either driver acts on is pinned against the file that
+`capture` (#503) is the **global** shortcut, which is the one keystroke in
+knobas that has to arrive while knobas is not the application being typed at.
+It types a combination into the **Shortcut** field in Settings and waits for
+the section to say *Registered.*, opens a detail so the capture has a
+foreground, brings **Finder** to the front and asserts it is there, sends the
+combination, asserts the capture window is up with the caret in its box, types
+a line, presses *Open in knobas*, and asserts that knobas is frontmost again,
+the capture window is gone, and the note is open with `CAPTURED FROM` in its
+links panel.
+
+Every accessible name any driver acts on is pinned against the file that
 carries it by `just witness-unit`, so an edit to one reads as a stale driver
-at the gate rather than as a failed run minutes into somebody's screen.
+at the gate rather than as a failed run minutes into somebody's screen. **A
+name is pinned as it is written and used as it is rendered**: WebKit names an
+element by rendered text, so a `.lab` label the stylesheet uppercases is
+`SHORTCUT` on screen and `Shortcut` in the markup. `rendered_label` is the one
+place that rule lives, and `witness-unit` pins the stylesheet rules behind it.
 
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
@@ -1201,8 +1215,10 @@ part of it. What the gate carries is `just witness-unit`
 decision rather than a side effect: how it compares Launch Services' answer
 against the bundle it built, how it reads the accessibility probe, and the
 three text functions `open-in-editor` is built out of -- the stub it writes,
-the git config it writes, and its reading of what the stub recorded. A driver
-is not exempt from the gate because its *run* is.
+the git config it writes, and its reading of what the stub recorded -- and the
+three `capture` is: the title a typed paragraph gives its note, the whole-line
+match its readings are found by, and the rendered-name rule above. A driver is
+not exempt from the gate because its *run* is.
 
 ### The prerequisites
 
@@ -1250,11 +1266,32 @@ is not exempt from the gate because its *run* is.
    **not** move the registration -- `dev.knobas.desktop` still resolved to
    `/Applications/knobas.app`. Which copy LS prefers among several carrying
    one identifier is not a documented API and the installed one wins, so the
-   harness refuses rather than launching a copy LS does not name. Move or
-   remove the installed knobas for the length of the run — that is the
+   harness refuses rather than launching a copy LS does not name. That is the
    runner's job, not the harness's, and #525 carries it as a precondition. The
    harness never moves it for you, and it re-registers whatever was registered
    before on its way out.
+
+   **Measured again on 2026-09-08 by #503, and it is worse than one copy.**
+   `lsregister -dump` listed **ten** paths carrying `dev.knobas.desktop`:
+   `/Applications/knobas.app`, three old worktrees, the root checkout's debug
+   *and* release bundles, and five stale DMG mount points. Moving
+   `/Applications/knobas.app` aside was not enough — LS then named the root
+   checkout's debug bundle. What worked, and what the three green runs
+   recorded below were made with, is unregistering every other path and putting
+   back afterwards the ones that still exist on disk:
+
+   ```sh
+   LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+   "$LSREG" -dump | sed -n 's/^ *path: *\(.*knobas\.app\) (0x[0-9a-f]*)$/\1/p' | sort -u
+   # unregister every path but the bundle this worktree is about to build:
+   "$LSREG" -u /Applications/knobas.app          # …and each of the others
+   just desktop-witness <driver>
+   "$LSREG" -f /Applications/knobas.app          # …and each one still on disk
+   ```
+
+   Nothing is moved and nothing is deleted: the only thing changed is the
+   Launch Services database, and a path whose bundle is gone needs no putting
+   back.
 
 5. **`swiftc`**, from the Command Line Tools. The accessibility helper is one
    Swift file compiled into a scratch directory on each run (about 2 s);
@@ -1265,73 +1302,100 @@ points back at this section, and exits non-zero.
 
 ### What is not witnessed yet
 
-As of 2026-09-08 **no green driver run exists**, and the debt has a number:
-**issue #525**, *Desktop witness: the first unlocked run*, which carries the
-run for every driver this harness gains and which the v1.5 exit waits on. The
-dev Mac has been locked since 22:47 CEST with no HID input for nearly three
-hours, and Björn is away for the milestone; the harness refuses at its first
-probe, which is the correct behaviour and is **not** a witness of the ⌘K
-assertion — a refusal is not a witness of the assertion. The deputy's ruling
-of 2026-09-08 on #500 settles what follows from that: the ticket merges with
-its run-criterion open and disclosed, nothing stands in for the run (no fake,
-no dry-run mode, no hand checklist — ADR-0013), and ADR-0016 now carries the
-dated consequence that *"No human step" is not "no human precondition"*.
+**Rewritten on 2026-09-08 by #503, because everything it said had stopped being
+true.** Until that morning no driver had ever run: the dev Mac's screen was
+locked, the harness refused at its first probe, and this section listed four
+open questions about a `WKWebView` nobody had been able to look at. The screen
+was unlocked, the harness ran, and the answers are below — together with the
+three faults the first run found, which are fixed, and the two gaps that remain.
 
-Four things are therefore still open, and none should be read as proven by
-this file existing:
+**Two drivers are green**, run from `.worktrees/issue-503` at 04:55 CEST on
+2026-09-08 against `dev.knobas.desktop` built and signed by `knobas-dev`:
 
-* whether a Tauri window's `WKWebView` exposes the launcher's input to the
-  accessibility API at all. Some web views build their tree only when an
-  assistive client asks, and behind the lock screen there is no way to find
-  out; `ax dump` in the driver's failure path is there so that the first
-  unlocked run diagnoses itself rather than needing a second.
-* the launch, single-instance, driver and quit steps, which begin after the
-  probe the harness stops at.
-* which of `AXDescription` and `AXTitle` a WebKit text field carries an
-  `aria-label` on. The driver accepts either, and asserts the role separately,
-  so this cannot make it pass on the wrong element -- but it has not been seen.
-  The same question, one step further, for a field named by a `<label for=…>`
-  rather than an `aria-label`, which is how the **Clones root** and the three
-  command fields are named: `open-in-editor` asks for **exactly one** element
-  carrying that name, so a WebKit that exposed the `<label>` element under the
-  same name as well would make it refuse -- with the tree dump beside the
-  refusal, which is what that dump is for.
-* whether `AXFocused` and `AXPress` reach a WebKit element at all, which is
-  what `ax focus` and `ax press` (#501) do and what `open-in-editor` is built
-  on. Both are the documented way to drive an accessibility tree; neither has
-  been sent at this app.
+* `just desktop-witness launcher-hotkey` — ⌘K focuses the launcher's query box,
+  Escape takes it out of the tree.
+* `just desktop-witness capture` — a shortcut typed into Settings and reported
+  as **registered**; a detail opened; **Finder brought to the front and asserted
+  there**; the combination pressed; the capture window up with the caret in its
+  box; a line typed; *Open in knobas* pressed; knobas frontmost again, the
+  capture window gone, and the note open with `CAPTURED FROM` in its links
+  panel.
 
-**And one gap that is not about the lock at all: the demo profile carries no
-repo entity.** `knobas_source_mock::items` emits tickets, PRs, builds, pages
-and commits; the fixture's `repos` and `branches` (`fixtures/tidewater/work.json`)
-are parsed and never sent. So `--demo` -- the profile this harness launches,
-on purpose, so that a run cannot mix fixture data into somebody's real corpus
--- has no repo detail to open, and `open-in-editor` refuses at that step with
-a message that says exactly this. **An unlocked Mac is therefore necessary and
-not sufficient for #501's witness**: #525 needs a demo corpus that carries a
-repo before the driver can reach its button. Nothing in #501 papers over it,
-because a fake would not be a witness (ADR-0013), and widening the demo corpus
-is a change to the reference adapter that #501 does not name.
+**One driver is red for a reason that is not the feature's**: `open-in-editor`
+now sets the clones root, stores its template and confirms the write, and then
+stops where it always said it would — *the demo profile carries no repo entity*.
+`knobas_source_mock::items` emits tickets, PRs, builds, pages and commits, and
+`fixtures/tidewater/work.json`'s repos and branches are parsed and never sent,
+so `--demo` has no repo detail to open. Widening the demo corpus is a change to
+the reference adapter that no ticket has named; **#525** owns it.
 
-What *is* witnessed, on 2026-09-08, and by what:
+#### What the first runs answered
 
-* **from a harness run**, `just desktop-witness launcher-hotkey` and
-  `just desktop-witness open-in-editor`: the refusal. `screen-locked`, naming
-  the permission and this section, exit 1. A merge-manager re-running either
-  recipe on this Mac gets the same refusal, and that is the expected result and
-  not a regression.
-* **from its own commands run by hand**, because the harness refuses before it
-  reaches them: the build and signing step -- `Authority=knobas-dev`,
-  `Identifier=dev.knobas.desktop`, `codesign --verify --deep --strict` clean,
-  the bundle at `target/debug/bundle/macos/knobas.app`, which is the first of
-  the two paths the harness looks in -- and the Launch Services measurement in
-  prerequisite 4 above.
+* **A Tauri window's `WKWebView` exposes its accessibility tree.** Roles,
+  `AXDOMIdentifier`s and all. The question this section opened with is closed.
+* **An `aria-label` arrives on `AXDescription` *and* `AXTitle`**, identically.
+  The drivers accept either, so this cost nothing, but it had not been seen.
+* **A `<label for=…>` names its field on `AXTitle`, and the label element
+  itself is not a second match** — `ax find` answers `1`, which is what
+  `exactly_one` needs.
+* **`AXFocused` and `AXPress` reach a WebKit element.** Both drivers depend on
+  them and both work.
+* **An accessible name is the *rendered* text.** A `<label class="lab">` is
+  named `SHORTCUT`, not `Shortcut`, because `app/src/app.css` gives that class
+  `text-transform: uppercase`; the same for the links panel's `.row.hd`
+  headings, which read `CAPTURED FROM`. An `aria-label` is **not** transformed:
+  it is not rendered text. `desktop-witness-lib.sh`'s `rendered_label` states
+  the rule once, both drivers use it, and `witness-unit` pins both stylesheet
+  rules.
 
-Nothing between the probe and the quit has run at all.
+#### What the first runs broke, and what was fixed
 
-**A merge-manager re-running `just desktop-witness` on this Mac gets the same
-`screen-locked` refusal, exit 1.** That is the expected result here, not a
-regression; #525 is where it stops being.
+* **A synthetic modifier stayed down.** `ax type` built its events from
+  `CGEventSource(.hidSystemState)`, which inherits the session's modifier
+  flags, and a `key` posted just before it leaves ⌘ held as far as that state
+  is concerned — there is no `flagsChanged` to release it. A driver that
+  pressed ⌘A to select a settings field and then typed
+  `CmdOrCtrl+Alt+Shift+K` into it sent ⌘C, ⌘A, ⌘S … ⌘K, and the last of those
+  opened the launcher over the pane it was typing in. Fixed: `type` clears the
+  flags on every event.
+* **`open-in-editor` looked for names nothing carries.** `Directory`,
+  `Open in VS Code` (the field, not the button) and `Checkout` are all `.lab`
+  text, so on screen they are upper case; the driver could not have got past
+  its first `fill`. Its `witness-unit` pin was green throughout, because it
+  pinned the *markup*. Fixed with `rendered_label`, and the run now reaches the
+  demo-corpus gap above.
+* **Two races.** The top strip's Settings button is not in the tree the instant
+  the app is frontmost — the harness waits for a *window*, and the boot screen
+  is one — and Return on a launcher that has not answered selects nothing. Both
+  drivers now wait for what they are about to act on.
+
+#### What is still not witnessed
+
+* **`captured-in`.** A capture's second born link needs a **stored** room, and
+  the `--demo` profile carries no context: a reader makes one. Making one
+  inside `capture.sh` means driving the tab strip — another feature's UI — to
+  arrange this feature's fixture, and the first attempt at it lost the field to
+  a blur before its Return. What the link is, and what it points at, is pinned
+  by `crates/knobas-app/tests/capture_ipc.rs` and
+  `app/src/lib/capture/capture.test.svelte.ts`. **#525.**
+* **A shortcut the operating system refuses.** That needs another application
+  holding a combination, which no driver can arrange on a machine it does not
+  own. The refusal path is pinned at the IPC seam with a stand-in registrar.
+* **Which entity a born link points at, from a driver.** Deliberately not
+  asserted: the ticket's key is on the room behind the slide-over and the
+  context's label is on the tab strip, so a driver reading the whole window for
+  either would pass with no link drawn at all.
+* **Launch Services with several copies of `dev.knobas.desktop` registered.**
+  Not a gap in a driver — a prerequisite, and on this Mac it is real. The
+  harness refuses unless the copy Launch Services names is the one it just
+  built, and there were **ten** registered paths on 2026-09-08: `/Applications`,
+  three old worktrees, the root checkout's debug and release bundles, and five
+  stale DMG mount points. The three green runs above were made with the others
+  unregistered (`lsregister -u <path>`) and every one that still existed on disk
+  put back afterwards; nothing was moved or deleted. **A merge-manager
+  re-running these recipes has to do the same**, or the harness will refuse with
+  *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
+  the winner. Making the harness handle that itself is #525's.
 
 ## Scripts
 
@@ -1350,7 +1414,7 @@ regression; #525 is where it stops being.
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
-| `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison and the accessibility probe's reading. No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
+| `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers. No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
 ## mockd's documented deviations
