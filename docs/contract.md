@@ -8102,10 +8102,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   after the first keystroke); three in `app/src/lib/shell/timer.test.ts` for the foreground ladder, its `canBeTarget`
   fall-through and the scan that keeps it spelled once;
   `entity_mirror.rs`'s `the_note_link_input_shape_matches_its_typescript_mirror`, which round-trips
-  the input DTO so a Rust-only field cannot hide; and, on the frontend, six in
-  `shell/Room.test.svelte.ts` for what *New note* sends from a stored room, over an open detail,
-  from the three derived rooms and over a detail in a derived room, and two more for the ruled
-  second rung --- a promoted room with nothing open, and an ad-hoc one --- plus two in
+  the input DTO so a Rust-only field cannot hide; and, on the frontend, seven in
+  `shell/Room.test.svelte.ts` for what *New note* sends --- four for the rooms (a stored room, over
+  an open detail, the three derived rooms, and over a detail in a derived room) and three for the
+  ruled second rung (a promoted room with nothing open, an ad-hoc one, and the one place the two
+  rungs compete: a detail open over a promoted room, where the detail wins) --- plus two in
   `detail/relations.test.ts` for the two readings of each word and the grouping they produce on the
   context's own panel.
 

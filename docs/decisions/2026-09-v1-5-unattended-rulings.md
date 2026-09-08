@@ -386,3 +386,14 @@ the property it pins is true today and stays true until someone edits a `where` 
 and either alone is sufficient; the new test dies only when both go. The ruling's expectation that
 the origin is what protects a born link is half the picture, and rule 1 of the §10.8 entry now says
 so.
+
+**Re-run by the merge-manager of #526, with the scope stated**, since "survives" without one
+invites the wrong conclusion. Over `cargo test -p knobas-app --test entity` (42 tests) both
+single-clause mutants pass and the both-clauses mutant fails
+`a_born_link_survives_the_notes_first_autosave` on *"the body governs the links the body derived,
+and nothing else: []"* — the implementer's account, exactly. Widened to `knobas-core`, the two
+clauses part company: `and origin = $3` **is** pinned, by
+`crates/knobas-core/tests/notes.rs`'s `a_hand_drawn_link_out_of_a_note_survives_the_body_changing`,
+which dies without it; `and relation = $2` is pinned by nothing in either binary. So the correction
+holds for the born-link property the ruling was about, and the origin clause is not unguarded in
+the codebase — a full `just check` goes red on that mutant.

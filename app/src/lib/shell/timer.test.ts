@@ -83,6 +83,21 @@ test("the room foreground ladder is spelled once, and both readers call it", () 
     const inlined = /anchorId[^\n]*canBeTarget|canBeTarget[^\n]*anchorId/.test(source);
     expect(inlined, `${file} re-spells the anchor rung instead of calling it`).toBe(false);
   }
+
+  // The line-scoped pattern above is as strong as `App.svelte` can be held to:
+  // it keeps a legitimate `canBeTarget` for the assets branch a few lines from
+  // the `anchorId` it hands to `roomForeground`, so any window wider than one
+  // line would fire on correct code. It also leaves a hole — a re-inlined
+  // ladder spread over two lines matches neither half of it, which is exactly
+  // how `App.svelte` spelled the rung before #502. `Room.svelte` has no assets
+  // branch and reaches the guard only through `roomForeground`, so it can be
+  // held to the rule that closes that hole, and it is the file where a second
+  // spelling would do the damage: the born link is what would then disagree
+  // with the heartbeat.
+  expect(
+    readFileSync(join(root, "lib/shell/Room.svelte"), "utf8"),
+    "Room.svelte reaches the target guard through roomForeground and nowhere else",
+  ).not.toContain("canBeTarget");
 });
 
 // -- what may be a target ---------------------------------------------------

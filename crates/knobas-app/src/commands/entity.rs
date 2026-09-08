@@ -1254,10 +1254,12 @@ pub struct NoteLinkInput {
 /// stories 40--43): `captured-in` to the context of the stored room the reader
 /// stands in -- which makes the note a member of it by ADR-0008, since an
 /// explicit add is an ordinary link touching the context's own `ctx:` entity --
-/// and `captured-from` to the entity whose detail is open. A derived room has
-/// no context (`CONTEXT.md`, **Room**), so a note born in one is born with
-/// nothing, and that is a caller's decision rather than a rule here: this
-/// command draws the links it is handed.
+/// and `captured-from` to the **foreground**, the word as `CONTEXT.md`'s
+/// **Passive attribution** defines it and as the heartbeat computes it: the
+/// open detail, else the room's anchor, else nothing (the deputy's ruling of
+/// 2026-09-08 on #502). A derived room has no context (`CONTEXT.md`, **Room**),
+/// so a note born in one is born with nothing, and that is a caller's decision
+/// rather than a rule here: this command draws the links it is handed.
 ///
 /// They are drawn in the note's own transaction, which is what the ticket's
 /// title means -- see [`knobas_core::note::create`], which also states what

@@ -35,7 +35,9 @@ export const DEFAULT_RELATION = "related";
  *
  * `captured-in` names the [context](../shell/contexts.ts) of the stored room
  * the reader stood in — which is what makes the note a member of it by
- * ADR-0008 — and `captured-from` the entity whose detail was open. Constants
+ * ADR-0008 — and `captured-from` the **foreground**: the open detail, else the
+ * room's anchor, else nothing (`CONTEXT.md`, **Passive attribution**; the
+ * deputy's ruling of 2026-09-08 on #502). Constants
  * because three places have to agree on the spelling: the curated list below,
  * what *New note* sends (`shell/Room.svelte`), and what the capture window
  * will send (#503). A fourth spelling would be a note that says it was

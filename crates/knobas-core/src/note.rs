@@ -184,14 +184,27 @@ pub struct BornLink {
 /// note that was, for that moment, in no context.
 ///
 /// **A target with no `knobas.entity` row draws no link, and the note is
-/// written anyway.** The same rule [`reconcile_refs`] applies to a `[[ref]]`
-/// naming nothing, expressed as the same `select ... from knobas.entity`: the
-/// caller's ids are read from surfaces that can go stale between the read and
-/// the keystroke -- a remembered room, a detail whose source was purged -- and
-/// refusing the note would make *New note* a button that stays broken while
-/// the reader can do nothing about it. Nothing is hidden by this: the note's
-/// links panel draws the links that exist, and there is no field claiming
-/// otherwise (`CONTEXT.md`, **Capture**: *"Never a field on the note"*).
+/// written anyway** -- expressed as the same `select ... from knobas.entity`
+/// [`reconcile_refs`] uses, though the precedent is `commands::time`'s
+/// `heartbeat` rather than that one: *"losing the attribution is honest,
+/// losing the observation is not"*. The note is the observation and a born
+/// link is the attribution, and refusing the note would make *New note* a
+/// button that stays broken while the reader can do nothing about it. Nothing
+/// is hidden by this: the note's links panel draws the links that exist, and
+/// there is no field claiming otherwise (`CONTEXT.md`, **Capture**: *"Never a
+/// field on the note"*).
+///
+/// **Which case that is, exactly**, because the obvious guess is wrong: an id
+/// *no row ever carried*. An entity a source dropped still **has** its row --
+/// a purge tombstones and never deletes (`knobas_sync::config`'s
+/// `PURGE_ITEMS` is an `update ... set deleted_at`; `CONTEXT.md`'s **Purge**
+/// carries *delete* on its *Avoid* list for this reason), and a context is
+/// never deleted at all -- so a born link to one **is** drawn, and the panel
+/// shows it marked ([`crate::link::LinkEnd`]'s `deleted_at`). What reaches this
+/// clause is a caller handing an id it did not read from a row, or one
+/// remembered across a database that changed under it. Ruled by the deputy on
+/// 2026-09-08 (#502); ADR-0011 is why the earlier wording here was corrected
+/// rather than left standing.
 ///
 /// # Errors
 ///

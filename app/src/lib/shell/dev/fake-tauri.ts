@@ -1938,6 +1938,10 @@ function saveNote(args: Record<string, unknown>) {
  */
 function noteDetail(id: string) {
   const note = NOTES.get(id)!;
+  const refs = [...note.body_md.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {
+    const targetId = found[1]!.trim();
+    return { target_id: targetId, target: noteLinkEnd(targetId) };
+  });
   const links = note.born
     .map((born) => ({ born, other: noteLinkEnd(born.target_id) }))
     .filter((drawn): drawn is { born: NoteLinkInput; other: LinkEnd } => drawn.other !== null)
@@ -1969,7 +1973,7 @@ function noteDetail(id: string) {
       created_at: note.created_at,
       updated_at: SYNCED_AT,
     },
-    refs: [],
+    refs,
     links,
   };
 }

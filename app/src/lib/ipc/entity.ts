@@ -499,8 +499,10 @@ export interface NoteLinkInput {
   target_id: string;
   /**
    * The stored relation. Folded to lower case by the backend like every other
-   * relation, and blank falls back to `related` (`detail/relations.ts`'s
-   * `DEFAULT_RELATION`) — so pass a word.
+   * relation, and **blank is refused** with `invalid` rather than defaulting to
+   * `related`: `create_link`'s relation is optional and its absence means
+   * *nobody named one*, but a link drawn beside a note is one the reader saw no
+   * dialog for, so `""` is a caller bug.
    */
   relation: string;
 }
@@ -513,14 +515,17 @@ export interface NoteLinkInput {
  *
  * `links` is what a **capture** attaches (`CONTEXT.md`, **Capture**):
  * `captured-in` to the context of the stored room the reader stands in, which
- * makes the note a member of it by ADR-0008, and `captured-from` to the entity
- * whose detail is open. A derived room has no context and an absent detail has
+ * makes the note a member of it by ADR-0008, and `captured-from` to the
+ * **foreground** — the open detail, else the room's anchor, else nothing, the
+ * word as `CONTEXT.md`'s **Passive attribution** defines it and as the
+ * heartbeat computes it (the deputy's ruling of 2026-09-08 on #502). A derived
+ * room has no context and a room with nothing in front of the reader has
  * nothing to point at, so a caller with neither omits the argument. Drawn in
  * the note's own transaction — a note is never briefly in no context.
  *
- * Rejects with `invalid` for a link whose target is not an entity id. A target
- * that no longer exists is not an error: no link is drawn and the note is
- * written, the same answer a `[[ref]]` naming nothing gets.
+ * Rejects with `invalid` for a link whose target is not an entity id, and for a
+ * blank relation. An id no row carries is not an error: no link is drawn and
+ * the note is written, the same answer a `[[ref]]` naming nothing gets.
  */
 export function createNote(
   title?: string,
