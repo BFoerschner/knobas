@@ -424,6 +424,20 @@ test("with no sources prop, the rows take their health from the board", async ()
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
+/**
+ * The box before the board's own read lands.
+ *
+ * One frame, and the only one in which the launcher names the store it is
+ * reading, so the word is pinned here or nowhere: `CONTEXT.md`'s **Mirror**
+ * entry lists *index* under `_Avoid_` and this line said *local index* from M1
+ * until #518. Asserted before `settle()` on purpose — after it the board has
+ * arrived and this line is gone.
+ */
+test("the box says which store it is reading while the board is in flight", () => {
+  open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
+  expect(target.textContent).toContain("Reading the mirror\u2026");
+});
+
 test("an empty box shows the smart lists and the recent items", async () => {
   open();
   await settle();
@@ -1089,8 +1103,12 @@ test("an author search says which sources could not be asked", async () => {
   // listing it would turn the explanation into a roll call.
   expect(gap?.textContent).not.toContain("Jira");
   // And the ordinary empty-result line is still there — the gap explains part
-  // of the emptiness, it does not replace the answer.
-  expect(target.querySelector(".none")).not.toBeNull();
+  // of the emptiness, it does not replace the answer. Its words, not merely
+  // its presence: this is the launcher's other account of the store it read,
+  // and it said *local index* from M1 until #518.
+  expect(target.querySelector(".none")?.textContent).toContain(
+    "Nothing in the mirror matches",
+  );
 });
 
 /**
