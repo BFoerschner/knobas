@@ -224,6 +224,118 @@ once, for #525.
 
 ---
 
+## #501 — the substituted witness for *not configured*, and whether #531 belongs in v1.5
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/501#issuecomment-5577955024>
+
+**The fork:** PR #530 was merged (`59479185`) and nothing here blocked it; its
+merge-manager escalated two questions afterwards. **(1)** Criterion 2 of #501
+asks that *"with an unset template on a non-macOS platform it reports not
+configured"*, and asks it at the IPC seam. `checkout_ipc.rs` has no such test,
+and the merge-manager judged that none can exist on this machine:
+`knobas_app::checkout::open` and `commands` both call
+`action.default_template()`, which reads `std::env::consts::OS`; the gate runs
+on a Mac; and macOS ships a default for all three actions — so *not
+configured* is a state no Mac reaches through a database. The PR moved the
+platform into an argument of all three deciders (`default_template_on`,
+`command_view`, `template_or_refusal`) and witnessed the refusal on the
+decider, in `an_action_with_no_template_on_this_platform_is_not_configured`,
+with the seam test `clearing_a_template_hands_this_platforms_default_back`
+saying in its doc comment where the other arm is. The PR body's checked bullet
+had named a test that exists nowhere; the merge-manager corrected it to the
+real name and merged, calling this *"a disclosed, reasoned substitution rather
+than a fork"*. Was the substitution right, should the box be open rather than
+checked, and is a record, a ticket, or nothing owed? **(2)** #531: the spawn
+wait in `open-in-editor.sh` breaks on `[ -s "$record" ]` where its Rust twin
+`recorded()` waits for the trailing newline. The divergence can only produce a
+false *failure*, on a driver that cannot yet run. v1.5, or leave it
+`needs-triage` with no milestone?
+
+**Ruling:** **(1) The substitution was right, criterion 2 stays checked, and
+nothing more is owed for it in code or in a new ticket.** The question was
+answered before the PR was written: spec #491's *Desktop witness, no human*
+ends *"Off macOS nothing is witnessed; the buttons read not configured"*, its
+Out of Scope list carries *"Witnessing on Linux or Windows"*, and the grilling
+ruled *"macOS is the witnessed platform; others get command templates and no
+witness"*. The precedent is **#496 part 3, not #500**: ADR-0013's 2026-09-07
+consequence sorts a witness gap into two classes — *"awkward to reproduce is
+not cannot produce: if the real instance can be driven into the fault by any
+seed, flag or clock, it is witnessed live"*, and otherwise *"a fake in the
+crate's test module is the witness for that one criterion"*. #500's locked
+screen is the first class (a Mac can be unlocked, so the run is deferred and
+#525 carries it); a Mac reporting a non-macOS `std::env::consts::OS` is the
+second, so the criterion is *met by the sanctioned substitute*, not held open
+against a run no ticket in this milestone may make. The two-place record that
+exists — the §10.8 entry and the seam test's doc comment — is sufficient.
+**Two lines of record-keeping are owed, and they ride in #531's PR:** this
+ruling appended here as a `## #501` section, since no other v1.5 PR acts on
+it; and the one citation ADR-0013's consequence asks of a substitute — *"The
+fake's doc comment cites this line"* — added to
+`an_action_with_no_template_on_this_platform_is_not_configured`'s doc comment,
+naming that 2026-09-07 consequence. No test is added, no signature moves, no
+`os` parameter is threaded into `open` or onto the wire, and nothing is
+written into #525. **(2) #531 goes into v1.5, `ready-for-agent`, and must
+merge before #525 runs.** It is not a desktop-witness ticket for the
+one-at-a-time cap: it launches no bundle, and its run-criterion is not `just
+desktop-witness` — which would refuse on the lock exactly as #530's did — but
+`just witness-unit` green with the wait condition pinned. Per #500's ruling —
+*"driver logic goes in a lib file `witness-unit` covers … because a driver is
+not exempt from the gate because its run is"* — the wait becomes a function in
+`testenv/desktop-witness-lib.sh` whose condition is the Rust twin's, the
+trailing newline, with a `witness-unit` check that a record without it is not
+yet a record. `launcher-hotkey.sh` has no record-file wait, so the shape is
+#531's alone.
+
+**Reasoning:** (1) the reading that keeps the frozen surface smallest, the
+witness real and the ticket's scope unchanged is the one the PR took. The
+three routes to the letter of criterion 2 are each worse: a test under
+`#[cfg(not(target_os = "macos"))]` is the `cfg!` the spec review struck from
+the first draft — *"the gate's machine asserted the opposite state and the
+refusal branch was executed by nothing"* — moved into a test; an `os`
+parameter on `open_checkout` widens a §10.8 wire shape for a testability seam,
+which the ticket's own entry says it does not do; and an internal
+`open_on(pool, entity_id, action, os)` moves the unwitnessed line rather than
+removing it, since whatever passes `std::env::consts::OS` last is the line no
+seam test on a Mac can see. The platform-as-argument shape puts the decision
+under test for every platform, which is what the criterion was for, and the
+residual can fail only toward a refusal, never toward a spawn, so ADR-0016's
+property is not what rides on it. The box stays checked rather than open
+because #500's open box has a payer (#525, and the exit waits on it), whereas
+an open box here would be a debt nobody in v1.5 is permitted to pay — a hand
+checklist by another name. The PR-body correction was owed regardless: a test
+name that exists nowhere is a claim in a record that measures a
+representation of the thing. (2) the exposure is narrow — the stub is `printf
+'%s\n' "$@" > '$1'`, one open and one write, and `recorded()`'s own comment
+says *"waiting for the trailing newline costs nothing and removes the
+question"* — but the moment it can bite is the worst one in the milestone.
+#525 is the last item before the v1.5 exit, its first run is *"the milestone's
+only evidence that the desktop witness works at all"*, and #500's ruling
+prices a red run at *"the three drivers are re-done against whatever the `ax
+dump` shows"*. A spurious red from half a line would send the runner down that
+path for a defect that is not there, and the Rust suite would give no hint
+because it does not share the bug. Fixing it costs one condition and one
+`witness-unit` check; leaving it unmilestoned leaves the exit gate carrying a
+known flake. It stays out of #525 itself because #525 is `ready-for-human` for
+the unlock alone and its body says *"Do not resolve it here"* about anything
+red.
+
+**If you disagree, the cost of reversing this is:** (1) nothing in code — no
+test is deleted and no signature moves. Reversing means either running the
+gate on a second operating system, which the spec's Out of Scope list and the
+grilling both refuse for v1.5 and which is Björn's line to redraw, or adding a
+platform parameter to an internal function so a seam test can pass `"linux"`:
+one function, one test, the unwitnessed line moved up one frame, additive and
+cheap at any time. Unchecking criterion 2 later is one edit to a closed ticket
+and a line in #525 or a new ticket. The two record-keeping lines are a doc
+comment and this section, reversible by deletion. (2) trivial — close #531
+`wontfix` or strip its milestone before anyone starts it; the driver is
+unchanged either way, and the first run on #525 then carries the one known
+spurious-red path, which the runner should be told about if that is the choice
+made.
+
+---
+
 ## #502 — what `captured-from` names when no detail is open, and the activity line a born link's withdrawal has no partner for
 
 Ruled 2026-09-08. Comment:

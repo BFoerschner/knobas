@@ -535,6 +535,19 @@ mod tests {
     /// -- macOS has a default for all three -- and which is what every button
     /// off macOS is in. Reachable here because the platform's default is an
     /// argument rather than a `cfg!`.
+    ///
+    /// **The citation ADR-0013 asks of a sanctioned substitute.** Its
+    /// 2026-09-07 consequence -- *"A fault the real instance cannot produce is
+    /// witnessed by a fake, and only that"* -- asks that *"The fake's doc
+    /// comment cites this line"*, and this test is that fake: the platform is
+    /// passed in, standing in for a machine the gate does not have. The rest
+    /// of that same line is why it is allowed here. *Awkward to reproduce* is
+    /// not *cannot produce*, and a Mac cannot be seeded, flagged or clocked
+    /// into reporting a non-macOS `std::env::consts::OS`, so no live run
+    /// reaches this arm -- unlike the locked screen of #500, which a person
+    /// unlocks. The seam is witnessed on its other arm by `checkout_ipc.rs`'s
+    /// `clearing_a_template_hands_this_platforms_default_back`. The
+    /// deputy's ruling of 2026-09-08 on #501, part 1.
     #[test]
     fn an_action_with_no_template_on_this_platform_is_not_configured() {
         let view = command_view(OpenAction::JetBrains, None, None);

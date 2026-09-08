@@ -6,12 +6,13 @@
 # themselves where macOS and `swiftc` are not both present.
 #
 # What is under test is `desktop-witness-lib.sh`: the path comparison the
-# harness makes against Launch Services' answer, and the reading of the
-# accessibility probe. Both are small enough to look correct and have been
-# wrong in this exact shape before -- the notification prototype lost a run to
-# a bundle path that differed by where it was copied from, and an unanswered
-# TCC prompt is recorded as a *denial*, so "no news" from a probe is the one
-# reading that must never come back as "granted".
+# harness makes against Launch Services' answer, the reading of the
+# accessibility probe, and the pieces `open-in-editor` is built out of. The
+# first two are small enough to look correct and have been wrong in this exact
+# shape before -- the notification prototype lost a run to a bundle path that
+# differed by where it was copied from, and an unanswered TCC prompt is
+# recorded as a *denial*, so "no news" from a probe is the one reading that
+# must never come back as "granted".
 #
 # The probe fixtures below are recorded output from `ax probe` on the dev Mac
 # on 2026-09-08, not invented shapes: the `screen-locked` one is what the first
@@ -229,6 +230,106 @@ check "a recorded path containing a space survives whole" "/Users/mara/My Code/p
     "$(sole_argument "/Users/mara/My Code/payout service")"
 check "trailing blank lines are not a second argument" "/src/x" \
     "$(sole_argument "$(printf '/src/x\n\n')")"
+
+# --- the wait the driver breaks on (#531) -----------------------------------
+#
+# The driver polls for the stub's output, and until this ticket it broke on
+# `[ -s "$record" ]` -- any non-empty file. Its Rust twin, `recorded()` in
+# `crates/knobas-app/tests/checkout_ipc.rs`, waits for the trailing newline,
+# which is the write having *finished*. A wait on non-emptiness can hand the
+# comparison half a line, and half a line is reported as *the command was not
+# given the checkout path*: the feature blamed for a race in the harness, on
+# the one run the witness exists for.
+#
+# So the condition itself is what is checked here, on real files, rather than
+# the driver's spelling of it: the driver calls `wait_for_record` and holds no
+# copy of the rule.
+
+# check_is_record <what> <yes|no> <path>
+check_is_record() {
+    local outcome=no
+    record_is_complete "$3" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+
+# check_waits <what> <yes|no> <path> <seconds>
+check_waits() {
+    local outcome=no
+    wait_for_record "$3" "$4" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+
+# Removed at the foot of the section, and by a trap until then: `check` never
+# exits, but `wait` on the background writer below does under `set -e`, and
+# that is an exit between the `mktemp` and the `rm -rf`. The helper section at
+# the foot of this file replaces this trap with its own, by which point this
+# directory is already gone.
+records=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-records.XXXXXX")
+trap 'rm -rf "$records"' EXIT
+
+printf '/Users/mara/src/payout-service\n' >"$records/whole"
+printf '/Users/mara/src/payout-serv' >"$records/half"
+: >"$records/empty"
+
+check_is_record "a record that ends in a newline is a record" yes "$records/whole"
+# The whole ticket, in one line.
+check_is_record "a record without its trailing newline is not yet a record" no \
+    "$records/half"
+# `tail -c 1` of an empty file prints nothing, exactly as it does for a file
+# ending in a newline -- so this is the check that keeps the `-s` in.
+check_is_record "the empty file the stub's redirect opens is not a record" no \
+    "$records/empty"
+check_is_record "a path with nothing at it is not a record" no "$records/absent"
+# Two arguments, and a path with a space in it: what makes a record finished is
+# where it ends, not what it says.
+printf '%s\n%s\n' --wait '/Users/mara/My Code/payout service' >"$records/two"
+check_is_record "a two-line record that ends in a newline is a record" yes \
+    "$records/two"
+
+# A budget of 0 is one look, and it is how the two checks below stay instant.
+check_waits "the wait answers at once for a record already on disk" yes \
+    "$records/whole" 0
+check_waits "the wait gives up when nothing is ever written" no \
+    "$records/absent" 0
+check_waits "the wait gives up on a record that never finished" no \
+    "$records/half" 0
+
+# And that it is a *wait*: a record written after the polling starts is waited
+# for, and what the caller then reads is the whole of it. The writer leaves
+# half a line on disk first, which is the state the old condition would have
+# returned.
+late=$records/late
+(
+    printf '/Users/mara/src/payout-serv' >"$late"
+    sleep 0.6
+    printf '/Users/mara/src/payout-service\n' >"$late"
+) &
+writer=$!
+if wait_for_record "$late" 10; then
+    check "a record still being written is waited out, and read whole" \
+        "/Users/mara/src/payout-service" "$(cat "$late")"
+else
+    check "a record still being written is waited out, and read whole" \
+        "/Users/mara/src/payout-service" "(the wait gave up after 10 s)"
+fi
+wait "$writer"
+
+rm -rf "$records"
+
+# The twin, pinned in the direction this ticket's divergence ran: two files
+# waiting on one stub, and only a reader of both can see them disagree. This
+# pins the spelling of the Rust condition, which is all a shell test can see of
+# it -- the same cheap cross-file pin as the labels below, and for the same
+# reason.
+twin=../crates/knobas-app/tests/checkout_ipc.rs
+if grep -qF "text.ends_with('\\n')" "$twin"; then
+    check "the Rust twin still waits for the trailing newline" yes yes
+else
+    check "the Rust twin still waits for the trailing newline" yes no
+    printf '  %s no longer contains text.ends_with(...) anywhere;\n' "$twin" >&2
+    printf "  recorded()'s wait is what that spelling stands for, and\n" >&2
+    printf '  record_is_complete is the shell copy of it (#531).\n' >&2
+fi
 
 # --- the accessible names the open-in-editor driver acts on -----------------
 #
