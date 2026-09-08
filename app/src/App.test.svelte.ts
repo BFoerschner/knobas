@@ -161,6 +161,19 @@ vi.mock("./lib/ipc/sources", () => ({
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // What a capture would attach (#503): the main window records its room and
+  // its foreground here whenever either changes. Recorded rather than
+  // swallowed, because the pair is what the capture window's two links are
+  // built from and this file is the only place the shell's own answers can be
+  // read.
+  // The capture shortcut the settings section draws (#503). Nothing set, which
+  // is the default, and no refusal to explain.
+  captureShortcut: () => Promise.resolve({ accelerator: null, refusal: null }),
+  setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
+  recordCaptureContext: (context: string | null, foreground: string | null) => {
+    captureRecords.push({ context, foreground });
+    return Promise.resolve();
+  },
   // The Tree's pane withdraws a link through this (#435). Nothing here does,
   // so it refuses rather than answering.
   unlink: () => Promise.reject(new Error("no unlink in this test")),
@@ -237,6 +250,16 @@ let timerStarts: unknown[] = [];
 /** The room each of those starts carried (#281). */
 let timerRooms: (string | null)[] = [];
 let timerStops = 0;
+/**
+ * Every pair the shell recorded for a capture (#503), in order.
+ *
+ * The **same** two values `timerRooms` and the foreground rule produce, sent to
+ * the backend so the capture window -- which has no shell in it -- can attach
+ * them. Recorded here because this file is the only seam where the shell's own
+ * answers are readable, and the property that matters is that the two records
+ * of *what was I on* cannot disagree.
+ */
+let captureRecords: { context: string | null; foreground: string | null }[] = [];
 /** What `currentTimer` answers on bring-up — set by a test that needs one running. */
 let timerRunning: unknown = null;
 /** The block `stopTimer` closes, which is what the worklog draft opens on (#280). */
@@ -545,6 +568,7 @@ beforeEach(() => {
   timerStarts = [];
   timerRooms = [];
   timerStops = 0;
+  captureRecords = [];
   timerRunning = null;
   timerClosed = null;
   draftAsks = [];
@@ -1512,6 +1536,60 @@ test("⌘T starts on the open detail rather than on the anchor of the room behin
     { kind: "entity", entity_id: "mock:PAY-231" },
   ]);
   expect(pickerTitle(), "the picker opened over a foreground that existed").toBeNull();
+});
+
+/**
+ * **What a capture would attach is what the timer would record** (#503).
+ *
+ * The property the deputy's ruling of 2026-09-08 on #502 binds, walked end to
+ * end at the one seam where both answers are readable: the pair sent to
+ * `record_capture_context` is the same room ⌘T records on its block and the
+ * same foreground ⌘T starts on. The capture window has no shell in it and
+ * cannot work either out, so this record is the only thing standing between a
+ * note and a `captured-from` that disagrees with the day review's passive block
+ * for the same minute.
+ *
+ * Asserted **against the timer's own two answers** and not against two literals
+ * beside them, because two literals would pass with the shell computing the
+ * pair a third way -- which is exactly the divergence the ruling refused.
+ */
+test("what a capture would attach is the room and the foreground the timer records", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  contextRows = [PROMOTED];
+  location.hash = "#/ctx/ctx:pay";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+
+  router.go("#/ticket/mock:PAY-231");
+  flushSync();
+  await until(
+    () => captureRecords.at(-1)?.foreground === "mock:PAY-231",
+    "the open detail never reached the capture record",
+  );
+
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+
+  const recorded = captureRecords.at(-1)!;
+  expect(recorded.foreground, "the capture and the timer disagree about the foreground").toBe(
+    (timerStarts[0] as { entity_id: string }).entity_id,
+  );
+  expect(recorded.context, "the capture and the timer disagree about the room").toBe(
+    timerRooms[0]!,
+  );
+
+  // Out into *All work* with nothing open: a derived room has no context, and
+  // nothing is in front of the reader. Both halves go, and they go together.
+  pressTimerKey();
+  await until(() => timerStops > 0, "the timer never stopped");
+  router.go("#/ctx/all");
+  flushSync();
+  await until(
+    () => captureRecords.at(-1)?.context === null && captureRecords.at(-1)?.foreground === null,
+    "a derived room with nothing open never recorded an empty pair",
+  );
 });
 
 /**

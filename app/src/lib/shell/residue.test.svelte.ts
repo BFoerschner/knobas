@@ -135,6 +135,14 @@ const LINE = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // What a capture would attach (#503): the main window records its room and
+  // its foreground here whenever either changes. Nothing in this file opens a
+  // capture window, so it only has to answer.
+  // The capture shortcut the settings section draws (#503). Nothing set, which
+  // is the default, and no refusal to explain.
+  captureShortcut: () => Promise.resolve({ accelerator: null, refusal: null }),
+  setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
+  recordCaptureContext: () => Promise.resolve(),
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
@@ -339,6 +347,7 @@ const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
 const CheckoutPanel = (await import("../detail/CheckoutPanel.svelte")).default;
 const CheckoutsSection = (await import("../settings/CheckoutsSection.svelte")).default;
+const CaptureSection = (await import("../settings/CaptureSection.svelte")).default;
 const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
 const MonitoringSection = (await import("../settings/MonitoringSection.svelte")).default;
 const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
@@ -1068,6 +1077,30 @@ const CASES: Case[] = [
           ports: {
             clonesRoot: () => deferred<string | null>("/Users/mara/src"),
             setClonesRoot: () => Promise.reject(new Error("no settings write in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The capture-shortcut section (#503). The same shape: one settings read,
+     * unmounted before it answers.
+     */
+    name: "CaptureSection",
+    source: "lib/settings/CaptureSection.svelte",
+    open: (target) => ({
+      app: mount(CaptureSection, {
+        target,
+        props: {
+          ports: {
+            captureShortcut: () =>
+              deferred<{ accelerator: string | null; refusal: string | null }>({
+                accelerator: "CmdOrCtrl+Shift+N",
+                refusal: null,
+              }),
+            setCaptureShortcut: () =>
+              Promise.reject(new Error("no settings write in this test")),
           },
         },
       }),

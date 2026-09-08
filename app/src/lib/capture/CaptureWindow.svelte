@@ -32,6 +32,7 @@
     close?: () => Promise<void>;
   } = $props();
 
+  // svelte-ignore state_referenced_locally
   const capture = createCapture({
     close:
       close ??
