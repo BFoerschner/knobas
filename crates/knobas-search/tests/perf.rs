@@ -360,10 +360,12 @@ async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
         .collect();
     assert!(
         refused.is_empty(),
-        "{} of the fixture's saved lists are refused, so they are not in the \
+        "{} of the fixture's {} saved lists are refused, so they are not in the \
          counting statement at all and this times an emptier rail than it \
-         claims: {refused:?}",
-        refused.len()
+         claims. The first: {:?}",
+        refused.len(),
+        saved.len(),
+        refused.first()
     );
     let counted: i64 = saved.iter().map(|list| list.count).sum();
     assert!(
