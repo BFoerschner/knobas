@@ -1,9 +1,6 @@
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_label_keeps_its_own_key_and_one_that_shadows_a_written_key_is_refused
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_parent_is_written_only_for_the_entries_the_import_would_create
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_server_without_an_address_or_an_image_carries_neither_property
-knobas-app	lib/knobas_app	assets::hcloud::tests::a_stored_token_is_not_written_back
-knobas-app	lib/knobas_app	assets::hcloud::tests::a_token_is_owed_only_when_the_keychain_holds_none
-knobas-app	lib/knobas_app	assets::hcloud::tests::a_typed_token_is_kept_only_when_the_run_answered
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_id_is_written_as_text_and_the_entry_is_named_after_it
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_origin_key_this_producer_writes_is_the_one_the_planner_matches_on
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_page_shape_carries_the_cursor_the_walk_follows
@@ -15,8 +12,12 @@ knobas-app	lib/knobas_app	assets::tests::a_route_url_needs_a_scheme_and_nothing_
 knobas-app	lib/knobas_app	assets::tests::a_routes_properties_are_all_custom_in_key_order
 knobas-app	lib/knobas_app	assets::tests::a_routes_property_is_vetted_for_its_value_and_against_no_schema
 knobas-app	lib/knobas_app	assets::tests::a_row_is_offered_the_action_its_state_has_a_use_for
+knobas-app	lib/knobas_app	assets::tests::a_stored_token_is_not_written_back
+knobas-app	lib/knobas_app	assets::tests::a_token_is_owed_only_when_the_keychain_holds_none
+knobas-app	lib/knobas_app	assets::tests::a_tokens_debug_prints_no_credential
 knobas-app	lib/knobas_app	assets::tests::a_type_no_table_declares_is_refused_by_name
 knobas-app	lib/knobas_app	assets::tests::a_typed_key_refuses_a_kind_its_type_did_not_declare
+knobas-app	lib/knobas_app	assets::tests::a_typed_token_is_kept_only_when_the_run_answered
 knobas-app	lib/knobas_app	assets::tests::a_value_comes_from_the_nearest_asset_at_or_above_that_sets_it
 knobas-app	lib/knobas_app	assets::tests::an_unreadable_bag_yields_the_schema_and_nothing_else
 knobas-app	lib/knobas_app	assets::tests::every_environment_is_one_the_schema_accepts
@@ -25,6 +26,7 @@ knobas-app	lib/knobas_app	assets::tests::every_visibility_is_one_the_schema_acce
 knobas-app	lib/knobas_app	assets::tests::the_alert_states_are_the_ones_the_engine_opens
 knobas-app	lib/knobas_app	assets::tests::the_asset_namespace_is_one_knobas_core_reserves
 knobas-app	lib/knobas_app	assets::tests::the_checked_in_estate_parses_and_its_scalars_become_tagged_values
+knobas-app	lib/knobas_app	assets::tests::the_estate_files_producer_is_refused_by_name_and_hcloud_is_not
 knobas-app	lib/knobas_app	assets::tests::the_file_shapes_read_the_keys_the_estate_files_own_check_allows
 knobas-app	lib/knobas_app	assets::tests::the_files_assets_are_ordered_parent_first_and_a_cycle_is_refused
 knobas-app	lib/knobas_app	assets::tests::the_monitor_kind_is_a_word_knobas_keeps_for_itself

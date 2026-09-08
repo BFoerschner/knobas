@@ -599,20 +599,15 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
 ) -> Result<assets::hcloud::Produced, IpcError> {
     let pool = lifecycle.pool()?;
     let producer = assets::find_producer(&producer)?;
-    // No wildcard arm on the importer (ADR-0006's rule applied to this enum):
-    // a producer that reads a live system added later has to be given a run
-    // here, rather than falling through to a refusal that reads like a bug.
-    let Some(importer) = producer.importer else {
-        return Err(IpcError::invalid(format!(
-            "`{}` is not an importer: it is the estate file a person picks off              the disk, and there is no live system to produce one from.",
-            producer.id
-        )));
-    };
+    // No wildcard arm on the importer below (ADR-0006's rule applied to this
+    // enum): a producer that reads a live system added later has to be given a
+    // run here, rather than falling through to a refusal that reads like a bug.
+    let importer = assets::importer_of(producer)?;
 
     // The keychain, which is where an importer's credential lives -- under its
     // own namespace, so nothing that walks *sources* can reach it (ADR-0015).
     let secrets = &crate::sources::state(&app)?.secrets;
-    let Some(credential) = assets::hcloud::token_for(secrets, producer.id, token).await? else {
+    let Some(credential) = assets::token_for(secrets, producer.id, token).await? else {
         return Ok(assets::hcloud::Produced::TokenNeeded);
     };
 
@@ -641,7 +636,7 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     // before it, so "a credential the far end refused is never kept" is a
     // property of `remember` that its own tests hold it to, rather than a
     // property of the order these two lines are written in.
-    assets::hcloud::remember(secrets, producer.id, credential, run).await
+    assets::remember(secrets, producer.id, credential, run).await
 }
 
 /// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
@@ -1529,18 +1524,20 @@ mod tests {
     /// and nothing else in the tree would notice: the two lists are in
     /// different languages and no compiler reads both.
     ///
-    /// **One direction only, deliberately.** `assets::HCLOUD_PRODUCER` is
-    /// declared before anything can produce an hcloud file (#508 gives the
-    /// planner the rule; v1.5's stream 9 gives the chooser its entry), so a
-    /// producer with no entry is the expected state and not a fault.
+    /// **One direction only, deliberately.** A producer is declared here before
+    /// anything can produce its files -- #508 declared `hcloud`'s origin key a
+    /// ticket before #509 gave it a produce command and a chooser entry, and
+    /// Docker (spec #491, story 67) is in that state now -- so a producer with
+    /// no entry is the expected state and not a fault.
     ///
     /// The ids are read **out of the list** rather than looked for anywhere in
     /// the file, so a `"hcloud"` written in a comment somewhere else in the
     /// mirror cannot make this pass, and the list is asserted to be non-empty
     /// so that a renamed or moved declaration fails as a broken parse instead
-    /// of checking nothing. **Non-empty and not a count**: stream 9 adds the
-    /// hcloud entry and stream 10 the Docker one, and a number here would go
-    /// red on the day the chooser grew the entry this test exists to check.
+    /// of checking nothing. **Non-empty and not a count**: #509 added the
+    /// hcloud entry and stream 10 adds the Docker one, and a number here would
+    /// go red on the day the chooser grew the entry this test exists to check
+    /// -- which is exactly what #509 would have done.
     #[test]
     fn the_chooser_offers_producers_this_build_knows() {
         let at = MIRROR
@@ -1552,12 +1549,19 @@ mod tests {
         let closes = MIRROR[opens..].find(']').expect("the list closes") + opens;
         let list = &MIRROR[opens..closes];
 
-        let offered: Vec<&str> = list
+        let offered: Vec<(&str, bool)> = list
             .match_indices("id: ")
             .map(|(at, keyword)| {
                 let rest = &list[at + keyword.len()..];
                 let quoted = rest.strip_prefix('"').expect("an id is a string literal");
-                &quoted[..quoted.find('"').expect("an unterminated id")]
+                let id = &quoted[..quoted.find('"').expect("an unterminated id")];
+                // The entry is one object literal, so its `importer:` is
+                // whatever appears before the next entry's `id:`.
+                let entry = &rest[..rest.find("id: ").unwrap_or(rest.len())];
+                let at = entry
+                    .find("importer: ")
+                    .unwrap_or_else(|| panic!("the chooser's {id:?} declares no `importer`"));
+                (id, entry[at..].starts_with("importer: true"))
             })
             .collect();
         assert!(
@@ -1565,11 +1569,27 @@ mod tests {
             "this parse found no producer in the chooser's list; if the \
              declaration moved, fix the parse rather than deleting the check"
         );
-        for id in offered {
-            assert!(
-                assets::PRODUCERS.iter().any(|producer| producer.id == id),
-                "the chooser offers {id:?} and no producer in this build carries \
-                 that id, so every file chosen under it is refused"
+        for (id, importer) in offered {
+            let declared = assets::PRODUCERS
+                .iter()
+                .find(|producer| producer.id == id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the chooser offers {id:?} and no producer in this build \
+                         carries that id, so every file chosen under it is refused"
+                    )
+                });
+            // **And whether it reads a live system**, which is what decides
+            // whether the dialog draws a file input or a token and a produce
+            // command (#509). A chooser that called the estate file an importer
+            // would draw a *Read* button whose every press the backend refuses;
+            // one that called hcloud a file would offer an `<input type="file">`
+            // for a file nobody has.
+            assert_eq!(
+                declared.importer.is_some(),
+                importer,
+                "the chooser and this build disagree about whether {id:?} reads \
+                 a live system"
             );
         }
     }

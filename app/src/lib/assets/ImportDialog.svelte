@@ -35,7 +35,7 @@
 
   **What the entries differ by is where their text comes from**, and that is the
   one thing this dialog branches on: an `<input type="file">` for the estate
-  file, a produce command for an importer (`IMPORTER_IDS`). Everything after the
+  file, a produce command for one whose entry says `importer`. Everything after the
   text — the preview, the three groups, the Import button — is the same code for
   both, because a producer returns an estate file in the checked-in shape and
   there is nothing downstream that could tell which made it.
@@ -84,7 +84,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-  import { IMPORT_PRODUCERS, IMPORTER_IDS } from "../ipc/assets";
+  import { IMPORT_PRODUCERS } from "../ipc/assets";
   import type {
     applyEstateImport,
     assetTree,
@@ -130,7 +130,9 @@
   let producer = $state(IMPORT_PRODUCERS[0].id);
 
   /** Whether the chosen producer reads a live system rather than a disk. */
-  const isImporter = $derived(IMPORTER_IDS.includes(producer));
+  const isImporter = $derived(
+    IMPORT_PRODUCERS.find((entry) => entry.id === producer)?.importer ?? false,
+  );
 
   /**
    * The token field, shown only when the backend says one is owed — on a first
@@ -163,7 +165,7 @@
    * A preview is a plan drawn under one producer's origin key, so carrying one
    * across would offer *Import* on a plan the backend is not about to run.
    */
-  function chose_producer() {
+  function choseProducer() {
     file = null;
     chosen = null;
     preview = null;
@@ -339,7 +341,7 @@
           class="inp"
           id={producerId}
           bind:value={producer}
-          onchange={chose_producer}
+          onchange={choseProducer}
         >
           {#each IMPORT_PRODUCERS as option (option.id)}
             <option value={option.id}>{option.label}</option>

@@ -4139,7 +4139,7 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
 /// entry whose id the tree does not hold, whose origin key names an asset it
 /// does, *is* that asset.
 ///
-/// The file is the shape stream 9's producer will emit -- hcloud's own id for
+/// The file is the shape `assets::hcloud` emits (#509) -- hcloud's own id for
 /// the server, which knobas has never seen -- against the checked-in estate,
 /// whose three servers carry their `hcloud_id`. What is asserted is every
 /// consequence the rule has, because the rename it makes is upstream of all of

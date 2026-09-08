@@ -8711,6 +8711,10 @@ From this commit on, each of the following requires an orchestrator decision **a
     treatment `reachable_transitions` got on `commands::entity` (#498) and the three smart-list
     writes got on `commands::search` (#506). An importer is emphatically **not** a source, so
     `commands::sources` was never a candidate.
+  * **`ImportProducer` gains `importer: boolean`**, mirroring `Producer::importer`. Stated and not
+    derived: a frontend reading `id !== "estate_file"` would be measuring a representation of the
+    thing, which is the mistake `Producer::importer`'s own doc refuses one surface over, and
+    `the_chooser_offers_producers_this_build_knows` now holds the flag as well as the id.
   * **`Produced`** is the one new wire shape: a tag-`state` union of `token_needed`,
     `landing_needed { servers }` and `ready { file, new_servers }`, mirrored as
     `TokenNeeded | LandingNeeded | ProducedFile`. A union rather than a record of optionals
@@ -8777,7 +8781,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   the `knobas` label) — an ordinary custom property in the existing bag, no schema and no number.
 
   **The reading this entry has to be explicit about: a token is stored only after a run that
-  reached the far end.** `assets::hcloud::remember` takes the run's `Result` as an *argument*
+  reached the far end.** `assets::remember` -- producer-generic, beside `Producer` rather than
+  inside `hcloud`, because nothing in it names a live system -- takes the run's `Result` as an
+  *argument*
   rather than being called after it has been checked, so that sentence is a property of one
   function its own tests hold it to rather than a property of the order two lines are written in;
   and only a token the caller typed is written, because one read out of the keychain is already
@@ -8805,15 +8811,19 @@ From this commit on, each of the following requires an orchestrator decision **a
   `("produce_estate_file", "producer")`, `("produce_estate_file", "token")` and
   `("produce_estate_file", "landUnder")` — the camelCase one is the argument Tauri renames and
   the one a mistyped mirror would drop silently) and
-  `the_chooser_offers_producers_this_build_knows` (now over two entries); `tests/wiring.rs`'
+  `the_chooser_offers_producers_this_build_knows` (now over two entries, and over each entry's
+  `importer` flag as well as its id); `tests/wiring.rs`'
   `every_command_is_in_the_handler_list` and `assets_ipc.rs`'
   `every_asset_command_is_registered_and_its_arguments_decode`; `knobas_secrets`'
   `an_importers_token_lives_under_its_own_namespace` (the prefix, and that no source id can be
   spelled so as to reach an importer's account) beside
-  `the_account_is_the_source_id_prefixed`; `assets::hcloud`'s
+  `the_account_is_the_source_id_prefixed`; `assets`'
   `a_token_is_owed_only_when_the_keychain_holds_none`,
   `a_typed_token_is_kept_only_when_the_run_answered` (all three ways a run can end, and the
-  importer's account written where a source's is not) and `a_stored_token_is_not_written_back`; `backup_ipc.rs`'
+  importer's account written where a source's is not), `a_stored_token_is_not_written_back`,
+  `a_tokens_debug_prints_no_credential` (`Token` hand-writes its `Debug` for
+  `knobas_secrets::Secret`'s reason, and has that type's own test) and
+  `the_estate_files_producer_is_refused_by_name_and_hcloud_is_not`; `backup_ipc.rs`'
   `a_shared_source_carries_no_secret_and_lands_as_missing_secret`, which now scans the archive for
   the importer's token, the `importer:` namespace and the `api_token` envelope kind; five in
   `assets::hcloud` over the file builder — the origin key held to `PRODUCERS`' declaration, the id

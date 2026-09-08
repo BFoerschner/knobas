@@ -810,6 +810,26 @@ export interface ImportProducer {
   id: string;
   /** What the chooser calls it. */
   label: string;
+  /**
+   * It reads a live system, so its text comes from {@link produceEstateFile}
+   * rather than from a file the reader picked off the disk (#509).
+   *
+   * `CONTEXT.md`, *Importer*: **producer** is the wider word, and the estate
+   * file is the one producer that is *not* an importer, because there is no
+   * live system on the other end of it. That difference is the whole of what
+   * the dialog branches on — an `<input type="file">` on one side, a token and
+   * a produce command on the other.
+   *
+   * **Stated, not derived from the id.** The backend's own rule is a field on
+   * `assets::Producer` and its doc says why: *"not `origin_key.is_empty()` …
+   * a check that read the key would be measuring a representation of the thing
+   * rather than the thing"*. A frontend that read `id !== "estate_file"` would
+   * be making exactly that mistake one surface over, and it would draw a *Read*
+   * button on any future producer that reads no live system.
+   * `commands::assets`' `the_chooser_offers_producers_this_build_knows` holds
+   * this flag to `Producer::importer` for every entry.
+   */
+  importer: boolean;
 }
 
 /**
@@ -830,28 +850,9 @@ export interface ImportProducer {
  * this list is never in and no code should be written for.
  */
 export const IMPORT_PRODUCERS: readonly [ImportProducer, ...ImportProducer[]] = [
-  { id: "estate_file", label: "Estate file" },
-  { id: "hcloud", label: "Hetzner Cloud" },
+  { id: "estate_file", label: "Estate file", importer: false },
+  { id: "hcloud", label: "Hetzner Cloud", importer: true },
 ];
-
-/**
- * The producers whose text comes from {@link produceEstateFile} rather than
- * from a file the reader picked off the disk (#509).
- *
- * `CONTEXT.md`, *Importer*: **producer** is the wider word, and the estate file
- * is the one producer that is not an importer, because there is no live system
- * on the other end of it. That difference is the whole of what the dialog
- * branches on — an `<input type="file">` on one side, a token and a produce
- * command on the other — so it is one list here rather than a condition spelled
- * out at each of the places that asks.
- *
- * Derived from {@link IMPORT_PRODUCERS} rather than written out, so a producer
- * added to that list and forgotten here would draw a chooser entry that offers
- * nothing at all.
- */
-export const IMPORTER_IDS: readonly string[] = IMPORT_PRODUCERS.filter(
-  (producer) => producer.id !== "estate_file",
-).map((producer) => producer.id);
 
 /**
  * What importing this estate file would do, having written nothing (#439).
