@@ -80,14 +80,17 @@
 //! [`saved::MAX_SAVED_LISTS`] lists through `saved::create`, cycling [`CASES`]'
 //! shapes, so every branch of the `union all` that
 //! `knobas_search::sql::saved_summary_sql` builds is a query the launcher
-//! actually runs. Three readings of the board are taken at every corpus size:
+//! actually runs. Both of the board's reads are taken in both of the rail's
+//! states at every corpus size, so four readings are printed and not three:
 //!
 //! * `smart_lists` over an **empty** rail -- the built-in half on its own, and
 //!   exactly the reading this file took before #533;
 //! * `smart_lists` over a rail carrying **the cap** -- what ⌘K pays, and
 //!   what [`BUDGET_MS`] gates;
-//! * `launcher_board`, which *calls* `smart_lists`, so it pays for the rail
-//!   too and its assertion tightened with them.
+//! * `launcher_board` over each of the same two rails. It *calls*
+//!   `smart_lists` and then reads the recent items, so it pays for the rail
+//!   too and its assertion tightened with them; its empty-rail reading is what
+//!   says how much of the budget is gone before a saved list exists.
 //!
 //! The two `smart_lists` readings are printed side by side on the curve rather
 //! than one number for the pair, because a rail that has grown expensive and a
@@ -98,7 +101,8 @@
 //! `saved::MAX_SAVED_LISTS` was added beyond #506's ticket and ratified by the
 //! deputy's ruling of 2026-09-08 as **a bound rather than a feature** -- the
 //! constant's own doc comment and `CONTEXT.md`'s **Smart list** carry the
-//! reason. So the cap is not asserted about here; it is *read off* a curve. [`rail_steps`] walks the rail from empty to the cap at 100 k items,
+//! reason. So the cap is not asserted about here; it is *read off* a curve.
+//! [`rail_steps`] walks the rail from empty to the cap at 100 k items,
 //! prints `smart_lists` at each step and the marginal cost of one saved list,
 //! and the gate then holds the cap's own reading to [`BUDGET_MS`]. A cap this
 //! fixture cannot carry inside the budget is a cap that comes down; the budget
