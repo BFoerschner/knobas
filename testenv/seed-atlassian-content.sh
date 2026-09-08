@@ -81,9 +81,13 @@
 #   Cancelled    -> Open                            ("Reopen")
 #   Rejected     -> In Progress                     ("Start Progress")
 #
-# The transition NAMES differ from their `to.name`s as well, which closes the
-# second route by which the four-status project could not tell the two reads
-# apart. `knobas-app`'s atlassian_live.rs is what asserts all of that.
+# Seven of the eight moves in that table are named for the MOVE rather than for
+# the status they land on ("Start Progress" -> In Progress, "Approve" ->
+# Approved, and so on; only Approved's "Done" is spelled the same as its
+# `to.name`), which closes the second route by which the four-status project
+# could not tell a read of `to.name` from a read of `name`. `knobas-app`'s
+# atlassian_live.rs asserts the first two rows of the table; the rest of it is
+# a measurement recorded here.
 #
 # THIS PROJECT IS DELIBERATELY EMPTY, and stays empty between runs. The Jira
 # adapter's own live suite syncs the WHOLE instance (`source(json!({}))`) and

@@ -157,7 +157,7 @@ const TRANSITIONED: &str = "PAY-240";
 ///
 /// It is the weaker of the two refusals, and #522 is why there are two: a
 /// status that exists nowhere on the instance can be refused by an adapter
-/// that never read the workflow at all. See [`NARROW_UNREACHABLE_FROM_FIRST`]
+/// that never read a workflow at all. See [`NARROW_UNREACHABLE_FROM_FIRST`]
 /// for the refusal of a status that exists in its project and is merely out of
 /// reach from where the ticket stands.
 const UNREACHABLE_STATUS: &str = "Blocked";
@@ -206,9 +206,9 @@ const NARROW_FROM_SECOND: [&str; 2] = ["Under Review", "Cancelled"];
 /// This is the refusal the reachable-transition read exists to stop offering,
 /// and the one [`UNREACHABLE_STATUS`] cannot witness: `"Blocked"` is a status
 /// that exists nowhere on this Jira, so refusing it says only that the adapter
-/// will not invent a transition. `"Done"` exists in this project, is on its
-/// board, and is still not somewhere an `Open` ticket may go -- which is the
-/// shape a person actually hits.
+/// will not invent a transition. `"Done"` is one of the seven statuses this
+/// project's own workflow has, and is still not somewhere an `Open` ticket may
+/// go -- which is the shape a person actually hits.
 const NARROW_UNREACHABLE_FROM_FIRST: &str = "Done";
 
 // -- the environment --------------------------------------------------------
@@ -1851,8 +1851,14 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
 /// `seed-state.json`'s `jira.issues`, and its `Seeded::clear_leftovers` deletes
 /// every issue on the instance the seed did not create -- which is also what
 /// clears this ticket after a run that was *killed* rather than failed, since
-/// only an unwinding process reaches a `Drop`. Nothing in `PAY` or `OPS` is
-/// read or written here.
+/// only an unwinding process reaches a `Drop`.
+///
+/// Every assertion here is about `NARROW`, and the only thing this test writes
+/// to Jira is the ticket it files and moves once. It is *not* true that it
+/// touches nothing else: [`app`] starts a real scheduler over a scratch
+/// database, and after its startup delay that scheduler runs a full sync of
+/// this source, which is unscoped and therefore reads every project on the
+/// instance. Those are reads into a database this test throws away.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workflow_narrows() {
