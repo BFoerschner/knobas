@@ -190,7 +190,15 @@ vi.mock("../ipc/backup", () => ({
   setBackupSchedule: () => Promise.reject(new Error("unused")),
   // The section reads these on mount to seed the share dialog; a mock that
   // replaces the module has to carry them or the component throws.
-  shareDefaults: { links: true, assets: true, contexts: true, notes: false, time: false, sources: true },
+  shareDefaults: {
+    links: true,
+    assets: true,
+    contexts: true,
+    notes: false,
+    time: false,
+    sources: true,
+    smart_lists: true,
+  },
   shareExport: () => Promise.reject(new Error("unused")),
   restoreBackup: () => Promise.reject(new Error("unused")),
 }));

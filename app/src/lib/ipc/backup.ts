@@ -59,6 +59,19 @@ export interface ShareParts {
   time: boolean;
   /** Source configurations. No secret is in one — credentials live in the OS keychain. */
   sources: boolean;
+  /**
+   * The launcher searches somebody saved as smart lists (#507).
+   *
+   * On by default, with links: a saved list is a query over the link map, not
+   * a private note about it. The built-in lists are code and are rows nowhere,
+   * so the share dialog offers **no toggle** for this part until a saved list
+   * exists — and sends it off while there is none, so the archive of a knobas
+   * nobody has saved a list on carries no list table at all.
+   *
+   * The query crosses exactly as it was typed: nothing on either side of an
+   * archive rewrites a stored query to a newer grammar.
+   */
+  smart_lists: boolean;
 }
 
 /** The ratified defaults, so a caller can start from them and toggle. */
@@ -69,6 +82,7 @@ export const shareDefaults: ShareParts = {
   notes: false,
   time: false,
   sources: true,
+  smart_lists: true,
 };
 
 /** One archive on disk — `backup::ArchiveFile`. */

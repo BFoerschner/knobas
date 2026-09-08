@@ -189,15 +189,28 @@ mod tests {
         let json = serde_json::to_value(ShareParts::default()).unwrap();
         assert_mirrored(
             &json,
-            &["assets", "contexts", "links", "notes", "sources", "time"],
+            &[
+                "assets",
+                "contexts",
+                "links",
+                "notes",
+                "smart_lists",
+                "sources",
+                "time",
+            ],
         );
         assert_eq!(json["links"], true, "the ratified default is links on");
         assert_eq!(json["notes"], false, "the ratified default is notes off");
         assert_eq!(json["time"], false, "the ratified default is time off");
+        assert_eq!(
+            json["smart_lists"], true,
+            "the ratified default is saved smart lists on (#507)"
+        );
 
         let sent = serde_json::json!({
             "links": true, "assets": false, "contexts": false,
-            "notes": true, "time": true, "sources": false
+            "notes": true, "time": true, "sources": false,
+            "smart_lists": false
         });
         let decoded: ShareParts = serde_json::from_value(sent).unwrap();
         assert_eq!(
@@ -209,6 +222,7 @@ mod tests {
                 notes: true,
                 time: true,
                 sources: false,
+                smart_lists: false,
             }
         );
     }

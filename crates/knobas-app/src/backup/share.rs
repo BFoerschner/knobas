@@ -45,6 +45,36 @@
 //! address book of its own -- see [`ENTITY`] for why that is a choice and not
 //! an oversight.
 //!
+//! # A saved smart list rides with no address book, and is stored verbatim
+//!
+//! `knobas.smart_list` is the one part whose table names nothing else: a saved
+//! list is not an entity, nothing links to one, and no context holds one -- it
+//! is a query somebody wrote down (migration `0025`, #506). So the
+//! `smart_lists` part is that one table and [`ENTITY`] is not in it.
+//!
+//! **The archive carries the query as the reader typed it and never a reading
+//! of it.** `CONTEXT.md`'s **Smart list** rules that no migration ever
+//! rewrites `knobas.smart_list.query` to a newer grammar, because an "upgrade"
+//! is a parse in disguise and would make *needs attention* a state no row can
+//! reach. An export or an import that rewrote a stored query would be the same
+//! thing wearing a different hat, and this part is a `pg_dump` table list --
+//! the one shape that cannot do it.
+//!
+//! **The cap is not in the archive.** `knobas_search::saved::create` counts the
+//! table and refuses the row past [`knobas_search::saved::MAX_SAVED_LISTS`],
+//! and nothing else enforces it: a restore is a schema dump, so a database
+//! restored from an archive holds however many lists that archive was taken
+//! from. Deliberate, and not an oversight -- an archive is a record of what
+//! the sharer had, and a restore that dropped rows to fit today's constant
+//! would be a restore that lost data silently, on the machine least able to
+//! notice, and would have to choose *which* rows to lose. The cap reasserts
+//! itself the next time somebody saves a list.
+//!
+//! Nothing in the tree makes the two disagree **today**, because the constant
+//! has never moved: every row in an archive was written past a `create` that
+//! held the same bound. It becomes a live case the day the number changes, and
+//! there is an open ticket to change it (#533).
+//!
 //! **The whole table travels**, and this is the one consequence worth reading
 //! twice: `pg_dump` restricts an archive by table and never by row, so "the
 //! entity rows the links reference" is not an argument list anyone can write.
@@ -82,6 +112,13 @@ pub struct ShareParts {
     /// secret is in it: spec §14 puts every credential in the OS keychain and
     /// nothing secret ever reaches Postgres.
     pub sources: bool,
+    /// `knobas.smart_list` -- the launcher searches somebody saved (#506).
+    /// **On by default**, with links: a saved list is a query over the link
+    /// map, not a private note about it. The built-in lists are code and are
+    /// rows nowhere, so a knobas nobody has saved a list on carries an empty
+    /// table here -- which is why the dialog offers no toggle for it until a
+    /// saved one exists, and sends the part off while there is none.
+    pub smart_lists: bool,
 }
 
 impl Default for ShareParts {
@@ -93,6 +130,7 @@ impl Default for ShareParts {
             notes: false,
             time: false,
             sources: true,
+            smart_lists: true,
         }
     }
 }
@@ -164,6 +202,9 @@ impl ShareParts {
         if self.sources {
             push("source_config");
         }
+        if self.smart_lists {
+            push("smart_list");
+        }
         tables
     }
 
@@ -178,6 +219,7 @@ impl ShareParts {
             notes: false,
             time: false,
             sources: false,
+            smart_lists: false,
         }
     }
 }
@@ -194,6 +236,10 @@ mod tests {
         let parts = ShareParts::default();
         assert!(parts.links && parts.assets && parts.contexts && parts.sources);
         assert!(
+            parts.smart_lists,
+            "saved smart lists are on by default (#507): a saved list is a query over the link map"
+        );
+        assert!(
             !parts.notes && !parts.time,
             "notes and time are off by default -- a colleague gets the link map, not the hours"
         );
@@ -205,7 +251,8 @@ mod tests {
                 "asset",
                 "route",
                 "context",
-                "source_config"
+                "source_config",
+                "smart_list"
             ],
         );
     }
@@ -257,6 +304,15 @@ mod tests {
                 },
                 vec!["source_config"],
             ),
+            // The one part that brings no address book: a saved list is not
+            // an entity, nothing links to one, and no context holds one.
+            (
+                ShareParts {
+                    smart_lists: true,
+                    ..ShareParts::none()
+                },
+                vec!["smart_list"],
+            ),
         ] {
             assert_eq!(parts.tables(), expected, "{parts:?}");
         }
@@ -284,6 +340,7 @@ mod tests {
                 notes: true,
                 time: true,
                 sources: true,
+                smart_lists: true,
             },
         ] {
             assert!(
@@ -308,6 +365,7 @@ mod tests {
             notes: true,
             time: true,
             sources: true,
+            smart_lists: true,
         };
         for forbidden in [
             "activity",
@@ -361,7 +419,8 @@ mod tests {
 
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
-            "notes": false, "time": false, "sources": false
+            "notes": false, "time": false, "sources": false,
+            "smart_lists": false
         }))
         .expect("a payload naming every part");
         assert_eq!(all, ShareParts::none());
