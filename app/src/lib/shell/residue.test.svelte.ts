@@ -14,7 +14,7 @@
  * three assertions about three teardowns, but one assertion about the class,
  * which holds for the component nobody has written yet.
  *
- * Every component with a `$effect` is mounted twice:
+ * Every component with a `$effect` is mounted three times:
  *
  * 1. **Used, then unmounted.** The ordinary case: the listener was installed,
  *    the timer was armed, the subscription resolved — and all of it has to be
@@ -23,6 +23,10 @@
  *    `invoke` and resolves a tick or more later, so a shell that navigates
  *    during bring-up unmounts inside exactly that window. Nothing that lands
  *    afterwards may install anything.
+ * 3. **Unmounted between answers.** The gap between those two: bring-up is
+ *    past whatever guard it opens with, some answers are in and the rest are
+ *    still coming. A subscription whose unlisten arrives after the teardown
+ *    has nothing left to call it, so it has to be dropped rather than stored.
  *
  * Only `window` listeners are watched, never `document` — Svelte delegates
  * there and never cleans up, which `residue.ts` explains at length.
@@ -135,6 +139,14 @@ const LINE = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // What a capture would attach (#503): the main window records its room and
+  // its foreground here whenever either changes. Nothing in this file opens a
+  // capture window, so it only has to answer.
+  recordCaptureContext: () => Promise.resolve(),
+  // The capture shortcut the settings section draws (#503). Nothing set, which
+  // is the default, and no refusal to explain.
+  captureShortcut: () => Promise.resolve({ accelerator: null, refusal: null }),
+  setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
@@ -339,6 +351,7 @@ const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
 const CheckoutPanel = (await import("../detail/CheckoutPanel.svelte")).default;
 const CheckoutsSection = (await import("../settings/CheckoutsSection.svelte")).default;
+const CaptureSection = (await import("../settings/CaptureSection.svelte")).default;
 const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
 const MonitoringSection = (await import("../settings/MonitoringSection.svelte")).default;
 const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
@@ -1075,6 +1088,30 @@ const CASES: Case[] = [
   },
   {
     /**
+     * The capture-shortcut section (#503). The same shape: one settings read,
+     * unmounted before it answers.
+     */
+    name: "CaptureSection",
+    source: "lib/settings/CaptureSection.svelte",
+    open: (target) => ({
+      app: mount(CaptureSection, {
+        target,
+        props: {
+          ports: {
+            captureShortcut: () =>
+              deferred<{ accelerator: string | null; refusal: string | null }>({
+                accelerator: "CmdOrCtrl+Shift+N",
+                refusal: null,
+              }),
+            setCaptureShortcut: () =>
+              Promise.reject(new Error("no settings write in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
      * The settings view itself has no effect of its own — it is a frame around
      * its sections — so the sections are what is walked here.
      */
@@ -1242,6 +1279,57 @@ test.each(CASES.map((entry) => [entry.name, entry] as const))(
       unmount(app);
       target.remove();
 
+      land();
+      await track.settle();
+      land();
+      await track.settle();
+
+      expect(track.residue()).toEqual({ listeners: [], timers: [] });
+    } finally {
+      track.stop();
+    }
+  },
+);
+
+/**
+ * **Unmounted between answers**, which is the window the two passes above leave
+ * open between them.
+ *
+ * The first lands every answer before the unmount, so a subscription is always
+ * stored in time; the second unmounts before any answer lands, so bring-up
+ * returns at its own `disposed` guard and installs nothing at all. Neither ever
+ * has a subscription **in flight past the teardown** — which is exactly where
+ * `App.svelte`'s `capture:open-note` listener leaked on 2026-09-08: an
+ * `await listen(...)` in the middle of the block pushed the line that stores
+ * the unlisten, and the lifecycle's own `db:state` behind it, to the far side
+ * of the unmount.
+ *
+ * That leak was found by this file, but only as **one red in six** runs of a
+ * loaded `just check`; it passed alone every time, and four unloaded gates on
+ * the merge head with the bug put back were green. Nothing on the branch would
+ * have failed if somebody restored the `await`. This pass fails it on every
+ * run, naming the same two listeners.
+ */
+test.each(CASES.map((entry) => [entry.name, entry] as const))(
+  "%s leaves nothing behind when it is unmounted between answers",
+  async (_name, entry) => {
+    const track = trackResidue();
+    try {
+      const target = document.createElement("div");
+      document.body.append(target);
+      const { app } = entry.open(target);
+      flushSync();
+
+      // One round of answers: enough for bring-up to be past its guard and to
+      // have issued what it issues, not enough for any of it to be back.
+      land();
+      await track.settle();
+      flushSync();
+
+      unmount(app);
+      target.remove();
+
+      // And now the rest arrives, with nothing left to hold it.
       land();
       await track.settle();
       land();

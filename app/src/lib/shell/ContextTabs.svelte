@@ -154,7 +154,18 @@
       }}
     />
   {:else}
-    <button class="tab new" title="New ad-hoc context" onclick={() => (naming = true)}>
+    <!--
+      An accessible name of its own, because the visible word is *new* and
+      "new" on its own tells a reader moving by control nothing about what it
+      makes. An accessibility fix and only that: no driver presses it, and
+      nothing outside this file reads the name.
+    -->
+    <button
+      class="tab new"
+      aria-label="New ad-hoc context"
+      title="New ad-hoc context"
+      onclick={() => (naming = true)}
+    >
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
       new
     </button>

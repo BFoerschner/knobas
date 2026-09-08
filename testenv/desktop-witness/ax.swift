@@ -247,6 +247,53 @@ func press(pid: pid_t, label: String) -> Int32 {
     return 0
 }
 
+/// Every string **value** under this app's windows, one per line.
+///
+/// The third way an element can carry text, and the one `find` deliberately
+/// does not read: `AXDescription` and `AXTitle` are what an `aria-label` and a
+/// button's own words arrive as, and `AXValue` is what a paragraph of rendered
+/// text and a text field's contents arrive as. `find` counts *named* elements,
+/// which is what a driver presses and focuses; this prints *what is written on
+/// the screen*, which is what a driver reads back.
+///
+/// Kept apart rather than folded into `find` on purpose. Widening `find` to
+/// match values would change what every existing driver's "exactly one" means
+/// -- a field whose value happened to equal its own label would suddenly be two
+/// -- and those counts are load-bearing (`open-in-editor`'s `exactly_one`).
+///
+/// One line per value, with empty ones dropped: the caller matches whole lines,
+/// because the readings this exists for come in pairs where one contains the
+/// other ("captured from", "captured from here") and a substring test would
+/// accept the wrong end of the link.
+func values(pid: pid_t) -> Int32 {
+    for window in windows(of: pid) {
+        visit(window, maxDepth: 25) { element, _ in
+            guard let value = attribute(element, kAXValueAttribute as String) as? String,
+                !value.isEmpty
+            else { return }
+            print(value)
+        }
+    }
+    return 0
+}
+
+/// The frontmost application: its pid and its bundle identifier, tab-separated.
+///
+/// What makes a *global* shortcut's witness a witness. Every other assertion in
+/// these drivers is about knobas' own window, and this is the one that says the
+/// keystroke was sent while somebody else had the screen -- without it a driver
+/// would prove only that a key works in the application that is already
+/// listening for keys.
+func frontmost() -> Int32 {
+    guard let app = NSWorkspace.shared.frontmostApplication else {
+        FileHandle.standardError.write(Data("ax: no application is frontmost\n".utf8))
+        return 1
+    }
+    print("pid\t\(app.processIdentifier)")
+    print("bundle\t\(app.bundleIdentifier ?? "")")
+    return 0
+}
+
 func dump(pid: pid_t, depth: Int) -> Int32 {
     let found = windows(of: pid)
     if found.isEmpty {
@@ -286,6 +333,17 @@ func type(_ string: String) -> Int32 {
                 return 1
             }
             event.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            // **No modifiers, explicitly.** An event built from
+            // `.hidSystemState` inherits the session's current modifier flags,
+            // and a synthetic `key` posted just before this one leaves ⌘
+            // *held* as far as that state is concerned -- there is no
+            // `flagsChanged` to let it go. Measured on 2026-09-08: a driver
+            // that pressed ⌘A to select a settings field and then typed
+            // `CmdOrCtrl+Alt+Shift+K` into it sent ⌘C, ⌘A, ⌘S … ⌘K, and the
+            // last of those opened the launcher over the pane it was typing
+            // in. Clearing the flags per event makes typing mean typing
+            // whatever was pressed before it.
+            event.flags = []
             event.post(tap: .cghidEventTap)
             // The webview's input handler runs on its own turn; typing faster
             // than it can read has dropped characters on every framework that
@@ -303,12 +361,23 @@ func type(_ string: String) -> Int32 {
 /// could "press ⌘K" at an app that never had the keyboard and read a stale
 /// tree as success. Through the HID tap the keystroke goes where a person's
 /// would, which is the thing being witnessed.
-func key(code: CGKeyCode, command: Bool) -> Int32 {
+func key(code: CGKeyCode, modifiers: [String]) -> Int32 {
     guard let source = CGEventSource(stateID: .hidSystemState) else {
         FileHandle.standardError.write(Data("ax: no event source\n".utf8))
         return 1
     }
-    let flags: CGEventFlags = command ? .maskCommand : []
+    var flags: CGEventFlags = []
+    for modifier in modifiers {
+        switch modifier {
+        case "command": flags.insert(.maskCommand)
+        case "shift": flags.insert(.maskShift)
+        case "option": flags.insert(.maskAlternate)
+        case "control": flags.insert(.maskControl)
+        default:
+            FileHandle.standardError.write(Data("ax: unknown modifier '\(modifier)'\n".utf8))
+            return 1
+        }
+    }
     for isDown in [true, false] {
         guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: isDown)
         else {
@@ -351,6 +420,10 @@ case "focused" where arguments.count == 2 && integer(1) != nil:
     status = focused(pid: pid_t(integer(1)!))
 case "find" where arguments.count == 3 && integer(1) != nil:
     status = find(pid: pid_t(integer(1)!), label: arguments[2])
+case "values" where arguments.count == 2 && integer(1) != nil:
+    status = values(pid: pid_t(integer(1)!))
+case "frontmost" where arguments.count == 1:
+    status = frontmost()
 case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
     status = dump(pid: pid_t(integer(1)!), depth: integer(2)!)
 case "focus" where arguments.count == 3 && integer(1) != nil:
@@ -359,11 +432,13 @@ case "press" where arguments.count == 3 && integer(1) != nil:
     status = press(pid: pid_t(integer(1)!), label: arguments[2])
 case "type" where arguments.count == 2:
     status = type(arguments[1])
-// The modifier is spelled out rather than taken from "any second word", so a
-// typo is a refusal instead of a keystroke sent without ⌘.
-case "key" where (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "command"))
-    && integer(1) != nil:
-    status = key(code: CGKeyCode(integer(1)!), command: arguments.count == 3)
+// Every modifier is spelled out and an unknown word is refused inside `key`,
+// so a typo is a refusal instead of a keystroke sent without ⌘. More than one
+// is allowed since #503: a capture shortcut a person would actually choose has
+// two or three, and a driver that could only send one would be witnessing a
+// combination nobody sets.
+case "key" where arguments.count >= 2 && integer(1) != nil:
+    status = key(code: CGKeyCode(integer(1)!), modifiers: Array(arguments.dropFirst(2)))
 default:
     FileHandle.standardError.write(
         Data(
@@ -374,11 +449,13 @@ default:
                    ax activate <pid>
                    ax focused <pid>
                    ax find <pid> <label>
+                   ax values <pid>
+                   ax frontmost
                    ax dump <pid> <depth>
                    ax focus <pid> <label>
                    ax press <pid> <label>
                    ax type <text>
-                   ax key <keycode> [command]
+                   ax key <keycode> [command|shift|option|control ...]
 
             """.utf8))
     status = 2

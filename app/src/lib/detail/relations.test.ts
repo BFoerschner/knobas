@@ -15,6 +15,7 @@ import {
   CAPTURED_IN,
   DEFAULT_RELATION,
   RELATIONS,
+  bornWith,
   drawn,
   groupLinks,
   readingFor,
@@ -260,4 +261,37 @@ test("monitored-by, picked from an asset, draws the same row as monitors picked 
   expect(drawn("monitored-by", "asset:knobas-gitea", "kuma:7")).toEqual(
     drawn("monitors", "kuma:7", "asset:knobas-gitea"),
   );
+});
+
+// --- the two links a captured note is born with (#502, #503) -----------------
+
+/**
+ * The pair a room or a capture hands in becomes the two born links, in that
+ * order.
+ *
+ * Here rather than in either caller because the function is one and the callers
+ * are two (`shell/Room.svelte`'s *New note*, `capture/capture.svelte.ts`'s
+ * window): what each of them hands in is its own test's, and what the pair
+ * becomes is this one's.
+ */
+test("the room and the foreground become the two born links, in that order", () => {
+  expect(bornWith({ context: "ctx:sepa", foreground: "mock:PAY-231" })).toEqual([
+    { target_id: "ctx:sepa", relation: "captured-in" },
+    { target_id: "mock:PAY-231", relation: "captured-from" },
+  ]);
+});
+
+/**
+ * The two halves are independent, which is the case a single link would get
+ * wrong: a derived room has no context and the reader is still looking at
+ * something, and a stored room with nothing open is the other way round.
+ */
+test("a derived room contributes no captured-in, and an empty foreground no captured-from", () => {
+  expect(bornWith({ context: null, foreground: "mock:PAY-231" })).toEqual([
+    { target_id: "mock:PAY-231", relation: "captured-from" },
+  ]);
+  expect(bornWith({ context: "ctx:sepa", foreground: null })).toEqual([
+    { target_id: "ctx:sepa", relation: "captured-in" },
+  ]);
+  expect(bornWith({ context: null, foreground: null })).toEqual([]);
 });

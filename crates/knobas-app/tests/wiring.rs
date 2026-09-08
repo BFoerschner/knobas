@@ -466,3 +466,115 @@ fn declared_commands() -> Vec<(String, String)> {
     );
     found
 }
+
+/// The global-shortcut plugin is registered, with a handler.
+///
+/// Both halves, and the second is the one that would fail silently: a plugin
+/// registered with no handler takes the key combination away from every other
+/// application on the machine and then does nothing with it, which is worse
+/// than not registering it at all. Nothing else in the tree references the
+/// builder, and no test that does not read this file can see it (#503).
+#[test]
+fn the_global_shortcut_plugin_is_registered_with_a_handler() {
+    let code = strip_comments(include_str!("../src/lib.rs"));
+    assert!(
+        code.contains("tauri_plugin_global_shortcut::Builder::new()"),
+        "the global-shortcut plugin is not registered in `run()`, so \
+         `capture::Plugin` finds no plugin state and every shortcut a reader \
+         sets is stored and never holds"
+    );
+    assert!(
+        code.contains(".with_handler("),
+        "the global-shortcut plugin is registered without a handler, so a \
+         shortcut is taken from every other application and opens nothing"
+    );
+    assert!(
+        code.contains("capture::open_window(app)"),
+        "the shortcut handler does not open the capture window"
+    );
+}
+
+/// The **capture window's** capability, and its whole content.
+///
+/// A second capability file (#503), for a window `default.json` does not cover:
+/// `default` is scoped to `["main"]`, so without this the capture window has no
+/// permission at all and cannot shut itself -- which is a decorationless window
+/// with no way out. One permission, and the list is asserted whole for
+/// `no_grant_reaches_further_than_the_app_does`' reason: every entry is a door,
+/// and a window that draws over other applications is the last one to widen by
+/// accident.
+///
+/// **No `global-shortcut:*` grant, here or in `default`.** The plugin is driven
+/// from Rust and the webview never calls it; a capability that granted
+/// `global-shortcut:allow-register` would be a webview able to take a key
+/// combination away from the whole machine.
+#[test]
+fn the_capture_window_may_close_itself_and_nothing_more() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/capture.json");
+    let text = std::fs::read_to_string(&path).expect("capabilities/capture.json is readable");
+    let capability: Value =
+        serde_json::from_str(&text).expect("capabilities/capture.json is valid JSON");
+
+    assert_eq!(
+        capability["windows"].as_array().map(Vec::as_slice),
+        Some([Value::String(knobas_app::capture::WINDOW_LABEL.to_owned())].as_slice()),
+        "the capture capability names a window that is not the one \
+         `knobas_app::capture::WINDOW_LABEL` builds, so it grants nothing to \
+         anything"
+    );
+    assert_eq!(
+        capability["permissions"].as_array().map(Vec::as_slice),
+        Some([Value::String("core:window:allow-close".to_owned())].as_slice()),
+        "the capture window's permissions changed; it draws one text area over \
+         other applications and everything else it does is one of knobas' own \
+         commands, which need no grant"
+    );
+
+    let both = format!(
+        "{text}{}",
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json")
+        )
+        .expect("capabilities/default.json is readable")
+    );
+    assert!(
+        !both.contains("\"global-shortcut:"),
+        "a capability grants the global-shortcut plugin to a webview. The \
+         shortcut is registered from Rust (`knobas_app::capture`); a window \
+         that could register one could take any key from any application"
+    );
+}
+
+/// The global-shortcut plugin is pinned exactly, and has **no npm half**.
+///
+/// Its own test rather than a third entry in
+/// `each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge`, because
+/// the claim is the opposite one: opener and notification are two halves of one
+/// protocol and have to agree, while this plugin is called from Rust only, so
+/// the thing worth pinning is that the JavaScript half was never added. A
+/// `@tauri-apps/plugin-global-shortcut` in `package.json` would mean somebody
+/// had started registering shortcuts from a webview.
+#[test]
+fn the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half() {
+    let manifest = include_str!("../Cargo.toml");
+    let pin = manifest
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("tauri-plugin-global-shortcut = "))
+        .expect("`tauri-plugin-global-shortcut` is not a dependency")
+        .trim()
+        .trim_matches('"')
+        .to_owned();
+    assert!(
+        pin.starts_with('='),
+        "`tauri-plugin-global-shortcut = {pin:?}` is not an exact pin"
+    );
+
+    let package = include_str!("../../../app/package.json");
+    assert!(
+        !package.contains("@tauri-apps/plugin-global-shortcut"),
+        "the npm half of the global-shortcut plugin was added. Nothing in the \
+         frontend calls it -- `knobas_app::capture` registers the shortcut -- so \
+         either this dependency is dead or a webview has started taking keys \
+         from the machine"
+    );
+}

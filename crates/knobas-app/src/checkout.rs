@@ -44,67 +44,10 @@ use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
-/// A value a person typed, cleared to `None` when it is blank.
-///
-/// One function because every write here means the same thing by an empty
-/// field -- *forget this* -- and none may store a blank: an empty clones root
-/// would make the scan walk the process's working directory, a blank override
-/// is a row `0024`'s CHECK refuses anyway, and a blank command template would
-/// hide the platform's default behind a row that runs nothing.
-fn settable(path: Option<&str>) -> Option<&str> {
-    path.map(str::trim).filter(|value| !value.is_empty())
-}
-
-/// One `knobas.setting` row as a string, or nothing.
-///
-/// A row that is not a JSON string is a row an older or a broken knobas wrote;
-/// it reads as *unset*, which is the miss direction and the one a person can
-/// fix from the settings pane. A blank one reads as unset too -- every caller
-/// of [`write_setting`] passes what [`settable`] answered, so a blank row is
-/// one an older knobas left behind rather than one this code can make.
-async fn read_setting(pool: &PgPool, key: &str) -> Result<Option<String>, IpcError> {
-    let value: Option<serde_json::Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(key)
-            .fetch_optional(pool)
-            .await
-            .map_err(IpcError::internal)?;
-    Ok(value
-        .as_ref()
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .filter(|stored| !stored.trim().is_empty()))
-}
-
-/// Store one `knobas.setting` row, or delete it when there is nothing to store.
-///
-/// Delete rather than store a blank: *unset* has a meaning for every setting
-/// here -- no clones root is looked under, an action falls back to the
-/// platform's default -- and a row holding `""` would be a third state that
-/// reads as neither.
-async fn write_setting(pool: &PgPool, key: &str, value: Option<&str>) -> Result<(), IpcError> {
-    match value {
-        Some(value) => {
-            sqlx::query(
-                "insert into knobas.setting (key, value) values ($1, $2)
-                 on conflict (key) do update set value = excluded.value, updated_at = now()",
-            )
-            .bind(key)
-            .bind(serde_json::Value::String(value.to_owned()))
-            .execute(pool)
-            .await
-            .map_err(IpcError::internal)?;
-        }
-        None => {
-            sqlx::query("delete from knobas.setting where key = $1")
-                .bind(key)
-                .execute(pool)
-                .await
-                .map_err(IpcError::internal)?;
-        }
-    }
-    Ok(())
-}
+// The `knobas.setting` reader, writer and blank rule live in `crate::settings`
+// since #503, which put a second feature's string in the same table. They were
+// born here; what moved is three functions and no behaviour.
+use crate::settings::{read as read_setting, settable, write as write_setting};
 
 /// The `knobas.setting` key holding the clones root.
 ///

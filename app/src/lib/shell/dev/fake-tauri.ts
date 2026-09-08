@@ -171,6 +171,7 @@ export function installIfRequested(): void {
   if (!params.has("fake-ipc")) return;
   seedClonesRoot(params);
   seedOpenState(params);
+  seedCaptureShortcut(params);
   installFakeTauri(demoHandlers(params));
 }
 
@@ -211,6 +212,16 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     set_checkout_command: (args) =>
       fakeSetCommand(String(args["action"] ?? ""), args["template"]),
     open_checkout: (args) => fakeOpen(String(args["action"] ?? "")),
+
+    // The capture window (#503). Its own document (`capture.html?fake-ipc`),
+    // so these five are what that page's walk answers from: the shortcut the
+    // settings section draws, the pair the capture reads its links from, and
+    // the button that would bring the note into the main window.
+    capture_shortcut: () => fakeShortcut(),
+    set_capture_shortcut: (args) => fakeSetShortcut(args["accelerator"]),
+    record_capture_context: () => null,
+    capture_context: () => FAKE_CAPTURE_CONTEXT,
+    reveal_note: () => null,
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
@@ -2043,7 +2054,16 @@ const NOTES = new Map<
 function createNote(args: Record<string, unknown>) {
   const id = `note:${Math.random().toString(16).slice(2, 6)}`;
   const born = Array.isArray(args["links"]) ? (args["links"] as NoteLinkInput[]) : [];
-  NOTES.set(id, { title: "", body_md: "", created_at: SYNCED_AT, born });
+  // The title and body the caller passed, and not two empty strings: *New
+  // note* sends neither, but a **capture** creates its note on the first
+  // keystroke and sends both (#503), and a fixture that dropped them would
+  // draw an empty note over a walk whose whole point is what was typed.
+  NOTES.set(id, {
+    title: String(args["title"] ?? ""),
+    body_md: String(args["bodyMd"] ?? ""),
+    created_at: SYNCED_AT,
+    born,
+  });
   return noteDetail(id);
 }
 
@@ -2420,6 +2440,51 @@ function fakeOpen(action: string) {
     };
   }
   return null;
+}
+
+/**
+ * The pair the capture window reads its two born links from (#503).
+ *
+ * A **stored** room and an open ticket, so the walk exercises the case with
+ * both links rather than the degenerate one: the SEPA context this fixture's
+ * `list_contexts` answers with, and the ticket its rooms open on.
+ */
+const FAKE_CAPTURE_CONTEXT = { context: "ctx:sepa", foreground: "mock:PAY-231" };
+
+/**
+ * `?fake-shortcut=<accelerator>` seeds a stored shortcut, and
+ * `?fake-shortcut-refused` makes it read as one the operating system would not
+ * hand over -- the branch a browser can otherwise never reach, since no browser
+ * can ask a window server for a key.
+ */
+function seedCaptureShortcut(params: URLSearchParams): void {
+  const stored = params.get("fake-shortcut");
+  if (stored !== null) fakeShortcutStored = stored.trim() === "" ? null : stored.trim();
+  fakeShortcutRefused = params.has("fake-shortcut-refused");
+}
+
+/**
+ * The capture shortcut this session has stored, and why it is not holding.
+ *
+ * Seeded by {@link seedCaptureShortcut}.
+ */
+let fakeShortcutStored: string | null = null;
+let fakeShortcutRefused = false;
+
+function fakeShortcut() {
+  return {
+    accelerator: fakeShortcutStored,
+    refusal:
+      fakeShortcutStored !== null && fakeShortcutRefused
+        ? `${fakeShortcutStored} is registered by another application`
+        : null,
+  };
+}
+
+function fakeSetShortcut(accelerator: unknown) {
+  const typed = typeof accelerator === "string" ? accelerator.trim() : "";
+  fakeShortcutStored = typed === "" ? null : typed;
+  return fakeShortcut();
 }
 
 /** A handful of log lines, so the History panel has something to draw. */

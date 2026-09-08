@@ -18,7 +18,7 @@
  * word it has never seen, and a guessed one ("…d by") would put language
  * nobody typed on screen.
  */
-import type { LinkEntry } from "../ipc/entity";
+import type { LinkEntry, NoteLinkInput } from "../ipc/entity";
 
 /**
  * What a link says when nobody named a relation —
@@ -50,6 +50,42 @@ export const DEFAULT_RELATION = "related";
 export const CAPTURED_IN = "captured-in";
 /** See {@link CAPTURED_IN}. */
 export const CAPTURED_FROM = "captured-from";
+
+/**
+ * **The links a captured note is born with**, from the room the reader was in
+ * and what was in front of them.
+ *
+ * Beside the two constants, and one function rather than two, because there are
+ * exactly two callers and the sentence above says why: *New note*
+ * (`shell/Room.svelte`, #502), which has the room it is standing in, and the
+ * capture window (`capture/capture.svelte.ts`, #503), which has the pair the
+ * main window recorded for it. Two copies of the same two pushes would be the
+ * fourth spelling {@link CAPTURED_IN}'s own note warns about.
+ *
+ * Each link is present only when it has something true to say: `context` is
+ * `null` for every **derived** room — *All work*, a source, a project — because
+ * a derived room has no context (`CONTEXT.md`, **Room**), and `foreground` is
+ * `null` when nothing was in front of the reader. The two are independent, so
+ * this can answer none, either, or both.
+ *
+ * It does **not** compute the foreground: both callers hand it in, and it is
+ * `shell/timer.ts`'s `roomForeground` in one spelling either way — what the
+ * deputy's ruling of 2026-09-08 on #502 binds is that a capture attaches what
+ * the heartbeat would send at that instant.
+ */
+export function bornWith(where: {
+  context: string | null;
+  foreground: string | null;
+}): NoteLinkInput[] {
+  const links: NoteLinkInput[] = [];
+  if (where.context !== null) {
+    links.push({ target_id: where.context, relation: CAPTURED_IN });
+  }
+  if (where.foreground !== null) {
+    links.push({ target_id: where.foreground, relation: CAPTURED_FROM });
+  }
+  return links;
+}
 
 /** One offered relation, and its two readings. */
 export interface Relation {

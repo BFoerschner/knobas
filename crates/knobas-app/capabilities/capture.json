@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "What the capture window may call (#503). One permission, and the list is short for the reason `default`'s is long: this window draws one text area over somebody else's screen and everything it does -- reading what the main window recorded, writing the note, bringing the note into the main window -- is one of knobas' own `#[tauri::command]`s, which the ACL does not gate while this application declares no manifest of its own. What is left is the one thing a window with no title bar cannot do for itself: close. `core:window:allow-close` and not `core:default`, which is twenty-five read-only window getters this window never asks and still would not carry a close. **No `global-shortcut:*` permission, here or in `default`**: the shortcut is registered from Rust (`knobas_app::capture`), the plugin's four commands are reachable from no window at all, and a capture window that could register a global shortcut would be a webview able to take a key combination away from every other application on the machine.",
+  "windows": ["capture"],
+  "permissions": ["core:window:allow-close"]
+}

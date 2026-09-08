@@ -71,6 +71,14 @@ tauri-plugin-opener = "=2.5.4"
 # halves speak one protocol and a mismatch fails at run time with "command not
 # found" rather than at build time.
 tauri-plugin-notification = "=2.4.0"
+# The capture window's global shortcut (#503, spec #491 stories 40-43). Pinned
+# exactly, the discipline the two plugins above record -- but for a different
+# reason, and the difference is the point: **no npm half exists for this one**.
+# The shortcut is registered in Rust, from the setting, at bring-up and on
+# every change; the webview never calls the plugin, so `app/package.json`
+# gains nothing and `capabilities/default.json` grants no
+# `global-shortcut:*` permission. See `crate::capture`.
+tauri-plugin-global-shortcut = "=2.3.2"
 # The click (#339). The plugin's desktop `notify` drops the `notify-rust` handle,
 # so knobas sends through the crate itself and waits on the handle (`notify.rs`).
 # Pinned exactly to the version `Cargo.lock` already carried for the plugin, so
