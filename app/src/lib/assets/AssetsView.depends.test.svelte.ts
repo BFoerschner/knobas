@@ -214,8 +214,8 @@ test("the panel counts what breaks and says where each one sits and why", async 
   await vi.waitFor(() => expect(text()).toContain("Depends on this"));
   expect(count()).toBe("3");
   expect(lines()).toEqual([
-    "knobas-teamcity depends on · knobas test estate / Hetzner Cloud nbg1",
-    "knobas-teamcity-agent runs on · knobas test estate / knobas-teamcity",
+    "knobas-teamcity depends on knobas test estate / Hetzner Cloud nbg1",
+    "knobas-teamcity-agent runs on knobas test estate / knobas-teamcity",
     "Docker engine (knobas-teamcity) inside",
   ]);
 });

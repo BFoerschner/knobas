@@ -2211,7 +2211,7 @@
                     >{row.relation === null ? "inside" : readingOf(row.relation, true)}</span
                   >
                   {#if row.path !== null}
-                    <span class="faint">· {row.path}</span>
+                    <span class="faint path">{row.path}</span>
                   {/if}
                 </li>
               {/each}
@@ -3054,6 +3054,24 @@
      own: they belong to this panel's answer and are outside its count. */
   .breaks .via {
     margin: 8px 0 4px;
+  }
+
+  /* A line here carries three things and the third is a whole path, which in
+     this pane is longer than the other two together. The shared `.lst` row is
+     one flex line, and it made a mess of both: squeezed into a 300px column
+     it broke "knobas-teamcity" across two lines — the one word a reader is
+     scanning for — and letting it wrap instead pushed each path down where it
+     read as the *next* asset's. So a grid, `.lst.routes`' treatment: name and
+     relation on the first row, the path under them on its own. */
+  .breaks .lst li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0 8px;
+    margin-bottom: 5px;
+  }
+
+  .breaks .lst li .path {
+    grid-column: 1 / -1;
   }
 
   .props {

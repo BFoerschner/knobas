@@ -4312,6 +4312,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::open_alerts,
             knobas_app::commands::assets::ack_alert,
             knobas_app::commands::assets::unmonitored_assets,
+            knobas_app::commands::assets::depends_on_this,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4481,6 +4482,13 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         // subject already is.
         ("ack_alert", serde_json::json!({ "monitorId": "kuma:7" })),
         ("unmonitored_assets", serde_json::json!({})),
+        // #505's panel. One required argument and no optional one, so it
+        // appears once: what breaks is a question about a named asset, and a
+        // call without one is a question with no subject.
+        (
+            "depends_on_this",
+            serde_json::json!({ "assetId": "asset:7f2c" }),
+        ),
     ] {
         let rejection = invoke(cmd, args.clone()).expect_err("there is no pool yet");
         assert!(
