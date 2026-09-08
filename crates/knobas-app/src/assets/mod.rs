@@ -1412,18 +1412,25 @@ const ROUTES_TO: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 /// fact to draw a blast radius from. That view is `deleted_at is null and
 /// confirmed_at is not null` (`0007`), so both filters are the view's.
 ///
-/// # Why the far end is joined to `knobas.asset`
+/// # Why a far end that is not an asset cannot reach the answer
 ///
 /// A link joins two *entities*, so the other end may be a ticket, a note or a
 /// monitor. The panel counts assets -- story 51 says *"every **asset** linked
-/// to it"* -- so the join is the filter, and it also settles the deleted case:
-/// [`delete`] removes the `knobas.asset` row and tombstones only the entity,
-/// so a link drawn at an asset somebody has since deleted finds no row here.
-/// That is not the panel hiding a live dependent; it is that a deleted asset
-/// is no longer an asset, has no type, no path and no place in the tree. What
-/// a tombstone **does** keep visible is the link itself, in the pane's
-/// *Linked* panel below, which is where `CONTEXT.md`'s rule about a link
-/// pointing at something withdrawn is honoured.
+/// to it"* -- and what enforces that is the **final** join: every row this
+/// statement returns is a `knobas.asset` row, columns and all, because that is
+/// what [`rows_of`] hydrates. There is deliberately no second `where` clause
+/// saying the same thing; a filter that is the shape of the read is a filter
+/// nobody can forget. (The first draft did join the far end to `knobas.asset`
+/// inside `edge` as well, and a mutation check found it changed no answer.)
+///
+/// It settles the deleted case in the same breath: [`delete`] removes the
+/// `knobas.asset` row and tombstones only the entity, so a link drawn at an
+/// asset somebody has since deleted finds no row here. That is not the panel
+/// hiding a live dependent; it is that a deleted asset is no longer an asset,
+/// has no type, no path and no place in the tree. What a tombstone **does**
+/// keep visible is the link itself, in the pane's *Linked* panel below, which
+/// is where `CONTEXT.md`'s rule about a link pointing at something withdrawn
+/// is honoured.
 ///
 /// # One row per asset, and which relation it reads as
 ///
@@ -1442,7 +1449,6 @@ const NEXT_LAYER: &str = "with edge (dst, relation) as (
          union all
          select l.from_id, l.relation
            from knobas.confirmed_link l
-           join knobas.asset f on f.id = l.from_id
           where l.to_id = any($1::text[])
             and l.relation = any($2::text[])
      ),
