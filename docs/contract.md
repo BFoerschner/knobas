@@ -9178,7 +9178,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   a rail read that fails. The premise under the dialog's behaviour is pinned separately by
   `an_empty_saved_list_table_is_still_in_the_archive_while_the_part_is_on`, whose other half is this
   criterion's *"with no saved list … the archive carries no list table"* read at the seam.
-- **A second importer on the one produce command, and its two DTO field names — issue #510
+- **A second importer on the one produce command, and one new field on its answer — issue #510
   (2026-09-08): the Docker host importer.**
 
   The second **importer** (`CONTEXT.md`; ADR-0015 — an importer produces an estate file and is
