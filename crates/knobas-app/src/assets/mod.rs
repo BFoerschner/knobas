@@ -2763,7 +2763,10 @@ pub async fn depends_on_this(pool: &PgPool, id: &str) -> Result<DependsOnThis, I
         .await?
         .ok_or_else(|| no_such_asset(id))?;
 
-    let relations: Vec<String> = DEPENDENCY_RELATIONS.iter().map(|r| (*r).to_owned()).collect();
+    let relations: Vec<String> = DEPENDENCY_RELATIONS
+        .iter()
+        .map(|r| (*r).to_owned())
+        .collect();
     let mut seen: HashSet<String> = HashSet::from([id.to_owned()]);
     let mut frontier: Vec<String> = vec![id.to_owned()];
     let mut assets: Vec<DependsOnRow> = Vec::new();

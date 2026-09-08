@@ -5840,10 +5840,12 @@ async fn a_link_the_panel_does_not_walk_leaves_the_list_empty() {
         "depends-on",
     )
     .await;
-    sqlx::query("insert into knobas.entity (id, kind, title) values ('jira:PAY-1','ticket','PAY-1')")
-        .execute(&pool)
-        .await
-        .expect("a mirrored ticket");
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ('jira:PAY-1','ticket','PAY-1')",
+    )
+    .execute(&pool)
+    .await
+    .expect("a mirrored ticket");
     link_as(&pool, "jira:PAY-1", "asset:knobas-gitea", "depends-on").await;
 
     let answer = assets::depends_on_this(&pool, "asset:knobas-gitea")
