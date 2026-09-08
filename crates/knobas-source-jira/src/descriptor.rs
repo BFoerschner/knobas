@@ -20,7 +20,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         name: "Jira".to_owned(),
         // M2 (issue #43): this adapter writes. `Capability::Search` stays
         // reserved for a future server-side `Source::search` -- knobas'
-        // launcher answers from the local index either way.
+        // launcher answers from the mirror either way.
         capabilities: vec![Capability::Write],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 8.14) or Basic user+password (spec §3).

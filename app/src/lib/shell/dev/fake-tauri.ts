@@ -216,7 +216,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       const repo = fakeRepoOf(id);
       const path = args["path"];
       if (repo === null) {
-        throw { code: "not_found", message: `${id} has no repository in the local index`, source_id: null };
+        throw { code: "not_found", message: `${id} has no repository in the mirror`, source_id: null };
       }
       if (typeof path === "string" && path.trim() !== "") {
         fakeOverrides[repo] = path.trim();
@@ -324,7 +324,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       if (existing) return existing;
       const entry = CORPUS.find((candidate) => candidate.entity_id === anchor);
       if (!entry) {
-        throw { code: "not_found", message: `${anchor} is not in the local index`, source_id: null };
+        throw { code: "not_found", message: `${anchor} is not in the mirror`, source_id: null };
       }
       const row = fakeContext("ticket", entry.title, anchor);
       FAKE_CONTEXTS.unshift(row);
@@ -2190,7 +2190,7 @@ function getEntity(args: Record<string, unknown>) {
   }
   const entry = CORPUS.find((candidate) => candidate.entity_id === id);
   if (!entry) {
-    throw { code: "not_found", message: `${id} is not in the local index`, source_id: null };
+    throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }
   return {
     row: mirrorRow(entry),
@@ -2264,7 +2264,7 @@ function fakeRepoOf(entityId: string): string | null {
 function fakeCheckout(entityId: string) {
   const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
   if (!entry) {
-    throw { code: "not_found", message: `${entityId} is not in the local index`, source_id: null };
+    throw { code: "not_found", message: `${entityId} is not in the mirror`, source_id: null };
   }
   if (entry.kind !== "repo" && entry.kind !== "branch") {
     throw {

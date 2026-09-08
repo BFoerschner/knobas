@@ -268,7 +268,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
   answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   writeFails = {
     code: "not_found",
-    message: "mock:PAY-228 is not in the local index",
+    message: "mock:PAY-228 is not in the mirror",
     source_id: null,
   };
   const screen = render();
@@ -278,7 +278,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
   screen.press(screen.picker(), "Enter");
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(screen.text()).toContain("is not in the local index"));
+  await vi.waitFor(() => expect(screen.text()).toContain("is not in the mirror"));
 
   screen.done();
 });

@@ -424,6 +424,39 @@ test("with no sources prop, the rows take their health from the board", async ()
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
+/**
+ * The box before the board's own read lands.
+ *
+ * Every `open()` in this file renders this frame and no other test looks at
+ * it — they all assert after `settle()`, by which time the board has arrived
+ * and the line is gone — so it is pinned here or nowhere: `CONTEXT.md`'s
+ * **Mirror** entry lists *index* under `_Avoid_`, and this placeholder used
+ * the forbidden word from M1 until #518. Hence the assertion before
+ * `settle()`, and a `launcherHome` that never resolves. The footnote below it
+ * names the store too, and has its own test.
+ */
+test("the box says which store it is reading while the board is in flight", () => {
+  open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
+  expect(target.textContent).toContain("Reading the mirror\u2026");
+});
+
+/**
+ * The footnote is one of the launcher's four accounts of the store, and the
+ * count beside it is the board's own.
+ *
+ * A **non-zero** `pending_writes`, because `session.home?.pending_writes ?? 0`
+ * renders the same `0` for a board that arrived with none and for a board that
+ * never arrived — so on `HOME` as it stands a footnote wired to nothing at all
+ * would still pass. The negative assertion in the paste-miss test below is not
+ * a substitute for this one: it would accept *local cache* as happily as
+ * *mirror*.
+ */
+test("the footnote names the store and counts the board's pending writes", async () => {
+  open({ ports: { launcherHome: async () => ({ ...HOME, pending_writes: 4 }) } });
+  await settle();
+  expect(target.textContent).toContain("mirror \u00b7 4 pending writes");
+});
+
 test("an empty box shows the smart lists and the recent items", async () => {
   open();
   await settle();
@@ -1089,8 +1122,13 @@ test("an author search says which sources could not be asked", async () => {
   // listing it would turn the explanation into a roll call.
   expect(gap?.textContent).not.toContain("Jira");
   // And the ordinary empty-result line is still there — the gap explains part
-  // of the emptiness, it does not replace the answer.
-  expect(target.querySelector(".none")).not.toBeNull();
+  // of the emptiness, it does not replace the answer. Its words, not merely
+  // its presence: this is another of the launcher's accounts of the store it
+  // read, and it used the word `CONTEXT.md`'s **Mirror** entry forbids until
+  // #518.
+  expect(target.querySelector(".none")?.textContent).toContain(
+    "Nothing in the mirror matches",
+  );
 });
 
 /**
@@ -1405,11 +1443,24 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
 
   expect(target.textContent).toContain("Not in the mirror");
   // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
-  // says to avoid: this panel is the reader's only account of why the
-  // launcher has nothing. Scoped to the panel, because the box's own footnote
-  // has said "local index" since M1 and correcting it is not this ticket's.
+  // says to avoid. The whole overlay now, not just the panel: #518 took the
+  // forbidden word off the footnote, the empty-result line and the reading
+  // placeholder, so every word the launcher draws is in scope.
+  //
+  // What this guards: the launcher is the screen that names the store to the
+  // reader — the footnote, the reading placeholder, the empty-result line and
+  // this panel — so a further string here saying *index* is far likelier to
+  // be the forbidden synonym than a database object. It is a fence, not the
+  // witness; the footnote and the panel each have a positive assertion of
+  // their own.
+  //
+  // The day a feature has a legitimate use of the word on this screen (the
+  // Postgres index `Diagnostics.svelte` names, say), **narrow** this to the
+  // footnote and `.miss` rather than deleting it. Do not narrow it back to
+  // `.miss` alone: at that scope the footnote's mutant was invisible, which
+  // is why it widened. (Deputy's ruling of 2026-09-08 on #518, part 2.)
   expect(
-    target.querySelector(".miss")?.textContent,
+    target.textContent?.toLowerCase(),
     "`index` is not the word for the mirror",
   ).not.toContain("index");
   expect(navigated, "there is nothing to open in the app").toEqual([]);

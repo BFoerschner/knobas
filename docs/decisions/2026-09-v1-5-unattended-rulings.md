@@ -781,3 +781,101 @@ properties on every container — which fits the mechanism unchanged and is what
 (*"the property an importer sets"*) — or changes `Producer` to read a key across a parent's
 property or an entry's field, which is a fork it raises. No new glossary entry and no ADR: the
 **Importer** amendment already on this branch is the glossary record and stays.
+
+---
+
+## #518 — two doc-comment lines in the frozen crate, the entry criterion 1 forbids, and two declines
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/518#issuecomment-5578535760>
+
+**The fork:** three, raised by PR #535 and decided by the implementer rather than left open, then
+put to the gate. (1) The PR changes two `///` lines on `Capability::Search` in
+`crates/knobas-source/src/lib.rs`, and §10.8 freezes *"any change to `crates/knobas-source/src/**`
+(the `Source` trait, its DTOs, the contract battery)"*. No entry was written and no fork raised:
+*"the ticket names the surface in its own words ('two SPI doc comments in `knobas-source`'), the
+ruling called this class 'a frozen crate's doc comments', no surface moves (two `///` lines on
+`Capability::Search`), and criterion 1 forbids the `docs/contract.md` edit an entry would need."*
+Is a doc-comment change inside the frozen crate a §10.8 touch at all; if a record is owed, where
+can it go when criterion 1 requires `docs/contract.md` byte-identical; and may the merge-manager
+proceed. (2) The paste-miss test in `Launcher.test.svelte.ts` widens from `.miss` to the whole
+launcher overlay, asserting no visible text there contains *index* — stronger than the ticket asked
+for, and a future feature that legitimately says the word on that screen would trip it. (3) The
+two-axis review asked for an `IpcError::not_in_mirror(id)` helper in `error.rs` and called the
+`docs/specs/2026-08-23-knobas-design.md` row edit scope creep; the implementer declined the first
+as a fork not its to take and kept the second.
+
+**Ruling:** (1) **Not a §10.8 touch; no entry is owed, none may be written in this PR, and the
+merge-manager may proceed.** The record of the question is this ruling, appended here by PR #535,
+which is the one edit to a record that PR makes. The answer already existed, in the spec and in a
+merged precedent: spec #491's scrub paragraph lists *"the two doc comments (the `Source` trait's
+module doc, the asset type table's)"* among the **living documents**, while its *Contract*
+paragraph in the same document says *"nothing else on the frozen list is touched"* — both true at
+once only if the SPI's doc comments are not on that list. #493 acted on exactly that reading:
+commit `5cd0bb09` (PR #513) rewrote two `//!` lines of the same file, touched `docs/contract.md`
+not at all, wrote no entry, and merged. The rule, so the next scrub does not fork again: **a change
+inside `crates/knobas-source/src/**` whose diff is `///` and `//!` hunks only, and which preserves
+what the sentence commits an adapter to (a word swap, a stale name, a cross-reference), is not a
+§10.8 touch and owes no entry**; the merge-manager's gate is `git diff -- crates/knobas-source/src/`
+showing prose and nothing else. **A doc comment that changes what a clause *means* — a tolerance, a
+direction, a field's semantics — is a contract change in prose form and goes to the gate as if it
+were code, whatever the diff looks like.** On criterion 1 and this file: the criterion names
+`docs/decisions/` among the records that keep their wording, and this file's header says *"the PR
+that acts on it appends the same four parts here"* — **the append wins**, as it did for #493, whose
+PR appended seventy lines here under a criterion that kept the records' word counts, because the
+criterion is aimed at the scrub rewriting a record and an appended ruling is not the scrub. PR
+#535's *"No ruling is appended"* paragraph was correct when written and is superseded: it becomes a
+sentence saying the #518 section is the only delta over the records, and its *"105 → 105"* count
+becomes *105 before the append*. (2) **Keep the widened assertion; craft, not a fork, and the
+merge-manager owns the final say.** One line is owed in the test: a comment saying what the
+assertion guards — the launcher is the screen that names the store, and *index* there is the
+synonym `CONTEXT.md`'s **Mirror** forbids — and that a future feature with a legitimate use of the
+word (the Postgres index `Diagnostics.svelte` names, say) **narrows** it to the footnote and the
+miss panel rather than deleting it. (3) **Both declines confirmed.** No helper in #518 and no
+follow-up ticket for one: `crates/knobas-app/src/error.rs` is on §10.8's list by name, #518 does
+not name it, and the #498 ruling already settled the class (*"a constructor is not on the list …
+Additive is not exempt"*, *"no follow-up ticket is owed for one"*). The spec edit stands: spec #491
+names *"the spec"* first among the living documents its scrub touches, #493 edited the same file
+under that sentence, and criterion 1's record list does not contain `docs/specs/`. No glossary
+change and no ADR: **Mirror**'s `_Avoid_: cache, index` is the rule, and the PR only makes the tree
+obey it.
+
+**Reasoning:** (1) the reading that keeps the frozen surface smallest is the one the spec had
+already taken. The freeze's reason is written at the top of the module it freezes — *"changing
+anything in this module afterwards needs an orchestrator decision and a spec update, because it
+breaks every adapter at once"* — and a `///` line breaks no adapter, changes no signature,
+variant or field, and is invisible to the contract battery. The parenthetical is the definition,
+not an illustration, which is how this list has read it before: the #498 ruling read *"its DTOs"*
+as the thing frozen, the #146 ruling read *"the contract battery"* as *"that contract's executable
+spec"*, and the #505 ruling said of a stale comment in `ipc/assets.ts` that *"a doc comment is
+living text."* #452's *"additive is not exempt"* is about additions to the compiled surface and
+does not reach prose. Treating every `///` as frozen would make a typo an orchestrator decision and
+put every future scrub into the contradiction #518 walked into — an entry owed in a file the ticket
+forbids editing. Checked on the branch rather than from the PR body: `git diff --stat
+9fb9e1fd...issue-518` over `docs/contract.md`, `docs/adr/`, `docs/decisions/`, `mockups/` and
+`crates/knobas-db/migrations/` is empty, and the diff over `crates/knobas-source/src/` is two `///`
+hunks with no non-comment line; the two adapter `descriptor.rs` edits are `//` comments in crates
+§10.8 does not name. (2) the glossary forbids *index* as a name for the mirror, and the launcher's
+footnote, placeholder and miss panel are the three places the app names the mirror to the user, so
+a fourth string saying *index* on that screen is far likelier to be the forbidden synonym than a
+database object — the friction points the right way. The PR's proof 4 is the assertion earning its
+keep, the footnote mutant having been invisible at `.miss` scope, and proof 6's positive assertion
+is what carries the footnote now, so the negative is a fence rather than the witness. (3) the
+answer to both exists in text already quoted; neither is a new decision. The drift a helper would
+prevent is now caught where it matters: each of the four Rust sentences has an `assert_eq!` on its
+full text.
+
+**If you disagree, the cost of reversing this is:** (1) trivial in code — two `///` lines return to
+the old phrase, and criterion 1's search then finds two hits the ticket says it must not. The real
+cost is to the rule: if a doc comment in the frozen crate is a §10.8 touch, #493's merged scrub
+retroactively owes an entry, this one owes one criterion 1 forbids, and one of spec #491's two
+sentences has to be rewritten — a correction to the spec and to §10.8's wording, which is Björn's
+and not a comment's. (2) nothing — narrow the selector back to `.miss` in one line; commit 4's
+positive footnote test still pins the wording. (3) trivial either way — one constructor later under
+a §10.8 entry of its own and four call sites; or one spec row back to the old phrase, which
+criterion 1's search then finds.
+
+**Flagged, not ruled:** whether §10.8's frozen-list sentence should say in its own words that its
+parenthetical is the definition and prose inside the crate is living text — a one-line contract
+amendment in the #112 idiom, Björn's to write or to refuse. This ruling and the decisions record
+carry the reading until then.

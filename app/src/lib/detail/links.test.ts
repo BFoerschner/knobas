@@ -75,11 +75,11 @@ test("a duplicate reports already linked, in words, and nothing changes", async 
 
 /** Any other refusal keeps its own words: `not_found` names what has not synced. */
 test("a refusal that is not a conflict keeps the backend's own message", async () => {
-  refusal = { code: "not_found", message: "mock:GONE-1 is not in the local index", source_id: null };
+  refusal = { code: "not_found", message: "mock:GONE-1 is not in the mirror", source_id: null };
 
   await linkTo("mock:PAY-231", "mock:GONE-1", "Gone");
 
-  expect(said()).toContain("mock:GONE-1 is not in the local index");
+  expect(said()).toContain("mock:GONE-1 is not in the mirror");
   expect(said()).not.toContain("Already linked");
 });
 

@@ -1015,7 +1015,7 @@ const CASES: Case[] = [
           value: "",
           placeholder: "Search",
           pending: false,
-          footnote: "local index",
+          footnote: "mirror",
           oninput: () => {},
           onkeydown: () => {},
           onclose: () => {},

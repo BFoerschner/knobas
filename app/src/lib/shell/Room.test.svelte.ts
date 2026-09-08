@@ -66,7 +66,7 @@ vi.mock("../ipc/entity", () => ({
     return answer(filter);
   },
   getEntity: (entityId: string): Promise<EntityDetail> =>
-    Promise.reject({ code: "not_found", message: `${entityId} is not in the local index`, source_id: null }),
+    Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null }),
   createNote: (_title?: string, _bodyMd?: string, links?: NoteLinkInput[]) => {
     written.push("note:new");
     born.push(links);
@@ -585,7 +585,7 @@ test("a note address opens the note view rather than the mirror's detail", async
     const screen = render(hash);
     await settle();
     expect(screen.text(), hash).toContain("Untitled note");
-    expect(screen.text(), hash).not.toContain("is not in the local index");
+    expect(screen.text(), hash).not.toContain("is not in the mirror");
     screen.done();
   }
 });

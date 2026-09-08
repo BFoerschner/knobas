@@ -45,9 +45,8 @@ pub struct LauncherHome {
     /// **E-Q5**, resolved: `knobas_sync::CredentialHealth` has merged, so the
     /// planned field-identical stand-in is not needed).
     pub sources: Vec<knobas_sync::CredentialHealth>,
-    /// What the launcher's footer counts in *"local index · N pending
-    /// writes"*: the writes knobas still owes a source and will send on its
-    /// own.
+    /// What the launcher's footer counts in *"mirror · N pending writes"*:
+    /// the writes knobas still owes a source and will send on its own.
     ///
     /// [`QueueCounts::pending`] alone, never the sum of the three open states.
     /// A pending write asks the user for patience; a held or refused one asks
