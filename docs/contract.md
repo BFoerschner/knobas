@@ -8831,7 +8831,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `the_real_estate_is_already_in_the_tree`; and, on the rendered side, three in
   `AssetsView.import.test.svelte.ts` — the token asked for once and not before it is owed, *land
   under* asked only when the importer found a server the estate lacks (both halves, and the token
-  field gone once the run reached the far end), and the produced file offered for download.
+  field gone once the run reached the far end), the produced file offered for download, and the
+  chooser dropping the preview the last producer drew (a plan under one origin key is not a plan
+  under another).
 
 - **Five IPC commands, one event, one plugin and a second capability — issue #503 (2026-09-08):
   the capture window and its global shortcut.**
