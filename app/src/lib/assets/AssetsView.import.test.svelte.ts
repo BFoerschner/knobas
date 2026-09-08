@@ -496,6 +496,7 @@ test("the chooser offers the estate file and sends it with both calls", async ()
   expect([...(chooser?.options ?? [])].map((option) => [option.value, option.text])).toEqual([
     ["estate_file", "Estate file"],
     ["hcloud", "Hetzner Cloud"],
+    ["docker", "Docker host"],
   ]);
   expect(chooser?.value).toBe("estate_file");
 
@@ -550,11 +551,11 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
 // offered for download.
 // ---------------------------------------------------------------------------
 
-/** Pick the chooser's `hcloud` entry, the way a reader picks it. */
-function chooseImporter() {
+/** Pick one of the chooser's importer entries, the way a reader picks it. */
+function chooseImporter(id = "hcloud") {
   const chooser = target.querySelector<HTMLSelectElement>(".dlg select");
   if (!chooser) throw new Error("the dialog draws no chooser");
-  chooser.value = "hcloud";
+  chooser.value = id;
   chooser.dispatchEvent(new Event("change", { bubbles: true }));
   flushSync();
 }
@@ -578,7 +579,7 @@ function tokenField(): HTMLInputElement | null {
  * lives.
  */
 test("an importer asks for the token once, and not before it is owed", async () => {
-  script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_servers: [] }];
+  script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const calls = render();
   await settle();
   button("Import")?.click();
@@ -619,7 +620,7 @@ test("an importer asks for the token once, and not before it is owed", async () 
  * to.
  */
 test("land under is asked only when the importer found a server the estate lacks", async () => {
-  script = [{ state: "ready", file: FILE, new_servers: [] }];
+  script = [{ state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const quiet = render();
   await settle();
   button("Import")?.click();
@@ -637,9 +638,9 @@ test("land under is asked only when the importer found a server the estate lacks
   script = [
     { state: "token_needed" },
     { state: "landing_needed", servers: ["knobas-scratch"] },
-    { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] },
     { state: "landing_needed", servers: ["knobas-scratch"] },
-    { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] },
   ];
   const asked = render();
   await settle();
@@ -706,7 +707,7 @@ test("land under is asked only when the importer found a server the estate lacks
  * preview and `calls.previewed` already pins.
  */
 test("the produced file is offered for download", async () => {
-  script = [{ state: "ready", file: FILE, new_servers: ["knobas-scratch"] }];
+  script = [{ state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] }];
   const calls = render();
   await settle();
   button("Import")?.click();
@@ -720,8 +721,59 @@ test("the produced file is offered for download", async () => {
   expect(link?.getAttribute("download")).toBe("hcloud-estate.json");
   expect(link?.getAttribute("href")).toMatch(/^blob:/);
   expect(link?.textContent?.trim()).toBe("Download hcloud-estate.json");
-  expect(target.textContent).toContain("1 server is new");
+  expect(target.textContent).toContain("1 is new");
   expect(calls.previewed).toEqual([FILE]);
+});
+
+/**
+ * **The Docker importer asks nothing** (#510): one press, one file.
+ *
+ * The two questions the hcloud half is built around are the two this producer
+ * structurally cannot ask — it has no credential, and a container lands under
+ * the engine whose context found it (spec #491, story 68) — so what this test
+ * is about is that neither is drawn: no token field, no picker, and the token
+ * argument goes over as `null` rather than as an empty string the backend would
+ * have to trim.
+ *
+ * And the **skipped** engines are drawn. That group is this producer's alone: a
+ * container engine in the tree carrying no `docker_context` is one the run
+ * could not read, and the produced file cannot tell that apart from an engine
+ * holding no containers. A reader hunting for a container that is in no group
+ * has nowhere else to find out why.
+ */
+test("the Docker importer asks for no token and no landing, and names what it skipped", async () => {
+  script = [
+    {
+      state: "ready",
+      file: FILE,
+      new_servers: [],
+      skipped: ["Docker engine (OrbStack)"],
+    },
+  ];
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+
+  chooseImporter("docker");
+  expect(tokenField()).toBeNull();
+  expect(target.querySelector('input[type="file"]')).toBeNull();
+
+  button("Read Docker host")?.click();
+  await settle();
+
+  expect(calls.produces).toEqual([["docker", null, null]]);
+  expect(tokenField()).toBeNull();
+  expect(target.querySelector(".dlg .pick")).toBeNull();
+  expect(target.textContent).not.toContain("Land under");
+  expect(calls.previewed).toEqual([FILE]);
+  expect(calls.producers).toEqual(["docker"]);
+
+  expect(target.textContent).toContain("1 container engine was");
+  expect(target.textContent).toContain("Docker engine (OrbStack)");
+  expect(target.querySelector<HTMLAnchorElement>(".dlg a.dl")?.getAttribute("download")).toBe(
+    "docker-estate.json",
+  );
 });
 
 /**
@@ -783,8 +835,8 @@ test("choosing another producer drops the preview the last one drew", async () =
 test("a token the far end refuses puts the field back, and another fault does not", async () => {
   script = [
     { state: "token_needed" },
-    { state: "ready", file: FILE, new_servers: [] },
-    { state: "ready", file: FILE, new_servers: [] },
+    { state: "ready", file: FILE, new_servers: [], skipped: [] },
+    { state: "ready", file: FILE, new_servers: [], skipped: [] },
   ];
   const calls = render();
   await settle();

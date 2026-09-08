@@ -82,18 +82,72 @@ as *new* against an estate that must preview all-known, and the recipe goes
 red. So a red `estate-live` naming one server is read as a wrong value in this
 file before it is read as a bug in the producer.
 
-**What that recipe measures is wider than the three ids.** It previews the
-produced file and requires *no changes*, so every property the hcloud importer
-writes has to be the key this file carries with the value this file carries:
-`hcloud_id`, `server_type`, `os` (hcloud's image name, where the `vm` type
-declares it), `location`, `ip`, and one property per Hetzner **label** --
-`knobas: testenv` and `role: <product>` on all three. A server resized in
-Hetzner, moved to another location, rebuilt on a newer image, relabelled, or
-given a new address turns `estate-live` red until this file follows. The
-properties this file carries that hcloud has never heard of -- `vcpu`,
-`memory_gb`, `disk_gb`, `ssh_host`, `docker_context`, `compose_profile` -- are
-not in the produced file and are not measured by it: an import is silent about
-what its file does not mention.
+**What that recipe's hcloud half measures is wider than the three ids.** It
+previews the produced file and requires *no changes*, so every property the
+hcloud importer writes has to be the key this file carries with the value this
+file carries: `hcloud_id`, `server_type`, `os` (hcloud's image name, where the
+`vm` type declares it), `location`, `ip`, and one property per Hetzner
+**label** -- `knobas: testenv` and `role: <product>` on all three. A server
+resized in Hetzner, moved to another location, rebuilt on a newer image,
+relabelled, or given a new address turns `estate-live` red until this file
+follows. The properties the three **servers** carry that hcloud has never heard
+of -- `vcpu`, `memory_gb`, `disk_gb`, `ssh_host`, `docker_context`,
+`compose_profile` -- are not in the produced file and are not measured by it: an
+import is silent about what its file does not mention.
+
+**Since #510 the recipe has a second half, and it measures the containers.** The
+Docker importer reads every `container_engine` asset here that carries a
+`docker_context` and spawns `docker --context <that> ps --format json` once per
+engine, so four things in this file are now under it:
+
+- **Every `container_engine` needs a `docker_context`.** `asset:orbstack-docker`
+  gained one (`orbstack`) with #510; the three Hetzner engines have had theirs
+  since M4.0. An engine without one is *skipped* -- named in the answer, its
+  containers absent from the file -- and `estate-live` goes red on the skip.
+- **Every container needs `docker_context` and `container_name`**, which
+  together are its [origin key](../../CONTEXT.md) -- a container's docker id
+  changes on every recreate and its name does not. Both are **properties**,
+  because that is what the Import's second matching rule reads; the name is
+  therefore written twice, once as the entry's name and once as the property,
+  and `crates/knobas-core/tests/estate_file.rs` holds the two equal and holds
+  each container's context equal to its engine's. That check is the one thing
+  the `hcloud_id`s do not have: a container's key is implied by the rest of this
+  file, so a hand edit that renames one and forgets the other is red in `just
+  check` rather than an hour later on a live recipe.
+- **A running container that is not written down here is red.** The producer
+  reads `docker ps` -- the *running* ones -- so a container started on one of
+  these engines and never recorded previews as *new*.
+- **A container recorded here and not running is not red**, and that is the
+  asymmetry to know: `asset:knobas-mockd` is not running (ADR-0013) -- no
+  container by that name is on the notebook's engine at all today, exited or
+  otherwise -- and this recipe says nothing about it, the same silence an
+  import keeps about anything its file does not mention.
+- **Reading `docker ps -a` instead would turn this recipe red**, which is why
+  the producer reads the running ones. `docker --context orbstack ps -a` on
+  2026-09-08 listed `knobas-teamcity` (*Exited (0) 2 days ago*) and
+  `knobas-teamcity-agent` (*Exited (143)*) on the notebook, left behind by the
+  local `real-teamcity` profile; this file records those two names only under
+  `docker_context: knobas-teamcity`, so under `-a` they would be produced with
+  the key (`orbstack`, `knobas-teamcity`), match nothing, and preview as
+  *new*. (`kuma-seed` is not the example anyone should reach for:
+  `testenv/seed-kuma.sh` runs it with `--rm`, so it leaves nothing behind.)
+
+What the Docker half does **not** write, and therefore does not measure: `image`
+and `compose_service`. `docker ps` reports `Image` as the image *reference* on
+the notebook (`gitea/gitea`) and as the image **id** on the three ssh contexts
+(`e34446c9dbf8` and friends, whose images compose pulled by digest), so writing
+it would put six containers into *would change* with a hash on every run;
+`compose_service` is one orchestrator's label and this file's own note about how
+a container is started, not a fact docker owns.
+
+**No tunnel is needed for either half**, which is a reading of what the two
+things carry and not a run with the tunnel down (2026-09-08): `ssh -G
+knobas-jira` resolves to `46.224.125.111` port 22 out of the block above, and
+the three `ssh -N` processes `./tunnel up` starts carry `-L
+127.0.0.1:8111|8080|8090` and TeamCity's one `-R` and nothing else -- so a
+`docker --context knobas-jira` call goes to the server's own address and no
+forward is in its path. What the recipe does need is the SSH key, the four
+contexts, and the docker CLI on the PATH.
 
 Nothing in the file is provisional any more, and the two things that were are
 named here because their settling is what the surrounding tests now rest on.

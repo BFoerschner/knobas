@@ -42,6 +42,7 @@
       "parent": "asset:orbstack",
       "description": "The engine `testenv/docker-compose.yml` brings its default services up on.",
       "properties": {
+        "docker_context": "orbstack",
         "compose_project": "knobas-testenv",
         "compose_file": "testenv/docker-compose.yml"
       }
@@ -53,6 +54,8 @@
       "parent": "asset:orbstack-docker",
       "description": "Gitea: a real product, the Gitea adapter's witness, and the VCS the TeamCity builds clone from through the tunnel's reverse forward.",
       "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-gitea",
         "image": "gitea/gitea",
         "compose_service": "gitea",
         "published_port": "127.0.0.1:3000"
@@ -66,6 +69,8 @@
       "parent": "asset:orbstack-docker",
       "description": "Uptime Kuma v2: the system of record for every monitor this file names. It does not watch itself.",
       "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-uptime-kuma",
         "image": "louislam/uptime-kuma",
         "compose_service": "uptime-kuma",
         "published_port": "127.0.0.1:3001"
@@ -78,6 +83,8 @@
       "parent": "asset:orbstack-docker",
       "description": "Our own mock of Jira Data Center and TeamCity. Deprecated since 2026-09-03 (ADR-0013) and unmonitored: it is recorded because the compose file still runs it, and it leaves this file the day the service goes.",
       "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-mockd",
         "compose_service": "mockd",
         "published_ports": "127.0.0.1:8200, 127.0.0.1:8210, 127.0.0.1:8212",
         "status": "deprecated (ADR-0013)"
@@ -136,6 +143,8 @@
       "parent": "asset:hetzner-teamcity-docker",
       "description": "The TeamCity server. Left running and seeded between sessions.",
       "properties": {
+        "docker_context": "knobas-teamcity",
+        "container_name": "knobas-teamcity",
         "image": "jetbrains/teamcity-server",
         "compose_service": "teamcity",
         "compose_profile": "real-teamcity",
@@ -161,6 +170,8 @@
       "parent": "asset:hetzner-teamcity-docker",
       "description": "The one build agent, because a server with none runs nothing. It publishes no port and has no monitor of its own; it falls with its server's ping.",
       "properties": {
+        "docker_context": "knobas-teamcity",
+        "container_name": "knobas-teamcity-agent",
         "image": "jetbrains/teamcity-agent",
         "compose_service": "teamcity-agent",
         "compose_profile": "real-teamcity",
@@ -208,6 +219,8 @@
       "parent": "asset:hetzner-jira-docker",
       "description": "Jira Software Data Center 10.3 LTS, on a 10-user timebomb licence renewed on the server's own systemd timer.",
       "properties": {
+        "docker_context": "knobas-jira",
+        "container_name": "knobas-jira",
         "image": "atlassian/jira-software",
         "compose_service": "jira",
         "compose_profile": "real-atlassian",
@@ -222,6 +235,8 @@
       "parent": "asset:hetzner-jira-docker",
       "description": "Jira's PostgreSQL. One server per product: `down -v` on either has to be a clean slate for that product alone.",
       "properties": {
+        "docker_context": "knobas-jira",
+        "container_name": "knobas-jira-db",
         "image": "postgres",
         "compose_service": "jira-db",
         "compose_profile": "real-atlassian"
@@ -280,6 +295,8 @@
       "parent": "asset:hetzner-confluence-docker",
       "description": "Confluence Data Center, the only contract there is for it: Atlassian publishes no machine-readable Confluence DC spec.",
       "properties": {
+        "docker_context": "knobas-confluence",
+        "container_name": "knobas-confluence",
         "image": "atlassian/confluence",
         "compose_service": "confluence",
         "compose_profile": "real-atlassian",
@@ -293,6 +310,8 @@
       "name": "knobas-confluence-db",
       "parent": "asset:hetzner-confluence-docker",
       "properties": {
+        "docker_context": "knobas-confluence",
+        "container_name": "knobas-confluence-db",
         "image": "postgres",
         "compose_service": "confluence-db",
         "compose_profile": "real-atlassian"

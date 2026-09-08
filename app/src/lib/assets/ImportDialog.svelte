@@ -22,16 +22,15 @@
   story 24's promise made visible *before* the write rather than discovered
   after it.
 
-  ## The chooser (#508, #509)
+  ## The chooser (#508, #509, #510)
 
-  *Import from* is where an estate file comes from, and it has **two entries**:
-  the file a person picked off the disk, and the hcloud importer.
-  `IMPORT_PRODUCERS` in `../ipc/assets` is the list, the Docker importer (spec
-  #491, story 67) adds the third, and what the chosen entry decides on the
-  backend is the **origin key** it declares — the Import's second matching rule
-  (`CONTEXT.md`, *Origin key*), used when a file entry's id is not one the tree
-  holds. That is why the id is sent with the preview *and* with the apply: it is
-  half of what decides the plan.
+  *Import from* is where an estate file comes from, and it has **three
+  entries**: the file a person picked off the disk, the hcloud importer, and the
+  Docker host importer. `IMPORT_PRODUCERS` in `../ipc/assets` is the list, and
+  what the chosen entry decides on the backend is the **origin key** it declares
+  — the Import's second matching rule (`CONTEXT.md`, *Origin key*), used when a
+  file entry's id is not one the tree holds. That is why the id is sent with the
+  preview *and* with the apply: it is half of what decides the plan.
 
   **What the entries differ by is where their text comes from**, and that is the
   one thing this dialog branches on: an `<input type="file">` for the estate
@@ -79,10 +78,10 @@
     after an `unauthorized` refusal, which is the other moment a reader has a
     token to give and the only way back from a credential the far end stopped
     accepting.
-  * **`landing_needed`** — the live system holds servers this estate does not.
+  * **`landing_needed`** — the live system holds things this estate does not.
     The picker walks the tree the way `MoveDialog` does, one read per level, and
     *where you have walked to is where they land*. Asked **once per run**, not
-    once per server, because where a provider's servers go is one decision.
+    once per finding, because where a provider's servers go is one decision.
   * **`ready`** — the file, which is previewed straight away (a reader who ran
     an importer has already said what they want to see) and offered as a
     download, so what was produced can be kept, read, or edited by hand and
@@ -91,6 +90,20 @@
   The download is an `<a download>` over a blob the webview already holds. No
   backend write and no filesystem capability: the text crossed the bridge to be
   previewed, and handing the same string to the browser costs nothing more.
+
+  ## The Docker importer asks nothing at all (#510)
+
+  It spawns the docker CLI under each engine asset's `docker_context`, so there
+  is no token to type, and a container lands under the engine whose context
+  found it, so there is no *land under* to choose. One press of *Read Docker
+  host* answers `ready`, and everything after the text is the same code as
+  before — which is what makes this dialog's two branches *file* and *importer*
+  rather than one per producer.
+
+  What it can say that hcloud never does is **skipped**: a container engine in
+  the tree carrying no `docker_context` is one this run could not read, and the
+  file cannot tell that apart from an engine holding nothing. So it is drawn,
+  named, above the preview.
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
@@ -156,6 +169,8 @@
   let landing = $state<string[] | null>(null);
   /** What the last successful run said it would create. */
   let produced = $state<string[]>([]);
+  /** What the last successful run knew of and could not read (#510). */
+  let skipped = $state<string[]>([]);
 
   /** Where the *land under* picker is standing: the crumb, and its foot. */
   let crumb = $state<AssetRow[]>([]);
@@ -184,6 +199,7 @@
     token = "";
     landing = null;
     produced = [];
+    skipped = [];
     crumb = [];
     rows = [];
     if (downloadHref !== null) URL.revokeObjectURL(downloadHref);
@@ -256,6 +272,7 @@
       }
       landing = null;
       produced = answer.new_servers;
+      skipped = answer.skipped;
       file = answer.file;
       offer(answer.file);
       chosen = producerLabel();
@@ -466,10 +483,22 @@
             Download {downloadName}
           </a>
           {#if produced.length > 0}
-            — {produced.length === 1
-              ? "1 server is new"
-              : `${produced.length} servers are new`}
+            — {produced.length === 1 ? "1 is new" : `${produced.length} are new`}
           {/if}
+        </p>
+      {/if}
+
+      <!--
+        What the run could not read (#510). Above the preview and not inside it,
+        because it is not a thing this import would do — it is a part of the
+        estate the file says nothing about, and a reader looking for a container
+        that is not in any group needs it before they read the groups.
+      -->
+      {#if skipped.length > 0}
+        <p class="hint">
+          {skipped.length === 1 ? "1 container engine was" : `${skipped.length} container engines were`}
+          not read, because {skipped.length === 1 ? "it carries" : "they carry"} no
+          <code>docker_context</code>: {skipped.join(", ")}.
         </p>
       {/if}
 

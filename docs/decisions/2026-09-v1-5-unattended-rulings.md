@@ -1665,3 +1665,349 @@ should answer backup at all (a fixture `share_export` returning a table list is 
 whether `docs/agents/working-model.md` should name the sections the walk cannot reach so nobody
 writes a criterion that assumes it can. Either way the dialog's witness stays
 `BackupSection.test.svelte.ts` and the archive's stays `backup_ipc.rs`.
+
+## #510 — the frozen gate for the Docker arm, the fork taken as route 1, the field-name revert and the module move, and four disclosed gaps
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/510#issuecomment-5581090073>
+
+Four parts on #510 / PR #545 — the frozen-surface gate for the `Importer::Docker` arm, the third
+`PRODUCERS` row and the one new field on `Produced`; the fork named on this ticket before it
+started, taken as route 1; the field-name revert and the `Produced` module move; and four
+disclosed gaps plus one claim about the tunnel. The implementer raised no fork; it decided,
+disclosed, and held the PR for this gate, which is what the entry's *"claims no ratification"*
+asks for. `just estate-live` came back *"8 containers produced over 4 engines, all known, no
+changes"* beside *"3 servers produced, all known, no changes"*, which is the criterion this ticket
+turns on and the Docker half of the witness ADR-0015 books (*"a file generated from the live
+hcloud or Docker host previews as all-known against `testenv/hetzner/estate.json`"*). Björn
+reverses any part with a follow-up ticket; the PR that acts on this appends it to
+`docs/decisions/2026-09-v1-5-unattended-rulings.md` in the same four-part shape.
+
+Owed inside #510, on PR #545: the ratification clause (part 1); two corrected sentences and one
+word (part 4b); the PR body corrected to match before the squash. For the orchestrator: a sixth
+spec-count note on #491 (part 1). No new glossary entry and no ADR: the **Origin key** amendment
+already on the branch is the glossary record and stays as written (part 2).
+
+---
+
+### 1. The frozen-surface gate: a second arm on one command, a third producer row, one new field
+
+**The fork:** PR #545 adds no command, no barrel line, no migration and no event. It adds `Docker`
+to `assets::Importer`, the enum `produce_estate_file` (#509) dispatches on; a third row to
+`assets::PRODUCERS` — `docker`, origin key `["docker_context", "container_name"]` — which crosses
+the bridge as the `producer` string and as an `IMPORT_PRODUCERS` chooser entry; and one field,
+`Ready.skipped: Vec<String>`, on `Produced`, mirrored in `app/src/lib/ipc/assets.ts`. The entry
+sits at the foot of §10.8 and reads *"no ruling had been posted on #510 when this entry was
+written, so this sentence records the flag and claims no ratification"*, as #508's and #509's did.
+Spec #491's stream map row 10 counts *"one IPC produce command"* and none landed. Does the ticket
+authorise the touch, is the entry what the contract requires, and may the merge-manager proceed?
+
+**Ruling:** **Authorised, and the entry is sufficient as written. The merge-manager may proceed**
+once the ratification clause and the rulings-file append are on the branch and part 4b's
+corrections are in.
+
+The ticket names the touch in its own words. Body: *"Same file shape, same preview and apply, same
+download"* — the same command, then, and not a second one. Fourth criterion: *"§10.8 entry for the
+produce command"* — the definite article, one command. Second criterion, which is what authorises
+the new field: *"an engine without the property is skipped and **named in the outcome**"* — an
+outcome that names a skipped engine is a field on the answer, and `Produced` is the answer. Spec
+#491, story 61: *"a chooser: an estate file, hcloud, or a Docker host"*, which is the third row;
+Implementation Decisions: *"App-side producers in the assets module … each returns an estate
+file's text in the checked-in shape, and **the existing** preview and apply commands consume it.
+The Import dialog's chooser selects the producer … Docker is read by spawning the docker CLI under
+the context named by the engine asset's property"*. On the count: row 10's *"one IPC produce
+command"* is the same command row 9 counted, so the spec is over by one here where it was short by
+one on #506 and #508. The rule recorded five times on #491 reads the same in both directions —
+*"The ticket is the operative text and the spec's count is a shorthand, not a prohibition"* — and
+the orchestrator posts a sixth note there in the shape of the five.
+
+What I checked, because the gate is a gate. The 17-file diff against `859e4027` has nothing under
+`crates/knobas-db/migrations/**`, `crates/knobas-source/**`, `crates/knobas-http/**` or
+`crates/knobas-secrets/**`; `crates/knobas-app/src/lib.rs`, `error.rs`, `profile.rs` and
+`app/src/lib/ipc/index.ts` are absent from it, so the barrel is the #509 list and
+`every_command_is_in_the_handler_list` sees what it saw. `0025_the_search_a_reader_saved.sql` is
+the last migration on `origin/main`, so *"`0026` is still the next free number"* is true today and
+the entry claims none. The entry is at line 9181 on the branch and the nearest `^#` above it is
+`2308: ### 10.8 The M1 contract is frozen`. `Produced` derives `Serialize` and not `Deserialize`,
+so `skipped` owes no `default`, as the entry says;
+`every_produced_state_matches_its_typescript_mirror` lists `Ready` as `["state", "file",
+"new_servers", "skipped"]`. `testenv/hetzner/estate.json` gains exactly nineteen lines — two per
+container over nine containers, and one on `asset:orbstack-docker` — which is what the entry says
+it gains.
+
+The clause owed: the entry's *"claims no ratification"* sentence stays as the history it is, and
+gains, beside it, *"— ratified in his absence by the deputy's ruling of 2026-09-08 on #510
+(`docs/decisions/2026-09-v1-5-unattended-rulings.md`)"*, the wording #496's, #498's, #503's,
+#505's, #506's, #507's, #508's and #509's entries carry.
+
+Claim-by-claim verification of the entry against the diff is the merge-manager's deep pass, as on
+those eight, and this ruling does not replace it. Three claims to start with, because each is the
+kind a reader takes on trust:
+
+1. **"The wire is unchanged by the move"** and **"Nothing decodes `Produced`"**, now with a field
+   more. The #509 ruling's grep — `Produced`, `ProducedFile`, `LandingNeeded`, `TokenNeeded`, now
+   also `skipped` — outside `assets/mod.rs`, `assets/hcloud.rs`, `assets/docker.rs`,
+   `commands/assets.rs`, `ipc/assets.ts`, `ImportDialog.svelte` and the test files; a hit in
+   `backup/`, `settings` or `fake-tauri.ts`'s persisted state is the sentence going false. And the
+   revert's residue: the diff is read for `new_assets` and for a `landing_needed` shape spelling
+   `assets` in the mirror, `fake-tauri.ts`, the Svelte and the vitest file — a rename reverted in
+   Rust and left in one TypeScript spelling is green in `cargo test` and wrong at runtime. The
+   moved type's attributes are byte-for-byte `origin/main`'s `hcloud.rs:197` — `tag = "state"`,
+   `rename_all = "snake_case"`, `Serialize` only.
+2. **"`IMPORT_PRODUCERS` grows the matching chooser entry"** and the fixture.
+   `the_chooser_offers_producers_this_build_knows` parses the list out of the mirror as text, from
+   `= [` to the first `]` (#508's third claim); it now reads three entries and each `importer`
+   flag. The `?fake-ipc` handler `dockerProduce` carries the fixture-only marker #496's second
+   condition requires — its header says *"there is no CLI here and no match"* — and the
+   merge-manager confirms it is in the handler and not only the PR body, and that the skipped
+   engine it answers with is one the fixture's own estate holds without a `docker_context`.
+3. **The estate-file gate.** `every_container_carries_the_context_and_the_name_it_is_matched_on`
+   is what makes *"a key part that repeats a column"* safe to say; mutants 5 and 6 show a *wrong*
+   value is red. The merge-manager satisfies itself that an *absent* pair is red too — a tenth
+   container added by hand with neither property — and that the test reaches every container under
+   an engine, not only entries whose parent is directly an engine. A file-level gate that a hand
+   edit can slip under is #237's class: a fixture claim that has to be traced through the rule.
+
+Plus the live re-run the ticket asks for: `just estate-live` on the merge commit, both halves,
+with `HETZNER_API_TOKEN` in the repo-root `.env`, the docker CLI on the PATH, and the tunnel left
+as found — up — per part 4e. Beside it, one read-only `docker --context orbstack ps -a`, for part
+4b.
+
+**Reasoning:** the freeze exists so that a wire shape never arrives unannounced; this one was
+announced by the spec's story 61 and its Implementation Decisions, named in the ticket's body and
+its second and fourth criteria, and written up in the section the freeze points at. The smallest
+frozen surface that meets stories 66–68 is one arm on an existing enum, one row, and one field,
+and that is what landed. Each way of avoiding the field is larger or contradicts the ticket:
+writing the skip into the file changes the estate-file schema (`deny_unknown_fields`,
+`ASSET_KEYS`, and the seam ADR-0015 says three readers share) and contradicts *"in the checked-in
+shape"*; skipping silently makes an engine nobody read indistinguishable from an engine holding
+nothing, which criterion 2 forbids in as many words; refusing the run on an engine without the
+property makes the notebook's `asset:orbstack-docker` — which had none until this PR — a red
+import rather than a named skip, and the ticket says *skipped*. `skipped` is `[]` for hcloud by
+construction, which the entry says and the hcloud seam test asserts, honestly labelled as a
+statement about the arm. The arm on `Importer` with no wildcard is ADR-0006's rule one level over,
+as #509's entry recorded; adding the variant stopped `commands::assets` compiling until the arm
+said what running it meant, which is the point.
+
+**If you disagree, the cost of reversing this is:** moderate after merge and not growing — the
+arm, the row and the field leave the wire only by a further §10.8 entry, there is no migration and
+nothing is persisted, and this is the milestone's last build ticket, so nothing downstream is
+written against it. Before merge it is one revert of a branch nothing has built on.
+
+---
+
+### 2. The fork named before it was met, taken as route 1; the **Origin key** amendment
+
+**The fork:** the comment of 2026-09-08 on this ticket named two routes — (1) *"write
+`docker_context` and the container's name as properties on every container entry — in the produced
+file and in `testenv/hetzner/estate.json`"*, which *"fits the mechanism unchanged and is what
+`CONTEXT.md`'s Origin key already says"*; (2) *"change `Producer` to read a key across a parent's
+property or an entry's field … raise it as a `**Fork:**`"*. The implementer took route 1, raised
+nothing, added `docker_context: "orbstack"` to `asset:orbstack-docker`, which had none, and
+amended **Origin key** with a dated sentence: *"every part of a key is a property, including one
+that repeats a column."* Confirm the reading, and say whether the amendment is the right shape and
+scope.
+
+**Ruling:** **Confirmed, and it was not a fork to raise: the comment said which route needed one,
+and it was the other.** Route 1 is the route *"the record points at"*, in the comment's own words,
+and the implementer's PR body quotes the sentence it rests on. The property on
+`asset:orbstack-docker` is authorised by the ticket's third criterion in its own words — *"the
+three servers' contexts **and the notebook's** produce a file that previews all-known"* — and the
+body's rule, *"for every engine asset in the tree that carries a `docker_context` property"*: an
+engine without the property is skipped by criterion 2, so a notebook engine without it could not
+produce and criterion 3 would be unsatisfiable on a correct implementation. The reading is also
+the one criterion 2 rewards: *"a recreated container (new id, same name) matches its asset"* is
+where the two-part key first does visible work, and `a_recreated_container_keeps_its_asset` — the
+produced file byte-identical across a change of every id — is its strongest form.
+
+**The amendment is the right shape and the right scope, and stays as written.** Shape: it keeps
+the ruled sentence and adds a dated, ticket-numbered clause after it, the treatment **Route** got
+on 2026-09-06 (#432) and **Live item** on 2026-09-07 (#448); it names the alternative and why it
+was not taken, in the comment's own terms (*"a second matching rule inside the second matching
+rule"*); and it names the gate that keeps the repeat honest, the way **Live item** names its
+migrations. Scope: it says one thing the entry did not yet say — that a part which duplicates a
+column is still a property — and nothing about how keys are declared or matched that the entry and
+ADR-0015 do not already say. No ADR: nothing architectural was decided; a consequence of #508's
+mechanism was written down where the next editor of the file will read it, and the rulings-file
+section this PR appends is its record.
+
+**Reasoning:** the reading that keeps the witness real in both directions is the one where the
+file is the record of the estate and the recipe holds the two to each other — ADR-0015's
+consequence, *"a disagreement between the two is a red test, not a judgement call"*. Route 2 would
+have made the container's key a computed thing the file never carries, so a hand edit renaming a
+container could not be caught in `just check` at all; route 1 makes it nineteen lines in a
+property bag with no schema and no count, and gives them the file-level gate the three
+`hcloud_id`s structurally cannot have. The precedent is #508 part 2 and #509 part 2: a decision
+the criterion already forces is confirmed, not re-decided.
+
+**If you disagree, the cost of reversing this is:** trivial in code — nineteen lines in
+`estate.json`, two keys in the producer, one test — but a reversal to route 2 is a change to the
+matching rule, and `CONTEXT.md`'s *"the second matching rule beside the id, and the only one"* is
+Björn's sentence and not the deputy's; the amendment would then be struck, not rewritten.
+
+---
+
+### 3. The field-name revert, and the `Produced` module move
+
+**The fork:** the implementer's words: *"I renamed `Produced`'s `new_servers`→`new_assets` and
+`servers`→`assets`; the Spec review called it over-reach and I agree — #509's §10.8 entry declared
+those names a day earlier and a deputy ratified them. The dialog's rendered sentence is fixed
+instead, and the §10.8 entry records the revert and why. `Produced`'s **module** move to `assets`
+stays (path only, wire identical)."* Was the revert right, and is the move inside #510's scope?
+
+**Ruling:** **(a) The revert was right, and no follow-up ticket is owed for the rename.** #509's
+entry declares the names — *"`landing_needed { servers }` and `ready { file, new_servers }`"* —
+and the ruling of 2026-09-08 on #509 (part 1) ratified that entry. #510's body asks for no rename:
+*"Same file shape, same preview and apply, same download."* A frozen wire field's name changes by
+a §10.8 conversation of its own, and the standard the implementer applied is the one comment 1 on
+this ticket set for the matching rule — settled by a ruling, not re-decided inside a ticket that
+did not ask. What *was* wrong was the reader's sentence, *"1 server is new"* over a list of
+containers, and that is fixed; a rendered sentence is nobody's frozen surface. The name is now
+recorded as reading narrow in three places — `Produced`'s header, the mirror, the entry — so the
+next reader does not take it for a claim. Not a ticket: `Produced` is decoded nowhere and has one
+caller, and the rename rides on the next entry that changes its shape for a reason of its own (a
+third producer, or the day something decodes it); Björn files it sooner if he wants the name
+sooner.
+
+**(b) The move is inside #510's scope, and the entry records it in the right shape.**
+`crates/knobas-app/src/assets/**` is not on §10.8's list — the five items are the migrations,
+`crates/knobas-source/src/**`, the IPC schema and barrels, `crates/knobas-http/**` and
+`error.rs`/`profile.rs` (#509 part 3) — so the question is scope, not the gate. The wire is the
+freeze, and the mirror test pins it unchanged: same tag, same three arms, same fields. §10.8
+spells a Rust path only as the signature's spelling; #510's entry says the path moved and the wire
+did not, and #509's `assets::hcloud::Produced` stays as written beside it, the supersession
+treatment. It is #510's to make because #510 is the ticket that gives `Produced` its second
+constructor: `origin/main`'s own `assets/mod.rs` (line 4052) already argues the case for `Token` —
+*"Beside `Producer` rather than inside `hcloud`, because nothing here names a live system: the
+second importer would otherwise import its credential handling from a module named after the
+first"* — and a type every producer answers with is that case exactly. The #509 ruling's part 4c
+ratified the same kind of move for `token_for` and `remember` as *"the deep-module move the
+implementer already made"*.
+
+**Reasoning:** the two halves are decided by the same test, whether a sentence is true. The
+dialog's sentence was false and is now true; the field's name was never false on the wire, only
+narrow, and a narrow name that says so is the cheaper of the two honest states. The move changes
+no sentence anyone reads across the bridge and makes one inside the crate true — that `docker.rs`
+does not `use super::hcloud::Produced`.
+
+**If you disagree, the cost of reversing this is:** (a) nil now; the rename is one line in Rust,
+one in the mirror, one in the dialog, and a §10.8 entry, whenever it is wanted. (b) trivial — the
+type back into `hcloud.rs` with a `pub use`, nothing on the wire either way.
+
+---
+
+### 4. Four disclosed gaps, and the tunnel
+
+**The fork:** the implementer's words. (a) *"The stub-driven suite is `#[cfg(unix)]` … On Windows
+criterion 2 is unwitnessed."* (b) *"`docker ps` and not `docker ps -a` has no test of its own … no
+fixture here holds a stopped container, so nothing would go red if it changed to `-a` until
+`estate-live` met a stopped one-shot container on a real engine."* (c) *"The applied-asset half of
+the landing test is not separately mutated … Isolating that would mean mutating `apply_import`,
+which both producers and the hand-picked estate file share."* (d) *"The command's Docker arm is
+witnessed only where it can be reached without a docker … The dispatch into
+`assets::docker::produce`, and `land_under` being ignored on that arm, have no test above the
+module — the same shape #509 left the hcloud arm in."* And (e), a claim about a witness rather
+than a gap in one: *"'through the tunnel' is the ticket's phrase and is not what the contexts use
+— they are `ssh://` to the servers' own addresses; I say so as a reading of what the forwards
+carry, not as a run with the tunnel down, which nobody made."* Inside #510, a follow-up ticket, or
+nothing; and is the tunnel reading right, does the phrase need correcting, is anything owed to
+witness it?
+
+**Ruling:** **(a) Nothing. (b) Nothing as a test; two sentences and one word corrected inside
+#510. (c) Nothing. (d) Nothing. (e) The reading is right; nothing is corrected and nothing is owed
+to witness it.**
+
+**(a)** The answer exists. Spec #491's Out of Scope list carries *"Witnessing on Linux or
+Windows"*; the grilling ruled *"macOS is the witnessed platform; others get command templates and
+no witness"*; the ruling of 2026-09-08 on #501 applied both to a criterion in exactly this
+position. `tests/checkout_ipc.rs` on `origin/main` (PR #519, lines 668–712) is the same
+`#[cfg(unix)]` arrangement for the same reason, and the entry says which half runs everywhere —
+the parse and the argument rule are not gated. Not a ticket: a Windows witness is the
+milestone-scale question the spec struck, not this ticket's.
+
+**(b)** The decision is pinned twice already, and the implementer undercounted its own witnesses.
+In `just check`: `the_context_is_the_only_thing_substituted_and_it_is_one_argument` asserts the
+literal `["--context", "knobas-jira", "ps", "--format", "json"]` (`docker.rs` 520–522), so `-a` is
+red there. Live, and this is ADR-0013's first class — *"if the real instance can be driven into
+the fault by any seed, flag or clock, it is witnessed live"* — the instance is already in the
+state: my read-only `docker --context orbstack ps -a` today lists `knobas-teamcity` (`Exited (0) 2
+days ago`) and `knobas-teamcity-agent` (`Exited (143) 2 days ago`) on the notebook, the local
+`real-teamcity` profile, which `testenv/hetzner/estate.json` records only under
+`asset:hetzner-teamcity-docker` with `docker_context: knobas-teamcity`. Under `-a` those two would
+carry the key (`orbstack`, `knobas-teamcity`), match nothing, and preview as *new* — `just
+estate-live` is red on `-a` on its next run. So nothing is owed as a test. What is wrong is the
+reason on record: `kuma-seed` is run by `testenv/seed-kuma.sh` line 38 with `docker compose
+--profile seed run --rm`, so it leaves no exited container behind and is not what `-a` would show;
+and the PR body's *"nothing would go red … until `estate-live` met a stopped one-shot container on
+a real engine"* is false today. Owed inside #510: `assets::docker`'s header sentence on `docker
+ps`, the README's *"`kuma-seed` is the reason"* paragraph and the PR body name the exited
+containers the notebook's engine actually holds as the reason and as the live witness, and drop
+`kuma-seed` as the example or say it is `--rm`. Same class as #509 part 4c and #496 part 1 — prose
+outrunning what the tool does — and the memory's own line, *a stub can be wrong about the tool*.
+The one word: the README's *"`asset:knobas-mockd` is stopped"* — no container by that name exists
+on the notebook today, stopped or otherwise; *not running* is the true word, and the recipe's
+silence is the same either way.
+
+**(c)** Nothing. The precedent is #508 part 3a: a mutant that cannot be isolated without deleting
+shared machinery is read, not reported, and the reading is where the next person will find it —
+here the PR body and the test's comment. `apply_import` is #439's and #508's, pinned by their own
+suites; the assertion is in place, it reads the origin key off the applied asset rather than the
+file (the Standards review's finding), and mutant 2 kills the producer's half. The other half is
+the Import's, and an import that dropped a property on apply is red in `assets_ipc.rs` already.
+
+**(d)** Nothing; the answer is #509 part 4c in as many words: *"As a witness question it owes
+nothing: the spec's seam paragraph puts the importer's witness at `assets::hcloud::produce` over a
+scratch database … and the wiring is held by
+`every_asset_command_is_registered_and_its_arguments_decode` and the three mirror tests — the same
+arrangement #505 and #506 ratified."* The one thing that ruling did find owed — a client built
+inline in the command and spelled a second time in the recipe — has no Docker analogue: the
+command and the recipe both call `assets::docker::cli(assets::docker::PROGRAM)`
+(`commands/assets.rs` 666, `estate_live.rs` 252), so the live run drives the spawn the command
+uses. The token refusal is the one decision the arm makes and it is witnessed (mutant 8);
+`land_under` is ignored by not being read, and a value nothing reads has no test to write.
+
+**(e)** The reading is right, and I confirmed it read-only rather than taking it from the body:
+`docker context ls` shows the three contexts as `ssh://knobas-confluence`, `ssh://knobas-jira`,
+`ssh://knobas-teamcity`; `ssh -G` on each resolves to `46.224.125.111`, `46.224.117.158` and
+`2.28.72.189`, port 22, with no `ProxyJump` and no `ProxyCommand`; `testenv/hetzner/tunnel` lines
+52–54 start `ssh -N … -L 127.0.0.1:$port:127.0.0.1:$port $rflag $rval knobas-$role` and nothing
+else. A `docker --context knobas-jira ps` is an ssh session of its own to the server's address,
+and no forward is in its path. **The phrase is corrected nowhere.** *"Through the tunnel"* in the
+ticket's body and criterion 3, and in spec row 10, names the session's arrangement the grilling
+ordered for streams 9 and 10 — *"need `source testenv/hetzner/env` and `tunnel up` and go last"* —
+the way story 63's *"image"* named what is read and not the key it becomes (#509 part 2); the
+ticket is left as written, the treatment #491 got on #508 part 1. The three documents on the
+branch say it as a reading and say no run was made, which is the honest shape and stays. **Nothing
+is owed to witness it.** The standard (#502's second ruling, #503 part 5, #509 part 4) is that a
+gap owes a witness when the unwitnessed direction is one the feature was cut for; no criterion,
+story or ADR asks the importer to run with the tunnel down, and the sentence exists so the next
+reader does not start a tunnel they do not need. The merge-manager re-runs the recipe as the
+criterion says, with the tunnel up and left as found, and does not take the shared tunnel down to
+prove a README sentence: it carries TeamCity's `-R` forward, which other suites spend.
+
+**Reasoning:** the standard is the one #502's second ruling set and #503's part 5 and #509's part
+4 applied: a gap owes something when the unwitnessed direction is the one the feature was cut for,
+and where it is owed follows the cost of the witness. (a) is allocated by the spec and struck by
+it. (b) is witnessed twice and mis-described once; the fix is the sentence, which is the one place
+this milestone has refused to leave prose ahead of the code. (c) and (d) are precedents applied.
+(e) is a claim that is true, labelled as a reading, and costs nothing to leave labelled that way.
+
+**If you disagree, the cost of reversing this is:** (a) nil in code — a Windows witness is a
+ticket of its own, and the spec's Out of Scope line would be Björn's to strike. (b) two sentences
+either way; a test that pins `ps` over `-a` at the seam would be one stub answer with an exited
+container, an afternoon, and would certify what the literal argv assertion already does. (c) nil.
+(d) nil. (e) nil — a `docker --context knobas-jira ps` with the tunnel down is a ten-second
+measurement whenever Björn wants the sentence to be one, taken when no live suite is running.
+
+---
+
+**Record-keeping:** the PR appends this as `## #510` in
+`docs/decisions/2026-09-v1-5-unattended-rulings.md`, after `## #507` (the last section on
+`origin/main` today) or after whatever section is last on the merge commit. The §10.8 clause of
+part 1, the two sentences and one word of part 4b, the PR body corrected to match before the
+squash (#509's second ruling, part 3: the body is the squash message), and the append are the
+edits to the branch this ruling asks for. **For the orchestrator:** post the sixth spec-count note
+on #491 (part 1); brief #545's merge-manager that those edits are conditions of the merge, that
+the three claims in part 1 are read before the deep pass, that `just estate-live` is re-run on the
+merge commit with the tunnel as found and `docker --context orbstack ps -a` read beside it, and
+that no file in `testenv/hetzner/` is touched by the re-run. No new glossary entry, no ADR.

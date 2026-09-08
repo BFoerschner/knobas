@@ -224,6 +224,7 @@
 //! `commands::assets::get_asset` because the answer is in the keychain and this
 //! module reads the database.
 
+pub mod docker;
 pub mod hcloud;
 
 use std::collections::{HashMap, HashSet};
@@ -3974,6 +3975,9 @@ pub struct Producer {
 pub enum Importer {
     /// Hetzner Cloud, over its public API (`assets::hcloud`).
     Hcloud,
+    /// A Docker host, by spawning the docker CLI under an engine asset's
+    /// context (`assets::docker`, ADR-0016).
+    Docker,
 }
 
 /// The estate file a person picks off the disk: the Import as M4.0 shipped it.
@@ -3998,15 +4002,26 @@ pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
 /// only: every id the chooser sends is one of these, and not the reverse.
 pub const HCLOUD_PRODUCER: &str = "hcloud";
 
+/// The Docker importer's files: one entry per running container, keyed by its
+/// docker context and its name (spec #491, stories 66--68).
+///
+/// **Declared by #510, together with the properties that make it match.** #508
+/// deliberately left it undeclared, because a container's key is its context
+/// plus its name and no container in `testenv/hetzner/estate.json` carried
+/// either as a property -- the context sat on the engine above it -- so a
+/// declaration then would have been a key that matches nothing. This ticket
+/// writes both onto every container in that file and onto every container the
+/// producer emits, which is the route the deputy's ruling of 2026-09-08 on
+/// #508 (part 2) named and the one `CONTEXT.md`'s **Origin key** already
+/// described (*"the property an importer sets"*). The alternative -- teaching
+/// [`Producer`] to read a key across a parent's property or an entry's field --
+/// is a change to the matching rule and was not taken.
+pub const DOCKER_PRODUCER: &str = "docker";
+
 /// Every producer this build knows.
 ///
-/// **No Docker producer yet.** Its origin key is a container's docker context
-/// plus its name (spec #491, story 67) and no container in
-/// `testenv/hetzner/estate.json` carries either as a property -- the context is
-/// on the engine above it -- so declaring one here would be a key that matches
-/// nothing and a promise this build cannot keep. Stream 10 declares it together
-/// with the properties it needs, the way #508 declared hcloud's together with
-/// the three `hcloud_id` values and #509 gave it something to produce.
+/// Three since #510, and the list is what the chooser chooses between: the file
+/// a person picks off the disk, and the two importers.
 pub const PRODUCERS: &[Producer] = &[
     Producer {
         id: ESTATE_FILE_PRODUCER,
@@ -4019,6 +4034,12 @@ pub const PRODUCERS: &[Producer] = &[
         label: "Hetzner Cloud",
         origin_key: &[hcloud::ORIGIN_KEY],
         importer: Some(Importer::Hcloud),
+    },
+    Producer {
+        id: DOCKER_PRODUCER,
+        label: "Docker host",
+        origin_key: docker::ORIGIN_KEY,
+        importer: Some(Importer::Docker),
     },
 ];
 
@@ -4146,6 +4167,132 @@ impl Token {
     pub fn as_str(&self) -> &str {
         &self.value
     }
+}
+
+/// What one run of a [producer](Producer) answered.
+///
+/// Three states and not a struct of optionals, because two of the three fields
+/// would be meaningless in each: a `file: None, needs: None` is a state no
+/// producer is ever in and no caller should have to write code for. The tag is
+/// `state`, which is [`PropertyValue`]'s `kind` arrangement one surface over.
+///
+/// **Here and not in [`hcloud`]**, since #510 gave it a second producer. The
+/// argument is the one this module already makes for [`Token`] and [`remember`]
+/// -- *"beside [`Producer`] rather than inside `hcloud`, because nothing here
+/// names a live system: the second importer would otherwise import its
+/// credential handling from a module named after the first"* -- and a type
+/// spelling every producer's answer is the same case. **The move is the Rust
+/// path only**; the wire is unchanged, tag and arms and field names.
+///
+/// Two of those field names now read narrower than what they carry:
+/// [`Ready::new_servers`](Produced::Ready) holds *container* names when the
+/// Docker importer filled it. They were declared by #509's §10.8 entry and
+/// ratified a day before #510 was implemented, and renaming a declared wire
+/// field is a §10.8 conversation of its own rather than a thing this ticket was
+/// asked for -- so the names stand, said here so the next reader does not take
+/// the narrowness for a claim. What the *dialog* draws is producer-neutral,
+/// because the rendered sentence is nobody's frozen surface.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Produced {
+    /// Nothing is stored under this importer's keychain account and the caller
+    /// sent no token. **Answered before any request is made**, so a reader who
+    /// has never used this importer is asked once rather than being shown a
+    /// 401 from a call made with nothing.
+    ///
+    /// Reachable only from a producer that *has* a credential. The Docker
+    /// importer has none -- it spawns a CLI that reads this machine's own
+    /// contexts -- and `produce_estate_file` refuses a token sent to it rather
+    /// than keeping one nothing would read.
+    TokenNeeded,
+    /// Assets the estate does not hold, and nowhere said to put them.
+    ///
+    /// The reader is asked **once per run**: the answer comes back as
+    /// `land_under` on the next call, and everything named here lands under it.
+    /// One question and not one per asset, because *where the things a provider
+    /// account holds go* is one decision -- and because the estate this was
+    /// written against answers it once, with a site.
+    ///
+    /// Reachable only from a producer whose findings have no natural parent.
+    /// Docker's have one by construction -- a container lands under the engine
+    /// whose context found it (spec #491, story 68) -- so this state is the
+    /// hcloud importer's alone today.
+    LandingNeeded {
+        /// By name, in the order the live system listed them.
+        servers: Vec<String>,
+    },
+    /// The estate file, ready for [`preview_import`].
+    Ready {
+        /// The file's text, in the checked-in shape -- there is nothing in it
+        /// that says which producer made it (spec #491, #508).
+        file: String,
+        /// What this file would create, by name; empty when the estate already
+        /// holds everything the live system showed, which is what `just
+        /// estate-live` asserts of both importers.
+        ///
+        /// **Servers from hcloud and containers from Docker**, under a name
+        /// #509 gave it when hcloud was the only producer. See this type's own
+        /// header for why the name stands.
+        new_servers: Vec<String>,
+        /// What this run knew of and could **not** read, by name -- for Docker,
+        /// a `container_engine` asset carrying no `docker_context`.
+        ///
+        /// Its own field rather than a silence, because an engine with no
+        /// context is indistinguishable in the file from an engine holding no
+        /// containers, and the reader is the only one who can tell them apart.
+        /// Always empty for hcloud: one token either sees a server or does not
+        /// know it exists.
+        skipped: Vec<String>,
+    },
+}
+
+/// One producer's estate file, around the entries it built.
+///
+/// The envelope every producer writes is the same three keys plus its own name,
+/// and it was written twice before #510 -- including the same
+/// `"rendering the estate file"` sentence, which is the copy that goes stale
+/// quietly. A producer chooses only what it calls the estate and what is in it.
+///
+/// # Errors
+///
+/// [`IpcError::internal`] if the file will not render, which is a bug here
+/// rather than anything a reader did.
+fn render_estate_file(name: &str, assets: Vec<serde_json::Value>) -> Result<String, IpcError> {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "version": FILE_VERSION,
+        "name": name,
+        "assets": assets,
+        "routes": [],
+    }))
+    .map_err(|error| IpcError::internal(format!("rendering the estate file: {error}")))
+}
+
+/// The ids in `draft` the Import would **create**, asked of the Import.
+///
+/// **Both producers decide *what is new* this way and neither decides it
+/// itself**, which is the point: the rule is id-then-origin-key
+/// ([`matched_by_origin_key`], #508) and a second copy of it living in a
+/// producer is the copy that goes stale against this one. The cost is one extra
+/// preview per run, which writes nothing at all.
+///
+/// Narrowed to [`NAMESPACE`], because a producer's file names assets and the
+/// preview's groups hold routes too.
+///
+/// # Errors
+///
+/// [`preview_import`]'s.
+async fn new_asset_ids(
+    pool: &PgPool,
+    draft: &str,
+    producer: &str,
+) -> Result<HashSet<String>, IpcError> {
+    Ok(preview_import(pool, draft, producer)
+        .await?
+        .new
+        .iter()
+        .filter(|entry| entry.kind == NAMESPACE)
+        .map(|entry| entry.id.clone())
+        .collect())
 }
 
 /// Where the servers an [importer](Importer) found and this estate does not hold
@@ -6376,7 +6523,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let answer = remember::<hcloud::Produced>(
+        let answer = remember::<Produced>(
             &refused,
             HCLOUD_PRODUCER,
             token,
@@ -6405,9 +6552,10 @@ mod tests {
             &accepted,
             HCLOUD_PRODUCER,
             token,
-            Ok(hcloud::Produced::Ready {
+            Ok(Produced::Ready {
                 file: "{}".to_owned(),
                 new_servers: Vec::new(),
+                skipped: Vec::new(),
             }),
         )
         .await
@@ -6431,7 +6579,7 @@ mod tests {
             &asked,
             HCLOUD_PRODUCER,
             token,
-            Ok(hcloud::Produced::LandingNeeded {
+            Ok(Produced::LandingNeeded {
                 servers: vec!["knobas-scratch".to_owned()],
             }),
         )
@@ -6472,9 +6620,10 @@ mod tests {
             &store,
             HCLOUD_PRODUCER,
             token,
-            Ok(hcloud::Produced::Ready {
+            Ok(Produced::Ready {
                 file: "{}".to_owned(),
                 new_servers: Vec::new(),
+                skipped: Vec::new(),
             }),
         )
         .await

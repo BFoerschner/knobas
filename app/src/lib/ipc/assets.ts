@@ -835,15 +835,14 @@ export interface ImportProducer {
 /**
  * The chooser's entries: where an estate file can come from (#508).
  *
- * **Two entries** since #509: the file a person picks off the disk, and the
- * hcloud importer. The Docker importer (spec #491, story 67) adds the third,
- * and each is a producer the backend already has to know an origin key for. The
- * ids here are the authority on what the chooser may send, and
- * `commands::assets`' `the_chooser_offers_producers_this_build_knows` reads
- * this list and checks every id against `assets::PRODUCERS`. The reverse is
- * deliberately not checked: the backend may declare a producer's origin key
- * before anything can produce that producer's file, which is what #508 did for
- * hcloud and what stream 10 will do for Docker.
+ * **Three entries** since #510: the file a person picks off the disk, the
+ * hcloud importer, and the Docker host importer. Each is a producer the backend
+ * has to know an origin key for. The ids here are the authority on what the
+ * chooser may send, and `commands::assets`'
+ * `the_chooser_offers_producers_this_build_knows` reads this list and checks
+ * every id against `assets::PRODUCERS`. The reverse is deliberately not
+ * checked: the backend may declare a producer's origin key before anything can
+ * produce that producer's file, which is what #508 did for hcloud.
  *
  * A **non-empty tuple** rather than an array, so the dialog can open on the
  * first entry without a fallback for a chooser with nothing in it — a state
@@ -852,6 +851,7 @@ export interface ImportProducer {
 export const IMPORT_PRODUCERS: readonly [ImportProducer, ...ImportProducer[]] = [
   { id: "estate_file", label: "Estate file", importer: false },
   { id: "hcloud", label: "Hetzner Cloud", importer: true },
+  { id: "docker", label: "Docker host", importer: true },
 ];
 
 /**
@@ -877,12 +877,19 @@ export function previewEstateImport(file: string, producer: string): Promise<Imp
 }
 
 /**
- * What one run of an importer answered — `assets::hcloud::Produced` (#509).
+ * What one run of a producer answered — `assets::Produced` (#509, #510).
  *
  * Three states and not a record of optionals: two of the three fields would be
  * meaningless in each, and `{ file: null, needs: null }` is a state the backend
  * is never in. `state` is the tag, the arrangement {@link PropertyValue} makes
  * with `kind`.
+ *
+ * It moved out of `assets::hcloud` when #510 gave it a second producer. The
+ * move was the Rust path only — this union is unchanged, tag, arms and field
+ * names — and `new_servers` therefore holds *container* names when the Docker
+ * importer filled it. Renaming a field #509's §10.8 entry declared is a
+ * conversation of its own; what this dialog *draws* is producer-neutral,
+ * because the rendered sentence is nobody's frozen surface.
  */
 export type Produced = TokenNeeded | LandingNeeded | ProducedFile;
 
@@ -890,15 +897,23 @@ export type Produced = TokenNeeded | LandingNeeded | ProducedFile;
  * Nothing is stored under this importer's keychain account and no token was
  * sent — the dialog asks for one, **once**: the backend stores it after the run
  * succeeds, so the next run comes back with a file instead.
+ *
+ * Reachable only from a producer that has a credential. The Docker importer has
+ * none — it spawns a CLI that reads this machine's own docker contexts — and
+ * the backend refuses a token sent to it.
  */
 export interface TokenNeeded {
   state: "token_needed";
 }
 
 /**
- * The live system holds servers this estate does not, and nothing has said
- * where they go. The dialog asks *land under* — once per run, not once per
- * server — and calls again with the answer.
+ * The live system holds things this estate does not, and nothing has said where
+ * they go. The dialog asks *land under* — once per run, not once per finding —
+ * and calls again with the answer.
+ *
+ * Reachable only from a producer whose findings have no natural parent, which
+ * today is hcloud alone: a Docker container lands under the engine whose
+ * context found it (spec #491, story 68).
  */
 export interface LandingNeeded {
   state: "landing_needed";
@@ -911,8 +926,20 @@ export interface ProducedFile {
   state: "ready";
   /** The file's text. Nothing in it says which producer made it (#508). */
   file: string;
-  /** The servers this file would create; empty when the estate holds them all. */
+  /**
+   * What this file would create, by name; empty when the estate holds it all.
+   * Servers from hcloud, containers from Docker — the name is #509's.
+   */
   new_servers: string[];
+  /**
+   * What the run knew of and could not read, by name — for Docker, a container
+   * engine in the tree carrying no `docker_context`. Always empty for hcloud.
+   *
+   * Its own field rather than a silence: an engine with no context is
+   * indistinguishable in the file from an engine holding no containers, and the
+   * reader is the only one who can tell them apart.
+   */
+  skipped: string[];
 }
 
 /**
@@ -941,13 +968,20 @@ export interface Landing {
  * backend reads the keychain, under the `importer:` namespace an importer's
  * credential lives in (ADR-0015 — an importer is not a source, and its token is
  * not reachable by anything that walks sources). `landUnder` is where the
- * servers this estate does not hold will land ({@link Landing}), and is owed
+ * things this estate does not hold will land ({@link Landing}), and is owed
  * only once `landing_needed` has said so — `null` until then, and *never* as a
  * way of saying *the top*, which is `{ parent: null }`.
  *
- * Rejects with `invalid` for a producer the backend does not know or for the
- * estate file (which is chosen from the disk and produces nothing), and with
- * `unauthorized` for a token the live system refused.
+ * **The Docker importer (#510) needs neither.** It spawns the docker CLI under
+ * each engine asset's `docker_context`, so there is no credential, and a
+ * container lands under the engine whose context found it, so there is no
+ * landing to choose. A token sent to it is refused rather than stored.
+ *
+ * Rejects with `invalid` for a producer the backend does not know, for the
+ * estate file (which is chosen from the disk and produces nothing) or for a
+ * token sent to a producer that takes none; with `unauthorized` for a token the
+ * live system refused; and with `unreachable` for a docker context this machine
+ * cannot read.
  */
 export function produceEstateFile(
   producer: string,

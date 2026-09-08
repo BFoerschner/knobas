@@ -1401,6 +1401,11 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
  * been given -- and one server the estate does not hold, which is enough to
  * make every branch reachable by hand and none of them reachable twice.
  *
+ * **The Docker producer is answered by {@link dockerProduce}, not by this**
+ * (#510): it asks for no token and no landing, and answering it here would draw
+ * hcloud's two questions over a producer that has neither, which is a walk
+ * certifying a dialog nobody ships.
+ *
  * What it says nothing about is Hetzner: there is no API here, no origin key
  * and no match. `crates/knobas-app/tests/assets_ipc.rs` witnesses the shape
  * against a recording and `just estate-live` witnesses the real system, which
@@ -1422,7 +1427,52 @@ const IMPORTER_NEW_SERVER = "knobas-scratch";
  */
 let PRODUCED_FILE: string | null = null;
 
+/**
+ * `produce_estate_file` for the **Docker host** producer (#510).
+ *
+ * One press, one answer: no token, no *land under*, and a container under an
+ * engine this fixture's estate already holds. It also answers with one
+ * **skipped** engine, so that the branch of the dialog that state exists for is
+ * reachable by hand -- a branch nothing here could reach is a branch nobody
+ * would see before it shipped. The name it skips is
+ * `asset:orbstack-docker`'s, because a reader recognises it from the Tree; it
+ * is **not** a claim about that engine, which since #510 carries a
+ * `docker_context` like every other engine in `testenv/hetzner/estate.json`.
+ * No engine in this fixture's estate can honestly be skipped, which is the
+ * whole reason this state has to be invented here.
+ *
+ * As above, it says nothing about docker: there is no CLI here and no match.
+ * `crates/knobas-app/tests/assets_ipc.rs` drives a stub docker and
+ * `just estate-live` drives the four real contexts.
+ */
+function dockerProduce() {
+  PRODUCED_FILE = JSON.stringify(
+    {
+      version: 1,
+      name: "Docker hosts",
+      assets: [
+        {
+          id: "asset:docker-orbstack/knobas-gitea",
+          type: "container",
+          name: "knobas-gitea",
+          properties: { docker_context: "orbstack", container_name: "knobas-gitea" },
+        },
+      ],
+      routes: [],
+    },
+    null,
+    2,
+  );
+  return {
+    state: "ready",
+    file: PRODUCED_FILE,
+    new_servers: [],
+    skipped: ["Docker engine (OrbStack)"],
+  };
+}
+
 function estateProduce(args: Record<string, unknown>) {
+  if (args.producer === "docker") return dockerProduce();
   const token = typeof args.token === "string" ? args.token.trim() : "";
   if (token !== "") IMPORTER_TOKEN = token;
   if (IMPORTER_TOKEN === null) return { state: "token_needed" };
@@ -1463,6 +1513,9 @@ function estateProduce(args: Record<string, unknown>) {
     state: "ready",
     file: PRODUCED_FILE,
     new_servers: held ? [] : [IMPORTER_NEW_SERVER],
+    // hcloud never skips: one token either sees a server or does not know it
+    // exists.
+    skipped: [],
   };
 }
 

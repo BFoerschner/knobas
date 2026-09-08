@@ -565,7 +565,17 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
 /// its own for the reason the two Import commands are: the estate is what this
 /// produces, and the `commands/` + `ipc/` layout is frozen (§10.8).
 ///
-/// # Three answers, and why a run can take two calls
+/// # Which importer, and what each of them needs
+///
+/// **hcloud** needs a token and may need a landing place; **Docker** (#510)
+/// needs neither. It spawns the docker CLI under each engine asset's
+/// `docker_context` -- a person-typed property, which is ADR-0016's rule -- so
+/// there is no credential to ask for, and a container lands under the engine
+/// whose context found it (spec #491, story 68), so there is nothing to ask
+/// *land under* about. A token sent to it is refused rather than stored under
+/// an account nothing would read, and `land_under` is ignored.
+///
+/// # Three answers, and why an hcloud run can take two calls
 ///
 /// [`Produced::TokenNeeded`] comes back before any request is made, when
 /// nothing is stored under this importer's keychain account and the caller sent
@@ -600,7 +610,7 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     producer: String,
     token: Option<String>,
     land_under: Option<assets::Landing>,
-) -> Result<assets::hcloud::Produced, IpcError> {
+) -> Result<assets::Produced, IpcError> {
     let pool = lifecycle.pool()?;
     let producer = assets::find_producer(&producer)?;
     // No wildcard arm on the importer below (ADR-0006's rule applied to this
@@ -608,32 +618,54 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     // run here, rather than falling through to a refusal that reads like a bug.
     let importer = assets::importer_of(producer)?;
 
-    // The keychain, which is where an importer's credential lives -- under its
-    // own namespace, so nothing that walks *sources* can reach it (ADR-0015).
-    let secrets = &crate::sources::state(&app)?.secrets;
-    let Some(credential) = assets::token_for(secrets, producer.id, token).await? else {
-        return Ok(assets::hcloud::Produced::TokenNeeded);
-    };
-
-    // The client is `assets::hcloud::client`'s and not built here, so the live
-    // recipe and the recorded-shape suite exercise the one the command uses
-    // rather than a second one spelled the same way (#509, part 4c of the
-    // deputy's ruling of 2026-09-08). Only the base URL differs between the
-    // three callers, and only a test passes anything but `hcloud::API`.
-    let run = match importer {
+    match importer {
         assets::Importer::Hcloud => {
-            match assets::hcloud::client(assets::hcloud::API, credential.as_str()) {
+            // The keychain, which is where an importer's credential lives --
+            // under its own namespace, so nothing that walks *sources* can
+            // reach it (ADR-0015).
+            let secrets = &crate::sources::state(&app)?.secrets;
+            let Some(credential) = assets::token_for(secrets, producer.id, token).await? else {
+                return Ok(assets::Produced::TokenNeeded);
+            };
+
+            // The client is `assets::hcloud::client`'s and not built here, so
+            // the live recipe and the recorded-shape suite exercise the one the
+            // command uses rather than a second one spelled the same way (#509,
+            // part 4c of the deputy's ruling of 2026-09-08). Only the base URL
+            // differs between the three callers, and only a test passes
+            // anything but `hcloud::API`.
+            let run = match assets::hcloud::client(assets::hcloud::API, credential.as_str()) {
                 Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_ref()).await,
                 Err(refused) => Err(refused),
-            }
-        }
-    };
+            };
 
-    // The run's answer goes *through* the store rather than being checked
-    // before it, so "a credential the far end refused is never kept" is a
-    // property of `remember` that its own tests hold it to, rather than a
-    // property of the order these two lines are written in.
-    assets::remember(secrets, producer.id, credential, run).await
+            // The run's answer goes *through* the store rather than being
+            // checked before it, so "a credential the far end refused is never
+            // kept" is a property of `remember` that its own tests hold it to,
+            // rather than a property of the order these two lines are written
+            // in.
+            assets::remember(secrets, producer.id, credential, run).await
+        }
+        // **The keychain is not touched at all on this arm** (#510). The Docker
+        // importer spawns the docker CLI, which reads this machine's own
+        // `docker context ls` and `~/.ssh/config`; there is no credential to
+        // store, so a token sent here is refused by name rather than written
+        // under an account nothing would ever read. `land_under` is ignored for
+        // the reason story 68 gives -- a container lands under the engine whose
+        // context found it -- and saying so is cheaper than a state the dialog
+        // can never reach.
+        assets::Importer::Docker => {
+            if token.is_some_and(|typed| !typed.trim().is_empty()) {
+                return Err(IpcError::invalid(
+                    "the Docker importer takes no credential: it spawns the \
+                     docker CLI, which uses this machine's own docker contexts \
+                     and its SSH configuration. Nothing would read a token \
+                     stored for it.",
+                ));
+            }
+            assets::docker::produce(&pool, &assets::docker::cli(assets::docker::PROGRAM)).await
+        }
+    }
 }
 
 /// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
@@ -1602,25 +1634,22 @@ mod tests {
     #[test]
     fn every_produced_state_matches_its_typescript_mirror() {
         for (interface, value, fields) in [
-            (
-                "TokenNeeded",
-                assets::hcloud::Produced::TokenNeeded,
-                &["state"][..],
-            ),
+            ("TokenNeeded", assets::Produced::TokenNeeded, &["state"][..]),
             (
                 "LandingNeeded",
-                assets::hcloud::Produced::LandingNeeded {
+                assets::Produced::LandingNeeded {
                     servers: vec!["knobas-teamcity".to_owned()],
                 },
                 &["state", "servers"][..],
             ),
             (
                 "ProducedFile",
-                assets::hcloud::Produced::Ready {
+                assets::Produced::Ready {
                     file: "{}".to_owned(),
                     new_servers: Vec::new(),
+                    skipped: Vec::new(),
                 },
-                &["state", "file", "new_servers"][..],
+                &["state", "file", "new_servers", "skipped"][..],
             ),
         ] {
             assert_shape(
