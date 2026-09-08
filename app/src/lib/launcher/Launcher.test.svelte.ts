@@ -1568,6 +1568,16 @@ test("a saved list that needs attention says so and does not open", async () => 
   flushSync();
   await settle();
   expect(target.querySelector("input")!.value).toBe("");
+
+  // And from the keyboard, which does not go through the button at all: the
+  // arrows and `Enter` reach `activate` directly, so `disabled` alone would
+  // leave `Enter` putting `list:legacy-palette` in the box and sending the
+  // reader to the backend's refusal.
+  press("ArrowDown");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("");
 });
 
 /**
