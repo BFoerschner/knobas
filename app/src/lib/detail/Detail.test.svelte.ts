@@ -278,18 +278,18 @@ test("not_found renders a panel with the id and a way out", async () => {
   answer = () =>
     Promise.reject({
       code: "not_found",
-      message: "mock:NOPE-1 is not in the local index",
+      message: "mock:NOPE-1 is not in the mirror",
       source_id: null,
     });
 
   const screen = render({ entityId: "mock:NOPE-1" });
   await vi.waitFor(() =>
-    expect(screen.text()).toContain("Not in the local index"),
+    expect(screen.text()).toContain("Not in the mirror"),
   );
   flushSync();
 
   expect(screen.text()).toContain("NOPE-1");
-  expect(screen.text()).toContain("mock:NOPE-1 is not in the local index");
+  expect(screen.text()).toContain("mock:NOPE-1 is not in the mirror");
   expect(screen.target.querySelector(".d-b")).not.toBeNull();
 
   const close = [...screen.target.querySelectorAll("button")].find(
@@ -314,7 +314,7 @@ test("invalid and not_found say different things", async () => {
   await vi.waitFor(() =>
     expect(screen.text()).toContain("not an entity address"),
   );
-  expect(screen.text()).not.toContain("Not in the local index");
+  expect(screen.text()).not.toContain("Not in the mirror");
   screen.done();
 });
 

@@ -232,11 +232,11 @@ pub enum Capability {
     /// The source can search **server-side**, on its own corpus.
     ///
     /// Reserved: the SPI has no `Source::search` yet, so nothing calls this in
-    /// M1 and knobas' own launcher answers from the local index either way
-    /// (§3a "Search does not know adapter names -- it knows `sync.item`").
-    /// M1's read-only adapters therefore declare **no** capabilities at all;
-    /// the alternative reading -- "syncs into the local index" -- would be
-    /// true of every adapter ever written and would assert nothing.
+    /// M1 and knobas' own launcher answers from the mirror either way (§3a
+    /// "Search does not know adapter names -- it knows `sync.item`"). M1's
+    /// read-only adapters therefore declare **no** capabilities at all; the
+    /// alternative reading -- "syncs into the mirror" -- would be true of
+    /// every adapter ever written and would assert nothing.
     Search,
     /// Must be accompanied by a non-empty
     /// [`SourceDescriptor::write_ops`], which says *which* writes.

@@ -104,7 +104,7 @@
 
 {#if response.groups.length === 0}
   <p class="none">
-    Nothing in the local index matches
+    Nothing in the mirror matches
     <span class="mono">{response.interpreted.text || "these filters"}</span>.
   </p>
 {/if}

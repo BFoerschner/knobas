@@ -771,7 +771,7 @@
           <span class="k">{key}</span>
           <h2 id={titleId}>
             {error.code === "not_found"
-              ? "Not in the local index"
+              ? "Not in the mirror"
               : error.code === "invalid"
                 ? "That is not an entity address"
                 : "Could not read this item"}

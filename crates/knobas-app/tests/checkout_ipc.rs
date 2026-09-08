@@ -354,10 +354,16 @@ async fn the_refusals_carry_the_codes_the_panel_branches_on() {
     let bad = view(&pool, "not-an-entity-id").await.expect_err("no ':'");
     assert_eq!(bad.code, IpcErrorCode::Invalid);
 
-    let missing = view(&pool, &format!("gitea:nobody/nothing-{}", unique()))
-        .await
-        .expect_err("not mirrored");
+    let absent = format!("gitea:nobody/nothing-{}", unique());
+    let missing = view(&pool, &absent).await.expect_err("not mirrored");
     assert_eq!(missing.code, IpcErrorCode::NotFound);
+    // The word is the glossary's: `CONTEXT.md`'s **Mirror** entry lists
+    // *index* under `_Avoid_` (#518).
+    assert_eq!(
+        missing.message,
+        format!("{absent} is not in the mirror"),
+        "the refusal names the id and the mirror"
+    );
 
     // A checkout belongs to a repo or a branch. A ticket has no clone, and
     // saying so by name is better than answering an empty view that a panel
@@ -411,6 +417,16 @@ async fn a_branch_with_no_repository_in_the_mirror_is_no_checkout() {
         .await
         .expect_err("nothing to key the override on");
     assert_eq!(refused.code, IpcErrorCode::NotFound);
+    // Named surfaces, in the glossary's word (#518): the branch, its missing
+    // repository, and the mirror rather than an *index*.
+    assert_eq!(
+        refused.message,
+        format!(
+            "{branch} is a branch whose repository is not in the mirror, \
+             so there is nothing to set a checkout on"
+        ),
+        "the refusal names the branch, the missing repository and the mirror"
+    );
 }
 
 /// A branch resolves to the **longest** repo id its own id starts with.
@@ -584,9 +600,9 @@ async fn purging_the_repo_takes_its_override_with_it() {
 /// The panel is mounted inside the detail, and `get_entity`'s `DETAIL` is
 /// exempt from both of the view's halves (`CONTEXT.md`, **Live item**, reader
 /// 2) precisely so a withdrawn or turned-off entity's detail opens and says so.
-/// A checkout read that went through the view would draw *not in the local
-/// index* on a page the app can open -- and the clone is still on the disk
-/// either way, which is the whole point of knowing where it is.
+/// A checkout read that went through the view would draw *not in the mirror*
+/// on a page the app can open -- and the clone is still on the disk either
+/// way, which is the whole point of knowing where it is.
 #[tokio::test]
 async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() {
     let pool = pool().await;

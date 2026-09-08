@@ -83,10 +83,16 @@ async fn a_blank_label_is_refused_as_invalid() {
 #[tokio::test]
 async fn promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid() {
     let pool = pool().await;
-    let missing = promote_context_inner(&pool, &format!("jira:GONE-{}", unique()))
-        .await
-        .unwrap_err();
+    let anchor = format!("jira:GONE-{}", unique());
+    let missing = promote_context_inner(&pool, &anchor).await.unwrap_err();
     assert_eq!(code(&missing), IpcErrorCode::NotFound);
+    // The word is the glossary's: `CONTEXT.md`'s **Mirror** entry lists
+    // *index* under `_Avoid_` (#518), and this sentence reaches a toast.
+    assert_eq!(
+        missing.message,
+        format!("{anchor} is not in the mirror"),
+        "the refusal names the anchor and the mirror"
+    );
 
     let malformed = promote_context_inner(&pool, "no-separator")
         .await

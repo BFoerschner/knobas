@@ -995,6 +995,16 @@ async fn an_unknown_id_is_not_found_not_internal() {
     let pool = seeded().await;
     let err = get_entity_inner(&pool, "mock:NOPE-1").await.unwrap_err();
     assert_eq!(err.code, knobas_app::IpcErrorCode::NotFound, "{err}");
+    // ...and the sentence names the id and the store it looked in, in the
+    // glossary's own word: `CONTEXT.md`'s **Mirror** entry lists *index* under
+    // `_Avoid_` (#518). This is the sentence the detail panel prints under its
+    // heading, so the wording is a surface and not an implementation detail;
+    // the webview's own tests assert on `fake-tauri.ts`'s copy of it, which is
+    // why the original is pinned here.
+    assert_eq!(
+        err.message, "mock:NOPE-1 is not in the mirror",
+        "the refusal names the entity and the mirror"
+    );
 }
 
 /// A bad deep link reports itself as a bad address, not as a 500.

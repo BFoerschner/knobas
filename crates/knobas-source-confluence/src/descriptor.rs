@@ -25,9 +25,9 @@ pub fn descriptor_template() -> SourceDescriptor {
         name: "Confluence".to_owned(),
         // `Write` since #286, and it is the only capability. `Capability::Search`
         // stays reserved for a server-side `Source::search` the SPI does not
-        // have -- knobas' launcher answers from the local index either way, and
-        // this adapter would be the first with a real server-side search to
-        // declare if the SPI ever grows one. `Webhooks` likewise: Confluence DC
+        // have -- knobas' launcher answers from the mirror either way, and this
+        // adapter would be the first with a real server-side search to declare
+        // if the SPI ever grows one. `Webhooks` likewise: Confluence DC
         // has them and knobas has no receiver.
         capabilities: vec![knobas_source::Capability::Write],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),

@@ -491,7 +491,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         .bind(entity.to_string())
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the local index")))?;
+        .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the mirror")))?;
 
     let source_id: String = row.get("source_id");
     let display_name: Option<String> = row.get("display_name");
@@ -2514,7 +2514,7 @@ pub async fn promote_context_inner(
     let anchor = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let promoted = knobas_core::context::promote(pool, &anchor)
         .await?
-        .ok_or_else(|| IpcError::not_found(format!("{anchor} is not in the local index")))?;
+        .ok_or_else(|| IpcError::not_found(format!("{anchor} is not in the mirror")))?;
     // One line per *mutation*: the store says which call inserted, so a
     // re-promotion answers with the room and writes nothing.
     if promoted.fresh {

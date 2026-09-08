@@ -608,7 +608,7 @@
   const placeholder =
     "Search everything, or type > for actions, # tickets, @ people, / source, ? help";
   const footnote = $derived(
-    `local index · ${session.home?.pending_writes ?? 0} pending writes`,
+    `mirror · ${session.home?.pending_writes ?? 0} pending writes`,
   );
   /** The chips render from the answer; before one lands there is nothing to
       say about a query nobody has interpreted yet. */
@@ -681,7 +681,7 @@
               ondelete={(id) => void session.deleteList(id)}
             />
           {:else}
-            <p class="none">Reading the local index…</p>
+            <p class="none">Reading the mirror…</p>
           {/if}
         {:else if session.mode === "help"}
           <Help

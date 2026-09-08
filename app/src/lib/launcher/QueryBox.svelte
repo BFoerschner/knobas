@@ -20,7 +20,7 @@
     placeholder: string;
     /** A query is in flight — the caret dims rather than the box jumping. */
     pending: boolean;
-    /** The right-hand note: "local index · 0 pending writes". */
+    /** The right-hand note: "mirror · 0 pending writes". */
     footnote: string;
     oninput: (value: string) => void;
     onkeydown: (event: KeyboardEvent) => void;

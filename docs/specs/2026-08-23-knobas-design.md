@@ -106,7 +106,7 @@ The promise: **adding a new source later — another document management system,
 | **Prefixes**: `>` actions · `#` tickets · `@` people · `/` source · `t ` time · `note:` · `list:` · `asset:` · `?` help | In mockup | |
 | **Filter chips**: per source, per type, `@me`, `today`, cross-source chips (e.g. *has failing build* — a join JQL can't express); asset chips `type:` `env:` `health:` | In mockup | |
 | **Source aliases + inline key:value filters**: `/ji` `/gt` `/tc` `/cf` `/nt` `/as` (and long forms), `type:` `env:` `health:` `owner:` typed inline as an alternative to chips | In mockup (R3) | |
-| **Per-row provenance**: every result shows its sync age ("synced 4 min ago", "local · always current", "read at import"); asset rows are double-height with their path underneath; footer reads "local index · N pending writes" | In mockup (R3) | |
+| **Per-row provenance**: every result shows its sync age ("synced 4 min ago", "local · always current", "read at import"); asset rows are double-height with their path underneath; footer reads "mirror · N pending writes" | In mockup (R3) | |
 | **"Do it here" rows**: contextual actions appended to results (Start/Stop timer on the current ticket, Comment on it); `>` with empty query doubles as the app's navigation menu | In mockup (R3) | |
 | **Asset search matches ancestor path names** (searching "pve-02" finds the containers under it), in both the launcher and the board filter | Decided (E1) | **R3 gap to fix in the real app**: the corpus indexed only the asset's own fields, and the board filter was dead code. The implementation must index the path. |
 | **Empty query** shows smart lists, contexts, inbox preview, today's time, recent items | In mockup | |

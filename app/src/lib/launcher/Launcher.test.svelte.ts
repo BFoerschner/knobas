@@ -1405,11 +1405,11 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
 
   expect(target.textContent).toContain("Not in the mirror");
   // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
-  // says to avoid: this panel is the reader's only account of why the
-  // launcher has nothing. Scoped to the panel, because the box's own footnote
-  // has said "local index" since M1 and correcting it is not this ticket's.
+  // says to avoid. The whole overlay now, not just the panel: #518 took
+  // *local index* off the footnote, the empty-result line and the reading
+  // placeholder, so every word the launcher draws is in scope.
   expect(
-    target.querySelector(".miss")?.textContent,
+    target.textContent?.toLowerCase(),
     "`index` is not the word for the mirror",
   ).not.toContain("index");
   expect(navigated, "there is nothing to open in the app").toEqual([]);
