@@ -546,8 +546,8 @@ mod tests {
     /// into reporting a non-macOS `std::env::consts::OS`, so no live run
     /// reaches this arm -- unlike the locked screen of #500, which a person
     /// unlocks. The seam is witnessed on its other arm by `checkout_ipc.rs`'s
-    /// `clearing_a_template_hands_this_platforms_default_back`. Deputy's
-    /// ruling of 2026-09-08 on #501, part 1.
+    /// `clearing_a_template_hands_this_platforms_default_back`. The
+    /// deputy's ruling of 2026-09-08 on #501, part 1.
     #[test]
     fn an_action_with_no_template_on_this_platform_is_not_configured() {
         let view = command_view(OpenAction::JetBrains, None, None);
