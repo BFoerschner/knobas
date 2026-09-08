@@ -182,6 +182,31 @@ printf '%s\n' "\$@" > '$1'
 EOF
 }
 
+# path_is_one_word <path>
+#
+# Whether a path can go into a command template unquoted -- which is the only
+# way a driver may put one there.
+#
+# **Because a driver may not type a quote.** Measured on the dev Mac,
+# 2026-09-08: macOS' *Smart Quotes* substitution rewrites a typed `"` as `“`
+# and `”` on its way into a WebKit field, so `open-in-editor`'s quoted template
+# reached the database as `“/var/…/stub” {path}` and knobas refused to run a
+# program by that name -- correctly, while the driver reported the feature as
+# broken. `ax type` posts characters the way a person's keyboard does, and the
+# input stack rewrites some of them; the harness's answer is to type none of
+# those, and to check rather than hope that it did not have to.
+#
+# The three the template's own grammar cannot survive unquoted: whitespace,
+# which is where `knobas_core::checkout::expand` splits words, and either
+# quote, which is what it groups them with. An empty path is refused too --
+# there is no word in it at all.
+path_is_one_word() {
+    case $1 in
+    '' | *[[:space:]]* | *'"'* | *"'"*) return 1 ;;
+    esac
+    return 0
+}
+
 # git_config <remote>
 #
 # The `.git/config` of a clone whose `origin` is <remote>. What the scan reads

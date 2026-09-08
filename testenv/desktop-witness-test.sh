@@ -207,6 +207,37 @@ check "the stub records one argument per line, into the path it was given" \
 check_contains "the recorded path is quoted in the script" \
     "> '$record'" "$(stub_script "$record")"
 
+# --- the path the driver types into a command template (#547) ---------------
+#
+# A driver may not type a quote: macOS rewrites `"` into `“` and `”` on its way
+# into a WebKit field, and the template that reaches the database then names a
+# program nothing can start. So the stub's path goes in unquoted, and whether
+# it *can* is checked before it is typed rather than discovered as a spawn that
+# failed.
+
+# check_one_word <what> <yes|no> <path>
+check_one_word() {
+    local outcome=no
+    path_is_one_word "$3" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+
+check_one_word "a scratch path with nothing special in it is one word" yes \
+    "/var/folders/ph/p63g3rb537b55_4cf_536s7r0000gn/T/knobas-open-in-editor.HKDuLm/stub"
+# What `mktemp -d` answers under a TMPDIR with a space, which is the case the
+# quotes were there for and is now a refusal with a reason instead.
+check_one_word "a path with a space in it is not one word" no \
+    "/Users/mara/My Code/knobas-open-in-editor.HKDuLm/stub"
+check_one_word "a path carrying a double quote is not one word" no \
+    '/tmp/knobas-"witness"/stub'
+check_one_word "a path carrying a single quote is not one word" no \
+    "/tmp/mara's-witness/stub"
+# A tab is whitespace too, and it is the one a `case` written with a literal
+# space would miss.
+check_one_word "a path with a tab in it is not one word" no \
+    "$(printf '/tmp/knobas\twitness/stub')"
+check_one_word "no path at all is not one word" no ""
+
 config=$(git_config "https://tidewater.example/tidewater/payout-service")
 # The section header git itself writes, and the one
 # `knobas_core::checkout::origin_url` looks for. A config naming the remote

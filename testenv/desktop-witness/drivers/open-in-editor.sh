@@ -225,12 +225,32 @@ fill "$CLONES_ROOT_FIELD" "$clones"
 "$ax" press "$pid" "$SAVE_CLONES_ROOT" || die "could not press '$SAVE_CLONES_ROOT'"
 say "clones root set to $clones"
 
-# The stub's path is **quoted inside the template**: `mktemp -d` answers under
-# `$TMPDIR`, and a `TMPDIR` with a space in it would otherwise make the first
-# word of the template something that is not the stub -- a driver failure
-# wearing the feature's clothes. `expand` groups a quoted word into one
-# argument, which is exactly what this needs.
-fill "$VSCODE_FIELD" "\"$stub\" {path}"
+# **No quotes in the template, and a refusal instead of them.**
+#
+# This used to type `"$stub" {path}`, quoted for the reason it looks like: a
+# `TMPDIR` with a space in it would make the first word of the template
+# something that is not the stub, and `expand` groups a quoted word into one
+# argument. **Measured on the dev Mac, 2026-09-08**: macOS' *Smart Quotes*
+# substitution rewrites a typed `"` as `“` and `”` on its way into a WebKit
+# field, so what knobas stored was `“/var/…/stub” {path}` and what it then
+# refused to run was a program of that name -- correctly, and with the whole
+# reason in the toast: *could not be run: No such file or directory (os error
+# 2)*. The driver had blamed the feature for the text substitution behind it.
+#
+# The rule that leaves is: **a driver types no character the input stack
+# rewrites** -- straight quotes, and a double hyphen, which the same preference
+# pane turns into a dash. So the template is one unquoted word and a
+# placeholder, and the path that has to survive that is *checked* rather than
+# assumed: a stub the driver cannot name in one word is a refusal here, with
+# the reason, rather than a spawn that fails minutes later as the feature's.
+path_is_one_word "$stub" || die \
+    "the scratch path this driver has to type into a command template is not one word:" \
+    "  $stub" \
+    "A template needs quotes around it, and a quote typed into a WebKit field" \
+    "is rewritten by macOS' Smart Quotes substitution into one the shell has" \
+    "never heard of -- so this refuses rather than storing a command knobas" \
+    "cannot run. TMPDIR is where the path comes from (mktemp -d)."
+fill "$VSCODE_FIELD" "$stub {path}"
 "$ax" press "$pid" "$SAVE_VSCODE" || die "could not press '$SAVE_VSCODE'"
 say "the '$VSCODE_FIELD' command now runs the stub"
 
