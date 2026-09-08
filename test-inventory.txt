@@ -1,6 +1,9 @@
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_label_keeps_its_own_key_and_one_that_shadows_a_written_key_is_refused
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_parent_is_written_only_for_the_entries_the_import_would_create
 knobas-app	lib/knobas_app	assets::hcloud::tests::a_server_without_an_address_or_an_image_carries_neither_property
+knobas-app	lib/knobas_app	assets::hcloud::tests::a_stored_token_is_not_written_back
+knobas-app	lib/knobas_app	assets::hcloud::tests::a_token_is_owed_only_when_the_keychain_holds_none
+knobas-app	lib/knobas_app	assets::hcloud::tests::a_typed_token_is_kept_only_when_the_run_answered
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_id_is_written_as_text_and_the_entry_is_named_after_it
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_origin_key_this_producer_writes_is_the_one_the_planner_matches_on
 knobas-app	lib/knobas_app	assets::hcloud::tests::the_page_shape_carries_the_cursor_the_walk_follows

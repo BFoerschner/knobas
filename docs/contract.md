@@ -8777,8 +8777,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   the `knobas` label) — an ordinary custom property in the existing bag, no schema and no number.
 
   **The reading this entry has to be explicit about: a token is stored only after a run that
-  reached the far end.** `produce_estate_file` writes the keychain **after** `produce` returns,
-  and only a token the caller typed. A credential the far end refused is never written, so *asked
+  reached the far end.** `assets::hcloud::remember` takes the run's `Result` as an *argument*
+  rather than being called after it has been checked, so that sentence is a property of one
+  function its own tests hold it to rather than a property of the order two lines are written in;
+  and only a token the caller typed is written, because one read out of the keychain is already
+  there and rewriting it is a keychain prompt for nothing. A credential the far end refused is never written, so *asked
   once* does not become *asked once and then wrong forever*; the dialog puts the field back on an
   `unauthorized` refusal, which is the only way back from a token that stopped being accepted, and
   an importer has no sources view to send anybody to. For the same reason the refusal carries **no
@@ -8807,7 +8810,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `every_asset_command_is_registered_and_its_arguments_decode`; `knobas_secrets`'
   `an_importers_token_lives_under_its_own_namespace` (the prefix, and that no source id can be
   spelled so as to reach an importer's account) beside
-  `the_account_is_the_source_id_prefixed`; `backup_ipc.rs`'
+  `the_account_is_the_source_id_prefixed`; `assets::hcloud`'s
+  `a_token_is_owed_only_when_the_keychain_holds_none`,
+  `a_typed_token_is_kept_only_when_the_run_answered` (all three ways a run can end, and the
+  importer's account written where a source's is not) and `a_stored_token_is_not_written_back`; `backup_ipc.rs`'
   `a_shared_source_carries_no_secret_and_lands_as_missing_secret`, which now scans the archive for
   the importer's token, the `importer:` namespace and the `api_token` envelope kind; five in
   `assets::hcloud` over the file builder — the origin key held to `PRODUCERS`' declaration, the id

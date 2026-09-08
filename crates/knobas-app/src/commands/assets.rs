@@ -612,22 +612,11 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     // The keychain, which is where an importer's credential lives -- under its
     // own namespace, so nothing that walks *sources* can reach it (ADR-0015).
     let secrets = &crate::sources::state(&app)?.secrets;
-    let account = knobas_secrets::KeychainAccount::importer(producer.id);
-    let given = token
-        .map(|typed| typed.trim().to_owned())
-        .filter(|typed| !typed.is_empty());
-    let secret = match &given {
-        Some(typed) => typed.clone(),
-        None => match knobas_secrets::spawn::get(secrets, &account)
-            .await
-            .map_err(IpcError::internal)?
-        {
-            Some(stored) => stored.value,
-            None => return Ok(assets::hcloud::Produced::TokenNeeded),
-        },
+    let Some(credential) = assets::hcloud::token_for(secrets, producer.id, token).await? else {
+        return Ok(assets::hcloud::Produced::TokenNeeded);
     };
 
-    let produced = match importer {
+    let run = match importer {
         assets::Importer::Hcloud => {
             let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
                 base_url: assets::hcloud::API.to_owned(),
@@ -637,27 +626,24 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
                 // `sources::Registry` has never heard of it.
                 adapter_kind: producer.id.to_owned(),
                 adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-                auth: knobas_http::Auth::Bearer(secret.clone()),
+                auth: knobas_http::Auth::Bearer(credential.as_str().to_owned()),
                 ..Default::default()
             })
-            .map_err(|error| IpcError::from_source_error(&error, None))?;
-            assets::hcloud::produce(&pool, &client, land_under.as_deref()).await?
+            .map_err(|error| IpcError::from_source_error(&error, None));
+            match client {
+                Ok(client) => {
+                    assets::hcloud::produce(&pool, &client, land_under.as_deref()).await
+                }
+                Err(refused) => Err(refused),
+            }
         }
     };
 
-    // Stored **after** the run, and only a token the caller typed: a credential
-    // the far end refused is never written, so *asked once* does not mean
-    // *asked once and then wrong forever*.
-    if let Some(typed) = given {
-        knobas_secrets::spawn::put(
-            secrets,
-            &account,
-            knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, typed),
-        )
-        .await
-        .map_err(IpcError::internal)?;
-    }
-    Ok(produced)
+    // The run's answer goes *through* the store rather than being checked
+    // before it, so "a credential the far end refused is never kept" is a
+    // property of `remember` that its own tests hold it to, rather than a
+    // property of the order these two lines are written in.
+    assets::hcloud::remember(secrets, producer.id, credential, run).await
 }
 
 /// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
