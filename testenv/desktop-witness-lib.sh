@@ -205,3 +205,59 @@ git_config() {
 sole_argument() {
     printf '%s' "$1" | awk 'NF { lines[++n] = $0 } END { if (n == 1) print lines[1] }'
 }
+
+# --- the capture driver's pure parts (issue #503) ---------------------------
+#
+# Here for the reason everything above is: what is left over once the typing and
+# the accessibility reads are taken out is text in and text out, and
+# `witness-unit` runs it on every gate.
+
+# capture_title <typed text>
+#
+# The title the capture gives its note: the **first non-blank line**, trimmed.
+#
+# The shell's copy of `app/src/lib/capture/capture.svelte.ts`'s `split`, and it
+# is a copy on purpose: the driver types a paragraph at a real window and has to
+# know what the note is then called, and asking the frontend would be the driver
+# reading the answer off the thing it is testing. Two implementations of one rule
+# is a cost this pays knowingly, and `witness-unit` runs them against the same
+# cases so a change to one is a red gate rather than a run that fails minutes in
+# with a title nobody can explain.
+capture_title() {
+    printf '%s\n' "$1" | awk 'NF { sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit }'
+}
+
+# has_reading <ax values output> <reading>
+#
+# Whether the screen carries <reading> as a **whole line**.
+#
+# Whole line, and that is the entire content of this function. The links panel
+# groups by a relation's *reading*, and every reading a capture draws has a
+# longer one containing it -- `captured in` / `captured here`, and, the one that
+# matters, `captured from` / `captured from here`. Those longer forms are the
+# readings from the **other** end of the same link, which is what a *context's*
+# panel shows about a note. A substring test would therefore let a driver
+# standing on the wrong detail report a pass, and it is precisely the class of
+# check this milestone keeps catching: one that measures a representation of the
+# thing rather than the thing.
+#
+# `awk` over a whole line with the surrounding whitespace stripped, because a
+# rendered line arrives with whatever the layout put around it and none of that
+# is a difference in what it says.
+has_reading() {
+    printf '%s\n' "$1" | awk -v want="$2" '
+        { line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+        line == want { found = 1 }
+        END { exit found ? 0 : 1 }
+    '
+}
+
+# frontmost_bundle <ax frontmost output>
+#
+# The bundle identifier of whatever has the screen, or nothing.
+#
+# One line of the same tab-separated shape every `ax` subcommand answers in, so
+# there is one reader of it and it is the tested one.
+frontmost_bundle() {
+    tsv_field "$1" bundle
+}

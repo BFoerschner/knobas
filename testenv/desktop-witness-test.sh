@@ -279,6 +279,86 @@ pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
     "the demo corpus still lives under the host the driver's clone points at"
 
+# --- the capture driver's pure parts (#503) ---------------------------------
+
+check "the title is the first line" "Retry storm" \
+    "$(capture_title "$(printf 'Retry storm\nthe queue backs up')")"
+check "a one-line capture is all title" "Ask Mara about the cutover" \
+    "$(capture_title "Ask Mara about the cutover")"
+# The three cases the frontend's `split` also carries, because the driver types
+# a paragraph at a real window and has to know what the note will be called; two
+# implementations of one rule are two chances to drift, and these are what make
+# the drift a red gate rather than a run that fails minutes in.
+check "a leading blank line is skipped rather than becoming the title" "Retry storm" \
+    "$(capture_title "$(printf '\n\n  Retry storm  \nthe queue backs up')")"
+check "surrounding whitespace is not part of the title" "Retry storm" \
+    "$(capture_title "   Retry storm   ")"
+check "nothing but whitespace is no title" "" "$(capture_title "$(printf '   \n\t\n')")"
+
+# `has_reading` matches a **whole** line, and these two cases are the whole
+# reason it exists: every reading a capture draws has a longer one containing
+# it, and the longer one is what the *other* end of the same link reads. A
+# substring test would let a driver standing on the context's panel report the
+# note's.
+readings=$(printf 'Linked items\ncaptured from here\nSEPA migration\n')
+check_matches_reading() {
+    local outcome=no
+    has_reading "$3" "$2" && outcome=yes
+    check "$1" "$4" "$outcome"
+}
+check_matches_reading "a whole line is found" "captured from here" "$readings" yes
+check_matches_reading "a line that only contains the reading is not a match" \
+    "captured from" "$readings" no
+check_matches_reading "a reading nothing on screen carries is not a match" \
+    "captured in" "$readings" no
+check_matches_reading "an indented line still matches" "captured in" \
+    "$(printf '   captured in   \n')" yes
+
+check "the frontmost bundle is read out of the helper's own shape" com.apple.finder \
+    "$(frontmost_bundle "$(printf 'pid\t431\nbundle\tcom.apple.finder\n')")"
+check "a frontmost answer with no bundle reads as nothing" "" \
+    "$(frontmost_bundle "$(printf 'pid\t431\nbundle\t\n')")"
+
+# --- the accessible names the capture driver acts on ------------------------
+
+pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Capture"' \
+    "the capture window's box still has its accessible name"
+pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Open in knobas"' \
+    "the capture window's button still has its accessible name"
+pin_label ../app/src/lib/settings/CaptureSection.svelte 'aria-label="Save capture shortcut"' \
+    "the capture shortcut's Save still has an accessible name of its own"
+# The **visible label text**, not the `for=`/`id=` pair: the driver focuses this
+# field by its accessible name, which the label element supplies, so a pin on
+# the id would stay green through a rename and let the run fail minutes in.
+pin_label ../app/src/lib/settings/CaptureSection.svelte 'for="capture-shortcut">Shortcut<' \
+    "the capture shortcut field is still labelled Shortcut"
+# The three lines the driver reads back off the screen. Each is a *value* rather
+# than a name, which is why `ax values` exists at all, and each has a sibling
+# state whose line is different -- *Not registered: …*, *Nothing is kept until
+# you type.* -- so a pin on the wrong one would make the run pass on a feature
+# that had failed.
+pin_label ../app/src/lib/settings/CaptureSection.svelte '>Registered.<' \
+    "the settings section still says *Registered.* when the shortcut holds"
+pin_label ../app/src/lib/capture/CaptureWindow.svelte '>Saved as a note.<' \
+    "the capture window still says *Saved as a note.* once the row exists"
+pin_label ../app/src/lib/detail/LinksPanel.svelte '>Linked items<' \
+    "the links panel still carries the heading the driver reads a detail by"
+# The two readings the panel groups a capture's links under, from the note's
+# own side (`readingOf`'s forward). The inverse readings -- *captured here*,
+# *captured from here* -- are what the other end shows, and `has_reading`'s
+# whole-line rule is what keeps them apart.
+pin_label ../app/src/lib/detail/relations.ts 'forward: "captured in"' \
+    "a captured-in link still reads *captured in* on the note"
+pin_label ../app/src/lib/detail/relations.ts 'forward: "captured from"' \
+    "a captured-from link still reads *captured from* on the note"
+# The tab strip's *new* button and the field it becomes: the driver makes an
+# ad-hoc context, because `captured-in` needs a **stored** room and the demo
+# profile carries none.
+pin_label ../app/src/lib/shell/ContextTabs.svelte 'aria-label="New context label"' \
+    "the new-context field still has its accessible name"
+pin_label ../app/src/lib/shell/ContextTabs.svelte 'aria-label="New ad-hoc context"' \
+    "the tab strip's *new* button still has an accessible name of its own"
+
 # --- the helper's own two answers -------------------------------------------
 #
 # The registered-path lookup and the permission probe are the two pieces the
