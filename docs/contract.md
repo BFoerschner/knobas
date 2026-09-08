@@ -9194,7 +9194,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   deputy is what exercises that gate, and its ruling is recorded on the issue and appended to
   `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #510 when this entry was written**, so this sentence records the flag and claims
-  no ratification.
+  no ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #510**
+  ([comment](https://github.com/BFoerschner/knobas/issues/510#issuecomment-5581090073),
+  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the second
+  arm of `Importer`, on the third `PRODUCERS` row and on the one new field, and which ruled the
+  fork named on the ticket before it started taken correctly as route 1, the field-name revert
+  right and the `Produced` module move inside this ticket's scope. The sentences stand side by
+  side rather than the first being rewritten, the treatment §10.8 gives every sentence it
+  supersedes.
 
   **No new command, no new argument, no new event, no migration.** `produce_estate_file` is
   #509's, at #509's shape, and the second importer is a second arm of the enum it already

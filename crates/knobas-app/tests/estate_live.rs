@@ -227,9 +227,9 @@ async fn the_real_estate_is_already_in_the_tree() {
 ///
 /// **Not an exact list of containers.** `docker ps` reads the *running* ones,
 /// and which of the estate's containers are running is a fact about the shared
-/// fixture rather than about this file: `knobas-mockd` is stopped (ADR-0013),
-/// and a product wiped by a sibling `down -v` is a legitimate state of the
-/// estate the README describes. What is asserted instead is that **every
+/// fixture rather than about this file: `knobas-mockd` is not running
+/// (ADR-0013), and a product wiped by a sibling `down -v` is a legitimate
+/// state of the estate the README describes. What is asserted instead is that **every
 /// engine answered** -- one context per engine, all four represented in the
 /// produced file -- which is the half a shrinking fixture cannot fake, and that
 /// nothing produced is new or changed.

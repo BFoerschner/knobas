@@ -118,11 +118,19 @@ engine, so four things in this file are now under it:
   reads `docker ps` -- the *running* ones -- so a container started on one of
   these engines and never recorded previews as *new*.
 - **A container recorded here and not running is not red**, and that is the
-  asymmetry to know: `asset:knobas-mockd` is stopped (ADR-0013) and this recipe
-  says nothing about it, the same silence an import keeps about anything its
-  file does not mention. `kuma-seed` is the reason the producer reads running
-  containers rather than all of them -- a one-shot job that exits by design
-  would otherwise be an entry in every produced file.
+  asymmetry to know: `asset:knobas-mockd` is not running (ADR-0013) -- no
+  container by that name is on the notebook's engine at all today, exited or
+  otherwise -- and this recipe says nothing about it, the same silence an
+  import keeps about anything its file does not mention.
+- **Reading `docker ps -a` instead would turn this recipe red**, which is why
+  the producer reads the running ones. `docker --context orbstack ps -a` on
+  2026-09-08 listed `knobas-teamcity` (*Exited (0) 2 days ago*) and
+  `knobas-teamcity-agent` (*Exited (143)*) on the notebook, left behind by the
+  local `real-teamcity` profile; this file records those two names only under
+  `docker_context: knobas-teamcity`, so under `-a` they would be produced with
+  the key (`orbstack`, `knobas-teamcity`), match nothing, and preview as
+  *new*. (`kuma-seed` is not the example anyone should reach for:
+  `testenv/seed-kuma.sh` runs it with `--rm`, so it leaves nothing behind.)
 
 What the Docker half does **not** write, and therefore does not measure: `image`
 and `compose_service`. `docker ps` reports `Image` as the image *reference* on

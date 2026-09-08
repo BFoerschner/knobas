@@ -81,10 +81,21 @@
 //!
 //! # Running containers, and why a failed context is a refusal
 //!
-//! `docker ps` and not `docker ps -a`: a stopped one-shot container --
-//! `testenv/docker-compose.yml`'s `kuma-seed`, which exits by design -- is not
-//! a thing in the estate, and reading exited containers would make every seed
-//! run add an entry to the produced file.
+//! `docker ps` and not `docker ps -a`: an exited container is not a thing in
+//! the estate, and reading them would put entries into the produced file that
+//! match nothing. The notebook's engine holds two of them today -- `docker
+//! --context orbstack ps -a` on 2026-09-08 listed `knobas-teamcity` (*Exited
+//! (0) 2 days ago*) and `knobas-teamcity-agent` (*Exited (143)*), left behind
+//! by the local `real-teamcity` profile -- and `testenv/hetzner/estate.json`
+//! records those two names only under `docker_context: knobas-teamcity`, on
+//! the Hetzner engine. Under `-a` they would be produced with the key
+//! (`orbstack`, `knobas-teamcity`), match nothing, and preview as **new**, so
+//! `just estate-live` is red on `-a` on its next run. In `just check` the
+//! literal argument list is asserted by
+//! `the_context_is_the_only_thing_substituted_and_it_is_one_argument`, which
+//! is red on `-a` too. (`testenv/docker-compose.yml`'s `kuma-seed` is *not*
+//! the example: `testenv/seed-kuma.sh` runs it `--rm`, so it leaves no exited
+//! container behind and `-a` would never show it.)
 //!
 //! A context that **cannot be read** is a refusal for the whole run and not a
 //! gap in the file, and that is the same sentence from the other side: a file
@@ -291,9 +302,10 @@ struct PsLine {
 /// four is `just estate-live` (2026-09-08, eight containers over four engines);
 /// nothing in `just check` can, because a stub writes whatever the test wrote
 /// into it, and an array shape from a future CLI is the failure this paragraph
-/// is the only warning about. A blank line is skipped; anything else that is not an object is a
-/// refusal naming the line, because a producer that shrugged at a line it could
-/// not read would answer with a file missing a container and no way to tell.
+/// is the only warning about. A blank line is skipped; anything else that is
+/// not an object is a refusal naming the line, because a producer that shrugged
+/// at a line it could not read would answer with a file missing a container and
+/// no way to tell.
 ///
 /// # Errors
 ///

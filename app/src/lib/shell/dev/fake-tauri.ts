@@ -1432,10 +1432,14 @@ let PRODUCED_FILE: string | null = null;
  *
  * One press, one answer: no token, no *land under*, and a container under an
  * engine this fixture's estate already holds. It also answers with one
- * **skipped** engine, because `asset:orbstack-docker` is the shape that state
- * exists for -- an engine in the tree with no `docker_context` -- and a branch
- * of the dialog nothing here could reach is a branch nobody would see before it
- * shipped.
+ * **skipped** engine, so that the branch of the dialog that state exists for is
+ * reachable by hand -- a branch nothing here could reach is a branch nobody
+ * would see before it shipped. The name it skips is
+ * `asset:orbstack-docker`'s, because a reader recognises it from the Tree; it
+ * is **not** a claim about that engine, which since #510 carries a
+ * `docker_context` like every other engine in `testenv/hetzner/estate.json`.
+ * No engine in this fixture's estate can honestly be skipped, which is the
+ * whole reason this state has to be invented here.
  *
  * As above, it says nothing about docker: there is no CLI here and no match.
  * `crates/knobas-app/tests/assets_ipc.rs` drives a stub docker and
