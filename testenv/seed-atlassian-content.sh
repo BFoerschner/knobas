@@ -99,9 +99,11 @@
 # `jira.projects` to survive both, which would put a narrowing workflow under a
 # restore path (`move_to`) that assumes one hop is always enough and cannot
 # come back out of *Done* at all. So the witness files its own ticket, walks
-# it, and deletes it, and a killed run's leftover is cleared by the adapter
-# suite that runs before it -- which is the division this file's siblings
-# already use. Nothing here is recorded in `jira.projects` or `jira.issues`
+# it, and deletes it. A killed run's leftover is cleared twice over: the
+# witness labels its ticket `knobas-live-suite` and its own suite sweeps that
+# label, and the adapter suite that runs before it deletes every issue on the
+# instance the seed did not create -- which is the division this file's
+# siblings already use. Nothing here is recorded in `jira.projects` or `jira.issues`
 # for the same reason: those two are the FIXTURE's corpus.
 #
 # ISSUE KEYS MATCH THE FIXTURE. Jira allocates keys from a per-project counter
@@ -258,8 +260,14 @@ record() {  # record <jq filter with $v bound> <json>
 # files a throwaway ticket in $NARROW_KEY and deletes it again, because "this
 # workflow still narrows" is not a claim any read of the project can make --
 # it takes a ticket standing in a state (#522). It burns a $NARROW_KEY key and
-# nothing else: no fixture project is written to, here or anywhere else in this
-# function, and the delete is checked rather than assumed.
+# nothing else, and that bound is the rule rather than today's arrangement:
+# **--verify writes to jira.narrowing and to nothing in jira.projects, ever.**
+# $NARROW_KEY's keys are asserted on by nothing; a fixture project's are
+# reached by burning the keys in front of them (ISSUE KEYS MATCH THE FIXTURE
+# above), so a probe filed into one would move the counter every live window.
+# The delete is checked rather than assumed, and a probe left by a run killed
+# between the create and the delete is cleared by the adapter suite's
+# Seeded::clear_leftovers on the next run, like the live suites' own litter.
 # ==========================================================================
 verify() {
   _fail=0

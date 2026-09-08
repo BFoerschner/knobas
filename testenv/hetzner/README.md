@@ -262,6 +262,20 @@ that recreates them empty: `./seed --teamcity` again.
 - The tunnels do not survive a server resize or reboot; `./tunnel up` again.
 - A server that lives for weeks accumulates whatever a suite failed to put
   back. The wipe above is the reset; the seeds and the content seed rebuild it.
+- **One named instance of that, on Jira:** an inactive workflow named
+  `ZZP: Process Management Workflow`, left on 2026-09-08 by #522's measurement
+  of which project template gives a narrowing workflow. The throwaway project
+  it belonged to was deleted and Jira reclaimed its statuses, but the workflow
+  itself has no REST route out of this version: `GET /rest/api/2/workflow`
+  answers no `entityId` to address a `DELETE` with, `/rest/api/2/workflow/search`
+  is a `404`, and `DELETE` by name is a `404` or a `405`. It is inert — in no
+  scheme, contributing no status, on no endpoint any seed or suite calls — and
+  it goes with the next `down -v` of the Jira service. An admin may delete it
+  from Jira's own workflow screen at any time and strike this bullet; no agent
+  is asked to click, because forcing a REST-less step through a UI is what
+  #522's own instruction refused. **The rule it leaves behind: walk a template
+  on the project the seed keeps, not on a throwaway** — the measurement would
+  have cost nothing to make on `NARROW` itself.
 - The renewer depends on Atlassian's public licence page for Confluence's
   re-apply. If Confluence turns out to follow Jira's start-relative rule, that
   dependency is redundant; nobody has measured it.

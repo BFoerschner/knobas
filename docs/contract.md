@@ -2011,7 +2011,10 @@ nor a label preferred over a destination is observable here. The live test asser
 rather than assuming it, so the day the instance grows a fifth status the gap closes with a red test
 instead of staying quietly open. Until then the **narrowing** is witnessed only by mockd's shaped
 workflow, which ADR-0013 says certifies nothing about a real Jira; closing it for real means a
-second workflow in the seed, which is a seeding change and a ticket of its own.
+second workflow in the seed, which is a seeding change and a ticket of its own. *Superseded by the
+#522 amendment below (2026-09-08): the seed's `NARROW` project puts nine statuses on the instance,
+the equality became `expected ∪ jira.narrowing.statuses`, and the narrowing is witnessed live on
+both of the routes this paragraph names; it is left as history rather than rewritten.*
 
 **A bearer token this Jira cannot resolve is a clean 401 on `/transitions`**, measured the same run:
 `source: unauthorized`, and the live test asserts that **class** rather than merely that the read
@@ -2074,8 +2077,10 @@ change and a ticket of its own."* This is that ticket, filed by the deputy's rul
 out of date: the instance has nine statuses, the equality assertion it describes has been replaced,
 and the narrowing is witnessed live rather than by mockd alone.
 
-- **§9 the seed creates a third Jira project whose workflow narrows, and it is not fixture
-  content.** `testenv/seed-atlassian-content.sh` creates `NARROW` (*Narrowing workflow fixture*)
+- **§9 the seed creates one more Jira project, and it is the second *workflow*.** Three projects
+  stand on the instance — `PAY`, `OPS` and `NARROW` — and `PAY` and `OPS` share one workflow, so
+  this is the third project and the second workflow. The workflow is what the ticket is about, and
+  it is not fixture content. `testenv/seed-atlassian-content.sh` creates `NARROW` (*Narrowing workflow fixture*)
   from Jira **Core**'s process-management template,
   `com.atlassian.jira-core-project-templates:jira-core-process-management`,
   `projectTypeKey: "business"`. **Measured 2026-09-08 (Jira 10.3.24), through

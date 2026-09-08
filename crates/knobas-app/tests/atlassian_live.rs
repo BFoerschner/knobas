@@ -1864,7 +1864,10 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
 /// `seed-state.json`'s `jira.issues`, and its `Seeded::clear_leftovers` deletes
 /// every issue on the instance the seed did not create -- which is also what
 /// clears this ticket after a run that was *killed* rather than failed, since
-/// only an unwinding process reaches a `Drop`.
+/// only an unwinding process reaches a `Drop`. The ticket also carries
+/// [`LITTER_LABEL`] from the moment it exists, so this suite's own
+/// [`Env::clear_leftovers`] finds it too and the file clears after itself
+/// rather than relying on the recipe's order.
 ///
 /// Every assertion here is about `NARROW`, and the only thing this test writes
 /// to Jira is the ticket it files and moves once. It is *not* true that it
@@ -1916,6 +1919,13 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
         env.narrowing.key
     );
 
+    // A run that was *killed* between the create and the `Drop` below left its
+    // ticket standing; this is what takes it away, by the label the create
+    // puts on. Read-only in the ordinary case, and instance-wide rather than
+    // scoped to `NARROW`, which is what makes it the same sweep the two write
+    // tests above run.
+    env.clear_leftovers().await;
+
     let (state, _events) = app(
         "atlassian_live_narrowing",
         &env,
@@ -1928,8 +1938,9 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
     // -- a ticket of this suite's own, in the workflow's first state ---------
     //
     // Filed rather than seeded: see the header. The summary names the suite so
-    // that a person looking at the server can tell whose it is; the restore
-    // that matters is the adapter suite's, and it works by key.
+    // that a person looking at the server can tell whose it is, and it is
+    // labelled as soon as it exists so that [`Env::clear_leftovers`] above can
+    // find it after a run that never reached a `Drop`.
     let (status, created) = env
         .api(
             reqwest::Method::POST,
@@ -1954,6 +1965,14 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
         .to_owned();
     litter.created = Some(key.clone());
     let entity = format!("{JIRA}:{key}");
+    let (status, labelled) = env
+        .api(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{key}"),
+            Some(json!({ "update": { "labels": [{ "add": LITTER_LABEL }] } })),
+        )
+        .await;
+    assert_eq!(status, 204, "labelling {key}: {labelled}");
 
     let standing = env.status_at_jira(&key).await;
     assert_eq!(
