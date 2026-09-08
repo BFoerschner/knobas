@@ -8462,6 +8462,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   capability — issue #503** below, which carries the new truth. This criterion is still open, and
   now for the demo corpus alone: `open-in-editor` reaches the step where a repo detail should
   open and `--demo` carries no repo entity.*
+
+  *And that amendment was itself superseded the same day, by **#537**: the corpus does carry a repo
+  entity now — `mock:payout-service`, plus two more repositories and three branches — so what is
+  left open on this criterion is the **run**, and nothing else. `just desktop-witness
+  open-in-editor` has still never been driven past the harness's readiness check on this Mac, and
+  the run is owed to **#525**. The #503 entry below carries the same correction at length.*
 - **Migration `0025` and three IPC commands on the search module — issue #506 (2026-09-08): the
   search a reader saved.**
 

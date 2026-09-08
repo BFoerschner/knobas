@@ -696,8 +696,9 @@ fn items(source_id: &str) -> Vec<SyncItem> {
 ///
 /// `knobas_core::checkout` reduces a remote to host + owner/repo, so this is
 /// the value the scan compares a `.git/config` against -- and `tidewater` is
-/// the owner segment every other link in this fixture already carries
-/// (`{MOCK_BASE}/tidewater/{repo}/pulls/{n}`, `.../commit/{sha}`). One
+/// the owner segment this fixture's *other repository links* already carry
+/// (`{MOCK_BASE}/tidewater/{repo}/pulls/{n}`, `.../commit/{sha}`; the ticket,
+/// build and page links are their own systems' shapes and carry no owner). One
 /// function, so the repo item's URL and the branch items' base cannot drift
 /// apart.
 fn repo_url(repo: &str) -> String {
@@ -818,10 +819,13 @@ impl Source for MockSource {
                 },
                 // The two the corpus gained in #537. `RP` and `BR` are the
                 // monograms `app/src/lib/shell/kinds.ts` already draws for
-                // these kinds -- the frontend's table is the fallback for a
-                // kind no descriptor declared, and two spellings of the same
-                // repository would be a difference a reader would have to
-                // explain.
+                // these kinds -- that table is the fallback for a kind no
+                // descriptor declared, so matching it keeps the demo drawing
+                // one glyph per kind whether the descriptor reached the
+                // frontend or not. It is not repo-wide agreement and does not
+                // claim to be: `knobas-source-gitea` declares `RE` for its own
+                // `repo`, pinned that way in §4.2, and a descriptor always
+                // wins over the fallback for its own source.
                 KindInfo {
                     id: "repo".to_owned(),
                     label: "Repository".to_owned(),

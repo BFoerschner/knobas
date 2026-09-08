@@ -2,16 +2,20 @@
 //!
 //! `test_util` hands every test in this binary the *same* database, and the
 //! binary runs them concurrently -- so the absolute row counts below are only
-//! meaningful while nothing else is syncing `mock`. Every test that touches
-//! that source takes [`MOCK`] for its whole duration; a test that touches only
-//! an id no adapter answers to (`jira`) needs no lock.
+//! meaningful while nothing else is syncing `mock`. Every test that syncs
+//! `mock` **on that shared database** takes [`MOCK`] for its whole duration; a
+//! test that touches only an id no adapter answers to (`jira`) needs no lock,
+//! and neither does one that syncs `mock` into a `scratch_database` of its own
+//! -- `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` is the
+//! one that does, for the reason its own doc gives.
 
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::checkout::{FoundBy, set_clones_root, view};
 use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::sources::demo;
 
-/// Held by every test that syncs the `mock` source.
+/// Held by every test that syncs the `mock` source **into the shared database**
+/// `test_pool` hands out.
 ///
 /// One shared database, one shared source: two demo loads racing would make
 /// the counts below depend on which test's transaction committed first, and
