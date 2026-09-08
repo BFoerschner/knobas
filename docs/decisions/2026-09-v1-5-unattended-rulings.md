@@ -650,3 +650,134 @@ the measurement is in this milestone and not the next.
 
 **For the orchestrator:** #533 is filed (v1.5, `ready-for-agent`, blocked by #506, under no cap).
 The merge is not held for its measurement.
+
+---
+
+## #508 — the frozen gate for the `producer` argument, three decisions taken as settled, and two disclosures
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/508#issuecomment-5578215465>
+
+**The fork:** three, raised by PR #534 and flagged rather than left open — the implementer decided
+each, disclosed them, and held the PR for the gate. (1) The PR changes the signatures of two
+commands the #439 entry froze: `preview_estate_import(.., file: String)` and
+`apply_estate_import(.., file: String)` each gain `producer: String`, **required**, mirrored in
+`app/src/lib/ipc/assets.ts`, with an entry at the foot of §10.8 saying in place *"no ruling had been
+posted on #508 when this entry was written, so this sentence records the flag and claims no
+ratification"*. This is not the shape the milestone's earlier gates saw: #409's `CandidateSource`
+and #284's `EntityRow.path` were fields added to a DTO and #502's `create_note` grew an `Option` —
+each additive, each leaving an older payload decodable. A required argument is not additive: a
+caller sending `{file}` alone is refused with *"missing required key producer"*, which the gate
+itself showed on its first run. Spec #491's stream map has no row for #508 and its *Contract*
+paragraph calls its own list *"the complete list; nothing else on the frozen list is touched"*.
+(2) Three decisions made without a fork being raised, on the ground that the record already made
+them: the producer is an argument and not a field of the file; the match is a **rename of the
+parse** (`matched_by_origin_key` answers *which asset*, `rename_matched` writes it into every
+mention of the id, and everything downstream in `plan` sees one kind of id) rather than a branch in
+the planner; and **no Docker producer is declared**, because its key needs a container's docker
+context plus its name and no container in `testenv/hetzner/estate.json` carries either as a
+property. (3) Two disclosures in the PR body: two surviving mutants, argued as equivalent by
+construction; and the three `hcloud_id` values, which no gate can check for being *wrong*.
+
+**Ruling:** (1) **Authorised, and the entry is sufficient as written; the merge-manager may
+proceed** once the ratification clause, the rulings-file append and part 3's README clause are on
+the branch. The ticket authorises the touch by consequence, in its own words — *"Which property is
+the key is declared **per producer** (`hcloud_id`; docker context plus container name), and the
+file-import producer declares none"*, *"The Import dialog gains its chooser with the estate file as
+its only entry"*, and the first criterion's *"the file import with no declared key behaves exactly
+as before"*. A key declared per producer, with one producer declaring none, is a planner that has
+to be told which producer made the file; a chooser is where that answer comes from; and the answer
+has to cross the bridge. Spec #491's Implementation Decisions fix both ends of the wire: *"each
+returns an estate file's text in the checked-in shape, and **the existing** preview and apply
+commands consume it. The Import dialog's chooser selects the producer."* *Existing* rules out a new
+command; *checked-in shape* rules out a field in the file. What is left is an argument on the two
+commands the spec named. The clause owed: the entry's *"claims no ratification"* sentence **stays**
+as the history it is and gains beside it *"— ratified in his absence by the deputy's ruling of
+2026-09-08 on #508"*, side by side rather than rewritten, the treatment §10.8 gives every sentence
+it supersedes. (2) **All three confirmed.** The producer as an argument was settled by the
+sentences above and the implementer was right not to raise it. The rename is confirmed as the
+mechanism, and the one reading the implementer named as a decision rather than a consequence — the
+match does not look at the entry's declared type — is confirmed as the ticket's own sentence
+(*"an asset whose origin-key property matches is the same asset"*) and `CONTEXT.md`'s (*"the second
+matching rule beside the id, and the only one"*); a type check would be a third rule nobody asked
+for. No Docker producer in #508, and the deferral is right for **ADR-0013's** reason and not only
+for tidiness. (3) **Nothing owed on the mutants. The `hcloud_id` gap is soundly discharged by
+#509**, and what is owed is that the discharge is *named*: one clause in
+`testenv/hetzner/README.md` naming stream 9's `just estate-live` as the witness, and the
+merge-manager re-running `hcloud server list` against the repo-root `.env`'s `HETZNER_API_TOKEN` —
+no tunnel, one call — against the three ids and the three IPs, because the loop's rule for anything
+quoted from a live system is that the merge-manager re-runs it. No follow-up ticket: #509 *is* that
+ticket, and a second one would be a record of a record.
+
+**Reasoning:** (1) the freeze exists so a wire shape never arrives unannounced. This one was
+announced at both ends by the spec, named in the ticket's body and first criterion, and written up
+in the section the freeze points at, with the *why not `Option`* paragraph a §10.8 entry for a
+required argument owes. The three ways of keeping the signatures untouched are each a larger touch
+or a contradiction of the ticket: a field in the file changes the estate-file schema —
+`deny_unknown_fields`, `ASSET_KEYS`, and a seam ADR-0015 says three readers already share — and
+contradicts *"in the checked-in shape"*; consulting every producer's key for every file contradicts
+*"the file-import producer declares none"*; a command per producer is a new command and a new
+barrel line per importer where the spec said *existing*. On *additive*: what the contract records is
+that **a shape changed**, not whether an older peer survives it — #409's words are *"a wire type
+changing shape is the thing this section exists to record"*. Where a peer can be older the entries
+say so and defend against it: #284's `path` carries `#[serde(default)]` because a `SearchHit` can
+sit in a share archive. **A Tauri command's arguments have exactly one caller, the webview compiled
+into the same bundle, and are never persisted, piped or exported**, so there is no older payload for
+the argument to break; *required* costs nothing a peer could pay and buys the red gate the entry
+claims (`every_asset_command_is_registered_and_its_arguments_decode`,
+`the_mirror_sends_the_argument_names_tauri_expects`) instead of a silent match-on-nothing that
+copies every asset. That is the difference from #502's `create_note`, where an absent list *means*
+something; here absence has no meaning that is safe. (2) the rename is the reading that keeps
+#439's machinery unbranched, which is the ticket's own phrasing — *"the entry's id is replaced by
+the tree's before the plan is drawn"* — transcribed rather than interpreted. It is also what makes
+spec #491's story 64 true rather than approximately true: **because the rename lands before
+`HAND_EDITED`'s bind**, a hand edit on the matched tree asset is honoured exactly as it would be
+for an entry that arrived under the tree's id, so a matched entry previews and applies as *the*
+asset rather than as a look-alike that overwrites it. Renaming every mention is not thoroughness
+for its own sake — mutant B shows the file is refused for a dangling parent if one mention is
+missed. For Docker, ADR-0013's rule is that the witness is the real system, and **a declared key no
+asset carries is a rule with no witness at all** — not fixture-witnessed, not live-witnessed,
+unreachable — which would let the registry claim a producer this build cannot honour, the class of
+sentence this milestone has twice caught outrunning the code. (3) the two survivors are equivalent
+**by construction** and not merely by today's fixture: `origin_key_of` builds one JSON array from
+the parts a bag carries and the two sides are compared as that string; an estate asset lacking a
+part is excluded by `?&` on the way in, and if `?&` is dropped it is excluded by the length check
+instead; a file entry lacking a part is excluded by the length check, and if that is dropped its
+shorter array can never equal a full one. Only removing both lets a half key meet a half key, and
+that mutant dies. No test could kill either alone without deleting the redundancy the doc comments
+argue for keeping. For the values, ADR-0013's consequence sorts a gap by whether the real instance
+can be driven into the state, hcloud is the real instance and #509's recipe is the seed; **a
+discharge by a later ticket in the same milestone is sound when the later ticket cannot pass while
+the gap is open**, and #509's third criterion cannot — a wrong id makes that server unknown by id
+and unmatched by key, so it previews as *new* and the recipe goes red. That is stronger than #498's
+case, where a follow-up had to be *filed* to make the witness exist. It is not sound as a silence:
+a README sentence ending *"rather than a red test"* and a #509 implementer who reads a red recipe as
+their own bug are the two ways the debt gets lost, and the two owed lines close both.
+
+**If you disagree, the cost of reversing this is:** (1) moderate after merge and growing — the
+argument leaves the two signatures only by a further §10.8 entry, and removing it means choosing
+one of the three larger alternatives, since the planner still has to learn the producer somehow;
+there is **no migration**, which is the entry's own point, so nothing is irreversible in the
+database. Before merge it is one revert of a branch nothing has built on, except that #509 and #510
+are blocked on it and #509's produce command is written against this argument's existence, so every
+day of delay widens the reversal. (2) moderate for the rename — replacing it with a branch in
+`plan` means the groups, the ordering, the hand-edit merge and the writes each learn a second kind
+of id, and the four seam tests that pin the rename are rewritten with it; nothing on the wire moves.
+Adding a type check is one predicate and one test, but it would be a third matching rule and the
+glossary's *"and the only one"* would need Björn's hand. Nil for the Docker deferral: declaring it
+earlier or later is #510's work either way. (3) nil for the mutants — a survivor ruled equivalent
+can be re-examined at any time by deleting one half and watching mutant L's tests. Trivial for the
+values: one clause and one comment; if Björn wants them gated before #509, the cheap shape is an
+`#[ignore]`d test in `estate_file.rs` calling `hcloud server list` under the token, which is a
+tunnel-free live check and one ticket, not a rewrite.
+
+**Flagged, not ruled:** spec #491's *Contract* paragraph is short by this argument, as it was short
+by stream 2's migration and #506's two fields; the rule recorded on #491 and applied on #506 covers
+it — *"The ticket is the operative text and the spec's count is a shorthand, not a prohibition"* —
+and the spec is left as written. The fork **#510** will meet is named before it is met: the
+mechanism keys on **properties of the entry itself**, and in the checked-in estate a container's
+name is a field and `docker_context` sits on the engine above it, so #510 either writes both as
+properties on every container — which fits the mechanism unchanged and is what **Origin key** says
+(*"the property an importer sets"*) — or changes `Producer` to read a key across a parent's
+property or an entry's field, which is a fork it raises. No new glossary entry and no ADR: the
+**Importer** amendment already on this branch is the glossary record and stays.

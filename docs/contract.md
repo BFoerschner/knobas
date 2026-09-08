@@ -8494,7 +8494,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   review.** In his absence the v1.5 loop's deputy is what exercises that gate, and its ruling is
   recorded on the issue and appended to `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the
   PR that acts on it; **no ruling had been posted on #508 when this entry was written**, so this
-  sentence records the flag and claims no ratification. The argument is in this entry rather than
+  sentence records the flag and claims no ratification — **ratified in his absence by the deputy's
+  ruling of 2026-09-08 on #508**
+  ([comment](https://github.com/BFoerschner/knobas/issues/508#issuecomment-5578215465),
+  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the argument,
+  on the chooser's list and on the three `hcloud_id` values. The two sentences stand side by side
+  rather than the first being rewritten, the treatment §10.8 gives every sentence it supersedes.
+  The argument is in this entry rather than
   in a §9 section of its own, the treatment #499 and #505 took: nothing here corrects an existing
   record, measures a source system or moves a §4.2 row.
 
@@ -8536,7 +8542,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   property, so declaring one now would be a key that matches nothing.
 
   **What is not touched.** **No migration** — `hcloud_id` is an ordinary custom property in
-  `knobas.asset`'s existing `properties` bag, and `0025` is still the next free number. No new
+  `knobas.asset`'s existing `properties` bag, and this entry claims no number. `0025` is the next
+  free one as this branch stands (`0024_the_checkout_and_its_override.sql` is the last file in
+  `crates/knobas-db/migrations/`) — **and PR #532 (#506) claims `0025`**, so whichever of the two
+  merges second re-reads this sentence on its merge commit and writes the number that is true
+  there. Nothing in this entry depends on the answer, which is the point of claiming none. No new
   command, no command renamed or removed, no return type changed, **no new event**, no settings
   key, no `Kind`, no reserved namespace, no `WriteOp` (ADR-0006 is untouched: an importer is not a
   source and queues nothing), no `Capability` — `Capability::Import` stays undeclared, per
