@@ -2128,8 +2128,11 @@ and the narrowing is witnessed live rather than by mockd alone.
   test passes in full under it, the `NARROW` one fails. Both are recorded here because they measure
   the gap this section closes rather than merely asserting it was closed.
 
-- **Frozen surfaces: none.** The change is `testenv/seed-atlassian-content.sh`,
-  `crates/knobas-app/tests/atlassian_live.rs`, `testenv/README.md` and `test-inventory.txt`. Nothing
+- **Frozen surfaces: none.** The change is seven files, and this list is exhaustive because the
+  §10.8 claim below rests on it. Code and fixture: `testenv/seed-atlassian-content.sh`,
+  `crates/knobas-app/tests/atlassian_live.rs` and `test-inventory.txt`. Record: `testenv/README.md`,
+  `testenv/hetzner/README.md`, `docs/contract.md` — this section, and the one italic pointer on the
+  #498 paragraph it supersedes — and `docs/decisions/2026-09-v1-5-unattended-rulings.md`. Nothing
   in `crates/knobas-source/src/**`, no migration, no IPC command, no barrel line — so no §10.8 entry
   is owed, and none is made. This section is a §9 record of a measurement, which is what §9 is for.
 

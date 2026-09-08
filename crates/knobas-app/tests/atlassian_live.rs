@@ -1869,12 +1869,17 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
 /// [`Env::clear_leftovers`] finds it too and the file clears after itself
 /// rather than relying on the recipe's order.
 ///
-/// Every assertion here is about `NARROW`, and the only thing this test writes
-/// to Jira is the ticket it files and moves once. It is *not* true that it
-/// touches nothing else: [`app`] starts a real scheduler over a scratch
-/// database, and after its startup delay that scheduler runs a full sync of
-/// this source, which is unscoped and therefore reads every project on the
-/// instance. Those are reads into a database this test throws away.
+/// Every assertion here is about `NARROW`, and what this test writes *there*
+/// is one ticket: filed, labelled, moved once and deleted. It is *not* true
+/// that it touches nothing else, and neither of the two things that do is an
+/// assertion. [`Env::clear_leftovers`] below is a **write** and is
+/// instance-wide rather than scoped to `NARROW`: it deletes every issue on
+/// this Jira carrying [`LITTER_LABEL`], which is the same sweep the two write
+/// tests above run and is instance-wide for the same reason -- a killed run's
+/// litter is not scoped either. And [`app`] starts a real scheduler over a
+/// scratch database, whose first full sync reads every project on the
+/// instance because this source is unscoped; those reads land in a database
+/// this test throws away.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workflow_narrows() {
