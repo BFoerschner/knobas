@@ -646,7 +646,10 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
         Some(checkout.to_string_lossy().as_ref()),
         "the scan must match the fixture's repo URL against the driver's remote"
     );
-    assert_eq!(answer.repo_entity_id.as_deref(), Some("mock:payout-service"));
+    assert_eq!(
+        answer.repo_entity_id.as_deref(),
+        Some("mock:payout-service")
+    );
 
     // 4. And a branch of it answers the same checkout, which is the whole
     //    reason the branch keys extend the repo's: `repo_of` finds a branch's
@@ -660,6 +663,9 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
     )
     .await
     .unwrap();
-    assert_eq!(branch.repo_entity_id.as_deref(), Some("mock:payout-service"));
+    assert_eq!(
+        branch.repo_entity_id.as_deref(),
+        Some("mock:payout-service")
+    );
     assert_eq!(branch.path, answer.path);
 }
