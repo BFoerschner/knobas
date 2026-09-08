@@ -1290,6 +1290,12 @@ this file existing:
 * which of `AXDescription` and `AXTitle` a WebKit text field carries an
   `aria-label` on. The driver accepts either, and asserts the role separately,
   so this cannot make it pass on the wrong element -- but it has not been seen.
+  The same question, one step further, for a field named by a `<label for=…>`
+  rather than an `aria-label`, which is how the **Clones root** and the three
+  command fields are named: `open-in-editor` asks for **exactly one** element
+  carrying that name, so a WebKit that exposed the `<label>` element under the
+  same name as well would make it refuse -- with the tree dump beside the
+  refusal, which is what that dump is for.
 * whether `AXFocused` and `AXPress` reach a WebKit element at all, which is
   what `ax focus` and `ax press` (#501) do and what `open-in-editor` is built
   on. Both are the documented way to drive an accessibility tree; neither has
