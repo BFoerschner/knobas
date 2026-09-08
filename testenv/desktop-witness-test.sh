@@ -207,6 +207,37 @@ check "the stub records one argument per line, into the path it was given" \
 check_contains "the recorded path is quoted in the script" \
     "> '$record'" "$(stub_script "$record")"
 
+# --- the path the driver types into a command template (#547) ---------------
+#
+# A driver may not type a quote: macOS rewrites `"` into `“` and `”` on its way
+# into a WebKit field, and the template that reaches the database then names a
+# program nothing can start. So the stub's path goes in unquoted, and whether
+# it *can* is checked before it is typed rather than discovered as a spawn that
+# failed.
+
+# check_one_word <what> <yes|no> <path>
+check_one_word() {
+    local outcome=no
+    path_is_one_word "$3" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+
+check_one_word "a scratch path with nothing special in it is one word" yes \
+    "/var/folders/ph/p63g3rb537b55_4cf_536s7r0000gn/T/knobas-open-in-editor.HKDuLm/stub"
+# What `mktemp -d` answers under a TMPDIR with a space, which is the case the
+# quotes were there for and is now a refusal with a reason instead.
+check_one_word "a path with a space in it is not one word" no \
+    "/Users/mara/My Code/knobas-open-in-editor.HKDuLm/stub"
+check_one_word "a path carrying a double quote is not one word" no \
+    '/tmp/knobas-"witness"/stub'
+check_one_word "a path carrying a single quote is not one word" no \
+    "/tmp/mara's-witness/stub"
+# A tab is whitespace too, and it is the one a `case` written with a literal
+# space would miss.
+check_one_word "a path with a tab in it is not one word" no \
+    "$(printf '/tmp/knobas\twitness/stub')"
+check_one_word "no path at all is not one word" no ""
+
 config=$(git_config "https://tidewater.example/tidewater/payout-service")
 # The section header git itself writes, and the one
 # `knobas_core::checkout::origin_url` looks for. A config naming the remote
@@ -373,6 +404,16 @@ pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Reset {co
 # The panel's own heading, which is how the driver tells a repo detail from
 # every other kind: a checkout panel is what a repo and a branch have and
 # nothing else does.
+#
+# **And what this pin cannot say, which is #547's whole finding.** It pins the
+# spelling in the markup. The driver used to look for that spelling as an
+# accessible *name*, and no element on screen has ever carried it as one -- a
+# `<span class="lab">` names nothing, and its words are an `AXValue` -- so this
+# pin was green through every run of a driver that could not have passed. A pin
+# of a source string measures that the driver's constant is not stale; it
+# measures nothing whatever about what the accessibility API answers, and the
+# only thing that does is a run. The driver reads this heading with `ax values`
+# now, which is the attribute it is in.
 pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
     "the checkout panel still carries the heading the driver looks for"
 # And the remote the driver writes into its fake clone: the scan matches it
@@ -436,6 +477,62 @@ check_matches_reading "a reading nothing on screen carries is not a match" \
     "captured in" "$readings" no
 check_matches_reading "an indented line still matches" "captured in" \
     "$(printf '   captured in   \n')" yes
+
+# --- what makes a wait a witness (#547) -------------------------------------
+#
+# `open-in-editor` waited for a *name* the accessibility API never answers with
+# -- `<span class="lab">Checkout</span>` names nothing and carries its words in
+# `AXValue` -- and reported a branch detail that was open on screen, with its
+# three buttons on it, as never having opened. The fix reads the heading as a
+# reading, and reads it **twice**: once before the Return that is supposed to
+# produce it and once after. These are the two decisions in that, which is all
+# of it that can be tested without a screen.
+
+# The values fixture is the shape `ax values` answers in: one string per line,
+# empty ones dropped. The `CHECKOUTS` line is the settings pane's own section
+# heading, which is on screen at the moment the before-reading is taken, and it
+# is one character away from the panel's.
+launcher_up=$(printf 'All work\nCHECKOUTS\nDIRECTORY\n3 matches\npayout-service\n')
+detail_up=$(printf 'All work\nCHECKOUT\n/tmp/clones/payout-service\nLINKED ITEMS\n')
+
+check "the panel's heading is not on screen while the launcher's list is" no \
+    "$(reading_verdict "$launcher_up" CHECKOUT)"
+check "the panel's heading is on screen once the detail is open" yes \
+    "$(reading_verdict "$detail_up" CHECKOUT)"
+# The settings pane's `CHECKOUTS` must not answer for the panel's `CHECKOUT`:
+# `has_reading` matches whole lines, and this is the case that says so in the
+# direction this driver runs.
+check "the settings pane's CHECKOUTS is not the panel's CHECKOUT" no \
+    "$(reading_verdict "$(printf 'CHECKOUTS\n')" CHECKOUT)"
+# The reading that must never be `no`. `ax values` prints nothing when it can
+# see no window and exits 0 anyway, so an empty answer read as "absent" would
+# make the before-half of every waypoint pass on a helper that had stopped
+# working -- a check that cannot fail.
+check "an empty answer is unreadable, not an absent heading" unreadable \
+    "$(reading_verdict "" CHECKOUT)"
+
+check "absent before the step and present after it is a witness" witnessed \
+    "$(waypoint_verdict no yes)"
+# The green that would witness nothing, and the reason this function exists: a
+# wait already satisfiable before the keystroke passes just as well on a
+# keystroke that did nothing.
+check "a reading that was already there witnesses nothing" too-early \
+    "$(waypoint_verdict yes yes)"
+check "a reading that was there and went away is still too early" too-early \
+    "$(waypoint_verdict yes no)"
+check "a reading that never arrived is named as that" never-appeared \
+    "$(waypoint_verdict no no)"
+# Precedence, in the direction that matters: an unreadable *after* cannot
+# rescue a before-reading that had already broken the witness.
+check "too early outranks an unreadable after-reading" too-early \
+    "$(waypoint_verdict yes unreadable)"
+check "an unreadable before-reading is not a witness" unreadable \
+    "$(waypoint_verdict unreadable yes)"
+check "an unreadable after-reading is not a witness" unreadable \
+    "$(waypoint_verdict no unreadable)"
+# A word neither function ever produces must not fall through to `witnessed`.
+check "a verdict this rule does not know is unreadable, not a pass" unreadable \
+    "$(waypoint_verdict no maybe)"
 
 check "the frontmost bundle is read out of the helper's own shape" com.apple.finder \
     "$(frontmost_bundle "$(printf 'pid\t431\nbundle\tcom.apple.finder\n')")"
