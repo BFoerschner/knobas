@@ -268,14 +268,19 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
 ///
 /// **#537 took that scoping's protection away**, exactly as the paragraph above
 /// predicted it could: the demo corpus gained the fixture's repositories and
-/// branches, and `payout-service`, `main` and `feature/PAY-231-sepa-retry` are
-/// mock titles that start with a lowercase letter. Byte order puts all six
-/// after `Standup protocols`; the database interleaves them, and it also sorts
-/// `Ledger_Deploy_Staging #412` before `ledger-api`, which no case-folded byte
-/// sort does either -- punctuation is weak in its collation and strong in
-/// Rust's. So the oracle moved rather than the corpus: the titles that came
-/// back are handed to a **hand-written statement of this test's own** to sort,
-/// and the two orders must agree.
+/// branches, and six mock titles now start with a lowercase letter --
+/// `payout-service`, `ledger-api`, `ops-runbooks`, `main`,
+/// `feature/PAY-231-sepa-retry` and `fix/PAY-228-partial-refund-drift`. Byte
+/// order puts all six after `Standup protocols`; the database interleaves them.
+///
+/// **Case-folding the byte sort would not have been enough either**, and this
+/// is measured rather than reasoned from what a collation ought to do. The run
+/// that failed printed the database's own order, and in it
+/// `Ledger_Deploy_Staging #412` comes **before** `ledger-api` -- while `-`
+/// (0x2D) sorts before `_` (0x5F), so every byte comparison, folded or not,
+/// puts them the other way round. So the oracle moved rather than the corpus:
+/// the titles that came back are handed to a **hand-written statement of this
+/// test's own** to sort, and the two orders must agree.
 ///
 /// That keeps what this test is for. The subject is that `TitleAsc` selects a
 /// *second SQL statement* rather than interpolating a column name into one, and

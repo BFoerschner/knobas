@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The second desktop-witness driver (issue #501): the button on a repo detail
-# runs the configured command, and hands it the checkout path.
+# The second desktop-witness driver (issue #501): the button on a repo or
+# branch detail runs the configured command, and hands it the checkout path.
 #
 # Why this feature is witnessed here and not in a suite. Spawning a process is
 # the one thing in knobas that leaves the application: `checkout_ipc.rs` proves
@@ -16,7 +16,9 @@
 #
 #   1. a clones root and an *Open in VS Code* template, typed into the real
 #      settings fields and stored by the real backend;
-#   2. a repo detail that finds the clone this driver put under that root;
+#   2. a repo or branch detail that finds the clone this driver put under that
+#      root -- either will do, because a branch draws its repository's
+#      checkout;
 #   3. that pressing the button starts the stub the template names, with the
 #      checkout path as its **only** argument.
 #

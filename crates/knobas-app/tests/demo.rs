@@ -625,11 +625,14 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
     assert_eq!(detail.payload["lang"], "Rust");
 
     // 2. The clone the driver plants, and the root it types into Settings.
+    //    `clone` and not `checkout`: `CONTEXT.md` keeps the two apart -- "the
+    //    clone is the directory, the checkout is what knobas knows about it",
+    //    and what `view` answers below is the second.
     let root = tempfile::tempdir().unwrap();
-    let checkout = root.path().join("payout-service");
-    std::fs::create_dir_all(checkout.join(".git")).unwrap();
+    let clone = root.path().join("payout-service");
+    std::fs::create_dir_all(clone.join(".git")).unwrap();
     std::fs::write(
-        checkout.join(".git").join("config"),
+        clone.join(".git").join("config"),
         "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = \
          https://tidewater.example/tidewater/payout-service\n",
     )
@@ -643,7 +646,7 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
     assert_eq!(answer.found_by, FoundBy::Scan);
     assert_eq!(
         answer.path.as_deref(),
-        Some(checkout.to_string_lossy().as_ref()),
+        Some(clone.to_string_lossy().as_ref()),
         "the scan must match the fixture's repo URL against the driver's remote"
     );
     assert_eq!(

@@ -10,6 +10,26 @@ use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::{Capability, Source, SourceError, WriteOp};
 use knobas_source_mock::MockSource;
 
+/// How many items the whole fixture is, counted from the fixture rather than
+/// remembered as a number.
+///
+/// Named once because two tests below need it -- the full sync and the
+/// upgrade-path re-sync -- and because a seven-term sum written out twice is a
+/// place for the two to drift apart. What it is *not* is an oracle for
+/// [`items`](knobas_source_mock): it says which of the fixture's lists the
+/// adapter is expected to emit, and a kind quietly dropped from `items` fails
+/// the tests that use it. A kind quietly added is caught by the contract
+/// battery, which refuses an item whose kind the descriptor does not declare.
+fn corpus_size(f: &knobas_source_mock::Fixture) -> usize {
+    f.tickets.len()
+        + f.prs.len()
+        + f.builds.len()
+        + f.pages.len()
+        + f.commits.len()
+        + f.repos.len()
+        + f.branches.len()
+}
+
 #[tokio::test]
 async fn passes_the_contract_battery() {
     battery(|fault| Box::new(MockSource::with_fault(fault)) as Box<dyn knobas_source::Source>)
@@ -230,16 +250,7 @@ async fn full_sync_emits_every_work_item() {
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
     assert_eq!(cursor, "tidewater-v3");
-    assert_eq!(
-        sink.0.len(),
-        f.tickets.len()
-            + f.prs.len()
-            + f.builds.len()
-            + f.pages.len()
-            + f.commits.len()
-            + f.repos.len()
-            + f.branches.len()
-    );
+    assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
         .0
@@ -312,7 +323,9 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
 /// stored. `"tidewater-v2"` is the second such position, held by every
 /// profile created between #234 and #537; the case below drives the older of
 /// the two, because a reader that repairs from `v1` repairs from anything
-/// that is not [`CURSOR`] -- the sync branches on equality, not on order. Asserting the corpus rather than the constant is the point: that a
+/// that is not [`CURSOR`] -- the sync branches on equality, not on order.
+///
+/// Asserting the corpus rather than the constant is the point: that a
 /// re-sync *happens* is the behaviour, and a test reading `CURSOR` back would
 /// pass just as happily while every such profile refetched nothing for ever.
 #[tokio::test]
@@ -326,13 +339,7 @@ async fn a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus() {
         .expect("a sync from a stale cursor");
     assert_eq!(
         sink.0.len(),
-        f.tickets.len()
-            + f.prs.len()
-            + f.builds.len()
-            + f.pages.len()
-            + f.commits.len()
-            + f.repos.len()
-            + f.branches.len(),
+        corpus_size(f),
         "a profile stored at an older fixture version must be re-sent everything"
     );
     // ...carrying what the older fixture had no way to send. Widening the

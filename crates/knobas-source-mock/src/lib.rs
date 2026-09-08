@@ -665,8 +665,10 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             r.name.clone(),
             body_text([r.name.clone(), r.lang.clone()]),
             // No owner and no timestamp in the dataset, and neither is
-            // invented: a repository in `mockups/shared/dataset.md` is a name,
-            // a language and a clone path. Absence is what the fixture
+            // invented. The brief's repository table has a name, a language, a
+            // local clone and a note (`payout-service`'s becomes
+            // `default_branch` and `commit_count`) -- and nobody to attribute
+            // it to, nor a moment to date it at. Absence is what the fixture
             // conventions above promise for a fact the brief does not give.
             None,
             None,
