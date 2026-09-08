@@ -503,3 +503,101 @@ test("the fixture's ack leaves the alert open and refuses a monitor with none", 
 
   expect(() => handlers["ack_alert"]!({ monitorId: "kuma:nothing-is-wrong-here" })).toThrow();
 });
+
+/**
+ * The launcher board's rail under `?fake-ipc` (#504).
+ *
+ * What a walk in a browser needs to be able to see, and what a fixture can get
+ * wrong without anybody noticing: the rail is **seven** rows in the registry's
+ * order, the three estate lists carry the counts the fixture's own estate
+ * implies, and the rows one of them answers with are **assets** — because a row
+ * of any other kind opens a room detail instead of the Tree, which is the whole
+ * of criterion 2.
+ *
+ * The four mirror lists reading 0 is asserted rather than tolerated: this
+ * fixture's corpus is frozen at `SYNCED_AT` and no source in it carries a
+ * username, so a non-zero count there would be this file inventing a mirror.
+ */
+test("the fixture's launcher board draws the seven lists, with the estate's three counted", () => {
+  const handlers = demoHandlers();
+  const board = handlers["launcher_home"]!({}) as {
+    smart_lists: { id: string; count: number; changed: boolean; description: string }[];
+    recent: unknown[];
+    sources: unknown[];
+    pending_writes: number;
+  };
+
+  expect(board.smart_lists.map((list) => list.id)).toEqual([
+    "changed-today",
+    "mine",
+    "mine-stale",
+    "just-synced",
+    "not-monitored",
+    "alerts-in-context",
+    "certs-expiring",
+  ]);
+  const count = (id: string) => board.smart_lists.find((list) => list.id === id)!.count;
+  for (const id of ["changed-today", "mine", "mine-stale", "just-synced"]) {
+    expect(count(id), `${id} has no mirror here to count`).toBe(0);
+  }
+  // Every estate list has something in it, or the walk has nothing to open.
+  for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
+    expect(count(id), `${id} is empty and cannot be walked`).toBeGreaterThan(0);
+  }
+  // A badge is a comparison against a stamp this fixture cannot keep.
+  expect(board.smart_lists.every((list) => list.changed === false)).toBe(true);
+  expect(board.recent.length).toBeGreaterThan(0);
+  expect(board.sources.length).toBeGreaterThan(0);
+
+  // And the rows behind the counts: assets, with the count the rail promised.
+  for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
+    const response = handlers["smart_list_items"]!({ id, limit: 20 }) as {
+      total: number;
+      groups: { kind: string; total: number; hits: { entity_id: string; kind: string }[] }[];
+    };
+    expect(response.total, `${id}'s rows and its count are one answer`).toBe(count(id));
+    expect(response.groups.map((group) => group.kind)).toEqual(["asset"]);
+    for (const hit of response.groups[0]!.hits) {
+      expect(hit.kind).toBe("asset");
+      expect(hit.entity_id.startsWith("asset:")).toBe(true);
+    }
+  }
+
+  // A list nobody ships is refused, not answered with nothing.
+  expect(() => handlers["smart_list_items"]!({ id: "nope", limit: 20 })).toThrow();
+});
+
+/**
+ * The fixture's *Certificates expiring* is the roster's own certificate, and
+ * the roster invents exactly one — nine days.
+ *
+ * Both directions, the `unmonitored_assets` test's rule: the asset the
+ * certificate is on is in, and every asset whose monitor has no certificate is
+ * out. A handler answering the whole estate would pass a one-sided check.
+ */
+test("the fixture's expiring certificates are the roster rows under thirty days", () => {
+  const handlers = demoHandlers();
+  const roster = handlers["monitor_roster"]!({}) as {
+    cert_days_remaining: number | null;
+    assets: { id: string }[];
+  }[];
+  const expiring = new Set(
+    roster
+      .filter((row) => row.cert_days_remaining !== null && row.cert_days_remaining < 30)
+      .flatMap((row) => row.assets.map((asset) => asset.id)),
+  );
+  expect(expiring.size, "a roster with no certificate cannot show this list").toBeGreaterThan(0);
+
+  const rows = handlers["smart_list_items"]!({ id: "certs-expiring", limit: 20 }) as {
+    groups: { hits: { entity_id: string }[] }[];
+  };
+  expect(new Set(rows.groups[0]!.hits.map((hit) => hit.entity_id))).toEqual(expiring);
+  // And nothing whose monitor watches no certificate at all.
+  const noCert = roster
+    .filter((row) => row.cert_days_remaining === null)
+    .flatMap((row) => row.assets.map((asset) => asset.id));
+  expect(noCert.length).toBeGreaterThan(0);
+  for (const id of noCert) {
+    expect(expiring.has(id), `${id} has no certificate and is on the list`).toBe(false);
+  }
+});
