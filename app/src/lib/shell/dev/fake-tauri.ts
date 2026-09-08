@@ -439,6 +439,15 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     }),
     smart_lists: () => fakeSmartLists(),
     smart_list_items: (args) => fakeSmartListItems(args),
+    // *Save as list* and the two writes that keep the rail tidy (#506).
+    // **Fixture-only**: the rows live in a module array, not in a database,
+    // and what they certify is the panel -- the rail drawing a saved row
+    // beside the built-ins, the rename field, the two-press delete. The table,
+    // the counts, the badge and the grammar's verdict are witnessed at the IPC
+    // seam over a real PostgreSQL, in `crates/knobas-app/tests/search_ipc.rs`.
+    create_smart_list: (args) => fakeCreateSmartList(args),
+    rename_smart_list: (args) => fakeRenameSmartList(args),
+    delete_smart_list: (args) => fakeDeleteSmartList(args),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -2961,6 +2970,8 @@ function fakeSmartLists() {
       count: 0,
       changed: false,
       description,
+      saved: false,
+      needs_attention: false,
     })),
     ...estate.map(([id, label, description]) => ({
       id,
@@ -2968,8 +2979,116 @@ function fakeSmartLists() {
       count: fakeListAssets(id).length,
       changed: false,
       description,
+      saved: false,
+      needs_attention: false,
     })),
+    ...fakeSavedLists(),
   ];
+}
+
+/**
+ * The lists a reader saved (#506) -- **fixture-only**, and mutable, because
+ * saving one is the gesture the walk is here to make.
+ *
+ * Seeded with **one row of each kind the rail can draw**: a runnable saved
+ * query, and one that needs attention. The second is seeded rather than made
+ * because no command can make one -- `knobas_search::saved::create` runs the
+ * grammar first and refuses a query it could not run, so a needs-attention row
+ * is what a *grammar change* leaves behind, and the backend's own IPC-seam
+ * test writes its row with SQL for the same reason.
+ *
+ * `needs_attention` is carried as **data** rather than re-derived here. The
+ * verdict is `saved::plan`'s, over §4's grammar and this installation's
+ * vocabulary, and a second reading of that in TypeScript is exactly the copy
+ * that drifts. What the walk sees is the two states drawn; what decides them
+ * is asserted over a real database in `crates/knobas-app/tests/search_ipc.rs`.
+ */
+const FIXTURE_SAVED: { id: string; label: string; query: string; broken?: boolean }[] = [
+  { id: "gitea-boxes", label: "Gitea boxes", query: "gitea" },
+  { id: "todays-palette", label: "Today's palette", query: "> palette", broken: true },
+];
+
+/**
+ * What one saved list stands for here: a **substring match over asset names**,
+ * where the real count is PostgreSQL FTS over four corpora -- the mirror,
+ * notes, assets and routes -- with `corpus::ALL`'s weights. The same stand-in
+ * `estateSearch` already makes, for the same reason: this fixture has no
+ * mirror to search.
+ *
+ * The change badge is `false` on every row, as it is on the built-ins: a badge
+ * is a comparison against a stamp in `knobas.setting`, and there is no setting
+ * table here to remember one in.
+ */
+function fakeSavedAssets(query: string) {
+  const needle = query.trim().toLowerCase();
+  return needle === ""
+    ? []
+    : FIXTURE_ESTATE.filter((asset) => asset.name.toLowerCase().includes(needle));
+}
+
+function fakeSavedLists() {
+  return FIXTURE_SAVED.map((list) => ({
+    id: list.id,
+    label: list.label,
+    count: list.broken ? 0 : fakeSavedAssets(list.query).length,
+    changed: false,
+    // The saved query is a saved list's own blurb, and a refused one says
+    // which rule refused it -- `saved::Refusal::description`, whose heading is
+    // the wording the rail draws.
+    description: list.broken
+      ? "Needs attention: the saved query starts with a prefix that is not a search. Rename it or delete it."
+      : list.query,
+    saved: true,
+    needs_attention: list.broken === true,
+  }));
+}
+
+/**
+ * `create_smart_list`: save the box's query -- **fixture-only**.
+ *
+ * The id is slugged the way `knobas_search::saved::slug` slugs it, because
+ * `list:<id>` is what opens the row this makes and a row the launcher could
+ * not address would make the walk look broken. A blank query is refused; every
+ * other refusal the real command makes is the grammar's, and this fixture does
+ * not have one.
+ */
+function fakeCreateSmartList(args: Record<string, unknown>) {
+  const label = String(args["label"] ?? "").trim();
+  const query = String(args["query"] ?? "").trim();
+  if (label === "" || query === "") {
+    throw { code: "invalid", message: "a saved list needs a name and a query", source_id: null };
+  }
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  let id = slug === "" ? "list" : slug.slice(0, 48).replace(/-+$/, "");
+  for (let suffix = 2; FIXTURE_SAVED.some((list) => list.id === id); suffix += 1) {
+    id = `${slug}-${suffix}`;
+  }
+  FIXTURE_SAVED.push({ id, label, query });
+  const made = fakeSavedLists().find((list) => list.id === id);
+  if (!made) throw { code: "internal", message: "the fixture lost the row it just made", source_id: null };
+  return made;
+}
+
+/** `rename_smart_list`: the id does not move, exactly as it does not there. */
+function fakeRenameSmartList(args: Record<string, unknown>) {
+  const id = String(args["id"] ?? "");
+  const label = String(args["label"] ?? "").trim();
+  const row = FIXTURE_SAVED.find((list) => list.id === id);
+  if (!row) throw { code: "not_found", message: `no saved list ${id}`, source_id: null };
+  if (label === "") {
+    throw { code: "invalid", message: "a saved list needs a name", source_id: null };
+  }
+  row.label = label;
+  return null;
+}
+
+/** `delete_smart_list`. */
+function fakeDeleteSmartList(args: Record<string, unknown>) {
+  const id = String(args["id"] ?? "");
+  const at = FIXTURE_SAVED.findIndex((list) => list.id === id);
+  if (at < 0) throw { code: "not_found", message: `no saved list ${id}`, source_id: null };
+  FIXTURE_SAVED.splice(at, 1);
+  return null;
 }
 
 /**
@@ -3022,7 +3141,11 @@ function fakeSmartListItems(args: Record<string, unknown>) {
     throw { code: "invalid", message: `unknown smart list: ${id}`, source_id: null };
   }
   const limit = Number(args["limit"] ?? 20);
-  const assets = fakeListAssets(id);
+  // A saved list answers with its own query's rows, and a built-in with its
+  // rule's -- one id namespace and one shape, which is what lets the launcher
+  // open either by typing `list:<id>`.
+  const saved = FIXTURE_SAVED.find((list) => list.id === id);
+  const assets = saved ? fakeSavedAssets(saved.query) : fakeListAssets(id);
   const hits = assets.slice(0, limit).map((asset) => ({
     entity_id: asset.id,
     kind: "asset",

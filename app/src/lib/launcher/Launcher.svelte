@@ -53,8 +53,11 @@
   import { onMount, tick } from "svelte";
 
   import {
+    createSmartList as defaultCreateSmartList,
+    deleteSmartList as defaultDeleteSmartList,
     launcherHome as defaultHome,
     ipcErrorMessage,
+    renameSmartList as defaultRenameSmartList,
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
   } from "../ipc";
@@ -187,6 +190,9 @@
     search: defaultSearch,
     launcherHome: defaultHome,
     resolveUrl: defaultResolveUrl,
+    createSmartList: defaultCreateSmartList,
+    renameSmartList: defaultRenameSmartList,
+    deleteSmartList: defaultDeleteSmartList,
     ...ports,
   });
 
@@ -235,6 +241,15 @@
    */
   let chain = $state<{ rowId: string; actions: ChainAction[]; selected: number } | null>(null);
 
+  /**
+   * The saved list whose name is being edited on the board, or `null` (#506).
+   *
+   * Here rather than in `Board.svelte` because both ways of starting a rename
+   * end here: the row's own *Rename* button, and the `Tab` chain, which is the
+   * launcher's.
+   */
+  let renaming = $state<string | null>(null);
+
   /** The entity a row stands for, if it stands for one. */
   function entityOf(row: LauncherRow): { entityId: string; title: string } | null {
     switch (row.kind) {
@@ -260,6 +275,29 @@
    * be offering an error.
    */
   function chainFor(row: LauncherRow): ChainAction[] {
+    // A saved smart list is not an entity and has its own two things to do
+    // (#506, story 58). They are in the chain because the chain is where every
+    // per-row action in this box lives, and because a launcher driven from the
+    // keyboard must be able to reach them without the pointer. A **built-in**
+    // list has no chain at all: it is code, and there is nothing to rename.
+    //
+    // *Delete* here goes straight through, where the row's own button arms
+    // first: reaching this row took `Tab`, an arrow and `Enter`, which is
+    // already the deliberate act the button's second press stands in for.
+    if (row.kind === "list") {
+      if (!row.list.saved) return [];
+      return [
+        { id: "rename", label: `Rename ${row.list.label}`, run: () => startRename(row.list.id) },
+        {
+          id: "delete",
+          label: `Delete ${row.list.label}`,
+          run: () => {
+            chain = null;
+            void session.deleteList(row.list.id);
+          },
+        },
+      ];
+    }
     const entity = entityOf(row);
     if (!entity) return [];
     const actions: ChainAction[] = [];
@@ -445,8 +483,41 @@
     }
   }
 
+  /** Open the row's name as a field, and close the chain that asked for it. */
+  function startRename(id: string) {
+    chain = null;
+    renaming = id;
+  }
+
+  /**
+   * End a rename. `label` is `null` for Escape and for the blur behind it,
+   * which abandons: a half-typed name is not a name anybody chose.
+   */
+  function finishRename(id: string, label: string | null) {
+    renaming = null;
+    if (label !== null && label.trim() !== "") void session.renameList(id, label);
+    box?.focus();
+  }
+
+  /**
+   * *Save as list* (#506, story 56: *"a search I run every day is one click"*).
+   *
+   * The name is the query itself, because one click is the story and the
+   * launcher has nowhere to ask for a name that is not a second dialog over
+   * this one. *Rename* on the row is what turns it into a word — which is why
+   * the two shipped together.
+   */
+  function saveAsList() {
+    void session.saveCurrent(session.raw.trim());
+  }
+
   function activate(row: LauncherRow) {
     if (row.kind === "list") {
+      // A list whose saved query today's grammar cannot run has no rows to
+      // show, and the reason is already on the row. Opening it would put the
+      // backend's refusal in the error line as though the reader had done
+      // something wrong.
+      if (row.list.needs_attention) return;
       session.set(`list:${row.list.id}`);
       box?.focus();
       return;
@@ -601,9 +672,13 @@
               sources={health}
               rows={session.rows}
               selected={session.selected}
+              {renaming}
               {now}
               onopen={activate}
               onhover={(index) => (session.selected = index)}
+              onstartrename={startRename}
+              onrename={finishRename}
+              ondelete={(id) => void session.deleteList(id)}
             />
           {:else}
             <p class="none">Reading the local index…</p>
@@ -672,6 +747,16 @@
         <span><kbd>↵</kbd> open</span>
         <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
         <span><kbd>Esc</kbd> back one step</span>
+        {#if session.canSave}
+          <!--
+            On a query and never on the board: an empty box is the board, and
+            there is nothing there to save. `canSave` is the session's, so the
+            control and the write agree about when there is a query.
+          -->
+          <button class="save" onclick={saveAsList} disabled={session.savedId !== null}>
+            {session.savedId === null ? "Save as list" : "Saved as list"}
+          </button>
+        {/if}
         <span class="sp"></span>
         {#if session.response}
           <span class="faint">{session.response.total} matches · {session.response.took_ms} ms</span>
@@ -714,6 +799,23 @@
   }
   .search-f .sp {
     flex: 1;
+  }
+  /* *Save as list* — a control in the hint row, so it sits with the other
+     things the box can do rather than over the results it would save. */
+  .save {
+    font: 400 11px var(--mono);
+    color: var(--text);
+    padding: 1px 7px;
+    border: 1px solid var(--hair);
+    border-radius: 3px;
+  }
+  .save:hover:not(:disabled) {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .save:disabled {
+    color: var(--faint);
+    cursor: default;
   }
   /* The chain sits between the results and the footnote: it acts on the row
      above it, and it is the thing the keyboard is now driving. */

@@ -94,8 +94,24 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
 
 const HOME: LauncherHome = {
   smart_lists: [
-    { id: "mine", label: "My items", count: 3, changed: true, description: "Yours." },
-    { id: "just-synced", label: "Just synced", count: 9, changed: false, description: "New." },
+    {
+      id: "mine",
+      label: "My items",
+      count: 3,
+      changed: true,
+      description: "Yours.",
+      saved: false,
+      needs_attention: false,
+    },
+    {
+      id: "just-synced",
+      label: "Just synced",
+      count: 9,
+      changed: false,
+      description: "New.",
+      saved: false,
+      needs_attention: false,
+    },
   ],
   recent: [
     {

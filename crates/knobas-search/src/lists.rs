@@ -300,6 +300,8 @@
 //! was opened, and when it holds something and has never been opened at all. A
 //! list with nothing in it is never badged: a badge on an empty list is noise.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 
@@ -350,6 +352,24 @@ pub struct SmartListSummary {
     pub changed: bool,
     /// Display text: the list's blurb, or the reason it is empty.
     pub description: String,
+    /// Whether somebody saved this list, rather than knobas shipping it
+    /// (#506).
+    ///
+    /// The one thing the rail needs to tell the two apart, and it is a
+    /// *capability* rather than a provenance note: a saved list can be renamed
+    /// and deleted and a built-in cannot, so the row draws those two controls
+    /// exactly when this is `true`. Both kinds are opened the same way, by
+    /// `list:<id>`, which is why the id is not what says which one this is.
+    pub saved: bool,
+    /// The saved query cannot be run by today's grammar (#506, story 60).
+    ///
+    /// Always `false` for a built-in: a built-in's predicate is compiled in, so
+    /// there is no version of it the launcher could fail to understand.
+    /// [`Self::count`] is `0` and [`Self::changed`] `false` on such a row --
+    /// not because the list is empty, but because nothing was asked -- and
+    /// [`Self::description`] carries [`crate::saved::NEEDS_ATTENTION`] and the
+    /// reason.
+    pub needs_attention: bool,
 }
 
 /// The statement one list's rows come from.
@@ -868,6 +888,8 @@ pub async fn summaries(
             count,
             changed: changed(newest, seen.as_deref()),
             description: describe(list, identity),
+            saved: false,
+            needs_attention: false,
         });
     }
     Ok(out)
@@ -893,6 +915,10 @@ pub async fn rows(
 
 /// Note that a list has just been looked at.
 ///
+/// **Saved lists use this too** (#506): one key, one wording, one clearing
+/// rule, so a saved list's badge and a built-in's cannot come to mean different
+/// things.
+///
 /// # Errors
 ///
 /// [`SearchError::Db`] if the setting cannot be written.
@@ -901,13 +927,48 @@ pub async fn mark_seen(pool: &PgPool, id: &str) -> Result<(), SearchError> {
     Ok(())
 }
 
+/// Every list's "last opened" stamp, by list id.
+///
+/// [`SUMMARY_SQL`] reads the same key inline, because a built-in's seen-stamp
+/// arrives in the same round trip as its count. A saved list's count comes from
+/// a statement built at run time (`crate::sql::saved_summary_sql`) that has no
+/// place to carry a `seen` CTE for a variable number of ids, so it reads them
+/// here instead -- one small statement, and only when a saved list exists.
+///
+/// The unpacking is PostgreSQL's -- `jsonb_each_text`, which is the same
+/// `->>` [`SUMMARY_SQL`] reads a built-in's stamp with, applied to every key
+/// instead of to a named one. So a value that is not a string arrives as the
+/// text of whatever it is and [`parse_stamp`] reads it as *never opened*,
+/// which is what that function's own doc says should happen: this is a shared
+/// key/value table on the launcher's hot path, and a badge that is on too
+/// often beats a board that will not load.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if the setting cannot be read.
+pub async fn seen_stamps(pool: &PgPool) -> Result<HashMap<String, String>, SearchError> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select key, value
+           from jsonb_each_text(
+                  coalesce((select value from knobas.setting where key = $1), '{}'::jsonb)
+                ) as stamps(key, value)",
+    )
+    .bind(SEEN_KEY)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, stamp)| stamp.map(|stamp| (id, stamp)))
+        .collect())
+}
+
 /// Whether a list has something in it that postdates the last look at it.
 ///
 /// An **unparseable** stamp reads as "never opened" rather than as an error:
 /// the value is ours to write, but it is in a shared key/value table on the
 /// launcher's hot path, and a badge that is on too often beats a board that
 /// refuses to load.
-fn changed(newest: Option<DateTime<Utc>>, seen: Option<&str>) -> bool {
+pub(crate) fn changed(newest: Option<DateTime<Utc>>, seen: Option<&str>) -> bool {
     // Nothing in the list: a badge on an empty list is noise, not news.
     let Some(newest) = newest else { return false };
     match seen.and_then(parse_stamp) {

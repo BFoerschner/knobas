@@ -171,7 +171,13 @@ export function search(query: SearchQuery): Promise<SearchResponse> {
   return invoke<SearchResponse>("search", { query });
 }
 
-/** One built-in smart list — `knobas_search::SmartListSummary`. */
+/**
+ * One smart list — `knobas_search::SmartListSummary`.
+ *
+ * Built-in and saved lists are **one shape** (#506, story 57): both are opened
+ * by `list:<id>`, both carry a count and a change badge, and `saved` is the
+ * only thing that tells them apart.
+ */
 export interface SmartListSummary {
   /** Stable id; also what `list:<id>` in the box names. */
   id: string;
@@ -180,8 +186,26 @@ export interface SmartListSummary {
   count: number;
   /** Something in it is newer than the last time it was opened. */
   changed: boolean;
-  /** The list's blurb, or the reason it is empty. */
+  /**
+   * The list's blurb, the reason it is empty, or — for a saved list — the
+   * query it stands for.
+   */
   description: string;
+  /**
+   * Somebody saved this list, so it can be renamed and deleted.
+   *
+   * A capability rather than a provenance note: it is what puts the two
+   * controls on the row, and the built-ins have neither.
+   */
+  saved: boolean;
+  /**
+   * The saved query is one today's grammar cannot run (#506, story 60).
+   *
+   * `count` is `0` and `changed` `false` on such a row because nothing was
+   * asked — not because the list is empty — and `description` says which rule
+   * refused it. Always `false` for a built-in. The row does not open.
+   */
+  needs_attention: boolean;
 }
 
 /**
@@ -216,9 +240,35 @@ export function launcherHome(): Promise<LauncherHome> {
   return invoke<LauncherHome>("launcher_home");
 }
 
-/** Every built-in smart list, with its count and its change badge. */
+/** Every smart list — built-in and saved — with its count and change badge. */
 export function smartLists(): Promise<SmartListSummary[]> {
   return invoke<SmartListSummary[]>("smart_lists");
+}
+
+/**
+ * Save the box's current query as a smart list (#506, story 56).
+ *
+ * `query` is the **raw box text**: the prefix, the chips and the terms are all
+ * in it, and the backend is what parses them (ruling P2). Answers with the row
+ * as the rail draws it.
+ */
+export function createSmartList(label: string, query: string): Promise<SmartListSummary> {
+  return invoke<SmartListSummary>("create_smart_list", { label, query });
+}
+
+/**
+ * Give a saved smart list a different name.
+ *
+ * The id does not move: it is what `list:<id>` names and what the change
+ * badge's seen-stamp is keyed on.
+ */
+export function renameSmartList(id: string, label: string): Promise<void> {
+  return invoke<void>("rename_smart_list", { id, label });
+}
+
+/** Forget a saved smart list. */
+export function deleteSmartList(id: string): Promise<void> {
+  return invoke<void>("delete_smart_list", { id });
 }
 
 /**

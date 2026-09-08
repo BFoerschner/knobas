@@ -508,26 +508,32 @@ test("the fixture's ack leaves the alert open and refuses a monitor with none", 
  * The launcher board's rail under `?fake-ipc` (#504).
  *
  * What a walk in a browser needs to be able to see, and what a fixture can get
- * wrong without anybody noticing: the rail is **seven** rows in the registry's
- * order, the three estate lists carry the counts the fixture's own estate
- * implies, and the rows one of them answers with are **assets** — because a row
- * of any other kind opens a room detail instead of the Tree, which is the whole
- * of criterion 2.
+ * wrong without anybody noticing: the rail is the **seven built-ins in the
+ * registry's order followed by the saved lists** (#506), the three estate lists
+ * carry the counts the fixture's own estate implies, and the rows one of them
+ * answers with are **assets** — because a row of any other kind opens a room
+ * detail instead of the Tree, which is the whole of #504's criterion 2.
  *
  * The four mirror lists reading 0 is asserted rather than tolerated: this
  * fixture's corpus is frozen at `SYNCED_AT` and no source in it carries a
  * username, so a non-zero count there would be this file inventing a mirror.
  */
-test("the fixture's launcher board draws the seven lists, with the estate's three counted", () => {
+test("the fixture's launcher board draws the seven built-ins, with the estate's three counted", () => {
   const handlers = demoHandlers();
   const board = handlers["launcher_home"]!({}) as {
-    smart_lists: { id: string; count: number; changed: boolean; description: string }[];
+    smart_lists: {
+      id: string;
+      count: number;
+      changed: boolean;
+      description: string;
+      saved: boolean;
+    }[];
     recent: unknown[];
     sources: unknown[];
     pending_writes: number;
   };
 
-  expect(board.smart_lists.map((list) => list.id)).toEqual([
+  expect(board.smart_lists.filter((list) => !list.saved).map((list) => list.id)).toEqual([
     "changed-today",
     "mine",
     "mine-stale",
@@ -536,6 +542,11 @@ test("the fixture's launcher board draws the seven lists, with the estate's thre
     "alerts-in-context",
     "certs-expiring",
   ]);
+  // The built-ins come first and the saved ones after, which is the order
+  // `Searcher::smart_lists` builds and the order the rail draws.
+  const savedFrom = board.smart_lists.findIndex((list) => list.saved);
+  expect(savedFrom).toBe(7);
+  expect(board.smart_lists.slice(savedFrom).every((list) => list.saved)).toBe(true);
   const count = (id: string) => board.smart_lists.find((list) => list.id === id)!.count;
   for (const id of ["changed-today", "mine", "mine-stale", "just-synced"]) {
     expect(count(id), `${id} has no mirror here to count`).toBe(0);

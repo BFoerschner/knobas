@@ -112,10 +112,11 @@ pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHo
     launcher_home_inner(&lifecycle.pool()?).await
 }
 
-/// Every built-in smart list, with its count and its change badge.
+/// Every smart list -- built-in and saved -- with its count and its change
+/// badge.
 ///
 /// The rail on its own, for a launcher refreshing it without re-reading the
-/// whole board.
+/// whole board, which is what it does after a save, a rename or a delete.
 ///
 /// # Errors
 ///
@@ -142,6 +143,59 @@ pub async fn smart_list_items(
     limit: u32,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
     smart_list_items_inner(&lifecycle.pool()?, &id, limit).await
+}
+
+/// Save the launcher's current query as a smart list (#506, story 56).
+///
+/// `label` is what the rail shows; `query` is the **raw box text**, which is
+/// the whole of §4's grammar -- the prefix, the chips and the terms are all in
+/// it, and the backend is what parses it (ruling P2). Answers with the row as
+/// the rail draws it, so the caller need not re-read the board to show what it
+/// just made.
+///
+/// # Errors
+///
+/// `invalid` for a blank name, for a query the grammar cannot run and when the
+/// cap is reached, `not_ready` before the database is up, `internal` if the
+/// write fails.
+#[tauri::command]
+pub async fn create_smart_list(
+    lifecycle: State<'_, Lifecycle>,
+    label: String,
+    query: String,
+) -> Result<knobas_search::SmartListSummary, IpcError> {
+    create_smart_list_inner(&lifecycle.pool()?, &label, &query).await
+}
+
+/// Rename a saved smart list (#506, story 58).
+///
+/// # Errors
+///
+/// `invalid` for a blank name, `not_found` if nobody saved a list by that id
+/// -- **including every built-in id**, which is not a saved list and cannot be
+/// renamed -- `not_ready` before the database is up, `internal` if the write
+/// fails.
+#[tauri::command]
+pub async fn rename_smart_list(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    label: String,
+) -> Result<(), IpcError> {
+    rename_smart_list_inner(&lifecycle.pool()?, &id, &label).await
+}
+
+/// Forget a saved smart list (#506, story 58).
+///
+/// # Errors
+///
+/// `not_found` if nobody saved a list by that id, `not_ready` before the
+/// database is up, `internal` if the delete fails.
+#[tauri::command]
+pub async fn delete_smart_list(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+) -> Result<(), IpcError> {
+    delete_smart_list_inner(&lifecycle.pool()?, &id).await
 }
 
 /// [`search`], against a pool.
@@ -213,6 +267,47 @@ pub async fn smart_list_items_inner(
         .await?)
 }
 
+/// [`create_smart_list`], against a pool.
+///
+/// # Errors
+///
+/// See [`create_smart_list`].
+pub async fn create_smart_list_inner(
+    pool: &PgPool,
+    label: &str,
+    query: &str,
+) -> Result<knobas_search::SmartListSummary, IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
+        .save_list(label, query)
+        .await?)
+}
+
+/// [`rename_smart_list`], against a pool.
+///
+/// # Errors
+///
+/// See [`rename_smart_list`].
+pub async fn rename_smart_list_inner(
+    pool: &PgPool,
+    id: &str,
+    label: &str,
+) -> Result<(), IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
+        .rename_list(id, label)
+        .await?)
+}
+
+/// [`delete_smart_list`], against a pool.
+///
+/// # Errors
+///
+/// See [`delete_smart_list`].
+pub async fn delete_smart_list_inner(pool: &PgPool, id: &str) -> Result<(), IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
+        .delete_list(id)
+        .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +363,8 @@ mod tests {
                 count: 3,
                 changed: true,
                 description: "Yours.".to_owned(),
+                saved: false,
+                needs_attention: false,
             }],
             recent: Vec::new(),
             sources: Vec::new(),
@@ -302,7 +399,15 @@ mod tests {
         list_keys.sort_unstable();
         assert_eq!(
             list_keys,
-            ["changed", "count", "description", "id", "label"]
+            [
+                "changed",
+                "count",
+                "description",
+                "id",
+                "label",
+                "needs_attention",
+                "saved"
+            ]
         );
         for key in &list_keys {
             assert!(

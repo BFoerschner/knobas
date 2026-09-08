@@ -41,6 +41,7 @@ pub mod group;
 pub mod home;
 pub mod lists;
 pub mod query;
+pub mod saved;
 pub mod snippet;
 pub mod sql;
 /// The deterministic corpus the perf gate and the bench share.
@@ -56,6 +57,7 @@ use sqlx::PgPool;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
+pub use saved::{Refusal, SavedList};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
     EntityRow, FilterAnswer, FilterCoverage, FilterDimension, ParsedQuery, Prefix, ResultGroup,
@@ -68,7 +70,7 @@ pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 /// A paste, not a query: §4's box is one line. The cap is on *characters*
 /// rather than bytes so that a query in a non-Latin script is not cut shorter
 /// than the same query in ASCII.
-const MAX_RAW_CHARS: usize = 512;
+pub(crate) const MAX_RAW_CHARS: usize = 512;
 
 /// Most rows one response may carry, whatever the caller asked for.
 const MAX_LIMIT: u32 = 200;
@@ -79,7 +81,7 @@ const MAX_LIMIT: u32 = 200;
 /// a chip name" is a question a caller answers, not the UI. Thirty-two is more
 /// instances than any installation has and far fewer than an `= any(...)` that
 /// costs anything.
-const MAX_FILTER_VALUES: usize = 32;
+pub(crate) const MAX_FILTER_VALUES: usize = 32;
 
 /// How many rows one kind may contribute to a page.
 ///
@@ -229,18 +231,78 @@ impl Searcher {
         home::explain_recent(&self.pool, home::RECENT_LIMIT).await
     }
 
-    /// Every built-in smart list, with its count and its change badge.
+    /// Every smart list, with its count and its change badge -- the built-ins
+    /// and then the ones a reader saved (#506).
     ///
-    /// Two round trips: the vocabulary (for the identity behind `@me`, which
-    /// every search loads anyway) and one statement carrying the counts, the
-    /// freshness stamps and the seen-stamps together.
+    /// **One list, not two**, which is the shape story 57 asks for: saved and
+    /// built-in behave as one kind, and `SmartListSummary::saved` is all that
+    /// tells the rail which controls a row carries. The built-ins come first
+    /// because they are the ones that are always there.
+    ///
+    /// Two round trips with nothing saved: the vocabulary (for the identity
+    /// behind `@me`, which every search loads anyway) and one statement
+    /// carrying the built-ins' counts, freshness stamps and seen-stamps
+    /// together. Two more once something is saved -- see
+    /// [`saved::summaries`], which is where the cost is stated.
     ///
     /// # Errors
     ///
     /// [`SearchError::Db`] if the summary cannot be read.
     pub async fn smart_lists(&self) -> Result<Vec<SmartListSummary>, SearchError> {
         let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
-        lists::summaries(&self.pool, &vocab.identity).await
+        let mut out = lists::summaries(&self.pool, &vocab.identity).await?;
+        out.extend(saved::summaries(&self.pool, &vocab).await?);
+        Ok(out)
+    }
+
+    /// Save the launcher's current query as a smart list (story 56).
+    ///
+    /// Answers with the row as the rail will draw it, so a caller that has
+    /// just saved one has the count and the badge without re-reading the
+    /// board.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a blank name, for a query today's grammar
+    /// cannot run, and when [`saved::MAX_SAVED_LISTS`] are already saved;
+    /// [`SearchError::Db`] if the row cannot be written.
+    pub async fn save_list(
+        &self,
+        label: &str,
+        raw: &str,
+    ) -> Result<SmartListSummary, SearchError> {
+        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        let created = saved::create(&self.pool, &vocab, label, raw).await?;
+        // Read back through the same function the rail reads, rather than
+        // assembling a summary here: a second way to build this row is a
+        // second answer to "what does a saved list look like", and the one the
+        // caller gets on save is the one it would get on the next opening.
+        saved::summaries(&self.pool, &vocab)
+            .await?
+            .into_iter()
+            .find(|list| list.id == created.id)
+            .ok_or_else(|| SearchError::UnknownList(created.id))
+    }
+
+    /// Give a saved list a different name (story 58). The id does not move.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a blank name,
+    /// [`SearchError::UnknownList`] if nobody saved a list by that id,
+    /// [`SearchError::Db`] if the write fails.
+    pub async fn rename_list(&self, id: &str, label: &str) -> Result<(), SearchError> {
+        saved::rename(&self.pool, id, label).await.map(|_| ())
+    }
+
+    /// Forget a saved list (story 58).
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::UnknownList`] if nobody saved a list by that id,
+    /// [`SearchError::Db`] if the delete fails.
+    pub async fn delete_list(&self, id: &str) -> Result<(), SearchError> {
+        saved::delete(&self.pool, id).await
     }
 
     /// The rows of one built-in smart list, shaped exactly like a search.
@@ -273,6 +335,14 @@ impl Searcher {
             .await
     }
 
+    /// One list's rows, whoever ships it.
+    ///
+    /// **`list:<id>` has one meaning, and this is where that is true**: a
+    /// built-in is looked up in the compiled-in registry, and anything else is
+    /// looked for in `knobas.smart_list` before the id is called unknown. The
+    /// two arms answer with the same `SearchResponse` and both clear the
+    /// badge, which is what lets the launcher open either one by typing its
+    /// id.
     async fn list_response(
         &self,
         id: &str,
@@ -281,20 +351,61 @@ impl Searcher {
         interpreted: ParsedQuery,
         started: Instant,
     ) -> Result<SearchResponse, SearchError> {
-        let list = lists::find(id).ok_or_else(|| SearchError::UnknownList(id.to_owned()))?;
-        let rows =
-            lists::rows(&self.pool, list, &vocab.identity, limit.clamp(1, MAX_LIMIT)).await?;
+        let limit = limit.clamp(1, MAX_LIMIT);
+        if let Some(list) = lists::find(id) {
+            let rows = lists::rows(&self.pool, list, &vocab.identity, limit).await?;
+            let groups = group::group(rows, &vocab.kinds);
+            lists::mark_seen(&self.pool, list.id).await?;
+            return Ok(SearchResponse {
+                interpreted,
+                total: groups.iter().map(|g| g.total).sum(),
+                groups,
+                // A built-in list is not a filter the user wrote, so there is
+                // no author question of theirs to report on -- `list:mine`
+                // narrows by the identity `lists::rows` resolves, and a
+                // coverage row for it would explain a query nobody typed.
+                coverage: Vec::new(),
+                took_ms: took_ms(started),
+            });
+        }
+
+        let saved = saved::find(&self.pool, id)
+            .await?
+            .ok_or_else(|| SearchError::UnknownList(id.to_owned()))?;
+        // A list the rail is drawing as *needs attention* answers with the
+        // reason rather than with an empty page: the row is not openable, so
+        // reaching here means somebody typed `list:<id>` for one, and telling
+        // them "no rows" would be the launcher hiding a broken saved query.
+        let runnable = saved::plan(&saved.query, vocab)
+            .map_err(|refusal| SearchError::Invalid(refusal.description()))?;
+
+        let built = sql::search_sql(
+            corpus::ALL,
+            runnable.text.as_deref(),
+            // A saved query is not being typed, so its last word is finished.
+            // `sep` saved as a list means `sep`, not "anything starting sep".
+            false,
+            &runnable.filters,
+            PER_GROUP,
+            limit,
+        );
+        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
         let groups = group::group(rows, &vocab.kinds);
-        lists::mark_seen(&self.pool, list.id).await?;
+        // **Unlike the built-in arm**, and for that arm's own stated reason
+        // read the other way: a saved list *is* a filter the user wrote, so an
+        // empty `author:` in it has the same two meanings issue #141 exists to
+        // tell apart.
+        let coverage = coverage::author_coverage(&self.pool, vocab, &runnable.filters).await?;
+        lists::mark_seen(&self.pool, &saved.id).await?;
+
         Ok(SearchResponse {
-            interpreted,
+            // The **saved query's** interpretation and not the `list:<id>` the
+            // reader typed to get here -- story 56's "keeping its text, chips
+            // and prefixes" is what the chip row above the results draws.
+            interpreted: runnable.interpreted,
             total: groups.iter().map(|g| g.total).sum(),
             groups,
-            // A built-in list is not a filter the user wrote, so there is no
-            // author question of theirs to report on -- `list:mine` narrows by
-            // the identity `lists::rows` resolves, and a coverage row for it
-            // would explain a query nobody typed.
-            coverage: Vec::new(),
+            coverage,
             took_ms: took_ms(started),
         })
     }
@@ -351,7 +462,7 @@ fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
 ///
 /// `note:` was in this list until #46 and left it the same way, for the same
 /// reason.
-fn empty_corpus(prefix: Option<Prefix>) -> bool {
+pub(crate) fn empty_corpus(prefix: Option<Prefix>) -> bool {
     matches!(prefix, Some(Prefix::Time | Prefix::Action | Prefix::Help))
 }
 
