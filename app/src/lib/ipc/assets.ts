@@ -713,9 +713,11 @@ export function dependsOnThis(assetId: string): Promise<DependsOnThis> {
  * source's monitors are attached to, by a `monitored-by` link, worst health
  * first.
  *
- * **Empty until M4.1.** No adapter emits a `monitor` yet, so the backend's
- * statement matches nothing — which is the read answering honestly rather than
- * a stub, and the tile fills itself the day the Kuma adapter lands.
+ * **Written before there was a monitor to find**, as the real statement rather
+ * than a stub, on the argument that a tile which fills itself the day the
+ * adapter lands beats one somebody has to remember to come back to. #442's
+ * Kuma adapter landed and it did — `assets::monitored_by`'s own docs say the
+ * same, and this comment said *empty until M4.1* until #505 corrected it.
  *
  * A source nothing was synced under answers with an empty list, not a
  * rejection.

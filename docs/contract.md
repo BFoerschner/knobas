@@ -8185,7 +8185,10 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   Spec #491's stream 7, whose map row names its frozen-surface touch as **one IPC read** and
   nothing else, and #505's own third acceptance criterion asks for this entry by name. **Björn
-  keeps the gate for frozen contracts and this entry is flagged for his review.** The argument is
+  keeps the gate for frozen contracts and this entry is flagged for his review — ratified in his
+  absence by the deputy's ruling of 2026-09-08 on #505
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
+  on the two DTOs as the read's own shape, and on the one barrel line.** The argument is
   in this entry rather than in a §9 section of its own, the treatment #499 took: nothing here
   corrects an existing record, measures a source system or moves a §4.2 row.
 
@@ -8239,16 +8242,20 @@ From this commit on, each of the following requires an orchestrator decision **a
   envelope unchanged at version 2. `AssetDetail`, `AssetRow`, `RouteRow`, `MemberAsset` and every
   other shape in `app/src/lib/ipc/assets.ts` are unchanged. The share export's part list is
   unchanged: this reads `knobas.asset`, `knobas.link` and `knobas.route`, all of which are already
-  parts.
+  parts. The link half is read through **`knobas.confirmed_link`**, `0007`'s view over that table
+  (`deleted_at is null and confirmed_at is not null`) and not the table itself — the part list is
+  about the table, so the sentence above holds, and the view is what keeps a proposal nobody has
+  accepted and a link somebody withdrew out of a blast radius.
 
   Pinned by: `commands::assets`' `the_depends_on_answer_matches_its_typescript_mirror` (both lists
-  populated, and `relation` present on one row and null on the other, so the mirror cannot declare
-  the `Option`s anything it likes) and
+  populated and **both rows** shape-checked, the second of them carrying a null `path` and a null
+  `relation` — `assert_shape` compares field *names*, so what that row catches is a
+  `skip_serializing_if` leaving the frontend short of the key the panel branches on) and
   `the_relations_the_panel_walks_are_in_the_frontend_vocabulary`; `tests/wiring.rs`'s
   `every_command_is_in_the_handler_list` and `assets_ipc.rs`'
   `every_asset_command_is_registered_and_its_arguments_decode`, which are what make the read
-  reachable from the window; six in `crates/knobas-app/tests/assets_ipc.rs` over scratch databases
-  seeded with **the real estate file** plus links drawn by the test —
+  reachable from the window; **seven** in `crates/knobas-app/tests/assets_ipc.rs` over scratch
+  databases seeded with **the real estate file** plus links drawn by the test —
   `what_breaks_below_an_asset_is_everything_it_holds_nearest_first` (four levels, the path, and no
   route on a VM),
   `a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart` (the relation, the
@@ -8258,7 +8265,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_cycle_is_walked_once_and_never_lists_the_asset_it_started_from` (story 53) and
   `a_link_the_panel_does_not_walk_leaves_the_list_empty` (the four adjacent links that are not
   blast radius: the other direction, another relation, an unconfirmed proposal, and a far end that
-  is not an asset), plus `the_panel_refuses_an_id_no_asset_carries`; and, on the rendered side,
+  is not an asset), and `the_panel_refuses_an_id_no_asset_carries`; and, on the rendered side,
   six in `AssetsView.depends.test.svelte.ts` for the count, the path and the relation on every
   line, the routes beneath and outside the number, the empty state, a refused walk saying so, the
   guard that stops one asset's answer being drawn under another's heading, and the click through
