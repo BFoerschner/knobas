@@ -2063,6 +2063,80 @@ two of the four stand in one column rather than certifying three states as four;
 `app/src/lib/detail/Detail.status.test.svelte.ts`, whose fixture makes the corpus and the workflow
 disagree in both directions so that one assertion sees both.
 
+### Amendments from the narrowing workflow in the seed (2026-09-08, binding) — issue #522
+
+**This section supersedes one paragraph of the #498 amendment above** — *"And it is the direction the
+live suite cannot witness, measured rather than assumed"* — and nothing else in it. That paragraph
+was written on a Jira whose whole status list was exactly the four `PAY`'s workflow reached, and it
+named its own closure: *"closing it for real means a second workflow in the seed, which is a seeding
+change and a ticket of its own."* This is that ticket, filed by the deputy's ruling of 2026-09-08 on
+#498 (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), and the paragraph's every clause is now
+out of date: the instance has nine statuses, the equality assertion it describes has been replaced,
+and the narrowing is witnessed live rather than by mockd alone.
+
+- **§9 the seed creates a third Jira project whose workflow narrows, and it is not fixture
+  content.** `testenv/seed-atlassian-content.sh` creates `NARROW` (*Narrowing workflow fixture*)
+  from Jira **Core**'s process-management template,
+  `com.atlassian.jira-core-project-templates:jira-core-process-management`,
+  `projectTypeKey: "business"`. **Measured 2026-09-08 (Jira 10.3.24), through
+  `/rest/project-templates/1.0/templates`:** the three *software* templates this container offers
+  are Scrum, Kanban and Basic and all three give the all-to-all *Simplified* workflow, so no
+  software template could have done this; the three *business* templates are reachable over the same
+  `POST /rest/api/2/project` the seed already makes, because Jira Core reports
+  `canUserUseApplication: true` under this Jira Software licence. No UI step, no workflow-scheme
+  surgery. Walked on the real server, *`<KEY>`: Process Management Workflow* has seven statuses and
+  offers a **proper subset** from every one of them: *Open* → *In Progress*; *In Progress* → *Under
+  Review*, *Cancelled*; *Under Review* → *Approved*, *Rejected*; *Approved* → *Done*; *Done* →
+  nothing; *Cancelled* → *Open*; *Rejected* → *In Progress*. Seven of those eight moves are named
+  for the move rather than for the status they land on, so the label-preferred-over-destination
+  direction is observable here too.
+
+- **§9 the project is empty at rest, and out of `jira.projects` and `jira.issues`.** Those two are
+  the *fixture's* corpus: `live_jira_seeded.rs` syncs the whole instance with an unscoped source and
+  asserts the mirror is exactly `jira.issues` in three places, its `a_full_sync_mirrors_every_seeded_issue_across_both_projects`
+  requires every entry of `jira.projects` to be named by a mirrored issue, and its
+  `Seeded::clear_leftovers` deletes every issue on the instance the seed did not create. A parked
+  ticket in `NARROW` would have had to join both arrays to survive that, which would put a narrowing
+  workflow under `clear_leftovers`'s `move_to` restore path — single-hop, and *Done* is terminal. So
+  the project is recorded as `jira.narrowing` instead, the live witness files its own ticket and
+  deletes it, and a killed run's leftover is cleared by the adapter suite that runs before it.
+  `--verify` writes for the same reason and in the same shape: "this workflow still narrows" is not
+  a claim any read of a project can make.
+
+- **§9 the direction #498 could not witness is now witnessed, in both of its forms.** Measured
+  2026-09-08 on the seeded pair. *Within a project:* `NARROW`'s ticket standing in *Open* is answered
+  `["In Progress"]` — one of that project's seven — and the write side refuses `"Done"`, a status the
+  project **has** and the ticket cannot reach from where it stands, which is the refusal the read
+  exists to stop offering and the one `"Blocked"` (a status that exists nowhere here) cannot make.
+  Stood in *In Progress* the same ticket is answered `["Under Review", "Cancelled"]`, so the answer
+  moves with the ticket rather than being the project's list or the corpus's. *At the instance
+  level:* `GET /rest/api/2/status` now answers **nine**, and `PAY`'s four reads still answer exactly
+  its own four, so they leave five existing statuses out. #498's `assert_eq!(on_the_instance,
+  expected)` — written to go red the day the list grew — is **replaced, not deleted**, by
+  `assert_eq!(on_the_instance, expected ∪ jira.narrowing.statuses)`, which keeps the tripwire and
+  names the project that explains the difference.
+
+- **Mutation-checked, live.** A `reachable_transitions` that answers `GET
+  /rest/api/2/project/<KEY>/statuses` instead of the workflow — the wrong implementation #498's
+  fixture could not see — is **survived by every narrowing assertion in the `PAY` test** and killed
+  by the `NARROW` one. So is reading the transition's own `name` instead of `to.name`: the `PAY`
+  test passes in full under it, the `NARROW` one fails. Both are recorded here because they measure
+  the gap this section closes rather than merely asserting it was closed.
+
+- **Frozen surfaces: none.** The change is `testenv/seed-atlassian-content.sh`,
+  `crates/knobas-app/tests/atlassian_live.rs`, `testenv/README.md` and `test-inventory.txt`. Nothing
+  in `crates/knobas-source/src/**`, no migration, no IPC command, no barrel line — so no §10.8 entry
+  is owed, and none is made. This section is a §9 record of a measurement, which is what §9 is for.
+
+Pinned by: `knobas-app`'s
+`tests/atlassian_live.rs::the_reachable_transitions_read_answers_a_proper_subset_where_the_workflow_narrows`
+and the amended
+`the_reachable_transitions_read_answers_the_seeded_workflow_from_every_state`; and
+`testenv/seed-atlassian-content.sh --verify`, which files a throwaway ticket, checks that what it is
+offered is a non-empty proper subset of what the project has, and deletes it — so an Atlassian
+template that quietly became all-to-all fails the seed rather than leaving the suite green and about
+nothing.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

@@ -232,8 +232,12 @@ struct Narrowing {
     /// The issue type the seed checked this project's scheme has, and the one
     /// a ticket is filed as below.
     issue_type: String,
-    /// Every status the project has, off `GET /rest/api/2/project/<KEY>/statuses`
-    /// -- not off the `/transitions` read this suite is about.
+    /// Every status the project's workflow for [`Narrowing::issue_type`] has,
+    /// off `GET /rest/api/2/project/<KEY>/statuses` -- not off the
+    /// `/transitions` read this suite is about. That endpoint answers per issue
+    /// type, and the seed records the row for the type the ticket below is
+    /// filed as rather than the first row, so this really is the denominator
+    /// the ticket's own workflow is measured against.
     statuses: Vec<String>,
 }
 
@@ -1649,21 +1653,27 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         .iter()
         .filter_map(|s| s["name"].as_str().map(str::to_owned))
         .collect();
-    assert!(
-        expected.is_subset(&on_the_instance),
-        "every status this workflow reaches has to exist on the instance; the workflow offers \
-         {expected:?} and the instance has {on_the_instance:?}"
-    );
+    let narrowing: std::collections::BTreeSet<String> =
+        env.narrowing.statuses.iter().cloned().collect();
     let never_reached: std::collections::BTreeSet<String> =
         on_the_instance.difference(&expected).cloned().collect();
+    assert_eq!(
+        on_the_instance,
+        expected.union(&narrowing).cloned().collect(),
+        "this Jira's statuses are this workflow's four ({expected:?}) and `{}`'s ({narrowing:?}) \
+         and nothing else. Both halves matter: without the second the reads below cannot tell \
+         the workflow's reply from every status the project has -- so if `{}` is gone, run \
+         `./seed-atlassian-content.sh`. And an instance that grew a status neither project \
+         explains is one this suite has stopped describing, which is what this equality is here \
+         to say out loud (it replaced #498's, which said the instance had only the four)",
+        env.narrowing.key,
+        env.narrowing.key
+    );
     assert!(
         !never_reached.is_empty(),
-        "this Jira has only the {} statuses this workflow reaches ({on_the_instance:?}), so the \
-         reads below cannot tell the workflow's reply from every status the project has. What \
-         puts statuses on this instance that PAY's workflow never reaches is the seed's \
-         narrowing project (`jira.narrowing` in seed-state.json); run \
-         `./seed-atlassian-content.sh`",
-        on_the_instance.len()
+        "the narrowing project has to put statuses on this instance that this workflow never \
+         reaches, or the reads below witness nothing: the instance has {on_the_instance:?} and \
+         the workflow offers {expected:?}"
     );
     println!(
         "SEEDED this instance has {} statuses, {} of which this workflow never reaches: \
@@ -1826,13 +1836,16 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
 /// it cannot say is that a **Jira workflow** answers this way, or that the
 /// adapter's `to.name` reading survives a template whose transition names are
 /// `Start Progress` and `Ready For Review` rather than the statuses they land
-/// on. Every row of [`NARROW_FROM_FIRST`]'s table was walked on the real
-/// server.
+/// on. Every row of the table on [`NARROW_FIRST_STATE`] was walked on the real
+/// server; this test stands a ticket in the first two of them, so those two are
+/// the rows a changed template would be caught in. The other five are a
+/// measurement recorded there, asserted by nothing.
 ///
 /// **Three claims, and they fail for different reasons.**
 ///
 /// 1. From `Open` the read answers exactly [`NARROW_FROM_FIRST`], and that is
-///    a *proper* subset of the project's statuses -- the denominator read off
+///    a *proper* subset of the statuses this project's workflow has for the
+///    type the ticket is filed as -- the denominator read off
 ///    `GET /rest/api/2/project/NARROW/statuses` by the seed, a different
 ///    endpoint from the `/transitions` one under test.
 /// 2. The write side refuses [`NARROW_UNREACHABLE_FROM_FIRST`] **by name**, and

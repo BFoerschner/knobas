@@ -7,10 +7,12 @@
 #
 #   ./seed-atlassian-content.sh            seed both products
 #   ./seed-atlassian-content.sh --verify   read PAY-231, one page and the
-#                                          nested page's ancestors back, and
-#                                          fail if any is missing or misplaced
-#                                          (the proof step of
-#                                          `just atlassian-live`)
+#                                          nested page's ancestors back, walk
+#                                          one throwaway ticket through the
+#                                          narrowing project's workflow, and
+#                                          fail if any is missing, misplaced,
+#                                          or no longer narrowing (the proof
+#                                          step of `just atlassian-live`)
 #
 # The fixture is READ-ONLY here, as it is for seed-gitea.sh: this script is
 # driven from the same file crates/knobas-source-mock compiles in, so there is
@@ -24,7 +26,7 @@
 # page comments by their text.
 #
 # THE PROJECT TEMPLATE. Jira DC creates a project from a template key, and the
-# key decides the workflow. This script uses
+# key decides the workflow. For the fixture's own projects this script uses
 #
 #   com.pyxis.greenhopper.jira:basic-software-development-template
 #
@@ -251,6 +253,13 @@ record() {  # record <jq filter with $v bound> <json>
 # missing or somewhere else. Deliberately by fixture key and title, not by
 # recorded id: this is the claim "the fixture is in there", so it must not
 # need the seed's own notes to pass.
+#
+# ONE STEP OF IT WRITES, and it is the only one: the narrowing check below
+# files a throwaway ticket in $NARROW_KEY and deletes it again, because "this
+# workflow still narrows" is not a claim any read of the project can make --
+# it takes a ticket standing in a state (#522). It burns a $NARROW_KEY key and
+# nothing else: no fixture project is written to, here or anywhere else in this
+# function, and the delete is checked rather than assumed.
 # ==========================================================================
 verify() {
   _fail=0
@@ -282,9 +291,10 @@ verify() {
   if [ "$API_STATUS" != "200" ]; then
     echo "  $NARROW_KEY: HTTP $API_STATUS -- missing" >&2; _fail=1
   else
-    _all=$(printf '%s' "$API_BODY" | jq -c '[.[0].statuses[].name]')
+    _all=$(printf '%s' "$API_BODY" | jq -c --arg t "$NARROW_TYPE" \
+             '[.[] | select(.name == $t) | .statuses[].name]')
     jira POST /rest/api/2/issue "$(jq -n --arg k "$NARROW_KEY" --arg t "$NARROW_TYPE" \
-        '{fields: {project: {key: $k}, summary: "seed --verify: does this workflow still narrow?", issuetype: {name: $t}}}')"
+        '{fields: {project: {key: $k}, summary: "seed-atlassian-content.sh --verify: does this workflow still narrow?", issuetype: {name: $t}}}')"
     if [ "$API_STATUS" != "201" ]; then
       echo "  $NARROW_KEY: creating the probe issue: HTTP $API_STATUS: $(printf '%s' "$API_BODY" | head -c 300)" >&2; _fail=1
     else
@@ -419,12 +429,17 @@ else
 fi
 jira GET "/rest/api/2/project/$NARROW_KEY/statuses"
 expect "statuses of $NARROW_KEY" 200
-# `.[0]` and not a union over the types, exactly as the fixture projects'
-# statuses are read below: it keeps the workflow's own order, and the type the
-# witness files ($NARROW_TYPE) is asserted to be one of the project's below.
-NARROW_STATUSES=$(printf '%s' "$API_BODY" | jq -c '[.[0].statuses[].name]')
+# $NARROW_TYPE's own row, not `.[0]` and not a union over the types. This list
+# is the DENOMINATOR the live witness calls "every status this project has",
+# and the ticket that stands in it is a $NARROW_TYPE, so it has to be that
+# type's workflow. `.[0]` -- which is how the fixture projects' statuses are
+# read below, where one workflow serves every type -- would be some other
+# type's list the day a template stopped mapping them all to one, and a longer
+# list makes "proper subset" cheaper than the claim it is written to support.
 printf '%s' "$API_BODY" | jq -e --arg t "$NARROW_TYPE" 'any(.[]; .name == $t)' >/dev/null \
   || die "$NARROW_KEY has no $NARROW_TYPE issue type -- the live witness files its ticket as one"
+NARROW_STATUSES=$(printf '%s' "$API_BODY" | jq -c --arg t "$NARROW_TYPE" \
+  '[.[] | select(.name == $t) | .statuses[].name]')
 say "$NARROW_KEY offers $(printf '%s' "$NARROW_STATUSES" | jq -r 'join(", ")')"
 
 # -- every fixture issue type in every project's scheme ----------------------
