@@ -122,9 +122,10 @@ async fn the_real_estate_is_already_in_the_tree() {
         .expect("the hcloud importer runs against the real API");
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped: _,
-    } = produced else {
+    } = produced
+    else {
         panic!(
             "the producer asked for something. A token is owed only when none \
              is stored, and this suite always sends one; a landing place is \
@@ -133,9 +134,9 @@ async fn the_real_estate_is_already_in_the_tree() {
         );
     };
     assert!(
-        new_assets.is_empty(),
+        new_servers.is_empty(),
         "these servers are not in `testenv/hetzner/estate.json` under their \
-         `hcloud_id`: {new_assets:?}. Read this first as a wrong `hcloud_id` \
+         `hcloud_id`: {new_servers:?}. Read this first as a wrong `hcloud_id` \
          in that file -- a plausible-but-wrong id is unmatched by key and \
          previews as new -- and only then as a bug in the producer."
     );
@@ -253,7 +254,7 @@ async fn the_real_containers_are_already_in_the_tree() {
         .expect("the docker importer runs against the four real engines");
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped,
     } = produced
     else {
@@ -269,10 +270,10 @@ async fn the_real_containers_are_already_in_the_tree() {
          `docker_context`, so their containers were not read: {skipped:?}"
     );
     assert!(
-        new_assets.is_empty(),
+        new_servers.is_empty(),
         "these containers are running and are not in \
          `testenv/hetzner/estate.json` under their context and name: \
-         {new_assets:?}. Read this first as that file being behind the real \
+         {new_servers:?}. Read this first as that file being behind the real \
          engines, and only then as a bug in the producer."
     );
 
@@ -285,7 +286,12 @@ async fn the_real_containers_are_already_in_the_tree() {
         .as_array()
         .expect("a list of assets")
         .iter()
-        .map(|entry| entry["properties"]["docker_context"].as_str().unwrap().to_owned())
+        .map(|entry| {
+            entry["properties"]["docker_context"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
         .collect();
     contexts.sort();
     contexts.dedup();

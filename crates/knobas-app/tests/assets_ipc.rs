@@ -4711,6 +4711,19 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
 /// needs no pool and therefore **answers**, which is why the success value is
 /// the response body rather than a placeholder.
 fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    invoke_over(cmd, body, knobas_app::Lifecycle::new())
+}
+
+/// The same, with a lifecycle the caller chose.
+///
+/// One test needs a lifecycle that is *past* bring-up, because the thing it
+/// asks about happens after `lifecycle.pool()?` and would otherwise be masked
+/// by `not_ready`.
+fn invoke_over(
+    cmd: &str,
+    body: serde_json::Value,
+    lifecycle: knobas_app::Lifecycle,
+) -> Result<serde_json::Value, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
             knobas_app::commands::assets::asset_tree,
@@ -4739,7 +4752,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
-    app.manage(knobas_app::Lifecycle::new());
+    app.manage(lifecycle);
     let webview: tauri::WebviewWindow<MockRuntime> =
         tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
             .build()
@@ -4915,6 +4928,15 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
                 "producer": HCLOUD_PRODUCER,
                 "landUnder": { "parent": "asset:hetzner-nbg1" },
             }),
+        ),
+        // #510's producer, over the same command. It takes neither of the two
+        // optional arguments, so it appears with them absent -- which is the
+        // shape the dialog sends -- and the arm that refuses a token sent to it
+        // is `the_docker_importer_takes_no_credential_and_says_so` below,
+        // where a lifecycle past bring-up lets the refusal be reached.
+        (
+            "produce_estate_file",
+            serde_json::json!({ "producer": assets::DOCKER_PRODUCER }),
         ),
         ("monitoring_settings", serde_json::json!({})),
         (
@@ -6422,18 +6444,20 @@ async fn every_recorded_server_is_already_in_the_tree_and_nothing_would_change()
         .expect("the producer runs");
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped,
-    } = produced else {
+    } = produced
+    else {
         panic!("every recorded server is in the estate, so nothing is owed: {produced:?}");
     };
     assert!(
-        new_assets.is_empty(),
-        "these three are the estate's own servers: {new_assets:?}"
+        new_servers.is_empty(),
+        "these three are the estate's own servers: {new_servers:?}"
     );
     assert!(
         skipped.is_empty(),
-        "hcloud skips nothing: one token either sees a server or does not know          it exists, so there is never anything it knew of and could not read"
+        "hcloud skips nothing: one token either sees a server or does not know \
+         it exists, so there is never anything it knew of and could not read"
     );
 
     let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
@@ -6509,14 +6533,14 @@ async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_
     assert_eq!(
         asked,
         assets::Produced::LandingNeeded {
-            assets: vec!["knobas-scratch".to_owned()]
+            servers: vec!["knobas-scratch".to_owned()]
         },
         "one server is not in the tree, and only that one is asked about"
     );
 
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped: _,
     } = assets::hcloud::produce(
         &pool,
@@ -6526,10 +6550,11 @@ async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_
         }),
     )
     .await
-    .expect("the producer runs with a landing place") else {
+    .expect("the producer runs with a landing place")
+    else {
         panic!("the landing place was given, so a file is owed");
     };
-    assert_eq!(new_assets, ["knobas-scratch"]);
+    assert_eq!(new_servers, ["knobas-scratch"]);
 
     let parsed: serde_json::Value = serde_json::from_str(&file).expect("the file is JSON");
     let entries = parsed["assets"].as_array().expect("the file has assets");
@@ -6615,7 +6640,7 @@ async fn on_an_empty_estate_the_top_of_the_estate_is_a_landing_place() {
     let asked = assets::hcloud::produce(&pool, &client, None)
         .await
         .expect("the producer runs");
-    let assets::Produced::LandingNeeded { assets: mut servers } = asked else {
+    let assets::Produced::LandingNeeded { mut servers } = asked else {
         panic!("nothing is in the tree, so all three servers are new: {asked:?}");
     };
     servers.sort();
@@ -6629,15 +6654,16 @@ async fn on_an_empty_estate_the_top_of_the_estate_is_a_landing_place() {
         .expect("the producer runs with the top of the estate chosen");
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped: _,
-    } = answered else {
+    } = answered
+    else {
         panic!(
             "the top of the estate is an answer, not a missing one -- a producer \
              that asks again here is the defect this case exists for: {answered:?}"
         );
     };
-    assert_eq!(new_assets.len(), 3);
+    assert_eq!(new_servers.len(), 3);
 
     let parsed: serde_json::Value = serde_json::from_str(&file).expect("the file is JSON");
     for entry in parsed["assets"].as_array().expect("the file has assets") {
@@ -6913,7 +6939,10 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
         &[
             ("orbstack", DOCKER_PS_ORBSTACK),
             ("knobas-teamcity", DOCKER_PS_TEAMCITY),
-            ("knobas-jira", "{\"Names\":\"knobas-jira\"}\n{\"Names\":\"knobas-jira-db\"}\n"),
+            (
+                "knobas-jira",
+                "{\"Names\":\"knobas-jira\"}\n{\"Names\":\"knobas-jira-db\"}\n",
+            ),
             (
                 "knobas-confluence",
                 "{\"Names\":\"knobas-confluence\"}\n{\"Names\":\"knobas-confluence-db\"}\n",
@@ -6927,7 +6956,7 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
         .expect("the docker importer runs against the stub");
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped,
     } = produced
     else {
@@ -6937,9 +6966,9 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
         );
     };
     assert!(
-        new_assets.is_empty(),
+        new_servers.is_empty(),
         "these containers are not in `testenv/hetzner/estate.json` under their \
-         context and name: {new_assets:?}"
+         context and name: {new_servers:?}"
     );
     assert!(
         skipped.is_empty(),
@@ -7036,9 +7065,11 @@ async fn a_recreated_container_keeps_its_asset() {
     let mut files = Vec::new();
     for answer in [before, after] {
         let dir = tempfile::tempdir().expect("a directory for the stub");
-        // Only the OrbStack engine answers; the three Hetzner contexts are not
-        // in this stub, so this run reads one context and refuses the rest --
-        // which is why the estate imported here is trimmed to it below.
+        // All four contexts the checked-in estate names answer, because a
+        // missing one is a refusal for the whole run and this test is about
+        // something else. Only OrbStack's holds containers; the three Hetzner
+        // engines answer empty, which is a legal state of a real engine and not
+        // a fault.
         let stub = stub_docker(
             dir.path(),
             &[
@@ -7103,7 +7134,7 @@ async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is
     let stub = stub_docker(dir.path(), &[("box", "{\"Names\":\"a-container\"}\n")]);
     let assets::Produced::Ready {
         file,
-        new_assets,
+        new_servers,
         skipped,
     } = assets::docker::produce(&pool, &assets::docker::cli(&stub))
         .await
@@ -7112,7 +7143,7 @@ async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is
         panic!("the Docker importer asks nothing");
     };
 
-    assert_eq!(new_assets, ["a-container"]);
+    assert_eq!(new_servers, ["a-container"]);
     assert_eq!(
         skipped,
         ["Docker engine (nameless)"],
@@ -7136,8 +7167,12 @@ async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is
          has no *land under* question (spec #491, story 68)"
     );
 
-    // And it applies: the container is created under that engine, with both
-    // halves of its origin key on it.
+    // And it applies: the container is created under that engine, **with both
+    // halves of its origin key on the asset** and not only in the file. The
+    // second half is the one worth reading -- a producer that wrote the
+    // properties and an apply that dropped them would pass every assertion
+    // above, and the next import would then match nothing and make a second
+    // copy of every container.
     assets::apply_import(&pool, &file, assets::DOCKER_PRODUCER)
         .await
         .expect("the produced file applies");
@@ -7148,6 +7183,25 @@ async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is
         .map(|row| row.name)
         .collect();
     assert_eq!(held, ["a-container"]);
+
+    let stored = assets::get(&pool, "asset:docker-box/a-container")
+        .await
+        .expect("the container the import created");
+    assert_eq!(stored.asset.parent_id.as_deref(), Some("asset:engine"));
+    let mut bag: Vec<(&str, &PropertyValue)> = stored
+        .properties
+        .iter()
+        .filter_map(|property| Some((property.key.as_str(), property.value.as_ref()?)))
+        .collect();
+    bag.sort_by_key(|(key, _)| *key);
+    assert_eq!(
+        bag,
+        [
+            ("container_name", &text("a-container")),
+            ("docker_context", &text("box")),
+        ],
+        "both halves of the origin key are on the asset, not only in the file"
+    );
 }
 
 /// **A column this build has never read does not refuse the run**, and a line
@@ -7277,10 +7331,17 @@ async fn the_context_property_reaches_docker_as_one_argument() {
 
     let dir = tempfile::tempdir().expect("a directory for the stub");
     let stub = stub_docker(dir.path(), &[]);
+    let touched = dir.path().join("knobas-should-not-exist");
     assets::docker::produce(&pool, &assets::docker::cli(&stub))
         .await
         .expect_err("docker has no context by that name");
 
+    // The effect, not only the record: the `touch` in that property did not
+    // run, because nothing between the property and the program interprets it.
+    assert!(
+        !touched.exists() && !std::path::Path::new("/tmp/knobas-should-not-exist").exists(),
+        "the context was interpreted by a shell somewhere"
+    );
     assert_eq!(
         recorded_argv(dir.path()),
         [vec!["--context", hostile, "ps", "--format", "json"]],
@@ -7368,5 +7429,55 @@ fn the_docker_producer_is_an_importer_and_declares_the_two_part_key() {
         ["docker_context", "container_name"],
         "the key `testenv/hetzner/estate.json` carries on every container, and \
          the one `assets::docker` writes"
+    );
+}
+
+/// **A token sent to the Docker importer is refused by name, at the command.**
+///
+/// The one behaviour of `produce_estate_file`'s Docker arm that can be reached
+/// without a docker on the far end, and the arm's only witness above
+/// `assets::docker::produce`: the dispatch happened, the estate-file producer's
+/// refusal is not what came back, and the credential was refused rather than
+/// written under an account nothing would ever read (ADR-0015 -- an importer's
+/// keychain namespace is its own, and this importer has nothing to put in it).
+///
+/// The pool is **unreachable**, which is what makes this a statement about
+/// order: the refusal is reached before anything queries, so a guard that ran
+/// after the first read would surface a connection error instead of this
+/// sentence. `tests/ipc.rs`' `demo_load_is_refused_outside_the_demo_profile`
+/// is the same arrangement.
+#[test]
+fn the_docker_importer_takes_no_credential_and_says_so() {
+    let lifecycle = knobas_app::Lifecycle::new();
+    lifecycle.install(knobas_app::AppState::over_pool(
+        tauri::async_runtime::block_on(async {
+            sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_secs(1))
+                .connect_lazy("postgres://knobas@127.0.0.1:1/knobas")
+                .expect("a lazy pool needs no server")
+        }),
+    ));
+    lifecycle.set(knobas_app::DbState::Ready);
+
+    let rejection = invoke_over(
+        "produce_estate_file",
+        serde_json::json!({ "producer": assets::DOCKER_PRODUCER, "token": "a-token" }),
+        lifecycle,
+    )
+    .expect_err("the Docker importer has nowhere to put a token");
+    assert!(
+        rejection.contains("invalid"),
+        "the refusal carries IpcErrorCode::Invalid: {rejection}"
+    );
+    for named in ["no credential", "docker CLI"] {
+        assert!(
+            rejection.contains(named),
+            "the refusal says {named:?}, so a reader knows why the field is not \
+             wanted rather than that something went wrong: {rejection}"
+        );
+    }
+    assert!(
+        !rejection.contains("not_ready") && !rejection.contains("state not managed"),
+        "the command never reached its Docker arm, so this proves nothing: {rejection}"
     );
 }

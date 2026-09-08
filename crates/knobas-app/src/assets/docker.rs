@@ -58,19 +58,22 @@
 //! the produced file must preview **all known with no changes** -- and
 //! [`super::preview_import`] walks the *file's* properties, so every key
 //! written here is a key that file has to carry with the value this producer
-//! reads. Two facts were measured on 2026-09-08 against the four real contexts
-//! and decided it:
+//! reads. One measurement and one reason decided it:
 //!
-//! * **`image` is not one CLI answer but two.** `docker ps`' `Image` column is
+//! * **`image` is not one CLI answer but two** -- measured on 2026-09-08
+//!   against all four real contexts. `docker ps`' `Image` column is
 //!   the image *reference* where the local engine has one (`gitea/gitea` on
 //!   `orbstack`) and the image **id** where it does not -- `e34446c9dbf8`,
 //!   `30267c7f633a`, `fe0737ba566a` on the three Hetzner engines, whose images
 //!   compose pulled by digest. The estate has carried `image` by hand as
 //!   `jetbrains/teamcity-server` since M4.0, so writing this column would put
 //!   six containers into *would change* with a hash, on every run.
-//! * **`compose_service` would agree today and says nothing docker owns.** It
-//!   is a label of one orchestrator, and a container that is not compose's has
-//!   none; it is the estate's own note about how the container is started.
+//! * **`compose_service` says nothing docker owns.** It is a label of one
+//!   orchestrator, and a container that is not compose's has none; it is the
+//!   estate's own note about how a container is started, which is why the file
+//!   carries it and this producer does not write it. (It happens to agree with
+//!   the file on the contexts spot-checked that day; that is not the reason,
+//!   and it is not measured by anything, since nothing writes it.)
 //!
 //! An import is silent about what its file does not mention (`super`), so
 //! leaving both out costs the estate nothing and keeps this producer's file to
@@ -110,7 +113,7 @@ use sqlx::{PgPool, Row};
 
 use crate::{IpcError, IpcErrorCode};
 
-use super::{DOCKER_PRODUCER, FILE_VERSION, NAMESPACE, Produced, PropertyValue};
+use super::{DOCKER_PRODUCER, NAMESPACE, Produced, PropertyValue};
 
 /// The property naming the docker context an engine is reached through, and
 /// the first part of a container's [origin key](super::Producer::origin_key).
@@ -171,11 +174,22 @@ const ENGINES: &str = "select id, name, properties -> $2 as context
                         order by id";
 
 /// One engine this run will read, with the context to read it through.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct Engine {
     /// The asset every container found under it lands in.
     asset_id: String,
     context: String,
+}
+
+/// What one engine answered: the engine, and the containers running on it.
+///
+/// A type rather than a `(Engine, Vec<String>)` threaded through two functions:
+/// the pair travels together everywhere it appears, and `found.names` reads as
+/// what it is where `found.1` reads as a position.
+#[derive(Debug)]
+struct Found {
+    engine: Engine,
+    names: Vec<String>,
 }
 
 /// The docker CLI, at the program it is spawned as.
@@ -185,7 +199,7 @@ struct Engine {
 /// estate-live` runs [`PROGRAM`], and the stub-driven suite runs a script of
 /// its own -- so the live run exercises the spawn the command uses rather than
 /// a second one spelled the same way.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Cli {
     program: OsString,
 }
@@ -248,7 +262,9 @@ impl Cli {
             )));
         }
         String::from_utf8(output.stdout).map_err(|error| {
-            IpcError::internal(format!("docker answered something that is not text: {error}"))
+            IpcError::internal(format!(
+                "docker answered something that is not text: {error}"
+            ))
         })
     }
 }
@@ -269,10 +285,13 @@ struct PsLine {
 /// The container names in one `docker ps --format json` answer, in its order.
 ///
 /// **One JSON object per line, not an array.** That is what the docker CLI on
-/// this machine writes (measured 2026-09-08 against all four contexts), and
-/// there is one CLI whatever the engine -- `--context` moves the *engine*, not
-/// the program -- so this parse is of one program's output and not of four
-/// servers'. A blank line is skipped; anything else that is not an object is a
+/// this machine writes, and there is one CLI whatever the engine --
+/// `--context` moves the *engine*, not the program -- so this parse is of one
+/// program's output and not of four servers'. What witnessed it against all
+/// four is `just estate-live` (2026-09-08, eight containers over four engines);
+/// nothing in `just check` can, because a stub writes whatever the test wrote
+/// into it, and an array shape from a future CLI is the failure this paragraph
+/// is the only warning about. A blank line is skipped; anything else that is not an object is a
 /// refusal naming the line, because a producer that shrugged at a line it could
 /// not read would answer with a file missing a container and no way to tell.
 ///
@@ -376,9 +395,9 @@ fn asset_id(context: &str, name: &str) -> String {
 }
 
 /// The estate file for `found`, with a `parent` on the entries in `new`.
-fn estate_file(found: &[(Engine, Vec<String>)], new: &HashSet<String>) -> Result<String, IpcError> {
+fn estate_file(found: &[Found], new: &HashSet<String>) -> Result<String, IpcError> {
     let mut assets = Vec::new();
-    for (engine, names) in found {
+    for Found { engine, names } in found {
         for name in names {
             let id = asset_id(&engine.context, name);
             let mut entry = serde_json::Map::new();
@@ -405,14 +424,7 @@ fn estate_file(found: &[(Engine, Vec<String>)], new: &HashSet<String>) -> Result
         }
     }
 
-    let file = serde_json::json!({
-        "version": FILE_VERSION,
-        "name": FILE_NAME,
-        "assets": assets,
-        "routes": [],
-    });
-    serde_json::to_string_pretty(&file)
-        .map_err(|error| IpcError::internal(format!("rendering the estate file: {error}")))
+    super::render_estate_file(FILE_NAME, assets)
 }
 
 /// One run of the Docker importer.
@@ -437,24 +449,20 @@ fn estate_file(found: &[(Engine, Vec<String>)], new: &HashSet<String>) -> Result
 pub async fn produce(pool: &PgPool, cli: &Cli) -> Result<Produced, IpcError> {
     let (engines, skipped) = engines(pool).await?;
 
-    let mut found: Vec<(Engine, Vec<String>)> = Vec::new();
+    let mut found: Vec<Found> = Vec::new();
     for engine in engines {
         let names = containers(&cli.ps(&engine.context).await?)?;
-        found.push((engine, names));
+        found.push(Found { engine, names });
     }
 
+    // Once with no parents, to ask the Import which of them it would create --
+    // `hcloud::produce`'s arrangement, through the call both share.
     let draft = estate_file(&found, &HashSet::new())?;
-    let preview = super::preview_import(pool, &draft, DOCKER_PRODUCER).await?;
-    let new: HashSet<String> = preview
-        .new
-        .iter()
-        .filter(|entry| entry.kind == NAMESPACE)
-        .map(|entry| entry.id.clone())
-        .collect();
+    let new = super::new_asset_ids(pool, &draft, DOCKER_PRODUCER).await?;
 
-    let new_assets: Vec<String> = found
+    let new_servers: Vec<String> = found
         .iter()
-        .flat_map(|(engine, names)| {
+        .flat_map(|Found { engine, names }| {
             names
                 .iter()
                 .filter(|name| new.contains(&asset_id(&engine.context, name)))
@@ -464,7 +472,7 @@ pub async fn produce(pool: &PgPool, cli: &Cli) -> Result<Produced, IpcError> {
 
     Ok(Produced::Ready {
         file: estate_file(&found, &new)?,
-        new_assets,
+        new_servers,
         skipped,
     })
 }
@@ -556,7 +564,12 @@ mod tests {
             containers("{\"Names\":\"knobas-jira,jira\"}").expect("one container"),
             ["knobas-jira"]
         );
-        for bad in ["not json at all", "{\"Names\":\"\"}", "{\"Names\":\"  \"}", "7"] {
+        for bad in [
+            "not json at all",
+            "{\"Names\":\"\"}",
+            "{\"Names\":\"  \"}",
+            "7",
+        ] {
             let refused = containers(bad).expect_err("a line that is not a container");
             assert_eq!(refused.code, IpcErrorCode::Internal);
         }
@@ -568,14 +581,14 @@ mod tests {
     #[test]
     fn a_container_lands_under_the_engine_whose_context_found_it() {
         let found = vec![
-            (
-                engine("asset:orbstack-docker", "orbstack"),
-                vec!["knobas-gitea".to_owned()],
-            ),
-            (
-                engine("asset:hetzner-jira-docker", "knobas-jira"),
-                vec!["knobas-jira".to_owned(), "knobas-jira-db".to_owned()],
-            ),
+            Found {
+                engine: engine("asset:orbstack-docker", "orbstack"),
+                names: vec!["knobas-gitea".to_owned()],
+            },
+            Found {
+                engine: engine("asset:hetzner-jira-docker", "knobas-jira"),
+                names: vec!["knobas-jira".to_owned(), "knobas-jira-db".to_owned()],
+            },
         ];
         let new: HashSet<String> = [asset_id("knobas-jira", "knobas-jira-db")]
             .into_iter()
@@ -612,6 +625,9 @@ mod tests {
     #[test]
     fn no_two_context_and_name_pairs_spell_one_id() {
         assert_ne!(asset_id("a-b", "c"), asset_id("a", "b-c"));
-        assert_eq!(asset_id("orbstack", "knobas-gitea"), "asset:docker-orbstack/knobas-gitea");
+        assert_eq!(
+            asset_id("orbstack", "knobas-gitea"),
+            "asset:docker-orbstack/knobas-gitea"
+        );
     }
 }

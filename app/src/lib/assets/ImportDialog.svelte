@@ -267,11 +267,11 @@
       tokenWanted = false;
       token = "";
       if (answer.state === "landing_needed") {
-        landing = answer.assets;
+        landing = answer.servers;
         return;
       }
       landing = null;
-      produced = answer.new_assets;
+      produced = answer.new_servers;
       skipped = answer.skipped;
       file = answer.file;
       offer(answer.file);
@@ -427,8 +427,8 @@
             <span class="l">Land under</span>
             <p class="hint">
               {landing.length === 1
-                ? "1 of them is not in the tree yet"
-                : `${landing.length} of them are not in the tree yet`}: {landing.join(", ")}.
+                ? "1 server is not in the tree yet"
+                : `${landing.length} servers are not in the tree yet`}: {landing.join(", ")}.
             </p>
             <nav class="crumb">
               <button class="crumbed" onclick={() => stand([])}>Estate</button>

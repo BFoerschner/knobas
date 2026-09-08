@@ -4181,11 +4181,17 @@ impl Token {
 /// -- *"beside [`Producer`] rather than inside `hcloud`, because nothing here
 /// names a live system: the second importer would otherwise import its
 /// credential handling from a module named after the first"* -- and a type
-/// spelling every producer's answer is the same case. The fields moved with it:
-/// what a producer makes is **assets**, and `new_servers` naming a list of
-/// container names was the wire saying something the code no longer meant
-/// (#510's §10.8 entry records the rename; §10.8 is append-only and #509's
-/// sentence stands beside it).
+/// spelling every producer's answer is the same case. **The move is the Rust
+/// path only**; the wire is unchanged, tag and arms and field names.
+///
+/// Two of those field names now read narrower than what they carry:
+/// [`Ready::new_servers`](Produced::Ready) holds *container* names when the
+/// Docker importer filled it. They were declared by #509's §10.8 entry and
+/// ratified a day before #510 was implemented, and renaming a declared wire
+/// field is a §10.8 conversation of its own rather than a thing this ticket was
+/// asked for -- so the names stand, said here so the next reader does not take
+/// the narrowness for a claim. What the *dialog* draws is producer-neutral,
+/// because the rendered sentence is nobody's frozen surface.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Produced {
@@ -4213,7 +4219,7 @@ pub enum Produced {
     /// hcloud importer's alone today.
     LandingNeeded {
         /// By name, in the order the live system listed them.
-        assets: Vec<String>,
+        servers: Vec<String>,
     },
     /// The estate file, ready for [`preview_import`].
     Ready {
@@ -4223,7 +4229,11 @@ pub enum Produced {
         /// What this file would create, by name; empty when the estate already
         /// holds everything the live system showed, which is what `just
         /// estate-live` asserts of both importers.
-        new_assets: Vec<String>,
+        ///
+        /// **Servers from hcloud and containers from Docker**, under a name
+        /// #509 gave it when hcloud was the only producer. See this type's own
+        /// header for why the name stands.
+        new_servers: Vec<String>,
         /// What this run knew of and could **not** read, by name -- for Docker,
         /// a `container_engine` asset carrying no `docker_context`.
         ///
@@ -4234,6 +4244,55 @@ pub enum Produced {
         /// know it exists.
         skipped: Vec<String>,
     },
+}
+
+/// One producer's estate file, around the entries it built.
+///
+/// The envelope every producer writes is the same three keys plus its own name,
+/// and it was written twice before #510 -- including the same
+/// `"rendering the estate file"` sentence, which is the copy that goes stale
+/// quietly. A producer chooses only what it calls the estate and what is in it.
+///
+/// # Errors
+///
+/// [`IpcError::internal`] if the file will not render, which is a bug here
+/// rather than anything a reader did.
+fn render_estate_file(name: &str, assets: Vec<serde_json::Value>) -> Result<String, IpcError> {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "version": FILE_VERSION,
+        "name": name,
+        "assets": assets,
+        "routes": [],
+    }))
+    .map_err(|error| IpcError::internal(format!("rendering the estate file: {error}")))
+}
+
+/// The ids in `draft` the Import would **create**, asked of the Import.
+///
+/// **Both producers decide *what is new* this way and neither decides it
+/// itself**, which is the point: the rule is id-then-origin-key
+/// ([`matched_by_origin_key`], #508) and a second copy of it living in a
+/// producer is the copy that goes stale against this one. The cost is one extra
+/// preview per run, which writes nothing at all.
+///
+/// Narrowed to [`NAMESPACE`], because a producer's file names assets and the
+/// preview's groups hold routes too.
+///
+/// # Errors
+///
+/// [`preview_import`]'s.
+async fn new_asset_ids(
+    pool: &PgPool,
+    draft: &str,
+    producer: &str,
+) -> Result<HashSet<String>, IpcError> {
+    Ok(preview_import(pool, draft, producer)
+        .await?
+        .new
+        .iter()
+        .filter(|entry| entry.kind == NAMESPACE)
+        .map(|entry| entry.id.clone())
+        .collect())
 }
 
 /// Where the servers an [importer](Importer) found and this estate does not hold
@@ -6495,7 +6554,7 @@ mod tests {
             token,
             Ok(Produced::Ready {
                 file: "{}".to_owned(),
-                new_assets: Vec::new(),
+                new_servers: Vec::new(),
                 skipped: Vec::new(),
             }),
         )
@@ -6521,7 +6580,7 @@ mod tests {
             HCLOUD_PRODUCER,
             token,
             Ok(Produced::LandingNeeded {
-                assets: vec!["knobas-scratch".to_owned()],
+                servers: vec!["knobas-scratch".to_owned()],
             }),
         )
         .await
@@ -6563,7 +6622,7 @@ mod tests {
             token,
             Ok(Produced::Ready {
                 file: "{}".to_owned(),
-                new_assets: Vec::new(),
+                new_servers: Vec::new(),
                 skipped: Vec::new(),
             }),
         )

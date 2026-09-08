@@ -1462,7 +1462,7 @@ function dockerProduce() {
   return {
     state: "ready",
     file: PRODUCED_FILE,
-    new_assets: [],
+    new_servers: [],
     skipped: ["Docker engine (OrbStack)"],
   };
 }
@@ -1482,7 +1482,7 @@ function estateProduce(args: Record<string, unknown>) {
   const landing = (args.landUnder ?? null) as { parent?: string | null } | null;
   const held = FIXTURE_ESTATE.some((asset) => asset.name === IMPORTER_NEW_SERVER);
   if (!held && landing === null) {
-    return { state: "landing_needed", assets: [IMPORTER_NEW_SERVER] };
+    return { state: "landing_needed", servers: [IMPORTER_NEW_SERVER] };
   }
   const entry: Record<string, unknown> = {
     id: "asset:hcloud-164750999",
@@ -1508,7 +1508,7 @@ function estateProduce(args: Record<string, unknown>) {
   return {
     state: "ready",
     file: PRODUCED_FILE,
-    new_assets: held ? [] : [IMPORTER_NEW_SERVER],
+    new_servers: held ? [] : [IMPORTER_NEW_SERVER],
     // hcloud never skips: one token either sees a server or does not know it
     // exists.
     skipped: [],

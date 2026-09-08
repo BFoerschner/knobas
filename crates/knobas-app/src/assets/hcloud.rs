@@ -71,7 +71,10 @@ use sqlx::PgPool;
 
 use crate::IpcError;
 
-use super::{FILE_VERSION, HCLOUD_PRODUCER, Landing, NAMESPACE, Produced};
+use super::{HCLOUD_PRODUCER, Landing, NAMESPACE, Produced};
+
+/// What the file calls the estate it describes -- the preview's heading.
+const FILE_NAME: &str = "Hetzner Cloud";
 
 /// Hetzner Cloud's API, versioned as its own documentation versions it.
 ///
@@ -332,14 +335,7 @@ fn estate_file(
         assets.push(serde_json::Value::Object(entry));
     }
 
-    let file = serde_json::json!({
-        "version": FILE_VERSION,
-        "name": "Hetzner Cloud",
-        "assets": assets,
-        "routes": [],
-    });
-    serde_json::to_string_pretty(&file)
-        .map_err(|error| IpcError::internal(format!("rendering the estate file: {error}")))
+    super::render_estate_file(FILE_NAME, assets)
 }
 
 /// The id a produced entry carries.
@@ -374,13 +370,7 @@ pub async fn produce(
 
     // Once with no parents, to ask the Import which of them it would create.
     let draft = estate_file(&servers, &HashSet::new(), None)?;
-    let preview = super::preview_import(pool, &draft, HCLOUD_PRODUCER).await?;
-    let new: HashSet<String> = preview
-        .new
-        .iter()
-        .filter(|entry| entry.kind == NAMESPACE)
-        .map(|entry| entry.id.clone())
-        .collect();
+    let new = super::new_asset_ids(pool, &draft, HCLOUD_PRODUCER).await?;
 
     let named: Vec<String> = servers
         .iter()
@@ -393,7 +383,7 @@ pub async fn produce(
         // the draft *is* the answer -- the state `just estate-live` asserts.
         return Ok(Produced::Ready {
             file: draft,
-            new_assets: Vec::new(),
+            new_servers: Vec::new(),
             // hcloud never skips: one token either sees a server or does not
             // know it exists, so there is nothing this run knew of and could
             // not read.
@@ -401,7 +391,7 @@ pub async fn produce(
         });
     }
     let Some(landing) = land_under else {
-        return Ok(Produced::LandingNeeded { assets: named });
+        return Ok(Produced::LandingNeeded { servers: named });
     };
     // `landing.parent` is `None` for the top of the estate, and `estate_file`
     // then writes no `parent` key at all -- which is what the Import reads as a
@@ -410,7 +400,7 @@ pub async fn produce(
     // two paths.
     Ok(Produced::Ready {
         file: estate_file(&servers, &new, landing.parent.as_deref())?,
-        new_assets: named,
+        new_servers: named,
         skipped: Vec::new(),
     })
 }

@@ -645,7 +645,10 @@ fn every_container_carries_the_context_and_the_name_it_is_matched_on() {
                 .as_str()
                 .unwrap_or_else(|| {
                     panic!(
-                        "the container engine `{}` carries no `docker_context`.                          It is what the Docker importer spawns `docker                          --context` with, and an engine without one is an                          engine whose containers no import can read.",
+                        "the container engine `{}` carries no `docker_context`. \
+                         It is what the Docker importer spawns `docker \
+                         --context` with, and an engine without one is an \
+                         engine whose containers no import can read.",
                         id(engine)
                     )
                 });
@@ -654,7 +657,8 @@ fn every_container_carries_the_context_and_the_name_it_is_matched_on() {
         .collect();
     assert!(
         !context_of.is_empty(),
-        "this parse found no container engine; if the type id moved, fix the          parse rather than deleting the check"
+        "this parse found no container engine; if the type id moved, fix the \
+         parse rather than deleting the check"
     );
 
     let mut checked = 0;
@@ -666,7 +670,9 @@ fn every_container_carries_the_context_and_the_name_it_is_matched_on() {
         assert_eq!(
             asset["properties"]["container_name"].as_str(),
             Some(field(asset, "name")),
-            "`{entry}`'s `container_name` and its name say different things.              The property is half the origin key and the name is what a person              reads; a container is one thing and they are the same string."
+            "`{entry}`'s `container_name` and its name say different things. \
+             The property is half the origin key and the name is what a person \
+             reads; a container is one thing and they are the same string."
         );
         let engine = field(asset, "parent");
         let context = context_of.get(engine).unwrap_or_else(|| {
@@ -675,13 +681,17 @@ fn every_container_carries_the_context_and_the_name_it_is_matched_on() {
         assert_eq!(
             asset["properties"]["docker_context"].as_str(),
             Some(*context),
-            "`{entry}` says it is reached through a different docker context              from the engine `{engine}` it runs on. The importer reads it              through the engine's, so the container's would match nothing."
+            "`{entry}` says it is reached through a different docker context \
+             from the engine `{engine}` it runs on. The importer reads it \
+             through the engine's, so the container's would match nothing."
         );
         checked += 1;
     }
     assert!(
         checked >= 8,
-        "only {checked} containers were checked; this file has carried more          than that since M4.0, so the parse has broken rather than the estate          having shrunk"
+        "only {checked} containers were checked; this file has carried more \
+         than that since M4.0, so the parse has broken rather than the estate \
+         having shrunk"
     );
 }
 

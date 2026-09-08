@@ -884,10 +884,12 @@ export function previewEstateImport(file: string, producer: string): Promise<Imp
  * is never in. `state` is the tag, the arrangement {@link PropertyValue} makes
  * with `kind`.
  *
- * It moved out of `assets::hcloud` when #510 gave it a second producer, and its
- * fields moved with it: what a producer makes is **assets**, and a field called
- * `new_servers` holding a list of container names was the wire saying something
- * the code no longer meant.
+ * It moved out of `assets::hcloud` when #510 gave it a second producer. The
+ * move was the Rust path only — this union is unchanged, tag, arms and field
+ * names — and `new_servers` therefore holds *container* names when the Docker
+ * importer filled it. Renaming a field #509's §10.8 entry declared is a
+ * conversation of its own; what this dialog *draws* is producer-neutral,
+ * because the rendered sentence is nobody's frozen surface.
  */
 export type Produced = TokenNeeded | LandingNeeded | ProducedFile;
 
@@ -915,8 +917,8 @@ export interface TokenNeeded {
  */
 export interface LandingNeeded {
   state: "landing_needed";
-  /** What is not in the tree, by name, in the order it came. */
-  assets: string[];
+  /** The servers that are not in the tree, by name, in the order they came. */
+  servers: string[];
 }
 
 /** The estate file, in the checked-in shape, ready for the preview. */
@@ -924,8 +926,11 @@ export interface ProducedFile {
   state: "ready";
   /** The file's text. Nothing in it says which producer made it (#508). */
   file: string;
-  /** What this file would create; empty when the estate holds it all. */
-  new_assets: string[];
+  /**
+   * What this file would create, by name; empty when the estate holds it all.
+   * Servers from hcloud, containers from Docker — the name is #509's.
+   */
+  new_servers: string[];
   /**
    * What the run knew of and could not read, by name — for Docker, a container
    * engine in the tree carrying no `docker_context`. Always empty for hcloud.

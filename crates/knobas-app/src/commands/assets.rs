@@ -1638,18 +1638,18 @@ mod tests {
             (
                 "LandingNeeded",
                 assets::Produced::LandingNeeded {
-                    assets: vec!["knobas-teamcity".to_owned()],
+                    servers: vec!["knobas-teamcity".to_owned()],
                 },
-                &["state", "assets"][..],
+                &["state", "servers"][..],
             ),
             (
                 "ProducedFile",
                 assets::Produced::Ready {
                     file: "{}".to_owned(),
-                    new_assets: Vec::new(),
+                    new_servers: Vec::new(),
                     skipped: Vec::new(),
                 },
-                &["state", "file", "new_assets", "skipped"][..],
+                &["state", "file", "new_servers", "skipped"][..],
             ),
         ] {
             assert_shape(

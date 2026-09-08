@@ -9216,17 +9216,21 @@ From this commit on, each of the following requires an orchestrator decision **a
     import its credential handling from a module named after the first"* — and a type spelling
     every producer's answer is that case exactly. **The wire is unchanged by the move**: same tag
     `state`, same three arms, same TypeScript `Produced`.
-  * **Two field names on that union did change, and this is where §10.8 records it.** `Ready`'s
-    `new_servers` is now **`new_assets`** and `LandingNeeded`'s `servers` is now **`assets`**. The
-    union is producer-generic since this ticket and a field called `new_servers` carrying a list
-    of *container* names is the wire saying something the code does not mean — the Import dialog
-    read it and drew *"1 server is new"* over containers. §10.8 is append-only for its entries, so
-    #509's sentence declaring those names **stands** and this one carries the new truth, the
-    treatment this section gives every sentence it supersedes (Björn's ruling of 2026-08-31 in the
-    #112 section). Nothing decodes `Produced` — it derives `Serialize` only, rides in no archive,
-    no settings row, no file and no `pg_dump` — so the rename has no older shape to describe and
-    **no `#[serde(default)]` is owed**, which is #509's own answer to the sentence every
-    field-on-a-DTO entry since #39 has had to answer.
+  * **No field on that union is renamed, and the one that reads narrow is left alone
+    deliberately.** `Ready.new_servers` holds *container* names when Docker filled it, and the
+    Import dialog was drawing *"1 server is new"* over a list of containers. The **rendered
+    sentence** is fixed here — it is nobody's frozen surface — and the **field name is not**:
+    #509's §10.8 entry declared it a day earlier and a deputy ratified it, so renaming it is a
+    §10.8 conversation of its own rather than something #510 was asked for. It *was* renamed
+    (`new_assets`, and `LandingNeeded.servers` → `assets`) in this branch and **reverted before
+    the PR**, on the reading comment 1 on #510 gives for the matching rule — *"that is a change to
+    the matching rule, so raise it as a `**Fork:**` rather than deciding it"* — applied to a
+    frozen wire field. `assets::Produced`'s own header and `app/src/lib/ipc/assets.ts` both say
+    the name reads narrow and why it stands, so the next reader does not take the narrowness for a
+    claim. Nothing decodes `Produced` — it derives `Serialize` only, rides in no archive, no
+    settings row, no file and no `pg_dump` — which is why the added field below owes no
+    `#[serde(default)]`, #509's own answer to the sentence every field-on-a-DTO entry since #39
+    has had to answer.
   * **One field is new: `Ready.skipped: Vec<String>`.** The Docker importer's answer has to be
     able to say *this engine was not read*, because a produced file that quietly omitted an
     engine's containers is indistinguishable from an engine holding none, and the reader is the
@@ -9305,10 +9309,18 @@ From this commit on, each of the following requires an orchestrator decision **a
   written down there (ADR-0013). It needs no tunnel — the contexts are `ssh://` to the servers'
   own addresses and the tunnel forwards only the products' HTTP ports.
 
-  Pinned by: `commands::assets`' `every_produced_state_matches_its_typescript_mirror` (three arms,
-  their tags, and now `new_assets`, `assets` and `skipped` read off the mirror rather than listed)
-  and `the_chooser_offers_producers_this_build_knows` (now over three entries and each entry's
-  `importer` flag); `assets::docker`'s
+  **Two producers, one envelope and one *what is new*.** `assets::render_estate_file` and
+  `assets::new_asset_ids` are the halves both producers share, lifted out of `hcloud` by this
+  ticket rather than copied into `docker`: the second is load-bearing, because *what is new* is
+  the id-then-origin-key rule (#508) and a producer that answered it itself would be the second
+  copy that goes stale against `matched_by_origin_key`. Both therefore decide it by **asking the
+  Import**, at the cost of one extra preview per run, which writes nothing.
+
+  Pinned by: `commands::assets`' `every_produced_state_matches_its_typescript_mirror` (three arms
+  and every field of each, listed here and cross-checked against the mirror; the **tags** and the
+  union's membership are read off the mirror rather than listed, which is what a fourth state
+  added on the Rust side has to fail on) and `the_chooser_offers_producers_this_build_knows` (now
+  over three entries and each entry's `importer` flag); `assets::docker`'s
   `the_origin_key_this_producer_writes_is_the_one_the_planner_matches_on`,
   `the_context_is_the_only_thing_substituted_and_it_is_one_argument`,
   `every_line_is_one_container_and_the_id_is_read_by_nothing`,
@@ -9323,9 +9335,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_column_this_build_has_never_read_does_not_refuse_the_run`,
   `a_context_this_machine_cannot_read_refuses_the_whole_run`,
   `the_context_property_reaches_docker_as_one_argument` (read off the stub's own record rather
-  than off the code that built it),
-  `one_context_is_read_once_and_only_a_container_engine_is_read_at_all` and
-  `the_docker_producer_is_an_importer_and_declares_the_two_part_key`; `knobas-core`'s
+  than off the code that built it, **and** the `touch` in that property asserted not to have
+  happened),
+  `one_context_is_read_once_and_only_a_container_engine_is_read_at_all`,
+  `the_docker_producer_is_an_importer_and_declares_the_two_part_key` and
+  `the_docker_importer_takes_no_credential_and_says_so` (the command's Docker arm, over an
+  **unreachable** pool, so the refusal is shown to happen before anything queries — the
+  arrangement `tests/ipc.rs`' `demo_load_is_refused_outside_the_demo_profile` uses), beside the
+  `produce_estate_file` row `every_asset_command_is_registered_and_its_arguments_decode` gains for
+  the producer with neither optional argument; `knobas-core`'s
   `every_container_carries_the_context_and_the_name_it_is_matched_on`; `just estate-live`'s
   `the_real_containers_are_already_in_the_tree`; and, on the rendered side,
   `AssetsView.import.test.svelte.ts`' `the Docker importer asks for no token and no landing, and

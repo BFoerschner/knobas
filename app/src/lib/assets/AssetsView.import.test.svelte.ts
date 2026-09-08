@@ -579,7 +579,7 @@ function tokenField(): HTMLInputElement | null {
  * lives.
  */
 test("an importer asks for the token once, and not before it is owed", async () => {
-  script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_assets: [], skipped: [] }];
+  script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const calls = render();
   await settle();
   button("Import")?.click();
@@ -620,7 +620,7 @@ test("an importer asks for the token once, and not before it is owed", async () 
  * to.
  */
 test("land under is asked only when the importer found a server the estate lacks", async () => {
-  script = [{ state: "ready", file: FILE, new_assets: [], skipped: [] }];
+  script = [{ state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const quiet = render();
   await settle();
   button("Import")?.click();
@@ -637,10 +637,10 @@ test("land under is asked only when the importer found a server the estate lacks
   app = undefined;
   script = [
     { state: "token_needed" },
-    { state: "landing_needed", assets: ["knobas-scratch"] },
-    { state: "ready", file: FILE, new_assets: ["knobas-scratch"], skipped: [] },
-    { state: "landing_needed", assets: ["knobas-scratch"] },
-    { state: "ready", file: FILE, new_assets: ["knobas-scratch"], skipped: [] },
+    { state: "landing_needed", servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] },
+    { state: "landing_needed", servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] },
   ];
   const asked = render();
   await settle();
@@ -707,7 +707,7 @@ test("land under is asked only when the importer found a server the estate lacks
  * preview and `calls.previewed` already pins.
  */
 test("the produced file is offered for download", async () => {
-  script = [{ state: "ready", file: FILE, new_assets: ["knobas-scratch"], skipped: [] }];
+  script = [{ state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] }];
   const calls = render();
   await settle();
   button("Import")?.click();
@@ -746,7 +746,7 @@ test("the Docker importer asks for no token and no landing, and names what it sk
     {
       state: "ready",
       file: FILE,
-      new_assets: [],
+      new_servers: [],
       skipped: ["Docker engine (OrbStack)"],
     },
   ];
@@ -835,8 +835,8 @@ test("choosing another producer drops the preview the last one drew", async () =
 test("a token the far end refuses puts the field back, and another fault does not", async () => {
   script = [
     { state: "token_needed" },
-    { state: "ready", file: FILE, new_assets: [], skipped: [] },
-    { state: "ready", file: FILE, new_assets: [], skipped: [] },
+    { state: "ready", file: FILE, new_servers: [], skipped: [] },
+    { state: "ready", file: FILE, new_servers: [], skipped: [] },
   ];
   const calls = render();
   await settle();
