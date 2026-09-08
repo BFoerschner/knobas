@@ -27,6 +27,7 @@
 -->
 <script lang="ts">
   import BackupSection from "./BackupSection.svelte";
+  import CaptureSection from "./CaptureSection.svelte";
   import CheckoutsSection from "./CheckoutsSection.svelte";
   import MonitoringSection from "./MonitoringSection.svelte";
   import NotificationsSection from "./NotificationsSection.svelte";
@@ -43,6 +44,7 @@
     <BackupSection />
     <MonitoringSection />
     <CheckoutsSection />
+    <CaptureSection />
     <PassiveSection />
     <NotificationsSection />
     <StandupSection />

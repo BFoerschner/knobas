@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
 
   import AssetsView from "./lib/assets/AssetsView.svelte";
   import MonitorsView from "./lib/assets/MonitorsView.svelte";
@@ -45,6 +46,8 @@
     type Draft,
   } from "./lib/ipc/time";
   import { addToContext, linkTo } from "./lib/detail/links.svelte";
+  import { EVENTS } from "./lib/ipc";
+  import { recordCaptureContext } from "./lib/ipc/entity";
 
   /**
    * The rooms the switcher offers: *All work*, the stored contexts (#47), one
@@ -288,6 +291,29 @@
     timer.roomContext = roomContext;
   });
 
+  /**
+   * **What a capture will attach** (#503) — the same two values the timer store
+   * is given just above, pushed to the backend so the capture window can read
+   * them.
+   *
+   * The capture window is a webview of its own with no shell in it: it cannot
+   * work out which room the reader was standing in or what was in front of
+   * them, so this is how it is told. What is sent is `roomContext` and
+   * `foreground` **unchanged** — not a third derivation of either — because the
+   * property the deputy's ruling of 2026-09-08 on #502 binds is that what a
+   * capture attaches equals what the heartbeat would send at that instant. Two
+   * spellings of the ladder would make that a coincidence; there is one, and it
+   * is `timer.ts`'s `roomForeground`, read once above.
+   *
+   * A rejected record is swallowed. It is `not_ready` during bring-up and
+   * nothing else — the command touches no database — and the effect runs again
+   * on the next change; a toast about a note nobody is writing yet would be the
+   * shell shouting about its own plumbing.
+   */
+  $effect(() => {
+    void recordCaptureContext(roomContext, foreground?.entity_id ?? null).catch(() => {});
+  });
+
   /** Whether ⌘T's picker is up (#278, story 9). */
   let pickerOpen = $state(false);
 
@@ -473,6 +499,7 @@
     let stopSourceKinds: (() => void) | undefined;
     let stopTimer: (() => void) | undefined;
     let stopNotify: (() => void) | undefined;
+    let stopCapture: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -545,6 +572,15 @@
       // into nothing. A rejected subscription is swallowed by the store:
       // notifications still fire, they simply have no door.
       stopNotify = notifications.start();
+      // The capture window's *Open in knobas* button (#503). Behind the same
+      // await as everything above it and for the same reason: `listen` is an
+      // `invoke`, and under `?fake-ipc` one issued before the fixture is one
+      // into nothing. The address is the kind-agnostic alias, because a note
+      // written in another window is one this shell has never drawn and knows
+      // no kind for -- `#/entity/<id>` is what that alias is for.
+      stopCapture = await listen<string>(EVENTS.captureOpenNote, (event) => {
+        router.go(`#/entity/${event.payload}`);
+      });
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -562,6 +598,7 @@
 
     return () => {
       disposed = true;
+      stopCapture?.();
       stopNotify?.();
       stopTimer?.();
       stopHealth?.();

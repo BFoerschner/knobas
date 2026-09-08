@@ -14,6 +14,19 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
   },
   build: {
+    // **Two documents, not one** (#503). `index.html` is the shell; the second
+    // is the capture window, which `knobas_app::capture` opens as its own
+    // Tauri window and which mounts one component with none of the shell's
+    // subscriptions behind it. Named here because a Vite build with no
+    // `input` emits `index.html` alone, and the missing page would show up
+    // only as a blank always-on-top rectangle in a bundled build --
+    // `just dev` serves both from the filesystem and would never say so.
+    rollupOptions: {
+      input: {
+        index: "index.html",
+        capture: "capture.html",
+      },
+    },
     // The only consumer is the WebView bundled with the app, so there is no
     // legacy browser to down-level for.
     target: "es2022",

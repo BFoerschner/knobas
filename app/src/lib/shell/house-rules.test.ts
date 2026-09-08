@@ -323,7 +323,11 @@ test("the dev harness is only reachable behind import.meta.env.DEV", () => {
   expect(
     importers.map((entry) => entry.file.slice(ROOT.length)).sort(),
     "a module started importing the dev harness — add it here only if a second entry point to the fixture is genuinely wanted",
-  ).toEqual(["App.svelte"]);
+    // `capture.ts` is the second, added on purpose with #503: the capture
+    // window is its own document (`capture.html`) with its own mount, so the
+    // browser walk that photographs it loads a page `App.svelte` is not on.
+    // One door per document, and both behind the same guard.
+  ).toEqual(["App.svelte", "capture.ts"]);
 });
 
 /**

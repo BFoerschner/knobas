@@ -41,6 +41,12 @@ export const EVENTS = {
   contextsChanged: "contexts:changed",
   /** `NotificationClicked` — a desktop notification's body was clicked (#339). */
   notificationClicked: "notification:clicked",
+  /**
+   * The note's entity id — the capture window asked for its note to be opened
+   * in the main window (#503). Sent to the `main` window by label, because the
+   * capture window is closing and has no use for it.
+   */
+  captureOpenNote: "capture:open-note",
 } as const;
 
 /** Why a command failed — `knobas_app::IpcErrorCode`. */

@@ -26,6 +26,7 @@
 
 pub mod assets;
 pub mod backup;
+pub mod capture;
 pub mod checkout;
 pub mod commands;
 mod error;
@@ -33,6 +34,7 @@ pub mod inbox;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod settings;
 pub mod sources;
 pub mod standup;
 pub mod start_work;
@@ -70,6 +72,11 @@ pub mod events {
     /// body was clicked (#339). The first event added after #290's entry
     /// said nothing new crosses the bridge; its §10.8 entry says why.
     pub const NOTIFICATION_CLICKED: &str = "notification:clicked";
+    /// Payload: the note's entity id, as a bare string -- the capture window
+    /// asked for its note to be opened in the main window (#503). Sent to the
+    /// `main` window by label and not broadcast: the capture window is closing
+    /// and has no use for it.
+    pub const CAPTURE_OPEN_NOTE: &str = "capture:open-note";
 }
 
 use std::sync::{Mutex, PoisonError};
@@ -157,6 +164,25 @@ pub fn run() {
         // at run time, with nothing failing in the build. The send itself is
         // knobas' own `notify` since #339 (`notify.rs`).
         .plugin(tauri_plugin_notification::init())
+        // The capture window's global shortcut (#503). Nothing is registered
+        // here: the accelerator is a setting, empty by default, and
+        // `capture::register_stored` applies it once the database is up. What
+        // this line installs is the *handler* -- one for every shortcut this
+        // application ever holds, of which there is exactly one -- and the
+        // plugin's own four commands, which no capability grants to any
+        // window, so the webview cannot reach them.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // The press only. A shortcut fires twice -- down and up --
+                    // and a handler that did not say which would open the
+                    // window and then focus it again on the release.
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        capture::open_window(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the
@@ -177,6 +203,12 @@ pub fn run() {
                 std::sync::Arc::new(notify::platform::show);
             let events = std::sync::Arc::new(sources::events::TauriEvents::new(handle.clone()));
             handle.manage(std::sync::Arc::new(notify::Notifier::new(backend, events)));
+            // What the main window records about where the reader is, and why
+            // the stored capture shortcut is not registered (#503). Managed
+            // here for `Lifecycle`'s reason: the capture window can call in
+            // before the database is up, and "state not managed" is not an
+            // answer anything can branch on.
+            handle.manage(capture::Capture::new());
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -347,6 +379,15 @@ pub fn run() {
             // read arriving after an entity one, because the list is in merge
             // order and never re-sorted (§10.8).
             commands::assets::depends_on_this,
+            // #503's capture window, appended after that for the same reason.
+            // Five: two for the shortcut setting, two for the pair the main
+            // window records and the capture window reads, and one for the
+            // button that brings the note into the main window.
+            commands::entity::capture_shortcut,
+            commands::entity::set_capture_shortcut,
+            commands::entity::record_capture_context,
+            commands::entity::capture_context,
+            commands::entity::reveal_note,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -436,6 +477,23 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // Beside the sync scheduler, not inside it: a backup is not a
             // source (see `backup`'s module docs).
             backup::start(&handle, &db);
+            // The capture shortcut (#503), from the setting. **Here and not in
+            // `setup`**: the plugin hands its registration to the main thread
+            // and blocks until it answers, so a call from the event loop would
+            // be the event loop waiting on itself. This task is not the main
+            // thread, and it is the first moment there is a pool to read the
+            // setting from. A refusal is recorded rather than fatal -- the
+            // settings pane is where it is read, and no shortcut is a reason
+            // to run without one, never a reason not to start.
+            if let Err(error) = capture::register_stored(
+                db.pool(),
+                &handle.state::<capture::Capture>(),
+                &capture::Plugin::new(handle.clone()),
+            )
+            .await
+            {
+                tracing::error!(%error, "the capture shortcut could not be read");
+            }
             Ok::<_, Box<dyn std::error::Error>>(db)
         }
         .await;
@@ -652,6 +710,7 @@ mod tests {
             super::events::ACTIVITY_NEW,
             super::events::CONTEXTS_CHANGED,
             super::events::NOTIFICATION_CLICKED,
+            super::events::CAPTURE_OPEN_NOTE,
         ] {
             assert!(
                 mirror.contains(&format!("\"{name}\"")),

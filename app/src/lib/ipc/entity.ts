@@ -1620,3 +1620,82 @@ export function setCheckoutCommand(
 export function openCheckout(entityId: string, action: string): Promise<void> {
   return invoke<void>("open_checkout", { entityId, action });
 }
+
+/**
+ * The capture shortcut as the settings pane draws it —
+ * `knobas_app::capture::ShortcutView` (#503).
+ *
+ * Three states in two fields. `accelerator: null` is the default and means
+ * knobas has registered nothing: no key is taken from any other application
+ * until somebody chooses one. An accelerator with `refusal: null` is holding.
+ * An accelerator with a `refusal` is stored and **not** holding — the plugin
+ * could not parse it, or the operating system would not give the combination
+ * up — and the sentence is the one to show, because *which* refusal it was is
+ * the whole of what the reader can act on.
+ */
+export interface CaptureShortcut {
+  accelerator: string | null;
+  refusal: string | null;
+}
+
+/** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */
+export function captureShortcut(): Promise<CaptureShortcut> {
+  return invoke<CaptureShortcut>("capture_shortcut");
+}
+
+/**
+ * Set the capture shortcut, or clear it with a blank one —
+ * `set_capture_shortcut` (#503).
+ *
+ * Answers the fresh view, so the field draws what is now stored. A combination
+ * the plugin or the operating system refuses does **not** reject: it is stored,
+ * and the answer carries the refusal. See {@link CaptureShortcut}.
+ */
+export function setCaptureShortcut(accelerator: string | null): Promise<CaptureShortcut> {
+  return invoke<CaptureShortcut>("set_capture_shortcut", { accelerator });
+}
+
+/**
+ * Where the reader is standing, as the main window last recorded it —
+ * `knobas_app::capture::Recorded` (#503).
+ *
+ * The two ids a capture attaches, and nothing else. `context` is the **stored**
+ * room's `ctx:` entity, `null` for every derived room because a derived room
+ * has none; `foreground` is the **foreground** as `CONTEXT.md`'s *Passive
+ * attribution* defines it, which is `shell/timer.ts`'s `roomForeground` and no
+ * second spelling of it.
+ */
+export interface CaptureContext {
+  context: string | null;
+  foreground: string | null;
+}
+
+/**
+ * Record where the reader is standing — `record_capture_context` (#503).
+ *
+ * The **main** window's to call, whenever either half changes. The capture
+ * window is a webview with no shell in it and cannot work either out; this is
+ * how it is told.
+ */
+export function recordCaptureContext(
+  context: string | null,
+  foreground: string | null,
+): Promise<void> {
+  return invoke<void>("record_capture_context", { context, foreground });
+}
+
+/** What the main window last recorded — `capture_context` (#503). */
+export function captureContext(): Promise<CaptureContext> {
+  return invoke<CaptureContext>("capture_context");
+}
+
+/**
+ * Bring the main window forward and open one note in it — `reveal_note` (#503).
+ *
+ * The capture window's *Open in knobas* button. It does not close the capture
+ * window; the capture window closes itself, so that a main window which would
+ * not come forward leaves the reader holding the words they typed.
+ */
+export function revealNote(noteId: string): Promise<void> {
+  return invoke<void>("reveal_note", { noteId });
+}
