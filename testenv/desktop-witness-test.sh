@@ -194,6 +194,91 @@ else
     printf '  testenv/desktop-witness.sh counts processes by that name.\n' >&2
 fi
 
+# --- the open-in-editor driver's pure parts (#501) --------------------------
+
+record='/tmp/knobas witness/record'
+check "the stub records one argument per line, into the path it was given" \
+    "$(printf '#!/bin/sh\nprintf %s "$@" > %s\n' "'%s\\n'" "'$record'")" \
+    "$(stub_script "$record")"
+# The record path is single-quoted in the script, so a directory with a space
+# in it -- which `mktemp -d` under a Mac's TMPDIR routinely is not, and a
+# worktree under "My Code" routinely is -- stays one word.
+check_contains "the recorded path is quoted in the script" \
+    "> '$record'" "$(stub_script "$record")"
+
+config=$(git_config "https://tidewater.example/tidewater/payout-service")
+# The section header git itself writes, and the one
+# `knobas_core::checkout::origin_url` looks for. A config naming the remote
+# under any other section would make the scan miss the clone the driver put
+# there, and the driver would report a *no checkout* as a failure of the
+# button.
+check_contains "the config names the origin remote the scan reads" \
+    '[remote "origin"]' "$config"
+check_contains "the config carries the remote it was given" \
+    "url = https://tidewater.example/tidewater/payout-service" "$config"
+
+check "one recorded argument is the answer" "/Users/mara/src/payout-service" \
+    "$(sole_argument "/Users/mara/src/payout-service")"
+# The two answers that must be empty, and the reason the function exists: a
+# reader that took the first line would pass on a command that was handed the
+# checkout *and something else*, which is the failure ADR-0016 is about.
+check "two recorded arguments are not a sole argument" "" \
+    "$(sole_argument "$(printf '%s\n%s' --wait /Users/mara/src/payout-service)")"
+check "no recorded argument is not a sole argument" "" "$(sole_argument "")"
+check "a recorded path containing a space survives whole" "/Users/mara/My Code/payout service" \
+    "$(sole_argument "/Users/mara/My Code/payout service")"
+check "trailing blank lines are not a second argument" "/src/x" \
+    "$(sole_argument "$(printf '/src/x\n\n')")"
+
+# --- the accessible names the open-in-editor driver acts on -----------------
+#
+# The same cheap pin #500 put on the launcher's `aria-label`, in the same
+# direction: nothing in the app knows a driver exists, so an edit to one of
+# these would fail a *correct* app minutes into a run with no clue in it.
+
+pin_label() {
+    if grep -q "$2" "$1"; then
+        check "$3" yes yes
+    else
+        check "$3" yes no
+        printf '  %s no longer carries %s;\n' "$1" "$2" >&2
+        printf '  testenv/desktop-witness/drivers/open-in-editor.sh presses it by name.\n' >&2
+    fi
+}
+
+pin_label ../app/src/lib/shell/TopStrip.svelte 'aria-label="Settings"' \
+    "the top strip's Settings button still has its accessible name"
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save clones root"' \
+    "the clones-root Save still has an accessible name of its own"
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save {command.label}"' \
+    "each open-command Save is named after its own command"
+# The **visible label text**, not the `for=`/`id=` pair: the driver focuses
+# this field by its accessible name, which the label element supplies, so a
+# pin on the id would stay green through a rename and let the run fail minutes
+# in. Same for the three command fields, whose names come from
+# `knobas_core::checkout`'s `label()` and are pinned there.
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Directory<' \
+    "the clones-root field is still labelled Directory"
+# The button the driver presses and the settings field it fills are both named
+# from one Rust string, so this is where the driver's `Open in VS Code` comes
+# from -- not from either component.
+pin_label ../crates/knobas-core/src/checkout.rs '"Open in VS Code"' \
+    "the VS Code action is still labelled the way the driver asks for it"
+# The Save that stored a template puts a *Reset* beside it, and the driver
+# waits for that appearing as its proof the write landed -- so the reset
+# button's accessible name is a name it acts on too.
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Reset {command.label}"' \
+    "each open-command Reset is named after its own command"
+# The panel's own heading, which is how the driver tells a repo detail from
+# every other kind: a checkout panel is what a repo and a branch have and
+# nothing else does.
+pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
+    "the checkout panel still carries the heading the driver looks for"
+# And the remote the driver writes into its fake clone: the scan matches it
+# against the demo repo's own URL, which this constant is the stem of.
+pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
+    "the demo corpus still lives under the host the driver's clone points at"
+
 # --- the helper's own two answers -------------------------------------------
 #
 # The registered-path lookup and the permission probe are the two pieces the

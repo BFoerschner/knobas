@@ -3,7 +3,8 @@
 // Everything the harness and its drivers need from macOS that shell cannot
 // reach: whether this session can drive the desktop at all, where Launch
 // Services has registered a bundle identifier, what the frontmost app has
-// focused, and the two synthetic keystrokes a driver sends.
+// focused, the synthetic keystrokes and typing a driver sends, and the two
+// things it does to a named element -- focus it, press it.
 //
 // **Why this and not AppleScript.** The obvious spelling of all of it is
 // `osascript` against `System Events`, and that is an Apple Event, which TCC
@@ -180,18 +181,69 @@ func visit(_ root: AXUIElement, maxDepth: Int, _ body: (AXUIElement, Int) -> Voi
 /// of the two an `aria-label` arrives as is a WebKit detail rather than a
 /// promise. A driver that insisted on one would fail on a correct app for a
 /// reason that has nothing to do with what it is witnessing.
-func find(pid: pid_t, label: String) -> Int32 {
-    var count = 0
+func matching(pid: pid_t, label: String) -> [AXUIElement] {
+    var found: [AXUIElement] = []
     for window in windows(of: pid) {
         visit(window, maxDepth: 25) { element, _ in
             if text(element, kAXDescriptionAttribute as String) == label
                 || text(element, kAXTitleAttribute as String) == label
             {
-                count += 1
+                found.append(element)
             }
         }
     }
-    print(count)
+    return found
+}
+
+func find(pid: pid_t, label: String) -> Int32 {
+    print(matching(pid: pid, label: label).count)
+    return 0
+}
+
+/// The one element carrying `label`, or a refusal that says how many there were.
+///
+/// **Exactly one, never "the first".** A driver that acted on the first match
+/// would act on whichever the walk reached first, which is an ordering nothing
+/// promises -- so two matches is as much a failure as none, and the message
+/// says which so the driver's dump has somewhere to start.
+func single(pid: pid_t, label: String, what: String) -> AXUIElement? {
+    let found = matching(pid: pid, label: label)
+    guard found.count == 1 else {
+        FileHandle.standardError.write(
+            Data("ax: \(found.count) elements labelled '\(label)' to \(what), wanted 1\n".utf8))
+        return nil
+    }
+    return found[0]
+}
+
+/// Give the keyboard to the element carrying `label`.
+///
+/// `AXFocused` rather than a synthetic click: a click needs a screen position,
+/// and a position needs a layout this harness has no business knowing. The
+/// focus is what the typing that follows depends on, and it is directly
+/// observable afterwards through `ax focused`.
+func focus(pid: pid_t, label: String) -> Int32 {
+    guard let target = single(pid: pid, label: label, what: "focus") else { return 1 }
+    let status = AXUIElementSetAttributeValue(
+        target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    guard status == .success else {
+        FileHandle.standardError.write(
+            Data("ax: could not focus '\(label)' (AXError \(status.rawValue))\n".utf8))
+        return 1
+    }
+    return 0
+}
+
+/// Press the element carrying `label` -- a button, or anything else that
+/// answers `AXPress`.
+func press(pid: pid_t, label: String) -> Int32 {
+    guard let target = single(pid: pid, label: label, what: "press") else { return 1 }
+    let status = AXUIElementPerformAction(target, kAXPressAction as CFString)
+    guard status == .success else {
+        FileHandle.standardError.write(
+            Data("ax: could not press '\(label)' (AXError \(status.rawValue))\n".utf8))
+        return 1
+    }
     return 0
 }
 
@@ -205,6 +257,40 @@ func dump(pid: pid_t, depth: Int) -> Int32 {
         visit(window, maxDepth: depth) { element, level in
             let indent = String(repeating: "  ", count: level)
             print(indent + describe(element).split(separator: "\n").joined(separator: " "))
+        }
+    }
+    return 0
+}
+
+/// Type `string` into whatever has the keyboard, character by character.
+///
+/// `keyboardSetUnicodeString` rather than a keycode table: a keycode is a
+/// position on a keyboard layout, and this Mac's layout is not something a
+/// driver may assume. A filesystem path is full of `/`, `-` and `.`, all of
+/// which move between layouts; the unicode string does not.
+///
+/// Posted through the HID tap, like `key`, so the characters go where a
+/// person's would -- to the frontmost application, whose window the driver has
+/// already brought forward.
+func type(_ string: String) -> Int32 {
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        FileHandle.standardError.write(Data("ax: no event source\n".utf8))
+        return 1
+    }
+    for character in string {
+        let utf16 = Array(String(character).utf16)
+        for isDown in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: isDown)
+            else {
+                FileHandle.standardError.write(Data("ax: could not build a key event\n".utf8))
+                return 1
+            }
+            event.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            event.post(tap: .cghidEventTap)
+            // The webview's input handler runs on its own turn; typing faster
+            // than it can read has dropped characters on every framework that
+            // has ever been driven this way.
+            Thread.sleep(forTimeInterval: 0.012)
         }
     }
     return 0
@@ -267,6 +353,12 @@ case "find" where arguments.count == 3 && integer(1) != nil:
     status = find(pid: pid_t(integer(1)!), label: arguments[2])
 case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
     status = dump(pid: pid_t(integer(1)!), depth: integer(2)!)
+case "focus" where arguments.count == 3 && integer(1) != nil:
+    status = focus(pid: pid_t(integer(1)!), label: arguments[2])
+case "press" where arguments.count == 3 && integer(1) != nil:
+    status = press(pid: pid_t(integer(1)!), label: arguments[2])
+case "type" where arguments.count == 2:
+    status = type(arguments[1])
 // The modifier is spelled out rather than taken from "any second word", so a
 // typo is a refusal instead of a keystroke sent without ⌘.
 case "key" where (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "command"))
@@ -283,6 +375,9 @@ default:
                    ax focused <pid>
                    ax find <pid> <label>
                    ax dump <pid> <depth>
+                   ax focus <pid> <label>
+                   ax press <pid> <label>
+                   ax type <text>
                    ax key <keycode> [command]
 
             """.utf8))

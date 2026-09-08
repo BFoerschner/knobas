@@ -1,6 +1,6 @@
 <!--
-  The **Clones root** section of the settings view (issue #499, spec #491
-  story 25).
+  The **Clones root** and **Open commands** sections of the settings view
+  (issues #499 and #501, spec #491 stories 25 and 29).
 
   One directory: where knobas looks for the clones on this machine. It scans two
   levels under it when a repo or a branch detail opens and matches each clone's
@@ -8,9 +8,18 @@
   `~/src/gitea.example.com/payout-service` are both reached and nothing deeper
   is walked.
 
+  Below it, the three commands the buttons on a repo or branch detail run:
+  *Open in VS Code*, *Open in JetBrains*, *Open terminal here*. Each is a
+  template with one placeholder, `{path}`, and macOS starts with a default for
+  all three; on another platform they are empty and the buttons read *not
+  configured* until somebody fills one in.
+
   **knobas never writes to a working tree** (ADR-0016): no clone, no checkout,
   no fetch. The section says so, because a directory setting handed to an app
-  is exactly the moment a person wants to know what it will do with it.
+  is exactly the moment a person wants to know what it will do with it. The
+  other half of that ADR is what the placeholder is about: `{path}` is the only
+  value knobas substitutes, so nothing a source mirrored can reach a program it
+  starts.
 
   A repo the scan misses — a clone outside the root, a linked worktree — is
   answered on the repo's own detail, not here: the override is per repository
@@ -24,8 +33,11 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
   import {
+    checkoutCommands as realReadCommands,
     clonesRoot as realRead,
+    setCheckoutCommand as realWriteCommand,
     setClonesRoot as realWrite,
+    type CheckoutCommand,
   } from "../ipc/entity";
   import { latestRead } from "../shell/latest-read";
 
@@ -36,11 +48,19 @@
     ports?: Partial<{
       clonesRoot: typeof realRead;
       setClonesRoot: typeof realWrite;
+      checkoutCommands: typeof realReadCommands;
+      setCheckoutCommand: typeof realWriteCommand;
     }>;
   } = $props();
 
   // svelte-ignore state_referenced_locally
-  const io = { clonesRoot: realRead, setClonesRoot: realWrite, ...ports };
+  const io = {
+    clonesRoot: realRead,
+    setClonesRoot: realWrite,
+    checkoutCommands: realReadCommands,
+    setCheckoutCommand: realWriteCommand,
+    ...ports,
+  };
 
   /** `undefined` until the first read answers — *unknown*, which is not *unset*. */
   let stored = $state<string | null | undefined>(undefined);
@@ -80,6 +100,61 @@
       saving = false;
     }
   }
+
+  // -- the open commands (#501) ---------------------------------------------
+
+  /** `null` until the first read answers — *unknown*, which is not *empty*. */
+  let commands = $state<CheckoutCommand[] | null>(null);
+  /** One draft per action, keyed by its id. */
+  let drafts = $state<Record<string, string>>({});
+  let commandFailure = $state<string | null>(null);
+  /** The action being written, so two Saves cannot overlap. */
+  let savingCommand = $state<string | null>(null);
+
+  const readCommands = latestRead<CheckoutCommand[]>();
+
+  /**
+   * Take what the backend now says, drafts included.
+   *
+   * Called only where there *is* a fresh answer -- the read, and a write that
+   * was accepted -- and the drafts are reset from it rather than left alone,
+   * which is the clones-root field's rule and for its reason: a field still
+   * holding what was typed after a write that normalised it would tell the
+   * reader they had stored a string knobas does not have. A **refused** write
+   * never reaches here, which is the other half of the same rule: the field
+   * keeps the string the reader has to correct
+   * (`a refused template says why, and the field keeps what was typed`).
+   */
+  function takeCommands(answer: CheckoutCommand[]) {
+    commands = answer;
+    drafts = Object.fromEntries(answer.map((command) => [command.action, command.template ?? ""]));
+    commandFailure = null;
+  }
+
+  function loadCommands() {
+    return readCommands(io.checkoutCommands, {
+      ok: takeCommands,
+      fail: (cause) => {
+        commandFailure = ipcErrorMessage(cause);
+      },
+    });
+  }
+
+  $effect(() => {
+    void loadCommands();
+  });
+
+  /** Store one action's template, or clear it back to the platform's. */
+  async function saveCommand(action: string, template: string | null) {
+    savingCommand = action;
+    try {
+      takeCommands(await io.setCheckoutCommand(action, template));
+    } catch (cause) {
+      commandFailure = ipcErrorMessage(cause);
+    } finally {
+      savingCommand = null;
+    }
+  }
 </script>
 
 <div class="tile-h">
@@ -113,18 +188,94 @@
         disabled={saving}
         placeholder="/Users/you/src"
       />
+      <!--
+        Every button in this component says *Save*, *Clear* or *Reset*, and
+        four of them are on screen at once — so each carries an accessible name
+        that says which field it belongs to. That is an accessibility fix
+        first: a reader moving by control hears four identical "Save"s
+        otherwise. It is also what lets the desktop witness press one of them
+        by name (#501), which `just witness-unit` pins.
+      -->
       <div class="acts">
-        <button class="btn" disabled={saving || draft.trim() === (stored ?? "")} onclick={() => void save(draft)}>
+        <button
+          class="btn"
+          aria-label="Save clones root"
+          disabled={saving || draft.trim() === (stored ?? "")}
+          onclick={() => void save(draft)}
+        >
           Save
         </button>
         {#if stored !== null}
-          <button class="btn" disabled={saving} onclick={() => void save(null)}>Clear</button>
+          <button class="btn" aria-label="Clear clones root" disabled={saving} onclick={() => void save(null)}>
+            Clear
+          </button>
         {/if}
       </div>
       {#if stored === null}
         <p class="sub">Not set — no checkout is looked for until it is.</p>
       {/if}
     </div>
+  {/if}
+</div>
+
+<div class="tile-h">
+  <span class="lab">Open commands</span>
+</div>
+
+<div class="sec-b">
+  <p>
+    What the buttons on a repo or a branch detail run.
+    <code>&#123;path&#125;</code> stands for the checkout, and it is the
+    <em>only</em> thing knobas fills in: nothing a source mirrored — a URL, a
+    branch name, a title — can reach a program started from here. No shell is
+    involved, so a path with a space in it is still one argument.
+  </p>
+
+  {#if commandFailure}
+    <p class="fail">{commandFailure}</p>
+    <button class="btn" onclick={() => void loadCommands()}>Retry</button>
+  {/if}
+
+  {#if commands}
+    {#each commands as command (command.action)}
+      <div class="field">
+        <label class="lab" for="checkout-command-{command.action}">{command.label}</label>
+        <input
+          id="checkout-command-{command.action}"
+          class="inp"
+          bind:value={drafts[command.action]}
+          disabled={savingCommand !== null}
+          placeholder="not configured"
+        />
+        <div class="acts">
+          <button
+            class="btn"
+            aria-label="Save {command.label}"
+            disabled={savingCommand !== null ||
+              drafts[command.action]?.trim() === (command.template ?? "")}
+            onclick={() => void saveCommand(command.action, drafts[command.action] ?? "")}
+          >
+            Save
+          </button>
+          {#if !command.is_default}
+            <button
+              class="btn"
+              aria-label="Reset {command.label}"
+              disabled={savingCommand !== null}
+              title="Forget this command and go back to what this platform starts with"
+              onclick={() => void saveCommand(command.action, null)}
+            >
+              Reset
+            </button>
+          {/if}
+        </div>
+        {#if command.template === null}
+          <p class="sub">Not configured — this button does nothing until a command is set.</p>
+        {:else if command.is_default}
+          <p class="sub">The default on this platform.</p>
+        {/if}
+      </div>
+    {/each}
   {/if}
 </div>
 

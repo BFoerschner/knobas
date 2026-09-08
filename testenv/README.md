@@ -1160,15 +1160,27 @@ section above, registers it with Launch Services, checks that this session can
 actually drive a desktop, launches the bundle **from the path Launch Services
 resolves `dev.knobas.desktop` to** on the demo profile, waits for its window,
 asserts that exactly one instance is running, runs the named driver, and quits
-the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`; the first
-one presses ⌘K, asserts through the accessibility tree that the launcher's
-query box has focus (`AXTextField`, labelled *Search or act*, which is the
-`aria-label` in `QueryBox.svelte`), and presses Escape -- after which the box
-must be gone from the tree, because `Launcher.svelte` renders the overlay
-under `{#if open}` and a closed launcher takes its input out of the DOM. That
-the label still says *Search or act* is pinned by `just witness-unit`, so an
-edit to it reads as a stale driver at the gate rather than as a failed run
-minutes into somebody's screen.
+the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`, and there
+are two.
+
+`launcher-hotkey` (#500) presses ⌘K, asserts through the accessibility tree
+that the launcher's query box has focus (`AXTextField`, labelled *Search or
+act*, which is the `aria-label` in `QueryBox.svelte`), and presses Escape --
+after which the box must be gone from the tree, because `Launcher.svelte`
+renders the overlay under `{#if open}` and a closed launcher takes its input
+out of the DOM.
+
+`open-in-editor` (#501) is the spawn: it writes a stub executable and a fake
+clone into a scratch directory, types that directory into the **Clones root**
+field and `<stub> {path}` into the **Open in VS Code** field in Settings,
+opens a repo detail through the launcher, presses *Open in VS Code*, and
+asserts that the stub ran with **exactly one** argument and that it is the
+checkout path. Exactly one is the assertion ADR-0016 asks for: what the
+program received is what the disk answered, and nothing the mirror holds.
+
+Every accessible name either driver acts on is pinned against the file that
+carries it by `just witness-unit`, so an edit to one reads as a stale driver
+at the gate rather than as a failed run minutes into somebody's screen.
 
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
@@ -1185,9 +1197,12 @@ report the winner's app as its own.
 
 `just desktop-witness` is **not** part of `just check` and must not become
 part of it. What the gate carries is `just witness-unit`
-(`testenv/desktop-witness-test.sh`), over the two pieces of the harness that
-are decisions rather than side effects: how it compares Launch Services'
-answer against the bundle it built, and how it reads the accessibility probe.
+(`testenv/desktop-witness-test.sh`), over every piece of the harness that is a
+decision rather than a side effect: how it compares Launch Services' answer
+against the bundle it built, how it reads the accessibility probe, and the
+three text functions `open-in-editor` is built out of -- the stub it writes,
+the git config it writes, and its reading of what the stub recorded. A driver
+is not exempt from the gate because its *run* is.
 
 ### The prerequisites
 
@@ -1262,7 +1277,7 @@ its run-criterion open and disclosed, nothing stands in for the run (no fake,
 no dry-run mode, no hand checklist — ADR-0013), and ADR-0016 now carries the
 dated consequence that *"No human step" is not "no human precondition"*.
 
-Three things are therefore still open, and none should be read as proven by
+Four things are therefore still open, and none should be read as proven by
 this file existing:
 
 * whether a Tauri window's `WKWebView` exposes the launcher's input to the
@@ -1275,11 +1290,36 @@ this file existing:
 * which of `AXDescription` and `AXTitle` a WebKit text field carries an
   `aria-label` on. The driver accepts either, and asserts the role separately,
   so this cannot make it pass on the wrong element -- but it has not been seen.
+  The same question, one step further, for a field named by a `<label for=…>`
+  rather than an `aria-label`, which is how the **Clones root** and the three
+  command fields are named: `open-in-editor` asks for **exactly one** element
+  carrying that name, so a WebKit that exposed the `<label>` element under the
+  same name as well would make it refuse -- with the tree dump beside the
+  refusal, which is what that dump is for.
+* whether `AXFocused` and `AXPress` reach a WebKit element at all, which is
+  what `ax focus` and `ax press` (#501) do and what `open-in-editor` is built
+  on. Both are the documented way to drive an accessibility tree; neither has
+  been sent at this app.
+
+**And one gap that is not about the lock at all: the demo profile carries no
+repo entity.** `knobas_source_mock::items` emits tickets, PRs, builds, pages
+and commits; the fixture's `repos` and `branches` (`fixtures/tidewater/work.json`)
+are parsed and never sent. So `--demo` -- the profile this harness launches,
+on purpose, so that a run cannot mix fixture data into somebody's real corpus
+-- has no repo detail to open, and `open-in-editor` refuses at that step with
+a message that says exactly this. **An unlocked Mac is therefore necessary and
+not sufficient for #501's witness**: #525 needs a demo corpus that carries a
+repo before the driver can reach its button. Nothing in #501 papers over it,
+because a fake would not be a witness (ADR-0013), and widening the demo corpus
+is a change to the reference adapter that #501 does not name.
 
 What *is* witnessed, on 2026-09-08, and by what:
 
-* **from a harness run**, `just desktop-witness launcher-hotkey`: the refusal.
-  `screen-locked`, naming the permission and this section, exit 1.
+* **from a harness run**, `just desktop-witness launcher-hotkey` and
+  `just desktop-witness open-in-editor`: the refusal. `screen-locked`, naming
+  the permission and this section, exit 1. A merge-manager re-running either
+  recipe on this Mac gets the same refusal, and that is the expected result and
+  not a regression.
 * **from its own commands run by hand**, because the harness refuses before it
   reaches them: the build and signing step -- `Authority=knobas-dev`,
   `Identifier=dev.knobas.desktop`, `codesign --verify --deep --strict` clean,
