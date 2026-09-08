@@ -197,9 +197,7 @@ impl<R: Runtime> Plugin<R> {
     pub fn new(app: tauri::AppHandle<R>) -> Self {
         Self(app)
     }
-}
 
-impl<R: Runtime> Plugin<R> {
     /// The plugin's state, or a sentence saying it is not there.
     ///
     /// `try_state` and not `state`, which **panics** when nothing is managed. A
