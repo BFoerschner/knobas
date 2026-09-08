@@ -48,7 +48,7 @@ const ACTOR: &str = "user";
 async fn a_note_is_written_read_back_and_edited() {
     let pool = pool().await;
 
-    let written = note::create(&pool, "Standup", "Blocker: none.", ACTOR)
+    let written = note::create(&pool, "Standup", "Blocker: none.", &[], ACTOR)
         .await
         .unwrap();
     let id = EntityRef::parse(&written.id).expect("a note id is an entity id");
@@ -91,7 +91,7 @@ async fn a_note_is_written_read_back_and_edited() {
 #[tokio::test]
 async fn a_note_is_an_entity_and_renaming_it_renames_that_entity() {
     let pool = pool().await;
-    let written = note::create(&pool, "Retry investigation", "", ACTOR)
+    let written = note::create(&pool, "Retry investigation", "", &[], ACTOR)
         .await
         .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
@@ -122,7 +122,7 @@ async fn a_note_is_an_entity_and_renaming_it_renames_that_entity() {
 #[tokio::test]
 async fn an_untitled_note_is_given_a_name_rather_than_none() {
     let pool = pool().await;
-    let written = note::create(&pool, "   ", "a thought", ACTOR)
+    let written = note::create(&pool, "   ", "a thought", &[], ACTOR)
         .await
         .unwrap();
     assert_eq!(written.title, note::UNTITLED);
@@ -147,7 +147,7 @@ async fn an_untitled_note_is_given_a_name_rather_than_none() {
 async fn deleting_a_note_removes_its_body_and_tombstones_its_address() {
     let pool = pool().await;
     let target = seed_entity(&pool, "ticket", "SEPA retry", false).await;
-    let written = note::create(&pool, "Scratch", &format!("see [[{target}]]"), ACTOR)
+    let written = note::create(&pool, "Scratch", &format!("see [[{target}]]"), &[], ACTOR)
         .await
         .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
@@ -211,7 +211,7 @@ async fn a_note_that_does_not_exist_reads_as_nothing() {
 async fn adding_a_ref_draws_a_link_and_removing_it_withdraws_the_link() {
     let pool = pool().await;
     let ticket = seed_entity(&pool, "ticket", "SEPA retry", false).await;
-    let written = note::create(&pool, "Investigation", "no refs yet", ACTOR)
+    let written = note::create(&pool, "Investigation", "no refs yet", &[], ACTOR)
         .await
         .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
@@ -304,6 +304,7 @@ async fn an_unresolved_ref_creates_no_link_and_says_it_is_unresolved() {
         &pool,
         "Investigation",
         &format!("[[{real}]] and [[{typo}]] and [[not an id]]"),
+        &[],
         ACTOR,
     )
     .await
@@ -379,9 +380,15 @@ async fn an_unresolved_ref_creates_no_link_and_says_it_is_unresolved() {
 async fn a_ref_to_a_withdrawn_entity_still_resolves_and_is_marked() {
     let pool = pool().await;
     let withdrawn = seed_entity(&pool, "ticket", "Legacy payout (withdrawn)", true).await;
-    let written = note::create(&pool, "Runbook", &format!("was [[{withdrawn}]]"), ACTOR)
-        .await
-        .unwrap();
+    let written = note::create(
+        &pool,
+        "Runbook",
+        &format!("was [[{withdrawn}]]"),
+        &[],
+        ACTOR,
+    )
+    .await
+    .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
 
     let refs = note::refs_of(&pool, &id).await.unwrap();
@@ -417,7 +424,7 @@ async fn a_hand_drawn_link_out_of_a_note_survives_the_body_changing() {
     let pool = pool().await;
     let by_hand = seed_entity(&pool, "pr", "Fix the retry counter", false).await;
     let by_ref = seed_entity(&pool, "ticket", "SEPA retry", false).await;
-    let written = note::create(&pool, "Investigation", &format!("[[{by_ref}]]"), ACTOR)
+    let written = note::create(&pool, "Investigation", &format!("[[{by_ref}]]"), &[], ACTOR)
         .await
         .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
@@ -472,10 +479,10 @@ async fn a_hand_drawn_link_out_of_a_note_survives_the_body_changing() {
 #[tokio::test]
 async fn a_note_that_still_names_the_other_keeps_the_link_when_the_first_drops_its_ref() {
     let pool = pool().await;
-    let a = note::create(&pool, "A", "nothing yet", ACTOR)
+    let a = note::create(&pool, "A", "nothing yet", &[], ACTOR)
         .await
         .unwrap();
-    let b = note::create(&pool, "B", "nothing yet", ACTOR)
+    let b = note::create(&pool, "B", "nothing yet", &[], ACTOR)
         .await
         .unwrap();
     let a_id = EntityRef::parse(&a.id).unwrap();
@@ -548,10 +555,10 @@ async fn a_note_that_still_names_the_other_keeps_the_link_when_the_first_drops_i
 #[tokio::test]
 async fn a_ref_to_a_note_that_does_not_name_back_is_withdrawn_as_usual() {
     let pool = pool().await;
-    let a = note::create(&pool, "A", "nothing yet", ACTOR)
+    let a = note::create(&pool, "A", "nothing yet", &[], ACTOR)
         .await
         .unwrap();
-    let b = note::create(&pool, "B", "B says nothing about A", ACTOR)
+    let b = note::create(&pool, "B", "B says nothing about A", &[], ACTOR)
         .await
         .unwrap();
     let a_id = EntityRef::parse(&a.id).unwrap();

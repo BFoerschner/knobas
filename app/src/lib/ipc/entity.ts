@@ -488,13 +488,51 @@ export function getNote(noteId: string): Promise<NoteDetail> {
 }
 
 /**
+ * One link a new note is born with —
+ * `knobas_app::commands::entity::NoteLinkInput`.
+ *
+ * The note is always the **from** end, so `captured-in` reads *captured in*
+ * from the note and *captured here* from the context.
+ */
+export interface NoteLinkInput {
+  /** The other end's entity id. */
+  target_id: string;
+  /**
+   * The stored relation. Folded to lower case by the backend like every other
+   * relation, and **blank is refused** with `invalid` rather than defaulting to
+   * `related`: `create_link`'s relation is optional and its absence means
+   * *nobody named one*, but a link drawn beside a note is one the reader saw no
+   * dialog for, so `""` is a caller bug.
+   */
+  relation: string;
+}
+
+/**
  * Write a new note — `knobas_app::commands::entity::create_note`.
  *
- * Both arguments are optional: *New note* creates the row before the first
+ * Every argument is optional: *New note* creates the row before the first
  * keystroke, so nothing typed into it can be lost to a closed window.
+ *
+ * `links` is what a **capture** attaches (`CONTEXT.md`, **Capture**):
+ * `captured-in` to the context of the stored room the reader stands in, which
+ * makes the note a member of it by ADR-0008, and `captured-from` to the
+ * **foreground** — the open detail, else the room's anchor, else nothing, the
+ * word as `CONTEXT.md`'s **Passive attribution** defines it and as the
+ * heartbeat computes it (the deputy's ruling of 2026-09-08 on #502). A derived
+ * room has no context and a room with nothing in front of the reader has
+ * nothing to point at, so a caller with neither omits the argument. Drawn in
+ * the note's own transaction — a note is never briefly in no context.
+ *
+ * Rejects with `invalid` for a link whose target is not an entity id, and for a
+ * blank relation. An id no row carries is not an error: no link is drawn and
+ * the note is written, the same answer a `[[ref]]` naming nothing gets.
  */
-export function createNote(title?: string, bodyMd?: string): Promise<NoteDetail> {
-  return invoke<NoteDetail>("create_note", { title, bodyMd });
+export function createNote(
+  title?: string,
+  bodyMd?: string,
+  links?: NoteLinkInput[],
+): Promise<NoteDetail> {
+  return invoke<NoteDetail>("create_note", { title, bodyMd, links });
 }
 
 /**

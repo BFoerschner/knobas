@@ -44,7 +44,13 @@
  * **This checks layout and interaction, not the bridge.** The real end-to-end
  * check is `just dev` (Tauri + embedded PostgreSQL) or `just demo`.
  */
-import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
+import type {
+  LinkEnd,
+  LinkRow,
+  NoteLinkInput,
+  SuggestionEntry,
+  SuggestionPage,
+} from "../../ipc/entity";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 // The estate itself. See `FIXTURE_ESTATE` below for why it is read and not
 // copied, and for the check that it reaches no production bundle.
@@ -182,7 +188,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     mini_board: (args) => miniBoard(args),
     get_entity: (args) => getEntity(args),
     resolve_url: (args) => resolveUrl(args),
-    create_note: () => createNote(),
+    create_note: (args) => createNote(args),
     get_note: (args) => getNote(args),
     save_note: (args) => saveNote(args),
     recent_activity: (args) => recentActivity(args),
@@ -1858,17 +1864,32 @@ function listEntities(args: Record<string, unknown>) {
  *
  * A note is the one kind knobas owns rather than mirrors (#46), so there is
  * nothing in `CORPUS` to answer from: the browser walk that shows a pasted URL
- * turning into a chip (#497) needs somewhere to write one. Stateful within the
- * session, like `LOCAL_LINKS` above and for the same reason — a walk that
- * typed a note and then could not read it back would show a bug this app does
+ * turning into a chip (#497), and the one that presses *New note* and reads the
+ * links panel (#502), both need somewhere to write one. Stateful within the
+ * session, like `FAKE_CONTEXTS` above and for the same reason — a walk that
+ * made a note and then could not read it back would show a bug this app does
  * not have.
  */
-const NOTES = new Map<string, { title: string; body_md: string; created_at: string }>();
+const NOTES = new Map<
+  string,
+  { title: string; body_md: string; created_at: string; born: NoteLinkInput[] }
+>();
 
-/** `create_note`, minting an id the way the backend's `note:<hex>` does. */
-function createNote() {
+/**
+ * `create_note`, minting an id the way the backend's `note:<uuid>` does, and
+ * keeping the links the note was **born with** (#502). **Fixture only.**
+ *
+ * Kept rather than drawn: there is no link table here, so what this can show is
+ * the one thing the walk is looking at — that the room and the foreground reach
+ * the command as two links, and that the panel then draws a chip for each.
+ * Whether the rows exist, whether they make the note a member of the context,
+ * and what happens to a target no row ever carried are questions only a
+ * database can answer, and `crates/knobas-app/tests/entity.rs` asks them there.
+ */
+function createNote(args: Record<string, unknown>) {
   const id = `note:${Math.random().toString(16).slice(2, 6)}`;
-  NOTES.set(id, { title: "", body_md: "", created_at: SYNCED_AT });
+  const born = Array.isArray(args["links"]) ? (args["links"] as NoteLinkInput[]) : [];
+  NOTES.set(id, { title: "", body_md: "", created_at: SYNCED_AT, born });
   return noteDetail(id);
 }
 
@@ -1897,16 +1918,16 @@ function saveNote(args: Record<string, unknown>) {
 }
 
 /**
- * One note, with its `[[refs]]` resolved against the corpus.
+ * One note: its `[[refs]]` resolved against what this fixture holds, and the
+ * links it was born with drawn the way the panel draws them. **Fixture only.**
  *
  * A **second, fixture-only** implementation of `knobas_core::note`'s
  * `parse_refs` and `reconcile_refs`, on the same terms as {@link resolveUrl}
  * below: the rule that decides what a reference *is* lives in Rust and is
- * tested against a real database, and there is no database here. What this
- * owes is the one outcome a walk has to be able to see — a body naming an
- * entity comes back with a chip to draw, and a body naming nothing does not.
- * `links` stays empty: the panel a link would fill is not what the walk is
- * looking at, and inventing rows for it would be a third copy of a rule.
+ * tested against a real database, and there is no database here. What this owes
+ * is the outcomes a walk has to be able to see — a body naming an entity comes
+ * back with a chip to draw and a body naming nothing does not (#497), and a
+ * note born in a room comes back with the links it was born with (#502).
  *
  * `notes/NoteView.test.svelte.ts` stands in for the same backend rule, and the
  * two deliberately do not share: this module is the dev harness, and
@@ -1919,24 +1940,66 @@ function noteDetail(id: string) {
   const note = NOTES.get(id)!;
   const refs = [...note.body_md.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {
     const targetId = found[1]!.trim();
-    const target = CORPUS.find((entry) => entry.entity_id === targetId);
-    return {
-      target_id: targetId,
-      target: target
-        ? {
-            entity_id: target.entity_id,
-            kind: target.kind,
-            title: target.title,
-            deleted_at: target.deleted_at,
-          }
-        : null,
-    };
+    return { target_id: targetId, target: noteLinkEnd(targetId) };
   });
+  const links = note.born
+    .map((born) => ({ born, other: noteLinkEnd(born.target_id) }))
+    .filter((drawn): drawn is { born: NoteLinkInput; other: LinkEnd } => drawn.other !== null)
+    .map(({ born, other }, index) => ({
+      link: {
+        id: `link:born-${id}-${index}`,
+        from_id: id,
+        to_id: born.target_id,
+        relation: born.relation,
+        // `manual`, because that is what the command writes and because the
+        // panel refuses to unlink an `implied` row with a message about a
+        // `[[reference]]` — which would be false about a capture link.
+        origin: "manual" as const,
+        note: null,
+        created_by: "user",
+        created_at: SYNCED_AT,
+        confirmed_at: SYNCED_AT,
+        rule: null,
+        rule_class: null,
+        reason: null,
+      },
+      other,
+    }));
   return {
-    note: { id, title: note.title, body_md: note.body_md, created_at: note.created_at, updated_at: SYNCED_AT },
+    note: {
+      id,
+      title: note.title,
+      body_md: note.body_md,
+      created_at: note.created_at,
+      updated_at: SYNCED_AT,
+    },
     refs,
-    links: [],
+    links,
   };
+}
+
+/**
+ * The other end of a note's ref or born link, out of whatever this fixture
+ * holds — the mirror's corpus, or a context this session made.
+ *
+ * `null` where nothing carries the id — an unresolved ref, and for a born link
+ * no link at all: the same failure direction the real command has.
+ */
+function noteLinkEnd(entityId: string): LinkEnd | null {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
+  if (entry) {
+    return {
+      entity_id: entityId,
+      kind: entry.kind,
+      title: entry.title,
+      deleted_at: entry.deleted_at,
+    };
+  }
+  const context = FAKE_CONTEXTS.find((candidate) => candidate.id === entityId);
+  if (context) {
+    return { entity_id: entityId, kind: "ctx", title: context.title, deleted_at: null };
+  }
+  return null;
 }
 
 /**

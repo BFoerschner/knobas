@@ -104,9 +104,15 @@ async fn seed(pool: &PgPool, tag: &str) -> Seeded {
     // Through the note store now that there is one (#46): what the round trip
     // has to prove is that a note *the user wrote* comes back, and the store is
     // what writes one -- two rows, not one.
-    knobas_core::note::create(pool, &note_title, "How to drain the payout queue.", "user")
-        .await
-        .unwrap();
+    knobas_core::note::create(
+        pool,
+        &note_title,
+        "How to drain the payout queue.",
+        &[],
+        "user",
+    )
+    .await
+    .unwrap();
 
     sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket',$2,$3)",

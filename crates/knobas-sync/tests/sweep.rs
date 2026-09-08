@@ -549,6 +549,7 @@ async fn a_full_sync_that_sweeps_cannot_reach_a_note() {
         &pool,
         "Retry runbook",
         &format!("what to do about [[{doomed}]]"),
+        &[],
         "user",
     )
     .await

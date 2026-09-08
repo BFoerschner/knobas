@@ -19,7 +19,13 @@
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";
-  import { createNote, listEntities, type EntityRow } from "../ipc/entity";
+  import {
+    createNote,
+    listEntities,
+    type EntityRow,
+    type NoteLinkInput,
+  } from "../ipc/entity";
+  import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
   import AssetsTile from "./AssetsTile.svelte";
   import RoomBar from "./RoomBar.svelte";
   import SuggestionTray from "./SuggestionTray.svelte";
@@ -30,6 +36,7 @@
   import { kindRegistry } from "./kind-registry.svelte";
   import { tilesFor } from "./kinds";
   import { hashFor, type Router } from "./router.svelte";
+  import { roomForeground } from "./timer";
 
   let {
     router,
@@ -227,16 +234,67 @@
   }
 
   /**
+   * The links a note started here is **born with** (#502, spec #491 stories
+   * 40-43; `CONTEXT.md`, **Capture**).
+   *
+   * Two of them at most, and each is present only when it has something true
+   * to say:
+   *
+   * * `captured-in` names this room's **context**, which is `null` for every
+   *   derived room — *All work*, a source, a project — because a derived room
+   *   has no context (`CONTEXT.md`, **Room**). Not the room's `id`: a derived
+   *   room's id (`src:gitea`) addresses nothing, and a stored room's id and its
+   *   context are the same `ctx:` entity, so reading the filter is the reading
+   *   that cannot be wrong for one of them. The link is what makes the note a
+   *   member of the context (ADR-0008), which is why there is no membership
+   *   write beside it.
+   * * `captured-from` names the **foreground**, as `CONTEXT.md`'s **Passive
+   *   attribution** defines that word and as the heartbeat computes it: the
+   *   open detail, else the room's anchor, else nothing. It is *exactly* the
+   *   timer's foreground rule (#278) and shares its one spelling,
+   *   `timer.ts`'s `roomForeground` — that is the point, not an accident. The
+   *   ticket's *"when a detail is open"* and story 42's *"when a detail was
+   *   open"* name the first rung, which is the common case, and the word they
+   *   use has a definition; the deputy's ruling of 2026-09-08 on #502 settles
+   *   it that way.
+   *
+   *   A promoted room with nothing open therefore draws two links that share a
+   *   name in the panel, and they are two facts: `captured-in` is which
+   *   working set the note belongs to (ADR-0008), `captured-from` is what the
+   *   note was about — the same split the timer in that room already makes
+   *   when it runs on the anchor and not on the context (`contexts.ts`,
+   *   *"Never the context's own id"*). What it buys is that the note and the
+   *   day review's passive block for that minute name the same entity.
+   *
+   * Built here rather than inside {@link startNote} so the decision is one
+   * expression a test can read, and because #503's capture window makes the
+   * same two from a room and a foreground it remembered rather than ones it is
+   * drawing.
+   */
+  function bornWith(): NoteLinkInput[] {
+    const links: NoteLinkInput[] = [];
+    if (context.filter.context !== null) {
+      links.push({ target_id: context.filter.context, relation: CAPTURED_IN });
+    }
+    const front = roomForeground(detail?.entityId, context.anchorId);
+    if (front !== null) {
+      links.push({ target_id: front, relation: CAPTURED_FROM });
+    }
+    return links;
+  }
+
+  /**
    * Write a new note and open it.
    *
    * The row exists before the editor does, and that is the whole of story 2:
-   * `create_note` takes no arguments, so there is nothing to lose between
-   * *New note* and the first keystroke. What the reader then edits is a note
-   * that is already saved.
+   * *New note* needs nothing typed, so there is nothing to lose between the
+   * button and the first keystroke. What the reader then edits is a note that
+   * is already saved — and already linked to where it was written, in the same
+   * transaction, so it is never briefly a thought belonging to nothing.
    */
   async function startNote() {
     try {
-      const written = await createNote();
+      const written = await createNote(undefined, undefined, bornWith());
       router.go(
         hashFor({
           view: "room",

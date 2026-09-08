@@ -1210,25 +1210,91 @@ pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, 
     })
 }
 
-/// Write a new note.
+/// One link a caller asks a new note to be born with (#502).
 ///
-/// Both arguments are optional because the affordance is *"start writing"*: a
-/// note created from an empty editor has no title and no body yet, and it still
-/// has to exist -- story 2 is that a thought is never lost to a closed window,
-/// which needs the row to be there before the first keystroke settles.
+/// An **input** DTO: the frontend sends these and nothing sends them back. It
+/// is a pair rather than two named fields (`capturedIn`, `capturedFrom`)
+/// because the command's job is *draw these links with the note*, and the two
+/// words are the caller's vocabulary, not the command's -- exactly as
+/// [`create_link_inner`] takes a relation rather than knowing what `blocks`
+/// means. The capture window (#503) and the in-app *New note* pass the same
+/// two, and a third caller with a third relation needs no argument here.
+///
+/// The note is always the **from** end; see [`knobas_core::note::BornLink`].
+///
+/// `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
+/// it is what lets `tests/entity_mirror.rs` pin an input DTO through a round
+/// trip, and so see a field the TypeScript mirror never declares.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+pub struct NoteLinkInput {
+    /// The other end's entity id.
+    pub target_id: String,
+    /// The relation the link carries, folded to lower case like every other
+    /// relation this module writes.
+    ///
+    /// Required, and blank is refused rather than defaulted. `create_link`'s
+    /// relation is an `Option` and its absence means *nobody named one*, which
+    /// [`DEFAULT_RELATION`] answers; here the caller is drawing a link the
+    /// reader never saw a dialog for, so `""` is a caller bug and a link
+    /// labelled `related` that nobody asked for would be the wrong sentence in
+    /// the panel rather than an error anybody could find.
+    pub relation: String,
+}
+
+/// Write a new note, and the links it is born with.
+///
+/// The first two arguments are optional because the affordance is *"start
+/// writing"*: a note created from an empty editor has no title and no body yet,
+/// and it still has to exist -- story 2 is that a thought is never lost to a
+/// closed window, which needs the row to be there before the first keystroke
+/// settles.
+///
+/// `links` is what a **capture** attaches (`CONTEXT.md`, **Capture**; spec #491
+/// stories 40--43): `captured-in` to the context of the stored room the reader
+/// stands in -- which makes the note a member of it by ADR-0008, since an
+/// explicit add is an ordinary link touching the context's own `ctx:` entity --
+/// and `captured-from` to the **foreground**, the word as `CONTEXT.md`'s
+/// **Passive attribution** defines it and as the heartbeat computes it: the
+/// open detail, else the room's anchor, else nothing (the deputy's ruling of
+/// 2026-09-08 on #502). A derived room has no context (`CONTEXT.md`, **Room**),
+/// so a note born in one is born with nothing, and that is a caller's decision
+/// rather than a rule here: this command draws the links it is handed.
+///
+/// They are drawn in the note's own transaction, which is what the ticket's
+/// title means -- see [`knobas_core::note::create`], which also states what
+/// happens to a target that no longer exists (no link, and the note is still
+/// written).
 ///
 /// # Errors
 ///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if a link's target is not an
+/// entity id, or if its relation is blank -- both are caller bugs, and both are
+/// worth refusing loudly, since every id this command is handed came from a row
+/// the caller was already drawing and every relation from its own vocabulary;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
 pub async fn create_note_inner(
     pool: &PgPool,
     title: Option<&str>,
     body_md: Option<&str>,
+    links: &[NoteLinkInput],
 ) -> Result<NoteDetail, IpcError> {
+    let born_with = links
+        .iter()
+        .map(|link| {
+            Ok(knobas_core::note::BornLink {
+                target: EntityRef::parse(&link.target_id).map_err(IpcError::invalid)?,
+                relation: present(Some(&link.relation))
+                    .ok_or_else(|| IpcError::invalid("a link drawn with a note needs a relation"))?
+                    .to_lowercase(),
+            })
+        })
+        .collect::<Result<Vec<_>, IpcError>>()?;
     let note = knobas_core::note::create(
         pool,
         title.unwrap_or_default(),
         body_md.unwrap_or_default(),
+        &born_with,
         ACTOR,
     )
     .await?;
@@ -1291,7 +1357,11 @@ pub async fn get_note(
     get_note_inner(&pool, &note_id).await
 }
 
-/// Write a new note.
+/// Write a new note, with the links it is born with.
+///
+/// `links` is absent for a caller that attaches none, which reads the same as
+/// an empty list and is spelled that way so *New note* in a derived room sends
+/// nothing rather than sending emptiness.
 ///
 /// # Errors
 ///
@@ -1302,9 +1372,16 @@ pub async fn create_note(
     lifecycle: State<'_, Lifecycle>,
     title: Option<String>,
     body_md: Option<String>,
+    links: Option<Vec<NoteLinkInput>>,
 ) -> Result<NoteDetail, IpcError> {
     let pool = lifecycle.pool()?;
-    create_note_inner(&pool, title.as_deref(), body_md.as_deref()).await
+    create_note_inner(
+        &pool,
+        title.as_deref(),
+        body_md.as_deref(),
+        links.as_deref().unwrap_or_default(),
+    )
+    .await
 }
 
 /// Save a note, refs and all.

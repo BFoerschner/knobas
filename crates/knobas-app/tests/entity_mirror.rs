@@ -29,8 +29,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef, SuggestionPage,
-    UrlMatch,
+    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, NoteLinkInput, SourceRef,
+    SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
@@ -655,6 +655,31 @@ fn the_note_ref_shape_matches_its_typescript_mirror() {
         wire["target"].is_null(),
         "an unresolved ref is a null target, not an absent key: {wire}"
     );
+}
+
+/// What a caller sends to have a note born with a link (#502).
+///
+/// Round-tripped rather than serialized, for the reason
+/// [`the_entity_filter_shape_matches_its_typescript_mirror`] states: this is
+/// an **input** DTO, and only decoding the mirror's own object and re-encoding
+/// it sees both directions at once.
+///
+/// The relation is a plain `string` on both sides on purpose. The curated menu
+/// is a rendering decision and lives in `app/src/lib/detail/relations.ts`
+/// (§5a's vocabulary is open), so an enum here would put a closed list in the
+/// one place the design says there is not one.
+#[test]
+fn the_note_link_input_shape_matches_its_typescript_mirror() {
+    let payload = serde_json::json!({
+        "target_id": "ctx:2f1a5d6e-0c9b-4a3e-8f7d-1b2c3d4e5f60",
+        "relation": "captured-in",
+    });
+    let decoded: NoteLinkInput =
+        serde_json::from_value(payload).expect("the mirror's NoteLinkInput decodes");
+    let wire = serde_json::to_value(&decoded).unwrap();
+
+    assert_shape("NoteLinkInput", &wire, &["relation", "target_id"]);
+    assert_eq!(wire["relation"], serde_json::json!("captured-in"));
 }
 
 /// The whole note view, including both of its lists at once.

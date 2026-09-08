@@ -180,7 +180,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
     // the sharer never had is a table the assertion on the far side cannot
     // fail on, so "no worklog crossed" would be a sentence about a fixture
     // rather than about the archive.
-    knobas_core::note::create(pool, NOTE_TITLE, NOTE_BODY, "user")
+    knobas_core::note::create(pool, NOTE_TITLE, NOTE_BODY, &[], "user")
         .await
         .expect("a note");
     sqlx::query(

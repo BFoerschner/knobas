@@ -16,7 +16,7 @@ _Avoid_: type, category
 A knobas-owned markdown document with `[[refs]]`; a first-class searchable kind, not an annotation on something else.
 
 **Capture**:
-A [note](#note) made from the global shortcut while some other window has the focus, in a small window of its own, created on the first keystroke and never on an empty one. What it attaches is two ordinary [links](#link): `captured-in` to the [context](#context) of the last **stored** [room](#room) the reader stood in — a derived room has no context, so nothing then — and `captured-from` to the foreground entity if there was one. The in-app *New note* attaches the same two, by the same mechanism. Never a field on the note. (Ruled 2026-09-07, v1.5 grilling; spec §6)
+A [note](#note) made from the global shortcut while some other window has the focus, in a small window of its own, created on the first keystroke and never on an empty one. What it attaches is two ordinary [links](#link): `captured-in` to the [context](#context) of the last **stored** [room](#room) the reader stood in — a derived room has no context, so nothing then — and `captured-from` to the foreground entity if there was one — the word as [Passive attribution](#passive-attribution) defines it, so a promoted room with nothing open gives its anchor. The in-app *New note* attaches the same two, by the same mechanism. Never a field on the note. (Ruled 2026-09-07, v1.5 grilling; spec §6)
 _Avoid_: quick note, scratch, jot, inbox (that is the stream of things to answer)
 
 **Checkout**:

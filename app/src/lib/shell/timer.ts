@@ -53,6 +53,39 @@ export function canBeTarget(candidate: { entityId: string; kind?: string }): boo
 }
 
 /**
+ * **What is in front of a reader standing in a room**: the open detail, else
+ * the room's anchor, else nothing — each put through {@link canBeTarget}.
+ *
+ * The rule spec #272 states for both the heartbeat and ⌘T (#278), minus the
+ * rung that is not a room's: the asset in the Tree's pane. The Assets view
+ * answers the question from the other half of the address and has no anchor to
+ * fall back to, so `App.svelte` keeps that branch of its own.
+ *
+ * **Here rather than spelled once in `App.svelte`, because two readers now ask
+ * it and they must not be able to disagree.** One is the heartbeat's
+ * foreground, which `App.svelte` pushes into the timer store; the other is the
+ * `captured-from` link a note is born with (`shell/Room.svelte`, #502). The
+ * deputy's ruling of 2026-09-08 on #502 is what binds them: what a capture
+ * attaches has to equal what the heartbeat would send at that instant, so that
+ * knobas' two records of *what was I on* — the note, and the day review's
+ * passive block for the same minute — name the same entity. Two spellings of
+ * this ladder would make that a coincidence rather than a fact;
+ * `timer.test.ts` scans for a second one.
+ *
+ * `null` is a legal answer and not a missing one: for the timer it is what
+ * makes ⌘T open the picker, and for a capture it is a note born with no
+ * `captured-from` at all.
+ */
+export function roomForeground(
+  openId: string | null | undefined,
+  anchorId: string | null | undefined,
+): string | null {
+  if (openId && canBeTarget({ entityId: openId })) return openId;
+  if (anchorId && canBeTarget({ entityId: anchorId })) return anchorId;
+  return null;
+}
+
+/**
  * The namespace half of `"<namespace>:<key>"`, or `null` when the string is
  * not an entity id.
  *
