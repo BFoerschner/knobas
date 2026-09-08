@@ -150,16 +150,66 @@ const TRANSITIONED: &str = "PAY-240";
 /// Not a status the issue merely cannot reach *from here*: this workflow
 /// ("Software Simplified Workflow for Project `<KEY>`") offers all four of its
 /// statuses from every one of them, the issue's own included -- which is
-/// itself a divergence from mockd, whose fixture workflow does not. So the
-/// only way to witness a refusal against the real server is a status that is
-/// not in the workflow, and `seed-state.json`'s `jira.statuses` is what this
-/// is checked against rather than assumed.
+/// itself a divergence from mockd, whose fixture workflow does not. So in
+/// **this** project the only way to witness a refusal against the real server
+/// is a status that is not in the workflow, and `seed-state.json`'s
+/// `jira.statuses` is what this is checked against rather than assumed.
+///
+/// It is the weaker of the two refusals, and #522 is why there are two: a
+/// status that exists nowhere on the instance can be refused by an adapter
+/// that never read the workflow at all. See [`NARROW_UNREACHABLE_FROM_FIRST`]
+/// for the refusal of a status that exists in its project and is merely out of
+/// reach from where the ticket stands.
 const UNREACHABLE_STATUS: &str = "Blocked";
 
 /// The project a ticket is created in, and the type it is created as -- one
 /// the template's issue type scheme has.
 const CREATE_PROJECT: &str = "PAY";
 const CREATE_TYPE: &str = "Task";
+
+/// **The narrowing workflow's states, and what each of them offers** (issue
+/// #522).
+///
+/// `NARROW` is the seed's second Jira project, from Jira Core's
+/// process-management template, and unlike the Simplified workflow the two
+/// Tidewater projects share, its workflow reaches a **proper subset** of its
+/// own statuses from every one of them. Walked on the real server on
+/// 2026-09-08 (Jira 10.3.24), the whole of it:
+///
+/// | standing       | offers                    |
+/// |----------------|---------------------------|
+/// | `Open`         | `In Progress`             |
+/// | `In Progress`  | `Under Review`, `Cancelled` |
+/// | `Under Review` | `Approved`, `Rejected`    |
+/// | `Approved`     | `Done`                    |
+/// | `Done`         | nothing -- terminal       |
+/// | `Cancelled`    | `Open`                    |
+/// | `Rejected`     | `In Progress`             |
+///
+/// The two rows below are the two this suite stands a ticket in. They are
+/// **constants and not a read**, deliberately: the thing under test is a read
+/// of `/transitions`, so an expectation taken from `/transitions` would assert
+/// that a value equals itself. The *denominator* -- the seven statuses the
+/// project has -- does come off the server, through `seed-state.json`'s
+/// `jira.narrowing.statuses`, which the seed read off
+/// `GET /rest/api/2/project/NARROW/statuses`: a different endpoint. So
+/// "answered exactly this, and this is fewer than the project has" is one
+/// claim checked against a constant and one against the server.
+const NARROW_FIRST_STATE: &str = "Open";
+const NARROW_FROM_FIRST: [&str; 1] = ["In Progress"];
+const NARROW_SECOND_STATE: &str = "In Progress";
+const NARROW_FROM_SECOND: [&str; 2] = ["Under Review", "Cancelled"];
+
+/// A status the narrowing project **has** and a ticket standing in
+/// [`NARROW_FIRST_STATE`] cannot reach.
+///
+/// This is the refusal the reachable-transition read exists to stop offering,
+/// and the one [`UNREACHABLE_STATUS`] cannot witness: `"Blocked"` is a status
+/// that exists nowhere on this Jira, so refusing it says only that the adapter
+/// will not invent a transition. `"Done"` exists in this project, is on its
+/// board, and is still not somewhere an `Open` ticket may go -- which is the
+/// shape a person actually hits.
+const NARROW_UNREACHABLE_FROM_FIRST: &str = "Done";
 
 // -- the environment --------------------------------------------------------
 
@@ -169,6 +219,21 @@ struct Env {
     password: String,
     http: reqwest::Client,
     /// `jira.statuses` from `seed-state.json`: what the seeded workflow offers.
+    statuses: Vec<String>,
+    /// `jira.narrowing` from `seed-state.json`: the second project, whose
+    /// workflow does not reach every status from every status.
+    narrowing: Narrowing,
+}
+
+/// The seed's narrowing-workflow project, as `seed-state.json` records it.
+#[derive(Clone)]
+struct Narrowing {
+    key: String,
+    /// The issue type the seed checked this project's scheme has, and the one
+    /// a ticket is filed as below.
+    issue_type: String,
+    /// Every status the project has, off `GET /rest/api/2/project/<KEY>/statuses`
+    /// -- not off the `/transitions` read this suite is about.
     statuses: Vec<String>,
 }
 
@@ -209,12 +274,39 @@ fn env() -> Env {
         .iter()
         .filter_map(|s| s.as_str().map(str::to_owned))
         .collect();
+    let narrowing = &whole["jira"]["narrowing"];
+    let strings = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect()
+    };
+    let narrowing = Narrowing {
+        key: narrowing["key"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: no jira.narrowing.key -- the narrowing-workflow project is what gives \
+                     the reachable-transition read a live witness; run \
+                     `./seed-atlassian-content.sh`",
+                    state.display()
+                )
+            })
+            .to_owned(),
+        issue_type: narrowing["issue_type"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{}: no jira.narrowing.issue_type", state.display()))
+            .to_owned(),
+        statuses: strings(&narrowing["statuses"]),
+    };
     Env {
         url: need("KNOBAS_JIRA_URL").trim_end_matches('/').to_owned(),
         user: need("KNOBAS_JIRA_USER"),
         password: need("KNOBAS_JIRA_PASSWORD"),
         http: client(),
         statuses,
+        narrowing,
     }
 }
 
@@ -1479,19 +1571,25 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
 /// test above leaves PAY-240 moved, and `live_jira_seeded.rs`'s
 /// `Seeded::clear_leftovers` is what puts it back.
 ///
-/// **What it cannot witness, and why that is not fixable here.** It cannot tell
-/// *the workflow's reply* from *every status the project has*, because on this
-/// fixture they are the same set: measured 2026-09-08, this Jira's whole status
-/// list (`GET /rest/api/2/status`) is exactly those four, and the seeded
-/// template's workflow reaches all four from every one of them -- there is no
-/// status in existence here for a narrowing read to leave out, and the
-/// transitions' own `name`s equal their `to.name`s, so that route is closed
-/// too. The body asserts that equality rather than assuming it, so the day the
-/// instance grows a fifth status the gap closes with a red test rather than
-/// quietly staying open. Until then **narrowing is witnessed only by mockd's
-/// shaped workflow** in `tests/status_move.rs`, and ADR-0013 is clear that a
-/// mock certifies nothing: closing it for real means a second workflow in the
-/// seed, which is a seeding change and a ticket of its own.
+/// **What this now witnesses that it could not before** (issue #522). Until the
+/// seed grew a second project, this Jira's whole status list
+/// (`GET /rest/api/2/status`) was exactly the four this workflow reaches, so
+/// "the workflow's reply" and "every status the project has" were the same set
+/// and the reads below could not tell them apart; the assertion here was an
+/// equality, written to go red the day the list grew. `NARROW` -- the seed's
+/// process-management project -- is what grew it, and the equality is now the
+/// **proper superset** below: this instance has statuses PAY's workflow never
+/// reaches, and every read below still answers PAY's four and none of them. So
+/// the leaving-out is witnessed here, live, at the instance level.
+///
+/// What is *not* witnessed here is a workflow that narrows **within its own
+/// project**, because PAY's still reaches all four of its statuses from every
+/// one of them, and that is the seeded template's own shape rather than
+/// something to work around.
+/// [`the_reachable_transitions_read_answers_a_proper_subset_where_the_workflow_narrows`]
+/// is where that lives, on `NARROW`, together with the refusal of a status
+/// that exists in the project and is not reachable from where the ticket
+/// stands.
 ///
 /// **This test writes nothing.** Every call it makes is a `GET`, including the
 /// refusal at the end -- an unreachable status never reaches the `POST`.
@@ -1526,23 +1624,21 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
     )
     .await;
 
-    // **What this fixture cannot witness, measured rather than assumed.** The
-    // question a reader will ask of the assertions below is whether they can
-    // tell "the workflow's reply" from "every status the project has" -- and
-    // against this fixture they cannot, because the two are the same set. That
-    // is not an oversight in how they are written, it is what the server is:
-    // `GET /rest/api/2/status`, a third endpoint listing every status this Jira
-    // has at all, answers **exactly** these four, and the seeded template's
-    // workflow reaches all four from every one of them. So there is no status
-    // in existence here that a narrowing read could leave out.
+    // **The premise the reads below narrow against, measured rather than
+    // assumed.** `GET /rest/api/2/status`, a third endpoint listing every
+    // status this Jira has at all, is what says the answers below are a
+    // *subset* of what exists rather than a copy of it. This was an equality
+    // until #522 -- the instance's whole list was exactly PAY's four -- and
+    // what grew it is the seed's `NARROW` project, whose process-management
+    // workflow brings `Open`, `Under Review`, `Approved`, `Cancelled` and
+    // `Rejected` onto the instance. Every one of those is a status a read that
+    // answered "every status the corpus has been seen to use" could leak into
+    // PAY's select, and none of them appears in any answer below.
     //
-    // Recorded here so the gap is on the record and checked, rather than
-    // assumed by the next reader: the day this instance grows a fifth status
-    // this assertion fails, and the read gains a direction it can witness.
-    // Until then, **narrowing is witnessed only by mockd's shaped workflow**
-    // (`tests/status_move.rs`), which ADR-0013 says certifies nothing about a
-    // real Jira. Closing it means a second workflow in the seed, which is a
-    // seeding change and a different ticket.
+    // The two halves are asserted separately because they fail for different
+    // reasons: a missing PAY status means the seed or the template changed, an
+    // instance with nothing else on it means `NARROW` is gone and the reads
+    // below have quietly stopped witnessing anything.
     let (status, body) = env
         .api(reqwest::Method::GET, "rest/api/2/status", None)
         .await;
@@ -1553,16 +1649,27 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         .iter()
         .filter_map(|s| s["name"].as_str().map(str::to_owned))
         .collect();
-    assert_eq!(
-        on_the_instance, expected,
-        "this Jira used to have exactly the four statuses this workflow reaches, which is why the \
-         assertions below cannot witness narrowing; it now has {on_the_instance:?}, so they can, \
-         and one of them should be asked to"
+    assert!(
+        expected.is_subset(&on_the_instance),
+        "every status this workflow reaches has to exist on the instance; the workflow offers \
+         {expected:?} and the instance has {on_the_instance:?}"
+    );
+    let never_reached: std::collections::BTreeSet<String> =
+        on_the_instance.difference(&expected).cloned().collect();
+    assert!(
+        !never_reached.is_empty(),
+        "this Jira has only the {} statuses this workflow reaches ({on_the_instance:?}), so the \
+         reads below cannot tell the workflow's reply from every status the project has. What \
+         puts statuses on this instance that PAY's workflow never reaches is the seed's \
+         narrowing project (`jira.narrowing` in seed-state.json); run \
+         `./seed-atlassian-content.sh`",
+        on_the_instance.len()
     );
     println!(
-        "SEEDED this instance has exactly the {} statuses this workflow reaches, so narrowing is \
-         not witnessable here: {on_the_instance:?}",
-        on_the_instance.len()
+        "SEEDED this instance has {} statuses, {} of which this workflow never reaches: \
+         {never_reached:?}",
+        on_the_instance.len(),
+        never_reached.len()
     );
 
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -1592,9 +1699,10 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         println!("SEEDED {key} stands in {standing:?} and reaches {reachable:?}");
         assert_eq!(
             answered, expected,
-            "from {standing:?} this workflow reaches every one of its statuses ({:?}); the read \
-             answered {reachable:?}",
-            env.statuses
+            "from {standing:?} this workflow reaches every one of its statuses ({:?}) and none of \
+             the {} the instance has besides ({never_reached:?}); the read answered {reachable:?}",
+            env.statuses,
+            never_reached.len()
         );
     }
     assert_eq!(
@@ -1696,6 +1804,270 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
 
     state.scheduler.shutdown().await;
     refused_state.scheduler.shutdown().await;
+}
+
+/// **A workflow that narrows: the read answers a proper subset, and the write
+/// side refuses a status the project has** (issue #522, the deputy's ruling of
+/// 2026-09-08 on #498).
+///
+/// The direction
+/// [`the_reachable_transitions_read_answers_the_seeded_workflow_from_every_state`]
+/// cannot see from inside PAY. Both Tidewater projects run Jira's *Simplified*
+/// workflow, which reaches all four of its statuses from every one of them, so
+/// inside PAY "what the workflow offers" and "what the project has" are the
+/// same list and a read that had never looked at a workflow would answer
+/// identically. `NARROW` is the seed's second project, from Jira Core's
+/// process-management template, and it does what a real Jira does all day:
+/// from `Open` it offers exactly one of its seven statuses.
+///
+/// ADR-0013 is why this is a live test and not a mockd one. mockd's fixture
+/// workflow already has a narrowing shape, and a mock certifies nothing: what
+/// it cannot say is that a **Jira workflow** answers this way, or that the
+/// adapter's `to.name` reading survives a template whose transition names are
+/// `Start Progress` and `Ready For Review` rather than the statuses they land
+/// on. Every row of [`NARROW_FROM_FIRST`]'s table was walked on the real
+/// server.
+///
+/// **Three claims, and they fail for different reasons.**
+///
+/// 1. From `Open` the read answers exactly [`NARROW_FROM_FIRST`], and that is
+///    a *proper* subset of the project's statuses -- the denominator read off
+///    `GET /rest/api/2/project/NARROW/statuses` by the seed, a different
+///    endpoint from the `/transitions` one under test.
+/// 2. The write side refuses [`NARROW_UNREACHABLE_FROM_FIRST`] **by name**, and
+///    that status is asserted to be one the project has. This is the refusal
+///    the read exists to stop a person ever meeting, and it is the one
+///    [`UNREACHABLE_STATUS`] cannot witness: `"Blocked"` exists nowhere here,
+///    so refusing it needs no workflow.
+/// 3. The answer *moves with the ticket*: standing the same ticket in
+///    `In Progress` changes it to [`NARROW_FROM_SECOND`], a different, larger,
+///    still proper subset. A read that answered the project's statuses, or the
+///    corpus's, would answer the same thing twice.
+///
+/// **The ticket is this test's own, and it is deleted.** `NARROW` holds no
+/// issues between runs, deliberately: the adapter suite that runs before this
+/// one syncs the whole instance and asserts the mirror is exactly
+/// `seed-state.json`'s `jira.issues`, and its `Seeded::clear_leftovers` deletes
+/// every issue on the instance the seed did not create -- which is also what
+/// clears this ticket after a run that was *killed* rather than failed, since
+/// only an unwinding process reaches a `Drop`. Nothing in `PAY` or `OPS` is
+/// read or written here.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workflow_narrows() {
+    use knobas_app::sources::crud;
+    use knobas_source::{Source, instance::SourceInstance};
+    use knobas_sync::scheduler::AdapterRegistry;
+
+    let env = env();
+    let project: std::collections::BTreeSet<String> =
+        env.narrowing.statuses.iter().cloned().collect();
+    let from_first: std::collections::BTreeSet<String> =
+        NARROW_FROM_FIRST.iter().map(|s| (*s).to_owned()).collect();
+    let from_second: std::collections::BTreeSet<String> =
+        NARROW_FROM_SECOND.iter().map(|s| (*s).to_owned()).collect();
+
+    // The premise, against the seed's record rather than against the endpoint
+    // under test: this project has statuses its first state cannot reach, and
+    // the one the refusal below asks for is one of them. Without this a
+    // template that had quietly become all-to-all would leave every assertion
+    // below true and none of them about narrowing.
+    for (what, wanted) in [("from the first state", &from_first), ("from the second", &from_second)]
+    {
+        assert!(
+            wanted.is_subset(&project) && wanted.len() < project.len(),
+            "what this workflow offers {what} ({wanted:?}) has to be a proper subset of the \
+             {} statuses `{}` has ({project:?}) -- otherwise this test witnesses no narrowing. \
+             The statuses come from seed-state.json's jira.narrowing; re-run \
+             `./seed-atlassian-content.sh`",
+            project.len(),
+            env.narrowing.key
+        );
+    }
+    assert!(
+        project.contains(NARROW_UNREACHABLE_FROM_FIRST)
+            && !from_first.contains(NARROW_UNREACHABLE_FROM_FIRST),
+        "{NARROW_UNREACHABLE_FROM_FIRST:?} has to be a status `{}` HAS ({project:?}) and does \
+         NOT offer from {NARROW_FIRST_STATE:?} ({from_first:?}) -- a status the project lacks is \
+         the refusal `{UNREACHABLE_STATUS}` already witnesses, and a reachable one is no refusal \
+         at all",
+        env.narrowing.key
+    );
+
+    let (state, _events) = app(
+        "atlassian_live_narrowing",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+    )
+    .await;
+    let mut litter = Litter::default();
+
+    // -- a ticket of this suite's own, in the workflow's first state ---------
+    //
+    // Filed rather than seeded: see the header. The summary names the suite so
+    // that a person looking at the server can tell whose it is; the restore
+    // that matters is the adapter suite's, and it works by key.
+    let (status, created) = env
+        .api(
+            reqwest::Method::POST,
+            "rest/api/2/issue",
+            Some(json!({
+                "fields": {
+                    "project": { "key": env.narrowing.key },
+                    "summary": "knobas live suite: the reachable-transition read, narrowed",
+                    "issuetype": { "name": env.narrowing.issue_type },
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, 201, "filing a ticket in {}: {created}", env.narrowing.key);
+    let key = created["key"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a created issue has a key: {created}"))
+        .to_owned();
+    litter.created = Some(key.clone());
+    let entity = format!("{JIRA}:{key}");
+
+    let standing = env.status_at_jira(&key).await;
+    assert_eq!(
+        standing, NARROW_FIRST_STATE,
+        "a ticket filed into `{}` starts in this workflow's first state; {key} started in \
+         {standing:?}",
+        env.narrowing.key
+    );
+
+    // -- 1. the read narrows ------------------------------------------------
+    let read = |entity: String| {
+        let state = &state;
+        async move {
+            crud::reachable_transitions(
+                &state.pool,
+                &state.secrets,
+                state.registry.as_ref(),
+                &entity,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("the read must answer for {entity}: {error}"))
+        }
+    };
+    let reachable = read(entity.clone()).await;
+    let answered: std::collections::BTreeSet<String> = reachable.iter().cloned().collect();
+    let left_out: std::collections::BTreeSet<&String> = project.difference(&answered).collect();
+    assert_eq!(
+        answered, from_first,
+        "{key} stands in {standing:?}, from which this workflow offers {from_first:?}; the read \
+         answered {reachable:?}"
+    );
+    assert!(
+        !left_out.is_empty(),
+        "the read has to leave something out, or it is not narrowing: it answered {answered:?} \
+         and `{}` has {project:?}",
+        env.narrowing.key
+    );
+    println!(
+        "SEEDED {key} stands in {standing:?} and reaches {reachable:?} -- {} of the {} statuses \
+         `{}` has; left out: {left_out:?}",
+        answered.len(),
+        project.len(),
+        env.narrowing.key
+    );
+
+    // -- 2. the write side refuses a status the project has -----------------
+    //
+    // At the adapter, for the reason the PAY refusal above is: a refusal is the
+    // one write that reaches no `POST`, and the queue's half of the story is
+    // already `the_three_write_ops_go_through_the_queue_and_come_back_from_jira`.
+    let source: Box<dyn Source> = Registry::builtin()
+        .build(SourceInstance {
+            id: JIRA.to_owned(),
+            kind: "jira".to_owned(),
+            display_name: "Tidewater Jira (seeded)".to_owned(),
+            base_url: env.url.clone(),
+            auth: Some(AuthMethod::UserPassword),
+            secret: Some(env.password.clone()),
+            account: None,
+            config: json!({ "username": env.user }),
+        })
+        .unwrap_or_else(|error| panic!("the adapter must build against the seeded URL: {error:?}"));
+    let refused = source
+        .write(knobas_source::WriteOp::Transition {
+            entity: entity.clone(),
+            status: NARROW_UNREACHABLE_FROM_FIRST.to_owned(),
+        })
+        .await;
+    let Err(knobas_source::SourceError::Protocol { message, .. }) = &refused else {
+        panic!(
+            "{NARROW_UNREACHABLE_FROM_FIRST:?} is a status `{}` has and {key} cannot reach from \
+             {standing:?}, so the write must be refused; got {refused:?}",
+            env.narrowing.key
+        );
+    };
+    assert!(
+        message.contains(NARROW_UNREACHABLE_FROM_FIRST),
+        "the refusal names the status that was asked for: {message}"
+    );
+    assert!(
+        from_first.iter().all(|s| message.contains(s)),
+        "...and carries what the workflow does offer from here ({from_first:?}), which is what \
+         makes it actionable: {message}"
+    );
+    assert_eq!(
+        env.status_at_jira(&key).await,
+        standing,
+        "a refused transition must not have moved anything"
+    );
+    println!("SEEDED the refusal of a status this project has: {message}");
+
+    // -- 3. the answer moves with the ticket --------------------------------
+    //
+    // Moved through Jira's own endpoint rather than through the queue: this is
+    // the setup for the second read, not the thing under test, and the write
+    // path's own live witness is the PAY test above.
+    let (status, offered) = env
+        .api(
+            reqwest::Method::GET,
+            &format!("rest/api/2/issue/{key}/transitions"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "transitions of {key}: {offered}");
+    let id = offered["transitions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|t| t["to"]["name"].as_str() == Some(NARROW_SECOND_STATE))
+        .and_then(|t| t["id"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| {
+            panic!("{key} has no transition to {NARROW_SECOND_STATE:?}: {offered}")
+        });
+    let (status, moved) = env
+        .api(
+            reqwest::Method::POST,
+            &format!("rest/api/2/issue/{key}/transitions"),
+            Some(json!({ "transition": { "id": id } })),
+        )
+        .await;
+    assert_eq!(status, 204, "moving {key} to {NARROW_SECOND_STATE:?}: {moved}");
+    let standing = env.status_at_jira(&key).await;
+    assert_eq!(standing, NARROW_SECOND_STATE, "{key} did not move");
+
+    let reachable = read(entity).await;
+    let answered: std::collections::BTreeSet<String> = reachable.iter().cloned().collect();
+    assert_eq!(
+        answered, from_second,
+        "{key} now stands in {standing:?}, from which this workflow offers {from_second:?}; the \
+         read answered {reachable:?}"
+    );
+    assert_ne!(
+        from_second, from_first,
+        "the two states have to offer different sets, or standing the ticket somewhere else \
+         witnessed nothing"
+    );
+    println!("SEEDED {key} now stands in {standing:?} and reaches {reachable:?}");
+
+    state.scheduler.shutdown().await;
+    drop(litter);
 }
 
 /// **A day's blocks logged to PAY-231, at Jira and back through the mirror**

@@ -51,6 +51,53 @@
 # in seed-state.json under `jira.unreachable_statuses` -- the fixture is not
 # edited to fit the server.
 #
+# THE SECOND PROJECT, AND WHY ITS WORKFLOW IS A DIFFERENT ONE (#522). The
+# template above gives a workflow that reaches every one of its statuses from
+# every one of them, so on a Jira seeded only from it the answer to "what does
+# this workflow offer from here" is indistinguishable from "every status this
+# project has" -- and #498's reachable-transition read, whose whole point is
+# that it *narrows*, had no live witness for the narrowing. ADR-0013's rule is
+# that "awkward to reproduce" is not "cannot produce", and a narrowing workflow
+# is what a real Jira does all day, so this seed produces one.
+#
+# Measured on this container on 2026-09-08 (Jira 10.3.24), through
+# /rest/project-templates/1.0/templates: the three *software* templates are
+# Scrum, Kanban and Basic, all Simplified and all all-to-all, and there are
+# three *business* (Jira Core) templates besides -- Project management, Task
+# management and Process management. Jira Core is usable under this Jira
+# Software licence (`canUserUseApplication: true`), so the business templates
+# are reachable over the same POST /rest/api/2/project this file already makes.
+#
+#   com.atlassian.jira-core-project-templates:jira-core-process-management
+#
+# gives "<KEY>: Process Management Workflow", seven statuses, and this shape --
+# every row a PROPER SUBSET of the seven, walked on the real server:
+#
+#   Open         -> In Progress                     ("Start Progress")
+#   In Progress  -> Under Review, Cancelled         ("Ready For Review", "Stop Progress")
+#   Under Review -> Approved, Rejected              ("Approve", "Reject")
+#   Approved     -> Done                            ("Done")
+#   Done         -> (nothing; terminal)
+#   Cancelled    -> Open                            ("Reopen")
+#   Rejected     -> In Progress                     ("Start Progress")
+#
+# The transition NAMES differ from their `to.name`s as well, which closes the
+# second route by which the four-status project could not tell the two reads
+# apart. `knobas-app`'s atlassian_live.rs is what asserts all of that.
+#
+# THIS PROJECT IS DELIBERATELY EMPTY, and stays empty between runs. The Jira
+# adapter's own live suite syncs the WHOLE instance (`source(json!({}))`) and
+# asserts the mirror is exactly `seed-state.json`'s `jira.issues`, and its
+# `Seeded::clear_leftovers` deletes every issue on the instance the seed did
+# not create; a parked ticket here would have to join `jira.issues` and
+# `jira.projects` to survive both, which would put a narrowing workflow under a
+# restore path (`move_to`) that assumes one hop is always enough and cannot
+# come back out of *Done* at all. So the witness files its own ticket, walks
+# it, and deletes it, and a killed run's leftover is cleared by the adapter
+# suite that runs before it -- which is the division this file's siblings
+# already use. Nothing here is recorded in `jira.projects` or `jira.issues`
+# for the same reason: those two are the FIXTURE's corpus.
+#
 # ISSUE KEYS MATCH THE FIXTURE. Jira allocates keys from a per-project counter
 # that no REST call sets, so the fixture's PAY-231 is reached the way
 # seed-gitea.sh reaches a pull request number: by burning the keys in front of
@@ -111,6 +158,15 @@ cd "$(dirname "$0")"
 FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
 STATE=seed-state.json
 TEMPLATE_KEY=com.pyxis.greenhopper.jira:basic-software-development-template
+# The narrowing-workflow project (#522, above): its key, its name, the Jira
+# Core template whose workflow narrows, and the issue type the live witness
+# files its throwaway ticket as. Named for what it is rather than after the
+# Tidewater fixture, because it is not fixture content: no ticket of
+# work.json belongs to it and none ever should.
+NARROW_KEY=NARROW
+NARROW_NAME='Narrowing workflow fixture'
+NARROW_TEMPLATE=com.atlassian.jira-core-project-templates:jira-core-process-management
+NARROW_TYPE=Task
 PLACEHOLDER_LABEL=knobas-placeholder
 PEOPLE_PASS=tidewater-dev
 SPACE_KEY=ENG
@@ -209,6 +265,39 @@ verify() {
     [ "$(printf '%s' "$API_BODY" | jq -r .key)" = "PAY-231" ] || { echo "  key is not PAY-231" >&2; _fail=1; }
   fi
 
+  # The narrowing project, and that its workflow is still a narrowing one
+  # (#522). Read back through the two endpoints the live witness's denominator
+  # and numerator come from -- the project's statuses and one throwaway
+  # issue's transitions -- because "the project exists" is not the claim: the
+  # claim is that a ticket standing in the workflow's first state is offered
+  # FEWER statuses than the project has, and an Atlassian template that
+  # quietly became all-to-all would satisfy the first and not the second. The
+  # issue is deleted again; this project holds none between runs.
+  say "verify: $NARROW_KEY's workflow narrows"
+  jira GET "/rest/api/2/project/$NARROW_KEY/statuses"
+  if [ "$API_STATUS" != "200" ]; then
+    echo "  $NARROW_KEY: HTTP $API_STATUS -- missing" >&2; _fail=1
+  else
+    _all=$(printf '%s' "$API_BODY" | jq -c '[.[0].statuses[].name]')
+    jira POST /rest/api/2/issue "$(jq -n --arg k "$NARROW_KEY" --arg t "$NARROW_TYPE" \
+        '{fields: {project: {key: $k}, summary: "seed --verify: does this workflow still narrow?", issuetype: {name: $t}}}')"
+    if [ "$API_STATUS" != "201" ]; then
+      echo "  $NARROW_KEY: creating the probe issue: HTTP $API_STATUS: $(printf '%s' "$API_BODY" | head -c 300)" >&2; _fail=1
+    else
+      _probe=$(printf '%s' "$API_BODY" | jq -r .key)
+      jira GET "/rest/api/2/issue/$_probe?fields=status"
+      _standing=$(printf '%s' "$API_BODY" | jq -r '.fields.status.name')
+      jira GET "/rest/api/2/issue/$_probe/transitions"
+      _offered=$(printf '%s' "$API_BODY" | jq -c '[.transitions[].to.name] | unique')
+      echo "  $_probe stands in \"$_standing\" and is offered $(printf '%s' "$_offered" | jq -r 'join(", ")') out of $(printf '%s' "$_all" | jq -r 'join(", ")')"
+      jq -n --argjson o "$_offered" --argjson a "$_all" \
+        -e '($o | length) > 0 and (($a - $o) | length) > 0 and (($o - $a) | length) == 0' >/dev/null \
+        || { echo "  $NARROW_KEY's workflow does not narrow from \"$_standing\": offered $_offered of $_all" >&2; _fail=1; }
+      jira DELETE "/rest/api/2/issue/$_probe"
+      [ "$API_STATUS" = "204" ] || { echo "  deleting the probe issue $_probe: HTTP $API_STATUS" >&2; _fail=1; }
+    fi
+  fi
+
   # The page with a body, and its first `## ` heading -- from the fixture, so
   # a renamed page in work.json is still what this checks for.
   _title=$(jqf '[.pages[] | select(.body)] | first | .title')
@@ -247,7 +336,7 @@ verify() {
       || { echo "  \"$_nested\" is not two deep under \"$_under\" -- its ancestors are $_path" >&2; _fail=1; }
   fi
   [ "$_fail" -eq 0 ] || die "verify FAILED"
-  say "verify ok: PAY-231 with its worklogs, \"$_title\" with its body, and \"$_nested\" under \"$_under\""
+  say "verify ok: PAY-231 with its worklogs, $NARROW_KEY's narrowing workflow, \"$_title\" with its body, and \"$_nested\" under \"$_under\""
 }
 
 # The nesting is a claim about the fixture, so it is checked against the
@@ -304,6 +393,35 @@ for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
   expect "create project $pkey" 201
   created "project $pkey ($(printf '%s' "$d" | jq -r .name), template $TEMPLATE_KEY)"
 done
+
+# -- the narrowing-workflow project ------------------------------------------
+# One project, no issues, from the Jira Core process-management template (see
+# "THE SECOND PROJECT" above). Find-then-skip like every create in this file,
+# so a second run creates nothing; its statuses are read back off
+# GET /rest/api/2/project/<KEY>/statuses -- the same endpoint the fixture
+# projects' are, and a DIFFERENT one from the /transitions read the live
+# witness is about, so the witness's denominator does not come from the
+# endpoint under test.
+jira GET "/rest/api/2/project/$NARROW_KEY"
+if [ "$API_STATUS" = "200" ]; then
+  skip "project $NARROW_KEY"
+else
+  jira POST /rest/api/2/project "$(jq -n --arg k "$NARROW_KEY" --arg n "$NARROW_NAME" \
+      --arg t "$NARROW_TEMPLATE" --arg l "$ADMIN_USER" \
+      '{key: $k, name: $n, projectTypeKey: "business", projectTemplateKey: $t,
+        lead: $l, assigneeType: "UNASSIGNED"}')"
+  expect "create project $NARROW_KEY" 201
+  created "project $NARROW_KEY ($NARROW_NAME, template $NARROW_TEMPLATE)"
+fi
+jira GET "/rest/api/2/project/$NARROW_KEY/statuses"
+expect "statuses of $NARROW_KEY" 200
+# `.[0]` and not a union over the types, exactly as the fixture projects'
+# statuses are read below: it keeps the workflow's own order, and the type the
+# witness files ($NARROW_TYPE) is asserted to be one of the project's below.
+NARROW_STATUSES=$(printf '%s' "$API_BODY" | jq -c '[.[0].statuses[].name]')
+printf '%s' "$API_BODY" | jq -e --arg t "$NARROW_TYPE" 'any(.[]; .name == $t)' >/dev/null \
+  || die "$NARROW_KEY has no $NARROW_TYPE issue type -- the live witness files its ticket as one"
+say "$NARROW_KEY offers $(printf '%s' "$NARROW_STATUSES" | jq -r 'join(", ")')"
 
 # -- every fixture issue type in every project's scheme ----------------------
 # The template's scheme has no Story. The project's scheme is found through
@@ -527,12 +645,15 @@ done
 record '.jira += {
   template_key: $v.template, statuses: $v.statuses, author: $v.author,
   epic_link_field: $v.epic_link, projects: $v.projects, issues: $v.issues,
-  unreachable_statuses: $v.unreachable,
-  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids, worklog ids and custom field ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `epic_link_field` is this instance'"'"'s Epic Link id, which is what a classic Data Center project keeps epic membership in (`fields.parent` is for sub-tasks and is absent here). `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have."
+  unreachable_statuses: $v.unreachable, narrowing: $v.narrowing,
+  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids, worklog ids and custom field ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `epic_link_field` is this instance'"'"'s Epic Link id, which is what a classic Data Center project keeps epic membership in (`fields.parent` is for sub-tasks and is absent here). `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have. `narrowing` is the second project (#522): a Jira Core process-management project whose workflow reaches a proper subset of its own statuses from every one of them, which is what gives the reachable-transition read a live witness for narrowing. It is deliberately empty and is deliberately NOT in `projects` or `issues`, which are the fixture'"'"'s corpus."
 }' "$(jq -n --arg t "$TEMPLATE_KEY" --arg a "$ADMIN_USER" --argjson ids "$JIRA_IDS" \
         --argjson un "${UNREACHABLE:-[]}" --argjson pr "$PROJECTS_JSON" --argjson st "$STATUSES" \
         --arg el "$EPIC_LINK_FIELD" \
-        '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un}')"
+        --argjson nw "$(jq -n --arg k "$NARROW_KEY" --arg n "$NARROW_NAME" --arg t "$NARROW_TEMPLATE" \
+                          --arg it "$NARROW_TYPE" --argjson st "$NARROW_STATUSES" \
+                          '{key: $k, name: $n, template_key: $t, issue_type: $it, statuses: $st}')" \
+        '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un, narrowing: $nw}')"
 
 # ==========================================================================
 # Confluence
