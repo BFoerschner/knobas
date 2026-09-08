@@ -705,3 +705,433 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
         Some(format!("site {t} / vm {t}").as_str())
     );
 }
+
+// ---------------------------------------------------------------------------
+// The three estate smart lists (#504)
+// ---------------------------------------------------------------------------
+//
+// **A scratch database each, unlike the rest of this file.** Every one of these
+// lists is a whole-estate aggregate -- "how many assets has nobody attached a
+// monitor to" is a question about the *table*, not about a token -- so there is
+// no per-test token that can isolate a count, and the delta trick `knobas-
+// search`'s own `tests/lists.rs` uses cannot be applied to a fixture that is a
+// whole file. `knobas_db::test_util::scratch_database` is what the estate tests
+// in `adapter_to_mirror.rs` already reach for, for the same reason.
+//
+// **The estate is the real file**, `testenv/hetzner/estate.json`, imported
+// through `knobas_app::assets::apply_import`: the same door `--demo` and
+// `estate_exit.rs` use. Not twenty-three assets typed out here, because a
+// fixture written beside the assertion agrees with it by construction, and
+// because two of these rules run over the *tree* -- an alert routed through an
+// ancestor needs an ancestor somebody drew on purpose.
+
+/// The estate the three lists are read over -- the real file.
+const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+
+/// How many assets that file holds. A literal, and deliberately not counted out
+/// of the file: a count derived from the fixture agrees with the fixture
+/// however wrong the import is.
+const ESTATE_ASSETS: i64 = 23;
+
+/// One mirrored monitor, and what its payload says about a certificate.
+///
+/// By hand, the way `assets_ipc.rs` seeds one: what is under test here is the
+/// **read**, and `crates/knobas-source-kuma` is where "the adapter writes this
+/// key" is the claim. `cert_days` is `None` for a monitor watching no
+/// certificate -- which is most of them, and which is the miss the predicate's
+/// `jsonb_typeof` guard has to survive.
+async fn mirror_monitor(pool: &sqlx::PgPool, name: &str, cert_days: Option<f64>) -> String {
+    let id = format!("kuma:{}", name.replace(|c: char| !c.is_alphanumeric(), "-"));
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .expect("the monitor's entity row");
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
+         values ($1,'kuma','monitor',$2,'', now(), now(),
+                 jsonb_build_object('state','up','cert_days_remaining', $3::float8))",
+    )
+    .bind(&id)
+    .bind(name)
+    .bind(cert_days)
+    .execute(pool)
+    .await
+    .expect("the mirrored monitor");
+    id
+}
+
+/// An unarchived context holding one entity by a confirmed link.
+async fn context_holding(pool: &sqlx::PgPool, key: &str, entity: &str) -> String {
+    let id = format!("ctx:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ctx',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .expect("the context's entity row");
+    sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc',$2)")
+        .bind(&id)
+        .bind(key)
+        .execute(pool)
+        .await
+        .expect("the context");
+    sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at)
+         values ($1,$2,'related','manual','test', now())",
+    )
+    .bind(&id)
+    .bind(entity)
+    .execute(pool)
+    .await
+    .expect("the confirmed link");
+    id
+}
+
+/// One open alert on a monitor.
+async fn open_alert(pool: &sqlx::PgPool, monitor: &str) {
+    sqlx::query("insert into knobas.monitor_alert (entity_id, state) values ($1,'down')")
+        .bind(monitor)
+        .execute(pool)
+        .await
+        .expect("the open alert");
+}
+
+/// The estate, three monitors on it, and the links the import draws.
+///
+/// The three monitors are the three cases the certificate rule has to tell
+/// apart, and they are attached to three different branches of the tree so no
+/// two lists can be satisfied by the same asset:
+///
+/// * `gitea` -- five days left, on `asset:knobas-gitea`, under
+///   `asset:orbstack-docker`.
+/// * `knobas-jira` -- **31** days left, on `asset:hetzner-jira`. The
+///   certificate negative the criterion asks for by name.
+/// * `jira (tunnel)` -- no certificate at all, on `asset:knobas-jira`. The miss
+///   direction: a payload with the key absent contributes nothing rather than
+///   raising.
+///
+/// The names are the estate file's own, so the links are drawn by the import's
+/// resolution rule rather than inserted here -- which is what makes *Not
+/// monitored*'s negative a real attachment and not a row this test wrote.
+async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
+    let pool = knobas_db::test_util::scratch_database(label)
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    mirror_monitor(&pool, "gitea", Some(5.0)).await;
+    mirror_monitor(&pool, "knobas-jira", Some(31.0)).await;
+    mirror_monitor(&pool, "jira (tunnel)", None).await;
+
+    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the estate imports")
+        .value;
+    assert_eq!(
+        outcome.assets_created, ESTATE_ASSETS,
+        "the real estate file is what these lists are read over"
+    );
+    assert_eq!(
+        outcome.monitors_linked, 3,
+        "the three seeded names resolved; the file's other four are still \
+         waiting on a monitor nobody has mirrored"
+    );
+    pool
+}
+
+/// The count of one list, off the board the launcher draws.
+async fn list_count(pool: &sqlx::PgPool, id: &str) -> i64 {
+    smart_lists_inner(pool)
+        .await
+        .expect("the board")
+        .into_iter()
+        .find(|list| list.id == id)
+        .unwrap_or_else(|| panic!("no list {id}"))
+        .count
+}
+
+/// Every asset id one list answers with, in the order it answers.
+async fn list_rows(pool: &sqlx::PgPool, id: &str) -> Vec<String> {
+    smart_list_items_inner(pool, id, 200)
+        .await
+        .expect("the list's rows")
+        .groups
+        .into_iter()
+        .flat_map(|group| group.hits)
+        .map(|hit| hit.row.entity_id)
+        .collect()
+}
+
+/// **Not monitored, at the wire** -- and it is the Monitors tab's roster.
+///
+/// The count, the rows and the negative in one test because they are one claim:
+/// the number on the launcher's rail and the rows behind it come from the same
+/// predicate, which is the failure `knobas_search::lists` calls the worst one
+/// available. The comparison against `assets::unmonitored_assets` is the other
+/// half -- two statements in two crates hard-coding the same two words, with no
+/// compiler between them.
+#[tokio::test]
+async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
+    let pool = estate_with_monitors("lists-unmonitored").await;
+
+    let rows = list_rows(&pool, "not-monitored").await;
+    assert_eq!(
+        list_count(&pool, "not-monitored").await,
+        rows.len() as i64,
+        "the rail's number and the rows behind it are one predicate"
+    );
+    assert_eq!(
+        rows.len() as i64,
+        ESTATE_ASSETS - 3,
+        "three of the estate's assets have a monitor attached and the rest do not"
+    );
+
+    // The negative the criterion asks for: an asset something watches is absent.
+    for watched in [
+        "asset:knobas-gitea",
+        "asset:hetzner-jira",
+        "asset:knobas-jira",
+    ] {
+        assert!(
+            !rows.contains(&watched.to_owned()),
+            "{watched} has a confirmed monitored-by link and must not be on the roster"
+        );
+    }
+    assert!(
+        rows.contains(&"asset:notebook".to_owned()),
+        "an asset nothing watches is: {rows:?}"
+    );
+
+    // And the same question asked of the Monitors tab, which is the read this
+    // list was written from.
+    let tab: Vec<String> = knobas_app::assets::unmonitored_assets(&pool)
+        .await
+        .expect("the tab's roster")
+        .into_iter()
+        .map(|asset| asset.id)
+        .collect();
+    assert_eq!(
+        rows, tab,
+        "the launcher and the Monitors tab answer the same roster, in the same \
+         order -- path, then name, then id"
+    );
+}
+
+/// **Open alerts in my contexts, at the wire** -- routed by membership, and
+/// through an ancestor.
+///
+/// The context holds `asset:orbstack-docker`, which is the *parent* of the
+/// asset the alerting monitor watches. So the row that comes back is there
+/// through ADR-0008's `held` recursion and not through a direct link, which is
+/// the half of *"directly or through an ancestor"* a flat membership rule would
+/// get wrong while passing every other assertion here.
+#[tokio::test]
+async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
+    let pool = estate_with_monitors("lists-alerts").await;
+
+    open_alert(&pool, "kuma:gitea").await;
+    // ...and one on an asset no context holds. The negative the criterion asks
+    // for by name: `asset:hetzner-jira` is in the estate, has a monitor, and is
+    // nobody's business.
+    open_alert(&pool, "kuma:knobas-jira").await;
+
+    assert_eq!(
+        list_rows(&pool, "alerts-in-context").await,
+        Vec::<String>::new(),
+        "with no context at all, an open alert is nobody's business -- spec \
+         #427 story 60"
+    );
+
+    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+
+    let rows = list_rows(&pool, "alerts-in-context").await;
+    assert_eq!(
+        rows,
+        ["asset:knobas-gitea"],
+        "the container under the engine the context holds, and nothing else"
+    );
+    assert_eq!(
+        list_count(&pool, "alerts-in-context").await,
+        1,
+        "the rail's number and the rows behind it are one predicate"
+    );
+
+    // An archived context is one the reader put away, and stops routing.
+    sqlx::query("update knobas.context set archived_at = now() where id = 'ctx:shipping'")
+        .execute(&pool)
+        .await
+        .expect("the archive");
+    assert_eq!(
+        list_rows(&pool, "alerts-in-context").await,
+        Vec::<String>::new(),
+        "an archived context routes nothing"
+    );
+}
+
+/// An **acked** alert is still open, and this is not the inbox.
+///
+/// The one place this list and the inbox's sixth rule deliberately differ. Ack
+/// clears the inbox item and leaves the alert open (#446, story 62), and every
+/// other surface -- the Assets view's strip, the top strip's badge -- keeps
+/// showing it. A predicate that copied the inbox's `acked_at is null` would
+/// make this list empty itself the moment somebody said "seen".
+#[tokio::test]
+async fn an_acked_alert_is_still_open_and_still_on_the_list() {
+    let pool = estate_with_monitors("lists-alerts-acked").await;
+    open_alert(&pool, "kuma:gitea").await;
+    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+
+    sqlx::query("update knobas.monitor_alert set acked_at = now() where entity_id = 'kuma:gitea'")
+        .execute(&pool)
+        .await
+        .expect("the ack");
+
+    assert_eq!(
+        list_rows(&pool, "alerts-in-context").await,
+        ["asset:knobas-gitea"],
+        "an ack is seen, not fixed"
+    );
+
+    // Recovery is what takes it off, and it is the same clause the reconciler
+    // writes.
+    sqlx::query("update knobas.monitor_alert set closed_at = now() where entity_id = 'kuma:gitea'")
+        .execute(&pool)
+        .await
+        .expect("the recovery");
+    assert_eq!(
+        list_rows(&pool, "alerts-in-context").await,
+        Vec::<String>::new()
+    );
+}
+
+/// **Certificates expiring, at the wire** -- with the 31-day negative.
+///
+/// Three monitors, three answers: five days is on the list, 31 days is not, and
+/// a payload with no `cert_days_remaining` at all is not -- the third being the
+/// miss direction ADR-0007 asks a payload read to fail in. The 31-day row is
+/// the negative the criterion names, and the asset it watches is *in the
+/// estate* and *does have a monitor*, so its absence is the window and nothing
+/// else.
+#[tokio::test]
+async fn only_a_certificate_inside_the_window_is_expiring() {
+    let pool = estate_with_monitors("lists-certs").await;
+
+    let rows = list_rows(&pool, "certs-expiring").await;
+    assert_eq!(
+        rows,
+        ["asset:knobas-gitea"],
+        "five days left is expiring; 31 days is not, and no certificate at all \
+         is not"
+    );
+    assert_eq!(
+        list_count(&pool, "certs-expiring").await,
+        1,
+        "the rail's number and the rows behind it are one predicate"
+    );
+
+    // The boundary itself, walked on the one monitor whose reading this test
+    // moves rather than asserted from a second fixture: 31 is out (above), 30
+    // is out and 29 is in, which is what *under 30 days* means.
+    for (days, on_the_list) in [(30.0_f64, false), (29.0_f64, true)] {
+        sqlx::query(
+            "update sync.item
+                set payload = jsonb_set(payload, '{cert_days_remaining}', to_jsonb($1::float8))
+              where entity_id = 'kuma:knobas-jira'",
+        )
+        .bind(days)
+        .execute(&pool)
+        .await
+        .expect("the new reading");
+        assert_eq!(
+            list_rows(&pool, "certs-expiring")
+                .await
+                .contains(&"asset:hetzner-jira".to_owned()),
+            on_the_list,
+            "a certificate with {days} days left"
+        );
+    }
+}
+
+/// A payload that stopped carrying a number empties the list rather than
+/// failing the board.
+///
+/// The `jsonb_typeof` guard, at the wire. Without it the `::numeric` cast
+/// raises on the first drifted row and `launcher_home` -- the whole board, not
+/// this one list -- comes back as an error. The direction matters: a launcher
+/// that will not open is worse than a list that says nothing.
+#[tokio::test]
+async fn a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure() {
+    let pool = estate_with_monitors("lists-certs-drift").await;
+
+    sqlx::query(
+        "update sync.item
+            set payload = jsonb_set(payload, '{cert_days_remaining}', '\"nine\"'::jsonb)
+          where entity_id = 'kuma:gitea'",
+    )
+    .execute(&pool)
+    .await
+    .expect("the drifted payload");
+
+    assert_eq!(
+        list_rows(&pool, "certs-expiring").await,
+        Vec::<String>::new()
+    );
+    // And the board still loads, which is the half that would have been an
+    // outage.
+    assert!(
+        launcher_home_inner(&pool)
+            .await
+            .expect("the board still loads")
+            .smart_lists
+            .iter()
+            .any(|list| list.id == "certs-expiring")
+    );
+}
+
+/// The three estate lists badge and clear like the four mirror lists.
+///
+/// One test over all three, because what is under test is the mechanism they
+/// share: `SUMMARY_SQL`'s per-list stamp against the one `knobas.setting` row,
+/// and `smart_list_items` writing that row as it answers. The stamps are
+/// **three different expressions** -- an asset's own `updated_at`, an alert's
+/// `opened_at`, a monitor's `synced_at` -- so a list whose stamp did not exist
+/// would never badge and one whose stamp was somebody else's would never clear.
+#[tokio::test]
+async fn every_estate_list_badges_until_it_is_opened() {
+    let pool = estate_with_monitors("lists-estate-badge").await;
+    open_alert(&pool, "kuma:gitea").await;
+    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+
+    let badged = |pool: sqlx::PgPool| async move {
+        smart_lists_inner(&pool)
+            .await
+            .expect("the board")
+            .into_iter()
+            .filter(|list| list.changed)
+            .map(|list| list.id)
+            .collect::<Vec<_>>()
+    };
+
+    let before = badged(pool.clone()).await;
+    for id in ["not-monitored", "alerts-in-context", "certs-expiring"] {
+        assert!(
+            before.contains(&id.to_owned()),
+            "{id} holds something and has never been opened: {before:?}"
+        );
+        smart_list_items_inner(&pool, id, 20)
+            .await
+            .expect("opening the list");
+    }
+
+    let after = badged(pool).await;
+    for id in ["not-monitored", "alerts-in-context", "certs-expiring"] {
+        assert!(
+            !after.contains(&id.to_owned()),
+            "{id} was just opened and still claims to be new: {after:?}"
+        );
+    }
+}
