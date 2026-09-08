@@ -1563,3 +1563,105 @@ deputy's. (a) and (b): nil either way.
 
 **Flagged, not ruled:** nothing. The first ruling is not reopened, and the merge-manager's deep pass
 over the §10.8 entry's claims stands as that ruling left it.
+## #507 — the frozen gate for `smart_lists` on `ShareParts`, the criterion only the dialog can deliver, two decisions taken rather than forked, and the walk that cannot reach the dialog
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/507#issuecomment-5579888742>
+
+Everything the ruling quotes as record was read off `origin/main` at `a1e6f316`, this branch's base,
+and not off `issue-533` or `v1-5-glossary-and-adrs`: on `main` `MAX_SAVED_LISTS` is 64, the **Smart
+list** entry ends with #506's amendment and carries no #533 clause, and this file has no `## #533`.
+PR #542's correction of its own transcription error therefore holds — its three sentences name #533
+and #540 as **open**.
+
+**The fork:** PR #542 raised four, and raised them by deciding and disclosing rather than by
+stopping. (1) It adds `smart_lists: bool` (default true) to `backup::share::ShareParts` — the
+argument DTO of `share_export` — mirrored as one field on `interface ShareParts` and one key on
+`shareDefaults` in `app/src/lib/ipc/backup.ts`, with `tables()` pushing `smart_list` when it is on.
+The §10.8 entry says in its own words that no ruling had been posted when it was written, the shape
+#508's entry carried before its clause. Does the ticket authorise the touch, is a field on
+`ShareParts` the same class as #506's two on `SmartListSummary`, and in what wording does the
+ratification go? (2) Criterion 1 reads *"with no saved list the dialog shows no toggle and the
+archive carries no list table"*, and `pg_dump` names a table whether or not there are rows in it —
+so the second clause is deliverable only by the dialog **sending the part off**, which `openShare`
+does. Is that the criterion's reading, and is more owed? (3) Two decisions taken rather than
+forked: an archive past the cap restores whole, and nothing upgrades a stored query. (4) One gap
+disclosed: no `?fake-ipc` walk can reach the *Share…* dialog, because the fixture answers no backup
+command and the section is behind `backup_status`.
+
+**Ruling:** (1) **Authorised, and the entry is sufficient as written; the merge-manager may
+proceed** once the ratification clause and this append are on the branch and claim 1 below is
+settled. The ticket names the touch **by the field's own name** — body, *"The share export gains a
+`smart_lists` part, on by default"*; criterion 1, *"The share export's parts gain `smart_lists`"*;
+criterion 2, *"the §10.8 entry for the part is written"* — and three more records name it: spec
+#491's stream map row 8 (*"the share-export part"*), the grilling, and `CONTEXT.md`'s **Share
+export** entry, which names it by ticket number (*"the toggle, with the archive's `smart_lists`
+part behind it, is **#507**'s"*). It is #409's class (*"a wire type changing shape is the thing
+this section exists to record"*), and **the contract wrote this field's decode rule before the
+field existed**: #454's entry put `#[serde(default)]` on the struct *"so a knobas built before a
+later part still decodes a payload naming it"* — a later part is this part. The clause owed: the
+flag sentence stays as the history it is and gains beside it *"— ratified in his absence by the
+deputy's ruling of 2026-09-08 on #507"* with the comment URL and this file. Four claims the
+merge-manager starts with, all four settled on the branch: **the six-key decode is now pinned by
+name** in `a_partial_payload_decodes_onto_the_defaults` (the ruling found the entry speaking where
+no test agreed — #506's claim 1 in a new place); the three hand copies of `shareDefaults` **could
+not** import it, since each factory replaces the module the constant lives in, and each now carries
+that reason and points at the Rust-side pin; `SettingsView.test` and `residue.test` reach the real
+`../ipc/search` and neither asserts on the toggle nor defers that read; and the anchored header
+grep is re-run on the merge commit. The implementer's choice to read the launcher's own rail for
+the one bit the dialog needs, rather than add a boolean to `BackupStatus`, is **ratified as the
+smaller frozen surface**. (2) **Confirmed, and nothing more is owed** than the test and the
+corrected doc comment. The answer was already in the glossary: *"`pg_dump` restricts by table and
+never by row (#454)"* — by table means by argument list, the argument list is the parts, and the
+parts are the dialog's to send. **A backend guard that stripped or refused `smart_lists` over an
+empty table must not be added**: it would make an archive's contents depend on its data, contradict
+that sentence, and make *off* and *on-and-empty* the same archive, so the seam test could not
+exist. (3) **Both confirmed, both already decided, and nothing is added to #533's clause.** A share
+archive is **not a second way** a database arrives over the cap: the Share export entry says *"the
+ordinary restore reads it"*, and #533's clause already says *"restored or **merged**"* — the first
+word covers this ticket. Both sentences stay whichever of #540 and #542 lands second, in either
+order, and #542's *"unmerged as this was written"* is history the later merge does not rewrite. On
+the stored query, reading the migration rule at the two other places stored text passes through is
+not a new rule. **No ADR**, for #506's reason: a fourth record would be a record of a record.
+(4) **Nothing inside #507.** One follow-up ticket, filed by the orchestrator, **outside v1.5**,
+`needs-triage`, no milestone, beside #529.
+
+**Reasoning:** (1) the freeze exists so that a wire shape never arrives unannounced, and this one
+was announced in #454's entry before the field existed, in `CONTEXT.md` twice, in the spec's stream
+map, and in the ticket's body and both criteria. The smallest reading is what landed: one boolean
+on the parts DTO that already exists, one table name on its list, no new command, no migration, no
+bit on `BackupStatus`. (2) ADR-0013's rule for a premise about a tool is to drive the tool, and the
+implementer did; mutant 8 is why the test is believed rather than the sentence, since seeding a
+corpus first kills it. A criterion met by a mechanism its author did not picture is not a criterion
+that cannot pass, so this is a confirmed reading and not a ruled gap. (3) the alternative to *every
+row arrives* is a restore that loses rows and chooses which, on the machine least able to notice,
+and the working model has no class that permits it; #533 has already ruled where the bound bites,
+and a rail over the cap after a restore costs what that curve says, which is the cap's meaning as
+ruled on #506 — *"a bound on the board's cost rather than a property of the schema"* — with the
+remedy the glossary already offers. (4) the reading that keeps the witness real refuses to invent a
+walk where the seam already witnesses: a fake `share_export` would certify nothing about an archive
+and would be a second copy of `ShareParts::tables()`, the copy that drifts. #496 part 3's condition
+is that the ticket have a seam suite behind the sentence; #507 has one and no sentence to
+substitute, so the substitution neither applies nor is missed. The hole is nonetheless real and
+unrecorded, which is #529's class and why the ticket is filed rather than dropped.
+
+**If you disagree, the cost of reversing this is:** (1) small before merge, one revert of a branch
+nothing has built on; moderate after — the field leaves `ShareParts` only by a further §10.8 entry,
+and every share taken meanwhile carries a `smart_list` table, though restoring such an archive into
+a build without the part is the partial-archive case the restore already accepts, so no archive is
+stranded. (2) a few lines in `share_export` to count rows before building the argument list, plus
+the Share export entry's *"never by row"* sentence, plus a seam test whose premise would be gone.
+(3) for the cap, one branch in `restore` or `share_export` and a choice of which rows to drop that
+nobody has written down; for the stored query, #506 part 2's cost — high, a column's meaning on a
+migrated table, and story 60 leaving the product. (4) nothing in code: pulling the ticket into v1.5
+is a milestone edit and closing it `wontfix` is one click.
+
+**For the orchestrator:** the part-4 ticket is filed as **#544** (`needs-triage`, no milestone,
+beside #529): the settings' Backup section — and with it the *Share…* dialog, the restore and the
+schedule editor — is unreachable under `?fake-ipc`, because the fixture answers no backup command
+and the section draws both buttons behind `backup_status`. The open question is whether the fixture
+should answer backup at all (a fixture `share_export` returning a table list is a second copy of
+`ShareParts::tables()` and would need #496 condition 2's fixture-only marker on every handler), or
+whether `docs/agents/working-model.md` should name the sections the walk cannot reach so nobody
+writes a criterion that assumes it can. Either way the dialog's witness stays
+`BackupSection.test.svelte.ts` and the archive's stays `backup_ipc.rs`.

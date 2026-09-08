@@ -9053,7 +9053,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   loop's deputy is what exercises that gate, and its ruling is recorded on the issue and appended to
   `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #507 when this entry was written**, so this sentence records the flag and claims no
-  ratification.
+  ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #507**
+  ([comment](https://github.com/BFoerschner/knobas/issues/507#issuecomment-5579888742),
+  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the field, on
+  the criterion's second clause, on both decisions taken rather than forked and on the disclosed
+  walk. The two sentences stand side by side rather than the first being rewritten, the treatment
+  §10.8 gives every sentence it supersedes.
 
   **The DTO — one boolean on an existing one, and nothing else on the wire:**
 
@@ -9073,7 +9078,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   `shareDefaults`. **`#[serde(default)]` is already on the struct** and is what this field rides in
   on: the attribute #454 put there for exactly this case means a knobas built before today still
   decodes a payload naming `smart_lists`, and a caller that sends the six older keys gets the
-  ratified answer for the seventh. **No new command, no command renamed or removed, no argument
+  ratified answer for the seventh. That second half is **asserted by name** in
+  `a_partial_payload_decodes_onto_the_defaults`, not left to the attribute: `smart_lists` is the
+  first field to make #454's sentence testable, and an equality against `Default` alone would hold
+  even if a later field arrived with the wrong ratified answer, since both sides of it would be
+  wrong together. **No new command, no command renamed or removed, no argument
   added to one, no return type changed, no new DTO, no event, no settings key, no `Kind`, no
   reserved namespace, no `WriteOp` (a saved list is knobas-local and no source has heard of one),
   no `Capability`, and no migration** — `knobas.smart_list` is `0025`'s and exists; `0026` is still
@@ -9147,8 +9156,10 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   Pinned by: `commands::backup::tests::the_share_parts_serialise_the_keys_the_mirror_declares` (both
   directions, now seven keys, with the ratified default asserted); `backup::share::tests`'
-  `the_defaults_are_the_ratified_ones` and `each_part_alone_is_exactly_its_own_tables` (the part
-  alone is `["smart_list"]`, with no `entity` beside it); in `crates/knobas-app/tests/backup_ipc.rs`
+  `the_defaults_are_the_ratified_ones`, `each_part_alone_is_exactly_its_own_tables` (the part
+  alone is `["smart_list"]`, with no `entity` beside it) and
+  `a_partial_payload_decodes_onto_the_defaults` (the six-key payload of a caller built before this
+  field, decoding to `smart_lists: true`); in `crates/knobas-app/tests/backup_ipc.rs`
   over scratch databases, `a_share_export_restores_the_link_map_and_leaves_the_hours_behind` (the
   saved list crosses with its id, its name and its query),
   `switching_the_saved_lists_part_off_leaves_the_list_table_behind` (two archives from one populated

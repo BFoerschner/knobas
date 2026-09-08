@@ -190,6 +190,12 @@ vi.mock("../ipc/backup", () => ({
   setBackupSchedule: () => Promise.reject(new Error("unused")),
   // The section reads these on mount to seed the share dialog; a mock that
   // replaces the module has to carry them or the component throws.
+  // Copied and not imported, and it could not be imported: this factory
+  // *replaces* `../ipc/backup`, so a `shareDefaults` read from there inside it
+  // would be this object. `BackupSection.test.svelte.ts` carries the same copy
+  // and the same reason; what keeps all of them honest is the Rust-side pin
+  // `commands::backup::tests::the_share_parts_serialise_the_keys_the_mirror_declares`,
+  // which reads the real `ShareParts` against the real mirror.
   shareDefaults: {
     links: true,
     assets: true,

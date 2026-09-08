@@ -405,6 +405,15 @@ mod tests {
 
     /// A payload naming one toggle leaves the ratified answer on the rest --
     /// and every field still decodes from the spelling the mirror sends.
+    ///
+    /// The **six-key** case is the one #454's entry wrote the `#[serde(default)]`
+    /// on this struct for, in as many words: *"a knobas built before a later
+    /// part still decodes a payload naming it"*, and its mirror image, a caller
+    /// built before a later part sending the keys it knows. `smart_lists` is
+    /// the first field to make that sentence testable, so it is tested here and
+    /// asserted **by name**: an equality against `Default` alone would still
+    /// hold if a future field arrived with the wrong ratified answer, because
+    /// both sides of it would be wrong together.
     #[test]
     fn a_partial_payload_decodes_onto_the_defaults() {
         let decoded: ShareParts = serde_json::from_value(serde_json::json!({ "notes": true }))
@@ -416,6 +425,19 @@ mod tests {
                 ..ShareParts::default()
             }
         );
+
+        // The payload a caller built before #507 sends: the six keys that
+        // existed then, and no seventh.
+        let older: ShareParts = serde_json::from_value(serde_json::json!({
+            "links": true, "assets": true, "contexts": true,
+            "notes": false, "time": false, "sources": true
+        }))
+        .expect("a payload naming the six parts that existed before smart lists");
+        assert!(
+            older.smart_lists,
+            "a payload without `smart_lists` must decode to the ratified answer for it, which is on"
+        );
+        assert_eq!(older, ShareParts::default());
 
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
