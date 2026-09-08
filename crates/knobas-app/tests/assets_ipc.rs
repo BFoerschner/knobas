@@ -6299,3 +6299,305 @@ async fn the_panel_refuses_an_id_no_asset_carries() {
         .expect_err("no such asset");
     assert_eq!(code(&refused), IpcErrorCode::NotFound);
 }
+
+// ---------------------------------------------------------------------------
+// The hcloud importer (#509), at the seam its command is a shim over.
+//
+// WHAT THESE WITNESS AND WHAT THEY DO NOT. The Hetzner Cloud API is replaced
+// here by a **recording** -- what `GET /v1/servers` really answered on
+// 2026-09-08, trimmed to the fields the producer reads plus several it does not
+// -- served in process by wiremock. That certifies **shape**: that the decode
+// reads the JSON hcloud sends, that a field it has never heard of does not
+// refuse the run, that the produced file validates as an estate file, that a
+// server already in the tree matches by origin key, and that a new one lands
+// under the chosen asset with its location as a property.
+//
+// It certifies nothing at all about the *live* system: a recording cannot go
+// red when Hetzner changes its JSON, and it cannot tell whether the three
+// `hcloud_id` values in `testenv/hetzner/estate.json` are the ids of the three
+// real servers. `just estate-live` is what witnesses those (ADR-0013;
+// `crates/knobas-app/tests/estate_live.rs`), and this comment says so rather
+// than leaving a green suite to imply otherwise.
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/servers`, as the real API answered on 2026-09-08.
+///
+/// Kept whole enough to be a recording rather than a hand-made shape: the three
+/// servers carry `status`, `created`, `locked`, `primary_disk_size`, `ipv6` and
+/// a `firewalls` list that this producer reads none of, which is what makes
+/// [`a_field_this_build_has_never_heard_of_does_not_refuse_the_run`] a test of
+/// the decode rather than of a fixture written to pass it.
+const HCLOUD_SERVERS: &str = include_str!("support/hcloud-servers.json");
+
+/// The token the fake below accepts, and nothing this build could reach a real
+/// Hetzner with.
+const HCLOUD_TOKEN: &str = "recorded-for-the-shape-battery";
+
+/// An hcloud answering the recording, in process.
+///
+/// The **whole** URL shape is matched -- the path and the bearer token -- so a
+/// producer that asked the wrong path or forgot the credential gets a 404 from
+/// wiremock rather than the answer it wanted.
+async fn spawn_mock_hcloud(body: &str) -> wiremock::MockServer {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let server = wiremock::MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/servers"))
+        .and(header("authorization", format!("Bearer {HCLOUD_TOKEN}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(body.to_owned(), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
+/// A client pointed at `server`, built the way the command builds the real one.
+fn hcloud_client(server: &wiremock::MockServer) -> knobas_http::HttpClient {
+    knobas_http::HttpClient::new(knobas_http::HttpConfig {
+        base_url: format!("{}/v1", server.uri()),
+        adapter_kind: "hcloud".to_owned(),
+        adapter_version: "test".to_owned(),
+        auth: knobas_http::Auth::Bearer(HCLOUD_TOKEN.to_owned()),
+        ..Default::default()
+    })
+    .expect("a client onto the fake hcloud")
+}
+
+/// **Every server the token sees is already in the tree, and nothing changes.**
+///
+/// The recorded half of `just estate-live`'s third criterion, and the strongest
+/// thing this suite can say without a network: the produced file's ids are
+/// `asset:hcloud-<id>` and none of them is in the estate, so every entry is
+/// matched by its **origin key** (#508) and previews under the tree's own id.
+///
+/// *No changes* is the part that pins the property **spellings**: the producer
+/// writes `hcloud_id`, `server_type`, `os`, `location`, `ip` and one property
+/// per label, and every one of them has to be the key `estate.json` carries,
+/// with the value it carries. A producer that wrote `image` where the estate
+/// writes `os`, or a number where it writes text, would land in *Would change*
+/// -- so this is the assertion the two files' vocabularies are held together
+/// by, and it is why the estate carries `location` and `knobas` at all.
+#[tokio::test]
+async fn every_recorded_server_is_already_in_the_tree_and_nothing_would_change() {
+    let hcloud = spawn_mock_hcloud(HCLOUD_SERVERS).await;
+    let pool = imported("hcloud-known").await;
+
+    let produced = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
+        .await
+        .expect("the producer runs");
+    let assets::hcloud::Produced::Ready { file, new_servers } = produced else {
+        panic!("every recorded server is in the estate, so nothing is owed: {produced:?}");
+    };
+    assert!(
+        new_servers.is_empty(),
+        "these three are the estate's own servers: {new_servers:?}"
+    );
+
+    let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("the produced file previews");
+    assert_eq!(preview.new, Vec::new(), "nothing in it is new");
+    assert_eq!(
+        preview
+            .changes
+            .iter()
+            .map(|change| (
+                change.id.clone(),
+                change
+                    .properties
+                    .iter()
+                    .map(|property| property.key.clone())
+                    .collect::<Vec<_>>()
+            ))
+            .collect::<Vec<_>>(),
+        Vec::new(),
+        "nothing already in the tree would change"
+    );
+    assert_eq!(preview.known.len(), 3, "the three servers, under the tree's ids");
+    let mut known: Vec<&str> = preview.known.iter().map(|entry| entry.id.as_str()).collect();
+    known.sort_unstable();
+    assert_eq!(
+        known,
+        [
+            "asset:hetzner-confluence",
+            "asset:hetzner-jira",
+            "asset:hetzner-teamcity"
+        ],
+        "each entry previews under the id the estate holds it by, not its own"
+    );
+}
+
+/// **A server the estate does not hold is asked about once, then lands.**
+///
+/// Two calls, which is the run the dialog makes: the first answers
+/// `LandingNeeded` naming the server, the second carries `land_under` and the
+/// preview puts it there. The two servers beside it are the estate's own and
+/// are **not** re-parented -- they carry no `parent` at all, which is the file
+/// saying nothing about where an asset it did not create sits.
+#[tokio::test]
+async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_told() {
+    let mut recorded: serde_json::Value = serde_json::from_str(HCLOUD_SERVERS).unwrap();
+    let fourth = serde_json::json!({
+        "id": 164750999,
+        "name": "knobas-scratch",
+        "status": "running",
+        "labels": { "knobas": "testenv", "role": "scratch" },
+        "image": { "name": "debian-13" },
+        "server_type": { "name": "cx23" },
+        "location": { "name": "fsn1" },
+        "public_net": { "ipv4": { "ip": "203.0.113.9" } }
+    });
+    recorded["servers"].as_array_mut().unwrap().push(fourth);
+    let hcloud = spawn_mock_hcloud(&recorded.to_string()).await;
+    let pool = imported("hcloud-new").await;
+    let client = hcloud_client(&hcloud);
+
+    let asked = assets::hcloud::produce(&pool, &client, None)
+        .await
+        .expect("the producer runs");
+    assert_eq!(
+        asked,
+        assets::hcloud::Produced::LandingNeeded {
+            servers: vec!["knobas-scratch".to_owned()]
+        },
+        "one server is not in the tree, and only that one is asked about"
+    );
+
+    let assets::hcloud::Produced::Ready { file, new_servers } =
+        assets::hcloud::produce(&pool, &client, Some("asset:hetzner-nbg1"))
+            .await
+            .expect("the producer runs with a landing place")
+    else {
+        panic!("the landing place was given, so a file is owed");
+    };
+    assert_eq!(new_servers, ["knobas-scratch"]);
+
+    let parsed: serde_json::Value = serde_json::from_str(&file).expect("the file is JSON");
+    let entries = parsed["assets"].as_array().expect("the file has assets");
+    let new_entry = entries
+        .iter()
+        .find(|entry| entry["id"] == serde_json::json!("asset:hcloud-164750999"))
+        .expect("the new server is in the file");
+    assert_eq!(new_entry["parent"], serde_json::json!("asset:hetzner-nbg1"));
+    assert_eq!(
+        new_entry["properties"]["location"],
+        serde_json::json!("fsn1"),
+        "the location is kept as a property, which is the whole of what the \
+         estate would otherwise never record about where a server runs"
+    );
+    for entry in entries {
+        if entry["id"] != serde_json::json!("asset:hcloud-164750999") {
+            assert_eq!(
+                entry.get("parent"),
+                None,
+                "an entry the estate already holds names no parent: {}",
+                entry["id"]
+            );
+        }
+    }
+
+    let outcome = assets::apply_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("the produced file applies");
+    assert_eq!(
+        (outcome.value.assets_created, outcome.value.properties_set),
+        (1, 0),
+        "one asset created, and not one property written on the two the estate \
+         already held"
+    );
+    let landed: (String, String) = sqlx::query_as(
+        "select parent_id, properties->'location'->>'value' from knobas.asset where id = $1",
+    )
+    .bind("asset:hcloud-164750999")
+    .fetch_one(&pool)
+    .await
+    .expect("the new server is in the tree");
+    assert_eq!(landed, ("asset:hetzner-nbg1".to_owned(), "fsn1".to_owned()));
+
+    let teamcity: String = sqlx::query_scalar("select parent_id from knobas.asset where id = $1")
+        .bind("asset:hetzner-teamcity")
+        .fetch_one(&pool)
+        .await
+        .expect("the server the estate already held");
+    assert_eq!(
+        teamcity, "asset:hetzner-nbg1",
+        "an import never re-parents what is already in the tree"
+    );
+}
+
+/// **A field this build has never heard of does not refuse the run.**
+///
+/// hcloud grows fields on its own schedule and knobas is not its reviewer. The
+/// estate file knobas *writes* is `deny_unknown_fields`, and this is the other
+/// side of that rule stated where it belongs: a closed vocabulary is right for
+/// a file somebody types by hand and wrong for a foreign API's answer.
+#[tokio::test]
+async fn a_field_this_build_has_never_heard_of_does_not_refuse_the_run() {
+    let mut recorded: serde_json::Value = serde_json::from_str(HCLOUD_SERVERS).unwrap();
+    recorded["servers"][0]["quantum_placement_zone"] = serde_json::json!({ "name": "nbg1-q" });
+    recorded["meta"]["pagination"]["a_field_from_the_future"] = serde_json::json!(7);
+    let hcloud = spawn_mock_hcloud(&recorded.to_string()).await;
+    let pool = imported("hcloud-unknown-field").await;
+
+    let produced = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
+        .await
+        .expect("a field nobody declared is not a refusal");
+    let assets::hcloud::Produced::Ready { file, .. } = produced else {
+        panic!("the estate holds all three servers");
+    };
+    assert!(
+        !file.contains("quantum_placement_zone"),
+        "and it is dropped rather than carried into the estate file"
+    );
+}
+
+/// **A token the far end refuses is `unauthorized`, and no file comes back.**
+///
+/// The one fault a person can act on (ADR-0004), and it has to arrive as
+/// itself: an importer's refusal read as `internal` is a reader told to file a
+/// bug about a token they can re-enter.
+#[tokio::test]
+async fn a_refused_token_is_unauthorized_and_not_an_internal_fault() {
+    let hcloud = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(401).set_body_string(
+            r#"{"error":{"code":"unauthorized","message":"unable to authenticate"}}"#,
+        ))
+        .mount(&hcloud)
+        .await;
+    let pool = imported("hcloud-refused").await;
+
+    let refused = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
+        .await
+        .expect_err("a 401 is a refusal");
+    assert_eq!(code(&refused), IpcErrorCode::Unauthorized);
+    assert!(
+        refused.source_id.is_none(),
+        "an importer is not a source, so there is no source for the shell to \
+         send anybody to (ADR-0015): {refused:?}"
+    );
+}
+
+/// **The estate file's producer produces nothing**, and says so by name.
+///
+/// The file a person picks off the disk is the one producer that is not an
+/// importer (`CONTEXT.md`), so there is no live system to run. Asked at the
+/// registry rather than at the command, because that is where the answer lives.
+#[test]
+fn the_estate_file_producer_is_not_an_importer_and_hcloud_is() {
+    let by_id = |id: &str| {
+        assets::PRODUCERS
+            .iter()
+            .find(|producer| producer.id == id)
+            .unwrap_or_else(|| panic!("{id} is declared"))
+    };
+    assert_eq!(by_id(ESTATE_FILE_PRODUCER).importer, None);
+    assert_eq!(
+        by_id(HCLOUD_PRODUCER).importer,
+        Some(assets::Importer::Hcloud)
+    );
+}

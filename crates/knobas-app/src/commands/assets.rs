@@ -555,6 +555,111 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
     Ok(written.value)
 }
 
+/// Run one **importer** and hand back the estate file it produced (#509).
+///
+/// `CONTEXT.md`, **Importer**: a producer of an estate file from a live system,
+/// **not** a [source](knobas_source) (ADR-0015). So this command configures
+/// nothing, stores no row, syncs nothing and queues no write; what it answers
+/// with is text, and [`preview_estate_import`] and [`apply_estate_import`] are
+/// what do anything with it. It is on `commands::assets` and not on a module of
+/// its own for the reason the two Import commands are: the estate is what this
+/// produces, and the `commands/` + `ipc/` layout is frozen (§10.8).
+///
+/// # Three answers, and why a run can take two calls
+///
+/// [`Produced::TokenNeeded`] comes back before any request is made, when
+/// nothing is stored under this importer's keychain account and the caller sent
+/// no token -- so a reader who has never used this importer is asked for one
+/// rather than shown a 401 from a call made with nothing. A token that *is*
+/// sent is stored **only once the run succeeded**, which is what makes *asked
+/// once* true without ever keeping a credential the far end refused.
+///
+/// [`Produced::LandingNeeded`] comes back when the live system holds servers
+/// this estate does not, and the caller has not said where they go. The reader
+/// answers once, and the next call carries `land_under`. That second call reads
+/// the live system again rather than holding the first read: this command owns
+/// no state between calls, and a cached answer would be a second place for the
+/// estate to be out of date.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a producer this build does not
+/// know or for the estate-file producer (which is chosen from the disk and
+/// produces nothing), and whatever the live system's own read classified --
+/// [`Unauthorized`](crate::IpcErrorCode::Unauthorized) for a refused token,
+/// which is the one fault a person can act on (ADR-0004).
+#[tauri::command]
+pub async fn produce_estate_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    producer: String,
+    token: Option<String>,
+    land_under: Option<String>,
+) -> Result<assets::hcloud::Produced, IpcError> {
+    let pool = lifecycle.pool()?;
+    let producer = assets::find_producer(&producer)?;
+    // No wildcard arm on the importer (ADR-0006's rule applied to this enum):
+    // a producer that reads a live system added later has to be given a run
+    // here, rather than falling through to a refusal that reads like a bug.
+    let Some(importer) = producer.importer else {
+        return Err(IpcError::invalid(format!(
+            "`{}` is not an importer: it is the estate file a person picks off              the disk, and there is no live system to produce one from.",
+            producer.id
+        )));
+    };
+
+    // The keychain, which is where an importer's credential lives -- under its
+    // own namespace, so nothing that walks *sources* can reach it (ADR-0015).
+    let secrets = &crate::sources::state(&app)?.secrets;
+    let account = knobas_secrets::KeychainAccount::importer(producer.id);
+    let given = token
+        .map(|typed| typed.trim().to_owned())
+        .filter(|typed| !typed.is_empty());
+    let secret = match &given {
+        Some(typed) => typed.clone(),
+        None => match knobas_secrets::spawn::get(secrets, &account)
+            .await
+            .map_err(IpcError::internal)?
+        {
+            Some(stored) => stored.value,
+            None => return Ok(assets::hcloud::Produced::TokenNeeded),
+        },
+    };
+
+    let produced = match importer {
+        assets::Importer::Hcloud => {
+            let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
+                base_url: assets::hcloud::API.to_owned(),
+                // The `User-Agent` only (`knobas/<v> (hcloud/<v>)`), so an
+                // admin reading an access log can tell what called them. It is
+                // not an adapter kind: no adapter is registered for this and
+                // `sources::Registry` has never heard of it.
+                adapter_kind: producer.id.to_owned(),
+                adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+                auth: knobas_http::Auth::Bearer(secret.clone()),
+                ..Default::default()
+            })
+            .map_err(|error| IpcError::from_source_error(&error, None))?;
+            assets::hcloud::produce(&pool, &client, land_under.as_deref()).await?
+        }
+    };
+
+    // Stored **after** the run, and only a token the caller typed: a credential
+    // the far end refused is never written, so *asked once* does not mean
+    // *asked once and then wrong forever*.
+    if let Some(typed) = given {
+        knobas_secrets::spawn::put(
+            secrets,
+            &account,
+            knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, typed),
+        )
+        .await
+        .map_err(IpcError::internal)?;
+    }
+    Ok(produced)
+}
+
 /// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
 /// keys for the sample retention, the response-time threshold").
 ///
@@ -1411,6 +1516,7 @@ mod tests {
             "delete_route",
             "preview_estate_import",
             "apply_estate_import",
+            "produce_estate_file",
             "monitoring_settings",
             "set_monitoring_settings",
             "monitor_roster",
@@ -1484,6 +1590,70 @@ mod tests {
         }
     }
 
+    /// **What an importer answers with, arm by arm** (#509).
+    ///
+    /// A tagged union, so every arm is exercised: the tag is what the dialog
+    /// branches on, and an arm the mirror has not heard of is a state the
+    /// dialog draws nothing at all for. The tags themselves are checked
+    /// against the mirror's `type Produced` rather than listed here, the rule
+    /// `PropertyKind` gets: a fourth state added on the Rust side has to fail
+    /// here rather than fall through.
+    #[test]
+    fn every_produced_state_matches_its_typescript_mirror() {
+        for (interface, value, fields) in [
+            (
+                "TokenNeeded",
+                assets::hcloud::Produced::TokenNeeded,
+                &["state"][..],
+            ),
+            (
+                "LandingNeeded",
+                assets::hcloud::Produced::LandingNeeded {
+                    servers: vec!["knobas-teamcity".to_owned()],
+                },
+                &["state", "servers"][..],
+            ),
+            (
+                "ProducedFile",
+                assets::hcloud::Produced::Ready {
+                    file: "{}".to_owned(),
+                    new_servers: Vec::new(),
+                },
+                &["state", "file", "new_servers"][..],
+            ),
+        ] {
+            assert_shape(
+                MIRROR,
+                interface,
+                &serde_json::to_value(&value).unwrap(),
+                fields,
+            );
+        }
+
+        let declared = declared_union(MIRROR, "Produced");
+        assert_eq!(
+            declared,
+            ["TokenNeeded", "LandingNeeded", "ProducedFile"],
+            "the mirror's `Produced` and this build's arms disagree"
+        );
+        // And the tag each arm carries, which is the value the dialog reads.
+        for (interface, tag) in [
+            ("TokenNeeded", "token_needed"),
+            ("LandingNeeded", "landing_needed"),
+            ("ProducedFile", "ready"),
+        ] {
+            let body = MIRROR
+                .split_once(&format!("export interface {interface} {{"))
+                .expect("the mirror declares the arm")
+                .1;
+            let body = &body[..body.find('}').expect("the arm is terminated")];
+            assert!(
+                body.contains(&format!("state: \"{tag}\"")),
+                "{interface} does not carry the tag {tag:?} the backend sends"
+            );
+        }
+    }
+
     /// Tauri renames a command's *arguments* to camelCase and leaves struct
     /// fields alone. Both spellings are on this surface at once -- the
     /// `assetId` argument and the `parent_id` field inside the row it answers
@@ -1511,6 +1681,9 @@ mod tests {
             ("preview_estate_import", "producer"),
             ("apply_estate_import", "file"),
             ("apply_estate_import", "producer"),
+            ("produce_estate_file", "producer"),
+            ("produce_estate_file", "token"),
+            ("produce_estate_file", "landUnder"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
         ] {

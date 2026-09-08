@@ -224,6 +224,8 @@
 //! `commands::assets::get_asset` because the answer is in the keychain and this
 //! module reads the database.
 
+pub mod hcloud;
+
 use std::collections::{HashMap, HashSet};
 
 use knobas_core::activity::ActivityRow;
@@ -3945,6 +3947,30 @@ pub struct Producer {
     /// [`origin_key_of`] is what an asset carrying only some of these comes to,
     /// on both sides.
     origin_key: &'static [&'static str],
+    /// Which live system this producer reads, or `None` for the one that reads
+    /// none (#509).
+    ///
+    /// **Not `origin_key.is_empty()`.** That an importer declares an origin key
+    /// is a consequence of there being a live system whose terms the key names,
+    /// not a definition of one -- and a check that read the key would be
+    /// measuring a representation of the thing rather than the thing.
+    /// `CONTEXT.md`'s **Importer** is the sentence this field carries: *"every
+    /// importer is a producer of an estate file; the estate file a person picks
+    /// off the disk is the one producer that is not an importer, because there
+    /// is no live system on the other end of it."*
+    pub importer: Option<Importer>,
+}
+
+/// The live system one [`Importer`](Producer::importer) reads.
+///
+/// An enum and **no wildcard arm** where it is matched, `WriteOp::identifier`'s
+/// rule (ADR-0006): adding a producer that reads a live system must stop
+/// `commands::assets` compiling until somebody says what running it means,
+/// rather than falling through to a refusal that reads like a missing feature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Importer {
+    /// Hetzner Cloud, over its public API (`assets::hcloud`).
+    Hcloud,
 }
 
 /// The estate file a person picks off the disk: the Import as M4.0 shipped it.
@@ -3983,11 +4009,13 @@ pub const PRODUCERS: &[Producer] = &[
         id: ESTATE_FILE_PRODUCER,
         label: "Estate file",
         origin_key: &[],
+        importer: None,
     },
     Producer {
         id: HCLOUD_PRODUCER,
         label: "Hetzner Cloud",
-        origin_key: &["hcloud_id"],
+        origin_key: &[hcloud::ORIGIN_KEY],
+        importer: Some(Importer::Hcloud),
     },
 ];
 
@@ -3999,7 +4027,7 @@ pub const PRODUCERS: &[Producer] = &[
 /// silently taken as the estate file's: a caller asking for a matching rule
 /// this build does not have would otherwise get the rule that matches on
 /// nothing, and its import would quietly create a second copy of every asset.
-fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
+pub fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
     PRODUCERS.iter().find(|it| it.id == id).ok_or_else(|| {
         IpcError::invalid(format!(
             "{id:?} is not one of the producers this build knows: {}",

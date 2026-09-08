@@ -388,6 +388,10 @@ pub fn run() {
             commands::entity::record_capture_context,
             commands::entity::capture_context,
             commands::entity::reveal_note,
+            // #509's hcloud importer, appended at the foot: the list is
+            // append-only (§10.8). The Import commands above are what consume
+            // what this answers with.
+            commands::assets::produce_estate_file,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
