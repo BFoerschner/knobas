@@ -1013,7 +1013,7 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
     let estate = seed_corpus(&sharer.pool, "secret").await;
     knobas_secrets::spawn::put(
         &sharer_secrets,
-        &estate.source,
+        &knobas_secrets::KeychainAccount::source(&estate.source),
         knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, PAT),
     )
     .await
@@ -1097,7 +1097,7 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
         Arc::new(knobas_secrets::MemoryStore::new());
     knobas_secrets::spawn::put(
         &secrets,
-        &estate.source,
+        &knobas_secrets::KeychainAccount::source(&estate.source),
         knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "still-here"),
     )
     .await
@@ -1446,9 +1446,9 @@ struct RefusesOne {
 impl knobas_secrets::SecretStore for RefusesOne {
     fn get(
         &self,
-        source_id: &str,
+        account: &knobas_secrets::KeychainAccount,
     ) -> Result<Option<knobas_secrets::Secret>, knobas_secrets::SecretError> {
-        if source_id == self.id {
+        if *account == knobas_secrets::KeychainAccount::source(&self.id) {
             return Err(knobas_secrets::SecretError::Backend(
                 "the keychain is locked".to_owned(),
             ));
@@ -1458,13 +1458,16 @@ impl knobas_secrets::SecretStore for RefusesOne {
 
     fn put(
         &self,
-        _source_id: &str,
+        _account: &knobas_secrets::KeychainAccount,
         _secret: &knobas_secrets::Secret,
     ) -> Result<(), knobas_secrets::SecretError> {
         unreachable!("a restore never writes a credential")
     }
 
-    fn delete(&self, _source_id: &str) -> Result<(), knobas_secrets::SecretError> {
+    fn delete(
+        &self,
+        _account: &knobas_secrets::KeychainAccount,
+    ) -> Result<(), knobas_secrets::SecretError> {
         unreachable!("a restore never deletes a credential")
     }
 }

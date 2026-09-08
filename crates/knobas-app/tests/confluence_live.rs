@@ -440,7 +440,7 @@ async fn app(name: &str, env: &Env) -> SourcesState {
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
-            CONFLUENCE,
+            &knobas_secrets::KeychainAccount::source(CONFLUENCE),
             &Secret::just(AuthMethod::UserPassword, env.password.clone()),
         )
         .expect("the Confluence credential is stored");

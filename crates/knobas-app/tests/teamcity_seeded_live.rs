@@ -220,7 +220,10 @@ async fn app(env: &Env, account: &str) -> SourcesState {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(TEAMCITY, &Secret::just(AuthMethod::Pat, env.token.clone()))
+        .put(
+            &knobas_secrets::KeychainAccount::source(TEAMCITY),
+            &Secret::just(AuthMethod::Pat, env.token.clone()),
+        )
         .expect("the TeamCity token is stored");
 
     knobas_sync::config::insert(

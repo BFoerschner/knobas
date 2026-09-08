@@ -5,7 +5,7 @@
 //! It writes under a per-run service name and deletes what it wrote, so it
 //! cannot collide with the credentials a real knobas stored.
 
-use knobas_secrets::{KeyringStore, Secret, SecretStore};
+use knobas_secrets::{KeychainAccount, KeyringStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_source::instance::Account;
 
@@ -21,7 +21,7 @@ fn the_keyring_store_honours_the_store_contract() {
     let service = format!("dev.knobas.desktop.test.{}", std::process::id());
     let store = KeyringStore::new(&service);
     assert_eq!(store.service(), service);
-    let id = "keyring-local";
+    let id = &KeychainAccount::source("keyring-local");
 
     store
         .delete(id)

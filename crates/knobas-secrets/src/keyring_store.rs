@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use keyring_core::{CredentialStore, Entry, Error as KeyringError};
 
-use crate::{Secret, SecretError, SecretStore, account_for, decode, encode};
+use crate::{KeychainAccount, Secret, SecretError, SecretStore, decode, encode};
 
 /// The OS keychain, under one service name.
 ///
@@ -68,9 +68,14 @@ impl KeyringStore {
         Ok(self.store.get_or_init(|| opened))
     }
 
-    fn entry(&self, source_id: &str) -> Result<Entry, SecretError> {
+    /// The keychain entry for one account.
+    ///
+    /// The account arrives **already namespaced** ([`KeychainAccount`]): this
+    /// module knows how to reach an item and not which namespaces there are,
+    /// the same separation that keeps it from rebuilding the service name.
+    fn entry(&self, account: &KeychainAccount) -> Result<Entry, SecretError> {
         self.store()?
-            .build(&self.service, &account_for(source_id), None)
+            .build(&self.service, account.as_str(), None)
             .map_err(map_error)
     }
 }
@@ -127,25 +132,25 @@ fn map_error(error: KeyringError) -> SecretError {
 }
 
 impl SecretStore for KeyringStore {
-    fn get(&self, source_id: &str) -> Result<Option<Secret>, SecretError> {
-        match self.entry(source_id)?.get_password() {
+    fn get(&self, account: &KeychainAccount) -> Result<Option<Secret>, SecretError> {
+        match self.entry(account)?.get_password() {
             Ok(raw) => decode(&raw).map(Some),
             Err(KeyringError::NoEntry) => Ok(None),
             Err(other) => Err(map_error(other)),
         }
     }
 
-    fn put(&self, source_id: &str, secret: &Secret) -> Result<(), SecretError> {
-        self.entry(source_id)?
+    fn put(&self, account: &KeychainAccount, secret: &Secret) -> Result<(), SecretError> {
+        self.entry(account)?
             .set_password(&encode(secret)?)
             .map_err(map_error)
     }
 
-    fn delete(&self, source_id: &str) -> Result<(), SecretError> {
+    fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         // Absent is success: `delete_source` runs this after the config row is
         // gone, and a source whose secret was already removed by hand must
         // still delete cleanly (interfaces §3, Delete).
-        match self.entry(source_id)?.delete_credential() {
+        match self.entry(account)?.delete_credential() {
             Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
             Err(other) => Err(map_error(other)),
         }

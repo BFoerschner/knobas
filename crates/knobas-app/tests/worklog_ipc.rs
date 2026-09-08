@@ -196,7 +196,7 @@ async fn app(name: &str) -> (SourcesState, Arc<Wrote>) {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(JIRA, &Secret::just(AuthMethod::Pat, "a-token"))
+        .put(&knobas_secrets::KeychainAccount::source(JIRA), &Secret::just(AuthMethod::Pat, "a-token"))
         .expect("the credential is stored");
 
     knobas_sync::config::insert(
