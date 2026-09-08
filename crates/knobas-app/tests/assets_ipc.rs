@@ -2469,7 +2469,7 @@ async fn the_linked_work_badge_counts_confirmed_links_to_work_items_only() {
     link_as(&pool, &two, &estate.postgres.id, "documented-in").await;
     link_as(&pool, &estate.postgres.id, &ctx.id, "related").await;
     link_as(&pool, &estate.postgres.id, &estate.db.id, "runs-on").await;
-    propose(&pool, &estate.postgres.id, &three).await;
+    propose(&pool, &estate.postgres.id, &three, "related").await;
 
     assert_eq!(
         column_row(&pool, &estate.db.id, "postgres")
@@ -2541,16 +2541,22 @@ async fn column_row(pool: &PgPool, parent: &str, name: &str) -> AssetRow {
 
 /// An unconfirmed proposal: a `knobas.link` row with no `confirmed_at`, which
 /// is what `knobas.proposed_link` holds and `knobas.confirmed_link` cannot.
-async fn propose(pool: &PgPool, from: &str, to: &str) {
+///
+/// The relation is the caller's because #505's walk filters on two words of
+/// its own: a proposal spelled `related` would be kept out of the *Depends on
+/// this* panel by the relation as well as by the state, and would witness
+/// neither.
+async fn propose(pool: &PgPool, from: &str, to: &str, relation: &str) {
     sqlx::query(
         "insert into knobas.link
              (from_id, to_id, relation, origin, created_by,
               confirmed_at, rule, rule_class, reason)
-         values ($1,$2,'related','suggested','knobas',
+         values ($1,$2,$3,'suggested','knobas',
               null,'exact_key','exact_key','the branch name carries the key')",
     )
     .bind(from)
     .bind(to)
+    .bind(relation)
     .execute(pool)
     .await
     .expect("the proposal");
@@ -5502,4 +5508,362 @@ async fn an_asset_read_without_a_keychain_offers_no_create() {
             .monitor_targets
             .is_empty()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Depends on this (#505)
+// ---------------------------------------------------------------------------
+
+/// The real estate file, imported, and the panel's answer for one asset in it.
+///
+/// **The file plus drawn links**, which is the ticket's own witness: the estate
+/// file is a tree and its routes and carries no `knobas.link` row at all, so
+/// every relation these tests read is drawn here by hand. What comes from the
+/// file is the shape the panel walks -- five levels from the estate root down
+/// to a database inside a container, and nine routes landing on containers --
+/// and that is the half a made-up fixture could not supply (ADR-0013).
+async fn imported(label: &str) -> PgPool {
+    let pool = pool(label).await;
+    assets::apply_import(&pool, ESTATE_FILE)
+        .await
+        .expect("the estate file imports");
+    pool
+}
+
+/// The panel's answer, as a reader sees it: `(id, relation)` per line, in
+/// order.
+///
+/// The relation is carried through rather than dropped, because the two facts
+/// this list is checked for -- *who* is on it and *why* -- are the two the
+/// pane draws, and a test that read only the ids would pass on a walk that
+/// labelled every line with the wrong word.
+async fn breaks_with(pool: &PgPool, id: &str) -> Vec<(String, Option<String>)> {
+    assets::depends_on_this(pool, id)
+        .await
+        .expect("the panel")
+        .assets
+        .into_iter()
+        .map(|row| (row.asset.id, row.relation))
+        .collect()
+}
+
+/// Held inside is broken with: the descendants, nearest first, each labelled
+/// with no relation at all.
+///
+/// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
+/// it"*. The subject is the Hetzner TeamCity machine, which is the deepest
+/// branch the real file has -- VM, Docker engine, two containers, and a
+/// database inside one of them -- so "nearest first" is a claim with four
+/// levels under it rather than one.
+///
+/// The relation is `null` on every line because the tree is a `parent_id`
+/// field and not a link (ADR-0014); the panel reads that null as *inside*.
+#[tokio::test]
+async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
+    let pool = imported("depends-on-descendants").await;
+
+    assert_eq!(
+        breaks_with(&pool, "asset:hetzner-teamcity").await,
+        vec![
+            ("asset:hetzner-teamcity-docker".to_owned(), None),
+            ("asset:knobas-teamcity".to_owned(), None),
+            ("asset:knobas-teamcity-agent".to_owned(), None),
+            ("asset:db-teamcity".to_owned(), None),
+        ]
+    );
+
+    let answer = assets::depends_on_this(&pool, "asset:hetzner-teamcity")
+        .await
+        .expect("the panel");
+    // Story 54's other half: where each one sits, so a reader can tell two
+    // containers of the same name apart. Outermost first, and excluding the
+    // asset itself, which is `knobas.asset.path_text`'s own rule.
+    assert_eq!(
+        answer
+            .assets
+            .iter()
+            .find(|row| row.asset.id == "asset:db-teamcity")
+            .expect("the database inside the container")
+            .path
+            .as_deref(),
+        Some(
+            "knobas test estate / Hetzner Cloud nbg1 / knobas-teamcity / \
+             Docker engine (knobas-teamcity) / knobas-teamcity"
+        )
+    );
+    // Nothing in the file lands on the VM itself -- every route it has lands
+    // on a container -- so the routes half is empty here and is witnessed
+    // where it is not.
+    assert!(answer.routes.is_empty(), "{:?}", answer.routes);
+}
+
+/// A `depends-on` link carries its own word, its far end brings what it holds,
+/// and an asset two ways from the subject is still one line.
+///
+/// Three drawn facts and one subject. TeamCity's VCS roots are the Gitea
+/// repositories it reaches through `route:tunnel-gitea-reverse` in the file,
+/// and its agent needs the server it registers with -- so *what breaks if
+/// Gitea goes down* is the TeamCity machine, everything inside it, and the
+/// agent, which arrives **twice**: at one hop through the chain of links and
+/// at two through the machine's tree. The panel counts assets, so it is one
+/// line, and its word is the edge that reached it first.
+///
+/// The routes are the second half of `CONTEXT.md`'s sentence: the two that
+/// land on Gitea are listed and are **not** among the five, *"so that the
+/// number is about assets"* (story 52).
+#[tokio::test]
+async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() {
+    let pool = imported("depends-on-chain").await;
+    link_as(
+        &pool,
+        "asset:hetzner-teamcity",
+        "asset:knobas-gitea",
+        "depends-on",
+    )
+    .await;
+    link_as(
+        &pool,
+        "asset:knobas-teamcity-agent",
+        "asset:hetzner-teamcity",
+        "depends-on",
+    )
+    .await;
+
+    let lines = breaks_with(&pool, "asset:knobas-gitea").await;
+    assert_eq!(
+        lines,
+        vec![
+            (
+                "asset:hetzner-teamcity".to_owned(),
+                Some("depends-on".to_owned())
+            ),
+            ("asset:hetzner-teamcity-docker".to_owned(), None),
+            (
+                "asset:knobas-teamcity-agent".to_owned(),
+                Some("depends-on".to_owned())
+            ),
+            ("asset:knobas-teamcity".to_owned(), None),
+            ("asset:db-teamcity".to_owned(), None),
+        ]
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|(id, _)| id == "asset:knobas-teamcity-agent")
+            .count(),
+        1,
+        "the agent is reached by a link and by the tree, and is one line"
+    );
+
+    let answer = assets::depends_on_this(&pool, "asset:knobas-gitea")
+        .await
+        .expect("the panel");
+    let mut landing: Vec<String> = answer.routes.iter().map(|r| r.id.clone()).collect();
+    landing.sort();
+    assert_eq!(
+        landing,
+        vec![
+            "route:notebook-gitea".to_owned(),
+            "route:tunnel-gitea-reverse".to_owned(),
+        ]
+    );
+    // Not counted: the number the panel draws is the assets', and the routes
+    // sit beneath it.
+    assert_eq!(answer.assets.len(), 5);
+    assert!(
+        answer
+            .assets
+            .iter()
+            .all(|row| !row.asset.id.starts_with("route:")),
+        "a route is not an asset and is never a line above the count"
+    );
+}
+
+/// A `runs-on` link carries its own word, beside the containment lines it
+/// shares a step with -- and nothing else in the estate joins them.
+///
+/// The subject is the Docker engine on the laptop's OrbStack VM. Three
+/// containers sit inside it, and the drawn link puts a fourth beside them: a
+/// TeamCity agent held under the *server's* engine and running on this one,
+/// which is the case ADR-0014 names when it says the tree and the relations
+/// are different facts.
+///
+/// The negative is the rest of the file: twenty-three assets are in this
+/// estate and four are on this list.
+#[tokio::test]
+async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
+    let pool = imported("depends-on-runs-on").await;
+    link_as(
+        &pool,
+        "asset:knobas-teamcity-agent",
+        "asset:orbstack-docker",
+        "runs-on",
+    )
+    .await;
+
+    let lines = breaks_with(&pool, "asset:orbstack-docker").await;
+    assert_eq!(
+        lines,
+        vec![
+            ("asset:knobas-gitea".to_owned(), None),
+            ("asset:knobas-mockd".to_owned(), None),
+            (
+                "asset:knobas-teamcity-agent".to_owned(),
+                Some("runs-on".to_owned())
+            ),
+            ("asset:knobas-uptime-kuma".to_owned(), None),
+        ]
+    );
+    for absent in [
+        "asset:knobas-teamcity",
+        "asset:hetzner-teamcity",
+        "asset:notebook",
+        "asset:orbstack",
+    ] {
+        assert!(
+            !lines.iter().any(|(id, _)| id == absent),
+            "{absent} does not break when the engine under it does"
+        );
+    }
+}
+
+/// An asset reached in one step both by the tree and by a link reads as
+/// *inside*.
+///
+/// The Docker engine is held by the machine and, here, also drawn at it with
+/// `runs-on` -- which is a true sentence somebody may well write down. Two
+/// edges, one asset: the panel counts assets, so it is one line, and the
+/// tie-break is containment, because *held by the thing that went down* needs
+/// no link to have been drawn and is the plainer answer to *why is this here*.
+///
+/// The whole list is asserted, not just that line: a tie-break that dropped
+/// the other three would also satisfy an assertion about this one.
+#[tokio::test]
+async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
+    let pool = imported("depends-on-tie-break").await;
+    link_as(
+        &pool,
+        "asset:hetzner-teamcity-docker",
+        "asset:hetzner-teamcity",
+        "runs-on",
+    )
+    .await;
+
+    assert_eq!(
+        breaks_with(&pool, "asset:hetzner-teamcity").await,
+        vec![
+            ("asset:hetzner-teamcity-docker".to_owned(), None),
+            ("asset:knobas-teamcity".to_owned(), None),
+            ("asset:knobas-teamcity-agent".to_owned(), None),
+            ("asset:db-teamcity".to_owned(), None),
+        ]
+    );
+}
+
+/// A cycle in hand-drawn links is walked once and the read comes back.
+///
+/// Story 53. Three databases in a ring -- Jira's depends on TeamCity's,
+/// Confluence's on Jira's, TeamCity's on Confluence's -- which nobody would
+/// draw on purpose and which the model does nothing to prevent: `depends-on`
+/// is an ordinary link and there is no acyclicity check on one.
+///
+/// Two claims, and the second is the one that matters: the walk **terminates**
+/// (a test that hangs fails the gate by timing out), and the subject is not on
+/// its own list, because the lap that comes back round finds it already
+/// visited. A visited set that only stopped the *second* visit to a
+/// non-subject asset would hang here.
+#[tokio::test]
+async fn a_cycle_is_walked_once_and_never_lists_the_asset_it_started_from() {
+    let pool = imported("depends-on-cycle").await;
+    link_as(&pool, "asset:db-jira", "asset:db-teamcity", "depends-on").await;
+    link_as(&pool, "asset:db-confluence", "asset:db-jira", "depends-on").await;
+    link_as(
+        &pool,
+        "asset:db-teamcity",
+        "asset:db-confluence",
+        "depends-on",
+    )
+    .await;
+
+    assert_eq!(
+        breaks_with(&pool, "asset:db-teamcity").await,
+        vec![
+            ("asset:db-jira".to_owned(), Some("depends-on".to_owned())),
+            (
+                "asset:db-confluence".to_owned(),
+                Some("depends-on".to_owned())
+            ),
+        ]
+    );
+}
+
+/// Four links at one asset that the panel is right to leave off it.
+///
+/// Each is a different way to be adjacent without breaking, and each would be
+/// counted by a walk missing one clause of [`assets::depends_on_this`]:
+///
+/// * **the other direction** -- Gitea depends on mockd, so mockd going down
+///   breaks Gitea and not the other way about;
+/// * **another relation** -- `blocks` is work's word and says nothing about
+///   what runs where;
+/// * **a proposal** -- nobody has confirmed it, and a blast radius drawn from
+///   a guess is a guess;
+/// * **an entity that is not an asset** -- a Jira ticket linked with the word
+///   is still a ticket, and the pane's *Linked* panel is where it belongs.
+///
+/// The routes are asserted in the same breath, so that "the panel is empty" is
+/// a claim about the walk rather than about a read that answered nothing at
+/// all.
+#[tokio::test]
+async fn a_link_the_panel_does_not_walk_leaves_the_list_empty() {
+    let pool = imported("depends-on-negatives").await;
+    link_as(
+        &pool,
+        "asset:knobas-gitea",
+        "asset:knobas-mockd",
+        "depends-on",
+    )
+    .await;
+    link_as(&pool, "asset:orbstack", "asset:knobas-gitea", "blocks").await;
+    propose(
+        &pool,
+        "asset:knobas-uptime-kuma",
+        "asset:knobas-gitea",
+        "depends-on",
+    )
+    .await;
+    sqlx::query("insert into knobas.entity (id, kind, title) values ('jira:PAY-1','ticket','PAY-1')")
+        .execute(&pool)
+        .await
+        .expect("a mirrored ticket");
+    link_as(&pool, "jira:PAY-1", "asset:knobas-gitea", "depends-on").await;
+
+    let answer = assets::depends_on_this(&pool, "asset:knobas-gitea")
+        .await
+        .expect("the panel");
+    assert!(
+        answer.assets.is_empty(),
+        "{:?}",
+        answer
+            .assets
+            .iter()
+            .map(|row| (&row.asset.id, &row.relation))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(answer.routes.len(), 2, "the two routes still land on Gitea");
+}
+
+/// An id no asset carries is a rejection and not an empty panel.
+///
+/// The two answers are different sentences -- *nothing breaks* and *there is
+/// no such asset* -- and a panel that drew the first for the second would say
+/// a deleted asset was safe to turn off.
+#[tokio::test]
+async fn the_panel_refuses_an_id_no_asset_carries() {
+    let pool = imported("depends-on-not-found").await;
+
+    let refused = assets::depends_on_this(&pool, "asset:nothing")
+        .await
+        .expect_err("no such asset");
+    assert_eq!(code(&refused), IpcErrorCode::NotFound);
 }

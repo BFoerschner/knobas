@@ -34,8 +34,8 @@ use tauri::{Emitter, State};
 use knobas_core::asset::AssetType;
 
 use crate::assets::{
-    self, AssetDetail, AssetEdit, AssetRow, ImportOutcome, ImportPreview, MemberAsset, OpenAlert,
-    PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
+    self, AssetDetail, AssetEdit, AssetRow, DependsOnThis, ImportOutcome, ImportPreview,
+    MemberAsset, OpenAlert, PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
 };
 use crate::{IpcError, Lifecycle};
 
@@ -461,6 +461,33 @@ pub async fn source_assets(
 ) -> Result<Vec<MemberAsset>, IpcError> {
     let pool = lifecycle.pool()?;
     assets::monitored_by(&pool, &source_id).await
+}
+
+/// What breaks if this asset goes down — the pane's *Depends on this* panel
+/// (spec §12.2, issue #505).
+///
+/// A read of its own rather than a field on [`get_asset`]'s answer, and that
+/// is the one design decision on this side of the bridge. The pane's read runs
+/// on every selection in every Miller column; this walk is a round trip per
+/// step of the closure and the panel is one section of the pane a reader
+/// scrolls to. Keeping it apart means the tree stays as quick as it was and
+/// the panel pays for itself.
+///
+/// **No `AppHandle`**, for the reason the other reads here have none: it
+/// announces nothing and writes nothing.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no asset carries,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn depends_on_this(
+    lifecycle: State<'_, Lifecycle>,
+    asset_id: String,
+) -> Result<DependsOnThis, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::depends_on_this(&pool, &asset_id).await
 }
 
 /// What importing `file` would do, having written nothing.
@@ -1521,6 +1548,70 @@ mod tests {
                 "monitor_targets",
             ],
         );
+    }
+
+    /// The *Depends on this* panel's two shapes (#505).
+    ///
+    /// **Both lists populated, and `relation` present in one row and `null` in
+    /// the other.** `path` and `relation` are `Option`s, so a fixture that
+    /// left either empty would let the mirror declare them anything at all --
+    /// the rule `the_asset_property_matches_its_typescript_mirror` states --
+    /// and the null one is the containment case the panel reads as *inside*,
+    /// which is the branch that would otherwise never be serialized here.
+    #[test]
+    fn the_depends_on_answer_matches_its_typescript_mirror() {
+        let answer = assets::DependsOnThis {
+            assets: vec![
+                assets::DependsOnRow {
+                    asset: row(),
+                    path: Some("hel1 / vm-db-01".to_owned()),
+                    relation: Some(assets::RUNS_ON.to_owned()),
+                },
+                assets::DependsOnRow {
+                    asset: row(),
+                    path: None,
+                    relation: None,
+                },
+            ],
+            routes: vec![route()],
+        };
+        assert_shape(
+            MIRROR,
+            "DependsOnRow",
+            &serde_json::to_value(&answer.assets[0]).unwrap(),
+            &["asset", "path", "relation"],
+        );
+        assert_shape(
+            MIRROR,
+            "DependsOnThis",
+            &serde_json::to_value(answer).unwrap(),
+            &["assets", "routes"],
+        );
+    }
+
+    /// The two words the panel walks are two the dialog offers (#505).
+    ///
+    /// The pin `the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary`
+    /// makes for `monitored-by`, made for the other two the moment they became
+    /// `where`-clause words: `assets::depends_on_this` filters on these
+    /// spellings, and a reader can only produce a row it will find by picking
+    /// one of them out of *Link to…*. Dropping either from `relations.ts`
+    /// would leave the panel reading a word nothing in the app can draw, and
+    /// nothing on that side of the bridge would notice.
+    ///
+    /// **The `id`, not the reading.** `runs-on`'s inverse *hosts* is a label
+    /// and not a second stored word, so it is the `id:` line that has to be
+    /// there; a table offering only "hosts" would store some other spelling.
+    #[test]
+    fn the_relations_the_panel_walks_are_in_the_frontend_vocabulary() {
+        const RELATIONS: &str = include_str!("../../../../app/src/lib/detail/relations.ts");
+        for relation in [assets::DEPENDS_ON, assets::RUNS_ON] {
+            assert!(
+                RELATIONS.contains(&format!("id: \"{relation}\"")),
+                "{relation} is not a curated relation, so *Link to…* cannot draw \
+                 a link the Depends on this panel would count"
+            );
+        }
     }
 
     /// One configured source, as `monitor_targets` reads it.

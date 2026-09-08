@@ -54,6 +54,38 @@ use uuid::Uuid;
 /// clause, which is a different thing.
 pub const MONITORED_BY: &str = "monitored-by";
 
+/// The relation an [asset](crate::asset) draws at the thing it needs.
+///
+/// `CONTEXT.md`, **Depends on this**: *"every asset linked to it by
+/// `depends-on` or `runs-on`, transitively over both … `depends-on` and
+/// `runs-on` are load-bearing relations from here on, beside `monitored-by`;
+/// the rest of the vocabulary stays open."* That sentence is what puts these
+/// two here rather than leaving them in the frontend's table: from #505 on,
+/// a `where` clause reads them, which is the same thing that earned
+/// [`MONITORED_BY`] its place and a different thing from a word that only has
+/// to be *rendered*.
+///
+/// Read from the **`to`** end. A link is directed, `from` → `to`, and this one
+/// says *from* depends on *to* -- so the blast radius of an asset is the
+/// `from` ends of the links pointing at it, which is spec #491's
+/// *"confirmed links with relation `depends-on` or `runs-on` toward the
+/// asset"*. `knobas_app::assets::depends_on_this` is the one reader.
+pub const DEPENDS_ON: &str = "depends-on";
+
+/// The relation an [asset](crate::asset) draws at the thing it runs on.
+///
+/// [`DEPENDS_ON`]'s twin, and read the same way round: *from* runs on *to*, so
+/// the container is the `from` end and the machine is the `to` end. Its
+/// inverse reading is *hosts*, which `app/src/lib/detail/relations.ts` gives
+/// it -- a label and not a second stored word, which is why the walk filters
+/// on this one spelling and finds every row however the reader phrased it.
+///
+/// **Not containment.** ADR-0014 makes holding a `parent_id` field and this a
+/// link, so a container held under a compose project may still run on a
+/// machine elsewhere in the tree, and both facts reach the panel by different
+/// routes.
+pub const RUNS_ON: &str = "runs-on";
+
 use crate::CoreError;
 use crate::entity::EntityRef;
 

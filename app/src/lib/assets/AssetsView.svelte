@@ -92,6 +92,7 @@
     createRoute as realCreateRoute,
     deleteAsset as realDeleteAsset,
     deleteRoute as realDeleteRoute,
+    dependsOnThis as realDependsOnThis,
     editAsset as realEditAsset,
     editRoute as realEditRoute,
     getAsset as realGetAsset,
@@ -105,6 +106,7 @@
     type Environment,
     type Inherited,
     type AssetType,
+    type DependsOnThis,
     type PropertyKind,
     type RouteDetail,
     type RouteRow,
@@ -115,6 +117,10 @@
     type LinkEntry,
   } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
+  // The relation vocabulary's own table: `depends-on` reads "depends on" and
+  // `runs-on` reads "runs on", and the panel below says the sentence rather
+  // than printing the stored key at a reader.
+  import { readingOf } from "../detail/relations";
   import LinkDialog from "../detail/LinkDialog.svelte";
   import LinksPanel from "../detail/LinksPanel.svelte";
   // The launcher's own debounce, imported rather than copied: two search
@@ -203,6 +209,15 @@
      */
     unlink: typeof realUnlink;
     /**
+     * What breaks if the selected asset goes down (#505) — the pane's
+     * *Depends on this* panel.
+     *
+     * A port and a read of its own, not a field on {@link getAsset}'s answer:
+     * the walk costs a round trip per step of the closure and the pane's read
+     * runs on every selection in every column.
+     */
+    dependsOnThis: typeof realDependsOnThis;
+    /**
      * The Import's two halves (#439): what a file would do, and doing it.
      *
      * Both, because the dialog is the one surface where a read and a write
@@ -277,6 +292,7 @@
     deleteRoute: realDeleteRoute,
     openExternal: realOpenExternal,
     unlink: realUnlink,
+    dependsOnThis: realDependsOnThis,
     previewEstateImport: realPreviewEstateImport,
     applyEstateImport: realApplyEstateImport,
     submitWrite: realSubmitWrite,
@@ -417,7 +433,19 @@
     detail === null || detail.asset.id !== selectedId ? emptyPath() : columnPathFor(detail),
   );
 
+  /**
+   * What breaks if the selected asset goes down (#505), or `null` while the
+   * read is out — and {@link dependsFailure} when it came back refused.
+   *
+   * Held apart from {@link detail} because it is a second read: a pane whose
+   * panel had to wait for this one would draw its properties late for a
+   * section a reader scrolls to.
+   */
+  let dependsOn = $state<DependsOnThis | null>(null);
+  let dependsFailure = $state<string | null>(null);
+
   const detailRead = latestRead<AssetDetail>();
+  const dependsRead = latestRead<DependsOnThis>();
   const columnsRead = latestRead<AssetRow[][]>();
   const routeRead = latestRead<RouteDetail>();
 
@@ -482,6 +510,15 @@
    */
   let editorsFor: string | null = null;
 
+  /**
+   * Which asset {@link dependsOn} answers about.
+   *
+   * {@link editorsFor}'s shape and its reason: not `$state`, because nothing
+   * draws from it — it is how the effect below tells a re-read of the same
+   * asset from a move to another one.
+   */
+  let dependsFor: string | null = null;
+
   /** The address names an asset: read it, or clear the pane when it names none. */
   $effect(() => {
     const id = selectedId;
@@ -507,6 +544,50 @@
         // the view lying about what the address names.
         detail = null;
         failure = ipcErrorMessage(cause);
+      },
+    });
+  });
+
+  /**
+   * The *Depends on this* panel's read (#505), beside the pane's and not
+   * inside it.
+   *
+   * An effect of its own so that the two answers arrive independently: the
+   * properties, the path and the routes are one round trip and this walk is
+   * one per step of the closure, and a pane that waited for both would draw
+   * neither until the slower had landed. Both run off `selectedId` and
+   * `revision`, so a write that changes what is held — a move, a delete, an
+   * import — re-reads the panel as well as the pane.
+   *
+   * The failure is kept and drawn in the panel rather than swallowed: this
+   * read is a walk over links a reader can get wrong (a cycle, an asset that
+   * has since gone), and a panel that silently drew "nothing depends on this"
+   * for a refusal would say a machine was safe to turn off.
+   */
+  $effect(() => {
+    const id = selectedId;
+    void revision;
+    if (id !== dependsFor) {
+      // Cleared on the way to the new asset, not left standing until the walk
+      // lands: `latestRead` drops the stale *answer*, but the last one is
+      // still on screen while the next is out, and this panel names other
+      // assets — a list of what breaks when the previous selection goes down,
+      // under this one's heading, is the pane stating a falsehood.
+      dependsFor = id;
+      dependsOn = null;
+      dependsFailure = null;
+    }
+    if (id === null) {
+      return;
+    }
+    void dependsRead(() => io.dependsOnThis(id), {
+      ok: (answer) => {
+        dependsOn = answer;
+        dependsFailure = null;
+      },
+      fail: (cause) => {
+        dependsOn = null;
+        dependsFailure = ipcErrorMessage(cause);
       },
     });
   });
@@ -2081,6 +2162,75 @@
         </section>
 
         <!--
+          **Depends on this** — what breaks if this asset goes down (spec
+          §12.2, #505), which `CONTEXT.md` gives that name and warns off
+          calling *blast radius*: that is the question, this is the panel.
+
+          Drawn on every asset, like *Exposes* and *Reachable via* and unlike
+          *Monitoring*: "what breaks if I turn this off" is a question about
+          every asset, and *nothing* is a real and useful answer to it — the
+          one a reader wants before pulling a machine out.
+
+          The routes come **beneath the list and outside the count**, which is
+          `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
+          are listed beneath as reachable via routes that would break and not
+          counted"*, so that the number is about assets. They are drawn as
+          plain rows rather than through the `routeRow` snippet above,
+          deliberately: that row carries the `data-wire` end the wire
+          measurement reads (#433), and every route here is already in
+          *Reachable via* with one — a second copy of the same key would
+          measure a wire twice.
+        -->
+        <section class="grp breaks">
+          <h3 class="lab">
+            Depends on this
+            {#if dependsOn !== null}<span class="n">{dependsOn.assets.length}</span>{/if}
+          </h3>
+          {#if dependsFailure !== null}
+            <p class="empty">{dependsFailure}</p>
+          {:else if dependsOn === null}
+            <p class="empty">Reading…</p>
+          {:else if dependsOn.assets.length === 0}
+            <p class="empty">Nothing depends on this.</p>
+          {:else}
+            <ul class="lst">
+              {#each dependsOn.assets as row (row.asset.id)}
+                <li>
+                  <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
+                    {row.asset.name}
+                  </button>
+                  <!--
+                    Why it is on the list. A relation is rendered through the
+                    vocabulary's own table, from the *listed* asset's end — it
+                    is the one that depends on, or runs on, the asset in the
+                    pane. `null` is containment, which is a `parent_id` field
+                    and not a link (ADR-0014), so there is no relation to
+                    render and the word is *inside*.
+                  -->
+                  <span class="faint"
+                    >{row.relation === null ? "inside" : readingOf(row.relation, true)}</span
+                  >
+                  {#if row.path !== null}
+                    <span class="faint">· {row.path}</span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if dependsOn !== null && dependsOn.routes.length > 0}
+            <p class="lab via">Reachable via routes that would break</p>
+            <ul class="lst">
+              {#each dependsOn.routes as route (route.id)}
+                <li>
+                  <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
+                  <span class="faint mono">{route.url}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+
+        <!--
           **Monitoring** — the monitors watching this asset (#445, story 33's
           own row of the pane), and under it the names the estate file gave
           that have not found one yet (#439).
@@ -2890,6 +3040,20 @@
 
   .grp h3 {
     margin: 0 0 4px;
+  }
+
+  /* The count beside *Depends on this* (#505): the number of assets that
+     break, and never the routes, which sit under their own line below. */
+  .breaks .n {
+    margin-left: 6px;
+    font: 600 11px/1 var(--mono);
+    color: var(--fg);
+  }
+
+  /* The routes' own line, inside the section rather than a heading of its
+     own: they belong to this panel's answer and are outside its count. */
+  .breaks .via {
+    margin: 8px 0 4px;
   }
 
   .props {

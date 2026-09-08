@@ -331,6 +331,43 @@ export interface AssetDetail {
 }
 
 /**
+ * One line of the *Depends on this* panel — `assets::DependsOnRow` (#505).
+ *
+ * The asset that breaks, where it sits, and why it is on the list. A carrier
+ * rather than fields on {@link AssetRow}, {@link MemberAsset}'s reason: the
+ * relation is true of this answer and not of the asset.
+ */
+export interface DependsOnRow {
+  asset: AssetRow;
+  /** The ancestors' names, outermost first, `" / "` between; `null` at the
+   * top of the estate. */
+  path: string | null;
+  /**
+   * The relation it came through — `"depends-on"` or `"runs-on"` — and `null`
+   * when it came through **containment**, which the panel reads as *inside*.
+   *
+   * Null rather than a word: ADR-0014 makes holding a `parent_id` field and
+   * says there is no `holds` relation, so there is no relation to name here.
+   */
+  relation: string | null;
+}
+
+/**
+ * What breaks if an asset goes down — `assets::DependsOnThis` (#505,
+ * `CONTEXT.md`'s **Depends on this**).
+ *
+ * Two lists and no count: the number the panel draws is `assets.length`, and
+ * the routes are listed beneath it and **not** counted, because the number is
+ * about assets.
+ */
+export interface DependsOnThis {
+  /** Every asset that breaks, nearest first. Never the asset itself. */
+  assets: DependsOnRow[];
+  /** The routes that land on the asset — the way in that stops working. */
+  routes: RouteRow[];
+}
+
+/**
  * One source a new monitor could be created in — `assets::MonitorTarget`.
  *
  * `entity` is what a `CreateMonitor` against this source targets, composed by
@@ -654,6 +691,21 @@ export function getAsset(assetId: string): Promise<AssetDetail> {
  */
 export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
   return invoke<MemberAsset[]>("context_assets", { ctxId });
+}
+
+/**
+ * What breaks if this asset goes down (#505): its descendants and everything
+ * linked to it by `depends-on` or `runs-on`, transitively over both, plus the
+ * routes that land on it listed apart.
+ *
+ * A read of its own and not part of {@link getAsset}: the pane's read runs on
+ * every selection in every column, and this walk costs a round trip per step
+ * of the closure.
+ *
+ * An id no asset carries is a rejection, not an empty answer.
+ */
+export function dependsOnThis(assetId: string): Promise<DependsOnThis> {
+  return invoke<DependsOnThis>("depends_on_this", { assetId });
 }
 
 /**

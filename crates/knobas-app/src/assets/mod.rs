@@ -113,6 +113,21 @@
 //! monitoring, so an expiry knobas *checks* is a Kuma monitor (M4.1) and an
 //! expiry knobas *records* is a property.
 //!
+//! # Depends on this (#505)
+//!
+//! `CONTEXT.md`, **Depends on this**: *what breaks if an asset goes down --
+//! its descendants, since they run inside it, and every asset linked to it by
+//! `depends-on` or `runs-on`, transitively over both*, with the routes that
+//! land on it listed beneath and not counted. [`depends_on_this`] is that
+//! read and [`NEXT_LAYER`] is the one step it repeats; the two relations are
+//! [`DEPENDS_ON`] and [`RUNS_ON`], `knobas_core::link`'s constants beside
+//! [`MONITORED_BY`] because from here on a `where` clause reads them.
+//!
+//! It is **not** part of [`get`]. The pane's read runs on every selection in
+//! every Miller column and this one costs a round trip per step of the
+//! closure, so it is a command of its own that the pane makes beside the
+//! other -- and the two answers land independently.
+//!
 //! # The Import (#439)
 //!
 //! `CONTEXT.md`, **Import**: *"loading assets from outside — an estate file,
@@ -243,6 +258,22 @@ const PATH_SEPARATOR: &str = " / ";
 /// its two readings. The two spellings are pinned together by
 /// `commands::assets`' mirror test, the way `DEFAULT_RELATION` is.
 pub const MONITORED_BY: &str = knobas_core::link::MONITORED_BY;
+
+/// The relation an asset draws at the thing it needs (`CONTEXT.md`,
+/// **Depends on this**; issue #505).
+pub const DEPENDS_ON: &str = knobas_core::link::DEPENDS_ON;
+
+/// The relation an asset draws at the thing it runs on (#505).
+pub const RUNS_ON: &str = knobas_core::link::RUNS_ON;
+
+/// The two relations [`depends_on_this`] walks.
+///
+/// Bound as an array rather than written into [`NEXT_LAYER`]'s text, for
+/// [`MONITORED_BY`]'s reason: one spelling per word in this crate. The order
+/// here is the declaration's and not the walk's -- the statement takes the
+/// whole array in one `= any` and orders its own tie-break by the relation
+/// text, which [`NEXT_LAYER`] argues.
+const DEPENDENCY_RELATIONS: [&str; 2] = [DEPENDS_ON, RUNS_ON];
 
 /// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
 ///
@@ -1328,6 +1359,104 @@ const ROUTES_REACHABLE: &str = "with recursive up (id, parent_id, depth) as (
        join knobas.asset ea on ea.id = r.asset_id
        join knobas.asset ta on ta.id = r.target_id
       order by path.depth asc, r.name asc, r.id asc";
+
+/// The routes that land **on this asset itself** -- what the *Depends on this*
+/// panel lists beneath its count (#505).
+///
+/// [`ROUTES_EXPOSED`]' columns over a third `where`, and a statement of its own
+/// for the reason all of them are: the SQL audit is over literal text.
+///
+/// **`target_id`, not the containment path**, which is what makes this a
+/// different read from [`ROUTES_REACHABLE`] rather than a filter over it.
+/// `CONTEXT.md`, **Depends on this**: *"Routes whose target **is the asset**
+/// are listed beneath as reachable via routes that would break"*. The panel
+/// answers *what breaks if this goes down*, and a route landing on the VM
+/// above still answers whatever else that VM holds; only the ones aimed here
+/// stop answering when this asset does.
+const ROUTES_TO: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
+            r.visibility, r.properties,
+            ea.name as asset_name, ta.name as target_name
+       from knobas.route r
+       join knobas.asset ea on ea.id = r.asset_id
+       join knobas.asset ta on ta.id = r.target_id
+      where r.target_id = $1
+      order by r.name asc, r.id asc";
+
+/// One step of [`depends_on_this`]' walk: everything that breaks when any
+/// asset in `$1` does, and the edge each was reached by (#505).
+///
+/// `$1` is the current frontier -- the ids reached by the previous step -- and
+/// `$2` is [`DEPENDENCY_RELATIONS`]. The walk itself, and the visited set that
+/// ends it, are in [`depends_on_this`]; this statement knows only about one
+/// layer.
+///
+/// # The two kinds of edge
+///
+/// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
+/// it, and every asset linked to it by `depends-on` or `runs-on`, transitively
+/// over both"*. Those are the two halves of the `edge` union:
+///
+/// * **containment**, `parent_id`, which is the tree (ADR-0014) and carries no
+///   relation word -- `null`, not `holds`, because that ADR says there is no
+///   such link and inventing one here would put a word in the panel that a
+///   reader could then type into *Link to…* and have counted twice;
+/// * **a confirmed link**, read from its **`to`** end. A link is directed and
+///   `depends-on` says *from* depends on *to*, so what breaks when `$1` goes
+///   down is the `from` ends of the links pointing at it -- spec #491's
+///   *"confirmed links with relation `depends-on` or `runs-on` toward the
+///   asset"*. The undirected reading would put the machine in the blast radius
+///   of the container running on it, which is the opposite of the question.
+///
+/// `knobas.confirmed_link` rather than `knobas.link`: a proposal is a guess
+/// nobody has accepted and a withdrawn link is a tombstone, and neither is a
+/// fact to draw a blast radius from. That view is `deleted_at is null and
+/// confirmed_at is not null` (`0007`), so both filters are the view's.
+///
+/// # Why the far end is joined to `knobas.asset`
+///
+/// A link joins two *entities*, so the other end may be a ticket, a note or a
+/// monitor. The panel counts assets -- story 51 says *"every **asset** linked
+/// to it"* -- so the join is the filter, and it also settles the deleted case:
+/// [`delete`] removes the `knobas.asset` row and tombstones only the entity,
+/// so a link drawn at an asset somebody has since deleted finds no row here.
+/// That is not the panel hiding a live dependent; it is that a deleted asset
+/// is no longer an asset, has no type, no path and no place in the tree. What
+/// a tombstone **does** keep visible is the link itself, in the pane's
+/// *Linked* panel below, which is where `CONTEXT.md`'s rule about a link
+/// pointing at something withdrawn is honoured.
+///
+/// # One row per asset, and which relation it reads as
+///
+/// An asset can be reached from one frontier by several edges at once -- held
+/// under a machine *and* drawn at it with `runs-on`. The panel counts assets
+/// and not paths, so `distinct on (dst)` keeps one row, and `order by dst,
+/// relation asc nulls first` decides which: containment first, because *inside
+/// the thing that went down* is the plainer reason and needs no link to have
+/// been drawn; then the relation words in text order, so two links between the
+/// same pair always read the same way round rather than by whichever the
+/// planner reached first.
+const NEXT_LAYER: &str = "with edge (dst, relation) as (
+         select a.id, null::text
+           from knobas.asset a
+          where a.parent_id = any($1::text[])
+         union all
+         select l.from_id, l.relation
+           from knobas.confirmed_link l
+           join knobas.asset f on f.id = l.from_id
+          where l.to_id = any($1::text[])
+            and l.relation = any($2::text[])
+     ),
+     reached (dst, relation) as (
+         select distinct on (dst) dst, relation
+           from edge
+          order by dst, relation asc nulls first
+     )
+     select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
+            a.owner, nullif(a.path_text, '') as path, reached.relation,
+            exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
+       from reached
+       join knobas.asset a on a.id = reached.dst
+      order by a.name asc, a.id asc";
 
 /// One route by id.
 const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
@@ -2516,6 +2645,156 @@ async fn tile_rows(
             .then_with(|| left.asset.id.cmp(&right.asset.id))
     });
     Ok(out)
+}
+
+/// One line of the *Depends on this* panel: an asset that breaks, where it
+/// sits, and why it is on the list (#505).
+///
+/// A carrier rather than fields on [`AssetRow`], [`MemberAsset`]'s reason
+/// exactly -- `path_text` is not on a Miller column's read and `relation` is
+/// true of this *answer* and not of the asset, which is on somebody else's
+/// list under a different word.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct DependsOnRow {
+    pub asset: AssetRow,
+    /// The ancestors' names, outermost first, `" / "` between them; `null` for
+    /// an asset at the top of the estate.
+    ///
+    /// Story 54's *"each dependent's path in the tree"*, read off
+    /// `knobas.asset.path_text` the way [`MemberAsset::path`] is.
+    pub path: Option<String>,
+    /// The relation it came through -- [`DEPENDS_ON`] or [`RUNS_ON`] -- and
+    /// **`null` when it came through containment**.
+    ///
+    /// The other half of story 54, *"the relation it came through"*, and the
+    /// null is the tree: ADR-0014 makes holding a `parent_id` field and says
+    /// there is no `holds` relation, so there is no word to put here that a
+    /// reader could not also draw as a link. The panel reads the null as
+    /// *inside*.
+    ///
+    /// An asset reachable both ways reads as the edge that got there first,
+    /// which [`NEXT_LAYER`] decides; the walk is breadth-first, so that is the
+    /// nearest one.
+    pub relation: Option<String>,
+}
+
+/// What breaks if one asset goes down (`CONTEXT.md`, **Depends on this**;
+/// spec §12.2, issue #505).
+///
+/// Two lists and no count: the count the panel draws is `assets.len()`, and a
+/// number beside a list it can be read off is a fact on the wire twice.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct DependsOnThis {
+    /// Every asset that breaks, nearest first -- the whole closure, each with
+    /// its path and the edge it was reached by.
+    ///
+    /// Never the asset itself: the question is what *else* stops working.
+    pub assets: Vec<DependsOnRow>,
+    /// The routes that land on the asset, listed beneath and **not counted**
+    /// (story 52, so that the number is about assets).
+    ///
+    /// Not folded into [`assets`](Self::assets): a route is not an asset, and
+    /// the assets whose routes these are keep working -- what stops is the way
+    /// in.
+    pub routes: Vec<RouteRow>,
+}
+
+/// The *Depends on this* panel's read: what breaks if this asset goes down
+/// (spec #491 stories 51-54, issue #505).
+///
+/// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
+/// it, and every asset linked to it by `depends-on` or `runs-on`, transitively
+/// over both … Routes whose target is the asset are listed beneath as
+/// reachable via routes that would break and not counted."*
+///
+/// # One walk over two kinds of edge
+///
+/// *Transitively over both* is one closure and not two: a container inside a
+/// machine breaks when the machine does, and whatever runs on that container
+/// breaks with it. So each step takes the current frontier and asks
+/// [`NEXT_LAYER`] for everything one edge further out, by containment or by
+/// link, and the answers become the next frontier. Nothing here re-states
+/// which edges those are; that statement's own docs argue the direction the
+/// links are read in and why the far end must be an asset.
+///
+/// # Breadth-first, with a visited set, which is what walks a cycle once
+///
+/// `seen` starts holding the asset itself and every row is added to it before
+/// it becomes frontier, so an asset already on the list is never expanded a
+/// second time. That is story 53 -- *"a cycle in hand-drawn links never hangs
+/// the pane"* -- and it is also what makes the loop terminate at all: each
+/// step adds at least one unseen asset or ends, and there are finitely many
+/// assets. It is deliberately **not** a recursive CTE: `union` in one would
+/// have to dedupe on the id alone to stop a cycle, and this answer carries a
+/// depth and a relation per row, which are exactly the columns that make every
+/// lap around a cycle a new row.
+///
+/// The order is the order the question is asked in: everything one step out,
+/// by name, then everything two steps out. The relation a row reads as is the
+/// edge that first reached it, so an asset both held by this one and drawn at
+/// it says *inside*.
+///
+/// # What is not here
+///
+/// **The asset itself**, which is the thing that went down rather than a
+/// consequence of it. **Anything that is not an asset**: the far end of every
+/// link is joined to `knobas.asset`, so a ticket, a note or a monitor linked
+/// with one of these two words is not on the list -- story 51 asks for *every
+/// asset linked to it*, and the pane's *Linked* panel below is where the rest
+/// of an asset's links are read. **A proposal**, which nobody has confirmed.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] for an id no asset carries -- rather than an empty
+/// panel, which is the honest answer for an asset that holds nothing and would
+/// be a lie about one that does not exist. [`IpcError`] if a read fails.
+pub async fn depends_on_this(pool: &PgPool, id: &str) -> Result<DependsOnThis, IpcError> {
+    sqlx::query(ONE)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| no_such_asset(id))?;
+
+    let relations: Vec<String> = DEPENDENCY_RELATIONS.iter().map(|r| (*r).to_owned()).collect();
+    let mut seen: HashSet<String> = HashSet::from([id.to_owned()]);
+    let mut frontier: Vec<String> = vec![id.to_owned()];
+    let mut assets: Vec<DependsOnRow> = Vec::new();
+
+    while !frontier.is_empty() {
+        let reached = sqlx::query(NEXT_LAYER)
+            .bind(&frontier)
+            .bind(&relations)
+            .fetch_all(pool)
+            .await?;
+
+        // Filtered before anything is hydrated: an asset already on the list
+        // is the same asset, and re-reading it would be the second lap the
+        // visited set exists to prevent.
+        let mut layer = Vec::with_capacity(reached.len());
+        for row in reached {
+            if seen.insert(row.try_get("id")?) {
+                layer.push(row);
+            }
+        }
+        if layer.is_empty() {
+            break;
+        }
+
+        let hydrated = rows_of(pool, &layer).await?;
+        frontier = hydrated.iter().map(|asset| asset.id.clone()).collect();
+        for (row, asset) in layer.iter().zip(hydrated) {
+            assets.push(DependsOnRow {
+                asset,
+                path: row.try_get("path")?,
+                relation: row.try_get("relation")?,
+            });
+        }
+    }
+
+    Ok(DependsOnThis {
+        assets,
+        routes: routes(pool, ROUTES_TO, id).await?,
+    })
 }
 
 /// Every open alert, newest first, with the monitor each is about.
