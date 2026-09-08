@@ -1255,23 +1255,33 @@ function dependsOnThis(args: Record<string, unknown>) {
   const assets: { asset: unknown; path: string | null; relation: string | null }[] = [];
   while (frontier.length > 0) {
     const reached = new Map<string, string | null>();
+    /**
+     * The store's `distinct on (dst) ... order by dst, relation asc nulls
+     * first`, over the **whole** step and not over one frontier entry:
+     * containment beats a link, and two links between the same pair settle by
+     * the relation's own text. Written out rather than first-writer-wins,
+     * because the order the frontier happens to be in is not a rule.
+     */
+    const claim = (dst: string, relation: string | null) => {
+      if (!reached.has(dst)) return void reached.set(dst, relation);
+      const held = reached.get(dst) ?? null;
+      if (held === null || relation === null) return void reached.set(dst, null);
+      if (relation < held) reached.set(dst, relation);
+    };
     for (const from of frontier) {
-      for (const held of FIXTURE_ESTATE.filter((row) => row.parent_id === from)) {
-        if (!reached.has(held.id)) reached.set(held.id, null);
-      }
+      for (const held of FIXTURE_ESTATE.filter((row) => row.parent_id === from)) claim(held.id, null);
       for (const edge of FIXTURE_DEPENDENCIES.filter((link) => link.to === from)) {
-        // Containment wins a tie inside one step, which is the store's
-        // `order by ... relation asc nulls first`.
-        if (!reached.has(edge.from)) reached.set(edge.from, edge.relation);
+        claim(edge.from, edge.relation);
       }
     }
     const layer = [...reached]
       .filter(([reachedId]) => !seen.has(reachedId))
       .map(([reachedId, relation]) => ({
+        // Non-null because every id in `reached` came out of `FIXTURE_ESTATE`
+        // or out of a link this file wrote between two of its assets.
         asset: FIXTURE_ESTATE.find((row) => row.id === reachedId)!,
         relation,
       }))
-      .filter((line) => line.asset !== undefined)
       .sort((left, right) => left.asset.name.localeCompare(right.asset.name));
     for (const line of layer) seen.add(line.asset.id);
     for (const line of layer) {

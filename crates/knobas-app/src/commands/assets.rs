@@ -1552,12 +1552,19 @@ mod tests {
 
     /// The *Depends on this* panel's two shapes (#505).
     ///
-    /// **Both lists populated, and `relation` present in one row and `null` in
-    /// the other.** `path` and `relation` are `Option`s, so a fixture that
-    /// left either empty would let the mirror declare them anything at all --
-    /// the rule `the_asset_property_matches_its_typescript_mirror` states --
-    /// and the null one is the containment case the panel reads as *inside*,
-    /// which is the branch that would otherwise never be serialized here.
+    /// **Two rows, and both of them shape-checked.** [`assert_shape`] compares
+    /// field *names*, so what the second row adds is the one thing that can
+    /// make a name disappear: a `#[serde(skip_serializing_if)]` on `path` or
+    /// `relation` would leave the null row short of a key the mirror declares
+    /// -- and the panel branches on exactly that null (`relation === null` is
+    /// what it draws as *inside*), so a key the frontend never receives is a
+    /// row it draws under the wrong reason. One populated row alone would
+    /// carry both keys whatever the attribute said.
+    ///
+    /// Both **lists** are populated for the reason
+    /// `the_asset_detail_matches_its_typescript_mirror` gives: an empty `Vec`
+    /// proves nothing about the shape it holds, and `DependsOnRow` is this
+    /// module's own.
     #[test]
     fn the_depends_on_answer_matches_its_typescript_mirror() {
         let answer = assets::DependsOnThis {
@@ -1575,12 +1582,14 @@ mod tests {
             ],
             routes: vec![route()],
         };
-        assert_shape(
-            MIRROR,
-            "DependsOnRow",
-            &serde_json::to_value(&answer.assets[0]).unwrap(),
-            &["asset", "path", "relation"],
-        );
+        for row in &answer.assets {
+            assert_shape(
+                MIRROR,
+                "DependsOnRow",
+                &serde_json::to_value(row).unwrap(),
+                &["asset", "path", "relation"],
+            );
+        }
         assert_shape(
             MIRROR,
             "DependsOnThis",

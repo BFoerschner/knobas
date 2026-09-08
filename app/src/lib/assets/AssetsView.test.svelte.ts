@@ -415,10 +415,9 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
         // file would render behind a "Creating is unavailable" line and a
         // dead plus. Empty is the honest fixture: no test here presses one.
         assetTypes: () => Promise.resolve([]),
-        // #505's panel is read on every selection, so a port left out here
-        // falls through to the real `invoke` and every pane in this file would
-        // draw the panel's failure line. Empty is the honest fixture: no test
-        // in this file is about what breaks.
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
         dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         search: (query: SearchQuery) => {
           searched.push(query);

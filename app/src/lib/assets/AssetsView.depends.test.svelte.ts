@@ -63,13 +63,19 @@ const TUNNEL: RouteRow = {
   visibility: "internal",
   properties: [],
 };
+// The real estate file's own reverse tunnel resolves the docker network name
+// `gitea`, which is a hostname that is neither loopback nor reserved and is
+// therefore an offence in `src/**` (`house-rules.test.ts`, *no runtime network
+// references*). The file is data and is exempt; a fixture spelled by hand is
+// not, so this one takes a reserved name. What is under test is that a second
+// route is drawn beneath the count, and the host is not part of that.
 const REVERSE: RouteRow = {
   ...TUNNEL,
   id: "route:tunnel-gitea-reverse",
   asset_id: TEAMCITY.id,
   asset_name: TEAMCITY.name,
   name: "gitea (reverse tunnel)",
-  url: "http://gitea:3000/",
+  url: "http://gitea.test:3000/",
 };
 
 /** What the panel answers for one asset, and nothing for the others. */
@@ -240,7 +246,7 @@ test("the routes that would break are listed beneath and are not in the count", 
   expect(lines()).toEqual([
     "knobas-teamcity depends on",
     "Gitea http://127.0.0.1:3000/",
-    "gitea (reverse tunnel) http://gitea:3000/",
+    "gitea (reverse tunnel) http://gitea.test:3000/",
   ]);
 });
 

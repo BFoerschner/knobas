@@ -1416,9 +1416,10 @@ const ROUTES_TO: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 ///
 /// A link joins two *entities*, so the other end may be a ticket, a note or a
 /// monitor. The panel counts assets -- story 51 says *"every **asset** linked
-/// to it"* -- and what enforces that is the **final** join: every row this
-/// statement returns is a `knobas.asset` row, columns and all, because that is
-/// what [`rows_of`] hydrates. There is deliberately no second `where` clause
+/// to it"* -- and what enforces that is the **final** join, `join knobas.asset
+/// a on a.id = reached.dst`: an id no asset carries reaches `reached` and then
+/// falls out there, and every row that survives carries the columns
+/// [`rows_of`] hydrates. There is deliberately no second `where` clause
 /// saying the same thing; a filter that is the shape of the read is a filter
 /// nobody can forget. (The first draft did join the far end to `knobas.asset`
 /// inside `edge` as well, and a mutation check found it changed no answer.)
@@ -2678,9 +2679,10 @@ pub struct DependsOnRow {
     /// reader could not also draw as a link. The panel reads the null as
     /// *inside*.
     ///
-    /// An asset reachable both ways reads as the edge that got there first,
-    /// which [`NEXT_LAYER`] decides; the walk is breadth-first, so that is the
-    /// nearest one.
+    /// An asset reachable both ways reads as the edge that got there first.
+    /// **Across** steps that is the walk's own breadth-first order, so the
+    /// nearest edge wins; **within** one step it is [`NEXT_LAYER`]'s
+    /// `distinct on`, which prefers containment.
     pub relation: Option<String>,
 }
 

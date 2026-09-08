@@ -105,10 +105,9 @@ function render(alerts: Alerts) {
       alerts,
       ports: {
         assetTypes: () => Promise.resolve([]),
-        // #505's panel is read on every selection, so a port left out here
-        // falls through to the real `invoke` and every pane in this file would
-        // draw the panel's failure line. Empty is the honest fixture: no test
-        // in this file is about what breaks.
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
         dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve((parentId ?? null) === null ? [SITE] : []),
@@ -306,10 +305,9 @@ test("the ack and the recovery are sentences in the asset's history", async () =
       alerts,
       ports: {
         assetTypes: () => Promise.resolve([]),
-        // #505's panel is read on every selection, so a port left out here
-        // falls through to the real `invoke` and every pane in this file would
-        // draw the panel's failure line. Empty is the honest fixture: no test
-        // in this file is about what breaks.
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
         dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve((parentId ?? null) === null ? [SITE] : []),
