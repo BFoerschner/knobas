@@ -879,7 +879,6 @@ criterion 1's search then finds.
 parenthetical is the definition and prose inside the crate is living text — a one-line contract
 amendment in the #112 idiom, Björn's to write or to refuse. This ruling and the decisions record
 carry the reading until then.
-||||||| parent of aaa57e31 (The deputy's ruling of 2026-09-08 on #503, acted on and appended)
 
 ---
 
@@ -988,3 +987,85 @@ time; nothing on the branch forecloses it.
 in `docs/agents/working-model.md` — three PRs have now changed another ticket's driver or the
 harness under it, each rightly, and a sentence saying so would spare the next implementer this
 fork. Björn's, on his return.
+
+---
+
+## #503 (second ruling) — whether the merge waits for an unlocked screen, what the 04:55 transcript is worth, and the third `residue` pass
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/503#issuecomment-5579456196>
+
+**The fork:** three, all raised by PR #536's merge-manager after the ruling above made three
+desktop re-runs a condition of the merge and the screen locked again before they could be made.
+(1) All three drivers refuse at step 1 — `trusted 1 / post-events 1 / screen-locked 1`, exit 1,
+06:20 CEST, before the build and before Launch Services is touched. Does #536 merge now with the
+re-run owed to #525, or wait for an unlocked screen; and if it merges, who produces the
+transcripts part 4(a) assigned to the merge-manager? (2) The 04:55 transcript is older than the PR
+body claimed: **five** commits landed under it, not two, and `b4dc71d7` moved the capture window's
+`close` port from a component prop into `createCapture`'s defaults — the wiring behind the
+driver's own last assertion, *knobas is frontmost again and the capture window has gone*. Does the
+transcript still count, and is the rewritten provenance paragraph enough? (3) The merge-manager
+added a third `residue` pass, 45 lines in a file shared by thirty-nine components, because four
+`just check` runs with the leak fix reverted were all green — the fix had no witness the gate
+could see. Keep or revert?
+
+**Ruling:** (1) **#536 merges now, with its fourth criterion open and owed to #525, exactly as
+#523 and #530 merged.** The answer already existed, in the ruling of 2026-09-08 on #500, part 3,
+written for this ticket by number: the drivers *"proceed in number order … the merge-manager
+re-running and expecting the refusal, the PR merging with that one criterion open and owed to the
+same follow-up."* (a) The merge-manager's three refusals **are** the re-run, and its deep-pass
+comment on #536 is the record; posting nothing on #500 or #503 was right, because a refusal is not
+the transcript #525's second criterion asks for and #500's part 5 refuses *"the refusal transcript
+read as a pass."* (b) The PR body's fourth box **opens**, with its three clauses beside it: green
+on the dev Mac with another app frontmost, met once at 04:55 on the pre-review head; transcript in
+the body, met; re-run by the merge-manager, refused and owed. (c) Part 4(a) of the first ruling is
+not reversed — its condition failed, so nothing was discharged and **#525 carries all three runs
+again**; the two transcripts are produced by #525's runner. (d) **`ready-for-human` goes back on
+#525**, and any iteration whose probe answers `screen-locked 0` may relabel it `ready-for-agent`
+and dispatch its two runs under the desktop cap, ahead of #537. (e) `Closes #503` stays; #503
+closes with criterion 4 owed to #525, as #500 closed with its criterion 2.
+
+(2) **The transcript counts as what it is and nothing more:** a green run of `capture` on the head
+of 04:55, with its provenance stated. It is not a witness of the merge head and nothing on the
+branch may read it as one. Three records say so: the provenance paragraph names the driver's own
+assertion on the moved path and where it is next earned; the §10.8 entry's *"The desktop witness
+ran and is green"* gains a sentence, because *ran and is green* without it reads as *the merged
+code was driven*, a claim measuring a representation of the thing; and `testenv/README.md`'s
+*What is not witnessed yet* gains the same, because #525's runner reads the README before the
+entry. **No new test is owed for the moved path**: the real port is a wire, and the wire's witness
+is the desktop.
+
+(3) **The third `residue` pass stays.** The merge-manager's brief is the answer — rule 4, verify
+claims rather than accept them and ask which direction is unwitnessed; rule 6, drive the fix
+yourself. One sentence is owed in the PR body's *Gate* section naming the pass, its count and its
+two mutants, so the squash commit carries the reason a shared test file changed.
+
+**Reasoning:** (1) the #500 ruling chose to proceed over to wait for a reason stronger here, not
+weaker: waiting holds forty files against a moving `main`, holds a Rust-agent slot on an idle
+merge-manager and blocks #537, and buys nothing, because the run an unlocked screen would give is
+the same run #525 makes on `main`. What #536 has that #523 and #530 did not is a green transcript
+of its driver; a PR that merged on a refusal alone is the precedent. (2) an older green transcript
+read as the merge head's would be a fourth item on #500's list of substitutes that discharge
+nothing, but the criterion's clauses are separable and a transcript honest about its head
+satisfies the clause it satisfies. The move itself is the unwitnessed-wire class recorded four
+times in M2.6 — *endpoints always tested, wire always blind* — whose remedy there was to name the
+direction and own it, not to hold a merge for a run nobody can make. (3) what the working model
+requires of every fix is a mutation check on a committed baseline; a fix four gates cannot
+distinguish from its absence has none, and merging it would have left `main` one careless `await`
+from a leak the gate sees once in six runs and then calls a flake — which is how it was nearly
+written off the first time. `residue.test.svelte.ts` is on no frozen surface and its thirty-nine
+cases are green under the new pass; #523's and #530's merge-managers changed shared harness files
+the same way, each ruled right.
+
+**If you disagree, the cost of reversing this is:** (1) low, and it falls as #525 runs — nothing
+is unmerged to reverse it; what a wait would have added is only that the merge commit and #525's
+`capture` transcript were the same head, which #525's run on `main` gives anyway. (2) trivial in
+code — three sentences and one clause, all prose, and the moved path is two lines that move back
+in one commit. (3) trivial — one commit, one file, reverted with `git revert`; what the revert
+spends is that the leak fix is guarded by nothing on the branch.
+
+**Flagged, not ruled:** the sentence flagged in the first ruling for `docs/agents/working-model.md`
+— that `testenv/desktop-witness/**` is shared infrastructure a PR may change under the gate — now
+has a second file in the same position, `app/src/lib/shell/residue.test.svelte.ts`, changed rightly
+by a merge-manager for a ticket that did not own it. Two instances in one milestone is a rule
+waiting to be written; Björn's, on his return.

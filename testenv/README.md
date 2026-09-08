@@ -1323,6 +1323,15 @@ three faults the first run found, which are fixed, and the two gaps that remain.
   capture window gone, and the note open with `CAPTURED FROM` in its links
   panel.
 
+**Both are runs of the head they were made on, not of what merged.** They
+predate #503's review commits: `b4dc71d7` moved the capture window's `close`
+port from a component prop into `createCapture`'s defaults, so the last line of
+the `capture` transcript above — *knobas is frontmost again and the capture
+window has gone* — has not been asserted against the wiring that merged. The
+merge-manager's re-run on the merge head refused with `screen-locked` at 06:20
+CEST on 2026-09-08, and the re-run is **owed to #525**, which carries all three
+runs again. The deputy's second ruling of 2026-09-08 on #503, parts 1 and 2.
+
 **One driver is red for a reason that is not the feature's**: `open-in-editor`
 now sets the clones root, stores its template and confirms the write, and then
 stops where it always said it would — *the demo profile carries no repo entity*.

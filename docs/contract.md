@@ -8715,7 +8715,13 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The desktop witness ran and is green**, which no criterion in this milestone had managed
   before: `just desktop-witness capture`, 2026-09-08, a shortcut registered with the window server
-  and pressed while **Finder** had the screen, asserted frontmost and not assumed. Three things it
+  and pressed while **Finder** had the screen, asserted frontmost and not assumed. **That is a run
+  of the head it was made on and not of the merged one**: it was made at 04:55, before the review's
+  commits — `b4dc71d7` moved the capture window's `close` port from a component prop into
+  `createCapture`'s defaults, which is the wiring behind the driver's last assertion — the
+  merge-manager's re-run on the merge head refused with `screen-locked` at 06:20 CEST, and the
+  re-run is **owed to #525**, which carries all three runs again (the deputy's second ruling of
+  2026-09-08 on #503, parts 1 and 2). Three things it
   does **not** assert are listed in `testenv/README.md`, *What is still not witnessed*, and **none
   of them is a debt**: `captured-in`, which needs a stored room the `--demo` profile does not
   carry and which is pinned at the seam spec #491's stream map puts the capture links' witness at
