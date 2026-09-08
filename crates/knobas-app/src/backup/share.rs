@@ -70,10 +70,13 @@
 //! notice, and would have to choose *which* rows to lose. The cap reasserts
 //! itself the next time somebody saves a list.
 //!
-//! Nothing in the tree makes the two disagree **today**, because the constant
-//! has never moved: every row in an archive was written past a `create` that
-//! held the same bound. It becomes a live case the day the number changes, and
-//! there is an open ticket to change it (#533).
+//! It became a live case on the day the number changed. Until #533 (PR #540)
+//! nothing in the tree could make the two disagree, because the constant had
+//! never moved: every row in an archive had been written past a `create` that
+//! held the same bound. `MAX_SAVED_LISTS` is **16** now and was 64, so an
+//! archive taken from a database holding more than sixteen saved lists is a
+//! real archive rather than one only a test can build -- and every row in it
+//! still arrives.
 //!
 //! **The whole table travels**, and this is the one consequence worth reading
 //! twice: `pg_dump` restricts an archive by table and never by row, so "the

@@ -9146,6 +9146,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   the constant at 16, and an archive taken before it would then outrun the cap on the machine
   restoring it). This entry records the reading, not that ticket's outcome.
 
+  **#540 landed first** — `MAX_SAVED_LISTS` is **16** on the commit this entry merges on, and was 64
+  when the paragraph above was written. That paragraph stays as the history it is, side by side with
+  this one; what it calls a contrived state is live from here, and nothing else in this entry
+  changes, because the reading it records is the one that says so. The seam test asserts against
+  `MAX_SAVED_LISTS` and never against a number, so it read the same at 64 and reads the same at 16.
+
   **What is not touched.** `crates/knobas-source/**`, `crates/knobas-http/**`,
   `crates/knobas-secrets/**`, `crates/knobas-app/src/{error,profile}.rs`, the keychain envelope
   (still version 2), `crates/knobas-db/src/backup.rs` (the archive is an argument list; `dump_tables`
