@@ -58,7 +58,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import NoteBody from "./NoteBody.svelte";
-  import { activeRef, insertRef, replaceSpan, type ActiveRef } from "./note-body";
+  import { activeRef, carryCaret, insertRef, replaceSpan, type ActiveRef } from "./note-body";
 
   let {
     entityId,
@@ -344,10 +344,19 @@
    * a miss, a rejection and a link the mirror does not hold all leave the URL
    * where it landed, which is the outcome the reader can see and edit.
    *
-   * The swap is guarded on the span still holding the URL it was asked about.
-   * A reader who kept typing through the round trip has moved the text under
-   * it, and the honest answer there is to leave the paste as the text it
-   * already is rather than to splice a reference into a body that has changed.
+   * The swap is guarded on the span still holding the URL it was asked about,
+   * and that guard is narrower than "did anything change" on purpose. A reader
+   * who wrote **on** through the round trip still gets the reference: the words
+   * that follow the link are not what the answer replaces, and losing the
+   * reference because somebody kept typing would be the more surprising of the
+   * two. A reader who took the URL back out, or moved it, has a body that no
+   * longer holds what the mirror was asked about, and splicing a reference in
+   * at the offset the URL used to be at would cut a hole in whatever replaced
+   * it — so there the answer goes unused.
+   *
+   * The caret is the reader's for the same reason: it comes from
+   * {@link carryCaret} rather than from the edit, so the swap does not pull it
+   * back out of the sentence being written.
    *
    * **What `preventDefault` costs.** Writing the paste ourselves puts it in
    * the undo stack as a scripted `value` write, so ⌘Z does not unwind it the
@@ -382,7 +391,12 @@
     }
     if (mine !== token || match === null || editor !== area) return;
     if (area.value.slice(at, at + url.length) !== url) return;
-    applyEdit(area, replaceSpan(area.value, at, at + url.length, `[[${match.entity_id}]]`));
+    const reference = `[[${match.entity_id}]]`;
+    const swapped = replaceSpan(area.value, at, at + url.length, reference);
+    applyEdit(area, {
+      body: swapped.body,
+      caret: carryCaret(area.selectionStart, at, at + url.length, reference.length),
+    });
     retarget(area);
   }
 

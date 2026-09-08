@@ -138,12 +138,16 @@ export function insertRef(
 /**
  * Write `written` over `[start, end)`, and say where the caret belongs.
  *
- * The caret rule is one rule for the whole editor: **just past what was
- * written**, so typing continues after it rather than inside it. A completion
- * lands past its `]]` ({@link insertRef}, which is this with the brackets
- * worked out), a paste lands past the pasted text, and the reference a
- * resolvable pasted URL turns into lands past its `]]` — three edits a reader
- * makes to one body, none of which may leave the caret somewhere else.
+ * The caret rule for an edit the reader just made is one rule for the whole
+ * editor: **just past what was written**, so typing continues after it rather
+ * than inside it. A completion lands past its `]]` ({@link insertRef}, which
+ * is this with the brackets worked out) and a paste lands past the pasted
+ * text — two edits that happen at the caret, in the same breath as the
+ * keystroke that asked for them.
+ *
+ * The reference a pasted URL turns into is the one edit that does not: it
+ * lands a round trip later, when the caret may be somewhere the reader put it.
+ * That edit takes the body from here and its caret from {@link carryCaret}.
  *
  * `start === end` is an insertion, which is what a paste with nothing selected
  * is; a paste over a selection replaces it, which is what the platform's own
@@ -159,4 +163,26 @@ export function replaceSpan(
     body: body.slice(0, start) + written + body.slice(end),
     caret: start + written.length,
   };
+}
+
+/**
+ * Where the caret belongs after a span was replaced *behind the reader's back*.
+ *
+ * {@link replaceSpan}'s rule is right for an edit the reader made, and wrong
+ * for the reference a pasted URL becomes: that one lands a round trip after
+ * the paste, and in that gap the caret is the reader's. Setting it to the end
+ * of the reference would drop their next keystroke into the middle of the
+ * sentence they are writing — the body would be right and the typing would
+ * not.
+ *
+ * So the caret rides the edit instead of being set by it. Before the span it
+ * does not move; after the span it moves by the difference in length, which is
+ * what keeps a caret that was just past the pasted URL just past the reference
+ * that replaced it; inside the span it lands past what was written, because a
+ * reader who was editing the URL itself has no position left to keep.
+ */
+export function carryCaret(caret: number, start: number, end: number, written: number): number {
+  if (caret <= start) return caret;
+  if (caret >= end) return caret + written - (end - start);
+  return start + written;
 }

@@ -66,6 +66,9 @@ const resolved: string[] = [];
 let held: Promise<void> | null = null;
 let release: () => void = () => {};
 
+/** Set while a test wants `resolve_url` to reject rather than answer. */
+let refuses = false;
+
 function hold() {
   held = new Promise((resolve) => {
     release = () => {
@@ -116,6 +119,7 @@ vi.mock("../ipc/entity", () => ({
   resolveUrl: async (url: string) => {
     resolved.push(url);
     if (held) await held;
+    if (refuses) throw { code: "internal", message: "the mirror is not readable", source_id: null };
     return MIRROR[url] ?? null;
   },
   getNote: async () => stored,
@@ -192,6 +196,7 @@ beforeEach(() => {
   toasts.length = 0;
   resolved.length = 0;
   held = null;
+  refuses = false;
   saveFails = null;
   stored = detail();
 });
@@ -694,6 +699,36 @@ test("writing on through the round trip keeps the words and still gets the refer
   await settle();
   expect(area.value).toBe("caused by [[mock:PAY-231]], and again at noon");
   expect(saves.at(-1)?.bodyMd).toBe("caused by [[mock:PAY-231]], and again at noon");
+  // And the caret is still where the reader left it — at the end of the words
+  // they were writing, not pulled back to the end of the reference. A swap
+  // that moved it would put their next keystroke in the middle of the
+  // sentence.
+  expect(area.selectionStart, "the swap pulled the caret out of the sentence").toBe(
+    area.value.length,
+  );
+  expect(area.selectionEnd).toBe(area.selectionStart);
+  screen.done();
+});
+
+/**
+ * The third way the mirror can decline to turn a URL into a reference, after
+ * "not a URL" and "not in the mirror": the read itself refused. The reader is
+ * owed the same thing in all three — the link they pasted, where they pasted
+ * it — and a resolver that failed must never swallow a paste.
+ */
+test("a resolver that refuses leaves the pasted URL in the body", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  refuses = true;
+  await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+
+  const area = screen.editor()!;
+  expect(resolved).toEqual(["https://jira.example/browse/PAY-231#comment-42"]);
+  expect(area.value).toBe("caused by https://jira.example/browse/PAY-231#comment-42");
+  expect(area.selectionStart).toBe(area.value.length);
+  expect(saves.at(-1)?.bodyMd).toBe("caused by https://jira.example/browse/PAY-231#comment-42");
   screen.done();
 });
 
