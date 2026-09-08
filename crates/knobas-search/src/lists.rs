@@ -1372,4 +1372,99 @@ mod tests {
         );
         assert!(parse_stamp("").is_none());
     }
+
+    /// **The `?fake-ipc` fixture's copy of this registry is the registry.**
+    ///
+    /// `app/src/lib/shell/dev/fake-tauri.ts`'s `fakeSmartLists` restates every
+    /// built-in's id, label and blurb so that a browser can be walked over the
+    /// rail (#504). It is a hand copy with no compiler between it and this
+    /// file, and #504's own doc comment named the gap rather than papering
+    /// over it; #506 touches that function to merge saved lists into it, which
+    /// is when the pin becomes natural.
+    ///
+    /// **What is compared is the triples, parsed out of the fixture, against
+    /// [`BUILTINS`] itself** — not a substring search, which a hand copy
+    /// dropping a clause would pass. The literals inside `fakeSmartLists` are
+    /// exactly three per list and in declaration order, so the sequence *is*
+    /// the registry or the test fails.
+    ///
+    /// **What is deliberately not compared**, because it is a divergence the
+    /// fixture states and defends rather than a drift:
+    ///
+    /// * the **counts** — the fixture's mirror lists honestly read 0 over a
+    ///   corpus frozen at `SYNCED_AT`, and its estate counts come from its own
+    ///   estate file;
+    /// * the **badges**, which are `false` there because a badge is a
+    ///   comparison against a stamp in `knobas.setting` and that fixture has no
+    ///   setting table;
+    /// * the row **order** a list answers in;
+    /// * and, for the two `@me` lists, what a reader actually sees — with no
+    ///   identity configured [`describe`] replaces the blurb with
+    ///   [`describe_missing_identity`], so the fixture draws the blurb where
+    ///   the app draws the advice. This test pins [`BuiltinList::blurb`], which
+    ///   is the field the fixture copied, and says nothing about `describe`.
+    #[test]
+    fn the_builtin_registry_matches_its_typescript_fixture() {
+        let fixture = include_str!("../../../app/src/lib/shell/dev/fake-tauri.ts");
+        let body = function_body(fixture, "fakeSmartLists");
+
+        // The negative control. `FIXTURE_SAVED` -- the fixture's saved lists
+        // (#506) -- is declared just below this function and carries strings of
+        // its own, so a slice that reached it would not be a slice. (The
+        // *call* to `fakeSavedLists()` is inside this function and is
+        // deliberately not the marker: it declares nothing.) A rearrangement
+        // that broke the slicing would look identical from here without it.
+        assert!(
+            !body.contains("FIXTURE_SAVED"),
+            "the fakeSmartLists slice runs past the end of the function:\n{body}"
+        );
+
+        let found = double_quoted(body);
+        let expected: Vec<&str> = BUILTINS
+            .iter()
+            .flat_map(|list| [list.id, list.label, list.blurb])
+            .collect();
+        assert_eq!(
+            found, expected,
+            "app/src/lib/shell/dev/fake-tauri.ts's fakeSmartLists is no longer \
+             this registry: every built-in is three literals there -- id, \
+             label, blurb -- in declaration order"
+        );
+    }
+
+    /// The body of `function <name>() { … }`, up to the first line-start `}`.
+    ///
+    /// Panics rather than returning an empty slice when the function is not
+    /// there: a rename on the TypeScript side that this could not find would
+    /// turn the assertion above into a vacuous one.
+    fn function_body<'a>(source: &'a str, name: &str) -> &'a str {
+        let header = format!("function {name}() {{");
+        let start = source
+            .find(&header)
+            .unwrap_or_else(|| panic!("`{header}` is not in fake-tauri.ts"))
+            + header.len();
+        let rest = &source[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("`function {name}` is never closed"));
+        &rest[..end]
+    }
+
+    /// Every `"..."` run in `source`, in order.
+    ///
+    /// TypeScript's other two string forms are not read, and none is needed:
+    /// the fixture's list declarations are double-quoted by Prettier, and a
+    /// list rewritten in backticks would come back short and fail the
+    /// comparison rather than pass it silently.
+    fn double_quoted(source: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut rest = source;
+        while let Some(start) = rest.find('"') {
+            rest = &rest[start + 1..];
+            let end = rest.find('"').expect("an unterminated string literal");
+            out.push(&rest[..end]);
+            rest = &rest[end + 1..];
+        }
+        out
+    }
 }

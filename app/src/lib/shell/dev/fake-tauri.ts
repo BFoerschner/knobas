@@ -2901,6 +2901,14 @@ function fakeAck(args: Record<string, unknown>) {
  * reason. Nothing here proves a predicate; what it lets a browser see is the
  * rail, the counts beside it and what a row opens.
  *
+ * **The three literals per list are pinned** since #506:
+ * `knobas_search::lists`' `the_builtin_registry_matches_its_typescript_fixture`
+ * parses the arrays below and compares the id, label and blurb triples against
+ * `BUILTINS` itself. Everything the two paragraphs after this one call a
+ * divergence — the counts, the badges, the row order, and what a reader with
+ * no identity configured actually reads on the two `@me` rows — is outside
+ * that pin, deliberately, and the test's own doc says so.
+ *
  * **The four mirror lists honestly read 0.** This fixture's corpus is frozen
  * at `SYNCED_AT` -- 22 August 2026 -- so nothing in it changed today and
  * nothing synced in the last hour; and no source here carries a username, so
