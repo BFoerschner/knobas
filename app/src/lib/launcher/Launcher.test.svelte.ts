@@ -429,9 +429,9 @@ test("with no sources prop, the rows take their health from the board", async ()
  *
  * One frame, and the only one in which the launcher names the store it is
  * reading, so the word is pinned here or nowhere: `CONTEXT.md`'s **Mirror**
- * entry lists *index* under `_Avoid_` and this line said *local index* from M1
- * until #518. Asserted before `settle()` on purpose — after it the board has
- * arrived and this line is gone.
+ * entry lists *index* under `_Avoid_`, and this line used the forbidden word
+ * from M1 until #518. Asserted before `settle()` on purpose — after it the
+ * board has arrived and this line is gone.
  */
 test("the box says which store it is reading while the board is in flight", () => {
   open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
@@ -1105,7 +1105,7 @@ test("an author search says which sources could not be asked", async () => {
   // And the ordinary empty-result line is still there — the gap explains part
   // of the emptiness, it does not replace the answer. Its words, not merely
   // its presence: this is the launcher's other account of the store it read,
-  // and it said *local index* from M1 until #518.
+  // and it used the word `CONTEXT.md`'s **Mirror** entry forbids until #518.
   expect(target.querySelector(".none")?.textContent).toContain(
     "Nothing in the mirror matches",
   );
@@ -1423,8 +1423,8 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
 
   expect(target.textContent).toContain("Not in the mirror");
   // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
-  // says to avoid. The whole overlay now, not just the panel: #518 took
-  // *local index* off the footnote, the empty-result line and the reading
+  // says to avoid. The whole overlay now, not just the panel: #518 took the
+  // forbidden word off the footnote, the empty-result line and the reading
   // placeholder, so every word the launcher draws is in scope.
   expect(
     target.textContent?.toLowerCase(),
