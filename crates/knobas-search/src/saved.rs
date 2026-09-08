@@ -110,24 +110,27 @@ const MAX_ID_CHARS: usize = 48;
 /// ```text
 /// saved lists       0    1    2    4    8   16   32   64
 /// the run at 64    41   53   55   60   81   84  132  212
-/// the run at 16    42   53   57   60   81   87    -    -
+/// the run at 16    42   56   59   66   88   90    -    -
 /// ```
 ///
 /// **Two runs and not one**, because no run can reach past the cap it is taken
 /// at -- [`create`] refuses the row. The first was taken with this constant
-/// still at 64 and is what condemned it; the second at the value below. They
-/// agree to within 3 ms, which is what this machine's noise is worth.
+/// still at 64, on a quiet machine, and is what condemned it; the second at
+/// the value below, with another agent's suite on the same Mac. They agree to
+/// within 7 ms, and the gate passed in both.
 ///
 /// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
-/// of two and nothing measured it until now. A saved list costs **under 3 ms**
+/// of two and nothing measured it until now. A saved list costs **about 3 ms**
 /// on top of an empty board's 41 to 42, which leaves room for **about twenty**;
 /// sixteen is that with margin.
 ///
-/// **Eight would not have been meaningfully cheaper** -- 81 ms, against
-/// sixteen's 84 and 87 -- because what a rail costs depends on the *shapes* on
+/// **Eight would not have been meaningfully cheaper** -- 81 and 88 ms, against
+/// sixteen's 84 and 90 -- because what a rail costs depends on the *shapes* on
 /// it as much as on how many: one saved browse over a whole source outweighs
 /// several saved searches for a word. Halving the allowance to buy three
-/// milliseconds is the trade this number declined.
+/// milliseconds is the trade this number declined; the first cap with real
+/// slack is four, at 66, and that is a worse product for a benchmark's
+/// comfort.
 ///
 /// Lowering it stays cheap and raising it is not: the budget does not move, so
 /// a larger rail is a cheaper statement's to earn, not a constant's.

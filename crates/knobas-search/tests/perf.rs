@@ -424,40 +424,55 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 /// Recorded here for the reason the estate test's own table is: an
 /// `#[ignore]`d benchmark whose result lives in a review thread is a claim the
 /// next reader has to re-earn before they can tell a regression from a busy
-/// machine. Taken on this Mac with a one-minute load average of 3, which the
-/// method section above is about.
+/// machine. p90 in milliseconds:
 ///
 /// ```text
 /// case                25000    50000   100000
-/// browse, no text        13       28       59   <- worst of the ten at 100 k
-/// lists, empty rail      20       24       40
-/// lists, 16 saved        36       48       85
-/// launcher_board         38       53       86
+/// browse, no text        14       29       60   <- worst of the ten at 100 k
+/// lists, empty rail      21       24       39
+/// lists, 16 saved        37       51       86
+/// board, empty rail      21       24       41
+/// board, 16 saved        37       51       86
 ///
-/// the rail at 100000 items, p90 ms:
+/// the rail at 100000 items:
 /// saved lists       0    1    2    4    8   16
-/// smart_lists      39   52   54   61   79   86
-/// launcher_board   42   53   57   60   81   87
+/// smart_lists      39   53   57   64   86   89
+/// launcher_board   42   56   59   66   88   90
 /// ```
 ///
-/// **The built-ins are most of the budget.** An empty rail already costs 40 ms
-/// of the hundred at 100 k items, so what a saved list is charged against is
-/// the sixty that are left, at about 2.8 ms each -- room for roughly twenty,
-/// which is where `saved::MAX_SAVED_LISTS = 16` comes from.
+/// Taken with a one-minute load average of 21 falling to 13 -- another agent's
+/// frontend suite on this Mac -- and **the gate passed there**, which is worth
+/// knowing beside the section above: what a busy machine costs this file is
+/// three or four milliseconds a step until it costs it everything. Two quieter
+/// runs the same morning read `launcher_board` at 84 and 87 where this one
+/// reads 90.
 ///
-/// **A second run**, minutes earlier on the same machine and with the cap
-/// still at its original 64 -- which is the only way to reach a step past the
-/// cap, since `saved::create` refuses the row -- read `launcher_board` at
-/// **212 ms** and `smart_lists` at 210 with 64 lists, and 132 and 131 with 32.
-/// Twice the budget, and nothing had measured it: that is the whole of what
-/// #533 was for. Its steps 0 to 16 read 41 53 55 60 81 84 against the 42 53 57
-/// 60 81 87 above, so the two agree to within 3 ms.
+/// **An empty board is already 41 ms of the hundred** at 100 k items -- the
+/// rail's own read is 39 of it and the recent items the rest -- so a saved
+/// list is charged against the fifty-nine that are left, at 3 ms each: room
+/// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` comes from.
+///
+/// **The margin is thin on purpose, and no smaller cap buys much of it.** The
+/// gate passes at 86 to 90 against a budget of 100, because the built-ins own
+/// most of the budget before a saved list exists. Eight lists read 81 to 88
+/// across three runs against sixteen's 84 to 90 -- never six milliseconds
+/// apart -- so halving the allowance would buy almost nothing, and the first
+/// cap with real slack is **four**, at 66. Sixteen is the largest number the
+/// budget affords with the gate still able to notice a regression.
+///
+/// **A second run**, earlier the same morning and with the cap still at its
+/// original 64 -- the only way to reach a step past the cap, since
+/// `saved::create` refuses the row -- read `launcher_board` at **212 ms** and
+/// `smart_lists` at 210 with 64 lists, and 132 and 131 with 32. Twice the
+/// budget, and nothing had measured it: that is the whole of what #533 was
+/// for. Its steps 0 to 16 read 41 53 55 60 81 84, against the 42 56 59 66 88
+/// 90 above.
 ///
 /// What the rail costs depends on the **shapes** on it and not only on how
-/// many: eight lists read 81 ms against sixteen's 87, because the eighth of
-/// [`CASES`]' shapes is `browse, no text`, one saved browse over a whole
-/// source, and it outweighs several saved searches for a word. That is why the
-/// step from 4 to 8 costs more than the step from 8 to 16.
+/// many: the eighth of [`CASES`]' shapes is `browse, no text`, one saved
+/// browse over a whole source, and it outweighs several saved searches for a
+/// word. That is why the step from 4 to 8 costs more than the step from 8
+/// to 16.
 ///
 /// # The harness shape, recorded because it is load-bearing
 ///
