@@ -1443,6 +1443,18 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   // says to avoid. The whole overlay now, not just the panel: #518 took the
   // forbidden word off the footnote, the empty-result line and the reading
   // placeholder, so every word the launcher draws is in scope.
+  //
+  // What this guards: the launcher is the screen that names the store to the
+  // reader — the footnote, the reading placeholder and this panel — so a
+  // fourth string here saying *index* is far likelier to be the forbidden
+  // synonym than a database object. It is a fence, not the witness; the
+  // footnote and the panel each have a positive assertion of their own.
+  //
+  // The day a feature has a legitimate use of the word on this screen (the
+  // Postgres index `Diagnostics.svelte` names, say), **narrow** this to the
+  // footnote and `.miss` rather than deleting it. Do not narrow it back to
+  // `.miss` alone: at that scope the footnote's mutant was invisible, which
+  // is why it widened. (Deputy's ruling of 2026-09-08 on #518, part 2.)
   expect(
     target.textContent?.toLowerCase(),
     "`index` is not the word for the mirror",
