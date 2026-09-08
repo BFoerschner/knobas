@@ -25,6 +25,7 @@ const calls = {
   setSchedule: [] as BackupSchedule[],
   restore: [] as string[],
   share: [] as ShareParts[],
+  lists: 0,
 };
 
 let status: BackupStatus;
@@ -50,6 +51,23 @@ let shareFails: unknown = null;
  * allowed to differ.
  */
 let stores: (posted: BackupSchedule) => BackupSchedule = (posted) => posted;
+
+/**
+ * What `smart_lists` answers with — the rail the share dialog asks one bit of.
+ *
+ * The default is the built-ins alone, which is a knobas nobody has saved a
+ * search on: the state the conditional toggle is *absent* in, and the one every
+ * test written before #507 was implicitly in.
+ */
+let rail: { id: string; saved: boolean }[] = [{ id: "mine", saved: false }];
+let railFails: unknown = null;
+
+vi.mock("../ipc/search", () => ({
+  smartLists: () => {
+    calls.lists += 1;
+    return railFails ? Promise.reject(railFails) : Promise.resolve(rail);
+  },
+}));
 
 vi.mock("../ipc/backup", () => ({
   backupStatus: () => {
@@ -87,6 +105,7 @@ vi.mock("../ipc/backup", () => ({
     notes: false,
     time: false,
     sources: true,
+    smart_lists: true,
   },
   shareExport: (parts: ShareParts) => {
     calls.share.push(parts);
@@ -159,6 +178,9 @@ beforeEach(() => {
   calls.setSchedule = [];
   calls.restore = [];
   calls.share = [];
+  calls.lists = 0;
+  rail = [{ id: "mine", saved: false }];
+  railFails = null;
   status = statusOf();
   statusFails = null;
   answerStatus = null;
@@ -863,7 +885,18 @@ test("Share… opens on the defaults and exports the parts that are ticked", asy
   await settle();
 
   expect(calls.share).toEqual([
-    { links: true, assets: true, contexts: true, notes: true, time: false, sources: true },
+    {
+      links: true,
+      assets: true,
+      contexts: true,
+      notes: true,
+      time: false,
+      sources: true,
+      // Off, and not because it was unticked: this knobas has no saved list,
+      // so the part has no toggle and is not asked for. #507's own tests below
+      // are where the other state is read.
+      smart_lists: false,
+    },
   ]);
   expect(dialog()).toBeNull();
   expect(toasts.items.map((toast) => toast.text).join(" ")).toContain(
@@ -958,4 +991,101 @@ test("the share dialog says that titles travel and credentials do not", async ()
   const said = dialog()!.textContent ?? "";
   expect(said).toContain("Titles travel");
   expect(said).toMatch(/credentials are never/i);
+});
+
+/**
+ * #507: **no toggle until a saved list exists, and no part either.**
+ *
+ * The second half is the one worth having. A missing checkbox is a fact about
+ * the dialog; what it is *for* is the archive, and an archive is held to it
+ * only because the part goes out switched off — `pg_dump` writes a table entry
+ * for every table its argument list names and never counts rows first, so a
+ * part left on would put an empty `smart_list` table in the archive of a knobas
+ * that has never saved a search. The payload is where that is visible.
+ */
+test("with nothing saved there is no smart-list toggle and no smart-list part", async () => {
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+
+  expect(tick("Saved smart lists")).toBeUndefined();
+
+  button("Export", dialog()!)!.click();
+  await settle();
+
+  expect(calls.share).toHaveLength(1);
+  expect(calls.share[0]!.smart_lists).toBe(false);
+});
+
+/**
+ * ...and one saved list is what puts it up, on by default.
+ *
+ * The pair with the test above is the whole of the criterion: the same dialog,
+ * the same defaults, and the only thing that differs is whether this knobas
+ * holds a saved list. `saved` is the flag #506 put on the row for this — a rail
+ * of built-ins alone answers *no* however many lists are on it, which is what
+ * the fixture above is.
+ */
+test("one saved list puts the toggle up, ticked, and the part in the export", async () => {
+  rail = [
+    { id: "mine", saved: false },
+    { id: "payout-tickets-this-week", saved: true },
+  ];
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+
+  expect(tick("Saved smart lists")!.checked).toBe(true);
+
+  button("Export", dialog()!)!.click();
+  await settle();
+
+  expect(calls.share[0]!.smart_lists).toBe(true);
+});
+
+/** ...and unticking it is what a toggle is: the part goes out off. */
+test("unticking the saved lists exports without them", async () => {
+  rail = [{ id: "payout-tickets-this-week", saved: true }];
+  render();
+  await settle();
+
+  button("Share…")!.click();
+  await settle();
+  tick("Saved smart lists")!.click();
+  await settle();
+  button("Export", dialog()!)!.click();
+  await settle();
+
+  expect(calls.share[0]!.smart_lists).toBe(false);
+  // One part off, not a broken dialog: everything else went as it was ticked.
+  expect(calls.share[0]!.links).toBe(true);
+  expect(calls.share[0]!.sources).toBe(true);
+});
+
+/**
+ * A rail that cannot be read costs the toggle and nothing else.
+ *
+ * The backup section is not where a broken launcher is reported, and an error
+ * banner over the archives would blame the wrong feature for it — the reader
+ * came here to find out where their backups are, and that read succeeded.
+ */
+test("a smart_lists read that fails draws no toggle and no error", async () => {
+  railFails = { code: "internal", message: "the rail is unreadable" };
+  render();
+  await settle();
+
+  expect(text()).toContain(DIR);
+  expect(text()).not.toContain("the rail is unreadable");
+
+  button("Share…")!.click();
+  await settle();
+  expect(tick("Saved smart lists")).toBeUndefined();
+
+  button("Export", dialog()!)!.click();
+  await settle();
+  expect(calls.share[0]!.smart_lists).toBe(false);
 });

@@ -570,7 +570,19 @@ struct Seeded {
     context: String,
     note: String,
     source: String,
+    /// The id `create_smart_list` generated for [`SAVED_LABEL`].
+    saved_list: String,
 }
+
+/// The launcher search the sharer saved, and the name they gave it (#507).
+///
+/// Saved through the command a reader presses rather than inserted, so the row
+/// is one the product can actually make: the id is the generated slug, and the
+/// query is text `saved::plan` accepts -- an `insert` could put either beyond
+/// what the feature produces and the archive would be carrying a row nothing
+/// else in knobas would.
+const SAVED_LABEL: &str = "Payout tickets this week";
+const SAVED_QUERY: &str = "#payouts updated:7d";
 
 async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     let t = format!("{tag}{}", uuid::Uuid::new_v4().simple());
@@ -703,6 +715,14 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     .await
     .expect("seed a mirror row");
 
+    // ...and a launcher search saved as a smart list (#506), which is what the
+    // `smart_lists` part of a share export carries (#507).
+    let saved_list =
+        knobas_app::commands::search::create_smart_list_inner(pool, SAVED_LABEL, SAVED_QUERY)
+            .await
+            .expect("seed a saved smart list")
+            .id;
+
     Seeded {
         ticket,
         pr,
@@ -711,7 +731,23 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
         context,
         note,
         source,
+        saved_list,
     }
+}
+
+/// The `id`, `label` and `query` of every saved list a database holds, in the
+/// rail's own order.
+///
+/// Read as three strings rather than through `saved::all`, because what the
+/// assertions below are about is the **text** an archive moved: a comparison
+/// that went through a type would be comparing what this side made of the
+/// bytes, which is the one thing a "nothing rewrites a stored query" claim
+/// cannot afford.
+async fn saved_lists(pool: &sqlx::PgPool) -> Vec<(String, String, String)> {
+    sqlx::query_as("select id, label, query from knobas.smart_list order by created_at, id")
+        .fetch_all(pool)
+        .await
+        .expect("read the saved smart lists")
 }
 
 /// How many rows a table holds -- the reading every assertion below is made of.
@@ -724,7 +760,20 @@ async fn rows(pool: &sqlx::PgPool, table: &str) -> i64 {
     .unwrap_or_else(|error| panic!("count knobas.{table}: {error}"))
 }
 
-/// Every `knobas` table the archive holds *rows* for, read off the file.
+/// Every `knobas` table the archive carries, read off the file.
+///
+/// **Rows or none**, which is not what this helper's first sentence said: it
+/// read *"every table the archive holds rows for"* until #507, and that was
+/// wrong from the day it was written. `pg_dump` writes a `TABLE DATA` entry
+/// for every table its argument list names and never counts rows first, so an
+/// archive of a knobas with nothing saved still names `smart_list` while that
+/// part is on -- asserted, not assumed, by
+/// [`an_empty_saved_list_table_is_still_in_the_archive_while_the_part_is_on`].
+///
+/// Which is why "the archive carries no list table" is a claim about the
+/// *argument list* and can only be delivered by switching the part off: the
+/// share dialog is what does that while no saved list exists (#507), and
+/// `BackupSection.test.svelte.ts` is where that half is pinned.
 async fn data_tables(archive: &std::path::Path) -> Vec<String> {
     let mut tables: Vec<String> = knobas_db::backup::archive_contents(archive)
         .await
@@ -792,6 +841,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("route", 1),
         ("context", 1),
         ("source_config", 1),
+        ("smart_list", 1),
     ] {
         assert_eq!(
             rows(there, table).await,
@@ -849,6 +899,20 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     assert!(
         addressed.contains(&estate.note),
         "the entity table travels whole; this assertion is the record of that"
+    );
+
+    // **The saved list arrived, and it arrived as the reader wrote it** (#507).
+    // A count says a row crossed; only the text says the *query* did, and the
+    // query is the whole of what a saved list is -- the label is a name for it
+    // and the id is how it is addressed.
+    assert_eq!(
+        saved_lists(there).await,
+        vec![(
+            estate.saved_list.clone(),
+            SAVED_LABEL.to_owned(),
+            SAVED_QUERY.to_owned()
+        )],
+        "the saved smart list did not cross with its id, its name and its query"
     );
 }
 
@@ -910,6 +974,16 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
             },
             vec!["source_config"],
         ),
+        // The one part with no address book: a saved smart list is not an
+        // entity, so `entity` is deliberately absent here.
+        (
+            "smart lists",
+            backup::ShareParts {
+                smart_lists: true,
+                ..none
+            },
+            vec!["smart_list"],
+        ),
     ] {
         let record = backup::share_export(&sharer, parts)
             .await
@@ -921,6 +995,299 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
             "the {label} part carries knobas.setting, which is every feature's bookkeeping"
         );
     }
+}
+
+/// **An empty table is still a table in the archive** -- the measurement the
+/// share dialog's behaviour rests on (#507).
+///
+/// `pg_dump` writes a `TABLE DATA` entry for every table its argument list
+/// names and never counts rows first, so a knobas nobody has saved a search on
+/// still produces an archive naming `smart_list` while the part is *on*. That
+/// is why hiding the toggle hides nothing by itself, and why the dialog sends
+/// the part **off** while no saved list exists rather than merely drawing no
+/// checkbox (`BackupSection.svelte`'s `openShare`, pinned in
+/// `BackupSection.test.svelte.ts`).
+///
+/// Asserted rather than argued in a doc comment, for two reasons. It is the
+/// load-bearing premise of a decision taken in the *webview*, and a premise
+/// stated only in prose is one nobody finds out has stopped being true. And it
+/// is a fact about a **tool**: a `pg_dump` that began omitting empty tables
+/// would make that switch unnecessary, and the honest way to learn that is a
+/// red test rather than a reading of the diff.
+///
+/// The second half is this criterion's other clause at the seam -- with the
+/// part off, an archive of a knobas with nothing saved names no list table --
+/// and the pair is what makes each reading mean something: the same empty
+/// database, twice, and only the argument list differs.
+#[tokio::test]
+async fn an_empty_saved_list_table_is_still_in_the_archive_while_the_part_is_on() {
+    let (sharer, dir) = service("shareemptylists").await;
+    assert_eq!(
+        rows(&sharer.pool, "smart_list").await,
+        0,
+        "this is the knobas nobody has saved a search on"
+    );
+
+    let on = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export with the ratified defaults");
+    assert!(
+        data_tables(&dir.path().join(&on.file))
+            .await
+            .contains(&"smart_list".to_owned()),
+        "an empty table is not in the archive, so `pg_dump` counts rows after all -- and the share \
+         dialog switching the part off is doing nothing"
+    );
+
+    let off = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            smart_lists: false,
+            ..backup::ShareParts::default()
+        },
+    )
+    .await
+    .expect("a share export with the saved lists switched off");
+    assert!(
+        !data_tables(&dir.path().join(&off.file))
+            .await
+            .contains(&"smart_list".to_owned()),
+        "the part is off and the archive still names the list table"
+    );
+}
+
+/// **The saved-lists part off leaves the table out of the archive; on brings
+/// it** -- two archives from the *same* populated database (#507).
+///
+/// The pair is the whole test, and the first half is the load-bearing one. An
+/// archive that does not name `smart_list` is evidence of nothing on its own:
+/// a knobas nobody has saved a list on produces one whatever the toggle says,
+/// and this file's own history has a scan that looked for a needle absent by
+/// construction and was green about nothing. So the reading with the part on
+/// is the control -- the table is in an archive of *this* database -- and the
+/// reading with it off is the claim.
+#[tokio::test]
+async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
+    let (sharer, dir) = service("sharelists").await;
+    seed_corpus(&sharer.pool, "lists").await;
+    assert_eq!(
+        rows(&sharer.pool, "smart_list").await,
+        1,
+        "the fixture has a saved list there to be left behind"
+    );
+
+    let on = backup::share_export(&sharer, backup::ShareParts::default())
+        .await
+        .expect("a share export with the ratified defaults");
+    assert!(
+        data_tables(&dir.path().join(&on.file))
+            .await
+            .contains(&"smart_list".to_owned()),
+        "saved smart lists are on by default"
+    );
+
+    let off = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            smart_lists: false,
+            ..backup::ShareParts::default()
+        },
+    )
+    .await
+    .expect("a share export with the saved lists switched off");
+    let held = data_tables(&dir.path().join(&off.file)).await;
+    assert!(
+        !held.contains(&"smart_list".to_owned()),
+        "the saved lists were switched off and the table is in the archive: {held:?}"
+    );
+    // ...and the rest of the defaults are still in it, so that "off" is one
+    // part switched off rather than an export that fell over.
+    for still in [
+        "entity",
+        "link",
+        "asset",
+        "route",
+        "context",
+        "source_config",
+    ] {
+        assert!(
+            held.contains(&still.to_owned()),
+            "switching the saved lists off took knobas.{still} with it: {held:?}"
+        );
+    }
+}
+
+/// **A stored query crosses an archive exactly as it was written** (#507,
+/// `CONTEXT.md`'s *Smart list*).
+///
+/// The rule the glossary states about migrations -- nothing ever rewrites
+/// `knobas.smart_list.query` to a newer grammar, because an upgrade is a parse
+/// in disguise and would make *needs attention* a state no row can reach -- is
+/// the same rule for an export and an import, which are the other two places
+/// stored text passes through something that could read it. A `pg_dump` table
+/// list is the one shape that cannot rewrite anything, and this is the
+/// assertion that says so at the seam rather than on the strength of the tool.
+///
+/// The row is **inserted and not saved**, because `saved::create` refuses a
+/// query it cannot run: there is no command that can make this row, which is
+/// exactly why it is the row worth putting through an archive. The rail's
+/// verdict is read on both machines, so the fixture is not merely a string
+/// that survived a copy -- it is a query today's grammar refuses, before and
+/// after.
+#[tokio::test]
+async fn a_saved_query_crosses_an_archive_exactly_as_it_was_written() {
+    /// A query today's grammar refuses: a saved list may not name another one.
+    const REFUSED_QUERY: &str = "list:mine";
+    const REFUSED_ID: &str = "was-a-list";
+
+    let (sharer, sharer_dir) = service("sharelistverbatim").await;
+    sqlx::query(
+        "insert into knobas.smart_list (id, label, query) values ($1, 'Was a list once', $2)",
+    )
+    .bind(REFUSED_ID)
+    .bind(REFUSED_QUERY)
+    .execute(&sharer.pool)
+    .await
+    .expect("a saved row today's grammar refuses");
+
+    assert!(
+        needs_attention(&sharer.pool, REFUSED_ID).await,
+        "this test proves nothing unless the stored query is one the grammar refuses here"
+    );
+
+    let record = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            smart_lists: true,
+            ..backup::ShareParts::none()
+        },
+    )
+    .await
+    .expect("a share export of the saved lists alone");
+
+    let (colleague, colleague_dir) = service("sharelistverbatimtarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("an archive of saved lists alone restores like any other");
+
+    assert_eq!(
+        saved_lists(&colleague.pool).await,
+        vec![(
+            REFUSED_ID.to_owned(),
+            "Was a list once".to_owned(),
+            REFUSED_QUERY.to_owned()
+        )],
+        "the archive rewrote a stored query on its way across"
+    );
+    assert!(
+        needs_attention(&colleague.pool, REFUSED_ID).await,
+        "the restored list reads as runnable, so something upgraded it"
+    );
+}
+
+/// **The cap is `saved::create`'s alone, and an archive is held to nothing**
+/// (#507).
+///
+/// `create` counts the table and refuses the row past `MAX_SAVED_LISTS`, and
+/// nothing else does: a restore is a schema dump. So a restored database holds
+/// however many lists the archive it came from held, and **every row arrives**.
+/// The alternative -- a restore that dropped rows to fit today's constant --
+/// loses somebody's data silently, on the machine least able to notice, and
+/// would have to choose *which* to lose. The cap reasserts itself the next
+/// time anybody saves a list, which is the second half of this test.
+///
+/// It stopped being a contrived state on the day somebody lowered the number,
+/// which is #533 (PR #540): the constant was 64 and is **16**, so an archive
+/// taken from a database with more than sixteen saved lists is one a reader
+/// can actually hand over. The fixture still reaches the state with an
+/// `insert` past `create`, because that is the only way to reach it *here* --
+/// the assertion is written against `MAX_SAVED_LISTS` rather than against a
+/// number, so it reads the same at 64, at 16, and at whatever the perf gate
+/// measures next.
+#[tokio::test]
+async fn an_archive_holding_more_saved_lists_than_the_cap_restores_all_of_them() {
+    let over = knobas_search::saved::MAX_SAVED_LISTS + 1;
+
+    let (sharer, sharer_dir) = service("sharelistcap").await;
+    sqlx::query(
+        "insert into knobas.smart_list (id, label, query)
+         select 'kept-' || n, 'Kept ' || n, '#payouts'
+           from generate_series(1, $1) as n",
+    )
+    .bind(over)
+    .execute(&sharer.pool)
+    .await
+    .expect("more saved lists than the cap, written past the command that counts");
+    assert_eq!(rows(&sharer.pool, "smart_list").await, over);
+
+    let record = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            smart_lists: true,
+            ..backup::ShareParts::none()
+        },
+    )
+    .await
+    .expect("a share export of the saved lists alone");
+
+    let (colleague, colleague_dir) = service("sharelistcaptarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("restore");
+
+    let landed = rows(&colleague.pool, "smart_list").await;
+    assert_eq!(
+        landed,
+        over,
+        "the restore dropped rows to fit this build's cap of {}",
+        knobas_search::saved::MAX_SAVED_LISTS
+    );
+    // Stated as its own assertion, because the equality above is satisfied by
+    // a fixture that never went past the cap at all: a database of exactly
+    // `MAX_SAVED_LISTS` rows restores whole and refuses the next `create` too,
+    // and this test would be green about a bound it had not crossed.
+    assert!(
+        landed > knobas_search::saved::MAX_SAVED_LISTS,
+        "the fixture holds {landed} lists and the cap is {}; this test is about an archive that \
+         goes past it",
+        knobas_search::saved::MAX_SAVED_LISTS
+    );
+
+    // ...and the cap is still the cap: the next list somebody saves is
+    // refused, which is what says the restore went past a bound rather than
+    // that there was never one.
+    let refused = knobas_app::commands::search::create_smart_list_inner(
+        &colleague.pool,
+        "One more",
+        "#payouts",
+    )
+    .await
+    .expect_err("a saved list past the cap must be refused");
+    // The code and the message, not a `Debug` rendering of the whole error: a
+    // formatted struct is a *representation* of the refusal, and the cap's
+    // digits could match something else printed beside them.
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+    assert!(
+        refused
+            .message
+            .contains(&knobas_search::saved::MAX_SAVED_LISTS.to_string()),
+        "the refusal does not tell the reader the cap: {}",
+        refused.message
+    );
+}
+
+/// Whether the rail reads *needs attention* for one saved list -- the product's
+/// own verdict on a stored query, asked through the read the launcher makes.
+async fn needs_attention(pool: &sqlx::PgPool, id: &str) -> bool {
+    knobas_app::commands::search::smart_lists_inner(pool)
+        .await
+        .expect("the rail")
+        .into_iter()
+        .find(|summary| summary.id == id)
+        .unwrap_or_else(|| panic!("no smart list called {id} on the rail"))
+        .needs_attention
 }
 
 /// The other direction of the defaults: the parts that are **off** by default

@@ -43,6 +43,7 @@
     type BackupStatus,
     type ShareParts,
   } from "../ipc/backup";
+  import { smartLists, type SmartListSummary } from "../ipc/search";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
@@ -95,6 +96,26 @@
   let shareDraft = $state<ShareParts>({ ...shareDefaults });
   let sharing = $state(false);
   let shareInFlight = $state(false);
+  /**
+   * Whether this knobas holds a saved smart list (#507).
+   *
+   * The `smart_lists` part is the one whose toggle is **conditional**:
+   * `CONTEXT.md`'s *Share export* rules that there is none until a saved list
+   * exists, because until then the part is a checkbox about nothing — the
+   * built-in lists are code and are rows nowhere.
+   *
+   * It has to be *false* rather than *unknown* before the read lands, and that
+   * is what makes it more than a cosmetic condition: `pg_dump` writes a
+   * `TABLE DATA` entry for every table its argument list names and never
+   * counts rows first, so an export taken with the part on would name a list
+   * table whatever this knobas has saved. Switching the part off is the only
+   * thing that keeps it out, so the state that draws no toggle is the state
+   * that sends no part — and the premise under that is pinned on the Rust
+   * side, by `backup_ipc.rs`'s
+   * `an_empty_saved_list_table_is_still_in_the_archive_while_the_part_is_on`,
+   * because a decision taken here rests on how a tool over there behaves.
+   */
+  let savedLists = $state(false);
 
   /** Whether the share dialog has anything to export. */
   const shareEmpty = $derived(!Object.values(shareDraft).some(Boolean));
@@ -124,20 +145,57 @@
    * half cannot be dropped in one place and kept in the other (#107).
    */
   const read = latestRead<BackupStatus>();
+  /**
+   * A second guard, because `latestRead` is one per thing read.
+   *
+   * The rail and the archive list are two answers with two round trips, and
+   * sharing one counter would make each of them make the other stale.
+   */
+  const readLists = latestRead<SmartListSummary[]>();
 
-  function load() {
-    return read(backupStatus, {
-      ok: (next) => {
-        status = next;
-        error = null;
-      },
-      fail: (cause) => {
-        // Not an empty archive list: "no backups yet" is a claim about the
-        // disk, and a section that could not ask has not earned it. The same
-        // rule the sources view follows for `list_sources`.
-        error = ipcErrorMessage(cause);
-      },
-    });
+  /**
+   * The two reads this section is drawn from, together.
+   *
+   * `smart_lists` is the launcher's own rail read, asked here for one bit of
+   * it: whether any list on it is saved. That is more work than the bit is
+   * worth in isolation, and it is the honest way to ask — `saved` is the
+   * capability flag #506 put on the row for exactly this question, and a
+   * second command answering "is there one" would be a second place for the
+   * answer to be right. It rides with every re-read rather than being taken
+   * once, so a list saved in the launcher while this section is open is a
+   * toggle that appears after the next export or restore rather than after a
+   * restart.
+   */
+  async function load() {
+    await Promise.all([
+      read(backupStatus, {
+        ok: (next) => {
+          status = next;
+          error = null;
+        },
+        fail: (cause) => {
+          // Not an empty archive list: "no backups yet" is a claim about the
+          // disk, and a section that could not ask has not earned it. The same
+          // rule the sources view follows for `list_sources`.
+          error = ipcErrorMessage(cause);
+        },
+      }),
+      readLists(smartLists, {
+        ok: (lists) => {
+          savedLists = lists.some((list) => list.saved);
+        },
+        fail: () => {
+          // Deliberately silent, and deliberately *false*. This read is not
+          // what the section is for: a rail that cannot be answered is the
+          // launcher's problem and is reported there, and an error banner over
+          // the backups would blame the wrong feature. What it costs is the
+          // toggle, and a share export with no lists in it is the safe half of
+          // not knowing — the archive is smaller than it could have been,
+          // rather than naming a part this knobas could not confirm it has.
+          savedLists = false;
+        },
+      }),
+    ]);
   }
 
   $effect(() => {
@@ -279,9 +337,18 @@
       exporting = false;
     }
   }
-  /** Open the share dialog on the ratified defaults. */
+  /**
+   * Open the share dialog on the ratified defaults.
+   *
+   * With one exception, and it is the exception the toggle's absence makes
+   * necessary: `smart_lists` opens *off* on a knobas with nothing saved. The
+   * ratified default is on — a saved list is a query over the link map, not a
+   * private note about it — but a part with no toggle is a part nobody can
+   * turn off, and leaving it on would put an empty `smart_list` table in the
+   * archive of every knobas that has never saved a search.
+   */
   function openShare() {
-    shareDraft = { ...shareDefaults };
+    shareDraft = { ...shareDefaults, smart_lists: savedLists };
     sharing = true;
   }
 
@@ -491,6 +558,17 @@
         <input type="checkbox" bind:checked={shareDraft.sources} />
         Source configurations
       </label>
+      <!--
+        Drawn only once a saved list exists (#507): until then the built-in
+        lists are the whole rail, they are code rather than rows, and a
+        checkbox for them would be one about nothing.
+      -->
+      {#if savedLists}
+        <label class="chk">
+          <input type="checkbox" bind:checked={shareDraft.smart_lists} />
+          Saved smart lists — kept exactly as you typed them
+        </label>
+      {/if}
       <!--
         Said here rather than only in the docs: an entity row is the *address*
         of a thing and the archive carries the whole address book, so a note's

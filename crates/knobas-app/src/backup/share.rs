@@ -45,6 +45,39 @@
 //! address book of its own -- see [`ENTITY`] for why that is a choice and not
 //! an oversight.
 //!
+//! # A saved smart list rides with no address book, and is stored verbatim
+//!
+//! `knobas.smart_list` is the one part whose table names nothing else: a saved
+//! list is not an entity, nothing links to one, and no context holds one -- it
+//! is a query somebody wrote down (migration `0025`, #506). So the
+//! `smart_lists` part is that one table and [`ENTITY`] is not in it.
+//!
+//! **The archive carries the query as the reader typed it and never a reading
+//! of it.** `CONTEXT.md`'s **Smart list** rules that no migration ever
+//! rewrites `knobas.smart_list.query` to a newer grammar, because an "upgrade"
+//! is a parse in disguise and would make *needs attention* a state no row can
+//! reach. An export or an import that rewrote a stored query would be the same
+//! thing wearing a different hat, and this part is a `pg_dump` table list --
+//! the one shape that cannot do it.
+//!
+//! **The cap is not in the archive.** `knobas_search::saved::create` counts the
+//! table and refuses the row past [`knobas_search::saved::MAX_SAVED_LISTS`],
+//! and nothing else enforces it: a restore is a schema dump, so a database
+//! restored from an archive holds however many lists that archive was taken
+//! from. Deliberate, and not an oversight -- an archive is a record of what
+//! the sharer had, and a restore that dropped rows to fit today's constant
+//! would be a restore that lost data silently, on the machine least able to
+//! notice, and would have to choose *which* rows to lose. The cap reasserts
+//! itself the next time somebody saves a list.
+//!
+//! It became a live case on the day the number changed. Until #533 (PR #540)
+//! nothing in the tree could make the two disagree, because the constant had
+//! never moved: every row in an archive had been written past a `create` that
+//! held the same bound. `MAX_SAVED_LISTS` is **16** now and was 64, so an
+//! archive taken from a database holding more than sixteen saved lists is a
+//! real archive rather than one only a test can build -- and every row in it
+//! still arrives.
+//!
 //! **The whole table travels**, and this is the one consequence worth reading
 //! twice: `pg_dump` restricts an archive by table and never by row, so "the
 //! entity rows the links reference" is not an argument list anyone can write.
@@ -82,6 +115,13 @@ pub struct ShareParts {
     /// secret is in it: spec §14 puts every credential in the OS keychain and
     /// nothing secret ever reaches Postgres.
     pub sources: bool,
+    /// `knobas.smart_list` -- the launcher searches somebody saved (#506).
+    /// **On by default**, with links: a saved list is a query over the link
+    /// map, not a private note about it. The built-in lists are code and are
+    /// rows nowhere, so a knobas nobody has saved a list on carries an empty
+    /// table here -- which is why the dialog offers no toggle for it until a
+    /// saved one exists, and sends the part off while there is none.
+    pub smart_lists: bool,
 }
 
 impl Default for ShareParts {
@@ -93,6 +133,7 @@ impl Default for ShareParts {
             notes: false,
             time: false,
             sources: true,
+            smart_lists: true,
         }
     }
 }
@@ -164,6 +205,9 @@ impl ShareParts {
         if self.sources {
             push("source_config");
         }
+        if self.smart_lists {
+            push("smart_list");
+        }
         tables
     }
 
@@ -178,6 +222,7 @@ impl ShareParts {
             notes: false,
             time: false,
             sources: false,
+            smart_lists: false,
         }
     }
 }
@@ -194,6 +239,10 @@ mod tests {
         let parts = ShareParts::default();
         assert!(parts.links && parts.assets && parts.contexts && parts.sources);
         assert!(
+            parts.smart_lists,
+            "saved smart lists are on by default (#507): a saved list is a query over the link map"
+        );
+        assert!(
             !parts.notes && !parts.time,
             "notes and time are off by default -- a colleague gets the link map, not the hours"
         );
@@ -205,7 +254,8 @@ mod tests {
                 "asset",
                 "route",
                 "context",
-                "source_config"
+                "source_config",
+                "smart_list"
             ],
         );
     }
@@ -257,6 +307,15 @@ mod tests {
                 },
                 vec!["source_config"],
             ),
+            // The one part that brings no address book: a saved list is not
+            // an entity, nothing links to one, and no context holds one.
+            (
+                ShareParts {
+                    smart_lists: true,
+                    ..ShareParts::none()
+                },
+                vec!["smart_list"],
+            ),
         ] {
             assert_eq!(parts.tables(), expected, "{parts:?}");
         }
@@ -284,6 +343,7 @@ mod tests {
                 notes: true,
                 time: true,
                 sources: true,
+                smart_lists: true,
             },
         ] {
             assert!(
@@ -308,6 +368,7 @@ mod tests {
             notes: true,
             time: true,
             sources: true,
+            smart_lists: true,
         };
         for forbidden in [
             "activity",
@@ -347,6 +408,15 @@ mod tests {
 
     /// A payload naming one toggle leaves the ratified answer on the rest --
     /// and every field still decodes from the spelling the mirror sends.
+    ///
+    /// The **six-key** case is the one #454's entry wrote the `#[serde(default)]`
+    /// on this struct for, in as many words: *"a knobas built before a later
+    /// part still decodes a payload naming it"*, and its mirror image, a caller
+    /// built before a later part sending the keys it knows. `smart_lists` is
+    /// the first field to make that sentence testable, so it is tested here and
+    /// asserted **by name**: an equality against `Default` alone would still
+    /// hold if a future field arrived with the wrong ratified answer, because
+    /// both sides of it would be wrong together.
     #[test]
     fn a_partial_payload_decodes_onto_the_defaults() {
         let decoded: ShareParts = serde_json::from_value(serde_json::json!({ "notes": true }))
@@ -359,9 +429,23 @@ mod tests {
             }
         );
 
+        // The payload a caller built before #507 sends: the six keys that
+        // existed then, and no seventh.
+        let older: ShareParts = serde_json::from_value(serde_json::json!({
+            "links": true, "assets": true, "contexts": true,
+            "notes": false, "time": false, "sources": true
+        }))
+        .expect("a payload naming the six parts that existed before smart lists");
+        assert!(
+            older.smart_lists,
+            "a payload without `smart_lists` must decode to the ratified answer for it, which is on"
+        );
+        assert_eq!(older, ShareParts::default());
+
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
-            "notes": false, "time": false, "sources": false
+            "notes": false, "time": false, "sources": false,
+            "smart_lists": false
         }))
         .expect("a payload naming every part");
         assert_eq!(all, ShareParts::none());
