@@ -1216,9 +1216,10 @@ decision rather than a side effect: how it compares Launch Services' answer
 against the bundle it built, how it reads the accessibility probe, and the
 three text functions `open-in-editor` is built out of -- the stub it writes,
 the git config it writes, and its reading of what the stub recorded -- and the
-three `capture` is: the title a typed paragraph gives its note, the whole-line
-match its readings are found by, and the rendered-name rule above. A driver is
-not exempt from the gate because its *run* is.
+four `capture` is: the title a typed paragraph gives its note, the whole-line
+match its readings are found by, the reading of `ax frontmost`'s answer, and the
+rendered-name rule above, which both drivers share. A driver is not exempt from
+the gate because its *run* is.
 
 ### The prerequisites
 
