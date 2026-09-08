@@ -243,7 +243,10 @@ pub async fn token_for(
     producer_id: &str,
     typed: Option<String>,
 ) -> Result<Option<Token>, IpcError> {
-    if let Some(value) = typed.map(|it| it.trim().to_owned()).filter(|it| !it.is_empty()) {
+    if let Some(value) = typed
+        .map(|it| it.trim().to_owned())
+        .filter(|it| !it.is_empty())
+    {
         return Ok(Some(Token { value, typed: true }));
     }
     let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::importer(producer_id))
@@ -328,10 +331,7 @@ async fn servers(client: &HttpClient) -> Result<Vec<Server>, IpcError> {
     loop {
         let request = client
             .request(Method::GET, "/servers")
-            .query(&[
-                ("page", page.to_string()),
-                ("per_page", PAGE.to_string()),
-            ][..]);
+            .query(&[("page", page.to_string()), ("per_page", PAGE.to_string())][..]);
         let answer: Page = client
             .send(request)
             .await
@@ -344,10 +344,16 @@ async fn servers(client: &HttpClient) -> Result<Vec<Server>, IpcError> {
             .json()
             .await
             .map_err(|error| {
-                IpcError::internal(format!("hcloud answered something that is not a server list: {error}"))
+                IpcError::internal(format!(
+                    "hcloud answered something that is not a server list: {error}"
+                ))
             })?;
         all.extend(answer.servers);
-        match answer.meta.and_then(|meta| meta.pagination).and_then(|p| p.next_page) {
+        match answer
+            .meta
+            .and_then(|meta| meta.pagination)
+            .and_then(|p| p.next_page)
+        {
             Some(next) => page = next,
             None => return Ok(all),
         }
@@ -370,7 +376,10 @@ fn estate_file(
         let id = asset_id(server.id);
         let mut properties = serde_json::Map::new();
         properties.insert(ORIGIN_KEY.to_owned(), server.id.to_string().into());
-        properties.insert("server_type".to_owned(), server.server_type.name.clone().into());
+        properties.insert(
+            "server_type".to_owned(),
+            server.server_type.name.clone().into(),
+        );
         if let Some(image) = &server.image {
             properties.insert("os".to_owned(), image.name.clone().into());
         }
@@ -390,10 +399,15 @@ fn estate_file(
         entry.insert("type".to_owned(), SERVER_TYPE_ID.into());
         entry.insert("name".to_owned(), server.name.clone().into());
         // Only the entries the import would create; see the module docs.
-        if new.contains(&id) && let Some(parent) = land_under {
+        if new.contains(&id)
+            && let Some(parent) = land_under
+        {
             entry.insert("parent".to_owned(), parent.into());
         }
-        entry.insert("properties".to_owned(), serde_json::Value::Object(properties));
+        entry.insert(
+            "properties".to_owned(),
+            serde_json::Value::Object(properties),
+        );
         assets.push(serde_json::Value::Object(entry));
     }
 
@@ -472,11 +486,19 @@ mod tests {
         Server {
             id,
             name: name.to_owned(),
-            image: Some(Named { name: "ubuntu-24.04".to_owned() }),
-            server_type: Named { name: "cx23".to_owned() },
-            location: Named { name: "nbg1".to_owned() },
+            image: Some(Named {
+                name: "ubuntu-24.04".to_owned(),
+            }),
+            server_type: Named {
+                name: "cx23".to_owned(),
+            },
+            location: Named {
+                name: "nbg1".to_owned(),
+            },
             public_net: PublicNet {
-                ipv4: Some(Ipv4 { ip: "203.0.113.7".to_owned() }),
+                ipv4: Some(Ipv4 {
+                    ip: "203.0.113.7".to_owned(),
+                }),
             },
             labels: labels
                 .iter()
@@ -507,8 +529,12 @@ mod tests {
     /// The id is text, because the estate stores it as text.
     #[test]
     fn the_id_is_written_as_text_and_the_entry_is_named_after_it() {
-        let file = estate_file(&[server(164_750_187, "knobas-teamcity", &[])], &HashSet::new(), None)
-            .expect("a file");
+        let file = estate_file(
+            &[server(164_750_187, "knobas-teamcity", &[])],
+            &HashSet::new(),
+            None,
+        )
+        .expect("a file");
         let entry = &parsed(&file)["assets"][0];
         assert_eq!(entry["id"], serde_json::json!("asset:hcloud-164750187"));
         assert_eq!(entry["type"], serde_json::json!("vm"));
@@ -525,7 +551,11 @@ mod tests {
     #[test]
     fn a_label_keeps_its_own_key_and_one_that_shadows_a_written_key_is_refused() {
         let file = estate_file(
-            &[server(1, "box", &[("knobas", "testenv"), ("role", "teamcity")])],
+            &[server(
+                1,
+                "box",
+                &[("knobas", "testenv"), ("role", "teamcity")],
+            )],
             &HashSet::new(),
             None,
         )
@@ -648,7 +678,10 @@ mod tests {
             )),
         )
         .await;
-        assert_eq!(answer.expect_err("the run failed").code, crate::IpcErrorCode::Unauthorized);
+        assert_eq!(
+            answer.expect_err("the run failed").code,
+            crate::IpcErrorCode::Unauthorized
+        );
         assert_eq!(
             under(&refused, &account),
             None,
@@ -723,7 +756,10 @@ mod tests {
             )
             .unwrap();
 
-        let token = token_for(&store, HCLOUD_PRODUCER, None).await.unwrap().unwrap();
+        let token = token_for(&store, HCLOUD_PRODUCER, None)
+            .await
+            .unwrap()
+            .unwrap();
         remember(
             &store,
             HCLOUD_PRODUCER,
@@ -757,9 +793,6 @@ mod tests {
             r#"{"servers":[],"meta":{"pagination":{"page":1,"next_page":2}}}"#,
         )
         .expect("a page");
-        assert_eq!(
-            more.meta.unwrap().pagination.unwrap().next_page,
-            Some(2)
-        );
+        assert_eq!(more.meta.unwrap().pagination.unwrap().next_page, Some(2));
     }
 }

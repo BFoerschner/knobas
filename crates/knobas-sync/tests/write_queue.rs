@@ -871,8 +871,8 @@ async fn a_source_with_no_credential_keeps_the_write() {
         &h.deps.secrets,
         &knobas_secrets::KeychainAccount::source(&h.source),
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     let write = h.comment(&ticket, "kept").await;
     let waiting = h.reload(write.id).await;

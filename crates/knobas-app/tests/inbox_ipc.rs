@@ -322,7 +322,10 @@ async fn harness() -> Harness {
     let secrets = MemoryStore::new();
     for id in ["forge", "tracker", "wiki"] {
         secrets
-            .put(&knobas_secrets::KeychainAccount::source(id), &Secret::just(AuthMethod::Pat, "tok"))
+            .put(
+                &knobas_secrets::KeychainAccount::source(id),
+                &Secret::just(AuthMethod::Pat, "tok"),
+            )
             .unwrap();
     }
 

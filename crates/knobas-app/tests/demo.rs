@@ -154,7 +154,10 @@ async fn an_unconfigured_source_cannot_be_reached() {
         knobas_app::IpcErrorCode::NotFound
     );
     assert!(
-        secrets.get(&knobas_secrets::KeychainAccount::source(&missing)).unwrap().is_none(),
+        secrets
+            .get(&knobas_secrets::KeychainAccount::source(&missing))
+            .unwrap()
+            .is_none(),
         "a source that does not exist must not get a keychain item"
     );
 }

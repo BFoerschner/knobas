@@ -231,8 +231,14 @@ async fn adding_a_source_writes_the_secret_first_and_returns_a_summary() {
         "the summary names the credential kind the form submitted"
     );
 
-    assert_eq!(f.secrets.get(&account(&f.id)).unwrap().unwrap().value, "pat-one");
-    assert_eq!(f.secrets.get(&account(&f.id)).unwrap().unwrap().kind, AuthMethod::Pat);
+    assert_eq!(
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().value,
+        "pat-one"
+    );
+    assert_eq!(
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().kind,
+        AuthMethod::Pat
+    );
 }
 
 /// `auth_kind` comes off the **row**, and `list` and `add` agree about it.
@@ -1108,7 +1114,11 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
     .await
     .unwrap();
 
-    let kept = f.secrets.get(&account(&f.id)).unwrap().expect("the credential");
+    let kept = f
+        .secrets
+        .get(&account(&f.id))
+        .unwrap()
+        .expect("the credential");
     assert_eq!(kept.value, "uk1_metrics", "the key was kept, not cleared");
     assert_eq!(kept.kind, AuthMethod::ApiToken);
     let account = kept.account.expect("the account was added");
@@ -1150,7 +1160,11 @@ async fn re_entering_the_key_keeps_the_stored_account() {
     .await
     .unwrap();
 
-    let kept = f.secrets.get(&account(&f.id)).unwrap().expect("the credential");
+    let kept = f
+        .secrets
+        .get(&account(&f.id))
+        .unwrap()
+        .expect("the credential");
     assert_eq!(kept.value, "uk1_rotated");
     assert_eq!(
         kept.account.expect("the account survived").username,

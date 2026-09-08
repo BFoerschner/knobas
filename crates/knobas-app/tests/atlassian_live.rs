@@ -980,7 +980,10 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
         .expect("a pool onto the scratch database");
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(&knobas_secrets::KeychainAccount::source(JIRA), &Secret::just(auth, secret))
+        .put(
+            &knobas_secrets::KeychainAccount::source(JIRA),
+            &Secret::just(auth, secret),
+        )
         .expect("the Jira credential is stored");
 
     knobas_sync::config::insert(
@@ -3231,7 +3234,10 @@ async fn wiki_app(
         .expect("a pool onto the scratch database");
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(&knobas_secrets::KeychainAccount::source(CONFLUENCE), &Secret::just(auth, secret))
+        .put(
+            &knobas_secrets::KeychainAccount::source(CONFLUENCE),
+            &Secret::just(auth, secret),
+        )
         .expect("the Confluence credential is stored");
 
     knobas_sync::config::insert(

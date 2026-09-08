@@ -165,7 +165,12 @@ pub async fn instance_write_ops(
 ) -> Vec<String> {
     let credential = match cfg.auth_kind.method() {
         None => Credential::default(),
-        Some(_) => match knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(&cfg.id)).await {
+        Some(_) => match knobas_secrets::spawn::get(
+            secrets,
+            &knobas_secrets::KeychainAccount::source(&cfg.id),
+        )
+        .await
+        {
             Ok(Some(stored)) => stored.into(),
             Ok(None) | Err(_) => return Vec::new(),
         },
@@ -256,7 +261,12 @@ pub async fn add(
             let classified = classify_insert(error, &input.id);
             if keeps_the_secret(&classified) {
                 tracing::warn!(source_id = %input.id, "another add won the race; keeping its secret");
-            } else if let Err(cleanup) = knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(&input.id)).await {
+            } else if let Err(cleanup) = knobas_secrets::spawn::delete(
+                secrets,
+                &knobas_secrets::KeychainAccount::source(&input.id),
+            )
+            .await
+            {
                 tracing::warn!(source_id = %input.id, %cleanup, "could not remove the orphaned secret");
             }
             return Err(classified);
@@ -447,7 +457,10 @@ pub async fn set_secret(
     // show. Removing an account is therefore not something this call can do;
     // deleting and re-adding the source is, and it is the honest cost of a
     // form that may never read a credential back.
-    let credential = Credential::keeping(&secret, knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?);
+    let credential = Credential::keeping(
+        &secret,
+        knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?,
+    );
     let Some(value) = credential.secret.clone() else {
         return Err(SourcesError::Invalid(format!(
             "source {id:?} has no stored credential to keep -- type one in"
@@ -588,7 +601,10 @@ pub async fn test(
     // included. A *Test* that resolved this differently would go green over a
     // credential the saved source does not have.
     let stored = match &draft.source_id {
-        Some(id) if auth.is_some() => knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?,
+        Some(id) if auth.is_some() => {
+            knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id))
+                .await?
+        }
         _ => None,
     };
     let had_stored = stored.is_some();
@@ -706,7 +722,13 @@ pub async fn reachable_transitions(
     // must not be turned into a keychain prompt by a select opening.
     let stored = match method {
         None => None,
-        Some(_) => knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(&parsed.namespace)).await?,
+        Some(_) => {
+            knobas_secrets::spawn::get(
+                secrets,
+                &knobas_secrets::KeychainAccount::source(&parsed.namespace),
+            )
+            .await?
+        }
     };
     let source = registry.build(instance_from(
         &parsed.namespace,

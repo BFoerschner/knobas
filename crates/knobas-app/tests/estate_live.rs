@@ -151,7 +151,11 @@ async fn the_real_estate_is_already_in_the_tree() {
             .collect::<Vec<_>>()
     );
 
-    let mut known: Vec<&str> = preview.known.iter().map(|entry| entry.id.as_str()).collect();
+    let mut known: Vec<&str> = preview
+        .known
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
     known.sort_unstable();
     assert_eq!(
         known,

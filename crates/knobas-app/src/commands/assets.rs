@@ -631,9 +631,7 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
             })
             .map_err(|error| IpcError::from_source_error(&error, None));
             match client {
-                Ok(client) => {
-                    assets::hcloud::produce(&pool, &client, land_under.as_deref()).await
-                }
+                Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_deref()).await,
                 Err(refused) => Err(refused),
             }
         }

@@ -6346,10 +6346,7 @@ async fn spawn_mock_hcloud(body: &str) -> wiremock::MockServer {
     Mock::given(method("GET"))
         .and(path("/v1/servers"))
         .and(header("authorization", format!("Bearer {HCLOUD_TOKEN}")))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw(body.to_owned(), "application/json"),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body.to_owned(), "application/json"))
         .mount(&server)
         .await;
     server
@@ -6417,8 +6414,16 @@ async fn every_recorded_server_is_already_in_the_tree_and_nothing_would_change()
         Vec::new(),
         "nothing already in the tree would change"
     );
-    assert_eq!(preview.known.len(), 3, "the three servers, under the tree's ids");
-    let mut known: Vec<&str> = preview.known.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(
+        preview.known.len(),
+        3,
+        "the three servers, under the tree's ids"
+    );
+    let mut known: Vec<&str> = preview
+        .known
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
     known.sort_unstable();
     assert_eq!(
         known,

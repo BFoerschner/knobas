@@ -313,8 +313,8 @@ pub(crate) async fn build_source(
                 &deps.secrets,
                 &knobas_secrets::KeychainAccount::source(&cfg.id),
             )
-                .await
-                .map_err(|e| RunFailure::Secret(e.to_string()))?;
+            .await
+            .map_err(|e| RunFailure::Secret(e.to_string()))?;
             let stored = stored.ok_or(RunFailure::MissingSecret)?;
             (Some(stored.value), stored.account)
         }

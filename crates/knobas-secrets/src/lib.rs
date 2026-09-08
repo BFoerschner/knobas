@@ -363,7 +363,10 @@ mod tests {
     /// load-bearing: changing it strands every stored credential.
     #[test]
     fn the_account_is_the_source_id_prefixed() {
-        assert_eq!(KeychainAccount::source("jira-eu").as_str(), "source:jira-eu");
+        assert_eq!(
+            KeychainAccount::source("jira-eu").as_str(),
+            "source:jira-eu"
+        );
     }
 
     /// **The importer namespace** (#509, ADR-0015): an importer's token is not
@@ -554,13 +557,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            store
-                .get(&kuma)
-                .unwrap()
-                .unwrap()
-                .account
-                .unwrap()
-                .username,
+            store.get(&kuma).unwrap().unwrap().account.unwrap().username,
             "knobas"
         );
         store.delete(&kuma).unwrap();
@@ -578,9 +575,7 @@ mod tests {
         store
             .put(&jira, &Secret::just(AuthMethod::Pat, "a"))
             .unwrap();
-        store
-            .put(&eu, &Secret::just(AuthMethod::Pat, "b"))
-            .unwrap();
+        store.put(&eu, &Secret::just(AuthMethod::Pat, "b")).unwrap();
         store.delete(&jira).unwrap();
         assert!(store.get(&jira).unwrap().is_none());
         assert_eq!(store.get(&eu).unwrap().unwrap().value, "b");
@@ -595,10 +590,7 @@ mod tests {
         spawn::put(&store, &jira, Secret::just(AuthMethod::Pat, "z"))
             .await
             .unwrap();
-        assert_eq!(
-            spawn::get(&store, &jira).await.unwrap().unwrap().value,
-            "z"
-        );
+        assert_eq!(spawn::get(&store, &jira).await.unwrap().unwrap().value, "z");
         spawn::delete(&store, &jira).await.unwrap();
         assert!(spawn::get(&store, &jira).await.unwrap().is_none());
     }
