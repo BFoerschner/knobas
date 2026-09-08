@@ -8833,9 +8833,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   driver asks for, and `crates/knobas-app/tests/demo.rs`'s
   `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds the chain from the demo
   load to `checkout::view` matching the very remote the driver plants. #501's criterion is still
-  open, and now for the run alone, owed to **#525** — on #537's head the driver reached the
-  harness's `screen-locked` refusal at step 1, before the build and before Launch Services, and
-  nothing past that refusal has been observed on it. There is **no #537 entry in §10.8**:
+  open, and now for the run alone, owed to **#525** — `just desktop-witness open-in-editor` on
+  #537's head was refused by the harness's readiness check (`screen-locked 1`, exit 1) before the
+  build, before Launch Services and before the driver was invoked, so nothing past that refusal
+  has been observed on it. There is **no #537 entry in §10.8**:
   `crates/knobas-source-mock` is on no frozen list, and its change touches no migration, no IPC
   schema or layout, neither barrel, nothing in `crates/knobas-source/src/**` and nothing in
   `crates/knobas-http/**` — checked against the list above rather than against the ticket's claim.

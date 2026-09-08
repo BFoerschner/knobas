@@ -1368,12 +1368,15 @@ and `crates/knobas-app/tests/demo.rs`'s
 chain below the window — the demo load, the entity read, and `checkout::view`
 matching the very remote the driver writes into the `.git/config` it plants.
 
-What #537 could **not** do is run it. On that head the screen was locked, and
-the driver reached the harness's `screen-locked` refusal at step 1 — before the
-build, before Launch Services, before anything on screen was touched. Nothing
-past that refusal has been observed on this driver, ever: no launcher hit, no
-repo detail, no press, no spawn. **One number now, not two**: the run is owed
-to **#525**, which has listed it as one of its three since it was filed.
+What #537 could **not** do is run it. `just desktop-witness open-in-editor`, on
+#537's head at 09:32 CEST on 2026-09-08, got as far as compiling the
+accessibility helper and no further: the harness's own readiness check answered
+`trusted 1 / post-events 1 / screen-locked 1` and refused, exit 1. That is
+before the build, before Launch Services, before the driver is invoked at all —
+so the driver's own first line has still never run, and nothing past that
+refusal has been observed on it, ever: no launcher hit, no detail, no press, no
+spawn. **One number now, not two**: the run is owed to **#525**, which has
+listed it as one of its three since it was filed.
 
 #### What the first runs answered
 
