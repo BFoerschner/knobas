@@ -367,9 +367,13 @@ const LOCAL_ORIGIN: &str = "tauri://localhost";
 /// Invoke `cmd` on a mock app that manages a `Lifecycle` with no pool and a
 /// `CaptureState` with nothing recorded.
 ///
-/// The two that read the database answer `not_ready`, which is the marker for
-/// *registered and dispatched* as distinct from *no such command*; the two that
-/// do not, answer.
+/// The two that read the database -- `capture_shortcut` and
+/// `set_capture_shortcut` -- answer `not_ready`, which is the marker for
+/// *registered and dispatched* as distinct from *no such command*.
+/// `record_capture_context` and `capture_context` take no pool and answer;
+/// `reveal_note` takes none either and answers `not_found`, because a mock app
+/// has no `main` window to bring forward. All five are dispatched, which is the
+/// only thing the caller below reads out of the answer.
 fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
@@ -423,9 +427,9 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
 /// adding a command and forgetting the list, which is a frontend failing at run
 /// time with "command not found" against a Rust side that compiles.
 ///
-/// Each optional argument appears **twice** -- present and null -- because an
-/// `Option` declared as a plain `String` would be refused by name in the second
-/// call and by nothing in the first.
+/// Each optional argument appears **three times** -- present, null and absent
+/// -- because an `Option` declared as a plain `String` would be refused by name
+/// in the second and third calls and by nothing in the first.
 #[test]
 fn every_capture_command_is_registered_and_its_arguments_decode() {
     for (cmd, args) in [

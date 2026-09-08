@@ -152,7 +152,11 @@ impl CaptureState {
         Self::default()
     }
 
-    fn take_refusal(&self) -> Option<String> {
+    /// The recorded refusal, **left where it is**. Read and not taken: the
+    /// settings pane is opened long after the write that earned the refusal,
+    /// and a read that cleared it would turn the report this module exists to
+    /// make back into the one-shot rejection its docs refuse.
+    fn refusal(&self) -> Option<String> {
         self.refusal
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -251,7 +255,7 @@ pub async fn shortcut(pool: &PgPool, capture: &CaptureState) -> Result<ShortcutV
         // The refusal is reported only beside an accelerator. A stored
         // shortcut that was cleared while a refusal was on record would
         // otherwise draw "not registered" under an empty field.
-        refusal: accelerator.as_ref().and_then(|_| capture.take_refusal()),
+        refusal: accelerator.as_ref().and_then(|_| capture.refusal()),
         accelerator,
     })
 }
@@ -437,7 +441,7 @@ mod tests {
     }
 
     /// A stand-in registrar: it records what it was asked for, and refuses
-    /// anything whose accelerator is in its refusal list.
+    /// the one accelerator it was built to refuse.
     #[derive(Default)]
     struct Stub {
         refuse: Option<String>,

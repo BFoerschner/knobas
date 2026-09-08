@@ -517,7 +517,7 @@ fn the_capture_window_may_close_itself_and_nothing_more() {
 
     assert_eq!(
         capability["windows"].as_array().map(Vec::as_slice),
-        Some([Value::String("capture".to_owned())].as_slice()),
+        Some([Value::String(knobas_app::capture::WINDOW_LABEL.to_owned())].as_slice()),
         "the capture capability names a window that is not the one \
          `knobas_app::capture::WINDOW_LABEL` builds, so it grants nothing to \
          anything"

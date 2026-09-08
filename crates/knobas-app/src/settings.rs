@@ -6,7 +6,7 @@
 //! (`crate::checkout`, issues #499 and #501), and the capture window's global
 //! shortcut (`crate::capture`, issue #503).
 //!
-//! **Here rather than in `checkout.rs`, where both functions were born, because
+//! **Here rather than in `checkout.rs`, where all three were born, because
 //! there are now two readers and one rule.** *Unset* has a meaning for every
 //! setting that goes through here -- no clones root is scanned, an action falls
 //! back to the platform's default, no shortcut is registered -- so a blank value
@@ -46,7 +46,7 @@ pub async fn read(pool: &PgPool, key: &str) -> Result<Option<String>, IpcError> 
 ///
 /// Delete rather than store a blank, for the reason this module's own docs
 /// give: *unset* is a state every caller has a meaning for, and a row holding
-/// `""` would be a fourth one nobody reads.
+/// `""` would be a third one nobody reads.
 ///
 /// # Errors
 ///

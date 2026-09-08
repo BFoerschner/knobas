@@ -584,13 +584,13 @@
       //
       // **Not `await`ed, and that is the whole of it.** Every line in this
       // block is synchronous after the one `await` at its head, and an
-      // `await listen(...)` in the middle would push everything below it a
-      // tick later — so a shell unmounted in that window runs its teardown
-      // *first* and then installs `notifications` and the lifecycle's own
-      // `db:state`, which is a subscription per window and no way to stop it.
+      // `await listen(...)` here would push everything below it a tick later
+      // — so a shell unmounted in that window runs its teardown *first*, and
+      // only then is this subscription stored and the lifecycle's own
+      // `db:state` installed, each with nothing left to stop it.
       // Measured on 2026-09-08: `residue`'s *App leaves nothing behind after
-      // it has been used* went red under a loaded gate with **two** listeners
-      // left, this one and `db:state`.
+      // it has been used* went red under a loaded gate with exactly those
+      // **two** listeners left, this one and `db:state`.
       //
       // The `disposed` check inside is the other half: `listen` resolves a
       // tick later whatever this line does, so a subscription that lands after

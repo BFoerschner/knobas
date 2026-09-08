@@ -242,7 +242,7 @@ pin_label() {
     else
         check "$3" yes no
         printf '  %s no longer carries %s;\n' "$1" "$2" >&2
-        printf '  testenv/desktop-witness/drivers/open-in-editor.sh presses it by name.\n' >&2
+        printf '  a driver under testenv/desktop-witness/drivers/ presses it by name.\n' >&2
     fi
 }
 
