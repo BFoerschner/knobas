@@ -6,7 +6,9 @@
 //! cannot see: the clones root round-tripping through `knobas.setting`, the
 //! override winning over the scan and giving it back when cleared, a branch
 //! answering its repository's checkout, and a repo with no clone answering
-//! *no checkout* with a clone command built from its own URL.
+//! *no checkout* with a clone command built from its own URL -- and, since
+//! #501, that pressing one of the three buttons starts a real process with the
+//! checkout path and nothing else in its argument list.
 //!
 //! # Why every test gets a database of its own
 //!
@@ -20,11 +22,12 @@
 //! everything but the root.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
 use knobas_app::checkout::{
-    CheckoutView, FoundBy, clones_root, set_clones_root, set_override, view,
+    CheckoutView, FoundBy, clones_root, commands, open, set_clones_root, set_command, set_override,
+    view,
 };
 use sqlx::PgPool;
 
@@ -626,4 +629,311 @@ async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() 
         "turning a source off hides its items from readers, not the clone from its owner"
     );
     assert_eq!(path_of(&answer), root.path().join(&turned_off.name));
+}
+
+// -- the spawn half (#501) ---------------------------------------------------
+//
+// The template rule itself is `knobas_core::checkout`'s and is asserted there
+// over every shape a person can type. What is asserted here is the join: that
+// the value reaching a real process is the checkout this database resolved,
+// and that each refusal names the thing a person has to go and change.
+
+/// An executable that records the arguments it was given, and the file it
+/// records them in.
+///
+/// A stub rather than a real editor for the reason ADR-0013 gives a fake in
+/// general: the thing under test is *what knobas passed*, and only a program
+/// that writes its `argv` down can answer that. What the editor then does with
+/// a directory is the editor's business and no assertion of knobas'.
+///
+/// One argument per line: the whole point is the count as well as the values,
+/// and a space-joined line could not tell one argument holding a space from
+/// two arguments.
+#[cfg(unix)]
+fn recording_stub(dir: &Path) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let record = dir.join("record");
+    let stub = dir.join("stub");
+    fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
+            record.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    (stub, record)
+}
+
+/// What the stub recorded, waiting for it to have run.
+///
+/// A deadline rather than a sleep: `open_checkout` returns as soon as the
+/// program has *started*, which is the only thing an IPC call can promise
+/// about a process it does not wait for, so a fixed sleep would be either slow
+/// or flaky depending on the machine. This is the same shape the desktop
+/// driver polls in.
+#[cfg(unix)]
+async fn recorded(record: &Path) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if let Ok(text) = fs::read_to_string(record) {
+            // A partly written file is possible; `> file` is one open and one
+            // write here, but waiting for the trailing newline costs nothing
+            // and removes the question.
+            if text.ends_with('\n') {
+                return text.lines().map(str::to_owned).collect();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the stub at {} never recorded anything", record.display());
+}
+
+/// The whole feature, end to end: a clones root, a scan, a template, and a
+/// real process that is handed the path the scan found -- and nothing else.
+#[cfg(unix)]
+#[tokio::test]
+async fn opening_a_checkout_runs_the_template_with_the_scanned_path() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let root = clones_root_with(&repo);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    let workshop = tempfile::tempdir().unwrap();
+    let (stub, record) = recording_stub(workshop.path());
+
+    set_command(
+        &pool,
+        "vscode",
+        Some(&format!("{} --wait {{path}}", stub.display())),
+    )
+    .await
+    .unwrap();
+
+    open(&pool, &repo.id, "vscode").await.unwrap();
+
+    // Exactly two arguments: the flag the template carried, and the checkout.
+    // The repo's URL, its key, its title and its source are all in scope at
+    // the call site and **none of them** reaches the process (ADR-0016).
+    assert_eq!(
+        recorded(&record).await,
+        [
+            "--wait".to_owned(),
+            root.path().join(&repo.name).to_string_lossy().into_owned()
+        ]
+    );
+}
+
+/// The override is a path, and the path is what runs -- so a worktree the scan
+/// cannot see opens in the editor as readily as a clone it can.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_override_is_what_the_command_is_given() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let workshop = tempfile::tempdir().unwrap();
+    let (stub, record) = recording_stub(workshop.path());
+    // A path with a space in it, because there is no shell between here and
+    // `exec`: it must arrive as **one** argument.
+    let worktree = workshop.path().join("my work/payout-service");
+    set_override(&pool, &repo.id, Some(&worktree.to_string_lossy()))
+        .await
+        .unwrap();
+    set_command(&pool, "terminal", Some(&format!("{} {{path}}", stub.display())))
+        .await
+        .unwrap();
+
+    open(&pool, &repo.id, "terminal").await.unwrap();
+
+    assert_eq!(
+        recorded(&record).await,
+        [worktree.to_string_lossy().into_owned()]
+    );
+}
+
+/// A branch opens its repository's checkout, which is what makes the same
+/// three buttons right on both details.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_branch_opens_its_repositorys_checkout() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let branch = branch_of(&pool, &repo, "feature/PAY-231-sepa-retry").await;
+    let root = clones_root_with(&repo);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    let workshop = tempfile::tempdir().unwrap();
+    let (stub, record) = recording_stub(workshop.path());
+    set_command(&pool, "vscode", Some(&format!("{} {{path}}", stub.display())))
+        .await
+        .unwrap();
+
+    open(&pool, &branch, "vscode").await.unwrap();
+
+    // The repository's clone, and **not** the branch: nothing checks anything
+    // out, so what opens is the working tree as the person left it (ADR-0016).
+    assert_eq!(
+        recorded(&record).await,
+        [root.path().join(&repo.name).to_string_lossy().into_owned()]
+    );
+}
+
+/// A repo with no clone on this machine refuses, and the refusal names the
+/// entity somebody pressed the button on.
+#[tokio::test]
+async fn a_repo_with_no_checkout_refuses_and_names_it() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    // No clones root and no override: *no checkout*, which the panel draws as
+    // a state and this command refuses as an address with nothing behind it.
+    let error = open(&pool, &repo.id, "vscode")
+        .await
+        .expect_err("there is nothing to open");
+    assert_eq!(error.code, IpcErrorCode::NotFound);
+    assert!(error.message.contains(&repo.id), "{}", error.message);
+    assert!(error.message.contains("no checkout"), "{}", error.message);
+}
+
+/// The three ways a template is refused before anything is spawned, each
+/// naming what is wrong with it.
+#[tokio::test]
+async fn a_template_that_cannot_be_run_is_refused_where_it_is_typed() {
+    let pool = pool().await;
+
+    // The refusal ADR-0016 is about: a placeholder that would carry a field
+    // the mirror wrote.
+    let error = set_command(&pool, "vscode", Some("code {repo_url}"))
+        .await
+        .expect_err("only {path} may be substituted");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(error.message.contains("{repo_url}"), "{}", error.message);
+    assert!(error.message.contains("code {repo_url}"), "{}", error.message);
+
+    // A command that would open nothing.
+    let error = set_command(&pool, "vscode", Some("code ."))
+        .await
+        .expect_err("a template with no path is refused");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+
+    // An action nobody has.
+    let error = set_command(&pool, "emacs", Some("emacs {path}"))
+        .await
+        .expect_err("emacs is not an action");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(error.message.contains("emacs"), "{}", error.message);
+
+    // And none of the three stored anything.
+    let stored = commands(&pool).await.unwrap();
+    assert!(
+        stored.iter().all(|command| command.is_default),
+        "a refused write must leave the row alone: {stored:?}"
+    );
+}
+
+/// A template whose program is not on this machine refuses, and the refusal
+/// names the template -- the string somebody has to go and change.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_program_that_will_not_start_names_the_template() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let root = clones_root_with(&repo);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    let template = "/nonexistent/knobas-not-an-editor {path}";
+    set_command(&pool, "jetbrains", Some(template)).await.unwrap();
+
+    let error = open(&pool, &repo.id, "jetbrains")
+        .await
+        .expect_err("there is no such program");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(error.message.contains(template), "{}", error.message);
+}
+
+/// The settings round trip: nothing stored reads as this platform's default,
+/// a stored template wins, and clearing it hands the default back.
+#[tokio::test]
+async fn a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_back() {
+    let pool = pool().await;
+
+    let before = commands(&pool).await.unwrap();
+    let ids: Vec<&str> = before.iter().map(|c| c.action.as_str()).collect();
+    assert_eq!(ids, ["vscode", "jetbrains", "terminal"]);
+    assert!(before.iter().all(|command| command.is_default));
+
+    set_command(&pool, "vscode", Some("  code --new-window {path}  "))
+        .await
+        .unwrap();
+    let after = commands(&pool).await.unwrap();
+    let vscode = after.iter().find(|c| c.action == "vscode").unwrap();
+    // Trimmed on the way in: a leading space would be a program name nothing
+    // resolves.
+    assert_eq!(vscode.template.as_deref(), Some("code --new-window {path}"));
+    assert!(!vscode.is_default);
+    // And only that one moved.
+    assert!(
+        after
+            .iter()
+            .filter(|c| c.action != "vscode")
+            .all(|c| c.is_default)
+    );
+
+    set_command(&pool, "vscode", None).await.unwrap();
+    assert_eq!(commands(&pool).await.unwrap(), before);
+}
+
+/// *Not configured*: an action with no template on this platform.
+///
+/// **The arm this asserts depends on where the gate runs, and only one of the
+/// two is the ticket's criterion.** macOS ships a default for all three
+/// actions, so the state cannot be reached there at all -- clearing the row
+/// hands the default back, which is the other half of the same rule. Off
+/// macOS there is no default, and clearing the row *is* the state, so the
+/// refusal runs. `knobas_core::checkout`'s `only_macos_starts_with_a_template`
+/// pins which platform is which; this is the seam's side of it.
+#[tokio::test]
+async fn an_action_with_no_template_reports_not_configured() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let root = clones_root_with(&repo);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    set_command(&pool, "jetbrains", None).await.unwrap();
+
+    let jetbrains = commands(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|command| command.action == "jetbrains")
+        .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            jetbrains.template.as_deref(),
+            Some("open -a \"IntelliJ IDEA\" {path}"),
+            "macOS has a default, so *not configured* is unreachable here"
+        );
+    } else {
+        assert_eq!(jetbrains.template, None);
+        let error = open(&pool, &repo.id, "jetbrains")
+            .await
+            .expect_err("no template, nothing to run");
+        assert_eq!(error.code, IpcErrorCode::Invalid);
+        assert!(
+            error.message.contains("not configured"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("Open in JetBrains"),
+            "{}",
+            error.message
+        );
+    }
 }

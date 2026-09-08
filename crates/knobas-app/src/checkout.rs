@@ -403,6 +403,11 @@ pub struct OpenCommandView {
     /// `vscode`, `jetbrains`, `terminal` -- the id `open_checkout` takes.
     pub action: String,
     /// What the button says.
+    ///
+    /// On the wire rather than in the component, which is why nothing here
+    /// pins `CheckoutPanel.svelte` against these three strings the way #499's
+    /// `FoundBy` is pinned: the panel draws one button per row of this list
+    /// and labels it from this field, so there is no second spelling to drift.
     pub label: String,
     /// The template this action would run: what somebody set, else this
     /// platform's default. `None` is *not configured*, which is every action
@@ -596,21 +601,6 @@ mod tests {
             assert!(
                 mirror.contains(&format!("{key}:")),
                 "OpenCommandView.{key} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
-    }
-
-    /// The panel draws one button per action and presses it by id, so the ids
-    /// are a vocabulary shared with the component. A renamed id is a button
-    /// whose only effect is `open_checkout`'s refusal.
-    #[test]
-    fn the_actions_are_the_ones_the_panel_draws() {
-        let panel = include_str!("../../../app/src/lib/detail/CheckoutPanel.svelte");
-        for action in checkout::OPEN_ACTIONS {
-            assert!(
-                panel.contains(action.label()),
-                "CheckoutPanel.svelte does not draw a button saying {:?}",
-                action.label()
             );
         }
     }
