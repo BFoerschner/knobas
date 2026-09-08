@@ -581,8 +581,25 @@
       // into nothing. The address is the kind-agnostic alias, because a note
       // written in another window is one this shell has never drawn and knows
       // no kind for -- `#/entity/<id>` is what that alias is for.
-      stopCapture = await listen<string>(EVENTS.captureOpenNote, (event) => {
+      //
+      // **Not `await`ed, and that is the whole of it.** Every line in this
+      // block is synchronous after the one `await` at its head, and an
+      // `await listen(...)` in the middle would push everything below it a
+      // tick later — so a shell unmounted in that window runs its teardown
+      // *first* and then installs `notifications` and the lifecycle's own
+      // `db:state`, which is a subscription per window and no way to stop it.
+      // Measured on 2026-09-08: `residue`'s *App leaves nothing behind after
+      // it has been used* went red under a loaded gate with **two** listeners
+      // left, this one and `db:state`.
+      //
+      // The `disposed` check inside is the other half: `listen` resolves a
+      // tick later whatever this line does, so a subscription that lands after
+      // the teardown has to be dropped rather than stored.
+      void listen<string>(EVENTS.captureOpenNote, (event) => {
         router.go(`#/entity/${event.payload}`);
+      }).then((off) => {
+        if (disposed) off();
+        else stopCapture = off;
       });
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
