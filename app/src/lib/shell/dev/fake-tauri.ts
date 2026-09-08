@@ -170,7 +170,7 @@ export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
   seedClonesRoot(params);
-  seedOpenFailure(params);
+  seedOpenState(params);
   installFakeTauri(demoHandlers(params));
 }
 
@@ -2304,20 +2304,33 @@ const fakeTemplates: Record<string, string> = {};
  */
 let fakeOpenFails: string | null = null;
 
-function seedOpenFailure(params: URLSearchParams): void {
-  const given = params.get("fake-open-fails");
-  if (given === null) return;
-  fakeOpenFails = given.trim() === "" ? null : given.trim();
+/**
+ * The action with no template at all, from `?fake-open-unset=<action>`.
+ *
+ * *Not configured* is the state every action is in off macOS, and macOS is the
+ * only platform anyone has run knobas on — so without this the one screen spec
+ * #491 describes for Windows and Linux could not be looked at by anybody. It
+ * is the same shape as `?fake-clones-root`: a QA pass putting a screen into a
+ * state the default fixture is not in.
+ */
+let fakeOpenUnset: string | null = null;
+
+function seedOpenState(params: URLSearchParams): void {
+  const fails = params.get("fake-open-fails");
+  if (fails !== null) fakeOpenFails = fails.trim() === "" ? null : fails.trim();
+  const unset = params.get("fake-open-unset");
+  if (unset !== null) fakeOpenUnset = unset.trim() === "" ? null : unset.trim();
 }
 
 /** `checkout_commands` — the stored template, else the platform's default. */
 function fakeCommands() {
   return FAKE_COMMANDS.map((command) => {
     const stored = fakeTemplates[command.action];
+    const platform = command.action === fakeOpenUnset ? null : command.default;
     return {
       action: command.action,
       label: command.label,
-      template: stored ?? command.default,
+      template: stored ?? platform,
       is_default: stored === undefined,
     };
   });
