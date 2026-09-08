@@ -124,7 +124,11 @@
 <div class="secl"><span class="lab">Smart lists</span><span class="n">saved local queries</span></div>
 {#each home.smart_lists as list, i (list.id)}
   {@const row = rows[i]}
-  <div class="slrow" class:on={i === selected}>
+  <!-- The hover is on the row and not on the button inside it, so moving the
+       pointer onto *Rename* or *Delete* selects the row those act on rather
+       than leaving the cursor two rows above. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="slrow" class:on={i === selected} onmouseenter={() => onhover(i)}>
     {#if renaming === list.id}
       <!--
         Renaming in place, on the row it renames. `blur` abandons rather than
@@ -160,7 +164,6 @@
         aria-selected={i === selected}
         disabled={list.needs_attention}
         onclick={() => row && onopen(row)}
-        onmouseenter={() => onhover(i)}
       >
         <span class="nm">
           {list.label}
@@ -184,11 +187,21 @@
           other per-row action in this box lives.
         -->
         <span class="own">
-          <button class="mini" onclick={() => onstartrename(list.id)}>Rename</button>
+          <button
+            class="mini"
+            onclick={() => {
+              onhover(i);
+              onstartrename(list.id);
+            }}>Rename</button
+          >
           <button
             class="mini del"
             class:armed={confirming === list.id}
             onclick={() => {
+              // Select first: `confirming` belongs to the row under the
+              // cursor, so a press on a row the cursor is not on has to move
+              // it there or the button could never arm.
+              onhover(i);
               if (confirming === list.id) {
                 armed = null;
                 ondelete(list.id);
