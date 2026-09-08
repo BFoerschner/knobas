@@ -129,6 +129,10 @@ pub struct ShortcutView {
 /// The process-wide capture state: what the main window recorded, and why the
 /// stored shortcut is not registered.
 ///
+/// `CaptureState` and not `Capture`, because a **capture** is the note
+/// (`CONTEXT.md`) and this is the process's memory of where the next one would
+/// come from.
+///
 /// Managed by Tauri like [`Lifecycle`](crate::commands::app::Lifecycle), and
 /// **in memory rather than in the database on purpose**. Both fields are facts
 /// about *this run*: a room the reader stood in last Tuesday is not where they
@@ -136,12 +140,12 @@ pub struct ShortcutView {
 /// Storing either would make a stale one survive a restart, which is the one
 /// direction that cannot be noticed.
 #[derive(Debug, Default)]
-pub struct Capture {
+pub struct CaptureState {
     recorded: Mutex<Recorded>,
     refusal: Mutex<Option<String>>,
 }
 
-impl Capture {
+impl CaptureState {
     /// A capture state that has been told nothing yet.
     #[must_use]
     pub fn new() -> Self {
@@ -241,7 +245,7 @@ impl<R: Runtime> Registrar for Plugin<R> {
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
-pub async fn shortcut(pool: &PgPool, capture: &Capture) -> Result<ShortcutView, IpcError> {
+pub async fn shortcut(pool: &PgPool, capture: &CaptureState) -> Result<ShortcutView, IpcError> {
     let accelerator = settings::read(pool, SHORTCUT_KEY).await?;
     Ok(ShortcutView {
         // The refusal is reported only beside an accelerator. A stored
@@ -266,7 +270,7 @@ pub async fn shortcut(pool: &PgPool, capture: &Capture) -> Result<ShortcutView, 
 /// module's docs, point 2.
 pub async fn set_shortcut(
     pool: &PgPool,
-    capture: &Capture,
+    capture: &CaptureState,
     registrar: &dyn Registrar,
     accelerator: Option<&str>,
 ) -> Result<ShortcutView, IpcError> {
@@ -289,7 +293,7 @@ pub async fn set_shortcut(
 /// settings pane is where it is read.
 pub async fn register_stored(
     pool: &PgPool,
-    capture: &Capture,
+    capture: &CaptureState,
     registrar: &dyn Registrar,
 ) -> Result<(), IpcError> {
     let accelerator = settings::read(pool, SHORTCUT_KEY).await?;
@@ -312,7 +316,7 @@ fn apply(registrar: &dyn Registrar, accelerator: Option<&str>) -> Option<String>
 }
 
 /// Record where the main window is, so a capture can attach it.
-pub fn record(capture: &Capture, recorded: Recorded) {
+pub fn record(capture: &CaptureState, recorded: Recorded) {
     *capture
         .recorded
         .lock()
@@ -321,7 +325,7 @@ pub fn record(capture: &Capture, recorded: Recorded) {
 
 /// What the main window last recorded.
 #[must_use]
-pub fn context(capture: &Capture) -> Recorded {
+pub fn context(capture: &CaptureState) -> Recorded {
     capture
         .recorded
         .lock()
@@ -505,7 +509,7 @@ mod tests {
     /// independently absent.
     #[test]
     fn what_the_main_window_recorded_is_what_comes_back() {
-        let capture = Capture::new();
+        let capture = CaptureState::new();
         assert_eq!(context(&capture), Recorded::default());
 
         record(

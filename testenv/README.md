@@ -1277,9 +1277,10 @@ the gate because its *run* is.
    `/Applications/knobas.app`, three old worktrees, the root checkout's debug
    *and* release bundles, and five stale DMG mount points. Moving
    `/Applications/knobas.app` aside was not enough — LS then named the root
-   checkout's debug bundle. What worked, and what the three green runs
-   recorded below were made with, is unregistering every other path and putting
-   back afterwards the ones that still exist on disk:
+   checkout's debug bundle. What worked, and what the three runs recorded below
+   were made with -- two green and one stopped at the demo-corpus gap -- is
+   unregistering every other path and putting back afterwards the ones that
+   still exist on disk:
 
    ```sh
    LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -1391,9 +1392,10 @@ the reference adapter that no ticket has named; **#525** owns it.
   harness refuses unless the copy Launch Services names is the one it just
   built, and there were **ten** registered paths on 2026-09-08: `/Applications`,
   three old worktrees, the root checkout's debug and release bundles, and five
-  stale DMG mount points. The three green runs above were made with the others
-  unregistered (`lsregister -u <path>`) and every one that still existed on disk
-  put back afterwards; nothing was moved or deleted. **A merge-manager
+  stale DMG mount points. The three runs above -- two green, one stopped at the
+  demo-corpus gap -- were made with the others unregistered
+  (`lsregister -u <path>`) and every one that still existed on disk put back
+  afterwards; nothing was moved or deleted. **A merge-manager
   re-running these recipes has to do the same**, or the harness will refuse with
   *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
   the winner. Making the harness handle that itself is #525's.

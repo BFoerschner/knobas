@@ -2263,7 +2263,7 @@ pub async fn open_checkout(
 #[tauri::command]
 pub async fn capture_shortcut(
     lifecycle: State<'_, Lifecycle>,
-    capture: State<'_, crate::capture::Capture>,
+    capture: State<'_, crate::capture::CaptureState>,
 ) -> Result<crate::capture::ShortcutView, IpcError> {
     let pool = lifecycle.pool()?;
     crate::capture::shortcut(&pool, &capture).await
@@ -2288,7 +2288,7 @@ pub async fn capture_shortcut(
 pub async fn set_capture_shortcut<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
-    capture: State<'_, crate::capture::Capture>,
+    capture: State<'_, crate::capture::CaptureState>,
     accelerator: Option<String>,
 ) -> Result<crate::capture::ShortcutView, IpcError> {
     let pool = lifecycle.pool()?;
@@ -2315,7 +2315,7 @@ pub async fn set_capture_shortcut<R: tauri::Runtime>(
 /// PostgreSQL is up yet.
 #[tauri::command]
 pub fn record_capture_context(
-    capture: State<'_, crate::capture::Capture>,
+    capture: State<'_, crate::capture::CaptureState>,
     context: Option<String>,
     foreground: Option<String>,
 ) {
@@ -2331,7 +2331,9 @@ pub fn record_capture_context(
 /// What the main window last recorded -- the capture window's half of the pair
 /// above.
 #[tauri::command]
-pub fn capture_context(capture: State<'_, crate::capture::Capture>) -> crate::capture::Recorded {
+pub fn capture_context(
+    capture: State<'_, crate::capture::CaptureState>,
+) -> crate::capture::Recorded {
     crate::capture::context(&capture)
 }
 

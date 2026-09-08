@@ -208,7 +208,7 @@ pub fn run() {
             // here for `Lifecycle`'s reason: the capture window can call in
             // before the database is up, and "state not managed" is not an
             // answer anything can branch on.
-            handle.manage(capture::Capture::new());
+            handle.manage(capture::CaptureState::new());
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -487,7 +487,7 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // to run without one, never a reason not to start.
             if let Err(error) = capture::register_stored(
                 db.pool(),
-                &handle.state::<capture::Capture>(),
+                &handle.state::<capture::CaptureState>(),
                 &capture::Plugin::new(handle.clone()),
             )
             .await

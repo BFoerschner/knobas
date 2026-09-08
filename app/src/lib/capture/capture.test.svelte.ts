@@ -10,7 +10,7 @@
  */
 import { expect, test } from "vitest";
 
-import { bornWith, createCapture, split, type CapturePorts } from "./capture.svelte";
+import { createCapture, split, type CapturePorts } from "./capture.svelte";
 import type { CaptureContext, NoteDetail } from "../ipc/entity";
 
 const NOTE_ID = "note:0f2c1a";
@@ -100,30 +100,6 @@ test("a leading blank line is skipped rather than becoming an empty title", () =
 
 test("nothing but whitespace is neither a title nor a body", () => {
   expect(split("   \n\t\n")).toEqual({ title: "", body: "" });
-});
-
-// --- the two born links ------------------------------------------------------
-
-test("the recorded room and foreground become the two born links, in that order", () => {
-  expect(bornWith({ context: "ctx:sepa", foreground: "mock:PAY-231" })).toEqual([
-    { target_id: "ctx:sepa", relation: "captured-in" },
-    { target_id: "mock:PAY-231", relation: "captured-from" },
-  ]);
-});
-
-/**
- * The two halves are independent, which is the case a single link would get
- * wrong: a derived room has no context and the reader is still looking at
- * something, and a stored room with nothing open is the other way round.
- */
-test("a derived room contributes no captured-in, and an empty foreground no captured-from", () => {
-  expect(bornWith({ context: null, foreground: "mock:PAY-231" })).toEqual([
-    { target_id: "mock:PAY-231", relation: "captured-from" },
-  ]);
-  expect(bornWith({ context: "ctx:sepa", foreground: null })).toEqual([
-    { target_id: "ctx:sepa", relation: "captured-in" },
-  ]);
-  expect(bornWith({ context: null, foreground: null })).toEqual([]);
 });
 
 // --- creation ----------------------------------------------------------------

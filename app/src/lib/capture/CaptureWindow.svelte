@@ -20,28 +20,17 @@
 
   let {
     ports,
-    /**
-     * Shut the window. Separate from {@link CapturePorts} because it is the one
-     * thing here that is Tauri's rather than knobas' — `getCurrentWindow()`
-     * needs the injected internals, which a test does not have and the
-     * `?fake-ipc` walk in a browser does not either.
-     */
-    close,
   }: {
+    /**
+     * The bridge, injectable so a test needs no Tauri — and `close` is one of
+     * them rather than a prop of its own, so there is one door into this
+     * window's IO and no way to override half of it.
+     */
     ports?: Partial<CapturePorts>;
-    close?: () => Promise<void>;
   } = $props();
 
   // svelte-ignore state_referenced_locally
-  const capture = createCapture({
-    close:
-      close ??
-      (async () => {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        await getCurrentWindow().close();
-      }),
-    ...ports,
-  });
+  const capture = createCapture(ports);
 
   let box = $state<HTMLTextAreaElement | null>(null);
 

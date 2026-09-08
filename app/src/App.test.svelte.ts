@@ -161,6 +161,23 @@ vi.mock("./lib/ipc/sources", () => ({
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // The note editor's read (#503). The shell can now be sent to a note it has
+  // never drawn -- the capture window's *Open in knobas* emits an address --
+  // so this mock has to answer for one. Empty: this file is about which
+  // address the event produces, not about what the editor then shows.
+  getNote: (noteId: string) =>
+    Promise.resolve({
+      note: {
+        id: noteId,
+        title: "Retry storm",
+        body_md: "",
+        created_at: "2026-09-08T09:00:00Z",
+        updated_at: "2026-09-08T09:00:00Z",
+      },
+      refs: [],
+      links: [],
+    }),
+  saveNote: () => Promise.reject(new Error("no note is saved in this test")),
   // What a capture would attach (#503): the main window records its room and
   // its foreground here whenever either changes. Recorded rather than
   // swallowed, because the pair is what the capture window's two links are
@@ -1589,6 +1606,38 @@ test("what a capture would attach is the room and the foreground the timer recor
   await until(
     () => captureRecords.at(-1)?.context === null && captureRecords.at(-1)?.foreground === null,
     "a derived room with nothing open never recorded an empty pair",
+  );
+});
+
+/**
+ * **The main window's half of *Open in knobas*** (#503).
+ *
+ * The capture window closes itself, so the navigation is not its to make: it
+ * asks the backend to bring this window forward, and this window listens for
+ * `capture:open-note` and routes. That listener is a wire with no other seam —
+ * `CaptureWindow.test.svelte.ts` can see the button and the `reveal_note` call
+ * and nothing past them — and this is the only place the address it produces is
+ * observable.
+ *
+ * The address is the **kind-agnostic alias**, which is the point rather than a
+ * detail: a note written in another window is one this shell has never drawn
+ * and knows no kind for, and `#/entity/<id>` is what that alias exists for.
+ */
+test("a note captured in the other window opens here when the capture asks", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => (listeners.get("capture:open-note") ?? []).length > 0,
+    "the shell never subscribed to capture:open-note",
+  );
+
+  emit("capture:open-note", "note:0f2c1a");
+  await until(
+    () => location.hash === "#/entity/note:0f2c1a",
+    `the address is ${location.hash}, not the note the capture asked for`,
   );
 });
 

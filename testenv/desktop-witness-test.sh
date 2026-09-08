@@ -291,7 +291,8 @@ pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
 
 check "a label's rendered name is its upper case" "SHORTCUT" "$(rendered_label Shortcut)"
 check "a rendered name keeps its spaces" "OPEN IN VS CODE" "$(rendered_label 'Open in VS Code')"
-check "a rendered name keeps its punctuation" "CAPTURED FROM" "$(rendered_label 'captured from')"
+check "a lower-case reading renders in upper case" "CAPTURED FROM" \
+    "$(rendered_label 'captured from')"
 check "an already-upper name is unchanged" "CHECKOUT" "$(rendered_label CHECKOUT)"
 check "nothing renders as nothing" "" "$(rendered_label '')"
 

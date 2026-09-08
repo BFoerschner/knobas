@@ -157,8 +157,8 @@
     <!--
       An accessible name of its own, because the visible word is *new* and
       "new" on its own tells a reader moving by control nothing about what it
-      makes. It is also the name the desktop witness presses it by (#503),
-      which `just witness-unit` pins.
+      makes. An accessibility fix and only that: no driver presses it, and
+      nothing outside this file reads the name.
     -->
     <button
       class="tab new"

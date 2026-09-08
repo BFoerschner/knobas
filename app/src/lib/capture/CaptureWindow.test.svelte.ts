@@ -46,11 +46,11 @@ function render(overrides: Partial<CapturePorts> = {}) {
   app = mount(CaptureWindow, {
     target,
     props: {
-      close: async () => {
-        closed = true;
-        calls.push("close");
-      },
       ports: {
+        close: async () => {
+          closed = true;
+          calls.push("close");
+        },
         captureContext: async () => ({ context: "ctx:sepa", foreground: "mock:PAY-231" }),
         createNote: async () => {
           calls.push("createNote");

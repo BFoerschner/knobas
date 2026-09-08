@@ -8708,10 +8708,22 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The desktop witness ran and is green**, which no criterion in this milestone had managed
   before: `just desktop-witness capture`, 2026-09-08, a shortcut registered with the window server
-  and pressed while **Finder** had the screen. Two things it does **not** witness are disclosed in
-  `testenv/README.md`, *What is not witnessed yet*, and owed to **#525**: `captured-in`, which
-  needs a stored room the `--demo` profile does not carry, and a combination the operating system
-  refuses, which needs another application holding one.
+  and pressed while **Finder** had the screen. Three things it does **not** witness are listed in
+  `testenv/README.md`, *What is still not witnessed*, and only the first is owed to **#525**:
+  `captured-in`, which needs a stored room the `--demo` profile does not carry; a combination the
+  operating system refuses, which needs another application holding one and is pinned at the IPC
+  seam with a stand-in registrar instead; and **which entity the born link points at**, which is
+  deliberately not asserted from a driver, because the ticket's key is on the room behind the
+  slide-over and a driver reading the whole window for it would pass with no link drawn at all.
+
+  **Two sentences in the entries above are now false, and §10.8 is append-only, so they are
+  corrected here rather than edited there.** The #500 and #501 entries each close with *"the
+  desktop witness has not run"*. It has: `just desktop-witness launcher-hotkey` is green as of
+  2026-09-08, so **#500's criterion is met**; `open-in-editor` now reaches the gap it always
+  named — the `--demo` corpus carries no repo entity — so **#501's remains open and is still
+  owed to #525**, for that reason and no longer for a locked screen. Its driver was also
+  *unrunnable as merged*, looking for three accessible names no element carries; that is fixed
+  in this change and pinned by `rendered_label`'s cases in `witness-unit`.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

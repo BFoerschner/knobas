@@ -49,11 +49,11 @@ vi.mock("../ipc/entity", () => ({
   // What a capture would attach (#503): the main window records its room and
   // its foreground here whenever either changes. Nothing in this file opens a
   // capture window, so it only has to answer.
+  recordCaptureContext: () => Promise.resolve(),
   // The capture shortcut the settings section draws (#503). Nothing set, which
   // is the default, and no refusal to explain.
   captureShortcut: () => Promise.resolve({ accelerator: null, refusal: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
-  recordCaptureContext: () => Promise.resolve(),
   // The Tree's pane withdraws a link through this (#435). Nothing here does,
   // so it refuses rather than answering.
   unlink: () => Promise.reject(new Error("no unlink in this test")),

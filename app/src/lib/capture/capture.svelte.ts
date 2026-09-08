@@ -34,7 +34,7 @@
  * the direction that matters and is story 2's: the row exists before the
  * sentence does, so a window that goes away does not take the thought with it.
  */
-import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
+import { bornWith } from "../detail/relations";
 import { ipcErrorMessage } from "../ipc";
 import {
   captureContext as realCaptureContext,
@@ -43,8 +43,25 @@ import {
   saveNote as realSaveNote,
   type CaptureContext,
   type NoteDetail,
-  type NoteLinkInput,
 } from "../ipc/entity";
+
+/**
+ * Shut the window this code is running in.
+ *
+ * The real `close` port, and it is here rather than defaulted to a no-op in
+ * {@link createCapture} because a no-op is the wrong failure: a capture whose
+ * port was mis-wired would take the keystroke, write the note and then leave an
+ * always-on-top window with no way out. A default that really closes is a
+ * default that can only be wrong in a test, where the test supplies its own.
+ *
+ * `getCurrentWindow` needs the injected Tauri internals, so it is imported
+ * where it is called: a module-level import would be evaluated by every vitest
+ * file that reaches this one.
+ */
+async function closeThisWindow(): Promise<void> {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().close();
+}
 
 /** Everything this window does that leaves it, injectable so a test needs no Tauri. */
 export interface CapturePorts {
@@ -52,32 +69,8 @@ export interface CapturePorts {
   createNote: typeof realCreateNote;
   saveNote: typeof realSaveNote;
   revealNote: (noteId: string) => Promise<void>;
-  /** Shut the window. The real one is `getCurrentWindow().close()`. */
+  /** Shut the window. The real one is {@link closeThisWindow}. */
   close: () => Promise<void>;
-}
-
-/**
- * The links a captured note is **born with**, from the pair the main window
- * recorded.
- *
- * The same two, in the same order, that `shell/Room.svelte`'s `bornWith` makes
- * from a room it is standing in — and each present only when it has something
- * true to say. `captured-in` is absent for a derived room, which has no
- * context; `captured-from` is absent when nothing was in front of the reader.
- *
- * Exported so the test can read the decision without driving a window, and
- * because it is the sentence the ticket's third criterion is about: *the
- * recorded last stored room and foreground are what the capture passes*.
- */
-export function bornWith(recorded: CaptureContext): NoteLinkInput[] {
-  const links: NoteLinkInput[] = [];
-  if (recorded.context !== null) {
-    links.push({ target_id: recorded.context, relation: CAPTURED_IN });
-  }
-  if (recorded.foreground !== null) {
-    links.push({ target_id: recorded.foreground, relation: CAPTURED_FROM });
-  }
-  return links;
 }
 
 /**
@@ -126,7 +119,7 @@ export function createCapture(ports?: Partial<CapturePorts>): Capture {
     createNote: realCreateNote,
     saveNote: realSaveNote,
     revealNote: realRevealNote,
-    close: async () => {},
+    close: closeThisWindow,
     ...ports,
   };
 

@@ -25,7 +25,7 @@
     type EntityRow,
     type NoteLinkInput,
   } from "../ipc/entity";
-  import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
+  import { bornWith } from "../detail/relations";
   import AssetsTile from "./AssetsTile.svelte";
   import RoomBar from "./RoomBar.svelte";
   import SuggestionTray from "./SuggestionTray.svelte";
@@ -266,21 +266,18 @@
    *   *"Never the context's own id"*). What it buys is that the note and the
    *   day review's passive block for that minute name the same entity.
    *
-   * Built here rather than inside {@link startNote} so the decision is one
-   * expression a test can read, and because #503's capture window makes the
-   * same two from a room and a foreground it remembered rather than ones it is
-   * drawing.
+   * **The two pushes live in `detail/relations.ts` since #503**, beside the two
+   * constants and shared with the capture window, which makes the same pair
+   * from a room and a foreground it remembered rather than ones it is drawing.
+   * What is left here is this room's two answers, which is the part only a room
+   * can give: the **filter's** context, and `roomForeground` over the open
+   * detail and the anchor.
    */
-  function bornWith(): NoteLinkInput[] {
-    const links: NoteLinkInput[] = [];
-    if (context.filter.context !== null) {
-      links.push({ target_id: context.filter.context, relation: CAPTURED_IN });
-    }
-    const front = roomForeground(detail?.entityId, context.anchorId);
-    if (front !== null) {
-      links.push({ target_id: front, relation: CAPTURED_FROM });
-    }
-    return links;
+  function bornHere(): NoteLinkInput[] {
+    return bornWith({
+      context: context.filter.context,
+      foreground: roomForeground(detail?.entityId, context.anchorId),
+    });
   }
 
   /**
@@ -294,7 +291,7 @@
    */
   async function startNote() {
     try {
-      const written = await createNote(undefined, undefined, bornWith());
+      const written = await createNote(undefined, undefined, bornHere());
       router.go(
         hashFor({
           view: "room",

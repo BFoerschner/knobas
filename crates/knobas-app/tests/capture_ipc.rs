@@ -32,8 +32,8 @@
 use std::sync::Mutex;
 
 use knobas_app::capture::{
-    Capture, Recorded, Registrar, ShortcutView, context, record, register_stored, set_shortcut,
-    shortcut,
+    CaptureState, Recorded, Registrar, ShortcutView, context, record, register_stored,
+    set_shortcut, shortcut,
 };
 use sqlx::PgPool;
 
@@ -105,7 +105,7 @@ const OTHER: &str = "Alt+Space";
 #[tokio::test]
 async fn nothing_is_registered_until_a_shortcut_is_chosen() {
     let pool = pool().await;
-    let capture = Capture::new();
+    let capture = CaptureState::new();
     let stub = Stub::default();
 
     register_stored(&pool, &capture, &stub)
@@ -131,7 +131,7 @@ async fn nothing_is_registered_until_a_shortcut_is_chosen() {
 #[tokio::test]
 async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
     let pool = pool().await;
-    let capture = Capture::new();
+    let capture = CaptureState::new();
     let stub = Stub::default();
 
     let answered = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
@@ -148,7 +148,7 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
 
     // A second process, over the same database: the setting is the only thing
     // that survived, and it is enough.
-    let restarted = Capture::new();
+    let restarted = CaptureState::new();
     let after = Stub::default();
     register_stored(&pool, &restarted, &after)
         .await
@@ -174,7 +174,7 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
 #[tokio::test]
 async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
     let pool = pool().await;
-    let capture = Capture::new();
+    let capture = CaptureState::new();
     let stub = Stub::refusing(SHORTCUT);
 
     let answered = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
@@ -203,7 +203,7 @@ async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
 #[tokio::test]
 async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
     let pool = pool().await;
-    let capture = Capture::new();
+    let capture = CaptureState::new();
     let stub = Stub::refusing(SHORTCUT);
 
     set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
@@ -251,7 +251,7 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
 /// foreground, which is the case a single nullable pair would get wrong.
 #[tokio::test]
 async fn the_recorded_room_and_foreground_are_what_the_capture_reads() {
-    let capture = Capture::new();
+    let capture = CaptureState::new();
 
     assert_eq!(
         context(&capture),
@@ -322,7 +322,7 @@ async fn the_recorded_room_and_foreground_are_what_the_capture_reads() {
 /// would say it belongs to a working set the reader had already walked out of.
 #[tokio::test]
 async fn a_later_record_replaces_the_earlier_one_whole() {
-    let capture = Capture::new();
+    let capture = CaptureState::new();
     record(
         &capture,
         Recorded {
@@ -365,7 +365,7 @@ const LOCAL_ORIGIN: &str = "http://tauri.localhost";
 const LOCAL_ORIGIN: &str = "tauri://localhost";
 
 /// Invoke `cmd` on a mock app that manages a `Lifecycle` with no pool and a
-/// `Capture` with nothing recorded.
+/// `CaptureState` with nothing recorded.
 ///
 /// The two that read the database answer `not_ready`, which is the marker for
 /// *registered and dispatched* as distinct from *no such command*; the two that
@@ -382,7 +382,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
     app.manage(knobas_app::Lifecycle::new());
-    app.manage(Capture::new());
+    app.manage(CaptureState::new());
     let webview: tauri::WebviewWindow<tauri::test::MockRuntime> =
         tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
             .build()
@@ -483,7 +483,7 @@ fn the_recorded_pair_crosses_the_bridge_before_the_database_is_up() {
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
     app.manage(knobas_app::Lifecycle::new());
-    app.manage(Capture::new());
+    app.manage(CaptureState::new());
     let webview: tauri::WebviewWindow<tauri::test::MockRuntime> =
         tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
             .build()

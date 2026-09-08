@@ -305,10 +305,13 @@
    * spellings of the ladder would make that a coincidence; there is one, and it
    * is `timer.ts`'s `roomForeground`, read once above.
    *
-   * A rejected record is swallowed. It is `not_ready` during bring-up and
-   * nothing else — the command touches no database — and the effect runs again
-   * on the next change; a toast about a note nobody is writing yet would be the
-   * shell shouting about its own plumbing.
+   * A rejected record is swallowed, and the reason is that there is nothing to
+   * say: `record_capture_context` takes no pool and reads nothing, so it
+   * cannot answer `not_ready` and has no failure of its own — what is left is
+   * the bridge not being there at all, which is browser QA under `?fake-ipc`
+   * before the fixture is installed. The effect runs again on the next change,
+   * and a toast about a note nobody is writing yet would be the shell shouting
+   * about its own plumbing.
    */
   $effect(() => {
     void recordCaptureContext(roomContext, foreground?.entity_id ?? null).catch(() => {});
