@@ -1402,7 +1402,7 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
         .bind(kind)
         .bind(format!("{t} {id}"))
         .bind(author)
-        .bind(i32::from(days))
+        .bind(days)
         .execute(&pool)
         .await
         .unwrap();
@@ -1750,8 +1750,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     // was fine.
     let unnamed = create_smart_list_inner(&pool, "   ", &t)
         .await
-        .err()
-        .expect("a saved list needs a name");
+        .expect_err("a saved list needs a name");
     assert_eq!(unnamed.code, IpcErrorCode::Invalid);
     assert!(
         !unnamed
