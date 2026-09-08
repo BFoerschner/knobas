@@ -40,12 +40,27 @@ pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 # edit to one of these would otherwise fail a *correct* app, minutes into a
 # run, with no clue in the failure.
 readonly SETTINGS_BUTTON='Settings'
-readonly CLONES_ROOT_FIELD='Directory'
 readonly SAVE_CLONES_ROOT='Save clones root'
-readonly VSCODE_FIELD='Open in VS Code'
 readonly SAVE_VSCODE='Save Open in VS Code'
 readonly OPEN_BUTTON='Open in VS Code'
-readonly CHECKOUT_PANEL='Checkout'
+# The label the settings row and the *Reset* button are both worded from. The
+# button's `aria-label` carries it verbatim; the field's name is the **rendered**
+# text and the stylesheet uppercases it, which is why the two are separate
+# constants.
+readonly VSCODE_LABEL='Open in VS Code'
+# **Rendered** names (#503's measurement, 2026-09-08): a `<label class="lab">`
+# and a `<span class="lab">` are uppercased by `app/src/app.css`, and WebKit
+# names an element by what is rendered. Written as it appears in the markup and
+# transformed here, so the source spelling stays readable and one function
+# states the rule -- see `rendered_label`. As typed, these two were `Directory`
+# and `Checkout`, which no element on screen carries, so this driver could not
+# have got past its first `fill`.
+CLONES_ROOT_FIELD=$(rendered_label 'Directory')
+readonly CLONES_ROOT_FIELD
+VSCODE_FIELD=$(rendered_label "$VSCODE_LABEL")
+readonly VSCODE_FIELD
+CHECKOUT_PANEL=$(rendered_label 'Checkout')
+readonly CHECKOUT_PANEL
 
 # The repository the demo profile is asked for, and the remote a clone of it
 # carries. `https://tidewater.example` is `knobas_source_mock`'s `MOCK_BASE`.
@@ -145,6 +160,13 @@ say "bringing pid $pid to the front"
 # --- 1. the settings ---------------------------------------------------------
 
 say "opening Settings"
+# Waited for, and not pressed straight away. The shell finishes booting after
+# its window appears -- the harness waits for a *window*, which the boot screen
+# also is -- so a press issued the instant the app is frontmost finds nothing.
+# Measured on 2026-09-08: `ax press` answered *0 elements labelled 'Settings'*
+# on a run whose own failure dump, a second later, showed the button.
+wait_until "the top strip's '$SETTINGS_BUTTON' button never appeared" \
+    exactly_one "$SETTINGS_BUTTON"
 "$ax" press "$pid" "$SETTINGS_BUTTON" || die "could not press the '$SETTINGS_BUTTON' button"
 
 fill "$CLONES_ROOT_FIELD" "$clones"
@@ -165,8 +187,11 @@ say "the '$VSCODE_FIELD' command now runs the stub"
 # the cheapest observable proof that the write landed, and it is asserted
 # rather than assumed: a Save that silently failed would otherwise be
 # discovered three steps later as "the editor did not open".
+# `$VSCODE_LABEL` and not `$VSCODE_FIELD`: this is the *Reset* button's
+# `aria-label`, which carries the label verbatim, while the field beside it is
+# named by its rendered -- uppercased -- text.
 wait_until "the command was not stored: no '$SAVE_VSCODE' row offers to reset it" \
-    present "Reset $VSCODE_FIELD"
+    present "Reset $VSCODE_LABEL"
 say "the template is stored (the field offers to reset it)"
 
 # --- 2. the repo detail ------------------------------------------------------

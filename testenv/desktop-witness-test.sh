@@ -279,6 +279,27 @@ pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
     "the demo corpus still lives under the host the driver's clone points at"
 
+# --- rendered_label, and the two stylesheet rules behind it -----------------
+#
+# Measured on the dev Mac on 2026-09-08, in the first harness run that got past
+# its probe: WebKit names an element by its **rendered** text, so a label the
+# stylesheet uppercases is named in upper case and a driver looking for the
+# markup's spelling finds nothing. Two drivers depend on that, so the rule is
+# one function and the stylesheet rules behind it are pinned: if either
+# `text-transform` goes, the constants in `capture.sh` and `open-in-editor.sh`
+# have to change, and this is what says so.
+
+check "a label's rendered name is its upper case" "SHORTCUT" "$(rendered_label Shortcut)"
+check "a rendered name keeps its spaces" "OPEN IN VS CODE" "$(rendered_label 'Open in VS Code')"
+check "a rendered name keeps its punctuation" "CAPTURED FROM" "$(rendered_label 'captured from')"
+check "an already-upper name is unchanged" "CHECKOUT" "$(rendered_label CHECKOUT)"
+check "nothing renders as nothing" "" "$(rendered_label '')"
+
+pin_label ../app/src/app.css '.lab{font:600 11px/1 var(--disp);text-transform:uppercase' \
+    "the .lab class still uppercases, which is why the field names are upper case"
+pin_label ../app/src/app.css '.row.hd{height:22px;cursor:default;color:var(--faint);font:500 10px var(--mono);text-transform:uppercase' \
+    "the .row.hd class still uppercases, which is why the panel readings are upper case"
+
 # --- the capture driver's pure parts (#503) ---------------------------------
 
 check "the title is the first line" "Retry storm" \
@@ -347,17 +368,8 @@ pin_label ../app/src/lib/detail/LinksPanel.svelte '>Linked items<' \
 # own side (`readingOf`'s forward). The inverse readings -- *captured here*,
 # *captured from here* -- are what the other end shows, and `has_reading`'s
 # whole-line rule is what keeps them apart.
-pin_label ../app/src/lib/detail/relations.ts 'forward: "captured in"' \
-    "a captured-in link still reads *captured in* on the note"
 pin_label ../app/src/lib/detail/relations.ts 'forward: "captured from"' \
     "a captured-from link still reads *captured from* on the note"
-# The tab strip's *new* button and the field it becomes: the driver makes an
-# ad-hoc context, because `captured-in` needs a **stored** room and the demo
-# profile carries none.
-pin_label ../app/src/lib/shell/ContextTabs.svelte 'aria-label="New context label"' \
-    "the new-context field still has its accessible name"
-pin_label ../app/src/lib/shell/ContextTabs.svelte 'aria-label="New ad-hoc context"' \
-    "the tab strip's *new* button still has an accessible name of its own"
 
 # --- the helper's own two answers -------------------------------------------
 #

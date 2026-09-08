@@ -333,6 +333,17 @@ func type(_ string: String) -> Int32 {
                 return 1
             }
             event.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            // **No modifiers, explicitly.** An event built from
+            // `.hidSystemState` inherits the session's current modifier flags,
+            // and a synthetic `key` posted just before this one leaves ⌘
+            // *held* as far as that state is concerned -- there is no
+            // `flagsChanged` to let it go. Measured on 2026-09-08: a driver
+            // that pressed ⌘A to select a settings field and then typed
+            // `CmdOrCtrl+Alt+Shift+K` into it sent ⌘C, ⌘A, ⌘S … ⌘K, and the
+            // last of those opened the launcher over the pane it was typing
+            // in. Clearing the flags per event makes typing mean typing
+            // whatever was pressed before it.
+            event.flags = []
             event.post(tap: .cghidEventTap)
             // The webview's input handler runs on its own turn; typing faster
             // than it can read has dropped characters on every framework that

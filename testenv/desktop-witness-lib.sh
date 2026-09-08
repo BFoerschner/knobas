@@ -206,6 +206,32 @@ sole_argument() {
     printf '%s' "$1" | awk 'NF { lines[++n] = $0 } END { if (n == 1) print lines[1] }'
 }
 
+# rendered_label <visible text>
+#
+# The accessible name an element has when its text is styled `.lab` or sits in a
+# `.row.hd` -- **the uppercase form**, because both carry
+# `text-transform: uppercase` in `app/src/app.css` and WebKit names an element
+# by what is *rendered*, not by what is in the markup.
+#
+# **Measured on the dev Mac, 2026-09-08**, in the first run of this harness that
+# got past its probe. The settings field whose markup reads
+# `<label class="lab" for="capture-shortcut">Shortcut</label>` arrives as
+# `AXTextField title=SHORTCUT`, and the links panel's group heading -- a bare
+# `<span>` inside `.row.hd` -- as `CAPTURED FROM`. An `aria-label` is **not**
+# transformed, because it is not rendered text: `Save capture shortcut` arrives
+# spelled exactly as it is written.
+#
+# Here rather than as an uppercase constant in each driver so that the rule is
+# stated once and the drivers keep the source spelling visible; `witness-unit`
+# pins both `text-transform` rules, so a stylesheet that stopped uppercasing
+# turns the gate red instead of failing a run minutes in.
+#
+# ASCII only, which every one of these labels is. A `tr` over a wider alphabet
+# would be a promise this cannot keep.
+rendered_label() {
+    printf '%s\n' "$1" | tr '[:lower:]' '[:upper:]'
+}
+
 # --- the capture driver's pure parts (issue #503) ---------------------------
 #
 # Here for the reason everything above is: what is left over once the typing and
