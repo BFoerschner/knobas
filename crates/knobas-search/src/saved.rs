@@ -72,9 +72,16 @@ use crate::{MAX_FILTER_VALUES, SearchError};
 
 /// What the rail says instead of a count when a saved query no longer runs.
 ///
-/// Public so that the panel, a test and this module compare against **one**
-/// wording rather than three copies of it -- `lists::describe_missing_identity`
-/// exists for the same reason.
+/// Public so that this module, the seam tests and the Rust-side pin on the
+/// `?fake-ipc` fixture (`lists::the_builtin_registry_matches_its_typescript_fixture`)
+/// compare against **one** wording rather than four copies of it --
+/// `lists::describe_missing_identity` exists for the same reason.
+///
+/// **The panel is not one of them, and cannot be**: `Board.svelte` draws these
+/// two words as its own literal, because no Rust constant crosses the bridge.
+/// What holds them together is `Launcher.test.svelte.ts`'s
+/// *a saved list that needs attention says so and does not open*, which reads
+/// them off the rendered count cell.
 pub const NEEDS_ATTENTION: &str = "Needs attention";
 
 /// Longest id [`create`] will generate.
@@ -89,7 +96,7 @@ const MAX_ID_CHARS: usize = 48;
 /// Every one of them is a `count(*)` over the corpora on the launcher's board
 /// path (`sql::saved_summary_sql` folds them into one round trip, which saves
 /// the latency and not the scans). The cap is generous -- nobody curates
-/// sixty-four saved searches -- and it is here so that the board's cost has a
+/// sixty-four saved lists -- and it is here so that the board's cost has a
 /// stated ceiling rather than an unbounded one.
 pub const MAX_SAVED_LISTS: i64 = 64;
 

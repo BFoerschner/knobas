@@ -1513,6 +1513,8 @@ const SAVED_HOME: LauncherHome = {
 function railRows() {
   return [...target.querySelectorAll(".slrow")].map((row) => ({
     text: row.textContent ?? "",
+    /** The right-hand cell: the count, or the words a refused query draws. */
+    right: row.querySelector(".c")?.textContent?.trim() ?? "",
     controls: [...row.querySelectorAll("button.mini")].map(
       (button) => button.textContent?.trim() ?? "",
     ),
@@ -1562,7 +1564,10 @@ test("a saved list that needs attention says so and does not open", async () => 
   await settle();
 
   const row = railRows()[2]!;
-  expect(row.text).toContain("Needs attention");
+  // The **count cell** and not the row's whole text: the blurb under the name
+  // carries these two words too, so a row that had gone back to drawing `0`
+  // beside a needs-attention blurb would satisfy a whole-row `toContain`.
+  expect(row.right).toBe("Needs attention");
   expect(row.open?.disabled).toBe(true);
 
   row.open?.click();
@@ -1579,6 +1584,16 @@ test("a saved list that needs attention says so and does not open", async () => 
   press("Enter");
   await settle();
   expect(target.querySelector("input")!.value).toBe("");
+
+  // The positive control, and the assertion above is worth nothing without
+  // it: an empty box is also what a launcher whose arrows never moved and
+  // whose `Enter` never fired would show. `ArrowUp` steps back onto the
+  // runnable saved row, and that one *does* open -- so the three keystrokes
+  // above are known to have landed on the row they were aimed at.
+  press("ArrowUp");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("list:sepa-retries");
 });
 
 /**

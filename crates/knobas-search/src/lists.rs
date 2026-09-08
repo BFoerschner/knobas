@@ -1424,9 +1424,17 @@ mod tests {
         // attention. The rest of that sentence is a `Refusal` variant's, which
         // the fixture legitimately stands in for; this word is the one a
         // reader recognises, so it is the one that may not drift.
+        //
+        // Asked of `fakeSavedLists`' body and not of the file, because the
+        // file is a representation of the fixture and not the fixture: two
+        // words in an unrelated comment anywhere in 3,000 lines would satisfy
+        // a whole-file `contains` while the blurb the rail draws had drifted.
+        // `function_body` panics when the function is not there, so a rename
+        // fails here rather than passing vacuously.
+        let drawn = function_body(fixture, "fakeSavedLists");
         assert!(
-            fixture.contains(crate::saved::NEEDS_ATTENTION),
-            "fake-tauri.ts no longer carries the heading a needs-attention row draws"
+            drawn.contains(crate::saved::NEEDS_ATTENTION),
+            "fakeSavedLists no longer carries the heading a needs-attention row draws:\n{drawn}"
         );
 
         let found = double_quoted(body);
