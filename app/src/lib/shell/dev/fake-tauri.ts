@@ -386,6 +386,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // here, and until now it answered "command not found" in red.
     preview_estate_import: (args) => estatePreview(args),
     apply_estate_import: (args) => estateApply(args),
+    produce_estate_file: (args) => estateProduce(args),
     // The room's Assets tile (#434). Empty for `context_members`' reason: the
     // fixture has no link graph, so no context holds anything and membership
     // -- assets included -- is honestly nothing. A stored room under
@@ -1383,6 +1384,61 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
       parent_id: route.asset,
     })),
   ];
+}
+
+/**
+ * `produce_estate_file`: the hcloud importer's three answers, without hcloud
+ * (#509).
+ *
+ * **A state machine and not a recording**, because what a walk through this
+ * harness can certify is the *dialog*: that the token is asked for once, that
+ * *land under* is asked only when a new server exists, and that the file comes
+ * back and is offered. So this fixture holds one flag -- whether a token has
+ * been given -- and one server the estate does not hold, which is enough to
+ * make every branch reachable by hand and none of them reachable twice.
+ *
+ * What it says nothing about is Hetzner: there is no API here, no origin key
+ * and no match. `crates/knobas-app/tests/assets_ipc.rs` witnesses the shape
+ * against a recording and `just estate-live` witnesses the real system, which
+ * is the split stated in `assets::hcloud`'s own header.
+ */
+let IMPORTER_TOKEN: string | null = null;
+
+/** The server this fixture's hcloud holds and the estate does not. */
+const IMPORTER_NEW_SERVER = "knobas-scratch";
+
+function estateProduce(args: Record<string, unknown>) {
+  const token = typeof args.token === "string" ? args.token.trim() : "";
+  if (token !== "") IMPORTER_TOKEN = token;
+  if (IMPORTER_TOKEN === null) return { state: "token_needed" };
+
+  const landUnder = typeof args.landUnder === "string" ? args.landUnder : null;
+  const held = FIXTURE_ESTATE.some((asset) => asset.name === IMPORTER_NEW_SERVER);
+  if (!held && landUnder === null) {
+    return { state: "landing_needed", servers: [IMPORTER_NEW_SERVER] };
+  }
+  const entry: Record<string, unknown> = {
+    id: "asset:hcloud-164750999",
+    type: "vm",
+    name: IMPORTER_NEW_SERVER,
+    properties: {
+      hcloud_id: "164750999",
+      server_type: "cx23",
+      os: "ubuntu-24.04",
+      location: "fsn1",
+      ip: "203.0.113.9",
+    },
+  };
+  if (!held) entry.parent = landUnder;
+  return {
+    state: "ready",
+    file: JSON.stringify(
+      { version: 1, name: "Hetzner Cloud", assets: [entry], routes: [] },
+      null,
+      2,
+    ),
+    new_servers: held ? [] : [IMPORTER_NEW_SERVER],
+  };
 }
 
 /**

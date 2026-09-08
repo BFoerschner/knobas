@@ -99,6 +99,7 @@
     getRoute as realGetRoute,
     moveAsset as realMoveAsset,
     previewEstateImport as realPreviewEstateImport,
+    produceEstateFile as realProduceEstateFile,
     type AssetDetail,
     type AssetRow,
     type AssetProperty,
@@ -227,6 +228,13 @@
     previewEstateImport: typeof realPreviewEstateImport;
     applyEstateImport: typeof realApplyEstateImport;
     /**
+     * Running an importer (#509) — the third half of the Import, and a port
+     * for the two above's reason: the dialog's token field, its *land under*
+     * picker and its download are each reachable only through an answer, so a
+     * produce a test could not stub would make all three unreachable.
+     */
+    produceEstateFile: typeof realProduceEstateFile;
+    /**
      * Queueing *Create monitor for this asset* (#453).
      *
      * The ordinary write queue, one command, exactly as the Monitors tab
@@ -295,6 +303,7 @@
     dependsOnThis: realDependsOnThis,
     previewEstateImport: realPreviewEstateImport,
     applyEstateImport: realApplyEstateImport,
+    produceEstateFile: realProduceEstateFile,
     submitWrite: realSubmitWrite,
     ...ports,
   };
@@ -2406,6 +2415,8 @@
   <ImportDialog
     preview={io.previewEstateImport}
     apply={io.applyEstateImport}
+    produce={io.produceEstateFile}
+    tree={io.assetTree}
     onclose={() => (importing = false)}
     onimported={() => {
       importing = false;
