@@ -613,6 +613,78 @@ fn every_compose_service_the_notebook_runs_is_recorded() {
     );
 }
 
+/// **Every container carries the origin key the Docker importer matches it on**
+/// (#510, spec #491 story 67).
+///
+/// The unique thing this can say, and it is the reason it exists: the three
+/// `hcloud_id` values in this file have **no** gate -- `README.md` says so, and
+/// `just estate-live` is their only witness -- but a container's origin key is
+/// two values that every other line of the same file already implies. Its
+/// `container_name` is its own `name`, and its `docker_context` is the one on
+/// the engine it hangs off. So a hand edit that renames a container and forgets
+/// the property, or moves it to another engine, is red here rather than red on
+/// a live recipe an hour later, or silent.
+///
+/// `CONTEXT.md`, **Origin key**: *"the docker context plus the container name
+/// for a container, since a container's id changes on every recreate and its
+/// name does not."* Both parts are **properties**, because that is what
+/// `assets::Producer::origin_key` matches on -- a name is a column and the
+/// planner does not read columns -- and the same two are what
+/// `assets::docker` writes into every entry it produces. Half a key matches
+/// nothing on either side, so a container missing one of them would preview as
+/// *new* and the import would make a second copy of it.
+#[test]
+fn every_container_carries_the_context_and_the_name_it_is_matched_on() {
+    let estate = estate();
+    let assets = assets(&estate);
+    let context_of: HashMap<&str, &str> = assets
+        .iter()
+        .filter(|asset| field(asset, "type") == "container_engine")
+        .map(|engine| {
+            let context = engine["properties"]["docker_context"]
+                .as_str()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the container engine `{}` carries no `docker_context`.                          It is what the Docker importer spawns `docker                          --context` with, and an engine without one is an                          engine whose containers no import can read.",
+                        id(engine)
+                    )
+                });
+            (id(engine), context)
+        })
+        .collect();
+    assert!(
+        !context_of.is_empty(),
+        "this parse found no container engine; if the type id moved, fix the          parse rather than deleting the check"
+    );
+
+    let mut checked = 0;
+    for asset in assets {
+        if field(asset, "type") != "container" {
+            continue;
+        }
+        let entry = id(asset);
+        assert_eq!(
+            asset["properties"]["container_name"].as_str(),
+            Some(field(asset, "name")),
+            "`{entry}`'s `container_name` and its name say different things.              The property is half the origin key and the name is what a person              reads; a container is one thing and they are the same string."
+        );
+        let engine = field(asset, "parent");
+        let context = context_of.get(engine).unwrap_or_else(|| {
+            panic!("`{entry}` hangs off `{engine}`, which is not a container engine")
+        });
+        assert_eq!(
+            asset["properties"]["docker_context"].as_str(),
+            Some(*context),
+            "`{entry}` says it is reached through a different docker context              from the engine `{engine}` it runs on. The importer reads it              through the engine's, so the container's would match nothing."
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 8,
+        "only {checked} containers were checked; this file has carried more          than that since M4.0, so the parse has broken rather than the estate          having shrunk"
+    );
+}
+
 /// What an asset entry may say, and what a route entry may say.
 ///
 /// A closed vocabulary is the only thing that catches the mistake none of the

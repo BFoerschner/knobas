@@ -1401,6 +1401,11 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
  * been given -- and one server the estate does not hold, which is enough to
  * make every branch reachable by hand and none of them reachable twice.
  *
+ * **The Docker producer is answered by {@link dockerProduce}, not by this**
+ * (#510): it asks for no token and no landing, and answering it here would draw
+ * hcloud's two questions over a producer that has neither, which is a walk
+ * certifying a dialog nobody ships.
+ *
  * What it says nothing about is Hetzner: there is no API here, no origin key
  * and no match. `crates/knobas-app/tests/assets_ipc.rs` witnesses the shape
  * against a recording and `just estate-live` witnesses the real system, which
@@ -1422,7 +1427,48 @@ const IMPORTER_NEW_SERVER = "knobas-scratch";
  */
 let PRODUCED_FILE: string | null = null;
 
+/**
+ * `produce_estate_file` for the **Docker host** producer (#510).
+ *
+ * One press, one answer: no token, no *land under*, and a container under an
+ * engine this fixture's estate already holds. It also answers with one
+ * **skipped** engine, because `asset:orbstack-docker` is the shape that state
+ * exists for -- an engine in the tree with no `docker_context` -- and a branch
+ * of the dialog nothing here could reach is a branch nobody would see before it
+ * shipped.
+ *
+ * As above, it says nothing about docker: there is no CLI here and no match.
+ * `crates/knobas-app/tests/assets_ipc.rs` drives a stub docker and
+ * `just estate-live` drives the four real contexts.
+ */
+function dockerProduce() {
+  PRODUCED_FILE = JSON.stringify(
+    {
+      version: 1,
+      name: "Docker hosts",
+      assets: [
+        {
+          id: "asset:docker-orbstack/knobas-gitea",
+          type: "container",
+          name: "knobas-gitea",
+          properties: { docker_context: "orbstack", container_name: "knobas-gitea" },
+        },
+      ],
+      routes: [],
+    },
+    null,
+    2,
+  );
+  return {
+    state: "ready",
+    file: PRODUCED_FILE,
+    new_assets: [],
+    skipped: ["Docker engine (OrbStack)"],
+  };
+}
+
 function estateProduce(args: Record<string, unknown>) {
+  if (args.producer === "docker") return dockerProduce();
   const token = typeof args.token === "string" ? args.token.trim() : "";
   if (token !== "") IMPORTER_TOKEN = token;
   if (IMPORTER_TOKEN === null) return { state: "token_needed" };
@@ -1436,7 +1482,7 @@ function estateProduce(args: Record<string, unknown>) {
   const landing = (args.landUnder ?? null) as { parent?: string | null } | null;
   const held = FIXTURE_ESTATE.some((asset) => asset.name === IMPORTER_NEW_SERVER);
   if (!held && landing === null) {
-    return { state: "landing_needed", servers: [IMPORTER_NEW_SERVER] };
+    return { state: "landing_needed", assets: [IMPORTER_NEW_SERVER] };
   }
   const entry: Record<string, unknown> = {
     id: "asset:hcloud-164750999",
@@ -1462,7 +1508,10 @@ function estateProduce(args: Record<string, unknown>) {
   return {
     state: "ready",
     file: PRODUCED_FILE,
-    new_servers: held ? [] : [IMPORTER_NEW_SERVER],
+    new_assets: held ? [] : [IMPORTER_NEW_SERVER],
+    // hcloud never skips: one token either sees a server or does not know it
+    // exists.
+    skipped: [],
   };
 }
 

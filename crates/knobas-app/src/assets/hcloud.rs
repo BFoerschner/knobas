@@ -71,7 +71,7 @@ use sqlx::PgPool;
 
 use crate::IpcError;
 
-use super::{FILE_VERSION, HCLOUD_PRODUCER, Landing, NAMESPACE};
+use super::{FILE_VERSION, HCLOUD_PRODUCER, Landing, NAMESPACE, Produced};
 
 /// Hetzner Cloud's API, versioned as its own documentation versions it.
 ///
@@ -184,43 +184,6 @@ struct Pagination {
     /// server's own answer about whether there is more.
     #[serde(default)]
     next_page: Option<u32>,
-}
-
-/// What one run of a producer answered.
-///
-/// Three states and not a struct of optionals, because two of the three fields
-/// would be meaningless in each: a `file: None, needs: None` is a state this
-/// producer is never in and no caller should have to write code for. The tag
-/// is `state`, which is `PropertyValue`'s `kind` arrangement one surface over.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum Produced {
-    /// Nothing is stored under this importer's keychain account and the caller
-    /// sent no token. **Answered before any request is made**, so a reader who
-    /// has never used this importer is asked once rather than being shown a
-    /// 401 from a call made with nothing.
-    TokenNeeded,
-    /// Servers the estate does not hold, and nowhere said to put them.
-    ///
-    /// The reader is asked **once per run**: the answer comes back as
-    /// `land_under` on the next call, and every server named here lands under
-    /// it. One question and not one per server, because *where the servers a
-    /// provider account holds go* is one decision -- and because the estate
-    /// this producer was written against answers it once, with a site.
-    LandingNeeded {
-        /// By name, in the order hcloud listed them.
-        servers: Vec<String>,
-    },
-    /// The estate file, ready for [`super::preview_import`].
-    Ready {
-        /// The file's text, in the checked-in shape -- there is nothing in it
-        /// that says hcloud made it (spec #491, #508).
-        file: String,
-        /// The servers this file would create, by name; empty when every
-        /// server the token sees is already in the tree, which is what
-        /// `just estate-live` asserts.
-        new_servers: Vec<String>,
-    },
 }
 
 /// The refusal a label that shadows one of [`OWN_KEYS`] gets.
@@ -430,11 +393,15 @@ pub async fn produce(
         // the draft *is* the answer -- the state `just estate-live` asserts.
         return Ok(Produced::Ready {
             file: draft,
-            new_servers: Vec::new(),
+            new_assets: Vec::new(),
+            // hcloud never skips: one token either sees a server or does not
+            // know it exists, so there is nothing this run knew of and could
+            // not read.
+            skipped: Vec::new(),
         });
     }
     let Some(landing) = land_under else {
-        return Ok(Produced::LandingNeeded { servers: named });
+        return Ok(Produced::LandingNeeded { assets: named });
     };
     // `landing.parent` is `None` for the top of the estate, and `estate_file`
     // then writes no `parent` key at all -- which is what the Import reads as a
@@ -443,7 +410,8 @@ pub async fn produce(
     // two paths.
     Ok(Produced::Ready {
         file: estate_file(&servers, &new, landing.parent.as_deref())?,
-        new_servers: named,
+        new_assets: named,
+        skipped: Vec::new(),
     })
 }
 

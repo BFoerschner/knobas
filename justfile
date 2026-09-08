@@ -1625,40 +1625,62 @@ atlassian-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test share_exit -- --ignored --nocapture --test-threads=1
     echo "atlassian-live: every Atlassian-gated live suite green (5 suites); $(( $(date +%s) - t0 ))s so far"
 
-# The **hcloud importer** against the real Hetzner Cloud (issue #509, v1.5
-# stream 9). `crates/knobas-app/tests/estate_live.rs` is the suite and it is one
-# test.
+# **Both importers** against the real systems (issues #509 and #510, v1.5
+# streams 9 and 10). `crates/knobas-app/tests/estate_live.rs` is the suite and
+# it is two tests: the hcloud producer against Hetzner Cloud, and the Docker
+# producer against the four engines `testenv/hetzner/estate.json` names.
 #
-# WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. The producer is run
-# against a recording in `just check` (`tests/assets_ipc.rs`), which certifies
-# shape: the decode, the file, the origin-key match, the landing. A recording is
-# green forever, so two facts have no witness but this recipe:
+# WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. Both producers are
+# run against a fake in `just check` (`tests/assets_ipc.rs`: a recorded hcloud
+# answer, and a stub docker executable), which certifies shape -- the decode,
+# the file, the origin-key match, the argument rule, the landing. A recording
+# and a stub are green forever, so these facts have no witness but this recipe:
 #
-#   1. that Hetzner still answers in that shape;
+#   1. that Hetzner still answers in that shape, and that the docker CLI still
+#      writes one JSON object per line;
 #   2. that the three `hcloud_id` values in `testenv/hetzner/estate.json` are
 #      the ids of the three real servers (#508 wrote them from `hcloud server
 #      list`; a *missing* id is red on a mutant, a plausible-but-wrong one is a
-#      second copy of a server and silent).
+#      second copy of a server and silent);
+#   3. that the four `docker_context` values in that file are contexts this
+#      machine has, each reaching the engine the file says it does;
+#   4. that every **running** container on those four engines is written down in
+#      that file, under the name it carries there -- the "diff against the
+#      estate file" the roadmap booked.
 #
-# **A RED RUN NAMING A SERVER IS READ FIRST AS A WRONG `hcloud_id` IN THAT
-# FILE**, and only then as a bug in the producer: a wrong id is unknown by id
-# and unmatched by key, so its server previews as *new* and the all-known
-# assertion goes red. That is the orchestrator's reading, posted on #509 under
-# the deputy's ruling of 2026-09-08 on #508, and the suite's own header repeats
-# it where a reader of a stack trace will meet it.
+# **A RED RUN NAMING A SERVER OR A CONTAINER IS READ FIRST AS A WRONG VALUE IN
+# THAT FILE**, and only then as a bug in a producer: a wrong `hcloud_id` is
+# unknown by id and unmatched by key, so its server previews as *new*; a
+# container running on a server and never written down previews as *new* the
+# same way. That is the orchestrator's reading, posted on #509 under the
+# deputy's ruling of 2026-09-08 on #508, and both suites' headers repeat it
+# where a reader of a stack trace will meet it.
 #
-# NO TUNNEL, NO CONTAINER, NO SEED. hcloud's API is public and this is one
-# `GET /v1/servers` -- read-only, against a shared fixture (`testenv/README.md`:
-# no shared container is stopped by anything here, and nothing here touches
-# one). The `hcloud` contexts named `terra-*` belong to other projects and are
-# not consulted: this reads the *token*, and the token is the project.
+# NO TUNNEL, NO CONTAINER, NO SEED. hcloud's API is public. The three Hetzner
+# docker contexts are `ssh://knobas-<product>`, which `~/.ssh/config` resolves
+# to each server's own address on port 22, while `testenv/hetzner/tunnel`
+# forwards only the products' HTTP ports (8111, 8080, 8090) -- so no forward is
+# in a docker call's path. That is a reading of what the two carry and not a run
+# with the tunnel down; the run that was made, on 2026-09-08, had it up. Every
+# call either half makes is a
+# read, against a shared fixture (`testenv/README.md`: no shared container is
+# stopped by anything here, and nothing here touches one). The `hcloud` contexts
+# named `terra-*` belong to other projects and are not consulted: this reads the
+# *token*, and the token is the project.
+#
+# WHAT IT DOES NEED, besides the token: the **docker CLI** and the four contexts
+# `testenv/hetzner/provision.sh` writes (`orbstack` is OrbStack's own). A context
+# this machine does not have is `unreachable` and red -- deliberately not a gap
+# in the produced file, because a file that quietly omitted one engine's
+# containers is indistinguishable from an engine holding none.
 #
 # The variable is **gated rather than skipped on**, `teamcity-live`'s rule and
 # issue #351's: a suite that skipped by name on an unset variable is one libtest
 # counts as a pass, and a green line certifying nothing is worse than a refusal.
+# The docker CLI is gated the same way and for the same reason.
 #
-# Serial and unparallelised: one test, one rate-limiter budget, somebody else's
-# server.
+# Serial and unparallelised: two tests, one rate-limiter budget, somebody else's
+# servers.
 estate-live:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1666,7 +1688,16 @@ estate-live:
     just _require-live-env 'the repo-root .env, which is gitignored -- the same
     HETZNER_API_TOKEN testenv/hetzner/provision.sh reads:
       cp .env.example .env   # then paste the Hetzner Cloud API token in
-    No tunnel and no seed are needed; this reads hcloud and nothing else.' \
+    No tunnel and no seed are needed; this reads hcloud and the docker contexts.' \
       HETZNER_API_TOKEN
+    if ! command -v docker >/dev/null 2>&1; then
+      echo "error: the docker CLI is not on the PATH." >&2
+      echo "  The Docker half of this recipe spawns it once per container engine" >&2
+      echo "  (\`docker --context <context> ps --format json\`), so without it the" >&2
+      echo "  suite would refuse every engine and report a fault that is this" >&2
+      echo "  machine's rather than the estate's. The four contexts it needs come" >&2
+      echo "  from testenv/hetzner/provision.sh; \`orbstack\` is OrbStack's own." >&2
+      exit 1
+    fi
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test estate_live \
       -- --ignored --nocapture --test-threads=1
