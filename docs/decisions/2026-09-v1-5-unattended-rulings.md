@@ -1181,3 +1181,85 @@ spends is that the leak fix is guarded by nothing on the branch.
 has a second file in the same position, `app/src/lib/shell/residue.test.svelte.ts`, changed rightly
 by a merge-manager for a ticket that did not own it. Two instances in one milestone is a rule
 waiting to be written; Björn's, on his return.
+
+---
+
+## #522 — the §9 record the ticket's scope sentence did not name, the workflow the measurement left behind, and a `--verify` that writes
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/522#issuecomment-5579875061>
+
+**The headline, before the three parts:** the gap the deputy's ruling of 2026-09-08 on #498 named
+is closed, and closed the way ADR-0013 asks. A `reachable_transitions` that answers the project's
+statuses instead of the workflow's offer, and one that reads the transition's own `name` instead of
+`to.name`, are each **survived by every narrowing assertion in the `PAY` test** and killed by the
+`NARROW` one, on the real Jira, with `PAY`'s restore point byte-identical before and after.
+
+**The fork:** three, raised by #522's implementer on PR #543. (1) `docs/contract.md` §9's #498
+amendment asserts *"`GET /rest/api/2/status` — this Jira's whole status list … answers **exactly**
+those four"*, which the seed's new project made false; the ticket's *Out of scope* sentence says
+*"No frozen surface: this is the seed, a test file and `seed-state.json`"*, so does that sentence
+bar a §9 section, is a §9 record the right shape, and does the superseded paragraph get a pointer?
+(2) The template measurement created a throwaway project, walked its workflow and deleted it, and
+Jira kept an inactive workflow `ZZP: Process Management Workflow` that no REST route on this
+version can delete — is that leftover acceptable under *leave it as you found it*, and is a README
+note, a ticket or a `seed-state.json` entry owed; and does `NARROW`, a permanent project the
+fixture's corpus does not name, need recording for the next live-suite agent? (3) `--verify` now
+writes one throwaway ticket, because *"this workflow still narrows"* is not a claim any read of a
+project can make — is a verify step that writes to the shared fixture the right meaning of the flag?
+
+**Ruling:** (1) **The section stays, it is the right shape, and #498's paragraph gains one italic
+pointer.** The scope sentence describes the code and does not bar the record: the colon makes the
+list an expansion of the frozen-surface claim, and `docs/contract.md` is on no frozen list — as
+`test-inventory.txt`, also absent from that sentence, is not out of scope either. Björn's ruling of
+2026-08-31 in the #112 section is the treatment — *"the old text stands and the amendment carries
+the new truth"* — and the #495 and #503 rulings applied it to a §9 sentence and a §10.8 entry
+respectively, the second making the pointer explicit. #498's paragraph named its own closure and
+#522 is that ticket, so the pointer is in the #495 idiom at `docs/contract.md` line 1451.
+(2) **Acceptable, recorded once, no ticket.** One bullet in `testenv/hetzner/README.md` under *What
+is not solved*, which already carries the class; nothing in `seed-state.json`; `NARROW` needs
+nothing further. (3) **Confirmed, with the write bounded as the branch bounds it**, and the three
+doc sites are correct: **`--verify` writes to `jira.narrowing` and to nothing in `jira.projects`,
+ever.**
+
+**Reasoning:** (1) the file's convention exists so that a measured sentence is never silently
+edited and never silently left false — the section does the first, the pointer the second. Deleting
+the section would leave a binding record asserting four statuses on an instance with nine, in the
+milestone that made it so; rewriting #498's paragraph in place is the wrong branch of the #112
+convention, reserved for a row that was never true; a follow-up ticket for one pointer is paperwork
+for a fact this PR made. The deputy verified by the anchored grep that the new section is at line
+2066 under `## 9.` and before `## 10.`, that `### 10.8` is at 2300, that no word of #498's section
+changed, and that the five-file diff touches nothing on §10.8's list. (2) what *leave it as you
+found it* protects is what the suites assert against and spend, and all of it is unchanged: `PAY`
+byte-identical, `/rest/api/2/status` the nine the new equality names, `/rest/api/2/project` exactly
+`NARROW`, `OPS`, `PAY`, `project=NARROW` empty, five suites green. An inactive workflow is in no
+scheme, contributes no status and appears on no endpoint any test or seed calls; reading the rule
+as *no byte on the server may differ* would also forbid `NARROW`, which the ticket ordered. The
+bullet is owed because a PR body is not where the next agent looks when an admin screen shows a
+workflow the seed never made, and it carries the lesson — **walk a template on the project the seed
+keeps, not on a throwaway**. No ticket, because there is nothing to build and the click is Björn's;
+nothing in `seed-state.json`, because that file is the seed's record of what the seed made and
+cannot truthfully carry a fact the seed cannot reproduce. `NARROW` is already in the three places a
+live-suite agent reads — `jira.narrowing` with its `_comment`, `testenv/README.md`'s Jira section
+and inventory line, and the seed's own header — and the one suite that could be surprised by a
+project the corpus does not name ran green twice with it present, because it asserts on issues and
+`NARROW` holds none. (3) ADR-0013's own sentence — *"a test that checks an assumption against
+itself cannot fail"* — is the reason: a read-only verify would pass on an Atlassian template that
+quietly went all-to-all, green and about nothing, which is the working model's *check that measures
+a representation of the thing*. `NARROW`'s keys are asserted on by nothing, while a fixture
+project's are reached by burning the keys in front of them, which is why the write must never move
+to one. The deputy grepped the README, the Hetzner README, the justfile and `docs/agents/` for any
+other sentence calling `--verify` read-only and found none.
+
+**If you disagree, the cost of reversing this is:** (1) trivial and by amendment — the section is a
+record, so an undo is a further #112-style entry rather than a deletion; the pointer is one
+sentence. (2) one click in Jira's admin UI, available to anyone with the admin account at any time,
+after which the bullet is struck; nothing depends on the workflow's presence or absence. (3) small —
+delete one block of `verify()` and restore three sentences, and `--verify` is a read-back again;
+what is lost is only the seed-side tripwire, since the live test still witnesses narrowing.
+
+**Left to the merge-manager, not ruled:** the ticket the new test files carried no `LITTER_LABEL`
+where the file's other create does, so `Env::clear_leftovers` could not find a killed run's
+`NARROW` ticket and the branch relied on the adapter suite's own clearing running first in the
+recipe. Acceptable as disclosed; the implementer took the should-fix, and the ticket is now
+labelled from the moment it exists and the test sweeps that label itself.

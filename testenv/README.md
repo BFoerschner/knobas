@@ -648,6 +648,26 @@ suites' transition tests use. The template's issue type scheme has no
 *Story*, so the seed adds the global Story type to each project's scheme
 over `PUT /rest/api/2/issuetypescheme/<id>`.
 
+**A third project, `NARROW`, whose workflow narrows** (issue #522). Every
+software template this container offers gives that same all-to-all Simplified
+workflow, so on `PAY` and `OPS` alone "what the workflow offers from here" and
+"every status this project has" are the same list — and #498's
+reachable-transition read, whose whole point is that it *narrows*, had no live
+witness for the narrowing. So the seed also creates *Narrowing workflow
+fixture* from Jira **Core**'s process-management template
+(`com.atlassian.jira-core-project-templates:jira-core-process-management`),
+which gives seven statuses and a proper subset from each of them: *Open* →
+*In Progress*; *In Progress* → *Under Review*, *Cancelled*; *Under Review* →
+*Approved*, *Rejected*; *Approved* → *Done*; *Done* → nothing; *Cancelled* →
+*Open*; *Rejected* → *In Progress*. It is **not** fixture content: no ticket
+of `work.json` belongs to it, it is recorded as `jira.narrowing` rather than in
+`jira.projects`, and it **holds no issues between runs** — the live witness in
+`atlassian_live.rs` files its own ticket, walks it and deletes it, and a killed
+run's leftover is cleared by the adapter suite's leftover clearing like any
+other stray. Adding it takes this Jira's whole status list
+(`GET /rest/api/2/status`) from four to nine, which is what lets `PAY`'s own
+reads witness that the answer is a *subset* rather than a copy.
+
 **Epic membership is in the Epic Link custom field, and only there.** `PAY`
 and `OPS` are *classic* Data Center projects, so `fields.parent` — the
 spelling a next-gen or a recent company-managed project uses — is **absent
@@ -711,7 +731,10 @@ ids, the space home page, and the Epic Link custom field's id — go to
 assertion looks a literal id up there and asserts everything else by key,
 title and text. Should a fixture status ever be missing from the workflow,
 `jira.unreachable_statuses` says which issue kept which status; today it is
-empty.
+empty. `jira.narrowing` records the third project — its key, name, template,
+the issue type the live witness files as, and the statuses that project's
+workflow for that type has — and `crates/knobas-app/tests/atlassian_live.rs`
+refuses to start without it.
 
 **Idempotent, and it says what it skipped.** Every create is preceded by a
 read — issues by key, comments and worklogs by text, pages by title in the
@@ -1437,7 +1460,7 @@ third criterion.
 | `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
-| `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back. `just atlassian-live` runs the whole window. |
+| `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back, and walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket). `just atlassian-live` runs the whole window. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
