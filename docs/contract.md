@@ -8826,6 +8826,21 @@ From this commit on, each of the following requires an orchestrator decision **a
   `rendered_label`'s cases in `witness-unit`. There is **no #500 entry in §10.8** — that ruling
   closed by recording that the frozen surface was untouched — so nothing is owed there, and that
   #500's criterion is met is recorded by a transcript on its own ticket.
+
+  *The paragraph above was true when it was written and was superseded the same day by **#537**,
+  which gave `knobas_source_mock::items` the fixture's three repositories and three branches: the
+  `--demo` corpus **does** carry a repo entity now, `mock:payout-service` under the name the
+  driver asks for, and `crates/knobas-app/tests/demo.rs`'s
+  `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds the chain from the demo
+  load to `checkout::view` matching the very remote the driver plants. #501's criterion is still
+  open, and now for the run alone, owed to **#525** — on #537's head the driver reached the
+  harness's `screen-locked` refusal at step 1, before the build and before Launch Services, and
+  nothing past that refusal has been observed on it. There is **no #537 entry in §10.8**:
+  `crates/knobas-source-mock` is on no frozen list, and its change touches no migration, no IPC
+  schema or layout, neither barrel, nothing in `crates/knobas-source/src/**` and nothing in
+  `crates/knobas-http/**` — checked against the list above rather than against the ticket's claim.
+  So the new truth is carried here, in the entry whose sentence it supersedes, rather than by an
+  entry that is not owed. Deputy's ruling of 2026-09-08 on #537, part 2.*
 - **One new command and a second keychain namespace — issue #509 (2026-09-08): the hcloud
   importer.**
 
