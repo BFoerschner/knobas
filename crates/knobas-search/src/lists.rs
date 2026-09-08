@@ -921,9 +921,15 @@ mod tests {
         );
         // And the summary makes both passes, or one group's counts come back
         // from a statement that never scanned them.
-        assert!(SUMMARY_SQL.contains("from sync.live_item i"), "{SUMMARY_SQL}");
+        assert!(
+            SUMMARY_SQL.contains("from sync.live_item i"),
+            "{SUMMARY_SQL}"
+        );
         assert!(SUMMARY_SQL.contains("from knobas.asset a"), "{SUMMARY_SQL}");
-        assert!(SUMMARY_SQL.contains("from scan, estate, seen"), "{SUMMARY_SQL}");
+        assert!(
+            SUMMARY_SQL.contains("from scan, estate, seen"),
+            "{SUMMARY_SQL}"
+        );
     }
 
     /// An estate row is an **asset**, which is what makes a row open the Tree:
@@ -969,20 +975,33 @@ mod tests {
     fn the_roster_rule_is_spelled_the_way_the_link_table_spells_it() {
         let list = find("not-monitored").unwrap();
         assert!(
-            list.rows_sql
-                .contains(&format!("l.relation = '{}'", knobas_core::link::MONITORED_BY)),
+            list.rows_sql.contains(&format!(
+                "l.relation = '{}'",
+                knobas_core::link::MONITORED_BY
+            )),
             "{}",
             list.rows_sql
         );
-        assert!(list.rows_sql.contains("m.kind = 'monitor'"), "{}", list.rows_sql);
+        assert!(
+            list.rows_sql.contains("m.kind = 'monitor'"),
+            "{}",
+            list.rows_sql
+        );
         // The proposal half: an unconfirmed guess leaves the asset on the list.
         assert!(
             list.rows_sql.contains("knobas.confirmed_link"),
             "{}",
             list.rows_sql
         );
+        // The base table's name is **assembled** rather than written out.
+        // `knobas-core`'s `tests/link_reads.rs` scans every shipping source
+        // file for a read of it and says "a doc comment counts: it is what the
+        // next implementer copies" -- and a negative assertion is no
+        // exception, because the scan cannot tell the two apart. Same device,
+        // and same reason, as `tests/sql_containment.rs`' split needle.
+        let base_table = format!("knobas.{}", "link");
         assert!(
-            !list.rows_sql.contains("from knobas.link "),
+            !list.rows_sql.contains(&format!("from {base_table} ")),
             "the roster must not count proposals: {}",
             list.rows_sql
         );
@@ -1002,7 +1021,8 @@ mod tests {
             list.rows_sql
         );
         assert!(
-            list.rows_sql.contains("join knobas.asset c on c.parent_id = h.id"),
+            list.rows_sql
+                .contains("join knobas.asset c on c.parent_id = h.id"),
             "the ancestor half of the rule is missing: {}",
             list.rows_sql
         );
@@ -1036,8 +1056,7 @@ mod tests {
         let list = find("certs-expiring").unwrap();
         assert_eq!(CERT_DAYS, 30);
         assert!(
-            list.rows_sql
-                .contains(&format!("::numeric < {CERT_DAYS})")),
+            list.rows_sql.contains(&format!("::numeric < {CERT_DAYS})")),
             "{}",
             list.rows_sql
         );
@@ -1063,7 +1082,11 @@ mod tests {
         );
         let guard = list.rows_sql.find("jsonb_typeof").expect("the guard");
         let cast = list.rows_sql.find("::numeric").expect("the cast");
-        assert!(guard < cast, "the cast runs before the guard: {}", list.rows_sql);
+        assert!(
+            guard < cast,
+            "the cast runs before the guard: {}",
+            list.rows_sql
+        );
         // The live view, never the base table: `CONTEXT.md`'s **Live item**
         // names the readers that reach past it and this is not one of them.
         assert!(

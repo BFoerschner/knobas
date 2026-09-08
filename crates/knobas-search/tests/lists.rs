@@ -194,13 +194,11 @@ async fn estate(pool: &sqlx::PgPool, tag: &str) -> (String, String) {
     .execute(pool)
     .await
     .expect("the mirrored monitor");
-    sqlx::query(
-        "insert into knobas.context (id, kind, title) values ($1,'adhoc','the room')",
-    )
-    .bind(&context)
-    .execute(pool)
-    .await
-    .expect("the context");
+    sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','the room')")
+        .bind(&context)
+        .execute(pool)
+        .await
+        .expect("the context");
     for (from, to, relation) in [
         (&watched, &monitor, "monitored-by"),
         (&context, &watched, "related"),
