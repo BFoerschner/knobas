@@ -18,7 +18,8 @@
 #      settings fields and stored by the real backend;
 #   2. a repo or branch detail that finds the clone this driver put under that
 #      root -- either will do, because a branch draws its repository's
-#      checkout;
+#      checkout -- with its checkout panel's heading **on screen after the
+#      launcher's Return and not before it** (#547);
 #   3. that pressing the button starts the stub the template names, with the
 #      checkout path as its **only** argument.
 #
@@ -61,6 +62,20 @@ CLONES_ROOT_FIELD=$(rendered_label 'Directory')
 readonly CLONES_ROOT_FIELD
 VSCODE_FIELD=$(rendered_label "$VSCODE_LABEL")
 readonly VSCODE_FIELD
+
+# The checkout panel's heading, and it is a **reading and not a name** -- which
+# is the whole of #547.
+#
+# `<label class="lab" for="clones-root">Directory</label>` names the field
+# beside it, so that field answers `AXTitle=DIRECTORY` and `ax find` counts it.
+# `<span class="lab">Checkout</span>` in `CheckoutPanel.svelte` names nothing:
+# it is an `AXStaticText` that carries its words in **`AXValue`**, and
+# `AXTitle` and `AXDescription` -- the only two attributes `ax.swift`'s
+# `matching()` reads -- come back empty on it. Measured on the dev Mac
+# (2026-09-08, #525's runner): a branch detail was open with its checkout panel
+# and its three buttons on screen, and `ax find CHECKOUT` answered **0** for as
+# long as it was. So this is read with `ax values` through `reads`, like the
+# capture driver's headings, and never with `ax find`.
 CHECKOUT_PANEL=$(rendered_label 'Checkout')
 readonly CHECKOUT_PANEL
 
@@ -87,6 +102,13 @@ die() {
     # half of it.
     printf 'open-in-editor: the focused element at that moment:\n' >&2
     { "$ax" focused "$pid" 2>&1 || true; } | sed 's/^/open-in-editor:   /' >&2
+    # The values as well as the tree, since #547: half of what this driver
+    # waits for is a *reading* and not a name, and the tree dump prints names.
+    # A failure whose diagnosis is "the heading is not on screen" is
+    # unreadable beside a dump that could not have shown the heading either
+    # way -- which is how #547 was first read as a missing panel.
+    printf 'open-in-editor: every string on knobas'"'"' windows:\n' >&2
+    { "$ax" values "$pid" 2>&1 || true; } | sed 's/^/open-in-editor:   /' >&2
     printf 'open-in-editor: the window as the accessibility tree sees it:\n' >&2
     { "$ax" dump "$pid" 8 2>&1 || true; } | sed 's/^/open-in-editor:   /' >&2
     exit 1
@@ -121,6 +143,34 @@ count_of() {
 }
 present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 exactly_one() { [ "$(count_of "$1")" = 1 ]; }
+
+# What is written on knobas' windows right now, one string per line.
+#
+# `ax values` and not `ax find`, and the helper's own docs say why: an
+# `aria-label` and a button's own words arrive as a **name**, which is what
+# `find` counts and what a driver presses; a heading, a status line and a
+# rendered paragraph arrive as a **value**, which is what a driver reads. The
+# capture driver has read its headings this way since #503; this driver asked
+# `find` for one and got the answer that question deserves (#547).
+screen() { "$ax" values "$pid" 2>/dev/null || true; }
+
+# reads <line> -- the screen carries <line> as a whole line.
+#
+# Whole line, through `has_reading`: `CHECKOUT` and the settings pane's
+# `CHECKOUTS` differ by one character at the end, and a substring test would
+# let the pane this driver has just been typing into answer for the panel it
+# has not opened yet.
+reads() { has_reading "$(screen)" "$1"; }
+
+# The launcher has finished searching for what was typed.
+#
+# Waited for rather than assumed, because the search is a round trip and Return
+# on a list that has not arrived selects nothing. `capture.sh` has waited for
+# this line since #503 and this driver did not: it typed and pressed Return in
+# the same breath, which is a race it has been winning rather than a step it
+# was taking. The line is the launcher's own count, matched loosely because the
+# timing in it changes every run.
+launcher_answered() { screen | grep -q " match"; }
 
 # fill <label> <text> -- put <text> in the field called <label>, replacing
 # whatever is in it.
@@ -202,7 +252,8 @@ say "opening the launcher and asking for '$REPO_QUERY'"
 "$ax" key "$KEY_K" command
 wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present 'Search or act'
 "$ax" type "$REPO_QUERY"
-"$ax" key "$KEY_RETURN"
+wait_until "the launcher never answered '$REPO_QUERY' within ${SETTLE_SECONDS} s" \
+    launcher_answered
 
 # The checkout panel is what a repo or a branch detail has and no other kind
 # does, so its heading is the honest test for "a repo or branch detail is open".
@@ -211,6 +262,16 @@ wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present '
 # extends), so the button below is the same button either way -- and the
 # launcher's group order puts branches above repositories, so a ⌘K-and-Return
 # on this query may well land on one.
+#
+# **Read twice, and the first read is the point (#547).** The heading is taken
+# once with the launcher's hit list on screen and once after Return, and
+# `waypoint_verdict` says whether the pair is a witness. A wait that was
+# already satisfiable before the keystroke proves nothing about the keystroke:
+# it would report a detail as open on a Return that selected nothing, and the
+# hit list this query draws is full of the words *payout-service* and *branch*.
+# The before-read is what makes the after-read mean the step -- and it is also
+# what would catch a knobas that started drawing this heading somewhere else,
+# rather than that discovery arriving as a false green.
 #
 # **Until #537 this is where a run stopped, and not for a fault of the
 # feature**: `knobas_source_mock::items` walked past the fixture's `repos` and
@@ -221,17 +282,47 @@ wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present '
 # `checkout::view` matching a clone whose remote is $REPO_REMOTE. So a failure
 # here is about the window -- the launcher, the routing, or the panel -- and
 # the message says where to look rather than blaming the corpus.
+before=$(reading_verdict "$(screen)" "$CHECKOUT_PANEL")
+say "the launcher has answered; '$CHECKOUT_PANEL' on screen: $before"
+
+"$ax" key "$KEY_RETURN"
+
+after=$(reading_verdict "$(screen)" "$CHECKOUT_PANEL")
 deadline=$((SECONDS + SETTLE_SECONDS))
-while [ "$SECONDS" -lt "$deadline" ] && ! present "$CHECKOUT_PANEL"; do sleep 0.2; done
-if ! present "$CHECKOUT_PANEL"; then
+while [ "$after" != yes ] && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 0.2
+    after=$(reading_verdict "$(screen)" "$CHECKOUT_PANEL")
+done
+say "after Return; '$CHECKOUT_PANEL' on screen: $after"
+
+case $(waypoint_verdict "$before" "$after") in
+witnessed) ;;
+too-early)
+    die "'$CHECKOUT_PANEL' was already on screen before Return, so waiting for" \
+        "it witnesses nothing about the detail." \
+        "Whatever drew that heading over the launcher is where to look: this" \
+        "step's whole claim is that the reading arrived *because* of the" \
+        "keystroke, and a reading that was already there would make this" \
+        "driver green on a Return that selected nothing."
+    ;;
+never-appeared)
     die "no repo or branch detail opened for '$REPO_QUERY'." \
         "The demo corpus does carry the repository (#537), and the read behind" \
         "this panel is covered by demo.rs's" \
         "the_demo_corpus_answers_the_checkout_the_desktop_driver_opens -- so" \
         "what failed is between the launcher and the panel: check that ⌘K's" \
-        "first hit for this query is a repo or a branch, and that the tree" \
-        "below carries a heading named '$CHECKOUT_PANEL'."
-fi
+        "first hit for this query is a repo or a branch, and that the strings" \
+        "below carry '$CHECKOUT_PANEL' as a line of its own."
+    ;;
+*)
+    die "the screen could not be read either side of Return" \
+        "(before: $before, after: $after)." \
+        "'ax values' printed nothing at all, which is what it answers when it" \
+        "can see no window -- a quit app, or a screen that locked mid-run." \
+        "That is not a measurement of the panel in either direction, so this" \
+        "refuses rather than reading an empty answer as an absent heading."
+    ;;
+esac
 say "a repo or branch detail is open, and it has a checkout panel"
 
 # --- 3. the spawn ------------------------------------------------------------

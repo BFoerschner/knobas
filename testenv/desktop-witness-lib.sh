@@ -333,3 +333,69 @@ has_reading() {
 frontmost_bundle() {
     tsv_field "$1" bundle
 }
+
+# --- what makes a wait a witness (issue #547) -------------------------------
+#
+# A driver waits for the screen to say something, and then reports the step
+# before the wait as having happened. That reasoning holds only if the screen
+# did **not** already say it -- a wait that was true one keystroke earlier
+# witnesses nothing, and passes just as green on a step that did nothing at
+# all. #547 is the other half of the same class: a wait that could never be
+# true, on a name the accessibility API does not answer with, which reports a
+# working feature as broken. The two functions below are the rule for both, in
+# the one place a driver can be tested without a screen.
+
+# reading_verdict <ax values output> <reading>
+#
+# What the screen says about one whole line: `yes`, `no` or `unreadable`.
+#
+# **Three answers and not two**, which is the whole reason this is not a bare
+# `has_reading`. `ax values` prints nothing at all when it can see no window --
+# a locked screen, a quit app, a helper that failed -- and exits 0 either way,
+# so an empty answer compared with "does it contain this line" is *no*. Read as
+# *no*, that empty answer is a **pass** for the before-half of a waypoint: the
+# check that is supposed to prove a wait was false beforehand would be
+# satisfied by a helper that had stopped working, which is exactly the check
+# that cannot fail. `count_of`'s `x` sentinel in the drivers is the same guard
+# on the same hazard, one attribute over.
+#
+# Nothing at all, rather than whitespace-only: `$( )` strips trailing newlines,
+# and `ax values` drops empty values, so a screen with anything written on it
+# answers with a non-empty string.
+reading_verdict() {
+    local values=$1 reading=$2
+    if [ -z "$values" ]; then
+        printf 'unreadable\n'
+        return
+    fi
+    if has_reading "$values" "$reading"; then
+        printf 'yes\n'
+    else
+        printf 'no\n'
+    fi
+}
+
+# waypoint_verdict <before> <after>
+#
+# Whether a wait witnessed the step it follows, given what the screen said just
+# before that step and just after it. One word: `witnessed`, `too-early`,
+# `never-appeared` or `unreadable`.
+#
+# The order of the branches is the order of what a reader has to do about it,
+# and `too-early` outranks everything the after-reading could say. A waypoint
+# that was already true is not a weaker witness than one that never arrived --
+# it is not a witness at all, and it is the failure that hides, because the run
+# it makes is *green*. Which of the two directions the after-reading then took
+# is a detail of a wait that had already stopped meaning anything.
+#
+# `unreadable` is its own answer rather than folded into `never-appeared`, for
+# the reason `classify_readiness` keeps it: a helper that answered nothing must
+# never read as a measurement, in either direction.
+waypoint_verdict() {
+    case $1:$2 in
+    yes:*) printf 'too-early\n' ;;
+    no:yes) printf 'witnessed\n' ;;
+    no:no) printf 'never-appeared\n' ;;
+    *) printf 'unreadable\n' ;;
+    esac
+}
