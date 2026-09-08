@@ -149,3 +149,59 @@ readiness_message() {
         ;;
     esac
 }
+
+# --- the open-in-editor driver's pure parts (issue #501) --------------------
+#
+# Here rather than in the driver for the reason the two functions above are:
+# everything in a driver either types at a real window or reads a real
+# accessibility tree, and the only witness for that is an unlocked Mac. What is
+# left over -- the text of a stub, the text of a git config, and the reading of
+# what the stub recorded -- is text in and text out, and `witness-unit` runs it
+# on every gate.
+
+# stub_script <record-path>
+#
+# An executable that writes the arguments it was given, one per line, and
+# exits. The program `open-in-editor` points a command template at, so that
+# "what did knobas pass?" has an answer on disk.
+#
+# One argument per line, because the count is half of what is being witnessed:
+# a space-joined line could not tell one argument holding a space from two
+# arguments, and "the checkout path and nothing else" is a claim about both.
+#
+# The record path is baked in rather than taken from the environment: the
+# template the app stores is a command line, the app spawns it with no shell
+# and passes on none of this shell's variables, so an `$RECORD` in here would
+# be empty at the moment it mattered.
+stub_script() {
+    # An unquoted heredoc, so `$1` is this function's argument while the
+    # `\n` and the `"\$@"` inside reach the file as written.
+    cat <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" > '$1'
+EOF
+}
+
+# git_config <remote>
+#
+# The `.git/config` of a clone whose `origin` is <remote>. What the scan reads
+# (`knobas_core::checkout::origin_url`), and the whole of what makes a
+# directory a checkout as far as knobas is concerned -- no `git init` is run,
+# because nothing in this feature runs git (ADR-0016) and a driver that did
+# would be witnessing git's behaviour rather than knobas'.
+git_config() {
+    printf '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n' "$1"
+}
+
+# sole_argument <recorded text>
+#
+# The one argument the stub recorded, or nothing at all.
+#
+# Nothing for **none** and nothing for **two**, and that is the point: a driver
+# that read the first line would pass on a command that had been handed the
+# checkout path *and* something else, which is the failure ADR-0016 is about.
+# An empty answer is what the driver reports as a failure, and it prints the
+# whole recording beside it.
+sole_argument() {
+    printf '%s' "$1" | awk 'NF { lines[++n] = $0 } END { if (n == 1) print lines[1] }'
+}

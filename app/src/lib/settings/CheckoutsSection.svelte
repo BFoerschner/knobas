@@ -184,12 +184,27 @@
         disabled={saving}
         placeholder="/Users/you/src"
       />
+      <!--
+        Every button in this component says *Save*, *Clear* or *Reset*, and
+        four of them are on screen at once — so each carries an accessible name
+        that says which field it belongs to. That is an accessibility fix
+        first: a reader moving by control hears four identical "Save"s
+        otherwise. It is also what lets the desktop witness press one of them
+        by name (#501), which `just witness-unit` pins.
+      -->
       <div class="acts">
-        <button class="btn" disabled={saving || draft.trim() === (stored ?? "")} onclick={() => void save(draft)}>
+        <button
+          class="btn"
+          aria-label="Save clones root"
+          disabled={saving || draft.trim() === (stored ?? "")}
+          onclick={() => void save(draft)}
+        >
           Save
         </button>
         {#if stored !== null}
-          <button class="btn" disabled={saving} onclick={() => void save(null)}>Clear</button>
+          <button class="btn" aria-label="Clear clones root" disabled={saving} onclick={() => void save(null)}>
+            Clear
+          </button>
         {/if}
       </div>
       {#if stored === null}
@@ -231,6 +246,7 @@
         <div class="acts">
           <button
             class="btn"
+            aria-label="Save {command.label}"
             disabled={savingCommand !== null ||
               drafts[command.action]?.trim() === (command.template ?? "")}
             onclick={() => void saveCommand(command.action, drafts[command.action] ?? "")}
@@ -240,6 +256,7 @@
           {#if !command.is_default}
             <button
               class="btn"
+              aria-label="Reset {command.label}"
               disabled={savingCommand !== null}
               title="Forget this command and go back to what this platform starts with"
               onclick={() => void saveCommand(command.action, null)}
