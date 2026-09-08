@@ -7,6 +7,8 @@
 //! an id no adapter answers to (`jira`) needs no lock.
 
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
+use knobas_app::checkout::{FoundBy, set_clones_root, view};
+use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::sources::demo;
 
 /// Held by every test that syncs the `mock` source.
@@ -181,8 +183,9 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
 
     let report = demo::demo_load_inner(pool).await.unwrap();
     assert_eq!(
-        report.upserted, 21,
-        "the README promises 21 items from the Tidewater fixture"
+        report.upserted, 27,
+        "every item the Tidewater fixture holds: 7 tickets, 3 PRs, 3 builds, \
+         5 pages, 3 commits, and -- since #537 -- 3 repos and 3 branches"
     );
 
     let response = knobas_search::Searcher::new(pool.clone())
@@ -477,8 +480,8 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 
     let report = demo::demo_load_inner(&pool).await.unwrap();
     assert_eq!(
-        report.upserted, 21,
-        "the work half is unchanged: the estate rides beside the fixture, not instead of it"
+        report.upserted, 27,
+        "the work half is the whole fixture: the estate rides beside it, not instead of it"
     );
 
     let stored = |pool: sqlx::PgPool, statement: &'static str| async move {
@@ -571,4 +574,92 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
         twice.is_empty(),
         "a second load wrote a second origin line: {twice:?}"
     );
+}
+
+/// The chain `open-in-editor`'s desktop driver stands on, minus the window
+/// (#537, #501, #525).
+///
+/// The driver plants a clone under a temporary root, types that root into
+/// Settings, asks the launcher for `payout-service` and presses a button on
+/// the detail that opens. Everything in that sentence except the typing and
+/// the pressing is here: the demo corpus through `MockSource::sync` and the
+/// upsert, the entity read that has to answer under the name the driver asks
+/// for, and `checkout::view` matching a `.git/config` the driver's own remote
+/// is written into.
+///
+/// **Why the remote is spelled the driver's way and not normalised.**
+/// `checkout_ipc.rs` deliberately plants an ssh remote so the match is
+/// `knobas_core::checkout`'s normalisation doing its work. This one plants the
+/// exact string `testenv/desktop-witness/drivers/open-in-editor.sh` writes,
+/// because what it witnesses is different: that the URL the *fixture* now
+/// emits and the URL the *driver* writes reduce to one repository. A repo item
+/// whose `web_url` lost the `tidewater` owner segment would still normalise
+/// fine and would still miss the driver's clone.
+///
+/// **Its own database, and therefore no [`MOCK`] guard.** The clones root is
+/// one `knobas.setting` row per database, which cannot be namespaced by a
+/// fixture id -- the reason `checkout_ipc.rs` gives for its own scratch
+/// database. A test that set it on this binary's shared pool would be setting
+/// it for every other test here.
+#[tokio::test]
+async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
+    let pool = knobas_db::test_util::scratch_database("demo-checkout")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch db");
+    knobas_db::migrate::run(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    // 1. The entity read answers under the name the driver types.
+    let detail = get_entity_inner(&pool, "mock:payout-service")
+        .await
+        .expect("the demo corpus must carry the repository the driver opens");
+    assert_eq!(detail.row.kind, "repo");
+    assert_eq!(detail.row.title, "payout-service");
+    assert_eq!(
+        detail.kind_info.as_ref().map(|k| k.plural.as_str()),
+        Some("Repositories"),
+        "the launcher draws this group's header from the adapter's declaration"
+    );
+    assert_eq!(detail.payload["lang"], "Rust");
+
+    // 2. The clone the driver plants, and the root it types into Settings.
+    let root = tempfile::tempdir().unwrap();
+    let checkout = root.path().join("payout-service");
+    std::fs::create_dir_all(checkout.join(".git")).unwrap();
+    std::fs::write(
+        checkout.join(".git").join("config"),
+        "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = \
+         https://tidewater.example/tidewater/payout-service\n",
+    )
+    .unwrap();
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+
+    // 3. The panel the button lives on finds it.
+    let answer = view(&pool, "mock:payout-service").await.unwrap();
+    assert_eq!(answer.found_by, FoundBy::Scan);
+    assert_eq!(
+        answer.path.as_deref(),
+        Some(checkout.to_string_lossy().as_ref()),
+        "the scan must match the fixture's repo URL against the driver's remote"
+    );
+    assert_eq!(answer.repo_entity_id.as_deref(), Some("mock:payout-service"));
+
+    // 4. And a branch of it answers the same checkout, which is the whole
+    //    reason the branch keys extend the repo's: `repo_of` finds a branch's
+    //    repository by that prefix and nothing else. The launcher's group
+    //    order puts branches *above* repositories (`knobas_search`'s
+    //    `GROUP_ORDER`), so this is the detail the driver's own ⌘K-and-Return
+    //    is at least as likely to land on.
+    let branch = view(
+        &pool,
+        "mock:payout-service@refs/heads/feature/PAY-231-sepa-retry",
+    )
+    .await
+    .unwrap();
+    assert_eq!(branch.repo_entity_id.as_deref(), Some("mock:payout-service"));
+    assert_eq!(branch.path, answer.path);
 }

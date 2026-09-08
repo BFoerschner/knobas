@@ -2011,3 +2011,82 @@ on #491 (part 1); brief #545's merge-manager that those edits are conditions of 
 the three claims in part 1 are read before the deep pass, that `just estate-live` is re-run on the
 merge commit with the tunnel as found and `docker --context orbstack ps -a` read beside it, and
 that no file in `testenv/hetzner/` is touched by the re-run. No new glossary entry, no ADR.
+
+---
+
+## #537 — whether the last desktop ticket's code half may be built on a locked screen, and what the loop does when nothing is left to move
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/537#issuecomment-5580568595>
+
+**The fork:** four, raised by the orchestrator before any dispatch. In its words: *"may #537's code
+half be built now, with its green run left open and owed to #525 — the treatment #500, #501 and
+#503 each got — or must the whole ticket wait for an unlocked screen?"* Then: what its
+merge-manager does about the run; what the v1.5 exit is if the screen stays locked for the rest of
+Björn's absence; and what #525 is owed. The state: twenty-two v1.5 tickets closed, no PR open, #525
+`ready-for-human`, #537 `ready-for-agent` with both blockers closed, the v1.0.0 release run green.
+The dev Mac's screen has been locked since 06:10 CEST, probed each iteration as `trusted 1 /
+post-events 1 / screen-locked 1`; it was unlocked once around 04:55 without anyone being asked.
+
+**Ruling:** (1) **#537 is dispatched now to build its code half, and merges with its run-criterion
+open and owed to #525. No fourth run is added to #525** — the run #537 would leave open is the one
+#525's second criterion already names. The answer existed: the 2026-09-08 ruling on #500, part 3,
+set the shape for every desktop ticket — *"the driver written and asserting what the ticket says,
+the `screen-locked` refusal in the PR body as the run … the PR merging with that one criterion open
+and owed to the same follow-up. Every other criterion on those tickets … is real and gated and is
+held in full."* The lock is not a cap: it blocks a run, never a build, and the desktop slot is free.
+`ready-for-human` was put on #525 for a stated reason that does not reach #537, which has work an
+agent does before any refusal. The mock adapter is the one fake ADR-0013 keeps, so its tests are a
+real witness of its corpus and criteria 1 and 2 are held by the gate. Criterion 1 is read as: *a
+synced `--demo` corpus yields a repo entity that the entity read returns under the name the driver
+asks for (`payout-service`)*, not merely that `items` returns more elements than before.
+
+(2) **The merge-manager re-runs the driver and expects the refusal.** The refusal transcript goes in
+the PR body; **nothing is posted on #501 for a refusal** (#503's second ruling, part 1(a): *"a
+refusal is not the transcript #525's second criterion asks for"*); the third box reads `[ ]` with
+its three clauses beside it. Four edits are conditions of the merge, on the branch: `testenv/README.md`'s
+*What is not witnessed yet* paragraph rewritten (the corpus gap closed by #537, the driver stopped at
+the `screen-locked` refusal at step 1, the run owed to #525 — **one number now, not two**); the PR
+body carrying the refusal and, where the two heads differ, the provenance sentence; this entry; and
+**no §10.8 entry**, because `crates/knobas-source-mock` is on no frozen list — checked against the
+list, not against the claim.
+
+(3) **The v1.5 exit is not taken while #525 is open** (#500 part 4, repeated by both #503 rulings;
+ADR-0016's dated consequence: *"a refusal is not a witness of the assertion, and no fake, no dry-run
+mode and no hand checklist stands in for one"*). When every buildable ticket is merged and the probe
+still reads `screen-locked 1`, the loop does **not** enter Step 4's exit branch, files nothing, and
+does not idle: it posts one closing report on #491 — milestone state, the release run, #525's three
+runs and the standing of each, the lock timeline, the two sentences a person can act on, this file's
+path and the *Flagged, not ruled* items, and the tickets filed outside v1.5 — and ends with
+`ScheduleWakeup` `stop: true`. On any `screen-locked 0` before that, #503's standing instruction
+applies instead and the loop continues.
+
+(4) **#525: label unchanged, criteria unchanged, one comment.** If #537 has merged when the unlock
+comes, its runner runs all three drivers on `main`; if #537's PR is still open, it runs two and
+`open-in-editor` is #537's agent's. #537 holds the one desktop slot from dispatch to merge, and
+#525's runs stay ahead of it: on an unlock the orchestrator tells the live #537 agent to hold,
+dispatches #525's runner, and hands the slot back when it reports.
+
+**Reasoning:** the four questions have one shape, and it is the one #500 settled: a real, gated
+change does not wait for a condition no agent can change, and a run that cannot be made is owed to a
+named payer rather than faked or waived. The *fourth run* the orchestrator was right to ask about
+does not exist once the criteria are read — #525 has always listed `open-in-editor`, #537 was a loan
+of that run to the ticket that could pay it, and a refusal returns the loan. Holding #537 buys
+nothing: the run made after a hold is the same run #525 makes on `main`, and #525 cannot close
+before #537 is on `main` in any case. Part 3 fills the gap the loop file has for a milestone whose
+last item is a person's precondition — Step 4 was written with an *exited* ruling as its only stop —
+and the choice between idling and stopping is a spending choice: the work is all on `main`, and the
+report puts the one remaining act in front of the one person who can do it.
+
+**If you disagree, the cost of reversing this is:** (1) low before #537's PR opens — remove
+`ready-for-agent`, and the corpus waits with the run; after it merges, nothing to unmerge, since the
+debt sits on #525 as it always did. (2) trivial — prose in a PR body and a README paragraph, and one
+comment on #501 posted later instead. (3) one command: `/loop /v15-next` restarts the loop, which
+relabels #525 on the first `screen-locked 0` and takes the exit itself; the price of this ruling is
+one unattended unlock, which the report tells you how to spend. (4) one label and one comment on
+#525; the sequencing is an instruction to the orchestrator, revoked by a line.
+
+**Flagged, not ruled:** the loop file's Step 4 has no branch for a milestone that cannot move and is
+not exited; part 3 supplies one for v1.5, and whether it is the general rule — stop and report when
+the only open work has a person's precondition — is Björn's, on his return, beside the
+`ready-for-human` vocabulary question already flagged on #500.

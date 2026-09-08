@@ -67,7 +67,10 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// example: #230 gave the corpus its projects and left the suffix at `v1`, so
 /// every profile created before it kept a matching cursor, never refetched,
 /// and showed no project rooms with nothing in the app able to repair it.
-const CURSOR: &str = "tidewater-v2";
+/// `v3` is #537 paying the same debt: the corpus gained the fixture's repos
+/// and branches, and a demo profile stored at `v2` has to be re-sent the
+/// corpus to get them.
+const CURSOR: &str = "tidewater-v3";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
@@ -455,8 +458,8 @@ fn body_text(parts: impl IntoIterator<Item = String>) -> String {
 /// One [`SyncItem`], with `payload` carrying the fixture record verbatim so a
 /// later milestone can re-map it without re-reading the fixture.
 // One positional argument per `SyncItem` field the fixture fills, which is the
-// point: adding a field to the SPI must not compile until all six call sites
-// below -- the five kinds in `items` and the tombstone in `tombstoned_item`
+// point: adding a field to the SPI must not compile until all eight call sites
+// below -- the seven kinds in `items` and the tombstone in `tombstoned_item`
 // -- have decided what to put in it. A parameter struct would take a
 // `..Default::default()` instead and let one kind silently keep the old value.
 #[allow(clippy::too_many_arguments)]
@@ -648,7 +651,70 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             Some(format!("{MOCK_BASE}/tidewater/{}/commit/{}", c.repo, c.sha)),
         ));
     }
+    // Repositories before their branches, because that is the order a reader
+    // needs them in: `knobas_app::checkout`'s `repo_of` answers a branch by
+    // finding the repo whose id its own extends, and a corpus that emitted the
+    // branches first would read as three branches belonging to nothing until
+    // the sink caught up. Nothing in the engine depends on the order -- the
+    // upsert is per item -- so this is for whoever reads a sync log.
+    for r in &f.repos {
+        out.push(item(
+            source_id,
+            "repo",
+            r.name.clone(),
+            r.name.clone(),
+            body_text([r.name.clone(), r.lang.clone()]),
+            // No owner and no timestamp in the dataset, and neither is
+            // invented: a repository in `mockups/shared/dataset.md` is a name,
+            // a language and a clone path. Absence is what the fixture
+            // conventions above promise for a fact the brief does not give.
+            None,
+            None,
+            r,
+            Some(repo_url(&r.name)),
+        ));
+    }
+    for b in &f.branches {
+        out.push(item(
+            source_id,
+            "branch",
+            branch_key(&b.repo, &b.name),
+            b.name.clone(),
+            body_text([b.name.clone(), b.repo.clone()]),
+            None,
+            None,
+            b,
+            Some(format!("{}/src/branch/{}", repo_url(&b.repo), b.name)),
+        ));
+    }
     out
+}
+
+/// A repository's page, and the URL a clone's `origin` is matched against.
+///
+/// `knobas_core::checkout` reduces a remote to host + owner/repo, so this is
+/// the value the scan compares a `.git/config` against -- and `tidewater` is
+/// the owner segment every other link in this fixture already carries
+/// (`{MOCK_BASE}/tidewater/{repo}/pulls/{n}`, `.../commit/{sha}`). One
+/// function, so the repo item's URL and the branch items' base cannot drift
+/// apart.
+fn repo_url(repo: &str) -> String {
+    format!("{MOCK_BASE}/tidewater/{repo}")
+}
+
+/// A branch's key: its repository's, plus the ref.
+///
+/// **The prefix is load-bearing** (§4.2 fixes the key grammar per source).
+/// `knobas_app::checkout`'s `repo_of` finds a branch's repository as the
+/// longest repo id in the same source that the branch id starts with, which is
+/// how it costs no knowledge of any adapter's spelling. `knobas-source-gitea`
+/// earns that with `gitea:owner/repo` and `gitea:owner/repo@refs/heads/name`;
+/// this is the same shape, without the owner the mock's keys have never
+/// carried (a pull request here is `payout-service#142`). A key that did not
+/// extend its repo's would leave every branch detail answering *no checkout*
+/// with the repo, the clone and the setting all correct.
+fn branch_key(repo: &str, branch: &str) -> String {
+    format!("{repo}@refs/heads/{branch}")
 }
 
 /// Where the fixture's records keep what knobas reads (#277).
@@ -746,6 +812,26 @@ impl Source for MockSource {
                     label: "Commit".to_owned(),
                     plural: "Commits".to_owned(),
                     monogram: "CM".to_owned(),
+                    full_sync_exhaustive: true,
+                },
+                // The two the corpus gained in #537. `RP` and `BR` are the
+                // monograms `app/src/lib/shell/kinds.ts` already draws for
+                // these kinds -- the frontend's table is the fallback for a
+                // kind no descriptor declared, and two spellings of the same
+                // repository would be a difference a reader would have to
+                // explain.
+                KindInfo {
+                    id: "repo".to_owned(),
+                    label: "Repository".to_owned(),
+                    plural: "Repositories".to_owned(),
+                    monogram: "RP".to_owned(),
+                    full_sync_exhaustive: true,
+                },
+                KindInfo {
+                    id: "branch".to_owned(),
+                    label: "Branch".to_owned(),
+                    plural: "Branches".to_owned(),
+                    monogram: "BR".to_owned(),
                     full_sync_exhaustive: true,
                 },
             ],

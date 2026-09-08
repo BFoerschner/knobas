@@ -1357,15 +1357,23 @@ merge-manager's re-run on the merge head refused with `screen-locked` at 06:20
 CEST on 2026-09-08, and the re-run is **owed to #525**, which carries all three
 runs again. The deputy's second ruling of 2026-09-08 on #503, parts 1 and 2.
 
-**One driver is red for a reason that is not the feature's**: `open-in-editor`
-now sets the clones root, stores its template and confirms the write, and then
-stops where it always said it would — *the demo profile carries no repo entity*.
-`knobas_source_mock::items` emits tickets, PRs, builds, pages and commits, and
-`fixtures/tidewater/work.json`'s repos and branches are parsed and never sent,
-so `--demo` has no repo detail to open. **Two numbers, not one**: **#537**
-widens the demo corpus — a change to the reference adapter, which #503 does not
-name and rightly left alone — and **#525** keeps the run itself, which is its
-third criterion.
+**One driver has still never been driven, and the corpus is no longer why.**
+`open-in-editor` used to stop where it always said it would — *the demo profile
+carries no repo entity* — because `knobas_source_mock::items` walked past the
+repos and branches `fixtures/tidewater/work.json` has always held. **#537
+closed that**: the corpus now carries three repositories and three branches,
+`mock:payout-service` answers the entity read under the name the driver types,
+and `crates/knobas-app/tests/demo.rs`'s
+`the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds the whole
+chain below the window — the demo load, the entity read, and `checkout::view`
+matching the very remote the driver writes into the `.git/config` it plants.
+
+What #537 could **not** do is run it. On that head the screen was locked, and
+the driver reached the harness's `screen-locked` refusal at step 1 — before the
+build, before Launch Services, before anything on screen was touched. Nothing
+past that refusal has been observed on this driver, ever: no launcher hit, no
+repo detail, no press, no spawn. **One number now, not two**: the run is owed
+to **#525**, which has listed it as one of its three since it was filed.
 
 #### What the first runs answered
 

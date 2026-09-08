@@ -203,26 +203,34 @@ wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present '
 "$ax" key "$KEY_RETURN"
 
 # The checkout panel is what a repo or a branch detail has and no other kind
-# does, so its heading is the honest test for "a repo detail is open".
+# does, so its heading is the honest test for "a repo or branch detail is open".
+# Either will do: the panel a branch draws is its **repository's** checkout
+# (`knobas_app::checkout`'s `repo_of` finds the repo whose entity id the branch's
+# extends), so the button below is the same button either way -- and the
+# launcher's group order puts branches above repositories, so a ⌘K-and-Return
+# on this query may well land on one.
 #
-# **This is where a run on today's demo profile stops, and it is not a fault of
-# the feature.** `knobas_source_mock::items` emits tickets, PRs, builds, pages
-# and commits; the fixture's `repos` and `branches` are parsed and never sent,
-# so the demo profile carries no repo entity and there is no repo detail in it
-# to open. The message says so rather than leaving the next reader to work it
-# out from a tree dump. testenv/README.md, *What is not witnessed yet*, carries
-# it, and #525 is where it is owed.
+# **Until #537 this is where a run stopped, and not for a fault of the
+# feature**: `knobas_source_mock::items` walked past the fixture's `repos` and
+# `branches`, so `--demo` had no repo entity at all. It carries three of each
+# now, and `crates/knobas-app/tests/demo.rs`'s
+# `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds
+# everything below the window: the entity read answering under this query, and
+# `checkout::view` matching a clone whose remote is $REPO_REMOTE. So a failure
+# here is about the window -- the launcher, the routing, or the panel -- and
+# the message says where to look rather than blaming the corpus.
 deadline=$((SECONDS + SETTLE_SECONDS))
 while [ "$SECONDS" -lt "$deadline" ] && ! present "$CHECKOUT_PANEL"; do sleep 0.2; done
 if ! present "$CHECKOUT_PANEL"; then
-    die "no repo detail opened for '$REPO_QUERY'." \
-        "The demo profile carries no repo entity: knobas_source_mock emits" \
-        "tickets, PRs, builds, pages and commits, and the fixture's repos and" \
-        "branches are parsed but never sent. Until the demo corpus carries one," \
-        "this driver has nothing to press a button on -- see testenv/README.md," \
-        "\"What is not witnessed yet\", and issue #525."
+    die "no repo or branch detail opened for '$REPO_QUERY'." \
+        "The demo corpus does carry the repository (#537), and the read behind" \
+        "this panel is covered by demo.rs's" \
+        "the_demo_corpus_answers_the_checkout_the_desktop_driver_opens -- so" \
+        "what failed is between the launcher and the panel: check that ⌘K's" \
+        "first hit for this query is a repo or a branch, and that the tree" \
+        "below carries a heading named '$CHECKOUT_PANEL'."
 fi
-say "a repo detail is open, and it has a checkout panel"
+say "a repo or branch detail is open, and it has a checkout panel"
 
 # --- 3. the spawn ------------------------------------------------------------
 
