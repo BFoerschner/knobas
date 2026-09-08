@@ -58,6 +58,16 @@
   for: `File.text()` is the platform's, jsdom implements it, and a seam here
   would be a seam around the one line no backend is behind.
 
+  ## The top of the estate is an ordinary destination, and says so on the wire
+
+  The picker opens at the top and *Put them in the top of the estate* is a real
+  answer — `{ parent: null }`, the spelling `create_asset` and `move_asset`
+  already take. It used to send a bare `null`, which the backend reads as
+  *nothing has been said yet*, so the press asked the same question again; on an
+  estate with **no assets** there was no other answer to give and the only
+  button did nothing, for ever, on the first run of an importer whose purpose is
+  to populate a tree.
+
   ## An importer's three questions (#509)
 
   `produceEstateFile` answers one of three ways and each is a question or an
@@ -219,7 +229,16 @@
     busy = true;
     failure = null;
     try {
-      const answer = await produceFile(producer, token.trim() || null, landUnder);
+      // `landing === null` is *nothing has been said yet*; anything else is an
+      // answer, and `landUnder` of `null` inside one is **the top of the
+      // estate** rather than another way of saying nothing (#509, second
+      // ruling of 2026-09-08). Sending a bare `null` for the top is what made
+      // this button do nothing on an estate with no assets to choose instead.
+      const answer = await produceFile(
+        producer,
+        token.trim() || null,
+        landing === null ? null : { parent: landUnder },
+      );
       if (answer.state === "token_needed") {
         tokenWanted = true;
         return;

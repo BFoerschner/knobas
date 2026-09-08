@@ -8965,7 +8965,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `the_chooser_offers_producers_this_build_knows` (now over two entries, and over each entry's
   `importer` flag as well as its id); `tests/wiring.rs`'
   `every_command_is_in_the_handler_list` and `assets_ipc.rs`'
-  `every_asset_command_is_registered_and_its_arguments_decode`; `knobas_secrets`'
+  `every_asset_command_is_registered_and_its_arguments_decode`, which now drives **all three
+  spellings of the landing** through the real Tauri pipeline — the argument absent, `{parent:null}`
+  and `{parent:"asset:…"}` — because two of the three decoding to one value is the defect the
+  second ruling was raised on; `knobas_secrets`'
   `an_importers_token_lives_under_its_own_namespace` (the prefix, and that no source id can be
   spelled so as to reach an importer's account) beside
   `the_account_is_the_source_id_prefixed`; `assets`'
@@ -8980,24 +8983,31 @@ From this commit on, each of the following requires an orchestrator decision **a
   `assets::hcloud` over the file builder — the origin key held to `PRODUCERS`' declaration, the id
   written as text, a label keeping its own key and one shadowing a written key refused by name, a
   parent written only for the entries the import would create, and a server with no IPv4 or image
-  carrying neither property; five in `crates/knobas-app/tests/assets_ipc.rs`, **four** of them
+  carrying neither property; **six** in `crates/knobas-app/tests/assets_ipc.rs`, **four** of them
   over a scratch database seeded with the real estate file —
   `every_recorded_server_is_already_in_the_tree_and_nothing_would_change` (the recorded half of
   the live recipe, and the assertion that holds the producer's property spellings to
   `estate.json`'s), `a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_told`
   (both round trips, the parent written only on the new entry, and the two matched servers not
   re-parented), `a_field_this_build_has_never_heard_of_does_not_refuse_the_run` and
-  `a_refused_token_is_unauthorized_and_not_an_internal_fault` (and carrying no `source_id`) —
-  those four over `assets::hcloud::client`, the **one** constructor the command, the recipe and
-  this suite share, so the live run exercises the client the command uses rather than a second one
-  spelled the same way (the deputy's ruling of 2026-09-08 on #509, part 4c); the fifth,
+  `a_refused_token_is_unauthorized_and_not_an_internal_fault` (and carrying no `source_id`); a
+  fifth over a scratch database holding **nothing at all**,
+  `on_an_empty_estate_the_top_of_the_estate_is_a_landing_place` — the first run the second ruling
+  of 2026-09-08 was raised on, where every server is new, there is no asset to land under, and the
+  only answer a reader can give is the top: `LandingNeeded` when nothing has been said and `Ready`
+  when `Landing { parent: None }` has, no entry in the file carrying a `parent`, and all three
+  applied at the top level — those five over `assets::hcloud::client`, the **one** constructor the
+  command, the recipe and this suite share, so the live run exercises the client the command uses
+  rather than a second one spelled the same way (part 4c of the first ruling); the sixth,
   `the_estate_file_producer_is_not_an_importer_and_hcloud_is`, is a plain `#[test]` that asks
   `PRODUCERS` and needs neither a database nor a client, because that is where the answer lives;
   `just estate-live`'s
   `the_real_estate_is_already_in_the_tree`; and, on the rendered side, five in
   `AssetsView.import.test.svelte.ts` — the token asked for once and not before it is owed, *land
-  under* asked only when the importer found a server the estate lacks (both halves, and the token
-  field gone once the run reached the far end), the produced file offered for download, and the
+  under* asked only when the importer found a server the estate lacks (both halves, the token
+  field gone once the run reached the far end, and **the top of the estate pressed from where the
+  picker opens**, which sends `{parent: null}` and reaches a file rather than the same question
+  again), the produced file offered for download, and the
   chooser dropping the preview the last producer drew (a plan under one origin key is not a plan
   under another), and a token the far end refuses putting the field back where an unreachable
   Hetzner does not — story 62's second half, and the only way back from a credential that stopped

@@ -71,7 +71,7 @@ use sqlx::PgPool;
 
 use crate::IpcError;
 
-use super::{FILE_VERSION, HCLOUD_PRODUCER, NAMESPACE};
+use super::{FILE_VERSION, HCLOUD_PRODUCER, Landing, NAMESPACE};
 
 /// Hetzner Cloud's API, versioned as its own documentation versions it.
 ///
@@ -98,8 +98,21 @@ pub const ORIGIN_KEY: &str = "hcloud_id";
 /// rather than a match.
 const SERVER_TYPE_ID: &str = "vm";
 
-/// The keys this producer writes itself. A label may not take one of them.
-const OWN_KEYS: &[&str] = &[ORIGIN_KEY, "server_type", "os", "location", "ip"];
+/// The keys this producer writes itself, each beside what it writes into it.
+///
+/// **Pairs and not a list**, so that [`label_collision`] reads the description
+/// out of this table instead of matching on the key with a wildcard arm. A
+/// wildcard would describe a key it has never seen -- a sixth key added here
+/// and forgotten there would be refused as *"the IPv4 address"* -- which is
+/// ADR-0006's reason for refusing a wildcard `WriteOp` arm, one level down.
+/// Adding a key here now carries its own sentence with it.
+const OWN_KEYS: &[(&str, &str)] = &[
+    (ORIGIN_KEY, "hcloud's id into"),
+    ("server_type", "the server type into"),
+    ("os", "the image name into"),
+    ("location", "the location into"),
+    ("ip", "the IPv4 address into"),
+];
 
 /// How many servers one page of the API asks for. Hetzner's own maximum is 50.
 const PAGE: u32 = 50;
@@ -211,19 +224,15 @@ pub enum Produced {
 }
 
 /// The refusal a label that shadows one of [`OWN_KEYS`] gets.
-fn label_collision(server: &str, key: &str) -> IpcError {
+///
+/// `writes` is that key's own sentence out of the table, so this function
+/// describes only keys it has been told about.
+fn label_collision(server: &str, key: &str, writes: &str) -> IpcError {
     IpcError::invalid(format!(
         "the server {server:?} carries a label called `{key}`, which is also \
-         what this importer writes {}. An asset property has one value, and \
-         there is no answer to which of the two a reader meant -- rename the \
-         label in Hetzner Cloud, or drop it.",
-        match key {
-            ORIGIN_KEY => "hcloud's id into",
-            "server_type" => "the server type into",
-            "os" => "the image name into",
-            "location" => "the location into",
-            _ => "the IPv4 address into",
-        }
+         what this importer writes {writes}. An asset property has one value, \
+         and there is no answer to which of the two a reader meant -- rename \
+         the label in Hetzner Cloud, or drop it."
     ))
 }
 
@@ -337,8 +346,8 @@ fn estate_file(
             properties.insert("ip".to_owned(), ipv4.ip.clone().into());
         }
         for (key, value) in &server.labels {
-            if OWN_KEYS.contains(&key.as_str()) {
-                return Err(label_collision(&server.name, key));
+            if let Some((_, writes)) = OWN_KEYS.iter().find(|(own, _)| own == key) {
+                return Err(label_collision(&server.name, key, writes));
             }
             properties.insert(key.clone(), value.clone().into());
         }
@@ -383,6 +392,12 @@ fn asset_id(server: i64) -> String {
 
 /// One run of the hcloud importer.
 ///
+/// **A `land_under` of `Some(Landing { parent: None })` is an answer**, not a
+/// missing one: it says *the top of the estate*, and the draft built above --
+/// which gives no entry a `parent` -- is already the file that says so. The
+/// spelling that means *nothing has been said yet* is the argument being
+/// `None`, and only that (#509, second ruling of 2026-09-08).
+///
 /// # Errors
 ///
 /// The read's ([`servers`]), the preview's, and [`IpcError::invalid`] for a
@@ -390,7 +405,7 @@ fn asset_id(server: i64) -> String {
 pub async fn produce(
     pool: &PgPool,
     client: &HttpClient,
-    land_under: Option<&str>,
+    land_under: Option<&Landing>,
 ) -> Result<Produced, IpcError> {
     let servers = servers(client).await?;
 
@@ -418,11 +433,16 @@ pub async fn produce(
             new_servers: Vec::new(),
         });
     }
-    let Some(parent) = land_under else {
+    let Some(landing) = land_under else {
         return Ok(Produced::LandingNeeded { servers: named });
     };
+    // `landing.parent` is `None` for the top of the estate, and `estate_file`
+    // then writes no `parent` key at all -- which is what the Import reads as a
+    // top-level asset (`FileAsset::parent`). Nothing branches on the top here:
+    // the answer *is* the draft's shape, which is why this is one call and not
+    // two paths.
     Ok(Produced::Ready {
-        file: estate_file(&servers, &new, Some(parent))?,
+        file: estate_file(&servers, &new, landing.parent.as_deref())?,
         new_servers: named,
     })
 }
@@ -513,7 +533,7 @@ mod tests {
         assert_eq!(properties["knobas"], serde_json::json!("testenv"));
         assert_eq!(properties["role"], serde_json::json!("teamcity"));
 
-        for key in OWN_KEYS {
+        for (key, writes) in OWN_KEYS {
             let refused = estate_file(
                 &[server(1, "box", &[(key, "whatever")])],
                 &HashSet::new(),
@@ -524,6 +544,14 @@ mod tests {
             assert!(
                 refused.message.contains(key) && refused.message.contains("box"),
                 "the refusal names the label and the server: {}",
+                refused.message
+            );
+            // And what it says the key is **for**, read out of the table
+            // rather than matched on: a sixth key described as the fifth one
+            // is the wildcard arm this table replaced.
+            assert!(
+                refused.message.contains(writes),
+                "the refusal describes `{key}` as something other than {writes:?}: {}",
                 refused.message
             );
         }

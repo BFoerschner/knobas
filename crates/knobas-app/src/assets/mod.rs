@@ -4148,6 +4148,43 @@ impl Token {
     }
 }
 
+/// Where the servers an [importer](Importer) found and this estate does not hold
+/// will land (#509, second ruling of 2026-09-08).
+///
+/// **A struct and not a bare `Option<String>`, because three answers need three
+/// spellings.** The argument is `Option<Landing>`, and the three are: *nothing
+/// has been said yet* (the argument absent), *under this asset*
+/// (`{ parent: "asset:…" }`), and *at the top of the estate*
+/// (`{ parent: null }`). A bare `Option<String>` gave the last two one spelling
+/// between them, and the collision was not academic: the Import dialog offers
+/// the top, promises it in words, and sent `null` -- which the producer read as
+/// *nothing said yet*, so it asked the same question again. On an estate with
+/// **no assets** there is no other answer to give, so the only button on a
+/// first run did nothing, for ever, for an importer whose whole purpose is to
+/// populate a tree.
+///
+/// `parent: None` is the module's own spelling of the top and not a new one:
+/// [`create`] is *"create an asset under `parent_id`, or at the top of the
+/// estate"*, [`move_to`] is *"or to the top of the estate"*,
+/// [`ImportEntry::parent_id`] is *"`null` only for an asset at the top"*, and
+/// [`FileAsset::parent`] is an `Option` the Import has written as a top-level
+/// asset since #439. `testenv/hetzner/estate.json` has exactly one parentless
+/// asset. An importer that refused the one answer the Import accepts would be
+/// the *"second set of rules"* spec #491's story 69 forbids.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Landing {
+    /// The asset the new servers go under, or `None` for the top of the estate.
+    ///
+    /// `#[serde(default)]` so `{}` reads as the top: an absent key and an
+    /// explicit `null` are one answer here, which is the opposite of the
+    /// distinction the whole type exists to make -- that one is between the
+    /// **argument** being absent and this field being `null`, and those cross
+    /// the bridge as different things.
+    #[serde(default)]
+    pub parent: Option<String>,
+}
+
 /// The live system a producer reads, or a refusal for the one that reads none.
 ///
 /// Beside [`find_producer`] and for its reason: an answer a command would

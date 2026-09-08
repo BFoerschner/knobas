@@ -811,9 +811,13 @@ const CASES: Case[] = [
      * One effect, `MoveDialog`'s -- the level the picker is standing on -- and
      * it is **installed but idle** until an importer answers `landing_needed`,
      * which is what this case mounts into: the read is not in flight, and the
-     * component must still leave nothing behind. A dialog closed on the
-     * question is the commonest way this one is unmounted, because the question
-     * is the moment a reader realises they have not decided.
+     * component must still leave nothing behind.
+     *
+     * **The in-flight picker is `MoveDialog`'s case, one entry up**, on the
+     * same `latestRead` and the same effect; this case holds the *idle* dialog,
+     * which is the state it spends its life in. Saying so rather than claiming
+     * a state this mount does not reach: the harness mounts and unmounts, it
+     * does not click, so nothing here drives the read.
      */
     name: "ImportDialog",
     source: "lib/assets/ImportDialog.svelte",

@@ -916,14 +916,34 @@ export interface ProducedFile {
 }
 
 /**
+ * Where the servers an importer found and this estate does not hold will land —
+ * `assets::Landing` (#509).
+ *
+ * **Three answers need three spellings**, and this type carries the two that
+ * are answers: `{ parent: "asset:…" }` is *under this asset* and
+ * `{ parent: null }` is *the top of the estate*, which is how `createAsset` and
+ * `moveAsset` already spell a place. The third — *nothing has been said yet* —
+ * is the whole argument being `null`, and is what `landing_needed` asks about.
+ *
+ * The distinction is not academic: a bare `string | null` gave *the top* and
+ * *nothing said yet* one spelling, so a reader who chose the top was asked the
+ * same question again, for ever on an estate with no assets to choose instead.
+ */
+export interface Landing {
+  /** The asset the servers go under, or `null` for the top of the estate. */
+  parent: string | null;
+}
+
+/**
  * Run one importer against its live system (#509).
  *
  * `token` is sent only when the reader has just typed one; otherwise the
  * backend reads the keychain, under the `importer:` namespace an importer's
  * credential lives in (ADR-0015 — an importer is not a source, and its token is
- * not reachable by anything that walks sources). `landUnder` is the asset the
- * servers this estate does not hold will land under, and is owed only once
- * `landing_needed` has said so.
+ * not reachable by anything that walks sources). `landUnder` is where the
+ * servers this estate does not hold will land ({@link Landing}), and is owed
+ * only once `landing_needed` has said so — `null` until then, and *never* as a
+ * way of saying *the top*, which is `{ parent: null }`.
  *
  * Rejects with `invalid` for a producer the backend does not know or for the
  * estate file (which is chosen from the disk and produces nothing), and with
@@ -932,7 +952,7 @@ export interface ProducedFile {
 export function produceEstateFile(
   producer: string,
   token: string | null,
-  landUnder: string | null,
+  landUnder: Landing | null,
 ): Promise<Produced> {
   return invoke<Produced>("produce_estate_file", { producer, token, landUnder });
 }

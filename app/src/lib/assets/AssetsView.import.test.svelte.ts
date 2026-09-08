@@ -25,6 +25,7 @@ import type {
   AssetRow,
   ImportOutcome,
   ImportPreview,
+  Landing,
   Produced,
 } from "../ipc/assets";
 import type { IpcError } from "../ipc";
@@ -179,8 +180,15 @@ interface Calls {
   /** The producer sent with each call, preview and apply alike (#508). */
   producers: string[];
   reads: number;
-  /** `(producer, token, landUnder)` per `produce_estate_file` call (#509). */
-  produces: [string, string | null, string | null][];
+  /**
+   * `(producer, token, landUnder)` per `produce_estate_file` call (#509).
+   *
+   * `landUnder` is a {@link Landing} or `null`, and the difference between
+   * `null` and `{ parent: null }` is the whole of what the second ruling of
+   * 2026-09-08 was about — so it is recorded verbatim rather than flattened to
+   * an id, which would have made the two indistinguishable here too.
+   */
+  produces: [string, string | null, Landing | null][];
 }
 
 /**
@@ -247,7 +255,7 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
         produceEstateFile: (
           producer: string,
           token: string | null,
-          landUnder: string | null,
+          landUnder: Landing | null,
         ) => {
           calls.produces.push([producer, token, landUnder]);
           const answer = script.shift();
@@ -630,6 +638,8 @@ test("land under is asked only when the importer found a server the estate lacks
     { state: "token_needed" },
     { state: "landing_needed", servers: ["knobas-scratch"] },
     { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
+    { state: "landing_needed", servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
   ];
   const asked = render();
   await settle();
@@ -652,6 +662,22 @@ test("land under is asked only when the importer found a server the estate lacks
   expect(tokenField()).toBeNull();
   expect(target.textContent).toContain("knobas-scratch");
   expect(target.querySelector(".dlg .pick")).not.toBeNull();
+
+  // **The picker opens at the top of the estate, and the top is an answer.**
+  // This is the half that was missing until the second ruling of 2026-09-08:
+  // the walk below steps into an asset first, so nothing ever pressed the
+  // button the picker opens on. Standing here sends `{ parent: null }` — the
+  // spelling that means *the top* — and the run reaches `ready`. A dialog
+  // sending a bare `null` would be asking the same question again, which on an
+  // estate with no asset to walk into is the only thing its only button can do.
+  button("Put them in the top of the estate")?.click();
+  await settle();
+  expect(asked.produces.at(-1)).toEqual(["hcloud", null, { parent: null }]);
+  expect(target.querySelector(".dlg .pick")).toBeNull();
+
+  // …and then the walk-in, which is the ordinary case.
+  button("Read Hetzner Cloud")?.click();
+  await settle();
   // The picker walks the estate: the top level holds the one asset this
   // fixture has, and standing on it is what says where the servers land.
   const into = [...target.querySelectorAll<HTMLButtonElement>(".dlg .into")];
@@ -664,7 +690,9 @@ test("land under is asked only when the importer found a server the estate lacks
   expect(asked.produces).toEqual([
     ["hcloud", null, null],
     ["hcloud", "a-hetzner-token", null],
-    ["hcloud", null, "asset:knobas-estate"],
+    ["hcloud", null, { parent: null }],
+    ["hcloud", null, null],
+    ["hcloud", null, { parent: "asset:knobas-estate" }],
   ]);
 });
 

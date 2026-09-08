@@ -1487,3 +1487,79 @@ three claims to start with are named in the comment: that `KeychainAccount::sour
 existing machine becomes unreachable, silently, with the gate green), that `Produced` is decoded
 nowhere, and that the share suite's secret-free scan is one that *would* carry the token if
 anything wrote a `source_config`-shaped row for an importer.
+
+---
+
+## #509 (second ruling) — the top of the estate as a landing place
+
+Ruled 2026-09-08, raised by PR #539's merge-manager after every condition of the first ruling was
+met and verified. Comment:
+<https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579926452>
+
+**The fork:** the merge-manager's words: *"`ImportDialog.svelte:154` derives `const landUnder =
+$derived(crumb.at(-1)?.id ?? null);` and `:155` names that position `"the top of the estate"`. The
+picker opens there … promises `They will land in <strong>the top of the estate</strong>.` with a
+button reading `Put them in the top of the estate`. Pressing it calls `produceFile(producer, token,
+null)` — and the backend reads `null` as nothing said yet … on an estate with no assets, every
+server is new, so `landing_needed` always fires, the picker renders `Nothing inside the top of the
+estate.`, and the only button does nothing — forever."* Two fixes: UI-only, disabling the button
+while the crumb is empty and reading the ticket's *"the land under asset asked once per run"* as
+*an asset is required*; or wire, giving the top its own spelling and changing the argument the first
+ruling ratified. #510 is written against the signature. Three smaller findings came with it, and
+whether the PR body is corrected before the squash.
+
+**Ruling:** **The wire fix, inside #539, before the merge. The backend is the defect and the
+dialog's promise is the true sentence.** The argument becomes `land_under: Option<Landing>` with
+`Landing { parent: Option<String> }`, mirrored as `landUnder: Landing | null` and
+`{ parent: string | null }`. **An absent `land_under` still means *nothing has been said yet*,
+unchanged from the first ruling**; a present one carries the assets module's own spelling of a
+place, `parent: null` for the top, exactly as `create_asset` and `move_asset` take it. A produced
+entry landing at the top carries no `parent` key, which the file builder already does for a `None`
+parent, so `produce` answers the top with the draft it has already built. Owed with it, all inside
+#539: the §10.8 entry amended in place, since it is this PR's own unmerged entry; one seam case in
+`assets_ipc.rs` over a scratch database holding **no assets at all**; the vitest *land under* case's
+missing half, pressing the button from where the picker opens; the `?fake-ipc` handler reading the
+new shape and the walk gaining one step at the top; and three mutants. The smaller findings: (a)
+`residue.test.svelte.ts`' `ImportDialog` comment names a state its case does not reach — one
+sentence, no new case, saying instead that the in-flight picker is `MoveDialog`'s case one entry up
+on the same `latestRead` and that this case holds the idle dialog; (b) `label_collision`'s wildcard
+arm goes, `OWN_KEYS` becoming pairs of the key and what the importer writes into it; (c) is the fork
+itself. The PR body's counts are corrected once, after this lands, since it moves them again. No
+glossary change, no ADR, no follow-up ticket, nothing newly blocked. **For the orchestrator:** #510's
+note gains one line, that `produce_estate_file`'s third argument is `Option<Landing>` and Docker
+sends `null`, since story 68 says *"Docker needs no land under question"*.
+
+**Reasoning:** the answer already existed, in four places, and every one says an asset at the top of
+the estate is ordinary — `ImportEntry.parent_id` (*"`null` only for an asset at the top of the
+estate"*), `FileAsset.parent`, which the Import has written as a top-level asset since #439,
+`create`'s and `move_to`'s own docs, and `tree.ts`'s `TOP: null`. `testenv/hetzner/estate.json` has
+exactly one parentless asset, the site everything else sits under, and ADR-0014's sentence is *"the
+estate is a tree"* — a tree has a top. That settles which side is wrong. Spec #491 story 69 asks
+that *"an importer adds no second set of rules"* and ADR-0015 says *"the existing Import is its
+preview and its apply"*; the Import accepts a parentless entry, so an importer refusing the one
+answer the Import accepts would be that second rule, and the UI-only fix is that rule made visible.
+The ticket's word *asset* in *"the land under asset asked once per run"* is the common answer and
+not a prohibition, and story 65's *"the importer invents no site"* forbids the **importer** making
+one, not a person choosing the top. **On an empty estate the top is the only choice there is**, and
+spec #491's own problem statement is that case. On the first ruling's sentence: *"absence has an
+exact meaning here"* is still exact, and what neither it nor the implementer saw is that the
+**present** value had one spelling for two answers, and the top's spelling collided with absence.
+The three smaller-looking shapes are each worse: `Option<Option<String>>` rests on the mirror
+sending `undefined` for one case and `null` for the other, an invisible distinction on the wire; a
+reserved string for the top is a reserved namespace, which the entry's *what is not touched* list
+rules out by name; and carrying the draft inside `landing_needed` would make one state a question
+and an answer at once, the class the entry gives as its reason for a union over a record of
+optionals. For (a), a test header saying more than its case is the class this milestone has refused
+to leave in place, and the fix is the sentence. For (b), a wildcard arm that describes a key it has
+never seen is ADR-0006's reason for refusing a wildcard `WriteOp` arm, one level down.
+
+**If you disagree, the cost of reversing this is:** trivial before merge — one struct and its
+mirror, two seam calls, one vitest half. After merge, `Landing` leaves the wire only by a further
+§10.8 entry, and there is **no migration and nothing persisted**, as the entry says. Reversing to
+the UI-only fix is one file, but it reinstates the empty-estate dead end and a rule the Import does
+not have, and the glossary's *"the existing Import is its preview and its apply"* would then need a
+clause saying the importer refuses what the Import accepts, which is Björn's sentence and not the
+deputy's. (a) and (b): nil either way.
+
+**Flagged, not ruled:** nothing. The first ruling is not reopened, and the merge-manager's deep pass
+over the §10.8 entry's claims stands as that ruling left it.

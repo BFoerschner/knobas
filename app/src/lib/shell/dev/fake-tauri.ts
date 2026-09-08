@@ -1427,9 +1427,15 @@ function estateProduce(args: Record<string, unknown>) {
   if (token !== "") IMPORTER_TOKEN = token;
   if (IMPORTER_TOKEN === null) return { state: "token_needed" };
 
-  const landUnder = typeof args.landUnder === "string" ? args.landUnder : null;
+  // **The argument being absent is the question; a `Landing` is an answer, and
+  // `{ parent: null }` is the top of the estate** (`assets::Landing`, #509).
+  // Read the way the backend reads it, because reading `{ parent: null }` as
+  // *nothing said yet* is exactly the defect the second ruling of 2026-09-08
+  // was raised on, and a fixture that repeated it would let the walk go green
+  // over it.
+  const landing = (args.landUnder ?? null) as { parent?: string | null } | null;
   const held = FIXTURE_ESTATE.some((asset) => asset.name === IMPORTER_NEW_SERVER);
-  if (!held && landUnder === null) {
+  if (!held && landing === null) {
     return { state: "landing_needed", servers: [IMPORTER_NEW_SERVER] };
   }
   const entry: Record<string, unknown> = {
@@ -1444,7 +1450,10 @@ function estateProduce(args: Record<string, unknown>) {
       ip: "203.0.113.9",
     },
   };
-  if (!held) entry.parent = landUnder;
+  // No `parent` key at all for the top, which is what `FileAsset::parent` reads
+  // as an asset at the top of the estate.
+  const parent = landing?.parent ?? null;
+  if (!held && parent !== null) entry.parent = parent;
   PRODUCED_FILE = JSON.stringify(
     { version: 1, name: "Hetzner Cloud", assets: [entry], routes: [] },
     null,

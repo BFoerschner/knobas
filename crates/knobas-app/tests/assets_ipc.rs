@@ -4735,6 +4735,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::assets::ack_alert,
             knobas_app::commands::assets::unmonitored_assets,
             knobas_app::commands::assets::depends_on_this,
+            knobas_app::commands::assets::produce_estate_file,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4883,6 +4884,37 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         (
             "apply_estate_import",
             serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),
+        ),
+        // #509's produce, and **all three spellings of its landing**, because
+        // that argument is where the second ruling of 2026-09-08 found a
+        // collision: the argument absent is *nothing said yet*, `{parent:null}`
+        // is *the top of the estate*, and `{parent:"asset:…"}` is *under this
+        // asset*. Two of the three decoding to one value is the defect, and a
+        // decode test is where the wire shape is held.
+        (
+            "produce_estate_file",
+            serde_json::json!({ "producer": HCLOUD_PRODUCER }),
+        ),
+        (
+            "produce_estate_file",
+            serde_json::json!({
+                "producer": HCLOUD_PRODUCER, "token": null, "landUnder": null,
+            }),
+        ),
+        (
+            "produce_estate_file",
+            serde_json::json!({
+                "producer": HCLOUD_PRODUCER,
+                "token": "a-hetzner-token",
+                "landUnder": { "parent": null },
+            }),
+        ),
+        (
+            "produce_estate_file",
+            serde_json::json!({
+                "producer": HCLOUD_PRODUCER,
+                "landUnder": { "parent": "asset:hetzner-nbg1" },
+            }),
         ),
         ("monitoring_settings", serde_json::json!({})),
         (
@@ -6474,11 +6506,15 @@ async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_
         "one server is not in the tree, and only that one is asked about"
     );
 
-    let assets::hcloud::Produced::Ready { file, new_servers } =
-        assets::hcloud::produce(&pool, &client, Some("asset:hetzner-nbg1"))
-            .await
-            .expect("the producer runs with a landing place")
-    else {
+    let assets::hcloud::Produced::Ready { file, new_servers } = assets::hcloud::produce(
+        &pool,
+        &client,
+        Some(&assets::Landing {
+            parent: Some("asset:hetzner-nbg1".to_owned()),
+        }),
+    )
+    .await
+    .expect("the producer runs with a landing place") else {
         panic!("the landing place was given, so a file is owed");
     };
     assert_eq!(new_servers, ["knobas-scratch"]);
@@ -6533,6 +6569,95 @@ async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_
     assert_eq!(
         teamcity, "asset:hetzner-nbg1",
         "an import never re-parents what is already in the tree"
+    );
+}
+
+/// **On an estate with nothing in it, the top of the estate is the answer.**
+///
+/// The case the Import dialog's only button used to do nothing in, for ever
+/// (the deputy's second ruling of 2026-09-08 on #509): a first run of an
+/// importer whose whole purpose is to populate a tree. Every server is new, so
+/// `landing_needed` fires; there is no asset to land under, because there are
+/// no assets; and the answer a reader can give is **the top**, which is
+/// `Landing { parent: None }`.
+///
+/// It is a different spelling from the argument being absent, and the two
+/// assertions here are what say so: the same producer, over the same recording,
+/// answers `LandingNeeded` when nothing has been said and `Ready` when the top
+/// has been chosen. A backend reading `Landing { parent: None }` as unanswered
+/// -- which is what this build did before the ruling -- makes the second call
+/// answer the first call's question again.
+///
+/// And the file it produces is the draft it had already built: no entry carries
+/// a `parent`, which `FileAsset::parent` has read as *an asset at the top of the
+/// estate* since #439, so the preview lists all three as new with a
+/// `parent_id` of `null` and the apply writes them at the top.
+#[tokio::test]
+async fn on_an_empty_estate_the_top_of_the_estate_is_a_landing_place() {
+    let hcloud = spawn_mock_hcloud(HCLOUD_SERVERS).await;
+    // No `imported(..)`: this estate has nothing in it at all, which is the
+    // whole of what the case is about.
+    let pool = pool("hcloud-empty-estate").await;
+    let client = hcloud_client(&hcloud);
+
+    let asked = assets::hcloud::produce(&pool, &client, None)
+        .await
+        .expect("the producer runs");
+    let assets::hcloud::Produced::LandingNeeded { mut servers } = asked else {
+        panic!("nothing is in the tree, so all three servers are new: {asked:?}");
+    };
+    servers.sort();
+    assert_eq!(
+        servers,
+        ["knobas-confluence", "knobas-jira", "knobas-teamcity"]
+    );
+
+    let answered = assets::hcloud::produce(&pool, &client, Some(&assets::Landing { parent: None }))
+        .await
+        .expect("the producer runs with the top of the estate chosen");
+    let assets::hcloud::Produced::Ready { file, new_servers } = answered else {
+        panic!(
+            "the top of the estate is an answer, not a missing one -- a producer \
+             that asks again here is the defect this case exists for: {answered:?}"
+        );
+    };
+    assert_eq!(new_servers.len(), 3);
+
+    let parsed: serde_json::Value = serde_json::from_str(&file).expect("the file is JSON");
+    for entry in parsed["assets"].as_array().expect("the file has assets") {
+        assert_eq!(
+            entry.get("parent"),
+            None,
+            "an entry landing at the top names no parent: {}",
+            entry["id"]
+        );
+    }
+
+    let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("the produced file previews");
+    assert_eq!(preview.known, Vec::new(), "this estate holds nothing yet");
+    assert_eq!(preview.new.len(), 3);
+    for entry in &preview.new {
+        assert_eq!(
+            entry.parent_id, None,
+            "the preview draws {} at the top of the estate",
+            entry.id
+        );
+    }
+
+    let outcome = assets::apply_import(&pool, &file, HCLOUD_PRODUCER)
+        .await
+        .expect("the produced file applies");
+    assert_eq!(outcome.value.assets_created, 3);
+    let at_the_top: i64 =
+        sqlx::query_scalar("select count(*) from knobas.asset where parent_id is null")
+            .fetch_one(&pool)
+            .await
+            .expect("the estate's top level");
+    assert_eq!(
+        at_the_top, 3,
+        "all three, at the top, with nothing above them"
     );
 }
 

@@ -576,7 +576,11 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
 ///
 /// [`Produced::LandingNeeded`] comes back when the live system holds servers
 /// this estate does not, and the caller has not said where they go. The reader
-/// answers once, and the next call carries `land_under`. That second call reads
+/// answers once, and the next call carries `land_under`. **The answer may be
+/// the top of the estate** -- [`assets::Landing`] with a `parent` of `null`,
+/// the spelling `create_asset` and `move_asset` already take -- which is a
+/// different thing from the argument being absent, and on an estate with no
+/// assets it is the only answer there is. That second call reads
 /// the live system again rather than holding the first read: this command owns
 /// no state between calls, and a cached answer would be a second place for the
 /// estate to be out of date.
@@ -595,7 +599,7 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     lifecycle: State<'_, Lifecycle>,
     producer: String,
     token: Option<String>,
-    land_under: Option<String>,
+    land_under: Option<assets::Landing>,
 ) -> Result<assets::hcloud::Produced, IpcError> {
     let pool = lifecycle.pool()?;
     let producer = assets::find_producer(&producer)?;
@@ -619,7 +623,7 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
     let run = match importer {
         assets::Importer::Hcloud => {
             match assets::hcloud::client(assets::hcloud::API, credential.as_str()) {
-                Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_deref()).await,
+                Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_ref()).await,
                 Err(refused) => Err(refused),
             }
         }
