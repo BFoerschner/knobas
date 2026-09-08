@@ -54,8 +54,8 @@ mod live_digest;
 
 use std::sync::Arc;
 
-use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
+use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::{assets, backup};
 use knobas_core::entity::EntityRef;
 use knobas_core::link::Origin;

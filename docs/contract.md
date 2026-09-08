@@ -8491,8 +8491,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   the producer … The planner gains its second matching rule"*), ADR-0015 is the decision behind it
   (an importer produces an estate file and is **not** a source), and #508's own acceptance criteria
   are the list. **Björn keeps the gate for frozen contracts and this entry is flagged for his
-  review**; in his absence the v1.5 loop's deputy ruling is what ratifies it
-  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`). The argument is in this entry rather than
+  review.** In his absence the v1.5 loop's deputy is what exercises that gate, and its ruling is
+  recorded on the issue and appended to `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the
+  PR that acts on it; **no ruling had been posted on #508 when this entry was written**, so this
+  sentence records the flag and claims no ratification. The argument is in this entry rather than
   in a §9 section of its own, the treatment #499 and #505 took: nothing here corrects an existing
   record, measures a source system or moves a §4.2 row.
 

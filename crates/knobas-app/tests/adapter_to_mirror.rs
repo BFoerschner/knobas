@@ -53,6 +53,7 @@
 //! to the docker-gated container layer.
 
 use async_trait::async_trait;
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::sources::Registry;
 use knobas_mockd::{spawn_mock_jira, spawn_mock_teamcity};
 use knobas_source::contract::VecSink;
@@ -64,7 +65,6 @@ use knobas_source::{
 use knobas_sync::scheduler::AdapterRegistry;
 use serde_json::Value;
 use sqlx::PgPool;
-use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// The six names issue #32 added to `knobas-source-jira`'s `BASE_FIELDS`.
 ///

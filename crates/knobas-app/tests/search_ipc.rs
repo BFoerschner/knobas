@@ -14,12 +14,12 @@
 //! absolute row count of anything global.
 
 use knobas_app::IpcErrorCode;
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::search::{
     create_smart_list_inner, delete_smart_list_inner, launcher_home_inner, rename_smart_list_inner,
     search_inner, smart_list_items_inner, smart_lists_inner,
 };
 use knobas_search::{SearchFilters, SearchQuery};
-use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// A pool with the schema on it.
 async fn pool() -> sqlx::PgPool {

@@ -90,7 +90,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use knobas_app::assets::{self, AlertState, PropertyValue, ESTATE_FILE_PRODUCER};
+use knobas_app::assets::{self, AlertState, ESTATE_FILE_PRODUCER, PropertyValue};
 use knobas_app::commands::entity::{inbox_count_inner, inbox_items_inner};
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_core::entity::EntityRef;

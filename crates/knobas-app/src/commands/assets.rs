@@ -1446,8 +1446,11 @@ mod tests {
     ///
     /// The ids are read **out of the list** rather than looked for anywhere in
     /// the file, so a `"hcloud"` written in a comment somewhere else in the
-    /// mirror cannot make this pass, and the count is asserted so that a
-    /// renamed list fails as a broken parse instead of checking nothing.
+    /// mirror cannot make this pass, and the list is asserted to be non-empty
+    /// so that a renamed or moved declaration fails as a broken parse instead
+    /// of checking nothing. **Non-empty and not a count**: stream 9 adds the
+    /// hcloud entry and stream 10 the Docker one, and a number here would go
+    /// red on the day the chooser grew the entry this test exists to check.
     #[test]
     fn the_chooser_offers_producers_this_build_knows() {
         let at = MIRROR
@@ -1467,15 +1470,16 @@ mod tests {
                 &quoted[..quoted.find('"').expect("an unterminated id")]
             })
             .collect();
-        assert_eq!(
-            offered.len(),
-            1,
-            "the chooser's list reads {offered:?}; if it moved, fix this parse              rather than deleting the check"
+        assert!(
+            !offered.is_empty(),
+            "this parse found no producer in the chooser's list; if the \
+             declaration moved, fix the parse rather than deleting the check"
         );
         for id in offered {
             assert!(
                 assets::PRODUCERS.iter().any(|producer| producer.id == id),
-                "the chooser offers {id:?} and no producer in this build carries                  that id, so every file chosen under it is refused"
+                "the chooser offers {id:?} and no producer in this build carries \
+                 that id, so every file chosen under it is refused"
             );
         }
     }

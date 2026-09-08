@@ -3910,13 +3910,21 @@ const DESCRIPTION_KEY: &str = "description";
 
 /// One producer of an estate file, and the origin key its files carry.
 ///
-/// `CONTEXT.md`, **Importer**: a producer of an estate file from a live system
-/// -- hcloud, a Docker host -- offered by the Import's chooser and previewed
-/// and applied by the same Import, and **not a source** (ADR-0015). A producer
-/// returns *"an estate file's text in the checked-in shape"* (spec #491's
-/// Implementation Decisions), so the file itself says nothing about where it
-/// came from; which producer made it is the chooser's answer, and it travels
-/// beside the text as the `producer` argument of the two Import commands.
+/// **Producer, not importer, and the two are not the same set.**
+/// `CONTEXT.md`, **Importer**, is *"a producer of an estate file from a live
+/// system -- hcloud, a Docker host"*, and **not a source** (ADR-0015). *Producer* is that entry's own wider word, amended into it by
+/// this ticket: every importer is one, and [`ESTATE_FILE_PRODUCER`] -- the
+/// file a person picks off the disk -- is the one producer that is not an
+/// importer, because there is no live system on the other end of it. It is the
+/// word #508 uses (*"the file-import producer declares none"*) and spec #491's
+/// (*"App-side producers in the assets module"*), and it is what the chooser
+/// chooses between.
+///
+/// A producer returns *"an estate file's text in the checked-in shape"* (spec
+/// #491's Implementation Decisions), so the file itself says nothing about
+/// where it came from; which producer made it is the chooser's answer, and it
+/// travels beside the text as the `producer` argument of the two Import
+/// commands.
 ///
 /// The only thing the planner asks a producer is its **origin key**
 /// (`CONTEXT.md`): *"the property an importer sets that names the thing it read
@@ -3933,9 +3941,9 @@ pub struct Producer {
     ///
     /// A list rather than one key, because an origin key is not always one
     /// property: spec #491's story 67 gives a container's as its docker context
-    /// plus its name, against `hcloud_id` alone for a server (story 64). An
-    /// entry that does not carry *every* key here is not keyed at all -- half a
-    /// key would match on half a question.
+    /// plus its name, against `hcloud_id` alone for a server (story 64).
+    /// [`origin_key_of`] is what an asset carrying only some of these comes to,
+    /// on both sides.
     origin_key: &'static [&'static str],
 }
 
@@ -4313,10 +4321,14 @@ struct RouteInsert {
 ///
 /// # Errors
 ///
-/// [`IpcError::invalid`] for a file that is not JSON, carries a key the format
-/// does not define, names a type nobody declares, names a parent or a target
-/// that is neither in the file nor in the estate, or whose assets hold each
-/// other in a cycle; [`IpcError`] if a read fails.
+/// [`IpcError::invalid`] for a producer this build does not know
+/// ([`find_producer`]), or for a file that is not JSON, carries a key the
+/// format does not define, names a type nobody declares, names a parent or a
+/// target that is neither in the file nor in the estate, whose assets hold each
+/// other in a cycle, whose origin key matches two assets at once, or which
+/// names one asset twice once its origin key has matched
+/// ([`matched_by_origin_key`], [`rename_matched`]); [`IpcError`] if a read
+/// fails.
 pub async fn preview_import(
     pool: &PgPool,
     file: &str,
@@ -4696,10 +4708,12 @@ async fn plan(
     if !matched.is_empty() {
         rename_matched(&mut parsed, &matched)?;
         asset_ids = parsed.assets.iter().map(|a| a.id.clone()).collect();
-        // Re-read under the ids the file will now be planned by. The matched
-        // rows carry the name, the properties and the monitor names the
-        // *changes* half compares against, and reaching them any other way
-        // would be a second reader of `knobas.asset` in one function.
+        // Re-read under the ids the file will now be planned by.
+        // `ORIGIN_KEYED_ASSETS` answered a different question and selected
+        // what that question needed -- it has no `monitors` column in it, and
+        // it is keyed by an origin key rather than by the file's ids -- so
+        // what the *changes* half compares against is still `KNOWN_ASSETS`'
+        // answer, asked again now that the ids are settled.
         stored = stored_assets(tx, &asset_ids).await?;
     }
 
@@ -4910,7 +4924,11 @@ async fn stored_assets(
     ids: &[String],
 ) -> Result<HashMap<String, StoredAsset>, IpcError> {
     let mut stored: HashMap<String, StoredAsset> = HashMap::new();
-    for row in sqlx::query(KNOWN_ASSETS).bind(ids).fetch_all(&mut **tx).await? {
+    for row in sqlx::query(KNOWN_ASSETS)
+        .bind(ids)
+        .fetch_all(&mut **tx)
+        .await?
+    {
         let properties: serde_json::Value = row.try_get("properties")?;
         stored.insert(
             row.try_get("id")?,
@@ -4960,17 +4978,19 @@ async fn matched_by_origin_key(
             continue;
         }
         let declared = vet_type(&asset.type_id)?;
-        let mut key = Vec::with_capacity(producer.origin_key.len());
+        // The entry's key properties in the shape the estate stores them, so
+        // that one function reads both sides.
+        let mut translated = serde_json::Map::new();
         for part in producer.origin_key {
             let Some(raw) = asset.properties.get(*part) else {
-                break;
+                continue;
             };
             let value = property_of(Some(declared), part, raw)?;
             value.vet(part)?;
-            key.push(stored_value(&value)?);
+            translated.insert((*part).to_owned(), stored_value(&value)?);
         }
-        if key.len() == producer.origin_key.len() {
-            asking.push((asset.id.as_str(), origin_key_of(key)));
+        if let Some(key) = origin_key_of(&translated, producer.origin_key) {
+            asking.push((asset.id.as_str(), key));
         }
     }
     if asking.is_empty() {
@@ -4994,16 +5014,11 @@ async fn matched_by_origin_key(
         let serde_json::Value::Object(properties) = properties else {
             continue;
         };
-        let key: Vec<serde_json::Value> = producer
-            .origin_key
-            .iter()
-            .filter_map(|part| properties.get(*part).cloned())
-            .collect();
-        if key.len() != producer.origin_key.len() {
+        let Some(key) = origin_key_of(&properties, producer.origin_key) else {
             continue;
-        }
+        };
         holders
-            .entry(origin_key_of(key))
+            .entry(key)
             .or_default()
             .push((row.try_get("id")?, row.try_get("name")?));
     }
@@ -5041,14 +5056,28 @@ async fn matched_by_origin_key(
     Ok(matched)
 }
 
-/// One origin key as a value two sides can be compared by.
+/// One property bag's origin key, or `None` if it does not carry every part.
+///
+/// **Every part or nothing**, said once and read by both sides: half a key
+/// would match on half a question. The bag is a bag of *stored* values on
+/// either side -- the estate's own, or a file entry's put through
+/// [`property_of`] and [`stored_value`] first -- so the tag travels with the
+/// value and a number is not a string that looks like one
+/// ([`PropertyValue`]).
 ///
 /// A `String` and not the values themselves, because [`serde_json::Value`] is
 /// not hashable -- it carries an `f64` -- and this is a map key. The spelling
-/// is JSON's own, produced from both sides by the same call, so a key of two
+/// is JSON's own, produced from both sides by this same call, so a key of two
 /// parts cannot collide with a one-part key that happens to contain a comma.
-fn origin_key_of(parts: Vec<serde_json::Value>) -> String {
-    serde_json::Value::Array(parts).to_string()
+fn origin_key_of(
+    properties: &serde_json::Map<String, serde_json::Value>,
+    key: &[&str],
+) -> Option<String> {
+    let parts: Vec<serde_json::Value> = key
+        .iter()
+        .filter_map(|part| properties.get(*part).cloned())
+        .collect();
+    (parts.len() == key.len()).then(|| serde_json::Value::Array(parts).to_string())
 }
 
 /// Replace every mention of a file id with the tree id its origin key found.
@@ -5071,7 +5100,9 @@ fn rename_matched(
 ) -> Result<(), IpcError> {
     let mut taken: HashMap<&str, &str> = HashMap::new();
     for asset in &parsed.assets {
-        let after = matched.get(&asset.id).map_or(asset.id.as_str(), String::as_str);
+        let after = matched
+            .get(&asset.id)
+            .map_or(asset.id.as_str(), String::as_str);
         if let Some(first) = taken.insert(after, asset.id.as_str()) {
             return Err(IpcError::invalid(format!(
                 "`{first}` and `{}` are both `{after}` once the origin key has \

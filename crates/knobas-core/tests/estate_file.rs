@@ -501,16 +501,21 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
             .as_str()
             .unwrap_or_else(|| {
                 panic!(
-                    "`{server}` needs its `hcloud_id`, written as a string: it                      is the origin key an hcloud import matches this server on"
+                    "`{server}` needs its `hcloud_id`, written as a string: \
+                     it is the origin key an hcloud import matches this \
+                     server on"
                 )
             });
         assert!(
             !hcloud_id.is_empty() && hcloud_id.chars().all(|c| c.is_ascii_digit()),
-            "`{server}`'s hcloud_id is `{hcloud_id}`, and hcloud numbers its              servers"
+            "`{server}`'s hcloud_id is `{hcloud_id}`, and hcloud numbers its \
+             servers"
         );
         assert!(
             hcloud_ids.insert(hcloud_id.to_owned()),
-            "`{hcloud_id}` is the hcloud_id of two servers in this file. An              origin key names one thing, and an import of a file carrying it              would be refused rather than guess which"
+            "`{hcloud_id}` is the hcloud_id of two servers in this file. An \
+             origin key names one thing, and an import of a file carrying \
+             it would be refused rather than guess which"
         );
 
         // The `runs` column, which is the fact the set-comparison in

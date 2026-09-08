@@ -22,8 +22,8 @@
 //! test ran first.
 
 use knobas_app::assets::{
-    self, AssetEdit, AssetRow, AssetStatus, Environment, PropertyValue, ESTATE_FILE_PRODUCER,
-    HCLOUD_PRODUCER,
+    self, AssetEdit, AssetRow, AssetStatus, ESTATE_FILE_PRODUCER, Environment, HCLOUD_PRODUCER,
+    PropertyValue,
 };
 use knobas_app::{IpcError, IpcErrorCode};
 use sqlx::{PgPool, Row};
@@ -4085,7 +4085,9 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
     }
 
     assert!(
-        assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER).await.is_ok(),
+        assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+            .await
+            .is_ok(),
         "the real estate file is not one of the seven"
     );
     assert_eq!(tables(&pool).await, before, "a refused preview wrote a row");
@@ -4095,11 +4097,19 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
 // The origin key: the Import's second matching rule (#508)
 // ---------------------------------------------------------------------------
 
-/// What the hcloud importer will produce for one server (spec #491, story 63):
-/// an id of its own invention, and the `hcloud_id` that is its **origin key**.
+/// A produced file's shape (spec #491, story 63): an id of the producer's own
+/// invention, and the `hcloud_id` that is its **origin key**.
 ///
-/// `entry_id` is what makes the two halves of this rule testable at once -- the
-/// same file under an id the tree holds and under one it does not.
+/// `hcloud_id` is optional so that the *same* file can be asked for with the
+/// key and without it, everything else identical -- which is what makes a test
+/// about the key a test about the key. The engine hung off the entry and the
+/// route exposed by it are not things hcloud reads; they are here because the
+/// rename has to reach every mention of an id and only another entry can
+/// witness that.
+///
+/// The server's name is deliberately **not** the one the tree carries. The
+/// import never renames, so the preview reports the file's name for the entry
+/// and the tree's for the change, and two names are what tell those apart.
 fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
     let key = match hcloud_id {
         Some(id) => format!(r#""hcloud_id":"{id}","#),
@@ -4107,7 +4117,7 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
     };
     format!(
         r#"{{"name":"Hetzner Cloud","assets":[
-             {{"id":"{entry_id}","type":"vm","name":"knobas-teamcity",
+             {{"id":"{entry_id}","type":"vm","name":"renamed in hcloud",
                "parent":"asset:hetzner-nbg1",
                "properties":{{{key}"server_type":"cx33"}}}},
              {{"id":"asset:hcloud-engine","type":"container_engine",
@@ -4155,10 +4165,11 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
         preview
             .known
             .iter()
-            .map(|entry| entry.id.as_str())
+            .map(|entry| (entry.id.as_str(), entry.name.as_str()))
             .collect::<Vec<_>>(),
-        ["asset:hetzner-teamcity"],
-        "the entry previews as already in the tree, under the tree's id"
+        [("asset:hetzner-teamcity", "renamed in hcloud")],
+        "the entry previews as already in the tree, under the tree's id and \
+         under its own name -- an entry is a line about the file"
     );
     assert_eq!(
         preview
@@ -4176,7 +4187,8 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
             .map(|change| (change.id.as_str(), change.name.as_str()))
             .collect::<Vec<_>>(),
         [("asset:hetzner-teamcity", "knobas-teamcity")],
-        "what would change is the stored asset, under the name the tree calls it"
+        "what would change is the stored asset, under the name the tree calls \
+         it: the import does not rename, and the file calls it something else"
     );
     assert_eq!(
         preview.changes[0]
@@ -4221,6 +4233,16 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
         property(&pool, "asset:hetzner-teamcity", "server_type").await,
         Some(text("cx33")),
         "the file's value was written to the asset the origin key found"
+    );
+    assert_eq!(
+        assets::get(&pool, "asset:hetzner-teamcity")
+            .await
+            .expect("the matched asset")
+            .asset
+            .name,
+        "knobas-teamcity",
+        "and its name is untouched: a matched entry is an update of properties, \
+         not a rename"
     );
 
     // Every mention, not just the entry's own.
@@ -4827,11 +4849,11 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
         ("source_assets", serde_json::json!({ "sourceId": "kuma" })),
         (
             "preview_estate_import",
-            serde_json::json!({ "file": ESTATE_FILE }),
+            serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),
         ),
         (
             "apply_estate_import",
-            serde_json::json!({ "file": ESTATE_FILE }),
+            serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),
         ),
         ("monitoring_settings", serde_json::json!({})),
         (

@@ -40,6 +40,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::sources::SourcesState;
 use knobas_app::sources::{Registry, write_queue};
 use knobas_core::write_queue::WriteState;
@@ -50,7 +51,6 @@ use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
 use live_digest::{Connections, Quiet, sync};
 use serde_json::json;
 use sqlx::{PgPool, Row};
-use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// The configured source id, which is also the monitor entities' namespace.
 const KUMA: &str = "kuma";
