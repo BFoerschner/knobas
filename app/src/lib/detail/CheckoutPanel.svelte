@@ -46,7 +46,13 @@
   let saving = $state(false);
   /** The three open actions, or `null` until the read answers. */
   let commands = $state<CheckoutCommand[] | null>(null);
-  /** The action whose program is being started, so its button cannot be double-pressed. */
+  /**
+   * The action whose program is being started, or `null`.
+   *
+   * While it is set **every** button is disabled, not only its own: the three
+   * open the same working tree, and a second press before the first program
+   * has started is a second editor nobody asked for.
+   */
   let opening = $state<string | null>(null);
 
   /**
