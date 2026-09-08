@@ -271,8 +271,15 @@
 //! and every probe under it is an `Index Scan` (`item_kind_updated_idx`,
 //! `link_pair_active_idx`, `entity_pkey`). What the fixture is too small to
 //! show is how the per-asset probes scale, and the honest statement of the
-//! bound is the shape: **one probe per asset per predicate**, on a table whose
-//! size is an estate.
+//! bound is the shape: **two probes per asset per predicate**, on a table
+//! whose size is an estate -- and three where the badge stamp is itself a
+//! subquery. Two and not one for the same reason the walk below appears
+//! twice: the planner inlines the estate CTE's inner select, so every
+//! predicate is evaluated once for the `count(*) filter` and again for the
+//! stamp's `filter`, and *Open alerts* and *Certificates expiring* evaluate
+//! their stamp a third time over the rows that passed. Re-measured on the
+//! merge of #527; the first draft of this paragraph said *one*, which was the
+//! same undercount it corrects for the walk one paragraph down.
 //!
 //! The context-membership walk is the one part that is **not** per-asset.
 //! `a.id in `[`held_by_any_context!`] binds nothing from the outer row, so the
@@ -1083,9 +1090,11 @@ mod tests {
     /// `knobas_app::assets`' `UNMONITORED` passes the relation and the monitor
     /// kind as `$1` and `$2`; this statement cannot, because `concat!` takes
     /// literals. So the relation is checked against the one constant both
-    /// crates read. The kind has no such constant to check against -- it is a
-    /// declared kind, not a knobas-owned one -- and is named here so the next
-    /// reader knows the pin is one-sided.
+    /// crates read, `knobas_core::link::MONITORED_BY`. The kind has a constant
+    /// too -- `assets::MONITOR_KIND` -- but it is private to `knobas-app`, a
+    /// crate `knobas-search` cannot depend on without inverting the workspace,
+    /// so the word is compared against itself here and the pin is **one-sided**
+    /// on that half. Named so the next reader knows which half is held.
     #[test]
     fn the_roster_rule_is_spelled_the_way_the_link_table_spells_it() {
         let list = find("not-monitored").unwrap();
@@ -1127,23 +1136,15 @@ mod tests {
     #[test]
     fn the_alert_list_routes_by_the_membership_walk_and_nothing_else() {
         let list = find("alerts-in-context").unwrap();
-        // The walk's own text, which only `held_by_any_context!` produces:
-        // seeded from every unarchived context, with the `held` recursion that
-        // is "directly or through an ancestor".
+        // **The macro's own expansion, not three substrings of it.** A walk
+        // copied out by hand and then amended would satisfy any set of
+        // clauses named here while no longer being ADR-0008's rule, which is
+        // exactly what this test claims it is. `held_by_any_context!` is a
+        // `concat!` of literals, so the thing itself is available to compare
+        // against and a representation of it is not good enough.
         assert!(
-            list.rows_sql.contains("from knobas.context c"),
-            "{}",
-            list.rows_sql
-        );
-        assert!(
-            list.rows_sql
-                .contains("join knobas.asset c on c.parent_id = h.id"),
-            "the ancestor half of the rule is missing: {}",
-            list.rows_sql
-        );
-        assert!(
-            list.rows_sql.contains("c.archived_at is null"),
-            "{}",
+            list.rows_sql.contains(knobas_core::held_by_any_context!()),
+            "the context half is not `held_by_any_context!`: {}",
             list.rows_sql
         );
         assert!(

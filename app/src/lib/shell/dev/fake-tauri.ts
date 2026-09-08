@@ -418,6 +418,14 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       // The newest of the fixture's corpus, in the shape `list_entities`
       // answers in -- the board draws recent rows with the same component.
       recent: CORPUS.filter((entry) => entry.deleted_at === null)
+        // `recent_sql!`'s order, because the comment above has to be true:
+        // newest first, a row the source never dated last, and the id to
+        // break a tie. CORPUS is in reading order, not date order.
+        .sort(
+          (left, right) =>
+            (right.updated_at ?? "").localeCompare(left.updated_at ?? "") ||
+            left.entity_id.localeCompare(right.entity_id),
+        )
         .slice(0, 8)
         .map(mirrorRow),
       sources: FIXTURE_SOURCES.map((source) => source.health),
@@ -2647,15 +2655,6 @@ function fakeAck(args: Record<string, unknown>) {
 }
 
 /**
- * `unmonitored_assets`: every asset in the file for which it names no Uptime
- * Kuma monitor.
- *
- * **Derived from the file and not listed here**, `fakeMonitorRoster`'s rule:
- * `estate.json` says which monitors each asset asks for, so *which assets ask
- * for none* is already written down once and a second list would drift from
- * it.
- */
-/**
  * The launcher's smart-list rail (#504) -- **fixture-only**.
  *
  * A restatement of `knobas_search::lists`' seven lists, in this file's own
@@ -2779,6 +2778,14 @@ function fakeListAssets(id: string): (typeof FIXTURE_ESTATE)[number][] {
  *
  * An unknown id is refused the way the real command refuses it, so a typo in
  * `list:` under `?fake-ipc` looks like a typo and not like an empty list.
+ *
+ * **The order is the fixture's, not the statement's** -- the last of the
+ * divergences `fakeSmartLists` lists. `rows_over_estate!` returns an estate
+ * list `order by coalesce(path,'') asc, title asc, entity_id asc`; these rows
+ * come back in whatever order the roster and the alert list already build,
+ * because reproducing that ordering here would be a fourth restatement to keep
+ * in step and the walk asserts nothing about it. What a browser sees is which
+ * rows, not which first.
  */
 function fakeSmartListItems(args: Record<string, unknown>) {
   const id = String(args["id"] ?? "");
@@ -2828,6 +2835,15 @@ function fakeSmartListItems(args: Record<string, unknown>) {
   };
 }
 
+/**
+ * `unmonitored_assets`: every asset in the file for which it names no Uptime
+ * Kuma monitor.
+ *
+ * **Derived from the file and not listed here**, `fakeMonitorRoster`'s rule:
+ * `estate.json` says which monitors each asset asks for, so *which assets ask
+ * for none* is already written down once and a second list would drift from
+ * it.
+ */
 function fakeUnmonitored() {
   return FIXTURE_ESTATE.filter((asset) => asset.monitors.length === 0)
     .map((asset) => ({

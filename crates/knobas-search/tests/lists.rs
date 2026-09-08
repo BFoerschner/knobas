@@ -143,8 +143,8 @@ async fn count_of(s: &Searcher, id: &str) -> i64 {
 /// estate row carries its path is `crates/knobas-app/tests/search_ipc.rs`'
 /// business, where the rows are made through the real door.
 ///
-/// Three assets, because the three lists are three different rules and one
-/// asset cannot be a negative for any of them:
+/// Two assets, because the three lists are three different rules and one asset
+/// cannot be a negative for any of them:
 ///
 /// * `bare` -- nothing attached. *Not monitored*.
 /// * `watched` -- a monitor linked to it, whose payload carries a certificate
