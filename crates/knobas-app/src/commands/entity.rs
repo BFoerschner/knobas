@@ -2171,6 +2171,81 @@ pub async fn set_checkout_override(
     crate::checkout::view(&pool, &entity_id).await
 }
 
+// -- opening a checkout (#501) ----------------------------------------------
+//
+// Beside #499's four and for its reason: a repo and a branch are entities, and
+// §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
+// `crate::checkout`; these three are the shims.
+
+/// Every *open* action, with the command it would run on this machine.
+///
+/// Read by the settings section and by the checkout panel: the panel needs to
+/// know whether an action has a template at all, because a button with none is
+/// drawn as *not configured* rather than pressed into a refusal.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn checkout_commands(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::commands(&pool).await
+}
+
+/// Set one action's command template, or clear it back to the platform's.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an action that
+/// does not exist or a template that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_command(
+    lifecycle: State<'_, Lifecycle>,
+    action: String,
+    template: Option<String>,
+) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_command(&pool, &action, template.as_deref()).await?;
+    crate::checkout::commands(&pool).await
+}
+
+/// Run an action's command at this entity's checkout.
+///
+/// The one place knobas starts a program. What it starts is a template a
+/// person set in settings; the only value substituted into it is the checkout
+/// path this machine's disk answered, never a field of the mirrored repo
+/// (ADR-0016).
+///
+/// It returns as soon as the program has started, and says nothing about what
+/// the program then did: an editor that opens a window is not something an IPC
+/// call can wait for.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown
+/// action, an address that is not a repo or a branch, an action with no
+/// template on this platform, a template that cannot be run, or a program that
+/// would not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
+/// if the mirror does not hold the entity or it has no checkout on this
+/// machine; [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a
+/// query failure.
+#[tauri::command]
+pub async fn open_checkout(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    action: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open(&pool, &entity_id, &action).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

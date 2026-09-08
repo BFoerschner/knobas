@@ -101,6 +101,18 @@ const CHECKOUT = {
   clone_command: "git clone https://gitea.example.com/tidewater/payout-service",
 };
 
+/** What `checkout_commands` answers for both checkout cases (#501). */
+const OPEN_COMMANDS = [
+  {
+    action: "vscode",
+    label: "Open in VS Code",
+    template: 'open -a "Visual Studio Code" {path}',
+    is_default: true,
+  },
+  { action: "jetbrains", label: "Open in JetBrains", template: null, is_default: true },
+  { action: "terminal", label: "Open terminal here", template: "open -a Terminal {path}", is_default: true },
+];
+
 const NOTE = {
   note: {
     id: "note:7f2c",
@@ -184,6 +196,12 @@ vi.mock("../ipc/entity", () => ({
   setCheckoutOverride: () => deferred(CHECKOUT),
   clonesRoot: () => deferred("/Users/mara/src"),
   setClonesRoot: () => deferred(undefined),
+  // The open commands (#501): a second read in the panel's effect and in the
+  // section's, deferred for the same reason -- both must be able to answer
+  // after their component is gone.
+  checkoutCommands: () => deferred(OPEN_COMMANDS),
+  setCheckoutCommand: () => deferred(OPEN_COMMANDS),
+  openCheckout: () => deferred(undefined),
 }));
 
 /**

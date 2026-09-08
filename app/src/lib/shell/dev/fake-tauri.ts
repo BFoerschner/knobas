@@ -170,6 +170,7 @@ export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
   seedClonesRoot(params);
+  seedOpenFailure(params);
   installFakeTauri(demoHandlers(params));
 }
 
@@ -206,6 +207,10 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       return null;
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
+    checkout_commands: () => fakeCommands(),
+    set_checkout_command: (args) =>
+      fakeSetCommand(String(args["action"] ?? ""), args["template"]),
+    open_checkout: (args) => fakeOpen(String(args["action"] ?? "")),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
@@ -2268,6 +2273,122 @@ function fakeCheckout(entityId: string) {
     clones_root: fakeClonesRoot,
     clone_command: url === null ? null : `git clone ${url}`,
   };
+}
+
+/**
+ * The open commands (#501): what each button on a repo detail would run.
+ *
+ * The fixture has no processes, so nothing here starts one — what it stands in
+ * for is the *state* the panel and the settings section branch on: a template
+ * set, a template that is this platform's default, and none at all. macOS's
+ * three defaults are transcribed, because the browser this runs in has no
+ * platform to ask.
+ */
+const FAKE_COMMANDS: { action: string; label: string; default: string | null }[] = [
+  { action: "vscode", label: "Open in VS Code", default: 'open -a "Visual Studio Code" {path}' },
+  { action: "jetbrains", label: "Open in JetBrains", default: 'open -a "IntelliJ IDEA" {path}' },
+  { action: "terminal", label: "Open terminal here", default: "open -a Terminal {path}" },
+];
+
+/** What this session has set, per action. */
+const fakeTemplates: Record<string, string> = {};
+
+/**
+ * The action whose spawn refuses, from `?fake-open-fails=<action>`.
+ *
+ * The `?fake-clones-root` precedent: a QA pass has to be able to put a screen
+ * in a state the default fixture is not in, and *the program would not start*
+ * is the one arm of this feature a fixture cannot reach by itself. With it
+ * set, pressing that button draws the failure the real backend produces for a
+ * template naming a program this machine has not got.
+ */
+let fakeOpenFails: string | null = null;
+
+function seedOpenFailure(params: URLSearchParams): void {
+  const given = params.get("fake-open-fails");
+  if (given === null) return;
+  fakeOpenFails = given.trim() === "" ? null : given.trim();
+}
+
+/** `checkout_commands` — the stored template, else the platform's default. */
+function fakeCommands() {
+  return FAKE_COMMANDS.map((command) => {
+    const stored = fakeTemplates[command.action];
+    return {
+      action: command.action,
+      label: command.label,
+      template: stored ?? command.default,
+      is_default: stored === undefined,
+    };
+  });
+}
+
+/**
+ * `set_checkout_command`, refusals included.
+ *
+ * A **second** implementation of the template rule, deliberately narrow: the
+ * rule is `knobas_core::checkout::expand` and is asserted there over every
+ * shape. What this owes is the one refusal a QA pass has to be able to see —
+ * a placeholder that is not `{path}`, named — plus the empty-clears-it
+ * behaviour the Reset button depends on.
+ */
+function fakeSetCommand(action: string, template: unknown) {
+  const known = FAKE_COMMANDS.find((command) => command.action === action);
+  if (!known) {
+    throw {
+      code: "invalid",
+      message: `'${action}' is not something knobas opens a checkout with`,
+      source_id: null,
+    };
+  }
+  const value = typeof template === "string" ? template.trim() : "";
+  if (value === "") {
+    delete fakeTemplates[action];
+    return fakeCommands();
+  }
+  const other = [...value.matchAll(/\{([^}]*)\}/g)].map((match) => match[1]).find((n) => n !== "path");
+  if (other !== undefined) {
+    throw {
+      code: "invalid",
+      message:
+        `'${value}' cannot be run: {${other}} is not something knobas fills in: ` +
+        "the only value a command knobas runs may take is {path}, the checkout on this disk",
+      source_id: null,
+    };
+  }
+  if (!value.includes("{path}")) {
+    throw {
+      code: "invalid",
+      message: `'${value}' cannot be run: the command has no {path}, so it would open nothing`,
+      source_id: null,
+    };
+  }
+  fakeTemplates[action] = value;
+  return fakeCommands();
+}
+
+/**
+ * `open_checkout`. Starts nothing — there is no process in a browser — and
+ * refuses for the action `?fake-open-fails` names, in the shape the real
+ * command refuses a program that is not installed.
+ */
+function fakeOpen(action: string) {
+  const known = fakeCommands().find((command) => command.action === action);
+  if (!known || known.template === null) {
+    throw {
+      code: "invalid",
+      message: `${known?.label ?? action} is not configured on this platform`,
+      source_id: null,
+    };
+  }
+  if (action === fakeOpenFails) {
+    throw {
+      code: "invalid",
+      message: `'${known.template}' could not be run: No such file or directory (os error 2)`,
+      source_id: null,
+    };
+  }
+  return null;
 }
 
 /** A handful of log lines, so the History panel has something to draw. */

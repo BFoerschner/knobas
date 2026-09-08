@@ -1,12 +1,14 @@
-//! The checkout a repo or a branch detail shows: the clones root, the scan and
-//! the per-repo override (issue #499, v1.5).
+//! The checkout a repo or a branch detail shows, and what its buttons run:
+//! the clones root, the scan and the per-repo override (issue #499), and the
+//! command templates and the spawn (issue #501). v1.5.
 //!
 //! `CONTEXT.md`, **Checkout**: knobas-owned data about the local disk, never a
-//! field of the mirrored repo. The finding is
+//! field of the mirrored repo. The pure halves are
 //! [`knobas_core::checkout`](knobas_core::checkout) -- normalising a remote
-//! URL to a key and walking the clones root -- and what is here is everything
-//! that needs a database: the setting, the override table `0024` added, and
-//! the resolution order the two of them make.
+//! URL to a key, walking the clones root, and turning a command template into
+//! an argument vector -- and what is here is everything that needs a database
+//! or an operating system: the settings, the override table `0024` added, the
+//! resolution order the two of them make, and the process.
 //!
 //! # The order, and why the override is first
 //!
@@ -20,12 +22,16 @@
 //! 3. **Nothing**, which is not a failure: the repo detail then shows *no
 //!    checkout* and the clone command to copy.
 //!
-//! # Nothing here runs git (ADR-0016)
+//! # Nothing here runs git, and nothing it runs comes from the mirror (ADR-0016)
 //!
 //! No clone, no checkout, no fetch. `clone_command` produces a **string a
-//! person copies**; it is never spawned, and the resolution never writes to a
-//! working tree. The spawn half -- *Open in editor*, *open a terminal here* --
-//! is #501, and it takes its one argument from what this module answers.
+//! person copies**; it is never spawned, and nothing here writes to a working
+//! tree. [`open`] does start a process -- that is the whole of #501 -- and the
+//! rule it keeps is the other half of the ADR: the *program* is a template a
+//! person set in settings, and the only value substituted into it is the
+//! checkout [`view`] resolved off this disk. No field of the mirrored repo
+//! reaches it, which the one-`&Path` signature of
+//! `knobas_core::checkout::expand` is what enforces.
 
 use std::path::{Path, PathBuf};
 
@@ -33,18 +39,70 @@ use serde::Serialize;
 use sqlx::{PgPool, Row};
 
 use knobas_core::checkout;
+use knobas_core::checkout::OpenAction;
 use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
-/// A path a person typed, cleared to `None` when it is blank.
+/// A value a person typed, cleared to `None` when it is blank.
 ///
-/// One function because both writes here mean the same thing by an empty
-/// field -- *forget this* -- and neither may store a blank: an empty clones
-/// root would make the scan walk the process's working directory, and a blank
-/// override is a row `0024`'s CHECK refuses anyway.
+/// One function because every write here means the same thing by an empty
+/// field -- *forget this* -- and none may store a blank: an empty clones root
+/// would make the scan walk the process's working directory, a blank override
+/// is a row `0024`'s CHECK refuses anyway, and a blank command template would
+/// hide the platform's default behind a row that runs nothing.
 fn settable(path: Option<&str>) -> Option<&str> {
     path.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// One `knobas.setting` row as a string, or nothing.
+///
+/// A row that is not a JSON string is a row an older or a broken knobas wrote;
+/// it reads as *unset*, which is the miss direction and the one a person can
+/// fix from the settings pane. A blank one reads as unset too, because
+/// [`write_setting`] never stores one.
+async fn read_setting(pool: &PgPool, key: &str) -> Result<Option<String>, IpcError> {
+    let value: Option<serde_json::Value> =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .map_err(IpcError::internal)?;
+    Ok(value
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .filter(|stored| !stored.trim().is_empty()))
+}
+
+/// Store one `knobas.setting` row, or delete it when there is nothing to store.
+///
+/// Delete rather than store a blank: *unset* has a meaning for every setting
+/// here -- no clones root is looked under, an action falls back to the
+/// platform's default -- and a row holding `""` would be a third state that
+/// reads as neither.
+async fn write_setting(pool: &PgPool, key: &str, value: Option<&str>) -> Result<(), IpcError> {
+    match value {
+        Some(value) => {
+            sqlx::query(
+                "insert into knobas.setting (key, value) values ($1, $2)
+                 on conflict (key) do update set value = excluded.value, updated_at = now()",
+            )
+            .bind(key)
+            .bind(serde_json::Value::String(value.to_owned()))
+            .execute(pool)
+            .await
+            .map_err(IpcError::internal)?;
+        }
+        None => {
+            sqlx::query("delete from knobas.setting where key = $1")
+                .bind(key)
+                .execute(pool)
+                .await
+                .map_err(IpcError::internal)?;
+        }
+    }
+    Ok(())
 }
 
 /// The `knobas.setting` key holding the clones root.
@@ -110,20 +168,7 @@ pub struct CheckoutView {
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
 pub async fn clones_root(pool: &PgPool) -> Result<Option<String>, IpcError> {
-    let value: Option<serde_json::Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(CLONES_ROOT_KEY)
-            .fetch_optional(pool)
-            .await
-            .map_err(IpcError::internal)?;
-    // A row that is not a JSON string is a row an older or a broken knobas
-    // wrote; it reads as *no clones root*, which is the miss direction and
-    // the one a person can fix from the settings pane.
-    Ok(value
-        .as_ref()
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .filter(|root| !root.trim().is_empty()))
+    read_setting(pool, CLONES_ROOT_KEY).await
 }
 
 /// Set the clones root, or clear it.
@@ -136,27 +181,7 @@ pub async fn clones_root(pool: &PgPool) -> Result<Option<String>, IpcError> {
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 pub async fn set_clones_root(pool: &PgPool, path: Option<&str>) -> Result<(), IpcError> {
-    match settable(path) {
-        Some(value) => {
-            sqlx::query(
-                "insert into knobas.setting (key, value) values ($1, $2)
-                 on conflict (key) do update set value = excluded.value, updated_at = now()",
-            )
-            .bind(CLONES_ROOT_KEY)
-            .bind(serde_json::Value::String(value.to_owned()))
-            .execute(pool)
-            .await
-            .map_err(IpcError::internal)?;
-        }
-        None => {
-            sqlx::query("delete from knobas.setting where key = $1")
-                .bind(CLONES_ROOT_KEY)
-                .execute(pool)
-                .await
-                .map_err(IpcError::internal)?;
-        }
-    }
-    Ok(())
+    write_setting(pool, CLONES_ROOT_KEY, settable(path)).await
 }
 
 /// Set a repository's checkout path by hand, or clear it back to the scan.
@@ -359,9 +384,249 @@ async fn repo_of(pool: &PgPool, entity_id: &str) -> Result<RepoOf, IpcError> {
     })
 }
 
+// -- the spawn half: what the buttons run (#501, ADR-0016) ------------------
+
+/// The `knobas.setting` key holding one action's command template.
+///
+/// One row per action under a shared prefix, in the store migration `0002`'s
+/// comment 6 keeps for "app-level state that has no other home" -- the clones
+/// root's reason exactly, and for the same reason no table: three strings
+/// somebody types once are not a relation.
+#[must_use]
+pub fn command_key(action: OpenAction) -> String {
+    format!("checkout.command.{}", action.id())
+}
+
+/// One button on the checkout panel, and one field in settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpenCommandView {
+    /// `vscode`, `jetbrains`, `terminal` -- the id `open_checkout` takes.
+    pub action: String,
+    /// What the button says.
+    pub label: String,
+    /// The template this action would run: what somebody set, else this
+    /// platform's default. `None` is *not configured*, which is every action
+    /// off macOS until a template is set.
+    pub template: Option<String>,
+    /// Whether [`template`](Self::template) is the platform default rather
+    /// than a stored row -- so the settings field can say which it is drawing
+    /// and offer to go back to it.
+    pub is_default: bool,
+}
+
+/// Every action, with the command it would run on this machine.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn commands(pool: &PgPool) -> Result<Vec<OpenCommandView>, IpcError> {
+    let mut out = Vec::with_capacity(checkout::OPEN_ACTIONS.len());
+    for action in checkout::OPEN_ACTIONS {
+        let stored = read_setting(pool, &command_key(action)).await?;
+        let is_default = stored.is_none();
+        out.push(OpenCommandView {
+            action: action.id().to_owned(),
+            label: action.label().to_owned(),
+            template: stored.or_else(|| action.default_template().map(str::to_owned)),
+            is_default,
+        });
+    }
+    Ok(out)
+}
+
+/// Set one action's command template, or clear it back to the platform's.
+///
+/// The template is checked here, where somebody is typing it, rather than at
+/// the button: a refusal that arrives three days later at an editor that did
+/// not open is a refusal nobody can act on.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an action that does not exist
+/// or a template that cannot be run;
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_command(
+    pool: &PgPool,
+    action: &str,
+    template: Option<&str>,
+) -> Result<(), IpcError> {
+    let action = open_action(action)?;
+    let template = settable(template);
+    if let Some(template) = template {
+        checkout::check_template(template)
+            .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    }
+    write_setting(pool, &command_key(action), template).await
+}
+
+/// Run one action's command at this entity's checkout.
+///
+/// # The only argument is the checkout path (ADR-0016)
+///
+/// The value substituted into the template comes from [`view`] -- the
+/// override a person typed, or a directory the scan found on this disk -- and
+/// `knobas_core::checkout::expand` takes one `&Path` and nothing else, so no
+/// field of the mirrored repo can reach a spawned process. That is the whole
+/// point of the feature having a settings surface at all: the *program* is
+/// what the person chose, and the *argument* is what knobas found.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown action, an address
+/// that is not a repo or a branch, an action with no template on this platform,
+/// a template that cannot be run, or a program that would not start;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
+/// entity, or it has no checkout on this machine;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn open(pool: &PgPool, entity_id: &str, action: &str) -> Result<(), IpcError> {
+    let action = open_action(action)?;
+    let checkout = view(pool, entity_id).await?;
+    let path = checkout.path.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{entity_id} has no checkout on this machine, so there is nothing to open"
+        ))
+    })?;
+    let template = read_setting(pool, &command_key(action))
+        .await?
+        .or_else(|| action.default_template().map(str::to_owned))
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "{} is not configured on this platform: set a command for it in Settings",
+                action.label()
+            ))
+        })?;
+    let argv = checkout::expand(&template, Path::new(&path))
+        .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    spawn(&argv).map_err(|error| {
+        IpcError::invalid(format!("'{template}' could not be run: {error}"))
+    })
+}
+
+/// The action with this id, or a refusal naming what was asked for.
+fn open_action(action: &str) -> Result<OpenAction, IpcError> {
+    OpenAction::from_id(action).ok_or_else(|| {
+        let known: Vec<&str> = checkout::OPEN_ACTIONS.iter().map(|a| a.id()).collect();
+        IpcError::invalid(format!(
+            "'{action}' is not something knobas opens a checkout with; it has {}",
+            known.join(", ")
+        ))
+    })
+}
+
+/// Start `argv[0]` with the rest as its arguments, and do not wait for it.
+///
+/// **No shell.** The expansion answers an argument vector and this passes it
+/// straight to `exec`, so a checkout path holding a space, a `$` or a `;` is
+/// one argument and stays one, and a template cannot pipe or chain. `sh -c`
+/// would undo both properties in one line.
+///
+/// The three standard streams are closed. An editor that prints on startup
+/// would otherwise write into the app's own stdout, and a child that fills a
+/// pipe nobody reads blocks for ever.
+///
+/// The thread exists only to reap. A `Child` that is dropped without being
+/// waited on leaves a zombie for the life of the process, and an editor is
+/// exactly the kind of program that outlives the click that started it -- so
+/// the wait happens on a thread of its own rather than on tokio's blocking
+/// pool, where a terminal emulator left open all afternoon would sit on a
+/// worker the rest of the IPC surface needs.
+fn spawn(argv: &[String]) -> std::io::Result<()> {
+    // `expand` refuses an empty template, so a command word is always here;
+    // this is the shape that says so without an index that could panic.
+    let (program, arguments) = argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::other("an expanded template has no command in it"))?;
+    let child = std::process::Command::new(program)
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- the spawn half (#501) ---------------------------------------------
+
+    /// The settings keys are one string in two places -- here and in whatever
+    /// a person reads when they wonder where their template went -- and they
+    /// are the only thing standing between an upgrade and three forgotten
+    /// commands. Spelled out rather than derived from `command_key`, which is
+    /// the function under test.
+    #[test]
+    fn every_action_stores_its_template_under_its_own_key() {
+        let keys: Vec<String> = checkout::OPEN_ACTIONS.into_iter().map(command_key).collect();
+        assert_eq!(
+            keys,
+            [
+                "checkout.command.vscode",
+                "checkout.command.jetbrains",
+                "checkout.command.terminal"
+            ]
+        );
+        // And under the clones root's own store, not beside it: a key that
+        // collided with `checkout.clones_root` would make one field eat the
+        // other.
+        assert!(!keys.contains(&CLONES_ROOT_KEY.to_owned()));
+    }
+
+    /// Exactly the keys the mirror declares -- a field added on one side only
+    /// is invisible to a walk over a hardcoded list.
+    #[test]
+    fn the_open_command_serialises_the_keys_the_mirror_declares() {
+        let json = serde_json::to_value(OpenCommandView {
+            action: "vscode".to_owned(),
+            label: "Open in VS Code".to_owned(),
+            template: None,
+            is_default: true,
+        })
+        .unwrap();
+        let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["action", "is_default", "label", "template"]);
+        let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
+        for key in &keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "OpenCommandView.{key} is missing from app/src/lib/ipc/entity.ts"
+            );
+        }
+    }
+
+    /// The panel draws one button per action and presses it by id, so the ids
+    /// are a vocabulary shared with the component. A renamed id is a button
+    /// whose only effect is `open_checkout`'s refusal.
+    #[test]
+    fn the_actions_are_the_ones_the_panel_draws() {
+        let panel = include_str!("../../../app/src/lib/detail/CheckoutPanel.svelte");
+        for action in checkout::OPEN_ACTIONS {
+            assert!(
+                panel.contains(action.label()),
+                "CheckoutPanel.svelte does not draw a button saying {:?}",
+                action.label()
+            );
+        }
+    }
+
+    /// An action nobody has is refused, and the refusal lists the ones there
+    /// are -- the message a person reading a log needs, and the one a renamed
+    /// id produces.
+    #[test]
+    fn an_action_that_does_not_exist_is_refused_by_name() {
+        let error = open_action("emacs").expect_err("emacs is not an action");
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        assert!(error.message.contains("emacs"), "{}", error.message);
+        for action in checkout::OPEN_ACTIONS {
+            assert!(error.message.contains(action.id()), "{}", error.message);
+        }
+    }
 
     /// The setting key is one string in two files, and the migration is the
     /// one a reader looking for the clones root's storage will open.

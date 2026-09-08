@@ -10,18 +10,52 @@
  *
  * The panel reads through the module import rather than a `ports` prop -- the
  * detail's own components do -- so the bridge is mocked here.
+ *
+ * The open buttons (#501) are asserted here too, and one thing about them is
+ * asserted *only* here: the failure message names the template, because the
+ * panel composes that sentence itself out of what `checkout_commands`
+ * answered. A test that read the template out of the rejection would be
+ * asserting its own mock.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { CheckoutView } from "../ipc/entity";
+import { toasts } from "../shell/toasts.svelte";
+import type { CheckoutCommand, CheckoutView } from "../ipc/entity";
 
 const reads: string[] = [];
 const writes: { entityId: string; path: string | null }[] = [];
+const opens: { entityId: string; action: string }[] = [];
 let answer: CheckoutView;
 let afterWrite: CheckoutView | null = null;
 /** Set by the one test about a refused read; cleared in `beforeEach`. */
 let refuseRead = false;
+/** The action whose spawn refuses, for the failure-message test. */
+let refuseOpen: string | null = null;
+/** Set by the one test about a refused commands read. */
+let refuseCommands = false;
+let commands: CheckoutCommand[];
+
+const VSCODE = 'open -a "Visual Studio Code" {path}';
+
+/** The three actions, as `checkout_commands` answers them on a Mac. */
+function configured(): CheckoutCommand[] {
+  return [
+    { action: "vscode", label: "Open in VS Code", template: VSCODE, is_default: true },
+    {
+      action: "jetbrains",
+      label: "Open in JetBrains",
+      template: 'open -a "IntelliJ IDEA" {path}',
+      is_default: true,
+    },
+    {
+      action: "terminal",
+      label: "Open terminal here",
+      template: "open -a Terminal {path}",
+      is_default: true,
+    },
+  ];
+}
 
 vi.mock("../ipc/entity", () => ({
   entityCheckout: (entityId: string) => {
@@ -38,6 +72,23 @@ vi.mock("../ipc/entity", () => ({
   setCheckoutOverride: (entityId: string, path: string | null) => {
     writes.push({ entityId, path });
     return Promise.resolve(afterWrite ?? answer);
+  },
+  checkoutCommands: () =>
+    refuseCommands
+      ? Promise.reject({ code: "internal", message: "no database", source_id: null })
+      : Promise.resolve(commands),
+  openCheckout: (entityId: string, action: string) => {
+    opens.push({ entityId, action });
+    if (action === refuseOpen) {
+      return Promise.reject({
+        code: "invalid",
+        // Deliberately *not* the template: what the panel prints has to come
+        // from what it read, not from what the backend happened to echo.
+        message: "No such file or directory (os error 2)",
+        source_id: null,
+      });
+    }
+    return Promise.resolve(undefined);
   },
 }));
 
@@ -92,6 +143,11 @@ beforeEach(() => {
   answer = view();
   afterWrite = null;
   refuseRead = false;
+  opens.length = 0;
+  refuseOpen = null;
+  refuseCommands = false;
+  commands = configured();
+  toasts.items = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -216,4 +272,99 @@ test("a read that fails leaves the panel quiet rather than shouting over the ite
   // without a checkout, and a toast about one nobody asked to see is noise.
   expect(text()).toContain("Reading…");
   expect(text()).not.toContain("No checkout");
+});
+
+// -- the open buttons (#501) -------------------------------------------------
+
+const FOUND = { path: "/Users/mara/src/payout-service", found_by: "scan" as const };
+
+test("a checkout offers the three buttons, and pressing one runs its action", async () => {
+  answer = view(FOUND);
+  render();
+  await settle();
+
+  for (const label of ["Open in VS Code", "Open in JetBrains", "Open terminal here"]) {
+    expect(button(label).disabled).toBe(false);
+  }
+
+  button("Open in VS Code").click();
+  await settle();
+
+  // The entity's own address and the action id -- and nothing else. What is
+  // opened is the backend's answer to that address, never a value the panel
+  // passed down from the mirrored row it is drawn beside (ADR-0016).
+  expect(opens).toEqual([{ entityId: REPO, action: "vscode" }]);
+});
+
+test("a branch's buttons run against the branch's own address", async () => {
+  const branch = `${REPO}@refs/heads/feature/PAY-231-sepa-retry`;
+  answer = view(FOUND);
+  render(branch);
+  await settle();
+
+  button("Open terminal here").click();
+  await settle();
+
+  expect(opens).toEqual([{ entityId: branch, action: "terminal" }]);
+});
+
+test("no checkout means no buttons: there is nothing to open", async () => {
+  answer = view();
+  render();
+  await settle();
+
+  expect(text()).toContain("No checkout on this machine.");
+  expect(() => button("Open in VS Code")).toThrow();
+});
+
+test("an action with no template is drawn as not configured and cannot be pressed", async () => {
+  answer = view(FOUND);
+  commands = configured().map((command) =>
+    command.action === "jetbrains" ? { ...command, template: null } : command,
+  );
+  render();
+  await settle();
+
+  // The button is still there -- spec #491: off macOS the buttons exist and
+  // read *not configured* until a template is set.
+  const jetbrains = button("Open in JetBrains");
+  expect(jetbrains.disabled).toBe(true);
+  expect(text()).toContain("not configured");
+  expect(jetbrains.title).toContain("Settings");
+  // And the other two are untouched by it.
+  expect(button("Open terminal here").disabled).toBe(false);
+
+  jetbrains.click();
+  await settle();
+  expect(opens).toEqual([]);
+});
+
+test("a spawn that fails says so and names the template that would not run", async () => {
+  answer = view(FOUND);
+  refuseOpen = "vscode";
+  render();
+  await settle();
+
+  button("Open in VS Code").click();
+  await settle();
+
+  const toast = toasts.items.at(-1);
+  expect(toast?.tone).toBe("err");
+  // The template, verbatim, because that is the string somebody has to go and
+  // change -- and the reason, which came from the backend.
+  expect(toast?.text).toContain(VSCODE);
+  expect(toast?.text).toContain("No such file or directory");
+});
+
+test("a refused commands read leaves the panel drawing its checkout and no buttons", async () => {
+  answer = view(FOUND);
+  refuseCommands = true;
+  render();
+  await settle();
+
+  // The same choice the checkout read makes: the detail is worth drawing, and
+  // a toast about a read nobody asked for would be noise over the item.
+  expect(text()).toContain("/Users/mara/src/payout-service");
+  expect(() => button("Open in VS Code")).toThrow();
+  expect(toasts.items).toEqual([]);
 });

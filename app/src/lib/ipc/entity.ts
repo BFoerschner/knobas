@@ -1566,3 +1566,57 @@ export function setCheckoutOverride(
 ): Promise<CheckoutView> {
   return invoke<CheckoutView>("set_checkout_override", { entityId, path });
 }
+
+/**
+ * One *open* action and the command it would run —
+ * `knobas_app::checkout::OpenCommandView` (#501).
+ *
+ * `template` is what somebody set, else this platform's default; `null` is
+ * *not configured*, which is every action off macOS until a template is set.
+ * `is_default` says which of the two the string is, so the settings field can
+ * offer to go back to the default rather than making somebody retype it.
+ */
+export interface CheckoutCommand {
+  /** `"vscode"`, `"jetbrains"`, `"terminal"` — what {@link openCheckout} takes. */
+  action: string;
+  /** What the button says. */
+  label: string;
+  template: string | null;
+  is_default: boolean;
+}
+
+/** Every open action, with the command it would run — `checkout_commands` (#501). */
+export function checkoutCommands(): Promise<CheckoutCommand[]> {
+  return invoke<CheckoutCommand[]>("checkout_commands");
+}
+
+/**
+ * Set one action's command template, or clear it back to the platform's —
+ * `set_checkout_command` (#501).
+ *
+ * Answers the fresh list, so a field draws what is now stored rather than what
+ * was typed at it. Rejects with `invalid` for a template knobas could not run,
+ * including one that reaches for any placeholder but `{path}`.
+ */
+export function setCheckoutCommand(
+  action: string,
+  template: string | null,
+): Promise<CheckoutCommand[]> {
+  return invoke<CheckoutCommand[]>("set_checkout_command", { action, template });
+}
+
+/**
+ * Run an action's command at this entity's checkout — `open_checkout` (#501).
+ *
+ * The one call that starts a program on this machine. The program is the
+ * template a person set; the only value substituted into it is the checkout
+ * path knobas found on this disk, never a field of the mirrored repo
+ * (ADR-0016).
+ *
+ * Resolves as soon as the program has started. It says nothing about what the
+ * program then did — an editor drawing a window is not something an IPC call
+ * can wait for.
+ */
+export function openCheckout(entityId: string, action: string): Promise<void> {
+  return invoke<void>("open_checkout", { entityId, action });
+}

@@ -112,6 +112,13 @@ vi.mock("../ipc/entity", () => ({
   // branch, so it refuses rather than answering a view nothing draws.
   entityCheckout: () => Promise.reject(new Error("no checkout read in this test")),
   setCheckoutOverride: () => Promise.reject(new Error("no override change in this test")),
+  // The open commands (#501): the settings view reads them at #/settings, so
+  // this answers the empty list rather than refusing — an address that draws a
+  // failure line is still an address that drew something, and this file would
+  // not tell the two apart.
+  checkoutCommands: () => Promise.resolve([]),
+  setCheckoutCommand: () => Promise.reject(new Error("no command change in this test")),
+  openCheckout: () => Promise.reject(new Error("nothing is spawned in this test")),
 }));
 
 vi.mock("../ipc/app", () => ({
