@@ -2668,8 +2668,15 @@ function fakeAck(args: Record<string, unknown>) {
  * **The four mirror lists honestly read 0.** This fixture's corpus is frozen
  * at `SYNCED_AT` -- 22 August 2026 -- so nothing in it changed today and
  * nothing synced in the last hour; and no source here carries a username, so
- * the two `@me` lists answer the way the real ones do on an install with no
- * account configured. Their descriptions are the Rust blurbs, copied.
+ * the two `@me` lists are empty for the reason the real ones would be.
+ *
+ * Their **descriptions** are the Rust blurbs, copied, and for the two `@me`
+ * lists that is a divergence rather than a copy: with no identity configured
+ * `lists::describe` replaces the blurb with `describe_missing_identity()` --
+ * three sentences about *Test connection* filling a source's username in.
+ * Restating that here would be the longest copied string in this file and the
+ * likeliest to rot, and it is not what #504 is about. What a walk sees on
+ * those two rows is therefore the blurb where the app would show the advice.
  *
  * **The three estate lists are derived from the estate this file draws**, each
  * from the nearest thing the fixture has to the rule:

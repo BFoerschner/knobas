@@ -239,18 +239,48 @@
 //! ([`crate::corpus::ASSET`] says the same about search). A predicate over the
 //! mirror cannot answer any of the three, so [`SUMMARY_SQL`] grew a **second
 //! CTE** -- `estate`, one scan of `knobas.asset` -- beside `scan`, and the
-//! final `select` reads both. Two scans of two tables in one statement, one
-//! round trip, and the `builtins!` macro still admits nothing else: a `scan:`
-//! entry is a filter over the mirror scan and an `asset:` entry is a filter
-//! over the estate scan, and there is no third arm.
+//! final `select` reads both. Two **scans**, one round trip, and the
+//! `builtins!` macro still admits nothing else: a `scan:` entry is a filter
+//! over the mirror scan and an `asset:` entry is a filter over the estate
+//! scan, and there is no third arm.
 //!
-//! The estate is the smallest table knobas has -- an installation's machines,
-//! not its tickets (migration `0019` says so in as many words) -- so a second
-//! scan of it is not the cost the removed `cross-key` list was. The one thing
-//! in these predicates that could have been is the context-membership walk,
-//! and it is **uncorrelated**: `a.id in `[`held_by_any_context!`] binds nothing
-//! from the outer row, so PostgreSQL evaluates the recursive walk once per
-//! statement and probes it per asset, rather than once per asset.
+//! *Two scans, not two tables.* The aggregates run over two relations; the
+//! **predicates** reach further -- `knobas.confirmed_link`, `knobas.entity`,
+//! `knobas.monitor_alert`, `sync.live_item` again, and `knobas.context`
+//! through the membership walk. What the rule fixes is what a `count(*)` is
+//! counting, which is one row per thing the list is a list of. See the section
+//! below for what those probes cost and what was measured.
+//!
+//! ## These three are correlated probes, which is the shape that was removed
+//!
+//! Said plainly, because the section above it is about a list that was taken
+//! out for being one. Two of the three predicates are a **correlated
+//! subquery per asset row** -- an open alert on this asset's monitors, a
+//! certificate on this asset's monitors -- which is `cross-key`'s shape and
+//! not the mirror lists'. What makes them affordable is not the shape; it is
+//! the **cardinality of the thing being scanned**. `cross-key` probed a GIN
+//! index once per ticket in a 14-day window of a mirror that grows to 100,000
+//! rows; these probe an index once per **asset**, and the estate is the
+//! smallest table knobas has -- an installation's machines, not its tickets,
+//! which is migration `0019`'s own sentence.
+//!
+//! **Measured, not assumed** (#504, PG 18.6, `explain (analyze, verbose)` over
+//! [`SUMMARY_SQL`] on a two-asset fixture): execution 0.58 ms, planning
+//! 2.72 ms -- planning is the larger half at this size, and the statement is
+//! prepared once per connection. The outer `knobas.asset` scan is a `Seq Scan`
+//! and every probe under it is an `Index Scan` (`item_kind_updated_idx`,
+//! `link_pair_active_idx`, `entity_pkey`). What the fixture is too small to
+//! show is how the per-asset probes scale, and the honest statement of the
+//! bound is the shape: **one probe per asset per predicate**, on a table whose
+//! size is an estate.
+//!
+//! The context-membership walk is the one part that is **not** per-asset.
+//! `a.id in `[`held_by_any_context!`] binds nothing from the outer row, so the
+//! planner turns it into a `hashed SubPlan` -- the recursive walk runs once and
+//! is then a hash probe per asset. It appears **twice** in the plan and not
+//! once, because the planner inlines the estate CTE's inner select and so
+//! evaluates the predicate separately for the count and for the badge stamp's
+//! `filter`. Two walks per launcher board, not one per asset.
 //!
 //! [`held_by_any_context!`]: knobas_core::held_by_any_context
 //!
@@ -459,6 +489,43 @@ macro_rules! not_monitored_pred {
     };
 }
 
+/// The join from a monitor to **the asset it watches**, written once.
+///
+/// Two of the three estate predicates make it -- an open alert's monitor, an
+/// expiring certificate's monitor -- and it is four clauses that have to agree
+/// exactly: **undirected** (`0011` made the pair unordered, so which end a link
+/// was written from is not a fact any read may depend on), the relation, and
+/// the *other* end of the link being the asset the outer scan is standing on.
+/// Two copies of it would be two answers to "what does this monitor watch"
+/// the day one was amended, which is the failure the whole registry is written
+/// against.
+///
+/// `$monitor` is how the caller's own relation spells the monitor's entity id.
+/// It binds `l` as the link alias and reads `a.id` from the outer scan, so a
+/// caller supplies the monitor side and nothing else.
+///
+/// The clauses sit in the `join ... on` rather than in the caller's `where`
+/// because they are what makes the join the join; an inner join reads the same
+/// either way, and this leaves each caller a `where` that is only its own
+/// question.
+macro_rules! monitors_asset {
+    ($monitor:literal) => {
+        concat!(
+            "join knobas.confirmed_link l
+                          on (l.from_id = ",
+            $monitor,
+            " or l.to_id = ",
+            $monitor,
+            ")
+                         and l.relation = 'monitored-by'
+                         and case when l.from_id = ",
+            $monitor,
+            "
+                                  then l.to_id else l.from_id end = a.id"
+        )
+    };
+}
+
 /// When the newest **open** alert on the monitors watching this asset opened,
 /// or `null` if none is open.
 ///
@@ -468,21 +535,20 @@ macro_rules! not_monitored_pred {
 /// this asset have an open alert", and the day one grew a clause the count and
 /// the badge would answer different questions about the same list.
 ///
-/// The join is the inbox's: undirected over `knobas.confirmed_link`, relation
-/// `monitored-by`, and the asset is whichever end of the link is not the
-/// monitor. Unlike the inbox it does **not** pick one asset per alert -- the
-/// inbox draws one row per alert and has to choose, this draws one row per
-/// *asset* and an asset either has an open alert or has not.
+/// The join is [`monitors_asset!`], which is the inbox's. Unlike the inbox this
+/// does **not** pick one asset per alert -- the inbox draws one row per alert
+/// and has to choose between the assets a monitor watches, while this draws one
+/// row per *asset* and an asset either has an open alert or has not.
 macro_rules! open_alert_opened_at {
     () => {
-        "(select max(al.opened_at)
+        concat!(
+            "(select max(al.opened_at)
                         from knobas.monitor_alert al
-                        join knobas.confirmed_link l
-                          on (l.from_id = al.entity_id or l.to_id = al.entity_id)
-                       where al.closed_at is null
-                         and l.relation = 'monitored-by'
-                         and case when l.from_id = al.entity_id
-                                  then l.to_id else l.from_id end = a.id)"
+                        ",
+            monitors_asset!("al.entity_id"),
+            "
+                       where al.closed_at is null)"
+        )
     };
 }
 
@@ -537,6 +603,16 @@ macro_rules! alerts_in_context_pred {
 /// 3. **The failure direction is absence.** A drifted key empties the list; it
 ///    never puts an asset on it whose certificate is fine.
 ///
+/// # The ticket says "the samples", and the samples do not carry it
+///
+/// Issue #504 asks for a list that *"reads the certificate days the samples
+/// carry"*. They do not: migration `0021`'s `knobas.monitor_sample` is
+/// `state` and `response_time_ms` and nothing else, and the certificate
+/// countdown exists only in the mirrored monitor's payload. So the read is the
+/// payload's, which is the only place the number is, and the ticket's phrase is
+/// loose rather than a second design nobody built. Recorded here rather than
+/// left for the next reader to rediscover by grepping `monitor_sample`.
+///
 /// `cert_days_remaining` is the key `knobas_source_kuma::map` writes and
 /// `knobas_app::assets`' `reading_of` already reads for the Monitors tab's
 /// *Cert N d* chip. This is the **third** place that spelling appears and the
@@ -545,24 +621,33 @@ macro_rules! alerts_in_context_pred {
 /// monitors_tab_draws` is the pin on this side of it.
 ///
 /// **`sync.live_item`, never `sync.item`.** `CONTEXT.md`'s **Live item** names
-/// the three readers that reach past the live view and says a fourth needs a
-/// reason of its own; this is not one of them and needs no line there. A
-/// monitor whose source the reader switched off, or that Kuma deleted, drops
-/// out of this list -- the same answer `monitor_roster` gives, and for the same
-/// reason: a certificate knobas is no longer told about is not a certificate it
-/// can promise anything about.
+/// the four readers that reach past the live view -- the Monitors roster
+/// (#448), the detail read (#204), the paste resolver (#496) and the checkout
+/// read (#499) -- and says *"a fifth needs a reason of its own and a line
+/// here"*. This is not one of them and owes no line there.
+///
+/// The consequence, stated because it is where this list and the roster part
+/// company. A monitor whose **source the reader switched off** drops out of
+/// both: the roster keeps the enabled clause and so does the view. A monitor
+/// Kuma **paused or deleted** is tombstoned by the adapter, and it drops out of
+/// *this* list while staying on the roster -- reader 1 is exempt from the
+/// tombstone half precisely so the roster can draw the *Paused* chip and the
+/// monitor's history. There is no equivalent thing to draw here: a countdown
+/// is a number knobas is being told, and nobody is polling a paused check, so
+/// the honest answer is that the asset leaves the list rather than sitting on
+/// it under a reading that has stopped moving.
 macro_rules! expiring_cert_seen_at {
     () => {
-        "(select max(m.synced_at)
+        concat!(
+            "(select max(m.synced_at)
                         from sync.live_item m
-                        join knobas.confirmed_link l
-                          on (l.from_id = m.entity_id or l.to_id = m.entity_id)
+                        ",
+            monitors_asset!("m.entity_id"),
+            "
                        where m.kind = 'monitor'
-                         and l.relation = 'monitored-by'
-                         and case when l.from_id = m.entity_id
-                                  then l.to_id else l.from_id end = a.id
                          and jsonb_typeof(m.payload -> 'cert_days_remaining') = 'number'
                          and (m.payload ->> 'cert_days_remaining')::numeric < 30)"
+        )
     };
 }
 
@@ -625,9 +710,10 @@ macro_rules! builtins {
         /// corpora and therefore two CTEs -- `scan` over `sync.live_item` and
         /// `estate` over `knobas.asset` -- and the macro admits nothing else:
         /// a list that is not a filter over one of those two scans cannot be
-        /// declared at all. See the module docs for what the one list that
-        /// could not be written this way cost, and for why the estate scan is
-        /// not that cost again.
+        /// declared at all. What the rule fixes is what a `count(*)` counts,
+        /// not how many tables the statement touches: the estate predicates
+        /// probe four more relations, and the module docs say what that costs
+        /// and what was measured.
         ///
         /// The estate CTE computes each list's predicate and its badge stamp
         /// **as columns of an inner select** and aggregates over those, rather
@@ -899,6 +985,14 @@ mod tests {
     /// the mirror. The membership is asserted **by id**, so a list moved from
     /// one group to the other fails here rather than silently changing what it
     /// counts.
+    ///
+    /// **The alias is what tells the two apart, and that is load-bearing.**
+    /// *Certificates expiring* reads `sync.live_item` too -- inside its
+    /// predicate, as `m` -- so the mirror probe has to be `from sync.live_item
+    /// i`, the outer scan's own alias, or that list would answer to both
+    /// halves. `i` and `a` are the aliases [`rows_over!`] and
+    /// [`rows_over_estate!`] give the relation a list is a list *of*; a
+    /// predicate that wanted either letter would have to shadow it.
     #[test]
     fn exactly_the_estate_lists_scan_the_estate() {
         let over_the_estate: Vec<&str> = BUILTINS
