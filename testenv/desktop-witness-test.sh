@@ -264,6 +264,16 @@ pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Dir
 # from -- not from either component.
 pin_label ../crates/knobas-core/src/checkout.rs '"Open in VS Code"' \
     "the VS Code action is still labelled the way the driver asks for it"
+# The Save that stored a template puts a *Reset* beside it, and the driver
+# waits for that appearing as its proof the write landed -- so the reset
+# button's accessible name is a name it acts on too.
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Reset {command.label}"' \
+    "each open-command Reset is named after its own command"
+# The panel's own heading, which is how the driver tells a repo detail from
+# every other kind: a checkout panel is what a repo and a branch have and
+# nothing else does.
+pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
+    "the checkout panel still carries the heading the driver looks for"
 # And the remote the driver writes into its fake clone: the scan matches it
 # against the demo repo's own URL, which this constant is the stem of.
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \

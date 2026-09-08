@@ -111,8 +111,6 @@
     });
   });
 
-  /** Set or clear the override, and redraw from what the backend now says. */
-
   /** Start one action's program at this checkout. */
   async function run(command: CheckoutCommand) {
     // A disabled button cannot be pressed, so this is the guard against a
@@ -132,6 +130,7 @@
     }
   }
 
+  /** Set or clear the override, and redraw from what the backend now says. */
   async function store(path: string | null) {
     saving = true;
     try {

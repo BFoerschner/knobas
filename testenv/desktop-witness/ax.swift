@@ -262,13 +262,6 @@ func dump(pid: pid_t, depth: Int) -> Int32 {
     return 0
 }
 
-/// Post one key to the frontmost application.
-///
-/// `.cghidEventTap` rather than posting to the pid: an event posted to a
-/// process is delivered whether or not that process is front, so a driver
-/// could "press ⌘K" at an app that never had the keyboard and read a stale
-/// tree as success. Through the HID tap the keystroke goes where a person's
-/// would, which is the thing being witnessed.
 /// Type `string` into whatever has the keyboard, character by character.
 ///
 /// `keyboardSetUnicodeString` rather than a keycode table: a keycode is a
@@ -303,6 +296,13 @@ func type(_ string: String) -> Int32 {
     return 0
 }
 
+/// Post one key to the frontmost application.
+///
+/// `.cghidEventTap` rather than posting to the pid: an event posted to a
+/// process is delivered whether or not that process is front, so a driver
+/// could "press ⌘K" at an app that never had the keyboard and read a stale
+/// tree as success. Through the HID tap the keystroke goes where a person's
+/// would, which is the thing being witnessed.
 func key(code: CGKeyCode, command: Bool) -> Int32 {
     guard let source = CGEventSource(stateID: .hidSystemState) else {
         FileHandle.standardError.write(Data("ax: no event source\n".utf8))

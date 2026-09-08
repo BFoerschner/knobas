@@ -116,10 +116,14 @@
   /**
    * Take what the backend now says, drafts included.
    *
-   * The drafts are reset from the answer rather than left alone, which is the
-   * clones-root field's rule and for its reason: a field that kept what was
-   * typed would tell the reader they had set a command on the one run where
-   * the write was refused.
+   * Called only where there *is* a fresh answer -- the read, and a write that
+   * was accepted -- and the drafts are reset from it rather than left alone,
+   * which is the clones-root field's rule and for its reason: a field still
+   * holding what was typed after a write that normalised it would tell the
+   * reader they had stored a string knobas does not have. A **refused** write
+   * never reaches here, which is the other half of the same rule: the field
+   * keeps the string the reader has to correct
+   * (`a refused template says why, and the field keeps what was typed`).
    */
   function takeCommands(answer: CheckoutCommand[]) {
     commands = answer;

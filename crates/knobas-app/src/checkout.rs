@@ -681,11 +681,26 @@ mod tests {
         let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, ["action", "is_default", "label", "template"]);
+        // The **interface's own body**, not the whole file: `entity.ts`
+        // declares `label:` and `template:` on other shapes too, so a
+        // whole-file substring would answer yes for a key `CheckoutCommand`
+        // had lost -- a check measuring the file where the claim is about one
+        // declaration.
         let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
+        let body = mirror
+            .split_once("export interface CheckoutCommand {")
+            .expect("entity.ts declares CheckoutCommand")
+            .1
+            // `"\n}"` and not `'}'`: a doc comment inside the interface
+            // carries `{@link openCheckout}`, and splitting on the first
+            // brace would cut the body off above the first field.
+            .split_once("\n}")
+            .expect("the CheckoutCommand interface is closed")
+            .0;
         for key in &keys {
             assert!(
-                mirror.contains(&format!("{key}:")),
-                "OpenCommandView.{key} is missing from app/src/lib/ipc/entity.ts"
+                body.contains(&format!("{key}:")),
+                "OpenCommandView.{key} is missing from app/src/lib/ipc/entity.ts's CheckoutCommand"
             );
         }
     }
