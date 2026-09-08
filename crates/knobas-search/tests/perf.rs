@@ -96,10 +96,9 @@
 //! ## The cap is a measured number, not a generous one
 //!
 //! `saved::MAX_SAVED_LISTS` was added beyond #506's ticket and ratified by the
-//! deputy's ruling of 2026-09-08 as **a bound rather than a feature**: a board
-//! whose cost grows with a number nobody bounds is the thing the budget exists
-//! to refuse. So the cap is not asserted about here -- it is *read off* a
-//! curve. [`rail_steps`] walks the rail from empty to the cap at 100 k items,
+//! deputy's ruling of 2026-09-08 as **a bound rather than a feature** -- the
+//! constant's own doc comment and `CONTEXT.md`'s **Smart list** carry the
+//! reason. So the cap is not asserted about here; it is *read off* a curve. [`rail_steps`] walks the rail from empty to the cap at 100 k items,
 //! prints `smart_lists` at each step and the marginal cost of one saved list,
 //! and the gate then holds the cap's own reading to [`BUDGET_MS`]. A cap this
 //! fixture cannot carry inside the budget is a cap that comes down; the budget
@@ -183,20 +182,32 @@ struct Timing {
 /// One row of the printed curve: what to call it, and which reading it draws.
 type BoardRow = (String, fn(&Point) -> Timing);
 
+/// What the board cost over a rail of a stated size.
+#[derive(Debug, Clone, Copy)]
+struct RailPoint {
+    /// How many saved lists were on the rail.
+    lists: i64,
+    /// How many rows those lists counted between them, so that a reading over
+    /// a rail that matched nothing cannot be quoted as a reading over a rail
+    /// that worked.
+    counted: i64,
+    /// `smart_lists`: the rail read on its own.
+    read: Timing,
+    /// `launcher_board`, which calls `smart_lists` and then reads the recent
+    /// items. **The number that binds**, because it is the whole of what ⌘K
+    /// pays on an empty query.
+    board: Timing,
+}
+
 /// One corpus size's whole reading.
 struct Point {
     size: i64,
     cases: Vec<(&'static str, Timing)>,
-    /// `launcher_board`, which calls `smart_lists` and so carries the rail.
-    board: Timing,
-    /// `smart_lists` with `knobas.smart_list` empty: the built-in half alone.
-    builtin: Timing,
-    /// `smart_lists` with [`saved::MAX_SAVED_LISTS`] lists on the rail.
-    saved: Timing,
-    /// How many rows the rail's saved lists counted between them, so that a
-    /// reading over a rail that matched nothing cannot be quoted as a reading
-    /// over a rail that worked.
-    counted: i64,
+    /// The board with nothing saved: the built-in half of the rail alone, and
+    /// the only reading this file took before #533.
+    empty: RailPoint,
+    /// The board with [`saved::MAX_SAVED_LISTS`] lists on the rail.
+    at_cap: RailPoint,
 }
 
 /// p50, p90 and max of `runs` timings of one query, in milliseconds.
@@ -310,8 +321,8 @@ async fn clear_the_rail(pool: &sqlx::PgPool) {
 /// the ones `list:` names, so the fixture is a rail a reader could have built.
 ///
 /// Cycling [`CASES`] rather than repeating one query is what puts every branch
-/// of the `union all` under the clock: a rail of sixty-four copies of
-/// `zzzznothing` is sixty-four aggregates over an empty match set, and would
+/// of the `union all` under the clock: a rail of nothing but copies of
+/// `zzzznothing` is a stack of aggregates over an empty match set, and would
 /// measure the statement's shape rather than its work.
 async fn fill_the_rail(pool: &sqlx::PgPool, count: i64) {
     let vocab = Vocabulary::load(pool, KindCatalog::default())
@@ -376,6 +387,25 @@ async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
     counted
 }
 
+/// Put `lists` saved lists on the rail and time both of the board's reads.
+///
+/// The **one** place the rail is set up and read. The size loop and the rail
+/// curve both go through it, so the two cannot drift into measuring two
+/// different things and then be printed in one table as though they had not.
+async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPoint {
+    clear_the_rail(pool).await;
+    fill_the_rail(pool, lists).await;
+    let counted = assert_the_rail_is_counted(searcher, lists).await;
+    let read = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
+    let board = timings_of(BOARD_RUNS, || searcher.launcher_board()).await;
+    RailPoint {
+        lists,
+        counted,
+        read,
+        board,
+    }
+}
+
 /// The gate: every launcher query under 100 ms at 100 k items, and the board
 /// with the saved-list cap on its rail.
 ///
@@ -399,7 +429,7 @@ async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
 ///
 /// ```text
 /// case                25000    50000   100000
-/// browse, no text        13       28       59     <- the worst of the ten
+/// browse, no text        13       28       59   <- worst of the ten at 100 k
 /// lists, empty rail      20       24       40
 /// lists, 16 saved        36       48       85
 /// launcher_board         38       53       86
@@ -415,10 +445,13 @@ async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
 /// the sixty that are left, at about 2.8 ms each -- room for roughly twenty,
 /// which is where `saved::MAX_SAVED_LISTS = 16` comes from.
 ///
-/// The same run before the constant came down, with the cap still at its
-/// original 64: `smart_lists` **210 ms** and `launcher_board` **212 ms**, with
-/// 32 lists at 131 and 132. Twice the budget, and nothing had measured it --
-/// which is the whole of what #533 was for.
+/// **A second run**, minutes earlier on the same machine and with the cap
+/// still at its original 64 -- which is the only way to reach a step past the
+/// cap, since `saved::create` refuses the row -- read `launcher_board` at
+/// **212 ms** and `smart_lists` at 210 with 64 lists, and 132 and 131 with 32.
+/// Twice the budget, and nothing had measured it: that is the whole of what
+/// #533 was for. Its steps 0 to 16 read 41 53 55 60 81 84 against the 42 53 57
+/// 60 81 87 above, so the two agree to within 3 ms.
 ///
 /// What the rail costs depends on the **shapes** on it and not only on how
 /// many: eight lists read 81 ms against sixteen's 87, because the eighth of
@@ -468,37 +501,31 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         }
         // The board's reads, in both of the rail's states. Empty first, which
         // is the built-in half on its own and the only reading this file took
-        // before #533; then the cap, which is what ⌘K pays.
-        clear_the_rail(&pool).await;
-        let builtin = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
-        fill_the_rail(&pool, saved::MAX_SAVED_LISTS).await;
-        let counted = assert_the_rail_is_counted(&searcher, saved::MAX_SAVED_LISTS).await;
-        let saved_reading = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
-        // Last, and with the rail full: `launcher_board` calls `smart_lists`,
-        // so this number contains the one above it.
-        let board = timings_of(BOARD_RUNS, || searcher.launcher_board()).await;
+        // before #533; then the cap, which is what ⌘K pays. Both readings of
+        // both reads, because `launcher_board` contains `smart_lists` and the
+        // difference between them is the other half of where the budget goes.
+        let empty = rail_at(&pool, &searcher, 0).await;
+        let at_cap = rail_at(&pool, &searcher, saved::MAX_SAVED_LISTS).await;
         for (label, timing) in [
-            ("smart_lists, empty rail", builtin),
-            ("smart_lists, rail at cap", saved_reading),
-            ("launcher_board", board),
+            ("smart_lists, empty rail", empty.read),
+            ("smart_lists, rail at cap", at_cap.read),
+            ("launcher_board, empty rail", empty.board),
+            ("launcher_board, rail at cap", at_cap.board),
         ] {
             println!(
-                "{size:>7} {label:<26} p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+                "{size:>7} {label:<28} p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
                 timing.p50, timing.p90, timing.max
             );
         }
         println!(
-            "{size:>7} {:<26} {} lists, {counted} rows counted",
-            "  the rail, as filled",
-            saved::MAX_SAVED_LISTS
+            "{size:>7} {:<28} {} lists, {} rows counted",
+            "  the rail, as filled", at_cap.lists, at_cap.counted
         );
         curve.push(Point {
             size,
             cases,
-            board,
-            builtin,
-            saved: saved_reading,
-            counted,
+            empty,
+            at_cap,
         });
         println!();
     }
@@ -516,13 +543,17 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         }
         println!();
     }
-    let board_rows: [BoardRow; 3] = [
-        ("lists, empty rail".to_owned(), |point| point.builtin),
+    let board_rows: [BoardRow; 4] = [
+        ("lists, empty rail".to_owned(), |point| point.empty.read),
         (
             format!("lists, {} saved", saved::MAX_SAVED_LISTS),
-            |point| point.saved,
+            |point| point.at_cap.read,
         ),
-        ("launcher_board".to_owned(), |point| point.board),
+        ("board, empty rail".to_owned(), |point| point.empty.board),
+        (
+            format!("board, {} saved", saved::MAX_SAVED_LISTS),
+            |point| point.at_cap.board,
+        ),
     ];
     for (label, pick) in board_rows {
         print!("{label:<16}");
@@ -552,26 +583,23 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         "{:>4}  {:>10}  {:>12}  {:>15}",
         "saved", "rows", "smart_lists", "launcher_board"
     );
-    let mut rail: Vec<(i64, Timing, Timing)> = Vec::new();
+    let mut rail: Vec<RailPoint> = Vec::new();
     for step in rail_steps(saved::MAX_SAVED_LISTS) {
-        clear_the_rail(&pool).await;
-        fill_the_rail(&pool, step).await;
-        let counted = assert_the_rail_is_counted(&searcher, step).await;
-        let lists = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
-        let board = timings_of(BOARD_RUNS, || searcher.launcher_board()).await;
+        let point = rail_at(&pool, &searcher, step).await;
         println!(
-            "{step:>4}  {counted:>10}  {:>12}  {:>15}",
-            lists.p90, board.p90
+            "{:>4}  {:>10}  {:>12}  {:>15}",
+            point.lists, point.counted, point.read.p90, point.board.p90
         );
-        rail.push((step, lists, board));
+        rail.push(point);
     }
-    let empty = rail.first().expect("a rail curve").2.p90;
-    let (steps, at_cap_lists, at_cap_board) = *rail.last().expect("a rail curve");
-    let over_empty = at_cap_board.p90.saturating_sub(empty);
-    let each = over_empty as f64 / f64::from(u32::try_from(steps.max(1)).unwrap_or(u32::MAX));
+    let bare = rail.first().expect("a rail curve").board.p90;
+    let at_cap = *rail.last().expect("a rail curve");
+    let over_bare = at_cap.board.p90.saturating_sub(bare);
+    let each = over_bare as f64 / f64::from(u32::try_from(at_cap.lists.max(1)).unwrap_or(u32::MAX));
     println!(
-        "  => {steps} saved lists cost the board {over_empty} ms over the empty rail's \
-         {empty} ms, about {each:.2} ms each"
+        "  => {} saved lists cost the board {over_bare} ms over the empty rail's \
+         {bare} ms, about {each:.2} ms each",
+        at_cap.lists
     );
     if each < 0.5 {
         println!(
@@ -582,7 +610,7 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         println!(
             "  => at that marginal cost the {BUDGET_MS} ms budget has room for about {:.0} \
              saved lists beside the built-ins and the recent read",
-            (BUDGET_MS as f64 - empty as f64).max(0.0) / each
+            (BUDGET_MS as f64 - bare as f64).max(0.0) / each
         );
     }
     println!();
@@ -630,25 +658,27 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
     // rail-at-cap reading is the one #533 adds and is the one story 57 asks
     // for; and `launcher_board` contains the second, so it tightened with it.
     assert!(
-        last.builtin.p90 < BUDGET_MS,
+        last.empty.read.p90 < BUDGET_MS,
         "smart_lists took {} ms at p90 over an empty rail and {} items",
-        last.builtin.p90,
+        last.empty.read.p90,
         last.size
     );
     assert!(
-        last.saved.p90 < BUDGET_MS,
+        last.at_cap.read.p90 < BUDGET_MS,
         "smart_lists took {} ms at p90 with {} saved lists on the rail ({} rows \
          counted) over {} items. The budget does not move: the fix is a lower \
          `saved::MAX_SAVED_LISTS`, and the rail curve above says to what.",
-        last.saved.p90,
-        saved::MAX_SAVED_LISTS,
-        last.counted,
+        last.at_cap.read.p90,
+        last.at_cap.lists,
+        last.at_cap.counted,
         last.size
     );
     assert!(
-        last.board.p90 < BUDGET_MS,
-        "launcher_board took {} ms at p90 over {} items",
-        last.board.p90,
+        last.at_cap.board.p90 < BUDGET_MS,
+        "launcher_board took {} ms at p90 with {} saved lists on the rail over \
+         {} items",
+        last.at_cap.board.p90,
+        last.at_cap.lists,
         last.size
     );
     // And the curve's own last point, taken after the size loop against a rail
@@ -656,21 +686,23 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
     // the cap was read off, so a cap that survives only the loop's fixture
     // cannot be quoted as measured.
     assert_eq!(
-        steps,
+        at_cap.lists,
         saved::MAX_SAVED_LISTS,
         "the rail curve must end at the cap"
     );
     assert!(
-        at_cap_lists.p90 < BUDGET_MS,
-        "smart_lists took {} ms at p90 at the cap of {steps} saved lists over \
+        at_cap.read.p90 < BUDGET_MS,
+        "smart_lists took {} ms at p90 at the cap of {} saved lists over \
          {at_size} items (budget {BUDGET_MS} ms)",
-        at_cap_lists.p90
+        at_cap.read.p90,
+        at_cap.lists
     );
     assert!(
-        at_cap_board.p90 < BUDGET_MS,
-        "launcher_board took {} ms at p90 at the cap of {steps} saved lists over \
+        at_cap.board.p90 < BUDGET_MS,
+        "launcher_board took {} ms at p90 at the cap of {} saved lists over \
          {at_size} items (budget {BUDGET_MS} ms)",
-        at_cap_board.p90
+        at_cap.board.p90,
+        at_cap.lists
     );
     println!("worst p90: {worst} ms at {} items", last.size);
 }

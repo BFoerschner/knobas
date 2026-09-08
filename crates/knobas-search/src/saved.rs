@@ -104,23 +104,30 @@ const MAX_ID_CHARS: usize = 48;
 /// sixty-four saved lists. `knobas-search`'s perf gate now fills the rail
 /// through [`create`] over the launcher's own query shapes and times
 /// `smart_lists` and `launcher_board` at 100 k items -- spec §14's corpus, and
-/// the size the 100 ms budget names. On an unloaded machine, 2026-09-08:
+/// the size the 100 ms budget names. `launcher_board` p90 in milliseconds, on
+/// an unloaded machine, 2026-09-08:
 ///
 /// ```text
 /// saved lists       0    1    2    4    8   16   32   64
-/// launcher_board   41   53   55   60   81   84  132  212   p90 ms
+/// the run at 64    41   53   55   60   81   84  132  212
+/// the run at 16    42   53   57   60   81   87    -    -
 /// ```
 ///
-/// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
-/// of two and nothing measured it until now. The rail costs about 2.7 ms a
-/// list on top of the built-ins' 41 ms, which leaves room for roughly
-/// twenty-two; sixteen is that with margin.
+/// **Two runs and not one**, because no run can reach past the cap it is taken
+/// at -- [`create`] refuses the row. The first was taken with this constant
+/// still at 64 and is what condemned it; the second at the value below. They
+/// agree to within 3 ms, which is what this machine's noise is worth.
 ///
-/// **Eight would not have been meaningfully cheaper** -- 81 ms against 84 --
-/// because what a rail costs depends on the *shapes* on it as much as on how
-/// many: one saved browse over a whole source outweighs several saved
-/// searches for a word. Halving the allowance to buy three milliseconds is the
-/// trade this number declined.
+/// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
+/// of two and nothing measured it until now. A saved list costs **under 3 ms**
+/// on top of an empty board's 41 to 42, which leaves room for **about twenty**;
+/// sixteen is that with margin.
+///
+/// **Eight would not have been meaningfully cheaper** -- 81 ms, against
+/// sixteen's 84 and 87 -- because what a rail costs depends on the *shapes* on
+/// it as much as on how many: one saved browse over a whole source outweighs
+/// several saved searches for a word. Halving the allowance to buy three
+/// milliseconds is the trade this number declined.
 ///
 /// Lowering it stays cheap and raising it is not: the budget does not move, so
 /// a larger rail is a cheaper statement's to earn, not a constant's.
