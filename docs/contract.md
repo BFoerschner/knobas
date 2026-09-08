@@ -8013,16 +8013,39 @@ From this commit on, each of the following requires an orchestrator decision **a
      note with the words *"This link comes from a `[[reference]]` in the note"*
      (`notes/NoteView.svelte`, `detail/Detail.svelte`). That sentence is false of a capture link,
      and under it the reader could never withdraw one. A capture link is an ordinary link: drawn
-     because the reader wrote a note there, withdrawn from the panel like any other.
+     because the reader wrote a note there, withdrawn from the panel like any other. It is also
+     outside `withdraw_refs_other_than`'s reach, so a note's first autosave does not take it ---
+     but **that is the relation's doing as much as the origin's**: the clause is scoped to
+     `(this note, relation `references`, origin `implied`)` and a born link fails both halves, so
+     neither can be shown to matter by removing it alone, and what
+     `a_born_link_survives_the_notes_first_autosave` pins is the conjunction.
   2. **They are drawn in the note's own transaction** (`knobas_core::note::create` grows a
      `&[BornLink]`), which is the whole of the ticket's title. A note that existed for a moment
      without its `captured-in` link would be, for that moment, a thought belonging to no context.
   3. **A malformed target is `invalid`; a well-formed target with no `knobas.entity` row draws no
-     link and the note is written anyway.** The first is a caller bug and deterministic. The second
-     is a race --- a room the capture window remembered, a detail whose source was purged --- and
-     refusing there would make *New note* a button that stays broken while the reader can do
-     nothing about it. It is the same rule, written as the same `select ... from knobas.entity`,
-     that `reconcile_refs` applies to a `[[ref]]` naming nothing.
+     link and the note is written anyway.** The first is a caller bug and deterministic; the second
+     is nothing a reader can act on, and refusing there would make *New note* a button that stays
+     broken while they can do nothing about it. The precedent is the **heartbeat**, not
+     `reconcile_refs`: `commands::time`'s `heartbeat` writes the observation with no target when
+     the foreground is one the timer could never run on --- *"losing the attribution is honest,
+     losing the observation is not"*. The note is the observation and a born link is the
+     attribution. (`reconcile_refs` shares the `select ... from knobas.entity` and not the
+     precedent: a ref that resolves to nothing is *shown back*, because that is how a typo is
+     found.)
+
+     **Which case this is, exactly**, because the obvious guess is wrong: an id *no row ever
+     carried*. A withdrawn entity has a row --- a purge tombstones and never deletes
+     (`knobas_sync::config`'s `PURGE_ITEMS`; `CONTEXT.md`'s **Purge** carries *delete* on its
+     *Avoid* list for this reason), and a context is never deleted at all --- so a born link to
+     something the source dropped **is** drawn and the panel shows it marked, which is what
+     `LinkEnd.deleted_at` exists for. What reaches this clause is a caller handing an id it did
+     not read from a row, or one remembered across a database that changed under it: #503's
+     capture window keeps a room and a foreground between sessions.
+
+     **The answer codes.** `create_note` can now answer **`invalid`**, which it could not before
+     --- for a malformed target and for a blank relation, the two caller bugs --- and it answers
+     nothing else new: no `not_found`, no `conflict`. Recorded because #440 settled that the set
+     of codes a frozen command can answer with is part of what §2 pins.
   4. **The relation is folded to lower case**, like every other relation this module writes, so
      `Captured-In` and `captured-in` cannot become two group headers neither of which sees the
      other --- and a **blank** relation is `invalid` rather than `related`. `create_link`'s
@@ -8067,13 +8090,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   Nothing here reaches past `sync.live_item`, so **Live item**'s census of three readers is
   unchanged.
 
-  Pinned by: four tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
+  Pinned by: five tests in `crates/knobas-app/tests/entity.rs` over a real PostgreSQL ---
   `a_note_born_in_a_stored_room_carries_both_links_and_is_a_member` (both relations, both origins,
   the note as the `from` end, `context::member_ids`, and the backlink from the ticket),
   `a_note_born_with_only_a_foreground_carries_only_that_link` (the two are independent),
   `a_note_born_with_no_links_is_born_with_none` and
-  `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one` (the two refusals and
-  the skip); three in `app/src/lib/shell/timer.test.ts` for the foreground ladder, its `canBeTarget`
+  `a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one` (the two refusals, the
+  skip, and the tombstoned target that is drawn rather than skipped) and
+  `a_born_link_survives_the_notes_first_autosave` (both links and the membership, after a save of a
+  body naming no ref --- the flow *New note* itself opens, since `NoteView.svelte` autosaves 700 ms
+  after the first keystroke); three in `app/src/lib/shell/timer.test.ts` for the foreground ladder, its `canBeTarget`
   fall-through and the scan that keeps it spelled once;
   `entity_mirror.rs`'s `the_note_link_input_shape_matches_its_typescript_mirror`, which round-trips
   the input DTO so a Rust-only field cannot hide; and, on the frontend, six in

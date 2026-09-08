@@ -306,3 +306,83 @@ capture window remembers. (2) small either way: into v1.5 the orchestrator sets 
 `ready-for-agent` and the ticket is one writer inside an existing transaction, one detail shape and
 a seam test; into #502 the same work on an open branch plus a §10.8 sentence, and after merge it is
 the follow-up ticket anyway.
+
+### #502, second ruling — the absent-endpoint rule, and the three unwitnessed items
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/502#issuecomment-5577074363>
+
+**The fork:** three, all from PR #526's own body. (1) The implementer, verbatim: *"The
+absent-endpoint rule — the one decision neither the ticket nor the deputy settled. I took the
+`reconcile_refs` precedent (no link, note still written) rather than refusing, and it deserves an
+explicit yes or no."* (a) the note is written and the link is not drawn, which is what is on the
+branch; (b) the whole call is refused, as a malformed target and a blank relation are; (c) the note
+is written and the answer reports which links were not drawn. And whether §10.8's rule 3 is the
+wording the contract requires. (2) Whether lifting the room foreground ladder into
+`shell/timer.ts`'s `roomForeground`, with a source scan as its pin, is the right way to meet the
+first ruling's *"one test pins that the two cannot disagree"*. (3) Whether any of the three
+directions the PR body states as unwitnessed owes something before merge, the way #498's owed #522.
+
+**Ruling:** (1) **(a), confirmed — with the rule's stated reason corrected, because as written it
+names a case that does not exist.** `create_note` gains `invalid` for the two caller bugs and no
+other code; the links panel is the report, and it already says *Nothing linked yet* where nothing
+was drawn. The §10.8 wording changes in three places that say the same thing — rule 3,
+`note::create`'s doc comment and the test's doc comment — all of which call the case *a race* and
+give *a detail whose source was purged* as its example. **A purge does not remove the row**
+(`knobas_sync::config`'s `PURGE_ITEMS` is an `update … set deleted_at`, and `CONTEXT.md`'s
+**Purge** carries *delete* on its *Avoid* list for that reason), so a born link to a purged detail
+**is** drawn, to a withdrawn entity, and the panel shows it marked — `LinkEnd.deleted_at`, *"Not a
+filter -- a fact the reader is shown"*. The population rule 3 governs is *an id no row ever
+carried*. ADR-0011: corrected in place. The corrected sentence makes a claim nothing on the branch
+pinned, so one case joins the existing test, using `mock:PAY-198` — the fixture's genuinely
+tombstoned row — and not one a test tombstones by hand. One further sentence is owed per #440's
+precedent that *"the set of codes a frozen command can answer with is part of what §2 pins"*: that
+`create_note` can now answer `invalid`, which it could not before, and nothing else new.
+(2) **Not a decision, and left to the merge-manager as craft.** One function with two callers and a
+scan that fails when either re-spells the rung is a way of meeting the first ruling's sentence, not
+a departure from it; whether a behavioural comparison against a running timer would be the better
+pin is the merge-manager's judgement, with mutant 9 as the evidence. (3) **One is owed, inside
+#502, before merge: a born link survives the note's first autosave.** The other two owe nothing —
+the walk being a fixture was settled by the #496 ruling's part (3), and `roomForeground`'s
+structural pin is what the first ruling asked for.
+
+**Reasoning:** (1) no settled text decides it — the ticket says nothing, spec #491 says nothing, and
+the first ruling was not asked — so it is ruled the way the grilling's rulings would: smallest
+frozen surface, real witness, ticket scope unchanged, and all three point the same way. **The
+nearest precedent is the heartbeat, not `reconcile_refs`**: `commands::time`'s `heartbeat` writes
+the observation with no target when the foreground is one the timer could never run on — *"losing
+the attribution is honest, losing the observation is not"*. A born link is the attribution and the
+note is the observation; the reader's act is the fact, and what it was about is derived from a
+surface, so a derivation that cannot be made is dropped rather than fatal. `reconcile_refs` rightly
+shares the SQL but not the precedent, since a ref that resolves to nothing is *shown back* so the
+typo can be found. Story 2 is the note's and not the link's, and under (b) the capture window's
+first keystroke could be refused for a room the reader last stood in yesterday, with the keystroke
+nowhere to go; the glossary's own words are conditional (*"if there was one"*). (b) would also be
+the wrong code — an endpoint with no row is `EndpointMissing → not_found` by Björn's #50 ruling,
+which was made for a *dialog* where the reader named both ends — so it would add a second new code
+where (a) adds one, and it would push onto #503 the handling of a refused first keystroke, the
+divergence between the command's two callers that the first ruling refused to create. (c) needs a
+place on the wire, and the entry records that `NoteDetail` and its neighbours are untouched; the
+panel already reports. (3) the #522 standard is that a gap owes something when the unwitnessed
+direction is the one a v1.5 feature was cut for, and where it is owed follows the cost of the
+witness: a shared seed with a restore point was a ticket, one seam test on an open branch is a
+clause. *New note* opens the born note in `NoteView.svelte`, whose `saveAfterMs` is 700, so the
+reader's first keystroke reconciles a body naming no ref — if that withdrew born links, criterion 1
+would be true at birth and false a second later.
+
+**If you disagree, the cost of reversing this is:** (1) trivial before merge — the insert becomes
+`values` instead of `select`, the foreign-key violation already maps through
+`CoreError::from_link_write` to `EndpointMissing` and on to `not_found`, one test flips and one
+§10.8 sentence changes. After merge: no migration and nothing to repair, since a note born under
+(a) with a link it could not draw is one whose panel showed the reader so at the time. The one
+ratchet is #503, which under (a) needs no refusal path on its first keystroke. (2) nothing — no
+code and no record depends on which pin is chosen. (3) trivial: one test fewer on an open branch;
+the property it pins is true today and stays true until someone edits a `where` clause in
+`note.rs`, which is precisely when the test would have been wanted.
+
+**Recorded by the implementer while acting on part 3:** the mutant the ruling names —
+`and origin = $3` dropping out of `withdraw_refs_other_than` — **survives**, and so does dropping
+`and relation = $2`. A born link is outside that clause **twice over**, by relation and by origin,
+and either alone is sufficient; the new test dies only when both go. The ruling's expectation that
+the origin is what protects a born link is half the picture, and rule 1 of the §10.8 entry now says
+so.
