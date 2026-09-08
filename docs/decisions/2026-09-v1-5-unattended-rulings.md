@@ -1263,3 +1263,105 @@ where the file's other create does, so `Env::clear_leftovers` could not find a k
 `NARROW` ticket and the branch relied on the adapter suite's own clearing running first in the
 recipe. Acceptable as disclosed; the implementer took the should-fix, and the ticket is now
 labelled from the moment it exists and the test sweeps that label itself.
+
+---
+
+## #533 — the measured cap, the margin principle, the glossary clause, and the second narrowed assertion
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/533#issuecomment-5579433539>
+
+**The fork:** four, raised by PR #540 and decided by the implementer rather than left open, then
+put to the gate. (1) The ticket's third criterion asks that `MAX_SAVED_LISTS` be *"confirmed or
+lowered by the measurement"*. The measurement — `launcher_board` p90 at 100 k items, 41 53 55 60 81
+84 132 212 ms over rails of 0 1 2 4 8 16 32 64 saved lists — puts 64 at 212 ms against a budget of
+100. The implementer lowered the constant to 16 and touched nothing else that runs. Is 16 the
+number, and what must the merge-manager's re-run meet for its numbers to count? (2) The margin, in
+the implementer's words: *"the gate now passes at 86–90 against 100 … the first cap with real slack
+is 4, at 66 ms. If you want slack over allowance, 4 is a one-line change"*, corrected after the PR
+opened to a floor of 84 across four runs of three commits, with both runs of the shipped code
+reading 90 at loads of 21 and of 12 and agreeing within 2 ms at every step. (3) The `CONTEXT.md`
+clause: *"The ticket says 'that constant and nothing else'; I read that as a bound on code … One
+revert if you read it strictly."* (4) `the_match_set_is_not_joined_row_by_row` builds over one
+corpus while the launcher runs four — found, disclosed, and left.
+
+**Ruling:** (1) **Sixteen is ratified as the measured cap.** The ticket's own sentence decides it:
+the constant was not confirmed, so it is lowered, and the curve says to where. `BUDGET_MS = 100` is
+untouched, which is the one thing the ticket forbade moving, and so is the summary statement's
+shape, which #506's ruling named as the expensive reversal and which no ruling has authorised. 64
+was wrong by a factor of **two against the budget** and of **four against the cap that fits**.
+Sixteen is a reading of the launcher's own mix — `CASES`' ten shapes cycled, one `browse, no text`
+among sixteen — because that is the fixture the ticket asked for; a rail of nothing but saved
+browses is the rail's pathological case in the sense `PATHOLOGICAL` already has in that file, and
+is not owed here. **The re-run standard**, because no reading of the shipped code has been taken on
+a quiet machine: the merge-manager's re-run is the first quiet baseline, and its numbers count only
+under four conditions, all stated in the merge comment — (a) nothing else on the machine **for the
+whole run**, not at the instant it starts, the orchestrator holding a slot for it the way the
+desktop cap holds the screen, because a watcher firing on a once-sampled one-minute average is
+exactly what let a sibling in mid-run; (b) the one-minute load average **at start and at end**,
+both below the machine's twelve cores; (c) a **monotonic rail curve** in both columns, which is the
+test of whether the run was a reading at all; (d) the **whole transcript quoted**, every block, so
+a contaminated 25 k or 50 k row is visible rather than omitted. Under those conditions a green is
+the gate's green and a red is real — a red means the constant comes down by the curve, inside this
+ticket, and the PR does not merge over it; a red taken outside them is not a reading and is not
+quoted. (2) **Sixteen, and the principle is: the cap is the largest count at which the measured
+board clears the budget on a quiet machine by more than the measurement's own quiet-machine spread.
+The margin is for the clock, never for the machine's load and never for the reviewer's comfort.**
+Headroom at the cap is 10 ms, run-to-run spread 2 ms, the morning's spread 6 ms; sixteen clears on
+either, twenty does not (the curve affords about nineteen with no margin), eight buys 2 to 6 ms for
+half the allowance and four buys 24 for a quarter of it. **If a quiet run of this code ever clears
+the budget by less than its own spread, the constant steps to eight without a ruling.** On the
+busy-machine worry the corrected record answers itself: load 12 and load 21 gave the same curve to
+within 2 ms, so in that range load did not move the numbers, while at 22 to 30 it put a 60 ms
+built-in case at 429 ms and a 50 k row at 201. **Load does not shave this file, it wrecks it** — no
+cap a reader would want buys a gate that survives another agent's `just check`, so the constant is
+not where that worry is answered; the method section and the re-run standard are. A thin margin is
+also what a gate is *for*: at 90 a 12 % regression turns it red, at 66 the same regression is
+invisible until it is a 50 % one. (3) **The clause stays, cut to the rule and made true.** The
+implementer's reading is the right one: the ticket's sentence bounds what the ticket may change to
+make the gate pass — the constant, never the budget, never the statement — and says nothing about
+the record, which follows the change wherever the change is (#496 corrected three glossary entries
+on the PR that added the reader; #506 part 2 owed one clause because a later implementer meets the
+consequence before they read the migration header, and #507 restores saved lists by the schema dump
+and never through `create`). Three edits: **the rule, not the reading** — at most sixteen, a
+measured bound and not a feature, lowered by measurement and never raised by hand, with the
+milliseconds struck, since a glossary carrying a benchmark reading is a second copy of a number
+that has one home; **where the bound bites** — *Save as list* refuses when sixteen exist and
+nothing else enforces it, so a restored or merged database is held to it by nothing but the archive
+it came from; and **the pointer** — the clause names #533 and this ruling and says the number is
+read off the rail curve, so the glossary follows the constant. (4) **Not inside #533 — the
+implementer's scope call is confirmed. One follow-up ticket, filed by the orchestrator outside
+v1.5**, no milestone, `needs-triage`, for Björn to place; it is **#541**. It is not #506's class:
+that gap was a budget whose fixture stopped covering what the budget names, so the milestone was
+shipping an unmeasured claim, where **this claim is measured** — the gate runs every case through
+`Searcher::search`, which builds over `corpus::ALL` since #436, and the M1 defect this pin catches
+cost 2.5× and would be red there. What is narrowed is a *detector* for one mechanism, one of a
+family (`tests/sql_shape.rs` carries eleven pins of the same shape), and passing `corpus::ALL` to
+it would widen it **in name only**, since three of the four branches sit at zero rows — the working
+model's *check that measures a representation of the thing*. The real ticket seeds the corpora and
+moves the family, which is not a #533 sentence.
+
+**Reasoning:** the ticket was filed so the number would be *"a measured number instead of a
+generous guess"*, and a measured number is whatever the curve says rather than the value nearest
+the guess. The margin rule is the one the file already uses in the other direction —
+`the_plan_does_not_decay_after_the_fifth_execution` keeps its coarse threshold because *"tightening
+it to 1.2x would only calibrate it to one loaded machine"* — and it hands the next measurer a
+number instead of a judgement call; the budget is the product's promise and the cap a bound on the
+product, so a bound set for the benchmark's ease is a feature taken away for no reader's benefit,
+the mirror of the file's own rule that a fixture must not be tuned until it passes. The re-run
+standard is the file's method section (*"Take it on a machine that is doing nothing else"*) made
+checkable. On the glossary, the reading that keeps the ticket's scope unchanged is the one under
+which the record of a change is part of the change, which is how every ruling in this file has
+treated it; the strict reading would leave the product's one reader-facing rule about saved lists
+in a Rust doc comment and have #507 learn the cap from `create`'s error string. Part 4 follows #498
+part 1, the precedent for *found, disclosed, not fixed here*, and sits outside the milestone
+because the milestone's witness has no defect on this point. No ADR: a constant read off a curve is
+a fact, not a decision.
+
+**If you disagree, the cost of reversing this is:** one constant for parts 1 and 2, either way, with
+no record moving but the number in `saved::MAX_SAVED_LISTS`, its doc comment and the glossary
+clause — though *raising* it needs a measurement that affords more, which means a cheaper summary
+statement or a budget Björn moves, neither of which a ticket in this loop may do. Three sentences
+in `CONTEXT.md` and no code for part 3; striking the clause entirely is one revert and leaves the
+cap enforced and unnamed. Trivial for part 4: pulling #541 into v1.5 is a milestone edit and
+closing it `wontfix` is one click, and nothing in #540 forecloses either.

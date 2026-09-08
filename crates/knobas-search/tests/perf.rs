@@ -25,6 +25,18 @@
 //! *this* fixture rather than citing the record, so the harness's own
 //! preparation step is a thing with evidence behind it and not a comment.
 //!
+//! # Take it on a machine that is doing nothing else
+//!
+//! Every assertion in this file is wall-clock against a fixed budget, which is
+//! why all of them are `#[ignore]`d. On a machine carrying another agent's
+//! `just check` this file fails on cases that have never been near the budget:
+//! `browse, no text` was measured at 27 ms and at **429 ms** on the same tree
+//! within an hour of each other on 2026-09-08, and the rail curve came back
+//! non-monotonic, which is a curve saying *measure again* rather than a
+//! reading. `the_plan_does_not_decay_after_the_fifth_execution`'s doc comment
+//! records the same lesson from the other direction, where load made a real
+//! regression pass. Check the load average before quoting a number from here.
+//!
 //! # A curve, not a point
 //!
 //! [`search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items`]
@@ -50,41 +62,75 @@
 //! fixture had been replaced and its description had not, in the one file
 //! whose stated purpose is to say what the fixture is.
 //!
-//! ## No saved smart list is on this rail (#506, and #533 is what measures it)
+//! ## The rail carries the saved-list cap (#533)
 //!
-//! `knobas.smart_list` is **empty in this fixture**, so `saved::summaries`
-//! returns on its first read and the `lists_ms` assertion below covers the
-//! **built-in half of the rail and nothing else**. That is not the budget the
-//! feature is held to: spec #491 story 57 says a saved list shows its count
-//! *"like the built-ins"*, on the same `⌘K`, so the saved half is inside the
-//! same 100 ms.
+//! `knobas.smart_list` was **empty in this fixture** when #506 added it: with
+//! nothing saved, `saved::summaries` returns on its first read, so the
+//! `smart_lists` assertion below covered the **built-in half of the rail and
+//! nothing else**. That is not the budget the feature is held to -- spec #491
+//! story 57 says a saved list shows its count *"like the built-ins"*, on the
+//! same ⌘K, so the saved half is inside the same 100 ms.
 //!
-//! This is a gap of its own kind and worth naming as one -- not a criterion
-//! that cannot pass and not a fixture blind in one direction, but **a budget
-//! whose fixture stopped covering what the budget names**, which is the same
-//! failure the paragraph above records in a different place. What is unknown
-//! is the cost of `saved::summaries` at `saved::MAX_SAVED_LISTS`: the three
-//! reads it makes, and the `union all` of aggregates, over a 100k corpus.
+//! That gap was of its own kind and is kept named as one: not a criterion that
+//! cannot pass and not a witness blind in one direction, but **a budget whose
+//! fixture stopped covering what the budget names** -- the same failure the
+//! paragraph above records about the corpus, in a different place.
 //!
-//! **#533** (v1.5, blocked by #506) closes it: it seeds `MAX_SAVED_LISTS`
-//! lists through `saved::create` over the shapes [`CASES`] already names, so
-//! every branch of that `union all` is a query the launcher runs; it times and
-//! gates `smart_lists` at [`BUDGET_MS`] with them on the rail, printed beside
-//! the built-in reading so the two halves are told apart; and it confirms or
-//! **lowers** 64 by the measurement. It may change that constant and it may
-//! not raise this budget.
+//! #533 closes it, and the fixture now says so. [`fill_the_rail`] saves
+//! [`saved::MAX_SAVED_LISTS`] lists through `saved::create`, cycling [`CASES`]'
+//! shapes, so every branch of the `union all` that
+//! `knobas_search::sql::saved_summary_sql` builds is a query the launcher
+//! actually runs. Both of the board's reads are taken in both of the rail's
+//! states at every corpus size, so four readings are printed and not three:
+//!
+//! * `smart_lists` over an **empty** rail -- the built-in half on its own, and
+//!   exactly the reading this file took before #533;
+//! * `smart_lists` over a rail carrying **the cap** -- what ⌘K pays, and
+//!   what [`BUDGET_MS`] gates;
+//! * `launcher_board` over each of the same two rails. It *calls*
+//!   `smart_lists` and then reads the recent items, so it pays for the rail
+//!   too and its assertion tightened with them; its empty-rail reading is what
+//!   says how much of the budget is gone before a saved list exists.
+//!
+//! The two `smart_lists` readings are printed side by side on the curve rather
+//! than one number for the pair, because a rail that has grown expensive and a
+//! board that has is the same number until they are told apart.
+//!
+//! ## The cap is a measured number, not a generous one
+//!
+//! `saved::MAX_SAVED_LISTS` was added beyond #506's ticket and ratified by the
+//! deputy's ruling of 2026-09-08 as **a bound rather than a feature** -- the
+//! constant's own doc comment and `CONTEXT.md`'s **Smart list** carry the
+//! reason. So the cap is not asserted about here; it is *read off* a curve.
+//! [`rail_steps`] walks the rail from empty to the cap at 100 k items,
+//! prints `smart_lists` at each step and the marginal cost of one saved list,
+//! and the gate then holds the cap's own reading to [`BUDGET_MS`]. A cap this
+//! fixture cannot carry inside the budget is a cap that comes down; the budget
+//! does not move.
 
 use std::time::Instant;
 
 use knobas_search::corpus::LIVE_ITEM;
 use knobas_search::query::EffectiveFilters;
-use knobas_search::{SearchFilters, SearchQuery, Searcher, sql, testing};
+use knobas_search::{
+    KindCatalog, SearchFilters, SearchQuery, Searcher, SmartListSummary, Vocabulary, saved, sql,
+    testing,
+};
 
 /// The budget, from spec §14.
 const BUDGET_MS: u128 = 100;
 
 /// The exit criterion's corpus size, and the two smaller points of the curve.
 const SIZES: [i64; 3] = [25_000, 50_000, 100_000];
+
+/// How many runs make one reading of the board's reads, and one rail step.
+///
+/// Ten, as for a launcher case: `⌘K` runs the board on every opening, so it is
+/// a keystroke like any other and gets a keystroke's percentiles. Ten is also
+/// the smallest count at which nearest-rank p90 is the **second**-worst sample
+/// rather than the worst -- below it, `rank` collapses p90 onto `max` and the
+/// two printed columns stop being two readings.
+const BOARD_RUNS: usize = 10;
 
 /// The launcher's shapes of query, each named for what it exercises.
 ///
@@ -137,12 +183,35 @@ struct Timing {
     max: u128,
 }
 
+/// One row of the printed curve: what to call it, and which reading it draws.
+type BoardRow = (String, fn(&Point) -> Timing);
+
+/// What the board cost over a rail of a stated size.
+#[derive(Debug, Clone, Copy)]
+struct RailPoint {
+    /// How many saved lists were on the rail.
+    lists: i64,
+    /// How many rows those lists counted between them, so that a reading over
+    /// a rail that matched nothing cannot be quoted as a reading over a rail
+    /// that worked.
+    counted: i64,
+    /// `smart_lists`: the rail read on its own.
+    read: Timing,
+    /// `launcher_board`, which calls `smart_lists` and then reads the recent
+    /// items. **The number that binds**, because it is the whole of what ⌘K
+    /// pays on an empty query.
+    board: Timing,
+}
+
 /// One corpus size's whole reading.
 struct Point {
     size: i64,
     cases: Vec<(&'static str, Timing)>,
-    board_ms: u128,
-    lists_ms: u128,
+    /// The board with nothing saved: the built-in half of the rail alone, and
+    /// the only reading this file took before #533.
+    empty: RailPoint,
+    /// The board with [`saved::MAX_SAVED_LISTS`] lists on the rail.
+    at_cap: RailPoint,
 }
 
 /// p50, p90 and max of `runs` timings of one query, in milliseconds.
@@ -158,6 +227,39 @@ async fn timings(searcher: &Searcher, raw: &str, runs: usize) -> Timing {
         searcher.search(q(raw)).await.expect("the query answers");
         samples.push(started.elapsed().as_millis());
     }
+    summarize(&mut samples)
+}
+
+/// The same percentiles over any read of the box, after one warm call.
+///
+/// The board's two reads are timed through this rather than taken once each,
+/// which is what this file did until #533. A single sample was defensible
+/// while `smart_lists` answered in a millisecond or two off an empty
+/// `knobas.smart_list`; it is not once the rail carries the cap, and the
+/// argument on [`timings`] -- that a mean, or a lone sample, hides exactly the
+/// keystroke the budget is about -- applies to the board unchanged.
+///
+/// **The warm call is discarded and is not the budget.** The launcher is open
+/// for a whole session, and the first call after the rail changes shape is the
+/// one that assembles a statement of a size this process has not seen.
+async fn timings_of<F, Fut, T, E>(runs: usize, mut once: F) -> Timing
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    E: std::fmt::Debug,
+{
+    once().await.expect("the read answers");
+    let mut samples: Vec<u128> = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let started = Instant::now();
+        once().await.expect("the read answers");
+        samples.push(started.elapsed().as_millis());
+    }
+    summarize(&mut samples)
+}
+
+/// Nearest-rank p50, p90 and max of a set of samples, which this sorts.
+fn summarize(samples: &mut [u128]) -> Timing {
     samples.sort_unstable();
     Timing {
         p50: samples[rank(samples.len(), 50)],
@@ -184,13 +286,202 @@ fn text_of(raw: &str) -> String {
         .join(" ")
 }
 
-async fn timed<T>(future: impl Future<Output = Result<T, knobas_search::SearchError>>) -> u128 {
-    let started = Instant::now();
-    future.await.expect("the read answers");
-    started.elapsed().as_millis()
+/// The saved-list counts the rail is measured at, ending at the cap.
+///
+/// Doubling from an empty rail, and the last step is always the cap itself.
+///
+/// What the curve has to show is whether the rail's cost is **linear in the
+/// number of lists** -- the shape that makes a cap the right instrument at all
+/// -- and what one more list costs near the cap. Doubling gives both: a wide
+/// base for the slope and its densest points where the constant is decided.
+/// The cap is the last step because it is the point the gate asserts on.
+fn rail_steps(cap: i64) -> Vec<i64> {
+    let mut steps = vec![0];
+    let mut count = 1;
+    while count < cap {
+        steps.push(count);
+        count *= 2;
+    }
+    steps.push(cap);
+    steps.dedup();
+    steps
 }
 
-/// The gate: every launcher query under 100 ms at 100 k items.
+/// Empty `knobas.smart_list`, one list at a time through `saved::delete`.
+async fn clear_the_rail(pool: &sqlx::PgPool) {
+    for list in saved::all(pool).await.expect("the rail reads") {
+        saved::delete(pool, &list.id)
+            .await
+            .expect("a saved list deletes");
+    }
+}
+
+/// Save `count` lists, cycling [`CASES`]' shapes.
+///
+/// **Through `saved::create` and not an insert**, which is what the ticket asks
+/// for and is load-bearing twice over. `create` runs `saved::plan` and refuses
+/// a query today's grammar cannot answer, so a rail built this way cannot hold
+/// a row that the counting statement leaves out; and the ids it generates are
+/// the ones `list:` names, so the fixture is a rail a reader could have built.
+///
+/// Cycling [`CASES`] rather than repeating one query is what puts every branch
+/// of the `union all` under the clock: a rail of nothing but copies of
+/// `zzzznothing` is a stack of aggregates over an empty match set, and would
+/// measure the statement's shape rather than its work.
+async fn fill_the_rail(pool: &sqlx::PgPool, count: i64) {
+    let vocab = Vocabulary::load(pool, KindCatalog::default())
+        .await
+        .expect("the vocabulary loads");
+    for index in 0..count {
+        let position = usize::try_from(index).expect("a rail smaller than a machine word");
+        let (name, raw) = CASES[position % CASES.len()];
+        saved::create(pool, &vocab, &format!("{name} {index}"), raw)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("saving {raw:?} as a list, which the fixture needs to run: {error}")
+            });
+    }
+}
+
+/// Read the rail back and prove it is the rail the timings are about.
+///
+/// This is the guard against the one way this measurement could report a
+/// number about nothing. `saved::summaries` leaves a **refused** list out of
+/// `saved_summary_sql` entirely -- that is what makes one broken row cheap
+/// rather than fatal -- so a rail of rows today's grammar will not run costs
+/// the board a single small select and times exactly like the empty rail this
+/// ticket exists to stop measuring. `create` cannot produce such a row, and
+/// this says so out of the summaries rather than trusting it.
+///
+/// Answers how many rows the rail counted between them, which the caller
+/// prints: a rail whose every list matched nothing is a second way to time an
+/// aggregate over nothing.
+async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
+    let rail = searcher.smart_lists().await.expect("the rail reads");
+    let saved: Vec<&SmartListSummary> = rail.iter().filter(|list| list.saved).collect();
+    assert_eq!(
+        i64::try_from(saved.len()).expect("a rail smaller than a machine word"),
+        expected,
+        "the fixture saved {expected} lists and the rail draws {}",
+        saved.len()
+    );
+    if expected == 0 {
+        return 0;
+    }
+    let refused: Vec<&str> = saved
+        .iter()
+        .filter(|list| list.needs_attention)
+        .map(|list| list.description.as_str())
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "{} of the fixture's {} saved lists are refused, so they are not in the \
+         counting statement at all and this times an emptier rail than it \
+         claims. The first: {:?}",
+        refused.len(),
+        saved.len(),
+        refused.first()
+    );
+    let counted: i64 = saved.iter().map(|list| list.count).sum();
+    assert!(
+        counted > 0,
+        "every saved list on the rail counted zero rows, so the union \
+         aggregated over nothing and the reading is not of the rail"
+    );
+    counted
+}
+
+/// Put `lists` saved lists on the rail and time both of the board's reads.
+///
+/// The **one** place the rail is set up and read. The size loop and the rail
+/// curve both go through it, so the two cannot drift into measuring two
+/// different things and then be printed in one table as though they had not.
+async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPoint {
+    clear_the_rail(pool).await;
+    fill_the_rail(pool, lists).await;
+    let counted = assert_the_rail_is_counted(searcher, lists).await;
+    let read = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
+    let board = timings_of(BOARD_RUNS, || searcher.launcher_board()).await;
+    RailPoint {
+        lists,
+        counted,
+        read,
+        board,
+    }
+}
+
+/// The gate: every launcher query under 100 ms at 100 k items, and the board
+/// with the saved-list cap on its rail.
+///
+/// # What the rail contributes (#533)
+///
+/// The board is measured in both of the rail's states at every size -- empty,
+/// which is the built-in half alone, and carrying [`saved::MAX_SAVED_LISTS`]
+/// lists -- and the second is what the budget is about, because story 57 puts
+/// a saved list's count on the same ⌘K as a built-in's. After the size loop
+/// the rail is walked from empty to the cap at the criterion's size, which is
+/// the reading the constant in `saved.rs` is chosen from. The module docs
+/// carry the reasons and the record.
+///
+/// # The reading, 2026-09-08 (#533)
+///
+/// Recorded here for the reason the estate test's own table is: an
+/// `#[ignore]`d benchmark whose result lives in a review thread is a claim the
+/// next reader has to re-earn before they can tell a regression from a busy
+/// machine. p90 in milliseconds:
+///
+/// ```text
+/// case                25000    50000   100000
+/// browse, no text        14       29       60   <- worst of the ten at 100 k
+/// lists, empty rail      21       24       39
+/// lists, 16 saved        37       51       86
+/// board, empty rail      21       24       41
+/// board, 16 saved        37       51       86
+///
+/// the rail at 100000 items:
+/// saved lists       0    1    2    4    8   16
+/// smart_lists      39   53   57   64   86   89
+/// launcher_board   42   56   59   66   88   90
+/// ```
+///
+/// Taken with a one-minute load average of 21 falling to 13 -- another agent's
+/// frontend suite on this Mac -- and **the gate passed there**, which is worth
+/// knowing beside the section above.
+///
+/// Four runs of this fixture the same morning put `launcher_board` at the cap
+/// between **84 and 90 ms**. The two lowest were of earlier commits on this
+/// branch and at quieter moments; both runs of the code as it stands read 90,
+/// at load averages of 21 and of 12. So take the spread as this measurement's
+/// own noise and not as a trend -- a busy machine costs this file a few
+/// milliseconds a step until it costs it everything, and the 50 k row of a
+/// fifth run, taken while a sibling suite started, had `mine` at 201 ms.
+///
+/// **An empty board is already 41 ms of the hundred** at 100 k items -- the
+/// rail's own read is 39 of it and the recent items the rest -- so a saved
+/// list is charged against the fifty-nine that are left, at 3 ms each: room
+/// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` comes from.
+///
+/// **The margin is thin on purpose, and no smaller cap buys much of it.** The
+/// gate passes at 84 to 90 against a budget of 100, because the built-ins own
+/// most of the budget before a saved list exists. Eight lists read 81 to 88
+/// across three runs against sixteen's 84 to 90 -- never six milliseconds
+/// apart -- so halving the allowance would buy almost nothing, and the first
+/// cap with real slack is **four**, at 66. Sixteen is the largest number the
+/// budget affords with the gate still able to notice a regression.
+///
+/// **A second run**, earlier the same morning and with the cap still at its
+/// original 64 -- the only way to reach a step past the cap, since
+/// `saved::create` refuses the row -- read `launcher_board` at **212 ms** and
+/// `smart_lists` at 210 with 64 lists, and 132 and 131 with 32. Twice the
+/// budget, and nothing had measured it: that is the whole of what #533 was
+/// for. Its steps 0 to 16 read 41 53 55 60 81 84, against the 42 56 59 66 88
+/// 90 above.
+///
+/// What the rail costs depends on the **shapes** on it and not only on how
+/// many: the eighth of [`CASES`]' shapes is `browse, no text`, one saved
+/// browse over a whole source, and it outweighs several saved searches for a
+/// word. That is why the step from 4 to 8 costs more than the step from 8
+/// to 16.
 ///
 /// # The harness shape, recorded because it is load-bearing
 ///
@@ -232,15 +523,33 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
             );
             cases.push((*name, timing));
         }
-        let board_ms = timed(searcher.launcher_board()).await;
-        let lists_ms = timed(searcher.smart_lists()).await;
-        println!("{size:>7} {:<16} {board_ms:>4} ms", "launcher_board");
-        println!("{size:>7} {:<16} {lists_ms:>4} ms", "smart_lists");
+        // The board's reads, in both of the rail's states. Empty first, which
+        // is the built-in half on its own and the only reading this file took
+        // before #533; then the cap, which is what ⌘K pays. Both readings of
+        // both reads, because `launcher_board` contains `smart_lists` and the
+        // difference between them is the other half of where the budget goes.
+        let empty = rail_at(&pool, &searcher, 0).await;
+        let at_cap = rail_at(&pool, &searcher, saved::MAX_SAVED_LISTS).await;
+        for (label, timing) in [
+            ("smart_lists, empty rail", empty.read),
+            ("smart_lists, rail at cap", at_cap.read),
+            ("launcher_board, empty rail", empty.board),
+            ("launcher_board, rail at cap", at_cap.board),
+        ] {
+            println!(
+                "{size:>7} {label:<28} p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+                timing.p50, timing.p90, timing.max
+            );
+        }
+        println!(
+            "{size:>7} {:<28} {} lists, {} rows counted",
+            "  the rail, as filled", at_cap.lists, at_cap.counted
+        );
         curve.push(Point {
             size,
             cases,
-            board_ms,
-            lists_ms,
+            empty,
+            at_cap,
         });
         println!();
     }
@@ -258,13 +567,77 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         }
         println!();
     }
-    for (label, pick) in [("launcher_board", true), ("smart_lists", false)] {
+    let board_rows: [BoardRow; 4] = [
+        ("lists, empty rail".to_owned(), |point| point.empty.read),
+        (
+            format!("lists, {} saved", saved::MAX_SAVED_LISTS),
+            |point| point.at_cap.read,
+        ),
+        ("board, empty rail".to_owned(), |point| point.empty.board),
+        (
+            format!("board, {} saved", saved::MAX_SAVED_LISTS),
+            |point| point.at_cap.board,
+        ),
+    ];
+    for (label, pick) in board_rows {
         print!("{label:<16}");
         for point in &curve {
-            print!("{:>9}", if pick { point.board_ms } else { point.lists_ms });
+            print!("{:>9}", pick(point).p90);
         }
         println!();
     }
+
+    // --- what the cap is worth ---
+    //
+    // `saved::MAX_SAVED_LISTS` is a **bound**, ratified as one: the board's
+    // cost grows with the number of lists on the rail, and a number nobody
+    // bounds is what the budget exists to refuse. This is the reading behind
+    // it -- the same `smart_lists` the gate takes, at the size the criterion
+    // names, over rails from empty to the cap -- so that the constant is read
+    // off a curve rather than chosen for being generous.
+    //
+    // **Both** reads at every step, because `launcher_board` is the one that
+    // binds: it calls `smart_lists` and then reads the recent items, so the
+    // rail's share of the budget is what is left of it after the built-ins and
+    // that second read. A cap chosen off the `smart_lists` column alone would
+    // be a cap the board cannot afford.
+    let at_size = curve.last().expect("at least one size").size;
+    println!("--- the rail at {at_size} items: the board by saved-list count, p90 ms ---");
+    println!(
+        "{:>4}  {:>10}  {:>12}  {:>15}",
+        "saved", "rows", "smart_lists", "launcher_board"
+    );
+    let mut rail: Vec<RailPoint> = Vec::new();
+    for step in rail_steps(saved::MAX_SAVED_LISTS) {
+        let point = rail_at(&pool, &searcher, step).await;
+        println!(
+            "{:>4}  {:>10}  {:>12}  {:>15}",
+            point.lists, point.counted, point.read.p90, point.board.p90
+        );
+        rail.push(point);
+    }
+    let bare = rail.first().expect("a rail curve").board.p90;
+    let at_cap = *rail.last().expect("a rail curve");
+    let over_bare = at_cap.board.p90.saturating_sub(bare);
+    let each = over_bare as f64 / f64::from(u32::try_from(at_cap.lists.max(1)).unwrap_or(u32::MAX));
+    println!(
+        "  => {} saved lists cost the board {over_bare} ms over the empty rail's \
+         {bare} ms, about {each:.2} ms each",
+        at_cap.lists
+    );
+    if each < 0.5 {
+        println!(
+            "  => one more list costs less than this clock can read; the cap is not what \
+             the budget is spent on at this size"
+        );
+    } else {
+        println!(
+            "  => at that marginal cost the {BUDGET_MS} ms budget has room for about {:.0} \
+             saved lists beside the built-ins and the recent read",
+            (BUDGET_MS as f64 - bare as f64).max(0.0) / each
+        );
+    }
+    println!();
 
     // The pathological case, printed and not gated. See `PATHOLOGICAL`.
     {
@@ -302,17 +675,58 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
     }
     // The other two hot paths of the box, held to the same budget: `⌘K` on an
     // empty query runs both, so a slow board is a slow launcher.
+    //
+    // Three assertions rather than two, because the rail has two states and a
+    // single number cannot say which of them went wrong. The empty-rail
+    // reading is the claim this file has always made about the built-ins; the
+    // rail-at-cap reading is the one #533 adds and is the one story 57 asks
+    // for; and `launcher_board` contains the second, so it tightened with it.
     assert!(
-        last.board_ms < BUDGET_MS,
-        "launcher_board took {} ms over {} items",
-        last.board_ms,
+        last.empty.read.p90 < BUDGET_MS,
+        "smart_lists took {} ms at p90 over an empty rail and {} items",
+        last.empty.read.p90,
         last.size
     );
     assert!(
-        last.lists_ms < BUDGET_MS,
-        "smart_lists took {} ms over {} items",
-        last.lists_ms,
+        last.at_cap.read.p90 < BUDGET_MS,
+        "smart_lists took {} ms at p90 with {} saved lists on the rail ({} rows \
+         counted) over {} items. The budget does not move: the fix is a lower \
+         `saved::MAX_SAVED_LISTS`, and the rail curve above says to what.",
+        last.at_cap.read.p90,
+        last.at_cap.lists,
+        last.at_cap.counted,
         last.size
+    );
+    assert!(
+        last.at_cap.board.p90 < BUDGET_MS,
+        "launcher_board took {} ms at p90 with {} saved lists on the rail over \
+         {} items",
+        last.at_cap.board.p90,
+        last.at_cap.lists,
+        last.size
+    );
+    // And the curve's own last point, taken after the size loop against a rail
+    // built up from empty: the same claim as the one above, over the fixture
+    // the cap was read off, so a cap that survives only the loop's fixture
+    // cannot be quoted as measured.
+    assert_eq!(
+        at_cap.lists,
+        saved::MAX_SAVED_LISTS,
+        "the rail curve must end at the cap"
+    );
+    assert!(
+        at_cap.read.p90 < BUDGET_MS,
+        "smart_lists took {} ms at p90 at the cap of {} saved lists over \
+         {at_size} items (budget {BUDGET_MS} ms)",
+        at_cap.read.p90,
+        at_cap.lists
+    );
+    assert!(
+        at_cap.board.p90 < BUDGET_MS,
+        "launcher_board took {} ms at p90 at the cap of {} saved lists over \
+         {at_size} items (budget {BUDGET_MS} ms)",
+        at_cap.board.p90,
+        at_cap.lists
     );
     println!("worst p90: {worst} ms at {} items", last.size);
 }
