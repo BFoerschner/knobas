@@ -4584,6 +4584,14 @@ const KNOWN_ROUTES: &str = "select id from knobas.route where id = any($1::text[
 /// times as the file is long. The key's *values* are compared in
 /// [`matched_by_origin_key`], where the tagged shape they are stored in is
 /// already the vocabulary.
+///
+/// **This `?&` and [`origin_key_of`]'s length check are one rule in two
+/// places** -- *every part or nothing* -- said once about the estate and once
+/// about a file entry. Either alone gives the right answer, which is why a
+/// mutant to either one alone survives and a mutant to both dies together
+/// (#508's mutation round). Keep both: the SQL one is what stops this reading
+/// the whole table, and the Rust one is what holds when a producer's key grows
+/// a second part.
 const ORIGIN_KEYED_ASSETS: &str =
     "select id, name, properties from knobas.asset where properties ?& $1::text[]";
 
@@ -5059,10 +5067,11 @@ async fn matched_by_origin_key(
 /// One property bag's origin key, or `None` if it does not carry every part.
 ///
 /// **Every part or nothing**, said once and read by both sides: half a key
-/// would match on half a question. The bag is a bag of *stored* values on
-/// either side -- the estate's own, or a file entry's put through
-/// [`property_of`] and [`stored_value`] first -- so the tag travels with the
-/// value and a number is not a string that looks like one
+/// would match on half a question. [`ORIGIN_KEYED_ASSETS`]' `?&` is the same
+/// sentence in SQL, and its doc says why both stay. The bag is a bag of
+/// *stored* values on either side -- the estate's own, or a file entry's put
+/// through [`property_of`] and [`stored_value`] first -- so the tag travels
+/// with the value and a number is not a string that looks like one
 /// ([`PropertyValue`]).
 ///
 /// A `String` and not the values themselves, because [`serde_json::Value`] is
