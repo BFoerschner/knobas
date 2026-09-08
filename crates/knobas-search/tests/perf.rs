@@ -442,10 +442,15 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 ///
 /// Taken with a one-minute load average of 21 falling to 13 -- another agent's
 /// frontend suite on this Mac -- and **the gate passed there**, which is worth
-/// knowing beside the section above: what a busy machine costs this file is
-/// three or four milliseconds a step until it costs it everything. Two quieter
-/// runs the same morning read `launcher_board` at 84 and 87 where this one
-/// reads 90.
+/// knowing beside the section above.
+///
+/// Four runs of this fixture the same morning put `launcher_board` at the cap
+/// between **84 and 90 ms**. The two lowest were of earlier commits on this
+/// branch and at quieter moments; both runs of the code as it stands read 90,
+/// at load averages of 21 and of 12. So take the spread as this measurement's
+/// own noise and not as a trend -- a busy machine costs this file a few
+/// milliseconds a step until it costs it everything, and the 50 k row of a
+/// fifth run, taken while a sibling suite started, had `mine` at 201 ms.
 ///
 /// **An empty board is already 41 ms of the hundred** at 100 k items -- the
 /// rail's own read is 39 of it and the recent items the rest -- so a saved
@@ -453,7 +458,7 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 /// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` comes from.
 ///
 /// **The margin is thin on purpose, and no smaller cap buys much of it.** The
-/// gate passes at 86 to 90 against a budget of 100, because the built-ins own
+/// gate passes at 84 to 90 against a budget of 100, because the built-ins own
 /// most of the budget before a saved list exists. Eight lists read 81 to 88
 /// across three runs against sixteen's 84 to 90 -- never six milliseconds
 /// apart -- so halving the allowance would buy almost nothing, and the first
