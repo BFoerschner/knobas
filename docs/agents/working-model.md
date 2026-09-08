@@ -24,7 +24,10 @@ Implementation now runs ticket-driven:
   output in its body, and the merge-manager re-runs it before squashing. The recipes, in full —
   keep this list current, a suite whose recipe is missing from it is one nobody knows to run:
   `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
-  `just teamcity-live-seeded`, `just atlassian-live`, and `just kuma-live` (#442); a PR runs
+  `just teamcity-live-seeded`, `just atlassian-live`, `just kuma-live` (#442), and
+  `just estate-live` (#509 — the hcloud importer, which is not an adapter but is a read of a
+  real system and is the only witness for the `hcloud_id` values in
+  `testenv/hetzner/estate.json`); a PR runs
   whichever its change reaches, and one touching the start-work flow reaches `start-work-live`. `just check` stays as it is; the
   live run is in addition to it, never inside it. A mockd run is not a substitute: the real
   container is the witness, a mock certifies nothing, and mockd is deprecated.
