@@ -557,21 +557,42 @@ macro_rules! open_alert_opened_at {
 /// **The context half is `knobas_core::held_by_any_context!` and not a second
 /// reading of it** -- ADR-0008's membership walk, seeded from every unarchived
 /// context at once, whose `held` layer *is* "directly or through an ancestor".
-/// `CONTEXT.md`, **Alert**: *"it reaches the inbox only when some context holds
-/// the affected asset, directly or through an ancestor"*. The subquery binds
-/// nothing from the outer row, so it is evaluated once per statement.
+/// The subquery binds nothing from the outer row, so the planner hashes it.
 ///
-/// **Open, and not "open and un-acked".** The inbox's sixth rule adds
-/// `acked_at is null` because an ack is *seen* and clears the inbox item; this
-/// list is not the inbox. Its name says *Open alerts*, the ticket's own gloss
-/// is *"an open alert whose asset some unarchived context holds"*, and #446's
-/// ruling that an acked alert *"leaves the inbox and stays in the Assets view"*
-/// puts every other surface on the open-only side of the line. So the routing
-/// rule this borrows is the **context** clause, which is the half that decides
-/// which alerts are anybody's business, and the ack clause stays where the
-/// surface that owns it is. Pinned by
-/// `an_acked_alert_is_still_open_and_still_on_the_list` in
-/// `crates/knobas-app/tests/search_ipc.rs`.
+/// # Why there is no `acked_at is null` here
+///
+/// Because **the routing rule is a defined term and the ack is not in it.**
+/// Spec §12.3 (`docs/specs/2026-08-23-knobas-design.md`) puts the two in
+/// consecutive sentences: *"**Alert routing rule (R3, now spec):** an alert
+/// reaches the inbox only when some context holds the affected asset (directly
+/// or via an ancestor or via the context's monitors); all open alerts always
+/// show in the Assets views and the top-strip count. **Ack** is knobas-local:
+/// clears the inbox item, writes history, the alert stays open until the
+/// monitor recovers"*. `CONTEXT.md`'s **Alert** keeps the same split, and its
+/// #446 amendment uses the term the same way -- *"the one place the alert's
+/// routing rule and `member_ids` differ"* is about which contexts count, not
+/// about the ack. So `alert!()`'s statement in `knobas_core::inbox` is the
+/// routing rule **plus the inbox's own lifecycle clause**; it is not the rule,
+/// and this list takes the rule.
+///
+/// **And *open* is defined too.** `CONTEXT.md`, **Alert**: *"open until the
+/// monitor recovers … **Only a return to *up* closes one**"*. A list called
+/// *Open alerts* that dropped acked ones would be false in its first word.
+/// Spec §12.3's *"all open alerts always show in the Assets views and the
+/// top-strip count"* is which side of the ack an estate surface sits on, and
+/// this list draws assets and opens the Tree.
+///
+/// The reading `knobas_core::inbox`'s `alert!` doc gives -- *"an acked alert
+/// leaves the inbox and stays in the Assets view"* -- says the same thing, and
+/// is cited here as what it is: a doc comment reading spec #427 story 62, not
+/// an authority of its own. The authority is the glossary and §12.3 above.
+///
+/// Pinned by `an_acked_alert_is_still_open_and_still_on_the_list` in
+/// `crates/knobas-app/tests/search_ipc.rs`. Ruled for v1.5 on 2026-09-08
+/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, #504), which also
+/// records why copying the clause would not have made the two counts agree:
+/// #446's ack writes `acked_at` **and** `complete_with`, and the inbox's count
+/// excludes snoozed items, so the disagreement is a shelf and not a clause.
 macro_rules! alerts_in_context_pred {
     () => {
         concat!(
