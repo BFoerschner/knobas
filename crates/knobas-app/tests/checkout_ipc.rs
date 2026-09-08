@@ -600,9 +600,9 @@ async fn purging_the_repo_takes_its_override_with_it() {
 /// The panel is mounted inside the detail, and `get_entity`'s `DETAIL` is
 /// exempt from both of the view's halves (`CONTEXT.md`, **Live item**, reader
 /// 2) precisely so a withdrawn or turned-off entity's detail opens and says so.
-/// A checkout read that went through the view would draw *not in the mirror*
-/// on a page the app can open -- and the clone is still on the disk either
-/// way, which is the whole point of knowing where it is.
+/// A checkout read that went through the view would draw *not in the mirror* on
+/// a page the app can open -- and the clone is still on the disk either way,
+/// which is the whole point of knowing where it is.
 #[tokio::test]
 async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() {
     let pool = pool().await;

@@ -328,8 +328,8 @@ struct RepoOf {
 /// the view's halves, and for the detail read's own reason (reader 2): the
 /// panel is mounted *inside* `get_entity`'s detail, which is exempt so that a
 /// withdrawn or turned-off entity's page still opens and says which. A
-/// checkout read that went through the view would answer *not in the mirror*
-/// on a page the app can open -- and the clone is still on the disk after the
+/// checkout read that went through the view would answer *not in the mirror* on
+/// a page the app can open -- and the clone is still on the disk after the
 /// server withdrew the repository or somebody turned its source off, which is
 /// exactly when knowing where it is helps. `0024`'s cascade is the
 /// same rule from the other side: a tombstoned repo keeps its entity row and

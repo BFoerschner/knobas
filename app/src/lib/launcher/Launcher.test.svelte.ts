@@ -427,15 +427,32 @@ test("with no sources prop, the rows take their health from the board", async ()
 /**
  * The box before the board's own read lands.
  *
- * One frame, and the only one in which the launcher names the store it is
- * reading, so the word is pinned here or nowhere: `CONTEXT.md`'s **Mirror**
- * entry lists *index* under `_Avoid_`, and this line used the forbidden word
- * from M1 until #518. Asserted before `settle()` on purpose — after it the
- * board has arrived and this line is gone.
+ * One frame, and no other test renders it, so the line is pinned here or
+ * nowhere: `CONTEXT.md`'s **Mirror** entry lists *index* under `_Avoid_`, and
+ * this placeholder used the forbidden word from M1 until #518. Asserted before
+ * `settle()` on purpose — after it the board has arrived and the line is gone.
+ * The footnote below it names the store too, and has its own test.
  */
 test("the box says which store it is reading while the board is in flight", () => {
   open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
   expect(target.textContent).toContain("Reading the mirror\u2026");
+});
+
+/**
+ * The footnote is the launcher's third account of the store, and the count
+ * beside it is the board's own.
+ *
+ * A **non-zero** `pending_writes`, because `session.home?.pending_writes ?? 0`
+ * renders the same `0` for a board that arrived with none and for a board that
+ * never arrived — so on `HOME` as it stands a footnote wired to nothing at all
+ * would still pass. The negative assertion in the paste-miss test below is not
+ * a substitute for this one: it would accept *local cache* as happily as
+ * *mirror*.
+ */
+test("the footnote names the store and counts the board's pending writes", async () => {
+  open({ ports: { launcherHome: async () => ({ ...HOME, pending_writes: 4 }) } });
+  await settle();
+  expect(target.textContent).toContain("mirror \u00b7 4 pending writes");
 });
 
 test("an empty box shows the smart lists and the recent items", async () => {
