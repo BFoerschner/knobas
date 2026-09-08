@@ -427,11 +427,13 @@ test("with no sources prop, the rows take their health from the board", async ()
 /**
  * The box before the board's own read lands.
  *
- * One frame, and no other test renders it, so the line is pinned here or
- * nowhere: `CONTEXT.md`'s **Mirror** entry lists *index* under `_Avoid_`, and
- * this placeholder used the forbidden word from M1 until #518. Asserted before
- * `settle()` on purpose — after it the board has arrived and the line is gone.
- * The footnote below it names the store too, and has its own test.
+ * Every `open()` in this file renders this frame and no other test looks at
+ * it — they all assert after `settle()`, by which time the board has arrived
+ * and the line is gone — so it is pinned here or nowhere: `CONTEXT.md`'s
+ * **Mirror** entry lists *index* under `_Avoid_`, and this placeholder used
+ * the forbidden word from M1 until #518. Hence the assertion before
+ * `settle()`, and a `launcherHome` that never resolves. The footnote below it
+ * names the store too, and has its own test.
  */
 test("the box says which store it is reading while the board is in flight", () => {
   open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
@@ -439,8 +441,8 @@ test("the box says which store it is reading while the board is in flight", () =
 });
 
 /**
- * The footnote is the launcher's third account of the store, and the count
- * beside it is the board's own.
+ * The footnote is one of the launcher's four accounts of the store, and the
+ * count beside it is the board's own.
  *
  * A **non-zero** `pending_writes`, because `session.home?.pending_writes ?? 0`
  * renders the same `0` for a board that arrived with none and for a board that
@@ -1121,8 +1123,9 @@ test("an author search says which sources could not be asked", async () => {
   expect(gap?.textContent).not.toContain("Jira");
   // And the ordinary empty-result line is still there — the gap explains part
   // of the emptiness, it does not replace the answer. Its words, not merely
-  // its presence: this is the launcher's other account of the store it read,
-  // and it used the word `CONTEXT.md`'s **Mirror** entry forbids until #518.
+  // its presence: this is another of the launcher's accounts of the store it
+  // read, and it used the word `CONTEXT.md`'s **Mirror** entry forbids until
+  // #518.
   expect(target.querySelector(".none")?.textContent).toContain(
     "Nothing in the mirror matches",
   );
@@ -1445,10 +1448,11 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   // placeholder, so every word the launcher draws is in scope.
   //
   // What this guards: the launcher is the screen that names the store to the
-  // reader — the footnote, the reading placeholder and this panel — so a
-  // fourth string here saying *index* is far likelier to be the forbidden
-  // synonym than a database object. It is a fence, not the witness; the
-  // footnote and the panel each have a positive assertion of their own.
+  // reader — the footnote, the reading placeholder, the empty-result line and
+  // this panel — so a further string here saying *index* is far likelier to
+  // be the forbidden synonym than a database object. It is a fence, not the
+  // witness; the footnote and the panel each have a positive assertion of
+  // their own.
   //
   // The day a feature has a legitimate use of the word on this screen (the
   // Postgres index `Diagnostics.svelte` names, say), **narrow** this to the
