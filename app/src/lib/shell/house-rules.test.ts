@@ -325,3 +325,46 @@ test("the dev harness is only reachable behind import.meta.env.DEV", () => {
     "a module started importing the dev harness — add it here only if a second entry point to the fixture is genuinely wanted",
   ).toEqual(["App.svelte"]);
 });
+
+/**
+ * **Who may turn a pasted URL into an entity** (spec #491 stories 12 and 13).
+ *
+ * Two surfaces call the resolver, and both were decided: the launcher, where a
+ * pasted link opens what it names (#496), and the note editor, where it
+ * becomes the `[[ref]]` the chip pipeline draws (#497). Every other text input
+ * in the app — a comment, a section edit, the standup protocol, a worklog
+ * draft, the write queue's amend — leaves a pasted URL exactly as it was
+ * pasted, because what reaches a source has to be what the user typed.
+ *
+ * The four component tests that pin story 13 pin four fields. This pins the
+ * rule, which is what the *fifth* field needs: a surface that quietly grew the
+ * substitution would send a `[[knobas:only]]` spelling to somebody else's Jira
+ * or wiki, where the words are what everyone else reads. Growing this list is
+ * allowed; doing it without noticing is not.
+ *
+ * Tests are out of the scan: a suite that mocks `../ipc/entity` names every
+ * export it stands in for, resolver included, and that is a fixture rather
+ * than a caller.
+ */
+test("only the launcher and the note editor resolve a pasted URL to an entity", () => {
+  const callers = offenders(
+    (text, file) =>
+      !/\.test\.(svelte\.)?ts$/.test(file) &&
+      file !== join(ROOT, "lib", "ipc", "entity.ts") &&
+      !file.startsWith(DEV_DIR + sep) &&
+      /\bresolveUrl\b/.test(codeOf(text)),
+  );
+
+  // `session.svelte.ts` is the launcher's own machinery and takes the resolver
+  // as an *optional* port; `Launcher.svelte` is what passes it one. The note
+  // editor builds a `Session` too, deliberately without one — a `[[` picker is
+  // a search, not a paste.
+  expect(
+    callers,
+    "a surface started resolving pasted URLs — every other text input has to leave one as text",
+  ).toEqual([
+    "lib/launcher/Launcher.svelte",
+    "lib/launcher/session.svelte.ts",
+    "lib/notes/NoteView.svelte",
+  ]);
+});

@@ -1,8 +1,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { LinkEntry, NoteDetail } from "../ipc/entity";
+import type { LinkEnd, LinkEntry, NoteDetail } from "../ipc/entity";
 import type { SearchResponse } from "../ipc/search";
+import { paste } from "../shell/test-paste";
 
 /**
  * The note editor, driven the way a person drives it.
@@ -35,17 +36,97 @@ function detail(over: Partial<NoteDetail> = {}): NoteDetail {
   };
 }
 
+/**
+ * The mirror, as the resolver sees it: the URLs it holds, and what they name
+ * (#496). One entry, because the question a paste asks is binary.
+ *
+ * Keyed on the URL **as pasted**, fragment and all. The normalisation that
+ * makes `#comment-42` irrelevant is the resolver's own — one rule, written
+ * once as SQL in `knobas_core::web_url`, applied to both sides and checked
+ * against a real database in `crates/knobas-app/tests/url_resolve.rs`. A
+ * fixture that re-implemented it here would be a second spelling of it, in a
+ * second language, that nothing forces to agree. What this file is entitled to
+ * check is the frontend's own half: that what reaches the resolver is what the
+ * reader pasted, verbatim.
+ */
+const MIRROR: Record<string, { entity_id: string; kind: string }> = {
+  "https://jira.example/browse/PAY-231#comment-42": { entity_id: "mock:PAY-231", kind: "ticket" },
+};
+
+/** Every URL `resolve_url` was asked about, in order. */
+const resolved: string[] = [];
+
+/**
+ * Set while a test wants the resolver's answer to still be in flight.
+ *
+ * The two things the swap is guarded against — the reader typing on, and the
+ * editor closing — are both *during the round trip*, and a resolver that
+ * answers on the next microtask has no during.
+ */
+let held: Promise<void> | null = null;
+let release: () => void = () => {};
+
+/** Set while a test wants `resolve_url` to reject rather than answer. */
+let refuses = false;
+
+function hold() {
+  held = new Promise((resolve) => {
+    release = () => {
+      held = null;
+      resolve();
+    };
+  });
+}
+
+/**
+ * What the save reconciles the body's `[[refs]]` to — `note::reconcile_refs`,
+ * standing in for it.
+ *
+ * The panel redraws its chips from the answer to the save rather than from a
+ * read of its own, so a fixture that returned the refs it was opened with
+ * would show a note whose body says one thing and whose chips say another —
+ * which is exactly the mismatch a paste-to-reference has to be checked
+ * against.
+ *
+ * `shell/dev/fake-tauri.ts` spells the same rule for the browser walk, and the
+ * two deliberately do not share — see the note on `noteDetail` there for why
+ * neither the dev harness nor a shared module is somewhere this can live.
+ */
+function refsOf(bodyMd: string): NoteDetail["refs"] {
+  return [...bodyMd.matchAll(/\[\[([^\]]+)\]\]/g)].map((found) => {
+    const targetId = found[1]!.trim();
+    const known = KNOWN[targetId];
+    return { target_id: targetId, target: known ?? null };
+  });
+}
+
+/** The corpus the mirror holds, by entity id — what a chip draws from. */
+const KNOWN: Record<string, LinkEnd> = {
+  "mock:PAY-231": {
+    entity_id: "mock:PAY-231",
+    kind: "ticket",
+    title: "Payments retry storm",
+    deleted_at: null,
+  },
+};
+
 vi.mock("../ipc/entity", () => ({
   // The ticket detail's status select (#179) reads the granted board and
   // queues through the write queue. Not what this file is about, so both
   // answer with nothing.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  resolveUrl: async (url: string) => {
+    resolved.push(url);
+    if (held) await held;
+    if (refuses) throw { code: "internal", message: "the mirror is not readable", source_id: null };
+    return MIRROR[url] ?? null;
+  },
   getNote: async () => stored,
   saveNote: async (noteId: string, title: string, bodyMd: string) => {
     saves.push({ noteId, title, bodyMd });
     if (saveFails) throw saveFails;
-    stored = { ...stored, note: { ...stored.note, title, body_md: bodyMd } };
+    stored = { ...stored, note: { ...stored.note, title, body_md: bodyMd }, refs: refsOf(bodyMd) };
     return stored;
   },
   deleteNote: async (noteId: string) => {
@@ -113,6 +194,9 @@ beforeEach(() => {
   deletes.length = 0;
   unlinks.length = 0;
   toasts.length = 0;
+  resolved.length = 0;
+  held = null;
+  refuses = false;
   saveFails = null;
   stored = detail();
 });
@@ -165,6 +249,13 @@ function render(saveAfterMs = 0) {
       area.dispatchEvent(new Event("input", { bubbles: true }));
       flushSync();
       await settle();
+    },
+    /** Paste into the body at the caret, and answer whether it was handled. */
+    async paste(text: string) {
+      const handled = paste(this.editor()!, text);
+      flushSync();
+      await settle();
+      return handled;
     },
     done: () => {
       unmount(app);
@@ -493,5 +584,205 @@ test("an unresolved reference in the body is visible as unresolved", async () =>
   await settle();
   expect(screen.text()).toContain("mock:NOPE-1");
   expect(screen.text()).toContain("unresolved");
+  screen.done();
+});
+
+/* ------------------------------------------------ pasting a URL (#497) */
+
+/**
+ * Story 12: a source URL pasted into a note body is the entity, so the paste
+ * writes the reference rather than the address — and from there the existing
+ * chip pipeline draws it and the backlink exists.
+ *
+ * The pasted URL carries a fragment, because a link out of chat usually does
+ * and dropping it is half of what the resolver's normalisation is for (#496).
+ */
+test("a pasted URL the mirror holds becomes the entity's reference", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  const handled = await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+  expect(handled, "the platform's own paste would have written the URL too").toBe(true);
+  expect(resolved).toEqual(["https://jira.example/browse/PAY-231#comment-42"]);
+
+  const area = screen.editor()!;
+  expect(area.value).toBe("caused by [[mock:PAY-231]]");
+  // The caret is past the reference, so the next word is typed after the chip
+  // and not inside it.
+  expect(area.selectionStart).toBe("caused by [[mock:PAY-231]]".length);
+  expect(area.selectionEnd).toBe(area.selectionStart);
+
+  // What the backend was asked to save, and what it reconciled.
+  expect(saves.at(-1)?.bodyMd).toBe("caused by [[mock:PAY-231]]");
+  expect(stored.refs).toEqual([
+    {
+      target_id: "mock:PAY-231",
+      target: {
+        entity_id: "mock:PAY-231",
+        kind: "ticket",
+        title: "Payments retry storm",
+        deleted_at: null,
+      },
+    },
+  ]);
+
+  // And the chip is what the reader sees, drawn by the pipeline #46 built.
+  screen.button("Done")?.click();
+  flushSync();
+  expect(screen.text()).toContain("Payments retry storm");
+  screen.done();
+});
+
+/**
+ * Story 12's other half. A link to something the mirror does not hold is
+ * still a link the writer meant to keep, so it stays exactly as pasted — the
+ * miss is never a swallowed paste.
+ */
+test("a pasted URL the mirror does not hold stays the URL, as text", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("see also ");
+
+  await screen.paste("https://jira.example/browse/NOPE-9");
+
+  const area = screen.editor()!;
+  expect(area.value).toBe("see also https://jira.example/browse/NOPE-9");
+  expect(area.selectionStart).toBe(area.value.length);
+  expect(saves.at(-1)?.bodyMd).toBe("see also https://jira.example/browse/NOPE-9");
+  // Nothing became a reference, so nothing is a chip.
+  expect(stored.refs).toEqual([]);
+  screen.done();
+});
+
+/**
+ * The gate in front of the resolver, from the direction that costs something:
+ * a paste that is not an absolute URL is an ordinary paste, and an ordinary
+ * paste is the platform's. Preventing one would put this component in charge
+ * of every clipboard in the editor — line endings, selections and all — for a
+ * question it had already answered "no" to.
+ */
+test("pasting something that is not a URL is left to the platform", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("");
+
+  const handled = await screen.paste("the counter starts at zero");
+  expect(handled).toBe(false);
+  expect(resolved).toEqual([]);
+  screen.done();
+});
+
+/**
+ * The swap happens a round trip after the paste, and in that gap the reader
+ * owns the body. Writing on is the ordinary thing to do there, and the words
+ * that follow the link have to survive the swap — the reference replaces the
+ * URL, not the sentence around it.
+ */
+test("writing on through the round trip keeps the words and still gets the reference", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  hold();
+  await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+  const area = screen.editor()!;
+  expect(area.value).toBe("caused by https://jira.example/browse/PAY-231#comment-42");
+
+  // The reader keeps writing while the mirror is still being asked.
+  area.value = `${area.value}, and again at noon`;
+  area.setSelectionRange(area.value.length, area.value.length);
+  area.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  release();
+  await settle();
+  expect(area.value).toBe("caused by [[mock:PAY-231]], and again at noon");
+  expect(saves.at(-1)?.bodyMd).toBe("caused by [[mock:PAY-231]], and again at noon");
+  // And the caret is still where the reader left it — at the end of the words
+  // they were writing, not pulled back to the end of the reference. A swap
+  // that moved it would put their next keystroke in the middle of the
+  // sentence.
+  expect(area.selectionStart, "the swap pulled the caret out of the sentence").toBe(
+    area.value.length,
+  );
+  expect(area.selectionEnd).toBe(area.selectionStart);
+  screen.done();
+});
+
+/**
+ * The third way the mirror can decline to turn a URL into a reference, after
+ * "not a URL" and "not in the mirror": the read itself refused. The reader is
+ * owed the same thing in all three — the link they pasted, where they pasted
+ * it — and a resolver that failed must never swallow a paste.
+ */
+test("a resolver that refuses leaves the pasted URL in the body", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  refuses = true;
+  await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+
+  const area = screen.editor()!;
+  expect(resolved).toEqual(["https://jira.example/browse/PAY-231#comment-42"]);
+  expect(area.value).toBe("caused by https://jira.example/browse/PAY-231#comment-42");
+  expect(area.selectionStart).toBe(area.value.length);
+  expect(saves.at(-1)?.bodyMd).toBe("caused by https://jira.example/browse/PAY-231#comment-42");
+  screen.done();
+});
+
+/**
+ * The edit the swap must not make. A reader who took the pasted URL back out
+ * — selected it and typed over it, or deleted the line — has a body that no
+ * longer holds what the mirror was asked about, and splicing a reference in at
+ * the offset the URL used to be at would cut a hole in what replaced it. So
+ * the swap asks whether the span still holds that URL, and lets the answer go
+ * unused when it does not.
+ */
+test("an edit that takes the pasted URL back out leaves the answer unused", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  hold();
+  await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+  const area = screen.editor()!;
+
+  // Second thoughts: the whole line goes.
+  area.value = "caused by the retry counter";
+  area.setSelectionRange(area.value.length, area.value.length);
+  area.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  release();
+  await settle();
+  expect(area.value).toBe("caused by the retry counter");
+  expect(saves.at(-1)?.bodyMd).toBe("caused by the retry counter");
+  screen.done();
+});
+
+/**
+ * The same gap, closed from the other side: *Done* unmounts the textarea, and
+ * an answer that arrived after it must not write through a field the panel no
+ * longer has. What was saved is what the reader left behind.
+ */
+test("leaving the editor mid-round-trip writes nothing back", async () => {
+  const screen = render();
+  await settle();
+  await screen.type("caused by ");
+
+  hold();
+  await screen.paste("https://jira.example/browse/PAY-231#comment-42");
+  screen.button("Done")?.click();
+  flushSync();
+  await settle();
+
+  release();
+  await settle();
+  expect(screen.editor()).toBeNull();
+  expect(saves.at(-1)?.bodyMd).toBe(
+    "caused by https://jira.example/browse/PAY-231#comment-42",
+  );
   screen.done();
 });

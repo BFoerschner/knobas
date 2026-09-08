@@ -16,10 +16,19 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityDetail } from "../ipc/entity";
 import type { SourceDescriptor } from "../ipc/sources";
+import { paste } from "../shell/test-paste";
 
 /** Plain functions, not `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const queued: unknown[] = [];
 const opened: string[] = [];
+/**
+ * Every URL `resolve_url` was asked about — which, on this surface, is none.
+ *
+ * Declared so that "the resolver was not consulted" is a thing this file can
+ * assert rather than a thing it relies on the mock happening not to export
+ * (spec #491 story 13).
+ */
+const resolvedUrls: string[] = [];
 
 vi.mock("../ipc/entity", () => ({
   listContexts: () => Promise.resolve([]),
@@ -33,6 +42,10 @@ vi.mock("../ipc/entity", () => ({
   submitWrite: (payload: unknown) => {
     queued.push(payload);
     return Promise.resolve({});
+  },
+  resolveUrl: (url: string) => {
+    resolvedUrls.push(url);
+    return Promise.resolve(null);
   },
 }));
 
@@ -163,6 +176,19 @@ function press(button: HTMLButtonElement | undefined) {
   flushSync();
 }
 
+/**
+ * Let a paste handler that resolves asynchronously have its turn.
+ *
+ * The point of the wait is the *second* half of what these tests check: a
+ * field that took a URL over on a round trip rather than synchronously would
+ * pass a `defaultPrevented` assertion and pass an immediate value assertion,
+ * and only fail after the answer landed.
+ */
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+  flushSync();
+}
+
 function type(area: HTMLTextAreaElement, text: string) {
   area.value = text;
   area.dispatchEvent(new Event("input", { bubbles: true }));
@@ -172,6 +198,7 @@ function type(area: HTMLTextAreaElement, text: string) {
 beforeEach(async () => {
   queued.length = 0;
   opened.length = 0;
+  resolvedUrls.length = 0;
   toasts.items = [];
   writeOps = ["comment", "update_page", "create_page"];
   entity = () => page();
@@ -354,6 +381,67 @@ test("cancelling a section edit queues nothing", async () => {
   expect(screen.editors()).toHaveLength(0);
   expect(queued).toEqual([]);
   expect(screen.text()).toContain("base 30 s, factor 2.");
+
+  screen.done();
+});
+
+/* ------------------------------------ a pasted URL stays a URL (#497) */
+
+/**
+ * Spec #491 story 13. A section edit is a **write back to Confluence**, and
+ * what reaches Confluence has to be what the reader typed: substituting a
+ * `[[ref]]` here would put a knobas-only spelling into somebody else's wiki
+ * page, where nothing can read it.
+ *
+ * The paste is left to the platform — nothing on this field takes it over —
+ * and the resolver is never asked. Only the note body does that (story 12,
+ * `notes/NoteView.svelte`).
+ */
+test("a URL pasted into a section edit is left as text and goes out as typed", async () => {
+  const link = "https://jira.example/browse/PAY-231";
+  const screen = render();
+  await vi.waitFor(() => expect(screen.button("Edit section")).toBeDefined());
+
+  press(screen.button("Edit section"));
+  const area = screen.editors()[0]!;
+  const before = area.value;
+  expect(paste(area, link), "something took the paste over").toBe(false);
+  await settle();
+  expect(area.value, "something rewrote the field without cancelling").toBe(before);
+  expect(resolvedUrls).toEqual([]);
+
+  type(area, `base 30 s, factor 2. See ${link}`);
+  press(screen.button("Queue edit"));
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+
+  const body = (queued[0] as { UpdatePage: { body: string } }).UpdatePage.body;
+  expect(body).toContain(`<h2>Backoff policy</h2><p>base 30 s, factor 2. See ${link}</p>`);
+  expect(body).not.toContain("[[");
+
+  screen.done();
+});
+
+/** The same rule on the comment box, and for the same reason. */
+test("a URL pasted into a comment is left as text and is queued as typed", async () => {
+  const link = "https://jira.example/browse/PAY-231";
+  const screen = render();
+  await vi.waitFor(() => expect(screen.button("Comment")).toBeDefined());
+
+  press(screen.button("Comment"));
+  const area = screen.editors()[0]!;
+  const before = area.value;
+  expect(paste(area, link), "something took the paste over").toBe(false);
+  await settle();
+  expect(area.value, "something rewrote the field without cancelling").toBe(before);
+  expect(resolvedUrls).toEqual([]);
+
+  type(area, `see ${link}`);
+  press(screen.button("Queue comment"));
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+
+  expect(queued[0]).toEqual({
+    Comment: { entity: "confluence:98307", body: `see ${link}` },
+  });
 
   screen.done();
 });

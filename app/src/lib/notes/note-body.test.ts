@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { LinkEnd, NoteRef } from "../ipc/entity";
-import { activeRef, insertRef, tokenise } from "./note-body";
+import { activeRef, carryCaret, insertRef, replaceSpan, tokenise } from "./note-body";
 
 function end(over: Partial<LinkEnd> = {}): LinkEnd {
   return {
@@ -125,4 +125,43 @@ test("a closing pair already after the caret is consumed rather than doubled", (
   const written = insertRef(body, active, "mock:PAY-231");
   expect(written.body).toBe("see [[mock:PAY-231]] then");
   expect(written.body.slice(written.caret)).toBe(" then");
+});
+
+/**
+ * A paste and the swap that follows it are both a span of the body being
+ * replaced, and the caret always lands just past what was written — the same
+ * rule `insertRef` follows, which is why they share this.
+ */
+test("replacing a span writes over it and leaves the caret past what was written", () => {
+  const body = "see  then";
+  const laid = replaceSpan(body, 4, 4, "https://jira.example/browse/PAY-231");
+  expect(laid.body).toBe("see https://jira.example/browse/PAY-231 then");
+  expect(laid.body.slice(laid.caret)).toBe(" then");
+
+  // A selection the paste lands on top of is what the span covers.
+  const over = replaceSpan("see the URL then", 4, 11, "[[mock:PAY-231]]");
+  expect(over.body).toBe("see [[mock:PAY-231]] then");
+  expect(over.body.slice(over.caret)).toBe(" then");
+});
+
+/**
+ * The swap a pasted URL becomes lands a round trip late, so the caret it finds
+ * is the reader's rather than its own — {@link carryCaret} is what keeps it
+ * there.
+ */
+test("a caret carried across a replaced span stays where the reader put it", () => {
+  const url = "https://jira.example/browse/PAY-231";
+  const ref = "[[mock:PAY-231]]".length;
+
+  // Just past the pasted URL, which is where a reader who pasted and stopped
+  // is: it follows the reference, exactly as `replaceSpan` would have said.
+  expect(carryCaret(4 + url.length, 4, 4 + url.length, ref)).toBe(4 + ref);
+  // Writing on: the caret keeps its distance from the end of the reference.
+  expect(carryCaret(4 + url.length + 18, 4, 4 + url.length, ref)).toBe(4 + ref + 18);
+  // Before the paste: untouched, because nothing in front of it moved.
+  expect(carryCaret(2, 4, 4 + url.length, ref)).toBe(2);
+  expect(carryCaret(4, 4, 4 + url.length, ref)).toBe(4);
+  // Inside the URL, which the reference replaced: past what was written, since
+  // there is no position inside it left to keep.
+  expect(carryCaret(20, 4, 4 + url.length, ref)).toBe(4 + ref);
 });
