@@ -13,9 +13,10 @@
 # synthetic ⌘K the application's focused element is the launcher's query box --
 # by role and by the `aria-label` the box carries (`QueryBox.svelte`,
 # "Search or act"), read out of the accessibility tree -- and that after
-# Escape the focus has left it. It says nothing about what the launcher then
-# shows: the board, the results and the action chain are the frontend suite's
-# and the `?fake-ipc` walk's, per the deputy's ruling of 2026-09-08 on #496.
+# Escape the focus has left it and the box is gone from the tree altogether.
+# It says nothing about what the launcher then shows: the board, the results
+# and the action chain are the frontend suite's and the `?fake-ipc` walk's,
+# per the deputy's ruling of 2026-09-08 on #496.
 #
 # Run by testenv/desktop-witness.sh, which passes it a compiled helper, the
 # pid of the one running instance and the bundle it launched.
@@ -29,8 +30,12 @@ ax=${KNOBAS_WITNESS_AX:?the harness passes this}
 pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 
 # The `aria-label` on the launcher's input. Named here rather than matched
-# loosely: a driver that accepted any text field would pass on the shell's
-# top-strip search field, which is a different box that opens the same overlay.
+# loosely: the app is full of text fields with labels of their own -- the
+# assets search (`Find an asset in the estate`), the context-tab rename (`New
+# context label`) -- and a driver that accepted any `AXTextField` would pass on
+# whichever of them the app happened to have open. The top strip's search
+# affordance is not one of them: it is a `<button>` (`TopStrip.svelte`) that
+# opens this same overlay, so the role test alone already excludes it.
 readonly QUERY_BOX_LABEL='Search or act'
 readonly KEY_K=40
 readonly KEY_ESCAPE=53
@@ -116,9 +121,11 @@ wait_until "⌘K did not put focus in the launcher's query box within ${SETTLE_S
     focus_is_query_box
 say "the launcher's query box has focus: role AXTextField, labelled '$QUERY_BOX_LABEL'"
 
-# The box is in the tree exactly once. Two would mean the shell's top-strip
-# search field is being counted as well, and this driver would be asserting
-# against whichever of them the walk reached first.
+# The box is in the tree exactly once. Two would mean something else under this
+# window carries the same label -- WebKit exposing an input and a wrapper of it
+# both, say -- and this driver would be asserting against whichever of them the
+# walk reached first. What `just witness-unit` pins is the other half of this:
+# that `QueryBox.svelte` still carries the label at all.
 boxes=$("$ax" find "$pid" "$QUERY_BOX_LABEL")
 [ "$boxes" = 1 ] || die "expected one element labelled '$QUERY_BOX_LABEL' in the tree, found $boxes"
 
