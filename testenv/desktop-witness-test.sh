@@ -6,12 +6,13 @@
 # themselves where macOS and `swiftc` are not both present.
 #
 # What is under test is `desktop-witness-lib.sh`: the path comparison the
-# harness makes against Launch Services' answer, and the reading of the
-# accessibility probe. Both are small enough to look correct and have been
-# wrong in this exact shape before -- the notification prototype lost a run to
-# a bundle path that differed by where it was copied from, and an unanswered
-# TCC prompt is recorded as a *denial*, so "no news" from a probe is the one
-# reading that must never come back as "granted".
+# harness makes against Launch Services' answer, the reading of the
+# accessibility probe, and the pieces `open-in-editor` is built out of. The
+# first two are small enough to look correct and have been wrong in this exact
+# shape before -- the notification prototype lost a run to a bundle path that
+# differed by where it was copied from, and an unanswered TCC prompt is
+# recorded as a *denial*, so "no news" from a probe is the one reading that
+# must never come back as "granted".
 #
 # The probe fixtures below are recorded output from `ax probe` on the dev Mac
 # on 2026-09-08, not invented shapes: the `screen-locked` one is what the first
@@ -258,10 +259,13 @@ check_waits() {
     check "$1" "$2" "$outcome"
 }
 
-# No trap: `check` never exits, so this directory is removed at the foot of the
-# section, and the one way past that line is an error that ends the run -- when
-# a directory under TMPDIR is the smallest of the problems.
+# Removed at the foot of the section, and by a trap until then: `check` never
+# exits, but `wait` on the background writer below does under `set -e`, and
+# that is an exit between the `mktemp` and the `rm -rf`. The helper section at
+# the foot of this file replaces this trap with its own, by which point this
+# directory is already gone.
 records=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-records.XXXXXX")
+trap 'rm -rf "$records"' EXIT
 
 printf '/Users/mara/src/payout-service\n' >"$records/whole"
 printf '/Users/mara/src/payout-serv' >"$records/half"
@@ -322,8 +326,9 @@ if grep -qF "text.ends_with('\\n')" "$twin"; then
     check "the Rust twin still waits for the trailing newline" yes yes
 else
     check "the Rust twin still waits for the trailing newline" yes no
-    printf '  %s no longer waits on text.ends_with in recorded();\n' "$twin" >&2
-    printf '  record_is_complete is the shell copy of that condition (#531).\n' >&2
+    printf '  %s no longer contains text.ends_with(...) anywhere;\n' "$twin" >&2
+    printf "  recorded()'s wait is what that spelling stands for, and\n" >&2
+    printf '  record_is_complete is the shell copy of it (#531).\n' >&2
 fi
 
 # --- the accessible names the open-in-editor driver acts on -----------------
