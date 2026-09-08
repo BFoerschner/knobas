@@ -95,10 +95,36 @@ const MAX_ID_CHARS: usize = 48;
 ///
 /// Every one of them is a `count(*)` over the corpora on the launcher's board
 /// path (`sql::saved_summary_sql` folds them into one round trip, which saves
-/// the latency and not the scans). The cap is generous -- nobody curates
-/// sixty-four saved lists -- and it is here so that the board's cost has a
-/// stated ceiling rather than an unbounded one.
-pub const MAX_SAVED_LISTS: i64 = 64;
+/// the latency and not the scans). The cap is here so that the board's cost
+/// has a stated ceiling rather than an unbounded one.
+///
+/// # Sixteen is a measured number (#533)
+///
+/// It was **64**, chosen as generous on the reasoning that nobody curates
+/// sixty-four saved lists. `knobas-search`'s perf gate now fills the rail
+/// through [`create`] over the launcher's own query shapes and times
+/// `smart_lists` and `launcher_board` at 100 k items -- spec §14's corpus, and
+/// the size the 100 ms budget names. On an unloaded machine, 2026-09-08:
+///
+/// ```text
+/// saved lists       0    1    2    4    8   16   32   64
+/// launcher_board   41   53   55   60   81   84  132  212   p90 ms
+/// ```
+///
+/// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
+/// of two and nothing measured it until now. The rail costs about 2.7 ms a
+/// list on top of the built-ins' 41 ms, which leaves room for roughly
+/// twenty-two; sixteen is that with margin.
+///
+/// **Eight would not have been meaningfully cheaper** -- 81 ms against 84 --
+/// because what a rail costs depends on the *shapes* on it as much as on how
+/// many: one saved browse over a whole source outweighs several saved
+/// searches for a word. Halving the allowance to buy three milliseconds is the
+/// trade this number declined.
+///
+/// Lowering it stays cheap and raising it is not: the budget does not move, so
+/// a larger rail is a cheaper statement's to earn, not a constant's.
+pub const MAX_SAVED_LISTS: i64 = 16;
 
 /// One row of `knobas.smart_list`.
 #[derive(Debug, Clone, sqlx::FromRow)]

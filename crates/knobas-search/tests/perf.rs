@@ -389,6 +389,43 @@ async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
 /// the reading the constant in `saved.rs` is chosen from. The module docs
 /// carry the reasons and the record.
 ///
+/// # The reading, 2026-09-08 (#533)
+///
+/// Recorded here for the reason the estate test's own table is: an
+/// `#[ignore]`d benchmark whose result lives in a review thread is a claim the
+/// next reader has to re-earn before they can tell a regression from a busy
+/// machine. Taken on this Mac with a one-minute load average of 3, which the
+/// method section above is about.
+///
+/// ```text
+/// case                25000    50000   100000
+/// browse, no text        13       28       59     <- the worst of the ten
+/// lists, empty rail      20       24       40
+/// lists, 16 saved        36       48       85
+/// launcher_board         38       53       86
+///
+/// the rail at 100000 items, p90 ms:
+/// saved lists       0    1    2    4    8   16
+/// smart_lists      39   52   54   61   79   86
+/// launcher_board   42   53   57   60   81   87
+/// ```
+///
+/// **The built-ins are most of the budget.** An empty rail already costs 40 ms
+/// of the hundred at 100 k items, so what a saved list is charged against is
+/// the sixty that are left, at about 2.8 ms each -- room for roughly twenty,
+/// which is where `saved::MAX_SAVED_LISTS = 16` comes from.
+///
+/// The same run before the constant came down, with the cap still at its
+/// original 64: `smart_lists` **210 ms** and `launcher_board` **212 ms**, with
+/// 32 lists at 131 and 132. Twice the budget, and nothing had measured it --
+/// which is the whole of what #533 was for.
+///
+/// What the rail costs depends on the **shapes** on it and not only on how
+/// many: eight lists read 81 ms against sixteen's 87, because the eighth of
+/// [`CASES`]' shapes is `browse, no text`, one saved browse over a whole
+/// source, and it outweighs several saved searches for a word. That is why the
+/// step from 4 to 8 costs more than the step from 8 to 16.
+///
 /// # The harness shape, recorded because it is load-bearing
 ///
 /// **Cumulative**: 25 k, then +25 k, then +50 k, with a `vacuum (analyze)`
