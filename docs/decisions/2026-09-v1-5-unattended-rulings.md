@@ -125,3 +125,99 @@ Ruled 2026-09-08. Comment:
 
 **For the orchestrator:** file the part-1 ticket (v1.5, `ready-for-agent`, blocked by #498, a tunnel ticket) and record this ruling's three parts here through PR #520's implementer, with the one clause of part 2 added to the §10.8 entry and the §9 sentence. The merge-manager may proceed on #520 once those two edits are on the branch.
 
+---
+
+## #500 — the desktop witness meets a locked screen
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/500#issuecomment-5576924248>
+
+**The fork:** PR #523 built the desktop-witness harness and could not run it.
+ADR-0016 says the witness is desktop automation with *"No human step — Björn
+ruled the same day that nobody will be there once the implementation runs"*,
+but macOS delivers no synthetic keystroke to an application behind the lock
+screen and only a person can unlock a Mac — so an unattended desktop witness
+has a human *precondition* even though it has no human *step*, and criterion
+2's green ⌘K transcript could not be produced. Both blockers were measured: the
+dev Mac locked since 2026-09-07 22:47 CEST, the harness refusing
+`screen-locked` with exit 1; and `/Applications/knobas.app` (v0.1.0) keeping
+the `dev.knobas.desktop` registration through an `lsregister -f` on the freshly
+built bundle. Four options: **A** merge with criterion 2 open, file a follow-up
+for the run, release the desktop slot; **B** hold the PR and the slot until the
+Mac is unlocked; **C** A plus an ADR-0016 amendment, so *no human step* is not
+later read as *no human prerequisite*; **D** something else discharges ⌘K. The
+implementer leaned C.
+
+**Ruling:** **C.** PR #523 merges with criterion 2 open and disclosed, once its
+merge-manager is satisfied on everything else; the merge-manager re-runs `just
+desktop-witness launcher-hotkey` as ADR-0016 asks and the transcript it must
+get is the same `screen-locked` refusal, exit 1 — the expected result on this
+Mac, not a regression. Every other criterion is held in full: `just check`
+green with `witness-unit` in it, the README's *What is not witnessed yet*
+present and true, criterion 2 left unchecked. `Closes #500` stays. **ADR-0016
+gains one dated consequence**, written by the implementer in the shape
+ADR-0013 uses for its 2026-09-07 addition: *"No human step" is not "no human
+precondition"* — the three preconditions a person meets once and the harness
+probes on every run (the Accessibility grant, an unlocked logged-in session, no
+other copy of `dev.knobas.desktop` registered), each a refusal that names the
+thing by its System Settings name and exits non-zero; that the criterion stays
+open until an unlocked run, with no fake, dry-run mode or hand checklist
+standing in (ADR-0013); that the grant is **Accessibility, not Automation**,
+because an Apple Event prompt nobody answers is recorded by TCC as a denial
+(`auth_reason 9`, measured twice); and that the harness never moves an
+installed app aside. **The desktop slot is released when #523 merges**: #501
+and then #503 proceed in number order under the one-desktop-ticket cap, write
+their drivers against this harness, and merge with the same one criterion open,
+the `screen-locked` refusal as their run, and every other criterion held —
+driver logic goes in a lib file `witness-unit` covers, on the split #523 drew,
+because a driver is not exempt from the gate because its run is. **One
+follow-up ticket** — #525, `ready-for-human`, milestone v1.5 — carries the
+unlocked run for all three drivers, and **the v1.5 exit is not taken while it
+is open**. **D is refused**: there is no route around the lock, and no
+substitute discharges ⌘K.
+
+**Reasoning:** the answer to the fork's premise was already in the spec. #491's
+*Desktop witness, no human* reads *"The one-time prerequisite — the automation
+permission for the terminal that runs the driver — is recorded in the testenv
+README beside the signing identity, and a refused permission is a named
+failure, not a silent pass"*: Björn's ruling already lives beside a human
+prerequisite and already distinguishes it from a step in the run. An unlocked
+session and a clear registration are prerequisites of that class, so *no human
+step* never meant *no human prerequisite* — but it is the reading the ADR's
+compressed sentence invites, which is why the ADR and not only the README is
+corrected. A over B because of what Björn's ruling was for: *"I will not be
+there once the implementation runs"*, and the `ready-for-human` checklist *"is
+superseded"* — B produces exactly the stall the ruling exists to prevent, at
+the price of three tickets, for a condition no agent can change; the 2026-08-29
+ruling on #92 is the precedent for merging with a live criterion owed. C over A
+because #501's and #503's implementers will open ADR-0016, read *No human
+step*, and stand at this same fork with #523's PR body nowhere in front of
+them. The witness stays real, which is why the run is deferred and not
+replaced: ADR-0013's 2026-09-07 consequence draws the line at *"awkward to
+reproduce is not cannot produce"*, and the desktop can be driven — just not
+now. That is a deferred live witness, not the fake's class, so the exit holds
+on #525; closing v1.5 with its three OS-level features never once driven would
+contradict the grilling's witness ruling as surely as a hand checklist would.
+The Accessibility-over-Automation mechanism is confirmed not because a sketch
+may be discarded but because the reason is measured and the ADR's binding word
+is the generic one. The frozen surface is untouched — `justfile` and
+`testenv/**` only — and nothing here adds to it.
+
+**If you disagree, the cost of reversing this is:** low before #525 runs, and
+lower the sooner it runs. Reversing to B unmerges nothing — the follow-up
+already holds the debt and the exit already waits on it; what B would add is
+only that #501 and #503 had not been written yet, which cannot be recovered.
+Reversing the ADR sentence is one dated strike-through in the style ADR-0013
+carries. If the first unlocked run is red — the WKWebView question the README
+names — the three drivers are re-done against whatever the `ax dump` shows,
+the same cost under A, B or C, paid once. The one thing this spends that
+cannot be returned is a milestone in which three features merged before their
+OS-level witness ran, on the disclosure in three PR bodies and one README
+section; #525 is where to say that was the wrong trade, and it is the last item
+between v1.5 and its exit.
+
+**Flagged, not ruled:** whether `ready-for-human` should carry a standing
+meaning of *a precondition only a person meets, the work itself scripted*,
+distinct from the retired checklist — a triage-vocabulary question
+(`docs/agents/triage-labels.md`) for Björn's return; this ruling uses the label
+once, for #525.

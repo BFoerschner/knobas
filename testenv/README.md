@@ -1143,6 +1143,156 @@ written from `notify-rust` 4.18.0's sources and have not been clicked on
 either platform -- disclosed here, in `notify.rs`'s and
 `notify.svelte.ts`'s module headers, and in `docs/contract.md` §10.8.
 
+## The desktop witness (macOS)
+
+Three of knobas' features belong to the operating system rather than to the
+app -- open-in-editor, open-in-terminal and the ⌘K capture shortcut -- and
+there is no instance to run a suite against, so ADR-0016 makes their witness a
+*scripted run against a real bundle*, not a checklist somebody ticks. This is
+that harness (issue #500).
+
+```sh
+just desktop-witness launcher-hotkey    # the drivers are listed if you omit one
+```
+
+It builds and signs a debug bundle with the `knobas-dev` identity from the
+section above, registers it with Launch Services, checks that this session can
+actually drive a desktop, launches the bundle **from the path Launch Services
+resolves `dev.knobas.desktop` to** on the demo profile, waits for its window,
+asserts that exactly one instance is running, runs the named driver, and quits
+the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`; the first
+one presses ⌘K, asserts through the accessibility tree that the launcher's
+query box has focus (`AXTextField`, labelled *Search or act*, which is the
+`aria-label` in `QueryBox.svelte`), and presses Escape -- after which the box
+must be gone from the tree, because `Launcher.svelte` renders the overlay
+under `{#if open}` and a closed launcher takes its input out of the DOM. That
+the label still says *Search or act* is pinned by `just witness-unit`, so an
+edit to it reads as a stale driver at the gate rather than as a failed run
+minutes into somebody's screen.
+
+**Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
+reason for it is that those features have no instance to run a suite against.
+A rendered panel is witnessed by headless Chrome against the `?fake-ipc` dev
+server -- the deputy's ruling of 2026-09-08 on #496, which seven tickets
+depend on -- and not here. This harness takes the screen and runs one at a
+time; putting panel QA on it would serialise the milestone behind it.
+
+One witness runs on a machine at a time, and the harness enforces it rather
+than asking: it takes `$TMPDIR/knobas-desktop-witness.lock` with `mkdir` and
+refuses if another run holds it. Two runs would fight over one screen, one
+bundle identifier and one Launch Services registration, and the loser would
+report the winner's app as its own.
+
+`just desktop-witness` is **not** part of `just check` and must not become
+part of it. What the gate carries is `just witness-unit`
+(`testenv/desktop-witness-test.sh`), over the two pieces of the harness that
+are decisions rather than side effects: how it compares Launch Services'
+answer against the bundle it built, and how it reads the accessibility probe.
+
+### The prerequisites
+
+1. **The `knobas-dev` code-signing identity**, exactly as the *Signed dev
+   build* section above creates it.
+
+2. **Accessibility, granted once to the terminal that runs the witness.**
+   System Settings → Privacy & Security → **Accessibility**, and the entry to
+   add is the terminal application (`com.mitchellh.ghostty` on the dev Mac),
+   not a script. A shell started before the grant does not see it; start a new
+   one.
+
+   **Accessibility, and deliberately not Automation.** The obvious way to
+   write a driver is `osascript` against `System Events`, and every one of
+   those is an Apple Event, which TCC gates under *Automation* with a per-
+   target modal prompt. Nobody is at this machine when the ticket loop runs,
+   and an unanswered prompt is not a deferral -- TCC records it as a **denial**
+   (`auth_reason 9`). Both of the dev Mac's Automation rows were written that
+   way on 2026-09-08, one for `com.apple.systemevents` and one for
+   `dev.knobas.desktop`, by two probes nobody was there to answer, and a
+   denied grant is sticky. So `testenv/desktop-witness/ax.swift` uses the
+   accessibility API and `CGEvent` directly instead: one grant, made once, no
+   prompt at run time. `AXIsProcessTrusted()` and
+   `CGPreflightPostEventAccess()` are what the harness probes, and neither
+   prompts.
+
+3. **An unlocked screen.** Not a formality: no synthetic keystroke reaches an
+   application behind the lock screen, and the window server answers a query
+   for a third-party app's windows with the *application* element instead of
+   the window, so a driver behind a lock reads an empty tree and blames the
+   app. Measured on 2026-09-08, locked: Ghostty, knobas, WhatsApp, Helium and
+   Proton Mail all answered `AXWindows` with one element whose role was
+   `AXApplication`, while `AXMenuBar` came back in full. The harness probes
+   `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` and refuses,
+   twice -- once before the build and once after it, because a build takes
+   minutes and the only moment worth probing is the one just before the
+   keystroke.
+
+4. **No other copy of `dev.knobas.desktop` registered with Launch Services.**
+   The witness has to launch the copy LS has registered, for the reason the
+   *Signed dev build* section gives: a notification click activates that copy,
+   whichever it is, and a click that finds a different one running starts a
+   second instance. Measured on 2026-09-08: with `/Applications/knobas.app`
+   installed (v0.1.0), `lsregister -f` on a freshly built debug bundle did
+   **not** move the registration -- `dev.knobas.desktop` still resolved to
+   `/Applications/knobas.app`. Which copy LS prefers among several carrying
+   one identifier is not a documented API and the installed one wins, so the
+   harness refuses rather than launching a copy LS does not name. Move or
+   remove the installed knobas for the length of the run — that is the
+   runner's job, not the harness's, and #525 carries it as a precondition. The
+   harness never moves it for you, and it re-registers whatever was registered
+   before on its way out.
+
+5. **`swiftc`**, from the Command Line Tools. The accessibility helper is one
+   Swift file compiled into a scratch directory on each run (about 2 s);
+   nothing is committed as a binary.
+
+Every refusal names the permission by the name it has in System Settings and
+points back at this section, and exits non-zero.
+
+### What is not witnessed yet
+
+As of 2026-09-08 **no green driver run exists**, and the debt has a number:
+**issue #525**, *Desktop witness: the first unlocked run*, which carries the
+run for every driver this harness gains and which the v1.5 exit waits on. The
+dev Mac has been locked since 22:47 CEST with no HID input for nearly three
+hours, and Björn is away for the milestone; the harness refuses at its first
+probe, which is the correct behaviour and is **not** a witness of the ⌘K
+assertion — a refusal is not a witness of the assertion. The deputy's ruling
+of 2026-09-08 on #500 settles what follows from that: the ticket merges with
+its run-criterion open and disclosed, nothing stands in for the run (no fake,
+no dry-run mode, no hand checklist — ADR-0013), and ADR-0016 now carries the
+dated consequence that *"No human step" is not "no human precondition"*.
+
+Three things are therefore still open, and none should be read as proven by
+this file existing:
+
+* whether a Tauri window's `WKWebView` exposes the launcher's input to the
+  accessibility API at all. Some web views build their tree only when an
+  assistive client asks, and behind the lock screen there is no way to find
+  out; `ax dump` in the driver's failure path is there so that the first
+  unlocked run diagnoses itself rather than needing a second.
+* the launch, single-instance, driver and quit steps, which begin after the
+  probe the harness stops at.
+* which of `AXDescription` and `AXTitle` a WebKit text field carries an
+  `aria-label` on. The driver accepts either, and asserts the role separately,
+  so this cannot make it pass on the wrong element -- but it has not been seen.
+
+What *is* witnessed, on 2026-09-08, and by what:
+
+* **from a harness run**, `just desktop-witness launcher-hotkey`: the refusal.
+  `screen-locked`, naming the permission and this section, exit 1.
+* **from its own commands run by hand**, because the harness refuses before it
+  reaches them: the build and signing step -- `Authority=knobas-dev`,
+  `Identifier=dev.knobas.desktop`, `codesign --verify --deep --strict` clean,
+  the bundle at `target/debug/bundle/macos/knobas.app`, which is the first of
+  the two paths the harness looks in -- and the Launch Services measurement in
+  prerequisite 4 above.
+
+Nothing between the probe and the quit has run at all.
+
+**A merge-manager re-running `just desktop-witness` on this Mac gets the same
+`screen-locked` refusal, exit 1.** That is the expected result here, not a
+regression; #525 is where it stops being.
+
 ## Scripts
 
 | Script | Does |
@@ -1159,6 +1309,8 @@ either platform -- disclosed here, in `notify.rs`'s and
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
+| `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
+| `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison and the accessibility probe's reading. No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
 ## mockd's documented deviations
