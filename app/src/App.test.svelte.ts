@@ -419,11 +419,17 @@ vi.mock("./lib/ipc/assets", () => ({
   createRoute: () => Promise.reject(new Error("no estate writes in this test")),
   editRoute: () => Promise.reject(new Error("no estate writes in this test")),
   deleteRoute: () => Promise.reject(new Error("no estate writes in this test")),
-  // The Import's two halves (#439), here for `contextAssets`' reason: the Tree
-  // reads both at module scope, and a mock short of an export throws inside
-  // the view's effect rather than failing as a missing feature.
+  // The Import's three halves (#439, #509), here for `contextAssets`' reason:
+  // the Tree reads all of them at module scope, and a mock short of an export
+  // throws inside the view's effect rather than failing as a missing feature.
   previewEstateImport: () => Promise.reject(new Error("no import in this test")),
   applyEstateImport: () => Promise.reject(new Error("no estate writes in this test")),
+  produceEstateFile: () => Promise.reject(new Error("no importer in this test")),
+  // The chooser's two lists are deliberately **not** here: `ImportDialog`
+  // reads them, and no test in this file opens that dialog. A copy would be a
+  // second chooser to keep in step with the real one, and the day it drifted
+  // nothing would notice -- `AssetsView.import.test.svelte.ts` is where the
+  // chooser is asserted, against the real list.
 }));
 
 /**
