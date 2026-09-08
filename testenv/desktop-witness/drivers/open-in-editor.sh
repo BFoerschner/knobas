@@ -232,13 +232,18 @@ say "pressing '$OPEN_BUTTON'"
 "$ax" press "$pid" "$OPEN_BUTTON" || die "could not press '$OPEN_BUTTON'"
 
 # The spawn is asynchronous by construction: `open_checkout` answers when the
-# program has *started*, so what is polled for is the stub's own output.
-deadline=$((SECONDS + SPAWN_SECONDS))
-while [ "$SECONDS" -lt "$deadline" ]; do
-    [ -s "$record" ] && break
-    sleep 0.2
-done
-[ -s "$record" ] || die "the stub was never run: nothing at $record after ${SPAWN_SECONDS} s"
+# program has *started*, so what is polled for is the stub's own output --
+# finished, in the sense `record_is_complete` gives the word, and not merely
+# begun. The wait lives in the lib because `witness-unit` covers the lib and
+# this is a decision rather than a side effect (#500's ruling, #531).
+if ! wait_for_record "$record" "$SPAWN_SECONDS"; then
+    printf 'open-in-editor: what is at %s now:\n' "$record" >&2
+    { cat "$record" 2>/dev/null || printf '(nothing at that path)\n'; } |
+        sed 's/^/open-in-editor:   /' >&2
+    die "the stub never finished writing a record after ${SPAWN_SECONDS} s." \
+        "A record is finished when it ends in a newline -- the condition" \
+        "recorded() waits for in crates/knobas-app/tests/checkout_ipc.rs."
+fi
 
 recorded=$(cat "$record")
 only=$(sole_argument "$recorded")

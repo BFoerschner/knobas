@@ -1214,10 +1214,11 @@ part of it. What the gate carries is `just witness-unit`
 (`testenv/desktop-witness-test.sh`), over every piece of the harness that is a
 decision rather than a side effect: how it compares Launch Services' answer
 against the bundle it built, how it reads the accessibility probe, and the
-three text functions `open-in-editor` is built out of -- the stub it writes,
-the git config it writes, and its reading of what the stub recorded -- and the
-four `capture` is: the title a typed paragraph gives its note, the whole-line
-match its readings are found by, the reading of `ax frontmost`'s answer, and the
+four pieces `open-in-editor` is built out of -- the stub it writes, the git
+config it writes, its wait for the stub's record to be *finished* rather than
+merely begun, and its reading of what the record says -- and the four `capture`
+is: the title a typed paragraph gives its note, the whole-line match its
+readings are found by, the reading of `ax frontmost`'s answer, and the
 rendered-name rule above, which both drivers share. A driver is not exempt from
 the gate because its *run* is.
 

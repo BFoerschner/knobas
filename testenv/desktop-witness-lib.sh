@@ -193,6 +193,52 @@ git_config() {
     printf '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n' "$1"
 }
 
+# record_is_complete <record-path>
+#
+# Whether the stub has finished writing: something is there, and it ends in a
+# newline.
+#
+# The newline and not merely a non-empty file, because the newline is what
+# `recorded()` waits for in `crates/knobas-app/tests/checkout_ipc.rs`, and the
+# two are watching the same stub write the same file in the same shape. The
+# stub's `> file` is one open and one write, so half a record is unlikely
+# rather than impossible; what half a record produces is a comparison against
+# half a line, reported as *the command was not given the checkout path* -- the
+# feature blamed for a race in the harness, at the one moment the witness
+# matters (#531).
+#
+# `-s` as well as the newline test, and it is load-bearing: `tail -c 1` of an
+# empty file prints nothing, which is the same answer it gives for a file that
+# ends in a newline. Without it the empty file the stub's `> file` leaves
+# between its open and its write would read as a finished record.
+record_is_complete() {
+    [ -s "$1" ] && [ -z "$(tail -c 1 "$1")" ]
+}
+
+# wait_for_record <record-path> <seconds>
+#
+# Poll until the record is complete, or give up after <seconds>. True when it
+# arrived.
+#
+# A deadline rather than a sleep, which is the shape `recorded()` polls in and
+# for its reason: the IPC call behind the button answers when the program has
+# *started*, which is the only thing a call that does not wait for a process
+# can promise, so what is waited on is the stub's own output.
+#
+# The condition is read once more after the deadline, so a record that landed
+# during the last sleep is a record rather than a failure reported one poll too
+# early. That final read is also what makes a budget of 0 mean *look once*,
+# which is what `witness-unit` asks it for.
+wait_for_record() {
+    local path=$1 seconds=$2
+    local deadline=$((SECONDS + seconds))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        record_is_complete "$path" && return 0
+        sleep 0.2
+    done
+    record_is_complete "$path"
+}
+
 # sole_argument <recorded text>
 #
 # The one argument the stub recorded, or nothing at all.
