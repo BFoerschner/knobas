@@ -32,6 +32,22 @@
 //! down something it never understood -- and it is why the test for it inserts
 //! its row with SQL: there is no command that can make one.
 //!
+//! **And nothing ever rewrites a stored query.** There is no editor for one
+//! and there is no migration that could be written for one: a data migration
+//! that "upgraded" stored text to a newer grammar would be a parse in
+//! disguise, committing the migration's reading of what the reader wrote, and
+//! it would make *needs attention* a state no row can reach. `CONTEXT.md`'s
+//! **Smart list** carries that rule. A refused row is deleted and the search
+//! saved again, which is what [`Refusal::description`] offers.
+//!
+//! # What is *not* a refusal
+//!
+//! A database fault. [`summaries`] propagates [`SearchError::Db`] with `?` on
+//! all three of its reads, so a statement that fails surfaces as `internal`
+//! and the launcher says so. A rail of *needs attention* rows means the
+//! grammar refused those queries and nothing else; it is never how a broken
+//! database looks.
+//!
 //! # What this module deliberately does not do
 //!
 //! * **No `list:` inside a saved query.** A saved list of a saved list is an
@@ -126,6 +142,14 @@ impl Refusal {
     ///
     /// Begins with [`NEEDS_ATTENTION`] so that the words a reader sees and the
     /// words a test asserts on are the same string, produced once.
+    ///
+    /// **It ends by offering what actually clears the state, which is not a
+    /// rename.** A rename changes the label; the query is what today's grammar
+    /// refuses, and nothing edits a stored query -- see the module docs and
+    /// `CONTEXT.md`'s **Smart list**, which is where the rule that no
+    /// migration ever rewrites one lives. So the way out is to delete the row
+    /// and save the search again, which is one search away in the box the
+    /// reader is already looking at.
     #[must_use]
     pub fn description(&self) -> String {
         let reason = match self {
@@ -142,7 +166,7 @@ impl Refusal {
                 "the saved query has no words and no filters left in it".to_owned()
             }
         };
-        format!("{NEEDS_ATTENTION}: {reason}. Rename it or delete it.")
+        format!("{NEEDS_ATTENTION}: {reason}. Delete it and save the search again.")
     }
 }
 

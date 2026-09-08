@@ -8379,8 +8379,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   breaking the board. **Ratified by the orchestrator under #506's own first criterion, which asks
   for these entries by name** (*"The migration creates the table and is never edited afterwards;
   §10.8 entries for it and the three commands"*), and by spec #491's stream map row 8, which lists
-  the touches as *"one migration (`smart_list`); IPC create/delete"*. Björn keeps the gate for
-  frozen contracts and this entry is flagged for his review.
+  the touches as *"one migration (`smart_list`); IPC create/delete"* — two commands where the ticket
+  says three, and story 58 (*"rename and delete a saved list"*) is why the ticket's count is the
+  operative one. Björn keeps the gate for frozen contracts and this entry is flagged for his
+  review — ratified in his absence by the deputy's ruling of 2026-09-08 on #506
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`).
 
   **Migration `0025` — one table, and nothing else.** `knobas.smart_list (id, label, query,
   created_at, updated_at)`, with three check constraints: the id is a slug `list:` can name
@@ -8409,6 +8412,24 @@ From this commit on, each of the following requires an orchestrator decision **a
     57 in as many words, and one id namespace: `list:<id>` resolves a built-in first and a saved
     row second, and `saved::free_id` walks past every built-in id so a saved *My items* cannot
     shadow `list:mine`.
+  * **Neither field carries `#[serde(default)]`, and none is owed** — the sentence every
+    field-on-a-DTO entry before this one has had to answer (#39's `coverage`, #141, #284's
+    `path`, *"so a row written or piped by a peer built before this still decodes"*).
+    `SmartListSummary` derives `Deserialize`, but **nothing decodes one**: every value is
+    constructed in `knobas_search::lists` or `::saved` and serialized outwards, it rides only
+    inside `LauncherBoard` and `LauncherHome` — both write-only in the same sense — and it is in
+    no archive, no settings row and no file. `pg_dump` carries tables, and this DTO is not one.
+    So there is no older shape to decode and the attribute would document a compatibility nobody
+    can exercise. Checked by reading every mention of the type in the workspace: nine in
+    `knobas-search`, nine in `knobas-app` (five signatures, one field, three in tests), and not
+    one `serde_json::from_*` or `#[derive(FromRow)]` among them. Should a decode site ever appear
+    — a share archive that carried saved lists as DTOs, say — that is the commit which owes the
+    attribute and an entry of its own.
+  * **A database fault is not *needs attention*.** `saved::summaries` propagates
+    `SearchError::Db` with `?` on all three of its reads (the row read, the counting statement,
+    the seen-stamps), so a statement that fails surfaces as `internal` and the launcher says so.
+    `needs_attention: true` means the **grammar** refused that query and nothing else; the field
+    is never how a broken database looks, and no path on the branch sets it from an error.
   * **One barrel grows three lines, not two files.** `crates/knobas-app/src/lib.rs`'s handler list
     gains the three commands, which `wiring.rs`'s `every_command_is_in_the_handler_list` requires.
     `app/src/lib/ipc/index.ts` lists **modules and events**, not functions, and `./search` is
@@ -8446,7 +8467,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_rail_with_nothing_saved_sends_no_statement`; `knobas_search::saved`'s
   `a_slug_is_addressable_whatever_the_label_was` and
   `every_refusal_names_its_own_rule_under_one_heading`; and, on the panel,
-  `Launcher.test.svelte.ts`'s six saved-list cases.
+  `Launcher.test.svelte.ts`'s **seven** saved-list cases — the rail beside the built-ins, the
+  needs-attention row that does not open (by pointer *and* by `Enter`), *Save as list* offered on
+  a query and not on the board, the same control kept off the `>` palette and the `?` card, the
+  rename, the two-press delete, and the `Tab` chain.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

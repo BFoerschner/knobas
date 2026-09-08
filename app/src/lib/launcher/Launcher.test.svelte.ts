@@ -1501,7 +1501,8 @@ const SAVED_HOME: LauncherHome = {
       label: "Palette",
       count: 0,
       changed: false,
-      description: "Needs attention: the saved query starts with a prefix that is not a search.",
+      description:
+        "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again.",
       saved: true,
       needs_attention: true,
     },

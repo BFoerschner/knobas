@@ -3044,7 +3044,7 @@ function fakeSavedLists() {
     // which rule refused it -- `saved::Refusal::description`, whose heading is
     // the wording the rail draws.
     description: list.broken
-      ? "Needs attention: the saved query starts with a prefix that is not a search. Rename it or delete it."
+      ? "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again."
       : list.query,
     saved: true,
     needs_attention: list.broken === true,

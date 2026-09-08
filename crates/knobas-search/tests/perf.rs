@@ -49,6 +49,30 @@
 //! on which `tombstone` ("rare word") matched 60,000 rows of 100,000. The
 //! fixture had been replaced and its description had not, in the one file
 //! whose stated purpose is to say what the fixture is.
+//!
+//! ## No saved smart list is on this rail (#506, and #533 is what measures it)
+//!
+//! `knobas.smart_list` is **empty in this fixture**, so `saved::summaries`
+//! returns on its first read and the `lists_ms` assertion below covers the
+//! **built-in half of the rail and nothing else**. That is not the budget the
+//! feature is held to: spec #491 story 57 says a saved list shows its count
+//! *"like the built-ins"*, on the same `⌘K`, so the saved half is inside the
+//! same 100 ms.
+//!
+//! This is a gap of its own kind and worth naming as one -- not a criterion
+//! that cannot pass and not a fixture blind in one direction, but **a budget
+//! whose fixture stopped covering what the budget names**, which is the same
+//! failure the paragraph above records in a different place. What is unknown
+//! is the cost of `saved::summaries` at `saved::MAX_SAVED_LISTS`: the three
+//! reads it makes, and the `union all` of aggregates, over a 100k corpus.
+//!
+//! **#533** (v1.5, blocked by #506) closes it: it seeds `MAX_SAVED_LISTS`
+//! lists through `saved::create` over the shapes [`CASES`] already names, so
+//! every branch of that `union all` is a query the launcher runs; it times and
+//! gates `smart_lists` at [`BUDGET_MS`] with them on the rail, printed beside
+//! the built-in reading so the two halves are told apart; and it confirms or
+//! **lowers** 64 by the measurement. It may change that constant and it may
+//! not raise this budget.
 
 use std::time::Instant;
 
