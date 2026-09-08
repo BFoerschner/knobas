@@ -1328,8 +1328,10 @@ now sets the clones root, stores its template and confirms the write, and then
 stops where it always said it would — *the demo profile carries no repo entity*.
 `knobas_source_mock::items` emits tickets, PRs, builds, pages and commits, and
 `fixtures/tidewater/work.json`'s repos and branches are parsed and never sent,
-so `--demo` has no repo detail to open. Widening the demo corpus is a change to
-the reference adapter that no ticket has named; **#525** owns it.
+so `--demo` has no repo detail to open. **Two numbers, not one**: **#537**
+widens the demo corpus — a change to the reference adapter, which #503 does not
+name and rightly left alone — and **#525** keeps the run itself, which is its
+third criterion.
 
 #### What the first runs answered
 
@@ -1373,13 +1375,20 @@ the reference adapter that no ticket has named; **#525** owns it.
 
 #### What is still not witnessed
 
-* **`captured-in`.** A capture's second born link needs a **stored** room, and
-  the `--demo` profile carries no context: a reader makes one. Making one
-  inside `capture.sh` means driving the tab strip — another feature's UI — to
-  arrange this feature's fixture, and the first attempt at it lost the field to
-  a blur before its Return. What the link is, and what it points at, is pinned
-  by `crates/knobas-app/tests/capture_ipc.rs` and
-  `app/src/lib/capture/capture.test.svelte.ts`. **#525.**
+* **`captured-in`, and it is not a debt.** A capture's second born link needs a
+  **stored** room, and the `--demo` profile carries no context: a reader makes
+  one. Making one inside `capture.sh` means driving the tab strip — another
+  feature's UI — to arrange this feature's fixture, and the first attempt at it
+  lost the field to a blur before its Return. **Spec #491's stream map puts the
+  capture links' witness elsewhere on purpose**: row 5 reads *"app IPC suite for
+  the links; desktop automation for the shortcut and window"*, and its *Primary
+  seam* paragraph names *"the capture links (stored room, derived room,
+  foreground present and absent)"* at *"the app's commands over a scratch
+  database"*. That witness is `crates/knobas-app/tests/capture_ipc.rs` and
+  `app/src/lib/capture/capture.test.svelte.ts`, and this driver asserting
+  `CAPTURED FROM` is already one link more than that row asks of it. A driver
+  step that makes a stored room is welcome later; it is owed to nothing (the
+  deputy's ruling of 2026-09-08 on #503, part 5).
 * **A shortcut the operating system refuses.** That needs another application
   holding a combination, which no driver can arrange on a machine it does not
   own. The refusal path is pinned at the IPC seam with a stand-in registrar.
@@ -1398,7 +1407,14 @@ the reference adapter that no ticket has named; **#525** owns it.
   afterwards; nothing was moved or deleted. **A merge-manager
   re-running these recipes has to do the same**, or the harness will refuse with
   *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
-  the winner. Making the harness handle that itself is #525's.
+  the winner. **The harness is not going to do it for you, and that is ruled
+  rather than unfinished**: ADR-0016's dated consequence of 2026-09-08 makes a
+  clear registration one of three preconditions *"a person meets once and the
+  harness probes on every run"*, and says in as many words that *"the harness
+  never moves an installed knobas aside to win the registration; that is the
+  runner's job, for the length of the run."* Ten registrations instead of one
+  changes the **recipe**, which prerequisite 4 above now carries; it does not
+  change the rule.
 
 ## Scripts
 

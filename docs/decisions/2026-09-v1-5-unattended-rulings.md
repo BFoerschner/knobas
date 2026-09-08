@@ -879,3 +879,112 @@ criterion 1's search then finds.
 parenthetical is the definition and prose inside the crate is living text — a one-line contract
 amendment in the #112 idiom, Björn's to write or to refuse. This ruling and the decisions record
 carry the reading until then.
+||||||| parent of aaa57e31 (The deputy's ruling of 2026-09-08 on #503, acted on and appended)
+
+---
+
+## #503 — the frozen gate for the capture window, whether an entry may correct the ones above it, a sibling driver's fix riding here, what #525 is now, and `captured-in`
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/503#issuecomment-5578718086>
+
+**The fork:** five, four of them raised by PR #536's own body and one by the ruling itself.
+(1) The PR adds five commands on `commands::entity`, five lines at the foot of `lib.rs`'s handler
+list, the DTOs `ShortcutView` and `Recorded`, the event `capture:open-note`,
+`tauri-plugin-global-shortcut = "=2.3.2"` with a `.plugin(...)` in `run()`, and a second
+capability file — the IPC command and event schema, both append-only barrels and a plugin's
+capability, all on §10.8's list. Does the ticket authorise each touch, is the entry sufficient,
+and may the merge-manager proceed? (2) The implementer wrote that the entry *"corrects two
+sentences above it"*, because §10.8 is append-only and the #500 and #501 entries both say the
+desktop witness has not run. May a new entry correct earlier ones — and, underneath the fork,
+**there is no #500 entry in §10.8** at all. (3) The fix to #501's *merged* driver, which was
+unrunnable because it read markup names where WebKit renders uppercase ones: in #536 or in a
+follow-up? (4) #525's stated subject — *the first unlocked run* — is largely discharged, yet
+three debts sit on it; closed, re-titled, split or held, and what does the exit wait on?
+(5) `captured-in` is not asserted by the driver; owed to #525, to a new ticket, or to nothing?
+
+**Ruling:** (1) **Authorised, and the entry is sufficient as written**; the merge-manager may
+proceed once the ratification clause, this append and parts 2, 4 and 5's edits are on the branch.
+The ticket names each touch in its own words, and the spec's *one* capture-window command against
+the five that landed is covered by the rule recorded three times on #491 — *"the ticket is the
+operative text and the spec's count is a shorthand, not a prohibition."* The entry's
+flagged-for-Björn sentence gains *"— ratified in his absence by the deputy's ruling of 2026-09-08
+on #503"*, the wording #496's, #498's, #505's, #506's and #508's carry. The ticket's *"asserts
+through the IPC seam"* names a mechanism a shell driver does not have, and **reading the note and
+its links panel off the real accessibility tree is the stronger claim**; the deviation stands,
+disclosed. (2) **The mechanism is right and was already ruled; the framing and one fact are
+wrong.** Björn's ruling of 2026-08-31 in the #112 section decides it — *"the old text stands and
+the amendment carries the new truth"* — so #501's sentence stays, #501's entry gains one italic
+pointer in the idiom this file already uses twice, and #503's paragraph is reframed from *two
+sentences are now false … corrected here* to *one sentence is superseded; the new truth is here*.
+**The #500 half goes**: that ruling closed by recording the frozen surface untouched, no entry was
+written, and an entry naming a sentence that is not there is the class this milestone keeps
+catching. (3) **The `open-in-editor` fix stays in #536.** `rendered_label` lands here anyway for
+this driver's own `SHORTCUT`, `CAPTURED FROM` and `LINKED ITEMS`, so merging without it would put
+a driver known to be unrunnable on `main` beside the one function that says why; the harness is
+shared infrastructure already changed twice by PRs that did not own it; the old pin
+(`for="clones-root">Directory<`) pinned a **representation** and stayed green while the driver
+could not pass its first `fill`, which is exactly what the #500 ruling's *"a driver is not exempt
+from the gate because its run is"* forbids; and `testenv/**` is on no frozen surface. Two
+conditions, both other people's: the merge-manager runs `open-in-editor` **to its named refusal**,
+and #531 rebases onto this merge. (4) **#525 is held under its own title and narrowed.** Two of
+its three runs are discharged once the **merge-manager's** re-run transcripts of `launcher-hotkey`
+and `capture` are posted on #500 and #503 — *re-run by the merge-manager* is the criterion, so
+those transcripts are theirs. The third run is still owed and its blocker is a fixture, not a
+lock: one new v1.5 ticket, **#537**, *the demo corpus carries repos and branches, and
+`open-in-editor`'s first green run*, blocked by #503 and #531. Two debts **leave** #525:
+`captured-in` (part 5) and making the harness handle Launch Services, which ADR-0016's dated
+consequence already rules — a clear registration is a precondition *"a person meets once and the
+harness probes on every run"*, and *"the harness never moves an installed knobas aside …; that is
+the runner's job"*. Ten registrations instead of one changes the **recipe**, not the rule.
+`ready-for-human` comes off #525, and the exit's desktop-witness half now waits on exactly two
+numbers: **#531 and #537**. (5) **`captured-in` is not owed — to #525, to a new ticket, or to
+anything.** Spec #491's stream map, row 5, allocates the witnesses — *"app IPC suite for the
+links; desktop automation for the shortcut and window"* — and its *Primary seam* paragraph puts
+*"the capture links (stored room, derived room, foreground present and absent)"* at *"the app's
+commands over a scratch database"*. That witness is on the branch, and the driver asserting
+`CAPTURED FROM` is **one link more** than that row asks of it. The three *"owed to #525"*
+sentences are replaced on this branch.
+
+**Reasoning:** (1) the freeze exists so that a wire shape, a plugin or a capability never arrives
+unannounced, and each was announced in the stream map, named in the ticket's body and first
+criterion, and written up where the freeze points. The smallest frozen surface that meets the
+stories is what landed, and both alternatives are larger on the list: a JavaScript half for the
+plugin means a `global-shortcut:*` permission in `default.json`, which is a webview able to take a
+key combination from every application on the machine; widening `default.json`'s window list
+instead of a second capability file hands the capture window the main window's whole grant where
+it needs one line. The witness ran, with **Finder asserted frontmost and not assumed**, which is
+what makes it a witness of a *global* shortcut. (2) a section append-only for its *entries* has
+always taken pointers into earlier ones, and a later entry that "corrects" an unpointed earlier
+one teaches the next reader of #501 something one entry out of date. (3) *a merged ticket's file
+belongs to that ticket* is not a rule anywhere in the working model; the rules are the gate and
+the frozen list, and this passes both. A follow-up would have left `main` carrying a driver the
+harness refuses at its first field, with #525's runner told to run it. (4) the #500 ruling held
+the exit because closing v1.5 with its three OS-level features never once driven would contradict
+the grilling; two are now driven, and the third is the one ADR-0016 was written for. ADR-0013's
+*"'awkward to reproduce' is not 'cannot produce'"* decides where the fixture-shaped blocker goes:
+`fixtures/tidewater/work.json` already carries the repos and `knobas_source_mock::items` does not
+send them, so a seed closes it and it is a ticket, not a gap. (5) the #502 second ruling's
+standard is that a gap owes something when the unwitnessed direction is the one the feature was
+cut for. That direction is spec #491's *"A thought while some other window is in front has no way
+in"*, and it is witnessed. Which room a capture belongs to is a question of what the main window
+recorded, which the seam answers for every case the spec lists; driving another feature's UI to
+arrange this feature's fixture, with a blur race found on the first attempt, would be a flaky
+witness of a thing witnessed where the spec put it.
+
+**If you disagree, the cost of reversing this is:** (1) moderate after merge — five commands and
+an event leave the barrels only by a further §10.8 entry, the plugin leaves `Cargo.toml` with its
+capability file; no migration, so nothing is irreversible in a database. Before merge it is one
+revert. (2) trivial, and by amendment: one paragraph and one pointer — and undoing the pointer is
+a further pointer, since deleting it would itself rewrite a record. (3) trivial — thirty-three
+lines in one driver revert and `rendered_label` stays for `capture.sh`; the driver is then
+unrunnable again until the follow-up lands, which is the interval this declined to open.
+(4) low: closing #525 on two runs is one label and one comment, and closing #537 `wontfix` costs
+nothing in code — what it spends is that the ADR-0016 witness for *Open in editor* never runs
+inside v1.5. (5) trivial — a follow-up ticket for the stored-room step, `testenv/**` only, at any
+time; nothing on the branch forecloses it.
+
+**Flagged, not ruled:** whether `testenv/desktop-witness/**` should be named shared infrastructure
+in `docs/agents/working-model.md` — three PRs have now changed another ticket's driver or the
+harness under it, each rightly, and a sentence saying so would spare the next implementer this
+fork. Björn's, on his return.

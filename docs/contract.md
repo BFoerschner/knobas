@@ -8374,6 +8374,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   **One criterion of #501 is open and disclosed**, per the deputy's ruling of 2026-09-08 on #500:
   the desktop witness has not run. `testenv/README.md`'s *What is not witnessed yet* carries it,
   and it is owed to **#525**.
+
+  *The sentence above was true when it was written and was superseded on 2026-09-08: the screen
+  was unlocked and the harness ran — see **Five IPC commands, one event, one plugin and a second
+  capability — issue #503** below, which carries the new truth. This criterion is still open, and
+  now for the demo corpus alone: `open-in-editor` reaches the step where a repo detail should
+  open and `--demo` carries no repo entity.*
 - **Migration `0025` and three IPC commands on the search module — issue #506 (2026-09-08): the
   search a reader saved.**
 
@@ -8599,7 +8605,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   application: a shortcut registered with the window server, held while knobas is not the
   application being typed at. Ratified in advance by spec #491 (stories 40–43) and by the ticket's
   own first criterion, which asks for this entry by name. **Björn keeps the gate for frozen
-  contracts and this entry is flagged for his review.**
+  contracts and this entry is flagged for his review — ratified in his absence by the deputy's
+  ruling of 2026-09-08 on #503 (`docs/decisions/2026-09-v1-5-unattended-rulings.md`).**
 
   **No migration.** The shortcut is one `knobas.setting` row — `capture.shortcut` — under `0002`,
   comment 6's store, for the clones root's reason: one accelerator a person types once is not a
@@ -8708,22 +8715,29 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The desktop witness ran and is green**, which no criterion in this milestone had managed
   before: `just desktop-witness capture`, 2026-09-08, a shortcut registered with the window server
-  and pressed while **Finder** had the screen. Three things it does **not** witness are listed in
-  `testenv/README.md`, *What is still not witnessed*, and only the first is owed to **#525**:
-  `captured-in`, which needs a stored room the `--demo` profile does not carry; a combination the
-  operating system refuses, which needs another application holding one and is pinned at the IPC
-  seam with a stand-in registrar instead; and **which entity the born link points at**, which is
-  deliberately not asserted from a driver, because the ticket's key is on the room behind the
-  slide-over and a driver reading the whole window for it would pass with no link drawn at all.
+  and pressed while **Finder** had the screen, asserted frontmost and not assumed. Three things it
+  does **not** assert are listed in `testenv/README.md`, *What is still not witnessed*, and **none
+  of them is a debt**: `captured-in`, which needs a stored room the `--demo` profile does not
+  carry and which is pinned at the seam spec #491's stream map puts the capture links' witness at
+  — *"the app's commands over a scratch database"* — so the driver asserting `CAPTURED FROM` is
+  already one link more than that row asks of it; a combination the operating system refuses,
+  which needs another application holding one and is pinned at the same seam with a stand-in
+  registrar; and **which entity the born link points at**, deliberately not asserted from a
+  driver, because the ticket's key is on the room behind the slide-over and a driver reading the
+  whole window for it would pass with no link drawn at all.
 
-  **Two sentences in the entries above are now false, and §10.8 is append-only, so they are
-  corrected here rather than edited there.** The #500 and #501 entries each close with *"the
-  desktop witness has not run"*. It has: `just desktop-witness launcher-hotkey` is green as of
-  2026-09-08, so **#500's criterion is met**; `open-in-editor` now reaches the gap it always
-  named — the `--demo` corpus carries no repo entity — so **#501's remains open and is still
-  owed to #525**, for that reason and no longer for a locked screen. Its driver was also
-  *unrunnable as merged*, looking for three accessible names no element carries; that is fixed
-  in this change and pinned by `rendered_label`'s cases in `witness-unit`.
+  **One sentence in the #501 entry above is superseded, and this is where the new truth is.**
+  That entry closes with *"the desktop witness has not run"*, which was true when it was written.
+  §10.8 is append-only for its entries, so the sentence stands and the entry gains an italic
+  pointer here, the treatment Björn's ruling of 2026-08-31 in the #112 section fixes — *"the old
+  text stands and the amendment carries the new truth"* — and the idiom this file already uses
+  twice. The new truth: `open-in-editor` now reaches the step it always named — the `--demo`
+  corpus carries no repo entity — so **#501's criterion is still open, for that reason and no
+  longer for a locked screen**. Its driver was also *unrunnable as merged*, looking for three
+  accessible names no element carries; that is fixed in this change and pinned by
+  `rendered_label`'s cases in `witness-unit`. There is **no #500 entry in §10.8** — that ruling
+  closed by recording that the frozen surface was untouched — so nothing is owed there, and that
+  #500's criterion is met is recorded by a transcript on its own ticket.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

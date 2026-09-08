@@ -29,10 +29,11 @@
 # that Escape closes the window (the same exit as the button, minus the
 # reveal -- `CaptureWindow.test.svelte.ts` drives both keys); that a combination
 # the operating system refuses reads as refused (that needs an application
-# holding one, which is a machine this driver cannot arrange); and **which
-# entity each of the two links points at** -- see the note at the foot, which
-# says why a driver that read the whole window for either end would pass with no
-# link drawn.
+# holding one, which is a machine this driver cannot arrange); **`captured-in`**,
+# which needs a stored room the `--demo` profile does not carry and which the
+# spec pins at another seam -- see step 2; and **which entity the link points
+# at** -- see the note at the foot, which says why a driver that read the whole
+# window for it would pass with no link drawn. **None of the three is a debt.**
 #
 # Run by testenv/desktop-witness.sh, which passes it a compiled helper, the pid
 # of the one running instance and the bundle it launched.
@@ -245,16 +246,18 @@ say "the shortcut $ACCELERATOR is stored and registered"
 #
 # A ticket opened in *All work*, so the capture has a **foreground** to attach.
 #
-# **`captured-in` is not witnessed by this run, and that is a gap rather than a
-# decision.** It needs a *stored* room, and the `--demo` profile carries no
-# context at all: a reader makes one, and making one here would mean driving
-# another feature's tab strip to arrange this feature's fixture. A first
-# attempt did exactly that on 2026-09-08 and the field closed under the driver
-# before its Return -- fragility bought for a link whose two ends are already
-# pinned by `capture_ipc.rs` (the recorded pair) and
-# `capture.test.svelte.ts` (the pair becoming the links). It is the same shape
-# as the gap #501 found in this profile, it is written up in testenv/README.md,
-# *What is not witnessed yet*, and it is owed to #525.
+# **`captured-in` is not asserted by this run, and it is owed to nothing.** It
+# needs a *stored* room, and the `--demo` profile carries no context at all: a
+# reader makes one, and making one here would mean driving another feature's tab
+# strip to arrange this feature's fixture -- a first attempt did exactly that on
+# 2026-09-08 and the field closed under the driver before its Return.
+# **Spec #491's stream map puts the links' witness elsewhere on purpose**: row 5
+# is *"app IPC suite for the links; desktop automation for the shortcut and
+# window"*, and the links are pinned where it says -- `capture_ipc.rs` (the
+# recorded pair, over a scratch database) and `capture.test.svelte.ts` (the pair
+# becoming the links). Asserting `CAPTURED FROM` below is already one link more
+# than that row asks of this driver. See testenv/README.md, *What is still not
+# witnessed*, and the deputy's ruling of 2026-09-08 on #503, part 5.
 
 say "opening the ticket $TICKET_QUERY, so the capture has a foreground"
 "$ax" key "$KEY_K" command
