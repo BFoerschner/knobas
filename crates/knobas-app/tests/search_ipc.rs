@@ -1317,13 +1317,26 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
 async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
     let pool = saved_pool("saved-count").await;
     let t = token("count");
+    // **Two rows that do not carry the token**, and they are not decoration:
+    // without them every row in the corpus matches the text, and a summary
+    // statement that dropped the `@@` predicate altogether would agree with
+    // the page it is supposed to be checked against. That mutant survived this
+    // test until these two rows existed.
+    let other = token("other");
     for (id, kind, author, days) in [
         ("jira:1", "ticket", "mara", 1),
         ("jira:2", "ticket", "mara", 40),
         ("jira:3", "pr", "mara", 1),
         ("jira:4", "ticket", "jonas", 1),
         ("jira:5", "build", "jonas", 90),
+        ("jira:6", "ticket", "mara", 1),
+        ("jira:7", "ticket", "jonas", 1),
     ] {
+        let t = if id == "jira:6" || id == "jira:7" {
+            other.clone()
+        } else {
+            t.clone()
+        };
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
              values ('jira', 'jira', 'Jira', 'http://x', 'Pat')
