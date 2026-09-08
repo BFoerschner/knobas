@@ -239,11 +239,11 @@ impl Searcher {
     /// tells the rail which controls a row carries. The built-ins come first
     /// because they are the ones that are always there.
     ///
-    /// Two round trips with nothing saved: the vocabulary (for the identity
-    /// behind `@me`, which every search loads anyway) and one statement
-    /// carrying the built-ins' counts, freshness stamps and seen-stamps
-    /// together. Two more once something is saved -- see
-    /// [`saved::summaries`], which is where the cost is stated.
+    /// Three round trips with nothing saved: the vocabulary (for the identity
+    /// behind `@me`, which every search loads anyway), one statement carrying
+    /// the built-ins' counts, freshness stamps and seen-stamps together, and
+    /// one small select over `knobas.smart_list`. Two more once something is
+    /// saved -- see [`saved::summaries`], which is where that cost is stated.
     ///
     /// # Errors
     ///

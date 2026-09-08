@@ -347,10 +347,13 @@ struct SavedCount {
 
 /// Every saved list's summary, in the shape the rail draws built-ins in.
 ///
-/// Two round trips when a saved list exists and **none** when one does not:
-/// the counts (one statement for every runnable list) and the seen-stamps. A
-/// list whose query is refused costs neither -- it is not in the statement at
-/// all, which is what makes one broken row cheap rather than fatal.
+/// **One round trip to read the table, and two more only if it had anything in
+/// it**: the counts -- one statement for every runnable list however many
+/// there are, `union all`-ed by [`sql::saved_summary_sql`] -- and the
+/// seen-stamps. So a launcher with nothing saved costs the board exactly one
+/// small select, and a list whose query is refused costs it nothing beyond
+/// that: it is not in the counting statement at all, which is what makes one
+/// broken row cheap rather than fatal.
 ///
 /// # Errors
 ///
