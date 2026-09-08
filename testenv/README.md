@@ -648,6 +648,26 @@ suites' transition tests use. The template's issue type scheme has no
 *Story*, so the seed adds the global Story type to each project's scheme
 over `PUT /rest/api/2/issuetypescheme/<id>`.
 
+**A third project, `NARROW`, whose workflow narrows** (issue #522). Every
+software template this container offers gives that same all-to-all Simplified
+workflow, so on `PAY` and `OPS` alone "what the workflow offers from here" and
+"every status this project has" are the same list — and #498's
+reachable-transition read, whose whole point is that it *narrows*, had no live
+witness for the narrowing. So the seed also creates *Narrowing workflow
+fixture* from Jira **Core**'s process-management template
+(`com.atlassian.jira-core-project-templates:jira-core-process-management`),
+which gives seven statuses and a proper subset from each of them: *Open* →
+*In Progress*; *In Progress* → *Under Review*, *Cancelled*; *Under Review* →
+*Approved*, *Rejected*; *Approved* → *Done*; *Done* → nothing; *Cancelled* →
+*Open*; *Rejected* → *In Progress*. It is **not** fixture content: no ticket
+of `work.json` belongs to it, it is recorded as `jira.narrowing` rather than in
+`jira.projects`, and it **holds no issues between runs** — the live witness in
+`atlassian_live.rs` files its own ticket, walks it and deletes it, and a killed
+run's leftover is cleared by the adapter suite's leftover clearing like any
+other stray. Adding it takes this Jira's whole status list
+(`GET /rest/api/2/status`) from four to nine, which is what lets `PAY`'s own
+reads witness that the answer is a *subset* rather than a copy.
+
 **Epic membership is in the Epic Link custom field, and only there.** `PAY`
 and `OPS` are *classic* Data Center projects, so `fields.parent` — the
 spelling a next-gen or a recent company-managed project uses — is **absent
