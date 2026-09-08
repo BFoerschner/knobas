@@ -300,6 +300,8 @@
 //! was opened, and when it holds something and has never been opened at all. A
 //! list with nothing in it is never badged: a badge on an empty list is noise.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 
@@ -350,6 +352,24 @@ pub struct SmartListSummary {
     pub changed: bool,
     /// Display text: the list's blurb, or the reason it is empty.
     pub description: String,
+    /// Whether somebody saved this list, rather than knobas shipping it
+    /// (#506).
+    ///
+    /// The one thing the rail needs to tell the two apart, and it is a
+    /// *capability* rather than a provenance note: a saved list can be renamed
+    /// and deleted and a built-in cannot, so the row draws those two controls
+    /// exactly when this is `true`. Both kinds are opened the same way, by
+    /// `list:<id>`, which is why the id is not what says which one this is.
+    pub saved: bool,
+    /// The saved query cannot be run by today's grammar (#506, story 60).
+    ///
+    /// Always `false` for a built-in: a built-in's predicate is compiled in, so
+    /// there is no version of it the launcher could fail to understand.
+    /// [`Self::count`] is `0` and [`Self::changed`] `false` on such a row --
+    /// not because the list is empty, but because nothing was asked -- and
+    /// [`Self::description`] carries [`crate::saved::NEEDS_ATTENTION`] and the
+    /// reason.
+    pub needs_attention: bool,
 }
 
 /// The statement one list's rows come from.
@@ -868,6 +888,8 @@ pub async fn summaries(
             count,
             changed: changed(newest, seen.as_deref()),
             description: describe(list, identity),
+            saved: false,
+            needs_attention: false,
         });
     }
     Ok(out)
@@ -893,6 +915,10 @@ pub async fn rows(
 
 /// Note that a list has just been looked at.
 ///
+/// **Saved lists use this too** (#506): one key, one wording, one clearing
+/// rule, so a saved list's badge and a built-in's cannot come to mean different
+/// things.
+///
 /// # Errors
 ///
 /// [`SearchError::Db`] if the setting cannot be written.
@@ -901,13 +927,48 @@ pub async fn mark_seen(pool: &PgPool, id: &str) -> Result<(), SearchError> {
     Ok(())
 }
 
+/// Every list's "last opened" stamp, by list id.
+///
+/// [`SUMMARY_SQL`] reads the same key inline, because a built-in's seen-stamp
+/// arrives in the same round trip as its count. A saved list's count comes from
+/// a statement built at run time (`crate::sql::saved_summary_sql`) that has no
+/// place to carry a `seen` CTE for a variable number of ids, so it reads them
+/// here instead -- one small statement, and only when a saved list exists.
+///
+/// The unpacking is PostgreSQL's -- `jsonb_each_text`, which is the same
+/// `->>` [`SUMMARY_SQL`] reads a built-in's stamp with, applied to every key
+/// instead of to a named one. So a value that is not a string arrives as the
+/// text of whatever it is and [`parse_stamp`] reads it as *never opened*,
+/// which is what that function's own doc says should happen: this is a shared
+/// key/value table on the launcher's hot path, and a badge that is on too
+/// often beats a board that will not load.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if the setting cannot be read.
+pub async fn seen_stamps(pool: &PgPool) -> Result<HashMap<String, String>, SearchError> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select key, value
+           from jsonb_each_text(
+                  coalesce((select value from knobas.setting where key = $1), '{}'::jsonb)
+                ) as stamps(key, value)",
+    )
+    .bind(SEEN_KEY)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, stamp)| stamp.map(|stamp| (id, stamp)))
+        .collect())
+}
+
 /// Whether a list has something in it that postdates the last look at it.
 ///
 /// An **unparseable** stamp reads as "never opened" rather than as an error:
 /// the value is ours to write, but it is in a shared key/value table on the
 /// launcher's hot path, and a badge that is on too often beats a board that
 /// refuses to load.
-fn changed(newest: Option<DateTime<Utc>>, seen: Option<&str>) -> bool {
+pub(crate) fn changed(newest: Option<DateTime<Utc>>, seen: Option<&str>) -> bool {
     // Nothing in the list: a badge on an empty list is noise, not news.
     let Some(newest) = newest else { return false };
     match seen.and_then(parse_stamp) {
@@ -1310,5 +1371,118 @@ mod tests {
             precise > two_pm_plus_two && precise - two_pm_plus_two < chrono::Duration::seconds(1)
         );
         assert!(parse_stamp("").is_none());
+    }
+
+    /// **The `?fake-ipc` fixture's copy of this registry is the registry.**
+    ///
+    /// `app/src/lib/shell/dev/fake-tauri.ts`'s `fakeSmartLists` restates every
+    /// built-in's id, label and blurb so that a browser can be walked over the
+    /// rail (#504). It is a hand copy with no compiler between it and this
+    /// file, and #504's own doc comment named the gap rather than papering
+    /// over it; #506 touches that function to merge saved lists into it, which
+    /// is when the pin becomes natural.
+    ///
+    /// **What is compared is the triples, parsed out of the fixture, against
+    /// [`BUILTINS`] itself** — not a substring search, which a hand copy
+    /// dropping a clause would pass. The literals inside `fakeSmartLists` are
+    /// exactly three per list and in declaration order, so the sequence *is*
+    /// the registry or the test fails.
+    ///
+    /// **What is deliberately not compared**, because it is a divergence the
+    /// fixture states and defends rather than a drift:
+    ///
+    /// * the **counts** — the fixture's mirror lists honestly read 0 over a
+    ///   corpus frozen at `SYNCED_AT`, and its estate counts come from its own
+    ///   estate file;
+    /// * the **badges**, which are `false` there because a badge is a
+    ///   comparison against a stamp in `knobas.setting` and that fixture has no
+    ///   setting table;
+    /// * the row **order** a list answers in;
+    /// * and, for the two `@me` lists, what a reader actually sees — with no
+    ///   identity configured [`describe`] replaces the blurb with
+    ///   [`describe_missing_identity`], so the fixture draws the blurb where
+    ///   the app draws the advice. This test pins [`BuiltinList::blurb`], which
+    ///   is the field the fixture copied, and says nothing about `describe`.
+    #[test]
+    fn the_builtin_registry_matches_its_typescript_fixture() {
+        let fixture = include_str!("../../../app/src/lib/shell/dev/fake-tauri.ts");
+        let body = function_body(fixture, "fakeSmartLists");
+
+        // The negative control. `FIXTURE_SAVED` -- the fixture's saved lists
+        // (#506) -- is declared just below this function and carries strings of
+        // its own, so a slice that reached it would not be a slice. (The
+        // *call* to `fakeSavedLists()` is inside this function and is
+        // deliberately not the marker: it declares nothing.) A rearrangement
+        // that broke the slicing would look identical from here without it.
+        assert!(
+            !body.contains("FIXTURE_SAVED"),
+            "the fakeSmartLists slice runs past the end of the function:\n{body}"
+        );
+
+        // The one string of `saved::Refusal::description`'s that the fixture
+        // also carries: the **heading** the rail draws on a row that needs
+        // attention. The rest of that sentence is a `Refusal` variant's, which
+        // the fixture legitimately stands in for; this word is the one a
+        // reader recognises, so it is the one that may not drift.
+        //
+        // Asked of `fakeSavedLists`' body and not of the file, because the
+        // file is a representation of the fixture and not the fixture: two
+        // words in an unrelated comment anywhere in 3,000 lines would satisfy
+        // a whole-file `contains` while the blurb the rail draws had drifted.
+        // `function_body` panics when the function is not there, so a rename
+        // fails here rather than passing vacuously.
+        let drawn = function_body(fixture, "fakeSavedLists");
+        assert!(
+            drawn.contains(crate::saved::NEEDS_ATTENTION),
+            "fakeSavedLists no longer carries the heading a needs-attention row draws:\n{drawn}"
+        );
+
+        let found = double_quoted(body);
+        let expected: Vec<&str> = BUILTINS
+            .iter()
+            .flat_map(|list| [list.id, list.label, list.blurb])
+            .collect();
+        assert_eq!(
+            found, expected,
+            "app/src/lib/shell/dev/fake-tauri.ts's fakeSmartLists is no longer \
+             this registry: every built-in is three literals there -- id, \
+             label, blurb -- in declaration order"
+        );
+    }
+
+    /// The body of `function <name>() { … }`, up to the first line-start `}`.
+    ///
+    /// Panics rather than returning an empty slice when the function is not
+    /// there: a rename on the TypeScript side that this could not find would
+    /// turn the assertion above into a vacuous one.
+    fn function_body<'a>(source: &'a str, name: &str) -> &'a str {
+        let header = format!("function {name}() {{");
+        let start = source
+            .find(&header)
+            .unwrap_or_else(|| panic!("`{header}` is not in fake-tauri.ts"))
+            + header.len();
+        let rest = &source[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("`function {name}` is never closed"));
+        &rest[..end]
+    }
+
+    /// Every `"..."` run in `source`, in order.
+    ///
+    /// TypeScript's other two string forms are not read, and none is needed:
+    /// the fixture's list declarations are double-quoted by Prettier, and a
+    /// list rewritten in backticks would come back short and fail the
+    /// comparison rather than pass it silently.
+    fn double_quoted(source: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut rest = source;
+        while let Some(start) = rest.find('"') {
+            rest = &rest[start + 1..];
+            let end = rest.find('"').expect("an unterminated string literal");
+            out.push(&rest[..end]);
+            rest = &rest[end + 1..];
+        }
+        out
     }
 }

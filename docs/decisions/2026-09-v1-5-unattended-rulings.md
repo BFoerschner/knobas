@@ -544,3 +544,109 @@ implementer reported that changed the code — the survived mutant that showed `
 join was redundant *and its comment wrong*, and the mirror test that never shape-checked the null
 row it said was its point — are the witness doing what ADR-0013 asks and are recorded where the
 next reader will look. Nothing is owed on them.
+
+---
+
+## #506 — the frozen gate for the saved smart list, the raw text it stores, and two witness gaps
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/506#issuecomment-5578127977>
+
+**The fork:** PR #532 raised three, and raised them by deciding and disclosing rather than by
+stopping. (1) It adds migration `0025` (`knobas.smart_list (id, label, query, created_at,
+updated_at)`), `create_smart_list`, `rename_smart_list` and `delete_smart_list` on
+`commands::search`, three lines on `crates/knobas-app/src/lib.rs`'s handler list, and `saved: bool`
+and `needs_attention: bool` on the **existing** `SmartListSummary`, mirrored in
+`app/src/lib/ipc/search.ts`. Migrations, the IPC command schema and the append-only barrels are on
+§10.8's list, and a field on an existing DTO is a wire type changing shape, which the contract
+treats as its own kind of touch. Does the ticket authorise each, and is the entry what the contract
+requires? (2) The migration stores the **raw box text and never a parse of it**, and `saved::plan`
+reads a stored row back through the same parser a keystroke goes through, answering a `Runnable` or
+a `Refusal` and never an error. Is that the right durability decision for stored user text across a
+grammar change, and does the glossary record it? (3) The PR body states two witness gaps — that the
+perf gate does not measure a board with saved lists on it, and that the browser walk cannot witness
+a count, a badge or the grammar's verdict. Does either owe something inside #506, a follow-up
+ticket, or nothing?
+
+**Ruling:** (1) **Authorised on all three counts, and the entry is sufficient; the merge-manager
+may proceed** once the ratification clause and this append are on the branch. The ticket names the
+migration and the commands in its own words and in its first criterion; spec #491's stream map row
+8 says *"IPC create/delete"* — two where the ticket says three — and story 58 is why the ticket's
+count is the operative one, the same reading #491's stream 2 already carries (*"the ticket is the
+operative text and the spec's count is a shorthand, not a prohibition"*). **The two fields are
+ratified as a touch in their own right** rather than folded into the commands, because the contract
+is explicit that they are one: the #409 entry says *"a field added to a DTO, no command, no
+migration, and an entry all the same. A wire type changing shape is the thing this section exists
+to record"*, with #284's `EntityRow.path` as its precedent. The ticket authorises them by
+consequence — *"the launcher's list panel merges built-ins and saved lists into one shape"* and
+*"A saved list whose query the grammar refuses shows *needs attention* rather than an error"* — and
+two booleans on the existing shape is the **smallest** reading of that sentence: a second DTO or a
+second command would be a larger frozen surface and would contradict story 57 on the wire itself.
+The clause owed: the entry's flagged-for-Björn sentence stays and gains *"— ratified in his absence
+by the deputy's ruling of 2026-09-08 on #506"*, the wording #496's, #498's and #505's entries carry.
+Three claims the merge-manager starts with, settled on the branch: the entry now says **why neither
+field needs `#[serde(default)]`** (nothing decodes `SmartListSummary` anywhere — every value is
+built in Rust and serialized outwards, and it is in no archive, settings row or file), it says that
+a **database fault is not *needs attention*** (`saved::summaries` propagates `SearchError::Db` with
+`?` on all three reads, so a statement failure is `internal`), and the pin count is corrected from
+six to **seven**, which was the entry lagging a case the code review added. (2) **Ratified, and it
+was already decided — the implementer transcribed it rather than choosing it.** Spec #491's
+Implementation Decisions say *"a `smart_list` table (id, label, **query text**, stamps)"*; story 60
+is reachable only if what is stored can be refused, and a parse cannot be refused by the grammar
+that produced it; ruling P2 already committed the launcher to the box text. **One clause is owed in
+the glossary and is on the branch: no migration ever rewrites `knobas.smart_list.query` to a newer
+grammar.** A data migration that *upgraded* stored queries is a parse in disguise — it commits the
+migration's reading of what the reader wrote — and it would make *needs attention* a state no row
+can reach. The row stays as the reader wrote it; a refused one is deleted and the search saved
+again. In the same breath the *needs attention* sentence stops saying *"Rename it or delete it"*,
+since a rename changes the label and not the query, and offers what actually clears the state. No
+ADR: the rule is in the spec's own words, the migration's immutable header and the glossary entry.
+(3) **The browser walk owes nothing; the perf gap owes one paragraph inside #506 and one follow-up
+ticket in v1.5.** The walk is settled by #496 part 3, which names #506 by number: showing the rail
+is what the walk witnesses, and that the count is right, the badge lights and clears and the
+grammar refuses what it should are the second criterion's, at the seam, where six tests over a real
+PostgreSQL carry them and mutants A, B, C and G pin them. The perf gap is a class of its own —
+**a budget whose fixture stopped covering what the budget names** — and `perf.rs`'s own *Fixture,
+stated* section is where it belongs, naming **#533**. `MAX_SAVED_LISTS = 64`, kept beyond the
+ticket, **stays**: it is what makes the gap finite, and #533 is what turns 64 into a measured
+number.
+
+**Reasoning:** (1) the freeze exists so that a wire shape never arrives unannounced; this one was
+announced in the spec's stream map, named in the ticket's body and first criterion, and written up
+in the section the freeze points at. The smallest frozen surface that meets stories 56–58 and 60 is
+one table, three writes on the module that already owns the rail, and two booleans on the shape the
+rail already draws — no new DTO, no event, no `WriteOp`, no `source_id`, one barrel growing three
+lines and the other untouched because it lists modules. Checked at the gate: one file under
+`crates/knobas-db/migrations/` (one `create table` and a `comment on table`, no `alter`), the next
+free number after #499's `0024`, nothing under `crates/knobas-source/src/**` or
+`crates/knobas-http/**`, no `error.rs`, `profile.rs` or `app/src/lib/ipc/index.ts`, and the entry
+inside §10.8 by an anchored header grep. (2) the reading that keeps the frozen surface smallest is
+the one with one column of text, and it is the only reading under which story 60 can be witnessed
+at all — which the seam test does, with a row today's `create` would refuse. A stored parse would
+be a second copy of §4's grammar frozen at the version that wrote it: the copy-that-drifts class
+the working model names, in a table. (3) ADR-0013's consequence sorts a gap by whether the witness
+can be driven into the state — *"'awkward to reproduce' is not 'cannot produce'"* — and the perf
+fixture is a real PostgreSQL a seed can drive to 64 saved lists, so a measurement is owed and is not
+#506's to make. In v1.5 rather than after, by the reading #496 part 1 and #498 took: a milestone
+that ships a rail with a cap chosen as *"generous enough"* and never measured against the budget the
+built-ins meet has a defect in its witness, not a feature for the next milestone. The walk owes
+nothing because the question was asked and answered once for the seven tickets carrying the
+sentence, and a second ruling on the same words would be re-deciding.
+
+**If you disagree, the cost of reversing this is:** (1) moderate after merge — the three commands
+and two fields leave the schema only by a further §10.8 entry, and `0025` is a table on every
+database that has started since, so removing it is a `0026` that drops it, never an edit. Before
+merge it is one revert of a branch nothing has built on; #507 is blocked by #506 and has not
+started. (2) high — it is a column's meaning on a migrated table, so storing a parse later means
+`0026` adding a column and a backfill that parses every stored row with whichever grammar is
+current, and story 60 leaving the product. Before merge it is the same migration rewritten, cheap
+in code and expensive in the spec, whose sentence would have to change with it. (3) trivial for the
+walk — no criterion text moves and no test is deleted; reversing it means naming a witness that can
+attach to a Tauri webview, which is #500's harness and its one-at-a-time cap. For the perf gap the
+paragraph is one doc comment and #533 is one seed and one assertion in an `#[ignore]`d test, closable
+unbuilt if Björn judges the budget the built-ins' alone. If the measurement fails the budget, the
+cheap reversal is the constant and the expensive one is the summary statement's shape, which is why
+the measurement is in this milestone and not the next.
+
+**For the orchestrator:** #533 is filed (v1.5, `ready-for-agent`, blocked by #506, under no cap).
+The merge is not held for its measurement.

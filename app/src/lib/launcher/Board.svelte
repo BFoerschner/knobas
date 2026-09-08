@@ -26,9 +26,13 @@
     sources,
     rows,
     selected,
+    renaming,
     now,
     onopen,
     onhover,
+    onstartrename,
+    onrename,
+    ondelete,
   }: {
     home: LauncherHome;
     /**
@@ -45,13 +49,59 @@
     sources: CredentialHealth[];
     rows: LauncherRow[];
     selected: number;
+    /**
+     * The saved list whose name is being edited, or `null` (#506, story 58).
+     *
+     * Owned by the launcher rather than by this component, because the `Tab`
+     * chain on a saved row is what starts a rename from the keyboard and the
+     * chain is the launcher's — two owners of one editing state is two ways
+     * for the input to be open.
+     */
+    renaming: string | null;
     now?: Date | undefined;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
+    /** Begin renaming a saved list — the row's name becomes a field. */
+    onstartrename: (id: string) => void;
+    /**
+     * Commit a rename, or abandon it: `label` is `null` for Escape and the
+     * blur that follows it.
+     *
+     * One callback for both, because the launcher has one thing to do either
+     * way — close the field — and two would let it close on one path and not
+     * the other.
+     */
+    onrename: (id: string, label: string | null) => void;
+    ondelete: (id: string) => void;
   } = $props();
 
   /** Recent rows start after the lists in the flat selectable list. */
   const recentFrom = $derived(home.smart_lists.length);
+
+  /**
+   * The saved list whose *Delete* has been pressed once.
+   *
+   * Two presses, and the second one is the delete. A saved list is a query
+   * somebody wrote down and there is no undo, so the one-pixel miss that costs
+   * a row is worth a second press; and the arming lives here rather than in
+   * the launcher because it is not a state anything else can act on.
+   *
+   * Cleared whenever the cursor moves to another row, so a half-armed button
+   * cannot sit waiting on a row nobody is looking at.
+   */
+  let armed = $state<string | null>(null);
+
+  /**
+   * The sentence above, as code: an armed *Delete* belongs to the row under
+   * the cursor, exactly as `Launcher.svelte`'s action chain belongs to the row
+   * it was opened on.
+   *
+   * Derived rather than cleared by an effect, so the button is never armed and
+   * on the wrong row for the tick it would take an effect to notice.
+   */
+  const confirming = $derived(
+    armed !== null && home.smart_lists[selected]?.id === armed ? armed : null,
+  );
 
   /** One line per source: what it is, and whether knobas can still read it. */
   const strip = $derived(
@@ -74,22 +124,111 @@
 <div class="secl"><span class="lab">Smart lists</span><span class="n">saved local queries</span></div>
 {#each home.smart_lists as list, i (list.id)}
   {@const row = rows[i]}
-  <button
-    class="sl"
+  <!--
+    The hover is on the row and not on the button inside it, so moving the
+    pointer onto *Rename* or *Delete* selects the row those act on rather than
+    leaving the cursor two rows above.
+
+    `role="presentation"`: the listbox's options are the `.sl` buttons, and
+    this wrapper exists only to put the two controls beside one. Marking it
+    presentational is what keeps it out of the listbox's own structure — the
+    same thing `Launcher.svelte`'s scrim does with its click target. A row
+    being renamed has *no* option, which is honest: its name is a text field
+    for as long as the field is open.
+  -->
+  <div
+    class="slrow"
     class:on={i === selected}
-    role="option"
-    aria-selected={i === selected}
-    onclick={() => row && onopen(row)}
+    role="presentation"
     onmouseenter={() => onhover(i)}
   >
-    <span class="nm">
-      {list.label}
-      <small>{list.description}</small>
-    </span>
-    <span class="c" class:chg={list.changed}>
-      {list.count}{#if list.changed}<span class="dot" title="something in it is new">●</span>{/if}
-    </span>
-  </button>
+    {#if renaming === list.id}
+      <!--
+        Renaming in place, on the row it renames. `blur` abandons rather than
+        commits, and Enter is the only thing that commits: a name half-typed
+        when the reader clicked away is not a name they chose.
+      -->
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        class="ren"
+        type="text"
+        autofocus
+        value={list.label}
+        aria-label="Rename {list.label}"
+        onkeydown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            onrename(list.id, event.currentTarget.value);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            // Never past this input: the launcher's own Escape ladder would
+            // read the same keystroke as "clear the box" and then "close".
+            event.stopPropagation();
+            onrename(list.id, null);
+          }
+        }}
+        onblur={() => onrename(list.id, null)}
+      />
+    {:else}
+      <button
+        class="sl"
+        role="option"
+        aria-selected={i === selected}
+        disabled={list.needs_attention}
+        onclick={() => row && onopen(row)}
+      >
+        <span class="nm">
+          {list.label}
+          <small class:att={list.needs_attention}>{list.description}</small>
+        </span>
+        <span class="c" class:chg={list.changed}>
+          {#if list.needs_attention}
+            <span class="att">Needs attention</span>
+          {:else}
+            {list.count}{#if list.changed}<span class="dot" title="something in it is new"
+                >●</span
+              >{/if}
+          {/if}
+        </span>
+      </button>
+      {#if list.saved}
+        <!--
+          The two controls a saved list has and a built-in does not. On the row
+          rather than in a menu, because there are two of them; reachable from
+          the keyboard through the row's `Tab` chain, which is where every
+          other per-row action in this box lives.
+        -->
+        <span class="own" role="presentation">
+          <button
+            class="mini"
+            onclick={() => {
+              onhover(i);
+              onstartrename(list.id);
+            }}>Rename</button
+          >
+          <button
+            class="mini del"
+            class:armed={confirming === list.id}
+            onclick={() => {
+              // Select first: `confirming` belongs to the row under the
+              // cursor, so a press on a row the cursor is not on has to move
+              // it there or the button could never arm.
+              onhover(i);
+              if (confirming === list.id) {
+                armed = null;
+                ondelete(list.id);
+              } else {
+                armed = list.id;
+              }
+            }}
+          >
+            {confirming === list.id ? "Confirm" : "Delete"}
+          </button>
+        </span>
+      {/if}
+    {/if}
+  </div>
 {/each}
 
 <!--
@@ -162,26 +301,78 @@
     font: 400 11px var(--mono);
     color: var(--faint);
   }
+  /* `.slrow` — the smart-list line and, on a saved one, its two controls. The
+     highlight is on the row so that the controls sit inside it rather than
+     beside a highlighted button. */
+  .slrow {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--hair);
+  }
+  .slrow:hover,
+  .slrow.on {
+    background: var(--raised);
+  }
+  .slrow.on {
+    box-shadow: inset 2px 0 0 var(--amber);
+  }
   /* `.sl` — the smart-list line (round 3, lines 380-385). */
   .sl {
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 6px;
     align-items: start;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: left;
     padding: 7px 12px;
     min-height: 32px;
     font-size: 12px;
-    border-bottom: 1px solid var(--hair);
     color: var(--text);
   }
-  .sl:hover,
-  .sl.on {
-    background: var(--raised);
+  .sl:disabled {
+    cursor: default;
   }
-  .sl.on {
-    box-shadow: inset 2px 0 0 var(--amber);
+  /* The rename field, sized like the row it replaces so the rail does not
+     jump when it opens. */
+  .ren {
+    flex: 1;
+    min-width: 0;
+    margin: 5px 12px;
+    padding: 2px 6px;
+    font: 500 12px var(--mono);
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--amber);
+    border-radius: 3px;
+  }
+  .own {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-right: 10px;
+  }
+  .mini {
+    font: 400 10px var(--mono);
+    color: var(--faint);
+    padding: 2px 6px;
+    border: 1px solid var(--hair);
+    border-radius: 3px;
+  }
+  .mini:hover {
+    color: var(--text);
+    border-color: var(--muted);
+  }
+  .mini.del:hover,
+  .mini.armed {
+    color: var(--fail);
+    border-color: var(--fail);
+  }
+  /* A saved query today's grammar cannot run: the reason where the blurb goes
+     and the words where the count goes, so the row reads as a state and not as
+     an empty list. */
+  .att {
+    color: var(--fail);
   }
   .nm {
     min-width: 0;

@@ -94,8 +94,24 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
 
 const HOME: LauncherHome = {
   smart_lists: [
-    { id: "mine", label: "My items", count: 3, changed: true, description: "Yours." },
-    { id: "just-synced", label: "Just synced", count: 9, changed: false, description: "New." },
+    {
+      id: "mine",
+      label: "My items",
+      count: 3,
+      changed: true,
+      description: "Yours.",
+      saved: false,
+      needs_attention: false,
+    },
+    {
+      id: "just-synced",
+      label: "Just synced",
+      count: 9,
+      changed: false,
+      description: "New.",
+      saved: false,
+      needs_attention: false,
+    },
   ],
   recent: [
     {
@@ -1452,4 +1468,312 @@ test("the launcher's own default resolver is what a paste reaches", async () => 
   await search(PASTED);
 
   expect(searchPort, "a pasted link must not reach the search engine").not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// Saved smart lists (#506)
+// ---------------------------------------------------------------------------
+
+/** A board carrying one built-in, one saved list, and one that needs attention. */
+const SAVED_HOME: LauncherHome = {
+  ...HOME,
+  smart_lists: [
+    {
+      id: "mine",
+      label: "My items",
+      count: 3,
+      changed: true,
+      description: "Yours.",
+      saved: false,
+      needs_attention: false,
+    },
+    {
+      id: "sepa-retries",
+      label: "SEPA retries",
+      count: 12,
+      changed: true,
+      description: "#sepa @me",
+      saved: true,
+      needs_attention: false,
+    },
+    {
+      id: "legacy-palette",
+      label: "Palette",
+      count: 0,
+      changed: false,
+      description:
+        "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again.",
+      saved: true,
+      needs_attention: true,
+    },
+  ],
+};
+
+/** The smart-list rows on the board, as one object per row. */
+function railRows() {
+  return [...target.querySelectorAll(".slrow")].map((row) => ({
+    text: row.textContent ?? "",
+    /** The right-hand cell: the count, or the words a refused query draws. */
+    right: row.querySelector(".c")?.textContent?.trim() ?? "",
+    controls: [...row.querySelectorAll("button.mini")].map(
+      (button) => button.textContent?.trim() ?? "",
+    ),
+    open: row.querySelector<HTMLButtonElement>("button.sl"),
+  }));
+}
+
+/**
+ * Saved and built-in lists are one rail, and only the saved ones carry the two
+ * controls (#506, stories 57 and 58).
+ *
+ * The built-in row is asserted **beside** the saved one rather than on its
+ * own: what the story asks for is one kind with one difference, and a test
+ * that only looked at the saved row could not see a *Rename* that had appeared
+ * on every row.
+ */
+test("the rail draws saved lists beside the built-ins, and only they can be renamed", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+
+  const rows = railRows();
+  expect(rows).toHaveLength(3);
+  // The built-in: its count, its badge, and nothing to press but the row.
+  expect(rows[0]!.text).toContain("My items");
+  expect(rows[0]!.text).toContain("3");
+  expect(rows[0]!.controls).toEqual([]);
+  // The saved one: the same count and badge, plus the two controls.
+  expect(rows[1]!.text).toContain("SEPA retries");
+  expect(rows[1]!.text).toContain("12");
+  // Its blurb is the query it stands for.
+  expect(rows[1]!.text).toContain("#sepa @me");
+  expect(rows[1]!.controls).toEqual(["Rename", "Delete"]);
+  // Both badges are drawn, so "like the built-ins" is a rendered fact.
+  expect(target.querySelectorAll(".dot")).toHaveLength(2);
+});
+
+/**
+ * A saved query today's grammar refuses reads *needs attention* and cannot be
+ * opened (story 60).
+ *
+ * The second half is the one that matters and the one a text assertion alone
+ * would miss: a row that said the right words and still put `list:legacy-…`
+ * in the box would send the reader to the backend's refusal.
+ */
+test("a saved list that needs attention says so and does not open", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+
+  const row = railRows()[2]!;
+  // The **count cell** and not the row's whole text: the blurb under the name
+  // carries these two words too, so a row that had gone back to drawing `0`
+  // beside a needs-attention blurb would satisfy a whole-row `toContain`.
+  expect(row.right).toBe("Needs attention");
+  expect(row.open?.disabled).toBe(true);
+
+  row.open?.click();
+  flushSync();
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("");
+
+  // And from the keyboard, which does not go through the button at all: the
+  // arrows and `Enter` reach `activate` directly, so `disabled` alone would
+  // leave `Enter` putting `list:legacy-palette` in the box and sending the
+  // reader to the backend's refusal.
+  press("ArrowDown");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("");
+
+  // The positive control, and the assertion above is worth nothing without
+  // it: an empty box is also what a launcher whose arrows never moved and
+  // whose `Enter` never fired would show. `ArrowUp` steps back onto the
+  // runnable saved row, and that one *does* open -- so the three keystrokes
+  // above are known to have landed on the row they were aimed at.
+  press("ArrowUp");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("list:sepa-retries");
+});
+
+/**
+ * *Save as list* is offered on a query and not on the board (story 56).
+ *
+ * Both halves, because the control's whole rule is *when*: an empty box is the
+ * board, and a board has nothing to save.
+ */
+test("save as list is offered on a query, never on an empty box", async () => {
+  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  const home = vi.fn(async () => SAVED_HOME);
+  open({
+    ports: { launcherHome: home, search: async () => response(), createSmartList: created },
+  });
+  await settle();
+  expect(target.querySelector("button.save"), "an empty box is the board").toBeNull();
+
+  await search("sepa retries");
+  const button = target.querySelector<HTMLButtonElement>("button.save");
+  expect(button?.textContent?.trim()).toBe("Save as list");
+
+  const before = home.mock.calls.length;
+  button!.click();
+  await settle();
+
+  // The **raw box text**, both as the query and as the name — one click, and
+  // the name is what *Rename* is for.
+  expect(created).toHaveBeenCalledWith("sepa retries", "sepa retries");
+  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Saved as list");
+  expect(
+    home.mock.calls.length,
+    "the rail is re-read rather than patched in place",
+  ).toBeGreaterThan(before);
+
+  // And the next keystroke is a different query, so the control comes back.
+  await search("sepa retries and more");
+  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Save as list");
+});
+
+/**
+ * The control is off the panels that are not searches (#506).
+ *
+ * `>` and `?` have text in the box and are not queries the engine answers, so
+ * `create_smart_list` would refuse them — and the launcher must not offer a
+ * button whose only outcome is that refusal. The gate is `Session.mode`, which
+ * is read off the **backend's own interpretation**, so this is the backend's
+ * grammar deciding and not a copy of the prefix table on this side.
+ */
+test("save as list is off the palette and the help card", async () => {
+  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  for (const prefix of ["action", "help"] as const) {
+    open({
+      ports: {
+        launcherHome: async () => SAVED_HOME,
+        search: async () =>
+          response({ interpreted: { ...response().interpreted, prefix }, groups: [] }),
+        createSmartList: created,
+      },
+    });
+    await settle();
+    await search(prefix === "action" ? "> sources" : "?");
+    expect(target.querySelector("button.save"), `${prefix} is not a query`).toBeNull();
+    if (app) unmount(app);
+    app = undefined;
+  }
+  expect(created).not.toHaveBeenCalled();
+});
+
+/**
+ * Renaming: Enter commits the field, Escape abandons it — and Escape does not
+ * reach the launcher's own ladder while the field is open.
+ *
+ * The last clause is the one that would be silently wrong: the ladder clears
+ * the box on `Esc` and closes on the next one, so a rename field that let the
+ * key through would close the overlay over the name being typed.
+ */
+test("a saved list is renamed in place, and Escape abandons rather than commits", async () => {
+  const renamed = vi.fn(async () => {});
+  const closed = vi.fn();
+  open({
+    onclose: closed,
+    ports: {
+      launcherHome: async () => SAVED_HOME,
+      search: async () => response(),
+      renameSmartList: renamed,
+    },
+  });
+  await settle();
+
+  const rename = () =>
+    [...target.querySelectorAll<HTMLButtonElement>("button.mini")].find(
+      (button) => button.textContent?.trim() === "Rename",
+    )!;
+
+  // Abandoned.
+  rename().click();
+  flushSync();
+  const field = target.querySelector<HTMLInputElement>("input.ren")!;
+  expect(field.value).toBe("SEPA retries");
+  field.value = "Half a name";
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  field.dispatchEvent(escape);
+  flushSync();
+  await settle();
+  expect(renamed).not.toHaveBeenCalled();
+  expect(target.querySelector("input.ren")).toBeNull();
+  expect(closed, "the launcher's own Esc ladder never saw the key").not.toHaveBeenCalled();
+
+  // Committed.
+  rename().click();
+  flushSync();
+  const again = target.querySelector<HTMLInputElement>("input.ren")!;
+  again.value = "SEPA, retried";
+  again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+  expect(renamed).toHaveBeenCalledWith("sepa-retries", "SEPA, retried");
+  expect(target.querySelector("input.ren")).toBeNull();
+});
+
+/** Deleting takes two presses on the row, and the first one only arms it. */
+test("deleting a saved list takes a second press", async () => {
+  const removed = vi.fn(async () => {});
+  open({
+    ports: {
+      launcherHome: async () => SAVED_HOME,
+      search: async () => response(),
+      deleteSmartList: removed,
+    },
+  });
+  await settle();
+
+  const remove = () =>
+    [...target.querySelectorAll<HTMLButtonElement>("button.mini.del")].find((button) =>
+      ["Delete", "Confirm"].includes(button.textContent?.trim() ?? ""),
+    )!;
+
+  remove().click();
+  flushSync();
+  await settle();
+  expect(removed, "the first press only arms it").not.toHaveBeenCalled();
+  expect(remove().textContent?.trim()).toBe("Confirm");
+
+  remove().click();
+  flushSync();
+  await settle();
+  expect(removed).toHaveBeenCalledWith("sepa-retries");
+});
+
+/**
+ * The `Tab` chain is the keyboard's way to the same two writes, and a built-in
+ * has no chain at all.
+ *
+ * The negative is the half that keeps the rule legible: *Rename* on a built-in
+ * would be a row offering a write the backend answers `not_found` to.
+ */
+test("the Tab chain renames and deletes a saved list, and offers nothing on a built-in", async () => {
+  const removed = vi.fn(async () => {});
+  open({
+    ports: {
+      launcherHome: async () => SAVED_HOME,
+      search: async () => response(),
+      deleteSmartList: removed,
+    },
+  });
+  await settle();
+
+  // Row 0 is the built-in, and `Tab` on it opens nothing.
+  press("Tab");
+  expect(target.querySelector(".chain")).toBeNull();
+
+  // Row 1 is the saved one.
+  press("ArrowDown");
+  press("Tab");
+  const chain = [...target.querySelectorAll(".chain-a")].map((row) => row.textContent?.trim());
+  expect(chain).toEqual(["Rename SEPA retries", "Delete SEPA retries"]);
+
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(removed).toHaveBeenCalledWith("sepa-retries");
+  expect(target.querySelector(".chain"), "the chain closes behind the write").toBeNull();
 });

@@ -20,6 +20,7 @@ import {
   type LauncherHome,
   type SearchQuery,
   type SearchResponse,
+  type SmartListSummary,
   type UrlMatch,
   ipcErrorMessage,
   noFilters,
@@ -51,6 +52,21 @@ export interface SessionPorts {
    * draws the two outcomes.
    */
   resolveUrl?(url: string): Promise<UrlMatch | null>;
+  /**
+   * Save the box's current query as a smart list, and the two writes that keep
+   * the rail tidy afterwards — `create_smart_list`, `rename_smart_list`,
+   * `delete_smart_list` (#506).
+   *
+   * **Optional as a group, and their absence is the switch**, exactly as
+   * {@link SessionPorts.resolveUrl}'s is: the two link pickers built on this
+   * class (`detail/LinkDialog.svelte`, `notes/NoteView.svelte`) are choosing a
+   * target from the corpus and have no rail to save anything to, so they pass
+   * none and {@link Session.canSave} is false there. The launcher passes all
+   * three, and it is the launcher that draws the controls.
+   */
+  createSmartList?(label: string, query: string): Promise<SmartListSummary>;
+  renameSmartList?(id: string, label: string): Promise<void>;
+  deleteSmartList?(id: string): Promise<void>;
 }
 
 export interface SessionOptions extends SessionPorts {
@@ -102,6 +118,14 @@ export class Session {
   pending = $state(false);
   selected = $state(0);
   actions = $state<LauncherAction[]>([]);
+  /**
+   * The id of the list the query in the box was just saved as, or `null`.
+   *
+   * A statement about the *current* query, so every path that changes the box
+   * clears it — otherwise a control would go on saying "Saved" over a query
+   * nobody has saved.
+   */
+  savedId = $state<string | null>(null);
 
   constructor(options: SessionOptions) {
     this.#ports = options;
@@ -132,12 +156,14 @@ export class Session {
   /** A keystroke: remember it and schedule the query. */
   type(raw: string): void {
     this.raw = raw;
+    this.savedId = null;
     this.#schedule();
   }
 
   /** Replace the box's contents and query immediately — a clicked chip. */
   set(raw: string): void {
     this.raw = raw;
+    this.savedId = null;
     this.#cancel();
     void this.run();
   }
@@ -151,6 +177,78 @@ export class Session {
       return;
     }
     this.selected = Math.min(last, Math.max(0, this.selected + delta));
+  }
+
+  /**
+   * Whether this session can save what is in the box as a smart list.
+   *
+   * Three things: a caller that supplied the write, a query to save, and a
+   * box that is actually showing results. The last is what keeps the control
+   * off the `>` palette, the `?` card and a pasted link — none of which the
+   * engine answers as a search, and all of which `saved::create` would refuse.
+   *
+   * **And it is not a second copy of the prefix table** (ruling P2): {@link
+   * Session.mode} is read off the *backend's own interpretation* of the query,
+   * which is exactly what `modeOf` exists for. The one residue is `t ` — a
+   * worklog prefix draws as results, so the control is offered and the backend
+   * refuses it by name. That refusal names its rule, which is the honest
+   * behaviour for a case the frontend is not entitled to decide.
+   */
+  get canSave(): boolean {
+    return (
+      this.#ports.createSmartList !== undefined && this.raw.trim() !== "" && this.mode === "results"
+    );
+  }
+
+  /**
+   * Save what is in the box, under `label`, and redraw the rail.
+   *
+   * The id the backend generated is remembered in {@link Session.savedId} so
+   * the control can say it worked; the next keystroke clears it, because it is
+   * a statement about *this* query.
+   */
+  async saveCurrent(label: string): Promise<void> {
+    const create = this.#ports.createSmartList;
+    if (!create) return;
+    await this.#write(async () => {
+      this.savedId = (await create(label, this.raw)).id;
+    });
+  }
+
+  /** Rename a saved list and redraw the rail. */
+  async renameList(id: string, label: string): Promise<void> {
+    const rename = this.#ports.renameSmartList;
+    if (!rename) return;
+    await this.#write(() => rename(id, label));
+  }
+
+  /** Delete a saved list and redraw the rail. */
+  async deleteList(id: string): Promise<void> {
+    const remove = this.#ports.deleteSmartList;
+    if (!remove) return;
+    await this.#write(async () => {
+      await remove(id);
+      if (this.savedId === id) this.savedId = null;
+    });
+  }
+
+  /**
+   * One write to the rail, then a **re-read** of the board.
+   *
+   * Never a patch of `home` in place: the count and the badge of a list this
+   * write did not touch are still the backend's answer, and a hand-patched
+   * array is a second opinion about them. The re-read is one round trip on a
+   * gesture a reader makes by hand, which is not the ⌘K budget.
+   */
+  async #write(write: () => Promise<void>): Promise<void> {
+    try {
+      await write();
+      this.error = null;
+    } catch (cause) {
+      this.error = ipcErrorMessage(cause);
+      return;
+    }
+    await this.loadHome();
   }
 
   /** Load the board. Called once when the overlay opens. */
@@ -234,6 +332,11 @@ export class Session {
    */
   dispose(): void {
     this.#cancel();
+    // Whatever else survives a close, this does not: it is a statement about
+    // the query in the box, and the paste branch below empties the box. Left
+    // set, a reopened launcher would read "Saved as list" over a query nobody
+    // saved this time.
+    this.savedId = null;
     if (this.url !== null) {
       this.raw = "";
       this.#clear();
