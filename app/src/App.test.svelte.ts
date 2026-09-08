@@ -350,6 +350,10 @@ vi.mock("./lib/ipc/assets", () => ({
       monitor_targets: [],
     });
   },
+  // #505's *Depends on this* panel, read on every selection. Answered with
+  // nothing for the reason below: this suite is about the shell's shortcuts,
+  // and the panel's own tests are in `AssetsView.depends.test.svelte.ts`.
+  dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
   // The type table the create/edit dialogs read (#429). Answered rather than
   // left out: a mock short of an export the component imports is an error at
   // mount, not a missing feature.

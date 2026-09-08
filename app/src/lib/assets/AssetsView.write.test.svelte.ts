@@ -290,6 +290,9 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
       return openRefusal === null ? Promise.resolve() : Promise.reject(openRefusal);
     },
     assetTypes: () => Promise.resolve(TYPES),
+    // #505's panel: read on every selection, so a port left out falls through
+    // to the real `invoke`. Empty is honest -- no test here is about it.
+    dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
     assetTree: (parentId?: string | null) => Promise.resolve(children(parentId ?? null)),
     getAsset: (assetId: string): Promise<AssetDetail> => {
       try {

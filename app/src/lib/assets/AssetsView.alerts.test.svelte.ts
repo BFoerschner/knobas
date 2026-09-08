@@ -105,6 +105,10 @@ function render(alerts: Alerts) {
       alerts,
       ports: {
         assetTypes: () => Promise.resolve([]),
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
+        dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve((parentId ?? null) === null ? [SITE] : []),
         getAsset: () => Promise.resolve(detailOf()),
@@ -301,6 +305,10 @@ test("the ack and the recovery are sentences in the asset's history", async () =
       alerts,
       ports: {
         assetTypes: () => Promise.resolve([]),
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
+        dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve((parentId ?? null) === null ? [SITE] : []),
         getAsset: () =>

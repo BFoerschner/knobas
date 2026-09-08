@@ -361,6 +361,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // name opens (#432). The three writes are **not** here: creating a route
     // from the dialog would need a minted id and a history of its own, and
     // what this fixture exists for is the two reads a browser looks at.
+    depends_on_this: (args) => dependsOnThis(args),
     get_route: (args) => routeDetail(args),
     // The Import (#439), as a **replay** and not as a second implementation of
     // the merge rule -- see `estatePreview`. It exists because the estate this
@@ -1203,6 +1204,99 @@ function assetDetail(args: Record<string, unknown>) {
           ]
         : []),
     ],
+  };
+}
+
+/**
+ * The `depends-on` and `runs-on` links this fixture pretends somebody drew.
+ *
+ * **Fixture-only.** The estate file is a tree and its routes and carries no
+ * link at all, so without these three rows the *Depends on this* panel (#505)
+ * would show containment on every asset in the browser and the two relation
+ * words would be unwalkable. They exist nowhere else: no seed writes them, no
+ * import produces them, and the panel's real witness is
+ * `crates/knobas-app/tests/assets_ipc.rs` over a scratch PostgreSQL, where the
+ * links are drawn by the test.
+ *
+ * `from` depends on / runs on `to`, which is the direction the read walks:
+ * what breaks when `to` goes down is `from`.
+ */
+const FIXTURE_DEPENDENCIES: { from: string; to: string; relation: string }[] = [
+  // TeamCity's VCS roots are the Gitea repositories it reaches through
+  // `route:tunnel-gitea-reverse`, which is in the file.
+  { from: "asset:hetzner-teamcity", to: "asset:knobas-gitea", relation: "depends-on" },
+  // An agent is no use without the server it registers with.
+  { from: "asset:knobas-teamcity-agent", to: "asset:knobas-teamcity", relation: "depends-on" },
+  // The mockd container answers the loopback ports the laptop's suites use.
+  { from: "asset:notebook", to: "asset:knobas-mockd", relation: "runs-on" },
+];
+
+/**
+ * `depends_on_this`: what breaks if this asset goes down (#505).
+ *
+ * `assets::depends_on_this`' **rule** and not one of its answers, the
+ * discipline `inForce` above states: breadth-first over containment and over
+ * {@link FIXTURE_DEPENDENCIES}, with a visited set, so a cycle drawn into that
+ * list would walk once here as it does in the store. The relation is `null`
+ * for a containment step, which the pane reads as *inside*.
+ *
+ * The routes are the ones landing on **this asset itself**, listed apart and
+ * not counted -- a narrower read than `reachable_via` above, which takes the
+ * whole containment path.
+ */
+function dependsOnThis(args: Record<string, unknown>) {
+  const id = args.assetId as string;
+  if (!FIXTURE_ESTATE.some((row) => row.id === id)) {
+    throw { code: "not_found", message: `no asset ${id}`, source_id: null };
+  }
+
+  const seen = new Set([id]);
+  let frontier = [id];
+  const assets: { asset: unknown; path: string | null; relation: string | null }[] = [];
+  while (frontier.length > 0) {
+    const reached = new Map<string, string | null>();
+    /**
+     * The store's `distinct on (dst) ... order by dst, relation asc nulls
+     * first`, over the **whole** step and not over one frontier entry:
+     * containment beats a link, and two links between the same pair settle by
+     * the relation's own text. Written out rather than first-writer-wins,
+     * because the order the frontier happens to be in is not a rule.
+     */
+    const claim = (dst: string, relation: string | null) => {
+      if (!reached.has(dst)) return void reached.set(dst, relation);
+      const held = reached.get(dst) ?? null;
+      if (held === null || relation === null) return void reached.set(dst, null);
+      if (relation < held) reached.set(dst, relation);
+    };
+    for (const from of frontier) {
+      for (const held of FIXTURE_ESTATE.filter((row) => row.parent_id === from)) claim(held.id, null);
+      for (const edge of FIXTURE_DEPENDENCIES.filter((link) => link.to === from)) {
+        claim(edge.from, edge.relation);
+      }
+    }
+    const layer = [...reached]
+      .filter(([reachedId]) => !seen.has(reachedId))
+      .map(([reachedId, relation]) => ({
+        // Non-null because every id in `reached` came out of `FIXTURE_ESTATE`
+        // or out of a link this file wrote between two of its assets.
+        asset: FIXTURE_ESTATE.find((row) => row.id === reachedId)!,
+        relation,
+      }))
+      .sort((left, right) => left.asset.name.localeCompare(right.asset.name));
+    for (const line of layer) seen.add(line.asset.id);
+    for (const line of layer) {
+      assets.push({
+        asset: assetRow(line.asset),
+        path: assetPathText(line.asset),
+        relation: line.relation,
+      });
+    }
+    frontier = layer.map((line) => line.asset.id);
+  }
+
+  return {
+    assets,
+    routes: FIXTURE_ROUTES.filter((route) => route.target_id === id).map(routeRow),
   };
 }
 

@@ -223,6 +223,10 @@ function render(hash: string) {
       now: () => NOW,
       ports: {
         assetTypes: () => Promise.resolve([]),
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
+        dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve(ESTATE.filter((candidate) => candidate.parent_id === (parentId ?? null))),
         getAsset: (assetId: string) => {

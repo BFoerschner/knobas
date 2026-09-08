@@ -180,6 +180,10 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
       now: () => NOW,
       ports: {
         assetTypes: () => Promise.resolve([]),
+        // #505's panel: read on every selection, so a port left out falls
+        // through to the real `invoke`. Empty is honest -- no test here is
+        // about it.
+        dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) => {
           calls.reads += 1;
           return Promise.resolve((parentId ?? null) === null ? [SITE] : []);

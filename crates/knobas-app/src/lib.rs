@@ -337,6 +337,10 @@ pub fn run() {
             // reason: it is stream E's read but the list is one list,
             // append-only (§10.8) and never re-sorted.
             commands::entity::resolve_url,
+            // #505's *Depends on this* panel, appended after that: an assets
+            // read arriving after an entity one, because the list is in merge
+            // order and never re-sorted (§10.8).
+            commands::assets::depends_on_this,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -456,3 +456,91 @@ and no wire change — but not only code: the list's label would have to change 
 **Alert** clause amended by this PR would be rewritten, and story 47's *"agree"* would still be
 false on snooze, so a reversal that wants the inbox and the launcher to show one number would also
 have to bring the inbox's shelf into the list, which is a design change and not a clause.
+
+---
+
+## #505 — the frozen gate for `depends_on_this`, the direction the links are walked, two craft decisions, and a stale doc comment
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/505#issuecomment-5577594293>
+
+**The fork:** four, raised by PR #528 and flagged rather than left open — the implementer decided
+each and asked for ratification. (1) The PR adds `commands::assets::depends_on_this`, the DTOs
+`DependsOnRow` and `DependsOnThis`, and one line at the foot of `crates/knobas-app/src/lib.rs`'s
+handler list: the IPC command schema and one of the two append-only barrels, both on §10.8's list.
+Does the ticket authorise the touch, and is the entry at `docs/contract.md:8183` what the contract
+requires? (2) `NEXT_LAYER` walks links from their **`to`** end — `select l.from_id … where l.to_id
+= any($1)` — on spec #491's *"confirmed links with relation `depends-on` or `runs-on` toward the
+asset"*, while `CONTEXT.md`'s **Depends on this** entry says only *"every asset linked to it by
+`depends-on` or `runs-on`"* and is direction-agnostic. Yes or no. (3) Two craft decisions made in
+the same breath: `depends_on_this` is a command of its own rather than a field on `get_asset`, and
+a row reached through containment carries `relation: null` rather than the word `holds`. (4)
+`sourceAssets`' doc comment in `app/src/lib/ipc/assets.ts` still says *"**Empty until M4.1.** No
+adapter emits a `monitor` yet"*, which stopped being true when #442's Kuma adapter landed. Owed
+here, owed as a ticket, or not owed?
+
+**Ruling:** (1) **Authorised, and the entry is sufficient as written**; the merge-manager may
+proceed once the clause and this append are on the branch. One clause is owed and is in this PR:
+the entry's *"Björn keeps the gate for frozen contracts and this entry is flagged for his review"*
+gains *"— ratified in his absence by the deputy's ruling of 2026-09-08 on #505"*, the wording
+#496's and #498's entries carry. Two claims the merge-manager's deep pass should start with, both
+fixed on the branch by this PR rather than left for review: the entry said the read touches
+*"`knobas.asset`, `knobas.link` and `knobas.route`"* while `NEXT_LAYER` reads
+`knobas.confirmed_link`, `0007`'s view over that table — true as a share-export claim and now
+carrying a sentence that says so — and the entry's pin count disagreed with the PR body's, which is
+seven. (2) **Yes. The `to` end is the operative reading, and it was already decided.** One
+parenthetical is owed on `CONTEXT.md`'s **Depends on this** entry, in that entry's amendment style,
+so the direction is not argued a third time. No ADR. (3) **Both ratified, and neither is reopened
+by the merge-manager.** What stays the merge-manager's is craft inside those two answers — the
+tie-break's `nulls first`, the ordering, the label text — not the answers. The `Option<String>` the
+implementer flagged as possible Primitive Obsession is the house style and is not owed a newtype.
+(4) **Owed here, on #528, as one hunk and no test.** Not a ticket.
+
+**Reasoning:** (1) the freeze exists so that a wire shape never arrives unannounced, and this one
+was announced in spec #491's stream map row 7 (*"one IPC read"*), named in the ticket's body
+(*"One IPC read on the assets module (§10.8 entry)"*) and its third criterion, and written up in
+the section the freeze points at. A read has a shape, and the two DTOs are that shape and nothing
+more — two additive DTOs are the read, not a second touch beside it, which is how #452's entry
+lists its four shapes under one authorisation. Checked at the gate: nothing under
+`crates/knobas-db/migrations/**`, `crates/knobas-source/src/**` or `crates/knobas-http/**` moves;
+`error.rs`, `profile.rs` and `app/src/lib/ipc/index.ts` are untouched; `lib.rs` grows one appended
+line; `crates/knobas-core/src/link.rs` gains two `pub const` and that crate is not on the frozen
+list, so the constants are the ticket's third criterion and not a gate question; the entry sits
+inside §10.8 by an anchored header grep. (2) *Toward* is an end, not a pair, and the glossary
+already supplies which end: **Link** says *"the stored direction is what tells `blocks` from
+`blocked by`"*, and `app/src/lib/detail/relations.ts` gives `runs-on` the readings *runs on* /
+*hosts*. So `container --runs-on--> machine` says the container runs on the machine, and what
+breaks when the machine goes down is the container — the `from` end of a link whose `to` is the
+machine. The undirected reading would list the machine under the container's panel, which is the
+panel answering the opposite question, and story 51's *"so that blast radius is one glance"* makes
+a glance at the wrong set worse than no panel. Mutant M1 is that direction witnessed on a real
+PostgreSQL over the real estate file, which is ADR-0013's witness. (3) both are the smallest
+reading of a record that already exists. The read of its own is the spec's own sentence, and a
+field on `get_asset` would be zero reads and one changed DTO — a different frozen-surface touch
+from the one the spec named — with the pane paying the walk on every selection in every Miller
+column for a section a reader scrolls to. `relation: null` is ADR-0014 applied: a row that came
+through the parent field came through no relation, and the implementer's reason — *a word there is
+one a reader could then draw as a link and have counted twice* — is that ADR's first rejected
+option restated. (4) the file is already in this PR's diff, the sentence is one paragraph in it,
+and the Rust side of the same read already carries the true sentence; a ticket for one stale
+paragraph in a file this PR edits would cost the loop more than the paragraph. It is not the #496
+part-1 case, where the *local index* wording was rendered text in other files with tests behind it.
+A doc comment is living text, and this milestone's own lesson — twice on this very branch — is
+prose that outran the code.
+
+**If you disagree, the cost of reversing this is:** (1) moderate after merge — the command leaves
+the barrel only by a further §10.8 entry and the two DTOs with it; there is no migration, which is
+the entry's own point, so nothing is irreversible in the database. Before merge it is one revert of
+a branch nothing has built on. (2) small in code — one predicate in `NEXT_LAYER` and the three
+tests that pin it, plus the glossary clause struck — but it would reverse spec #491's own sentence,
+so it is a spec amendment and a ticket, not a comment. (3) a §10.8 entry of its own and a change to
+`AssetDetail`, which every asset test reads, for the first; trivial before merge for the second,
+one string on the wire and one test, but it would be an ADR-0014 supersession and Björn's to write.
+(4) nil — one paragraph, no code, no test.
+
+**On the witness, which no part reopens:** the `--demo` half of the second criterion was ruled on
+#496 (part 3), which names #505, and the PR body meets its four conditions. The two things the
+implementer reported that changed the code — the survived mutant that showed `NEXT_LAYER`'s inner
+join was redundant *and its comment wrong*, and the mirror test that never shape-checked the null
+row it said was its point — are the witness doing what ADR-0013 asks and are recorded where the
+next reader will look. Nothing is owed on them.

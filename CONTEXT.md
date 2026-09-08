@@ -247,7 +247,7 @@ The property an [importer](#importer) sets that names the thing it read in the s
 _Avoid_: external id, foreign key, source id (that is a [source](#source)'s)
 
 **Depends on this**:
-What breaks if an [asset](#asset) goes down: its descendants, since they run inside it, and every asset linked to it by `depends-on` or `runs-on`, transitively over both — the panel in the asset pane that answers *blast radius* (spec §12.2). Routes whose target is the asset are listed beneath as *reachable via routes that would break* and not counted. `depends-on` and `runs-on` are load-bearing relations from here on, beside `monitored-by`; the rest of the vocabulary stays open. (Ruled 2026-09-07, v1.5 grilling)
+What breaks if an [asset](#asset) goes down: its descendants, since they run inside it, and every asset linked to it by `depends-on` or `runs-on`, transitively over both — the panel in the asset pane that answers *blast radius* (spec §12.2). Routes whose target is the asset are listed beneath as *reachable via routes that would break* and not counted. `depends-on` and `runs-on` are load-bearing relations from here on, beside `monitored-by`; the rest of the vocabulary stays open. (Ruled 2026-09-07, v1.5 grilling) (Amended 2026-09-08, #505: read from the link's `to` end — the assets that break are the `from` ends of the `depends-on` and `runs-on` links pointing at the asset, per spec #491's *"toward the asset"* and the [Link](#link) entry's stored direction. So a container drawn `runs-on` at a machine is in the machine's answer and the machine is not in the container's: what breaks is what was standing on the thing that fell.)
 _Avoid_: blast radius (that is the question, not the panel), dependents, impact, downstream
 
 **Route**:

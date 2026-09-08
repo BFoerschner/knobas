@@ -102,6 +102,9 @@ function estate(targets: MonitorTarget[], reachable: RouteRow[] = [ROUTE]) {
       else refuseQueue = refusal;
     },
     assetTypes: () => Promise.resolve([]),
+    // #505's panel: read on every selection, so a port left out falls through
+    // to the real `invoke`. Empty is honest -- no test here is about it.
+    dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
     assetTree: (parentId?: string | null) =>
       Promise.resolve(
         parentId === null || parentId === undefined ? [row()] : [],
