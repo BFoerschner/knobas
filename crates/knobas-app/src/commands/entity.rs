@@ -2331,9 +2331,7 @@ pub fn record_capture_context(
 /// What the main window last recorded -- the capture window's half of the pair
 /// above.
 #[tauri::command]
-pub fn capture_context(
-    capture: State<'_, crate::capture::Capture>,
-) -> crate::capture::Recorded {
+pub fn capture_context(capture: State<'_, crate::capture::Capture>) -> crate::capture::Recorded {
     crate::capture::context(&capture)
 }
 

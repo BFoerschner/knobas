@@ -77,7 +77,9 @@ impl Registrar for Stub {
             .expect("the stub's log")
             .push(format!("register {accelerator}"));
         if self.refuse == Some(accelerator) {
-            return Err(format!("{accelerator} is registered by another application"));
+            return Err(format!(
+                "{accelerator} is registered by another application"
+            ));
         }
         Ok(())
     }

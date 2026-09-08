@@ -67,8 +67,8 @@ use sqlx::PgPool;
 use tauri::{Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
 
-use crate::settings;
 use crate::IpcError;
+use crate::settings;
 
 /// The `knobas.setting` key holding the capture shortcut.
 ///

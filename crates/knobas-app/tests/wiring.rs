@@ -530,9 +530,13 @@ fn the_capture_window_may_close_itself_and_nothing_more() {
          commands, which need no grant"
     );
 
-    let both = format!("{text}{}", std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json")
-    ).expect("capabilities/default.json is readable"));
+    let both = format!(
+        "{text}{}",
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json")
+        )
+        .expect("capabilities/default.json is readable")
+    );
     assert!(
         !both.contains("\"global-shortcut:"),
         "a capability grants the global-shortcut plugin to a webview. The \
@@ -555,10 +559,7 @@ fn the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half() {
     let manifest = include_str!("../Cargo.toml");
     let pin = manifest
         .lines()
-        .find_map(|line| {
-            line.trim()
-                .strip_prefix("tauri-plugin-global-shortcut = ")
-        })
+        .find_map(|line| line.trim().strip_prefix("tauri-plugin-global-shortcut = "))
         .expect("`tauri-plugin-global-shortcut` is not a dependency")
         .trim()
         .trim_matches('"')
