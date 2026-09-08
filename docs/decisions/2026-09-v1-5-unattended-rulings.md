@@ -2090,3 +2090,95 @@ one unattended unlock, which the report tells you how to spend. (4) one label an
 not exited; part 3 supplies one for v1.5, and whether it is the general rule — stop and report when
 the only open work has a person's precondition — is Björn's, on his return, beside the
 `ready-for-human` vocabulary question already flagged on #500.
+
+## #525 — the two reds of the first unlocked run: what is owed, by whom, and whether the exit waits
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/525#issuecomment-5587346615>
+
+**The fork:** the Mac was unlocked, the harness probed `trusted 1 / post-events 1 / screen-locked 0`
+before and after each build, and #525's runner drove all three drivers on `main` `d7738927`, one at
+a time, foreground. `launcher-hotkey` is green (transcript on #500). `open-in-editor` and `capture`
+are red, and in both the driver's assertion fails while its own `ax dump` shows the app did what the
+stream asks: a branch detail for `feature/PAY-231-sepa-retry` is open with *Set path…*, *Open in VS
+Code*, *Open in JetBrains* and *Open terminal here*, but `open-in-editor.sh:225` waits on `present
+"$CHECKOUT_PANEL"` — `CHECKOUT`, from `rendered_label 'Checkout'` — and no element in the 250-line
+tree carries that as `AXTitle` or `AXDescription`, the only two attributes `ax.swift`'s `matching()`
+reads; the capture window is up over Finder with the caret in its `AXTextArea`, but `capture.sh:286`'s
+`exactly_one "$CAPTURE_BOX"` counts **three** elements named `Capture`. Filed as #547 and #548. Two
+questions: (1) is the fix owed under #547/#548 as tickets that each end in a green transcript on #501
+and #503, under #525 by its runner, or as disclosed debt left for after the milestone; (2) does the
+v1.5 exit wait on them, given that they were not in spec #491's list.
+
+**Ruling:** (1) **Both reds are owed under #547 and #548, in v1.5, each relabelled `ready-for-agent`,
+and each is a desktop-witness ticket under the one-at-a-time cap** — taken in number order, #547
+first, #548 when #547 has merged. Not under #525, whose body says *"Do not resolve it here."* Not
+post-milestone, because the same body's first bold line is *"The v1.5 exit is not taken while this
+ticket is open."* **Each fix is to `testenv/**` — the driver, or the harness under it — and never to
+the app to satisfy the driver**: the app opened the panel and the window, the dumps are the
+measurement, and the names it carries are its own and each is right. `ax.swift`'s doc comment on
+`matching()` already states the rule the drivers broke — *"A driver that insisted on one would fail
+on a correct app for a reason that has nothing to do with what it is witnessing."* Five conditions
+of each merge, on the branch: **(a)** the implementer re-verifies the diagnosis on the tree it starts
+from and says so on the PR (for #548, what it can establish about how a green at 04:55 became a red
+on `d7738927`, and *unmeasurable* rather than a guess where the squashed branch puts it out of
+reach); **(b) the new waypoint is witnessed in both directions** — whatever the driver waits on is
+something the dump measures the tree to carry, and the PR body shows it **false before the step and
+true after** on the same tree, which for #547 means the wait cannot be satisfied by the launcher's
+own hit list before the detail opens; **(c)** pure logic goes in `desktop-witness-lib.sh` under
+`witness-unit` (*"a driver is not exempt from the gate because its run is"*), and **no `pin_label`
+of a markup spelling is offered as the witness of an accessible name**, since #547's own finding is
+that the pin of the *Checkout* heading stayed green over this; **(d) the merge-manager runs the
+driver green on the branch head it squashes**, foreground, prerequisite 4 first, and posts that
+transcript on **#501** (for #547) or **#503** (for #548), which **discharges #525's criterion 2 or
+3** — and on a `screen-locked` refusal the PR merges as #523, #530, #536 and #537 did, with the run
+owed; **(e)** this entry, written by #547's implementer as the first to land, and **no ADR and no
+glossary entry**, because nothing architectural is decided and ADR-0016's dated consequence already
+says what the witness observes.
+
+(2) **The v1.5 exit waits on #547 and #548, through #525**, which stays open under its title with
+its criteria unchanged as the holder of runs 2 and 3; `in-progress` comes off and no other label
+goes on — not `ready-for-agent`, because *"the remaining work is another ticket's criterion, not a
+dispatch"*, and not `ready-for-human`, because no person's precondition remains. When both are closed
+and green transcripts from the head that merged sit on #501 and #503, the orchestrator closes #525
+before Step 4's exit branch is entered. (3) **Nothing else is owed on #525.** The `launcher-hotkey`
+green stands; the two dumps are evidence for #547 and #548 and are **not** witnesses of streams 4
+and 5 — *"a panel on screen is not a stub spawned with the checkout path, and a window with a caret
+is not a note with its links."*
+
+**Reasoning:** part 1 was answered by #525's body twice. *"Do not resolve it here. File a new ticket
+with the driver's `ax dump` output attached"* names the payer, and *"a red run means the three
+drivers are re-done against whatever the dump shows — the same cost whenever it is paid, which is
+why the ruling chose to pay it once, **later**, rather than stall three tickets now"* prices it —
+*later* than #500's merge, inside a ticket whose first line holds the exit. The fix is the driver and
+not the app for the reason the working model names, *a check that measures a representation of the
+thing instead of the thing*, and this harness has now produced that class three times: the markup
+names `Directory` and `Checkout` that #536's fix uppercased, the `witness-unit` pin that stayed green
+over a name the AX API never answered, and `matching()`'s two attributes against a window whose three
+names are all correct. The memory of #398 says what an unsatisfiable criterion does next — it
+*"pushes the agent toward changing correct work to match a broken check"* — which is why condition
+(b) asks for both directions rather than a green run: `exactly_one` to `present` on the same name
+would pass, and would also pass on a `Capture` that never opened. Part 2 follows from what the
+witness is: spec #491's stream map names **desktop automation** as the witness of rows 4 and 5, and
+ADR-0016's consequence says what it observes — *"the spawned editor or terminal observed as a process
+with the expected path"* — and `open-in-editor` stopped one step before the button. ADR-0013 decides
+the class: *"awkward to reproduce is not cannot produce: if the real instance can be driven into the
+fault by any seed, flag or clock, it is witnessed live"*, and the desktop was driven today.
+
+**If you disagree, the cost of reversing this is:** (1) low before either PR opens — two `wontfix`
+labels, or two milestones removed, and nothing merged is undone; after they merge, nothing to
+unmerge, since each is `testenv/**` on no frozen surface. What the reversal spends is the price the
+first #503 ruling put on closing #537: *"the ADR-0016 witness for* Open in editor *never runs inside
+v1.5"*, and now the capture witness on the merged head with it. Reversing the *app untouched*
+condition is one attribute in a Svelte file; its price is a witness that measures a label added for
+the witness. (2) one label and one comment — close #525 against the one green — and nothing in code;
+the price is a milestone exit with two of its three desktop streams never green on `main`. (3) the
+sequencing and the closing instruction are lines to the orchestrator, revoked by a line.
+
+**Flagged, not ruled:** whether `witness-unit`'s pins of rendered and markup names should be retired
+or replaced by something that reads the AX tree — three instances in one harness of a pin green while
+the tree disagreed is a rule waiting to be written in `docs/agents/working-model.md`, beside the
+shared-infrastructure sentence already flagged on #503. And whether the loop file's desktop cap
+should name tickets by shape (*any ticket whose merge runs `just desktop-witness`*) rather than by
+number, which would have covered #525, #537, #547 and #548 without a ruling each. Both Björn's, on
+his return.

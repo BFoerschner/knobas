@@ -1220,6 +1220,16 @@ element by rendered text, so a `.lab` label the stylesheet uppercases is
 `SHORTCUT` on screen and `Shortcut` in the markup. `rendered_label` is the one
 place that rule lives, and `witness-unit` pins the stylesheet rules behind it.
 
+**What a pin cannot say, and #547 is the bill for it.** A pin measures that a
+string is still in a file. It says nothing about which *attribute* the
+accessibility API answers with, and the two are different questions: an
+`aria-label` and a button's own words arrive as a **name** (`AXDescription` /
+`AXTitle`, which `ax find` counts and `ax press` acts on), while a heading, a
+status line and a rendered paragraph arrive as a **value** (`AXValue`, which
+only `ax values` reads). `open-in-editor` waited for a heading as a name for as
+long as it existed, and its pin was green the whole time. Only a run can tell
+the two apart, which is what this harness is for.
+
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
 A rendered panel is witnessed by headless Chrome against the `?fake-ipc` dev
@@ -1238,13 +1248,16 @@ part of it. What the gate carries is `just witness-unit`
 (`testenv/desktop-witness-test.sh`), over every piece of the harness that is a
 decision rather than a side effect: how it compares Launch Services' answer
 against the bundle it built, how it reads the accessibility probe, and the
-four pieces `open-in-editor` is built out of -- the stub it writes, the git
+five pieces `open-in-editor` is built out of -- the stub it writes, the git
 config it writes, its wait for the stub's record to be *finished* rather than
-merely begun, and its reading of what the record says -- and the four `capture`
-is: the title a typed paragraph gives its note, the whole-line match its
-readings are found by, the reading of `ax frontmost`'s answer, and the
-rendered-name rule above, which both drivers share. A driver is not exempt from
-the gate because its *run* is.
+merely begun, its reading of what the record says, and whether the stub's path
+can go into a command template without the quotes it may not type (#547) --
+and the four `capture` is: the title a typed paragraph gives its note, the
+whole-line match its readings are found by, the reading of `ax frontmost`'s
+answer, and the rendered-name rule above, which both drivers share. Two more
+belong to neither: `reading_verdict` and `waypoint_verdict`, which say whether
+a wait witnessed the step before it or was merely true on both sides of it. A
+driver is not exempt from the gate because its *run* is.
 
 ### The prerequisites
 
@@ -1368,15 +1381,31 @@ and `crates/knobas-app/tests/demo.rs`'s
 chain below the window — the demo load, the entity read, and `checkout::view`
 matching the very remote the driver writes into the `.git/config` it plants.
 
-What #537 could **not** do is run it. `just desktop-witness open-in-editor`, on
-#537's head at 09:32 CEST on 2026-09-08, got as far as compiling the
-accessibility helper and no further: the harness's own readiness check answered
-`trusted 1 / post-events 1 / screen-locked 1` and refused, exit 1. That is
-before the build, before Launch Services, before the driver is invoked at all —
-so the driver's own first line has still never run, and nothing past that
-refusal has been observed on it, ever: no launcher hit, no detail, no press, no
-spawn. **One number now, not two**: the run is owed to **#525**, which has
-listed it as one of its three since it was filed.
+What #537 could **not** do is run it: on #537's head at 09:32 CEST on
+2026-09-08 the readiness check answered `screen-locked 1` and refused before the
+build. #525's runner got the screen at 16:55 and the driver ran for the first
+time — and refused a branch detail that was open in its own dump, which is
+**#547**.
+
+**`open-in-editor` is green since #547**, run from `.worktrees/issue-547` at
+17:32 CEST on 2026-09-08 against `dev.knobas.desktop` built and signed by
+`knobas-dev`, with `/Applications/knobas.app` moved aside and every other path
+unregistered so Launch Services named the bundle the run had just built:
+
+```
+open-in-editor: the launcher has answered; 'CHECKOUT' on screen: no
+open-in-editor: after Return; 'CHECKOUT' on screen: yes
+open-in-editor: a repo or branch detail is open, and it has a checkout panel
+open-in-editor: pressing 'Open in VS Code'
+open-in-editor: the stub ran with one argument, and it is the checkout: …/clones/payout-service
+```
+
+That last line is **ADR-0016's witness, and the first time it has ever been
+observed**: a program a person chose in Settings, started by the button on a
+branch detail, holding the path the disk answered with and nothing the mirror
+holds. It is a run of the head it was made on and not of what merged — the
+run of the merge head is the merge-manager's, and it is **#525**'s second
+criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 
 #### What the first runs answered
 
@@ -1417,6 +1446,33 @@ listed it as one of its three since it was filed.
   the app is frontmost — the harness waits for a *window*, and the boot screen
   is one — and Return on a launcher that has not answered selects nothing. Both
   drivers now wait for what they are about to act on.
+
+#### What the first unlocked run broke, and what #547 fixed
+
+* **A wait on a name nothing carries.** `open-in-editor` asked `ax find` for
+  `CHECKOUT`, and `<span class="lab">Checkout</span>` is not a *name*: it names
+  nothing, and its words are an `AXValue`. The panel was on screen with its
+  three buttons and the count was 0, so the driver reported a working feature
+  as a detail that never opened — and `witness-unit`'s pin of the heading was
+  green throughout, because **pinning what the markup says measures nothing
+  about what the accessibility API answers**. The heading is read with `ax
+  values` now, the way `capture` has read its headings since #503.
+* **And read twice.** A wait that was already true one keystroke earlier
+  witnesses nothing, so the reading is taken with the launcher's hit list on
+  screen *and* after Return, and `waypoint_verdict` refuses the pair unless it
+  went from absent to present. An empty answer from `ax values` is
+  `unreadable`, never *absent*: the helper prints nothing when it can see no
+  window, and read as *absent* that would make the before-half of every
+  waypoint pass on a helper that had stopped working.
+* **A driver may not type a quote.** The template it typed was `"<stub>
+  {path}"`, quoted against a `TMPDIR` with a space in it — and macOS' *Smart
+  Quotes* substitution rewrote the straight quotes on their way into the WebKit
+  field, so knobas stored `“/var/…/stub” {path}` and refused to run a program
+  of that name, correctly and with the reason in the toast. **`ax type` posts
+  characters the way a person's keyboard does, and the input stack rewrites
+  some of them** — straight quotes, and a double hyphen, which the same
+  preference pane turns into a dash. The template is one unquoted word now, and
+  `path_is_one_word` refuses to type a path that would have needed the quotes.
 
 #### What is still not witnessed
 
