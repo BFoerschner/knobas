@@ -2,8 +2,8 @@
 //!
 //! Ruling P13. §14a's demo mode loads the Tidewater fixture, and stream D and
 //! stream E develop against it while real sources are being built into the same
-//! application. Sharing one database would mean twenty-one fixture items in
-//! every search over a real corpus, for ever -- so `--demo` selects a whole
+//! application. Sharing one database would mean the Tidewater fixture's items
+//! in every search over a real corpus, for ever -- so `--demo` selects a whole
 //! profile: its own data directory (and therefore its own embedded PostgreSQL,
 //! on its own port), and its own keychain service, so a demo run is not even
 //! offered the real credentials.

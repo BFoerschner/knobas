@@ -258,17 +258,37 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
 /// [`lists_the_newest_first_and_reports_the_unpaged_total`] is, and for one
 /// worth naming because it is not about freshness.
 ///
-/// The oracle below is Rust's `sort()`, which is **byte order**, and the
+/// The oracle used to be Rust's `sort()`, which is **byte order**, and the
 /// database's is its own collation -- and the two disagree the moment a title
-/// starts with a lowercase letter. Every title in the mock corpus happens to
+/// starts with a lowercase letter. Every title in the mock corpus happened to
 /// start with a capital, so the disagreement never showed; the first test in
 /// this binary to write a lowercase title made it fail here, in a test that has
 /// nothing to do with that test's subject (#442, whose monitors really are
-/// called `gitea` and `canary`). Scoping is the fix the file's own header asks
-/// for -- "written to survive another test running beside it" -- and it costs
-/// this test nothing: what it asserts is that `TitleAsc` is a *second SQL
-/// statement* rather than an interpolated column name, and one source's rows
-/// answer that as well as the whole corpus does.
+/// called `gitea` and `canary`), and scoping this read to `mock` was the fix.
+///
+/// **#537 took that scoping's protection away**, exactly as the paragraph above
+/// predicted it could: the demo corpus gained the fixture's repositories and
+/// branches, and six mock titles now start with a lowercase letter --
+/// `payout-service`, `ledger-api`, `ops-runbooks`, `main`,
+/// `feature/PAY-231-sepa-retry` and `fix/PAY-228-partial-refund-drift`. Byte
+/// order puts all six after `Standup protocols`; the database interleaves them.
+///
+/// **Case-folding the byte sort would not have been enough either**, and this
+/// is measured rather than reasoned from what a collation ought to do. The run
+/// that failed printed the database's own order, and in it
+/// `Ledger_Deploy_Staging #412` comes **before** `ledger-api` -- while `-`
+/// (0x2D) sorts before `_` (0x5F), so every byte comparison, folded or not,
+/// puts them the other way round. So the oracle moved rather than the corpus:
+/// the titles that came back are handed to a **hand-written statement of this
+/// test's own** to sort, and the two orders must agree.
+///
+/// That keeps what this test is for. The subject is that `TitleAsc` selects a
+/// *second SQL statement* rather than interpolating a column name into one, and
+/// an `order by` the test wrote itself is an independent answer to that: an
+/// implementation that ignored the order, or ordered by anything else, still
+/// fails. What it stops being able to see is a collation change under the whole
+/// database -- which would move both sides together, and is not this test's
+/// subject or this milestone's risk.
 #[tokio::test]
 async fn title_order_is_a_second_statement_not_string_interpolation() {
     let pool = seeded().await;
@@ -286,8 +306,12 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
         .iter()
         .map(|r| r.title.clone())
         .collect::<Vec<_>>();
-    let mut sorted = titles.clone();
-    sorted.sort();
+    let (sorted,): (Vec<String>,) =
+        sqlx::query_as("select array(select t from unnest($1::text[]) as t order by t)")
+            .bind(&titles)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(titles, sorted);
 
     // ...and it is a different order from the default, or the assertion above

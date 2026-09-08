@@ -2301,7 +2301,7 @@ Task 7 closed with *Load demo data* never having been clicked in a real window. 
 - **`just demo`** — `profile demo=true`, `dir=.../dev.knobas.desktop/demo`, its own postmaster on port 50849. Clicking *Load demo data* rendered **"Synced 21 items from mock (0 deleted, tidewater-v1)"**. Typing `sepa retry` into the search box returned three groups — PRS, COMMITS, TICKETS — with `mock:PAY-231` ("Retry failed SEPA payouts") in the ticket group, and the snippet rendered as separate `SEPA` / `retry` runs, which is P2's `Vec<Segment>` arriving intact through the bridge. Cmd-Q logged `stopping the embedded postgres` and the process exited.
 - **`just dev`** — `profile demo=false`, `dir=.../dev.knobas.desktop`, its own postmaster on port 50861. Clicking the same button rendered **"Demo load failed: demo data belongs to the demo profile -- start knobas with --demo (or `just demo`)"**. Two servers, two directories, one refusal: P13 works as ruled.
 
-The pipeline between those two gestures is also pinned by a test now, so the ritual need not be repeated: `crates/knobas-app/tests/demo.rs::the_loaded_fixture_is_searchable_the_way_the_readme_promises` loads the fixture through `demo_load_inner`, asserts the 21 items the README promises, and asserts `knobas_search::search("sepa retry")` finds `mock:PAY-231` in the ticket group. Mutation-checked: pointing it at a non-existent id fails with the five ids the query really returns.
+The pipeline between those two gestures is also pinned by a test now, so the ritual need not be repeated: `crates/knobas-app/tests/demo.rs::the_loaded_fixture_is_searchable_the_way_the_readme_promises` loads the fixture through `demo_load_inner`, asserts the whole corpus arrives (21 items at the freeze; 27 since #537 gave the mock adapter the fixture's three repos and three branches), and asserts `knobas_search::search("sepa retry")` finds `mock:PAY-231` in the ticket group. Mutation-checked: pointing it at a non-existent id fails with the five ids the query really returns.
 
 One observation worth carrying: the **default** profile on the development machine already holds `mock` fixture rows, synced by M0 before P13 existed. P13 stops the mixing from here on; it does not clean up what M0 mixed. Deleting the `mock` source and its items from a real corpus is a one-off the user does when it bothers them, not something this PR does behind their back.
 
@@ -8462,6 +8462,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   capability — issue #503** below, which carries the new truth. This criterion is still open, and
   now for the demo corpus alone: `open-in-editor` reaches the step where a repo detail should
   open and `--demo` carries no repo entity.*
+
+  *And that amendment was itself superseded the same day, by **#537**: the corpus does carry a repo
+  entity now — `mock:payout-service`, plus two more repositories and three branches — so what is
+  left open on this criterion is the **run**, and nothing else. `just desktop-witness
+  open-in-editor` has still never been driven past the harness's readiness check on this Mac, and
+  the run is owed to **#525**. The #503 entry below carries the same correction at length.*
 - **Migration `0025` and three IPC commands on the search module — issue #506 (2026-09-08): the
   search a reader saved.**
 
@@ -8826,6 +8832,22 @@ From this commit on, each of the following requires an orchestrator decision **a
   `rendered_label`'s cases in `witness-unit`. There is **no #500 entry in §10.8** — that ruling
   closed by recording that the frozen surface was untouched — so nothing is owed there, and that
   #500's criterion is met is recorded by a transcript on its own ticket.
+
+  *The paragraph above was true when it was written and was superseded the same day by **#537**,
+  which gave `knobas_source_mock::items` the fixture's three repositories and three branches: the
+  `--demo` corpus **does** carry a repo entity now, `mock:payout-service` under the name the
+  driver asks for, and `crates/knobas-app/tests/demo.rs`'s
+  `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds the chain from the demo
+  load to `checkout::view` matching the very remote the driver plants. #501's criterion is still
+  open, and now for the run alone, owed to **#525** — `just desktop-witness open-in-editor` on
+  #537's head was refused by the harness's readiness check (`screen-locked 1`, exit 1) before the
+  build, before Launch Services and before the driver was invoked, so nothing past that refusal
+  has been observed on it. There is **no #537 entry in §10.8**:
+  `crates/knobas-source-mock` is on no frozen list, and its change touches no migration, no IPC
+  schema or layout, neither barrel, nothing in `crates/knobas-source/src/**` and nothing in
+  `crates/knobas-http/**` — checked against the list above rather than against the ticket's claim.
+  So the new truth is carried here, in the entry whose sentence it supersedes, rather than by an
+  entry that is not owed. Deputy's ruling of 2026-09-08 on #537, part 2.*
 - **One new command and a second keychain namespace — issue #509 (2026-09-08): the hcloud
   importer.**
 

@@ -10,6 +10,26 @@ use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::{Capability, Source, SourceError, WriteOp};
 use knobas_source_mock::MockSource;
 
+/// How many items the whole fixture is, counted from the fixture rather than
+/// remembered as a number.
+///
+/// Named once because two tests below need it -- the full sync and the
+/// upgrade-path re-sync -- and because a seven-term sum written out twice is a
+/// place for the two to drift apart. What it is *not* is an oracle for
+/// [`items`](knobas_source_mock): it says which of the fixture's lists the
+/// adapter is expected to emit, and a kind quietly dropped from `items` fails
+/// the tests that use it. A kind quietly added is caught by the contract
+/// battery, which refuses an item whose kind the descriptor does not declare.
+fn corpus_size(f: &knobas_source_mock::Fixture) -> usize {
+    f.tickets.len()
+        + f.prs.len()
+        + f.builds.len()
+        + f.pages.len()
+        + f.commits.len()
+        + f.repos.len()
+        + f.branches.len()
+}
+
 #[tokio::test]
 async fn passes_the_contract_battery() {
     battery(|fault| Box::new(MockSource::with_fault(fault)) as Box<dyn knobas_source::Source>)
@@ -196,7 +216,7 @@ async fn fixture_keeps_the_prose_verbatim() {
 /// entry point, so it declares no Search. It keeps `Write` + `"comment"`,
 /// which is the battery's exercise vehicle for the write path.
 #[tokio::test]
-async fn descriptor_declares_write_only_and_five_kinds() {
+async fn descriptor_declares_write_only_and_seven_kinds() {
     let d = MockSource::new().descriptor();
     assert_eq!(d.id, "mock");
     assert_eq!(d.adapter_kind, "mock");
@@ -207,7 +227,10 @@ async fn descriptor_declares_write_only_and_five_kinds() {
     assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));
     assert!(d.auth_methods.is_empty(), "the mock authenticates nothing");
     let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
-    assert_eq!(kinds, ["ticket", "pr", "build", "page", "commit"]);
+    assert_eq!(
+        kinds,
+        ["ticket", "pr", "build", "page", "commit", "repo", "branch"]
+    );
     for k in &d.entity_kinds {
         assert!(!k.label.is_empty() && !k.plural.is_empty());
         assert_eq!(k.monogram.chars().count(), 2, "monogram of {:?}", k.id);
@@ -226,11 +249,8 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v2");
-    assert_eq!(
-        sink.0.len(),
-        f.tickets.len() + f.prs.len() + f.builds.len() + f.pages.len() + f.commits.len()
-    );
+    assert_eq!(cursor, "tidewater-v3");
+    assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
         .0
@@ -271,7 +291,7 @@ async fn full_sync_emits_every_work_item() {
 }
 
 /// A caller already at the current version has nothing to fetch -- and must say
-/// so without re-emitting 21 items on every 5-minute tick.
+/// so without re-emitting the whole corpus on every 5-minute tick.
 ///
 /// Corrected rather than deleted (ADR-0011: verify, then correct): this said
 /// "the fixture never changes", which the repo's own history falsifies --
@@ -287,11 +307,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v2".into()), &mut sink)
+        .sync(Some("tidewater-v3".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v2");
+    assert_eq!(cursor, "tidewater-v3");
 }
 
 /// The upgrade path the cursor's versioning exists to provide (#234): a
@@ -300,7 +320,12 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
 ///
 /// `"tidewater-v1"` is not an invented string -- it is the cursor every demo
 /// profile created before the fixture gained projects (#230) actually has
-/// stored. Asserting the corpus rather than the constant is the point: that a
+/// stored. `"tidewater-v2"` is the second such position, held by every
+/// profile created between #234 and #537; the case below drives the older of
+/// the two, because a reader that repairs from `v1` repairs from anything
+/// that is not [`CURSOR`] -- the sync branches on equality, not on order.
+///
+/// Asserting the corpus rather than the constant is the point: that a
 /// re-sync *happens* is the behaviour, and a test reading `CURSOR` back would
 /// pass just as happily while every such profile refetched nothing for ever.
 #[tokio::test]
@@ -314,7 +339,7 @@ async fn a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus() {
         .expect("a sync from a stale cursor");
     assert_eq!(
         sink.0.len(),
-        f.tickets.len() + f.prs.len() + f.builds.len() + f.pages.len() + f.commits.len(),
+        corpus_size(f),
         "a profile stored at an older fixture version must be re-sent everything"
     );
     // ...carrying what the older fixture had no way to send. Widening the
@@ -699,4 +724,147 @@ fn configured(config: serde_json::Value) -> knobas_source::instance::SourceInsta
         account: None,
         config,
     }
+}
+
+/// The repositories and branches the demo profile is asked for (#537).
+///
+/// The corpus carried neither until this landed: `fixtures/tidewater/work.json`
+/// has held three repos and three branches since the transcription, and `items`
+/// walked tickets, PRs, builds, pages and commits past them. So the `--demo`
+/// profile had no repo entity in it, and everything hanging off one -- the
+/// checkout panel, *Open in VS Code*, `open-in-editor`'s desktop witness -- had
+/// nothing to open (#501, #525).
+///
+/// **The key grammar is the thing under test, not the count.** Interfaces §4.2
+/// fixes it per source, and `knobas_app::checkout`'s `repo_of` finds a branch's
+/// repository as *the longest repo id in the same source that the branch id
+/// starts with*. A branch key that did not extend its repo's would leave every
+/// branch detail answering "no checkout" -- with the repo, the clone and the
+/// setting all correct -- so the prefix is asserted here rather than assumed
+/// from the format string that builds it.
+#[tokio::test]
+async fn full_sync_emits_the_fixtures_repos_and_branches() {
+    let f = knobas_source_mock::fixture();
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+
+    let repos: Vec<(&str, &str)> = sink
+        .0
+        .iter()
+        .filter(|i| i.kind == "repo")
+        .map(|i| (i.entity.key.as_str(), i.title.as_str()))
+        .collect();
+    assert_eq!(
+        repos,
+        [
+            ("payout-service", "payout-service"),
+            ("ledger-api", "ledger-api"),
+            ("ops-runbooks", "ops-runbooks"),
+        ],
+        "every repo the fixture holds, keyed and titled by its name"
+    );
+
+    let payout = sink
+        .0
+        .iter()
+        .find(|i| i.entity.key == "payout-service")
+        .expect("payout-service emitted");
+    assert_eq!(payout.entity.to_string(), "mock:payout-service");
+    // The URL a clone's `origin` is matched against: `knobas_core::checkout`
+    // reduces both to host + owner/repo, and the desktop driver writes exactly
+    // this remote into the `.git/config` it plants.
+    assert_eq!(
+        payout.web_url.as_deref(),
+        Some("https://tidewater.example/tidewater/payout-service")
+    );
+    // The transcription verbatim, as every other kind carries it.
+    assert_eq!(payout.payload["lang"], "Rust");
+    assert_eq!(payout.payload["default_branch"], "main");
+    assert!(!payout.deleted);
+
+    let branches: Vec<&str> = sink
+        .0
+        .iter()
+        .filter(|i| i.kind == "branch")
+        .map(|i| i.entity.key.as_str())
+        .collect();
+    assert_eq!(
+        branches,
+        [
+            "payout-service@refs/heads/main",
+            "payout-service@refs/heads/feature/PAY-231-sepa-retry",
+            "payout-service@refs/heads/fix/PAY-228-partial-refund-drift",
+        ]
+    );
+    let sepa = sink
+        .0
+        .iter()
+        .find(|i| i.entity.key == "payout-service@refs/heads/feature/PAY-231-sepa-retry")
+        .expect("the SEPA branch emitted");
+    assert_eq!(sepa.title, "feature/PAY-231-sepa-retry");
+    assert_eq!(sepa.payload["ticket"], "PAY-231");
+    assert_eq!(
+        sepa.web_url.as_deref(),
+        Some(
+            "https://tidewater.example/tidewater/payout-service/src/branch/\
+             feature/PAY-231-sepa-retry"
+        )
+    );
+    // The rule `repo_of` walks, stated as a property of every emitted branch
+    // rather than of the one above: each has exactly one repo whose id it
+    // extends, and that repo is the one the fixture names.
+    for branch in sink.0.iter().filter(|i| i.kind == "branch") {
+        let repo = f
+            .branches
+            .iter()
+            .find(|b| branch.entity.key.starts_with(&format!("{}@", b.repo)))
+            .map(|b| b.repo.as_str())
+            .expect("a branch key extends its repository's");
+        let owners: Vec<&str> = sink
+            .0
+            .iter()
+            .filter(|i| i.kind == "repo")
+            .filter(|i| branch.entity.to_string().starts_with(&i.entity.to_string()))
+            .map(|i| i.entity.key.as_str())
+            .collect();
+        assert_eq!(
+            owners,
+            [repo],
+            "{} must extend exactly one repo id, its own",
+            branch.entity
+        );
+    }
+}
+
+/// The demo button's subtitle names the size of the corpus it loads, and
+/// nothing made that true until this.
+///
+/// `app/src/lib/sources/FirstRun.svelte` offers *Load the Tidewater dataset*
+/// under `21 fixture items · a 23-asset estate · no network, no credential`.
+/// That sentence was written when a full sync was 21 items, is the first thing
+/// a person opening a demo build reads, and no test on either side of the
+/// bridge could see it: #537 widened the corpus to 27 and found the `21` by
+/// grep. The estate's own count is pinned by `demo.rs`'s
+/// `the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing`,
+/// which reads `testenv/hetzner/estate.json`; this is the work half's.
+///
+/// The oracle is a **real sync through the adapter**, not a sum of fixture
+/// array lengths: what the subtitle claims is what the button produces, and an
+/// `items` that stopped emitting a kind would have to move the sentence too.
+/// `include_str!` rather than a path read, so the file being renamed or moved
+/// fails the build here rather than passing an assertion over an empty string.
+#[tokio::test]
+async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
+    const FIRST_RUN: &str = include_str!("../../../app/src/lib/sources/FirstRun.svelte");
+    let mut sink = VecSink(Vec::new());
+    MockSource::new().sync(None, &mut sink).await.expect("sync");
+
+    let claim = format!("{} fixture items", sink.0.len());
+    assert!(
+        FIRST_RUN.contains(&claim),
+        "FirstRun.svelte must offer the demo load as {claim:?}; \
+         a full sync emits {} items and the subtitle says otherwise",
+        sink.0.len()
+    );
 }

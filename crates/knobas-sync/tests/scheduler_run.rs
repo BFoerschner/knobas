@@ -260,8 +260,9 @@ async fn one_run_in(
 async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
     // The tombstoning mock, so this run's three counts are **three different
-    // numbers** (21 upserted, 1 deleted, 0 swept). With the plain mock they
-    // were 21/0/0, and the field-by-field comparison below could not fail:
+    // numbers** (27 upserted since #537, 1 deleted, 0 swept). With the plain
+    // mock they were 27/0/0, and the field-by-field comparison below could not
+    // fail:
     // swapping `deleted` and `swept` in `run_log::finish` gave 12 passed, 0
     // failed. The unit test on `RunCounts::of` says "values are all different
     // on purpose"; the same reasoning was missing one level up.

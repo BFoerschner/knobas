@@ -33,8 +33,8 @@ use crate::{IpcError, Lifecycle};
 /// which owns the behaviour and the test for it.
 ///
 /// Refused outside the demo profile (ruling P13): the Tidewater fixture is
-/// twenty-one items of fiction, and a corpus that mixes it with real work is
-/// one nobody can search again. The refusal comes before the first query, so
+/// invented work, and a corpus that mixes it with real work is one nobody can
+/// search again. The refusal comes before the first query, so
 /// the wrong profile writes nothing at all.
 ///
 /// Ends with a `sync:state` for the mock source (#240), the way every other
