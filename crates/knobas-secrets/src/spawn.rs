@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::{Secret, SecretError, SecretStore};
+use crate::{KeychainAccount, Secret, SecretError, SecretStore};
 
 fn joined<T>(
     result: Result<Result<T, SecretError>, tokio::task::JoinError>,
@@ -25,29 +25,32 @@ fn joined<T>(
 /// task itself failed.
 pub async fn get(
     store: &Arc<dyn SecretStore>,
-    source_id: &str,
+    account: &KeychainAccount,
 ) -> Result<Option<Secret>, SecretError> {
     let store = Arc::clone(store);
-    let id = source_id.to_owned();
-    joined(tokio::task::spawn_blocking(move || store.get(&id)).await)
+    let account = account.clone();
+    joined(tokio::task::spawn_blocking(move || store.get(&account)).await)
 }
 
 /// # Errors
 /// As [`get`].
 pub async fn put(
     store: &Arc<dyn SecretStore>,
-    source_id: &str,
+    account: &KeychainAccount,
     secret: Secret,
 ) -> Result<(), SecretError> {
     let store = Arc::clone(store);
-    let id = source_id.to_owned();
-    joined(tokio::task::spawn_blocking(move || store.put(&id, &secret)).await)
+    let account = account.clone();
+    joined(tokio::task::spawn_blocking(move || store.put(&account, &secret)).await)
 }
 
 /// # Errors
 /// As [`get`].
-pub async fn delete(store: &Arc<dyn SecretStore>, source_id: &str) -> Result<(), SecretError> {
+pub async fn delete(
+    store: &Arc<dyn SecretStore>,
+    account: &KeychainAccount,
+) -> Result<(), SecretError> {
     let store = Arc::clone(store);
-    let id = source_id.to_owned();
-    joined(tokio::task::spawn_blocking(move || store.delete(&id)).await)
+    let account = account.clone();
+    joined(tokio::task::spawn_blocking(move || store.delete(&account)).await)
 }

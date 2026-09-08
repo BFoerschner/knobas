@@ -536,7 +536,12 @@ async fn settle_health(state: &BackupState) -> Result<(), ExportError> {
             .fetch_all(&state.pool)
             .await?;
     for id in sources {
-        match knobas_secrets::spawn::get(&state.secrets, &id).await {
+        match knobas_secrets::spawn::get(
+            &state.secrets,
+            &knobas_secrets::KeychainAccount::source(&id),
+        )
+        .await
+        {
             // This machine holds it; nothing about this source is missing.
             Ok(Some(_)) => continue,
             Ok(None) => {}

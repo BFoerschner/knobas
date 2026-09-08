@@ -1,0 +1,185 @@
+{
+  "servers": [
+    {
+      "id": 164750187,
+      "name": "knobas-teamcity",
+      "status": "running",
+      "created": "2026-09-06T07:04:26Z",
+      "labels": {
+        "knobas": "testenv",
+        "role": "teamcity"
+      },
+      "locked": false,
+      "primary_disk_size": 40,
+      "image": {
+        "id": 161547269,
+        "name": "ubuntu-24.04",
+        "description": "Ubuntu 24.04",
+        "os_flavor": "ubuntu",
+        "os_version": "24.04",
+        "type": "system"
+      },
+      "server_type": {
+        "id": 114,
+        "name": "cx23",
+        "description": "CX 23",
+        "cores": 2,
+        "memory": 4,
+        "disk": 40,
+        "architecture": "x86"
+      },
+      "location": {
+        "id": 2,
+        "name": "nbg1",
+        "description": "Nuremberg DC Park 1",
+        "city": "Nuremberg",
+        "country": "DE",
+        "network_zone": "eu-central"
+      },
+      "public_net": {
+        "ipv4": {
+          "id": 148284492,
+          "ip": "46.224.117.158",
+          "blocked": false,
+          "dns_ptr": "static.158.117.224.46.clients.your-server.de"
+        },
+        "ipv6": {
+          "id": 148284493,
+          "ip": "2a01:4f8:c2c:1d9e::/64",
+          "blocked": false
+        },
+        "floating_ips": [],
+        "firewalls": [
+          {
+            "id": 11581293,
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "id": 164750202,
+      "name": "knobas-jira",
+      "status": "running",
+      "created": "2026-09-06T07:04:39Z",
+      "labels": {
+        "knobas": "testenv",
+        "role": "jira"
+      },
+      "locked": false,
+      "primary_disk_size": 80,
+      "image": {
+        "id": 161547269,
+        "name": "ubuntu-24.04",
+        "description": "Ubuntu 24.04",
+        "os_flavor": "ubuntu",
+        "os_version": "24.04",
+        "type": "system"
+      },
+      "server_type": {
+        "id": 109,
+        "name": "cpx22",
+        "description": "CPX 22",
+        "cores": 2,
+        "memory": 4,
+        "disk": 80,
+        "architecture": "x86"
+      },
+      "location": {
+        "id": 2,
+        "name": "nbg1",
+        "description": "Nuremberg DC Park 1",
+        "city": "Nuremberg",
+        "country": "DE",
+        "network_zone": "eu-central"
+      },
+      "public_net": {
+        "ipv4": {
+          "id": 148284531,
+          "ip": "46.224.125.111",
+          "blocked": false,
+          "dns_ptr": "static.111.125.224.46.clients.your-server.de"
+        },
+        "ipv6": {
+          "id": 148284532,
+          "ip": "2a01:4f8:1c16:75c6::/64",
+          "blocked": false
+        },
+        "floating_ips": [],
+        "firewalls": [
+          {
+            "id": 11581293,
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "id": 164750224,
+      "name": "knobas-confluence",
+      "status": "running",
+      "created": "2026-09-06T07:04:54Z",
+      "labels": {
+        "knobas": "testenv",
+        "role": "confluence"
+      },
+      "locked": false,
+      "primary_disk_size": 80,
+      "image": {
+        "id": 161547269,
+        "name": "ubuntu-24.04",
+        "description": "Ubuntu 24.04",
+        "os_flavor": "ubuntu",
+        "os_version": "24.04",
+        "type": "system"
+      },
+      "server_type": {
+        "id": 109,
+        "name": "cpx22",
+        "description": "CPX 22",
+        "cores": 2,
+        "memory": 4,
+        "disk": 80,
+        "architecture": "x86"
+      },
+      "location": {
+        "id": 2,
+        "name": "nbg1",
+        "description": "Nuremberg DC Park 1",
+        "city": "Nuremberg",
+        "country": "DE",
+        "network_zone": "eu-central"
+      },
+      "public_net": {
+        "ipv4": {
+          "id": 148284575,
+          "ip": "2.28.72.189",
+          "blocked": false,
+          "dns_ptr": "static.189.72.28.2.clients.your-server.de"
+        },
+        "ipv6": {
+          "id": 148284576,
+          "ip": "2a01:4f8:1c16:3651::/64",
+          "blocked": false
+        },
+        "floating_ips": [],
+        "firewalls": [
+          {
+            "id": 11581293,
+            "status": "applied"
+          }
+        ]
+      }
+    }
+  ],
+  "meta": {
+    "pagination": {
+      "last_page": 1,
+      "next_page": null,
+      "page": 1,
+      "per_page": 25,
+      "previous_page": null,
+      "total_entries": 3
+    }
+  }
+}

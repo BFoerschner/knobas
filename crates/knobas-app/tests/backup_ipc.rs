@@ -1003,9 +1003,21 @@ async fn switching_notes_and_time_on_brings_the_notes_and_the_hours() {
 /// in. And the source lands on the far machine as `missing_secret`, which is
 /// the honest verdict there: the keychain is the colleague's and has nothing
 /// under that id.
+///
+/// **Both keychain namespaces** since #509. An importer's token is not a
+/// source's credential -- it has no `knobas.source_config` row, so no part list
+/// and no `missing_secret` verdict apply to it -- and that is exactly why it
+/// gets its own reading here rather than being taken as covered: nothing in the
+/// export knows the word `importer`, and a scan that only looked for the
+/// source's PAT would be green about a token it never looked for. The token is
+/// put in the sharer's keychain under `importer:hcloud` before the export, so
+/// the assertion is about a store that really held one.
 #[tokio::test]
 async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
     const PAT: &str = "knobas-test-pat-2f6c9a4e1b";
+    /// The importer's token (#509): a different value from the PAT, so a scan
+    /// finding neither cannot be a scan that found one and stopped.
+    const IMPORTER_TOKEN: &str = "knobas-test-hcloud-7b1d4e0c93";
 
     let sharer_secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
@@ -1013,11 +1025,18 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
     let estate = seed_corpus(&sharer.pool, "secret").await;
     knobas_secrets::spawn::put(
         &sharer_secrets,
-        &estate.source,
+        &knobas_secrets::KeychainAccount::source(&estate.source),
         knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, PAT),
     )
     .await
     .expect("the sharer's own credential");
+    knobas_secrets::spawn::put(
+        &sharer_secrets,
+        &knobas_secrets::KeychainAccount::importer("hcloud"),
+        knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, IMPORTER_TOKEN),
+    )
+    .await
+    .expect("the sharer's hcloud importer token");
 
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
@@ -1051,6 +1070,20 @@ async fn a_shared_source_carries_no_secret_and_lands_as_missing_secret() {
         assert!(
             !sql.contains(envelope),
             "the keychain envelope's {envelope} is in the archive"
+        );
+    }
+    // The importer's half (#509). Its token, the namespace its account is
+    // under, and the envelope kind it is stored as -- an importer has no row in
+    // any table the export carries, so any of the three appearing would mean
+    // something wrote a credential somewhere no part list mentions.
+    assert!(
+        !sql.contains(IMPORTER_TOKEN),
+        "the importer's token itself is in the archive"
+    );
+    for trace in ["importer:", "\"kind\":\"api_token\""] {
+        assert!(
+            !sql.contains(trace),
+            "the importer keychain namespace's {trace} is in the archive"
         );
     }
 
@@ -1097,7 +1130,7 @@ async fn a_restore_onto_a_machine_that_still_holds_the_credential_leaves_the_hea
         Arc::new(knobas_secrets::MemoryStore::new());
     knobas_secrets::spawn::put(
         &secrets,
-        &estate.source,
+        &knobas_secrets::KeychainAccount::source(&estate.source),
         knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "still-here"),
     )
     .await
@@ -1446,9 +1479,9 @@ struct RefusesOne {
 impl knobas_secrets::SecretStore for RefusesOne {
     fn get(
         &self,
-        source_id: &str,
+        account: &knobas_secrets::KeychainAccount,
     ) -> Result<Option<knobas_secrets::Secret>, knobas_secrets::SecretError> {
-        if source_id == self.id {
+        if *account == knobas_secrets::KeychainAccount::source(&self.id) {
             return Err(knobas_secrets::SecretError::Backend(
                 "the keychain is locked".to_owned(),
             ));
@@ -1458,13 +1491,16 @@ impl knobas_secrets::SecretStore for RefusesOne {
 
     fn put(
         &self,
-        _source_id: &str,
+        _account: &knobas_secrets::KeychainAccount,
         _secret: &knobas_secrets::Secret,
     ) -> Result<(), knobas_secrets::SecretError> {
         unreachable!("a restore never writes a credential")
     }
 
-    fn delete(&self, _source_id: &str) -> Result<(), knobas_secrets::SecretError> {
+    fn delete(
+        &self,
+        _account: &knobas_secrets::KeychainAccount,
+    ) -> Result<(), knobas_secrets::SecretError> {
         unreachable!("a restore never deletes a credential")
     }
 }

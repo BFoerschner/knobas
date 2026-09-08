@@ -349,7 +349,10 @@ async fn app(env: &Env) -> SourcesState {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(KUMA, &Secret::just(AuthMethod::ApiToken, env.key.clone()))
+        .put(
+            &knobas_secrets::KeychainAccount::source(KUMA),
+            &Secret::just(AuthMethod::ApiToken, env.key.clone()),
+        )
         .expect("the Kuma API key is stored");
 
     knobas_sync::config::insert(

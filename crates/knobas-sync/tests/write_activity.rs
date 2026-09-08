@@ -248,7 +248,10 @@ async fn harness() -> Harness {
     .unwrap();
     let secrets = MemoryStore::new();
     secrets
-        .put(&source, &Secret::just(AuthMethod::Pat, "tok"))
+        .put(
+            &knobas_secrets::KeychainAccount::source(&source),
+            &Secret::just(AuthMethod::Pat, "tok"),
+        )
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));

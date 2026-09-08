@@ -555,6 +555,87 @@ pub async fn apply_estate_import<R: tauri::Runtime>(
     Ok(written.value)
 }
 
+/// Run one **importer** and hand back the estate file it produced (#509).
+///
+/// `CONTEXT.md`, **Importer**: a producer of an estate file from a live system,
+/// **not** a [source](knobas_source) (ADR-0015). So this command configures
+/// nothing, stores no row, syncs nothing and queues no write; what it answers
+/// with is text, and [`preview_estate_import`] and [`apply_estate_import`] are
+/// what do anything with it. It is on `commands::assets` and not on a module of
+/// its own for the reason the two Import commands are: the estate is what this
+/// produces, and the `commands/` + `ipc/` layout is frozen (§10.8).
+///
+/// # Three answers, and why a run can take two calls
+///
+/// [`Produced::TokenNeeded`] comes back before any request is made, when
+/// nothing is stored under this importer's keychain account and the caller sent
+/// no token -- so a reader who has never used this importer is asked for one
+/// rather than shown a 401 from a call made with nothing. A token that *is*
+/// sent is stored **only once the run succeeded**, which is what makes *asked
+/// once* true without ever keeping a credential the far end refused.
+///
+/// [`Produced::LandingNeeded`] comes back when the live system holds servers
+/// this estate does not, and the caller has not said where they go. The reader
+/// answers once, and the next call carries `land_under`. **The answer may be
+/// the top of the estate** -- [`assets::Landing`] with a `parent` of `null`,
+/// the spelling `create_asset` and `move_asset` already take -- which is a
+/// different thing from the argument being absent, and on an estate with no
+/// assets it is the only answer there is. That second call reads
+/// the live system again rather than holding the first read: this command owns
+/// no state between calls, and a cached answer would be a second place for the
+/// estate to be out of date.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a producer this build does not
+/// know or for the estate-file producer (which is chosen from the disk and
+/// produces nothing), and whatever the live system's own read classified --
+/// [`Unauthorized`](crate::IpcErrorCode::Unauthorized) for a refused token,
+/// which is the one fault a person can act on (ADR-0004).
+#[tauri::command]
+pub async fn produce_estate_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    producer: String,
+    token: Option<String>,
+    land_under: Option<assets::Landing>,
+) -> Result<assets::hcloud::Produced, IpcError> {
+    let pool = lifecycle.pool()?;
+    let producer = assets::find_producer(&producer)?;
+    // No wildcard arm on the importer below (ADR-0006's rule applied to this
+    // enum): a producer that reads a live system added later has to be given a
+    // run here, rather than falling through to a refusal that reads like a bug.
+    let importer = assets::importer_of(producer)?;
+
+    // The keychain, which is where an importer's credential lives -- under its
+    // own namespace, so nothing that walks *sources* can reach it (ADR-0015).
+    let secrets = &crate::sources::state(&app)?.secrets;
+    let Some(credential) = assets::token_for(secrets, producer.id, token).await? else {
+        return Ok(assets::hcloud::Produced::TokenNeeded);
+    };
+
+    // The client is `assets::hcloud::client`'s and not built here, so the live
+    // recipe and the recorded-shape suite exercise the one the command uses
+    // rather than a second one spelled the same way (#509, part 4c of the
+    // deputy's ruling of 2026-09-08). Only the base URL differs between the
+    // three callers, and only a test passes anything but `hcloud::API`.
+    let run = match importer {
+        assets::Importer::Hcloud => {
+            match assets::hcloud::client(assets::hcloud::API, credential.as_str()) {
+                Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_ref()).await,
+                Err(refused) => Err(refused),
+            }
+        }
+    };
+
+    // The run's answer goes *through* the store rather than being checked
+    // before it, so "a credential the far end refused is never kept" is a
+    // property of `remember` that its own tests hold it to, rather than a
+    // property of the order these two lines are written in.
+    assets::remember(secrets, producer.id, credential, run).await
+}
+
 /// The two numbers monitoring is shaped by (issue #443, spec #427's "Settings
 /// keys for the sample retention, the response-time threshold").
 ///
@@ -1411,6 +1492,7 @@ mod tests {
             "delete_route",
             "preview_estate_import",
             "apply_estate_import",
+            "produce_estate_file",
             "monitoring_settings",
             "set_monitoring_settings",
             "monitor_roster",
@@ -1439,18 +1521,20 @@ mod tests {
     /// and nothing else in the tree would notice: the two lists are in
     /// different languages and no compiler reads both.
     ///
-    /// **One direction only, deliberately.** `assets::HCLOUD_PRODUCER` is
-    /// declared before anything can produce an hcloud file (#508 gives the
-    /// planner the rule; v1.5's stream 9 gives the chooser its entry), so a
-    /// producer with no entry is the expected state and not a fault.
+    /// **One direction only, deliberately.** A producer is declared here before
+    /// anything can produce its files -- #508 declared `hcloud`'s origin key a
+    /// ticket before #509 gave it a produce command and a chooser entry, and
+    /// Docker (spec #491, story 67) is in that state now -- so a producer with
+    /// no entry is the expected state and not a fault.
     ///
     /// The ids are read **out of the list** rather than looked for anywhere in
     /// the file, so a `"hcloud"` written in a comment somewhere else in the
     /// mirror cannot make this pass, and the list is asserted to be non-empty
     /// so that a renamed or moved declaration fails as a broken parse instead
-    /// of checking nothing. **Non-empty and not a count**: stream 9 adds the
-    /// hcloud entry and stream 10 the Docker one, and a number here would go
-    /// red on the day the chooser grew the entry this test exists to check.
+    /// of checking nothing. **Non-empty and not a count**: #509 added the
+    /// hcloud entry and stream 10 adds the Docker one, and a number here would
+    /// go red on the day the chooser grew the entry this test exists to check
+    /// -- which is exactly what #509 would have done.
     #[test]
     fn the_chooser_offers_producers_this_build_knows() {
         let at = MIRROR
@@ -1462,12 +1546,19 @@ mod tests {
         let closes = MIRROR[opens..].find(']').expect("the list closes") + opens;
         let list = &MIRROR[opens..closes];
 
-        let offered: Vec<&str> = list
+        let offered: Vec<(&str, bool)> = list
             .match_indices("id: ")
             .map(|(at, keyword)| {
                 let rest = &list[at + keyword.len()..];
                 let quoted = rest.strip_prefix('"').expect("an id is a string literal");
-                &quoted[..quoted.find('"').expect("an unterminated id")]
+                let id = &quoted[..quoted.find('"').expect("an unterminated id")];
+                // The entry is one object literal, so its `importer:` is
+                // whatever appears before the next entry's `id:`.
+                let entry = &rest[..rest.find("id: ").unwrap_or(rest.len())];
+                let at = entry
+                    .find("importer: ")
+                    .unwrap_or_else(|| panic!("the chooser's {id:?} declares no `importer`"));
+                (id, entry[at..].starts_with("importer: true"))
             })
             .collect();
         assert!(
@@ -1475,11 +1566,91 @@ mod tests {
             "this parse found no producer in the chooser's list; if the \
              declaration moved, fix the parse rather than deleting the check"
         );
-        for id in offered {
+        for (id, importer) in offered {
+            let declared = assets::PRODUCERS
+                .iter()
+                .find(|producer| producer.id == id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the chooser offers {id:?} and no producer in this build \
+                         carries that id, so every file chosen under it is refused"
+                    )
+                });
+            // **And whether it reads a live system**, which is what decides
+            // whether the dialog draws a file input or a token and a produce
+            // command (#509). A chooser that called the estate file an importer
+            // would draw a *Read* button whose every press the backend refuses;
+            // one that called hcloud a file would offer an `<input type="file">`
+            // for a file nobody has.
+            assert_eq!(
+                declared.importer.is_some(),
+                importer,
+                "the chooser and this build disagree about whether {id:?} reads \
+                 a live system"
+            );
+        }
+    }
+
+    /// **What an importer answers with, arm by arm** (#509).
+    ///
+    /// A tagged union, so every arm is exercised: the tag is what the dialog
+    /// branches on, and an arm the mirror has not heard of is a state the
+    /// dialog draws nothing at all for. The tags themselves are checked
+    /// against the mirror's `type Produced` rather than listed here, the rule
+    /// `PropertyKind` gets: a fourth state added on the Rust side has to fail
+    /// here rather than fall through.
+    #[test]
+    fn every_produced_state_matches_its_typescript_mirror() {
+        for (interface, value, fields) in [
+            (
+                "TokenNeeded",
+                assets::hcloud::Produced::TokenNeeded,
+                &["state"][..],
+            ),
+            (
+                "LandingNeeded",
+                assets::hcloud::Produced::LandingNeeded {
+                    servers: vec!["knobas-teamcity".to_owned()],
+                },
+                &["state", "servers"][..],
+            ),
+            (
+                "ProducedFile",
+                assets::hcloud::Produced::Ready {
+                    file: "{}".to_owned(),
+                    new_servers: Vec::new(),
+                },
+                &["state", "file", "new_servers"][..],
+            ),
+        ] {
+            assert_shape(
+                MIRROR,
+                interface,
+                &serde_json::to_value(&value).unwrap(),
+                fields,
+            );
+        }
+
+        let declared = declared_union(MIRROR, "Produced");
+        assert_eq!(
+            declared,
+            ["TokenNeeded", "LandingNeeded", "ProducedFile"],
+            "the mirror's `Produced` and this build's arms disagree"
+        );
+        // And the tag each arm carries, which is the value the dialog reads.
+        for (interface, tag) in [
+            ("TokenNeeded", "token_needed"),
+            ("LandingNeeded", "landing_needed"),
+            ("ProducedFile", "ready"),
+        ] {
+            let body = MIRROR
+                .split_once(&format!("export interface {interface} {{"))
+                .expect("the mirror declares the arm")
+                .1;
+            let body = &body[..body.find('}').expect("the arm is terminated")];
             assert!(
-                assets::PRODUCERS.iter().any(|producer| producer.id == id),
-                "the chooser offers {id:?} and no producer in this build carries \
-                 that id, so every file chosen under it is refused"
+                body.contains(&format!("state: \"{tag}\"")),
+                "{interface} does not carry the tag {tag:?} the backend sends"
             );
         }
     }
@@ -1511,6 +1682,9 @@ mod tests {
             ("preview_estate_import", "producer"),
             ("apply_estate_import", "file"),
             ("apply_estate_import", "producer"),
+            ("produce_estate_file", "producer"),
+            ("produce_estate_file", "token"),
+            ("produce_estate_file", "landUnder"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
         ] {

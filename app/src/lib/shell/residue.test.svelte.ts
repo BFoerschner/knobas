@@ -341,6 +341,7 @@ const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const MonitorsView = (await import("../assets/MonitorsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
+const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
 const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
@@ -799,6 +800,37 @@ const CASES: Case[] = [
           move: () => Promise.reject(new Error("no write in this test")),
           onclose: () => {},
           onmoved: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The Import dialog's *land under* picker (#509).
+     *
+     * One effect, `MoveDialog`'s -- the level the picker is standing on -- and
+     * it is **installed but idle** until an importer answers `landing_needed`,
+     * which is what this case mounts into: the read is not in flight, and the
+     * component must still leave nothing behind.
+     *
+     * **The in-flight picker is `MoveDialog`'s case, one entry up**, on the
+     * same `latestRead` and the same effect; this case holds the *idle* dialog,
+     * which is the state it spends its life in. Saying so rather than claiming
+     * a state this mount does not reach: the harness mounts and unmounts, it
+     * does not click, so nothing here drives the read.
+     */
+    name: "ImportDialog",
+    source: "lib/assets/ImportDialog.svelte",
+    open: (target) => ({
+      app: mount(ImportDialog, {
+        target,
+        props: {
+          preview: () => Promise.reject(new Error("no preview in this test")),
+          apply: () => Promise.reject(new Error("no write in this test")),
+          produce: () => Promise.reject(new Error("no importer in this test")),
+          tree: () => deferred([]),
+          onclose: () => {},
+          onimported: () => {},
         },
       }),
     }),

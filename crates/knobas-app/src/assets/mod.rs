@@ -224,7 +224,12 @@
 //! `commands::assets::get_asset` because the answer is in the keychain and this
 //! module reads the database.
 
+pub mod hcloud;
+
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use knobas_secrets::{KeychainAccount, SecretStore};
 
 use knobas_core::activity::ActivityRow;
 use knobas_core::asset::{self, AssetType, PropertyKind};
@@ -3945,6 +3950,30 @@ pub struct Producer {
     /// [`origin_key_of`] is what an asset carrying only some of these comes to,
     /// on both sides.
     origin_key: &'static [&'static str],
+    /// Which live system this producer reads, or `None` for the one that reads
+    /// none (#509).
+    ///
+    /// **Not `origin_key.is_empty()`.** That an importer declares an origin key
+    /// is a consequence of there being a live system whose terms the key names,
+    /// not a definition of one -- and a check that read the key would be
+    /// measuring a representation of the thing rather than the thing.
+    /// `CONTEXT.md`'s **Importer** is the sentence this field carries: *"every
+    /// importer is a producer of an estate file; the estate file a person picks
+    /// off the disk is the one producer that is not an importer, because there
+    /// is no live system on the other end of it."*
+    pub importer: Option<Importer>,
+}
+
+/// The live system one [`Importer`](Producer::importer) reads.
+///
+/// An enum and **no wildcard arm** where it is matched, `WriteOp::identifier`'s
+/// rule (ADR-0006): adding a producer that reads a live system must stop
+/// `commands::assets` compiling until somebody says what running it means,
+/// rather than falling through to a refusal that reads like a missing feature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Importer {
+    /// Hetzner Cloud, over its public API (`assets::hcloud`).
+    Hcloud,
 }
 
 /// The estate file a person picks off the disk: the Import as M4.0 shipped it.
@@ -3959,13 +3988,13 @@ pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
 /// The hcloud importer's files: one entry per server, keyed by `hcloud_id`
 /// (spec #491, stories 63--64).
 ///
-/// **Declared before anything produces one**, which is this ticket's half of a
-/// pair: #508 gives the planner the rule and gives the three checked-in servers
-/// their `hcloud_id` property, and v1.5's stream 9 gives the chooser its entry
-/// and the produce command behind it. Until then the registry knows this
-/// producer and the chooser's own list -- `IMPORT_PRODUCERS` in
-/// `app/src/lib/ipc/assets.ts` -- does not, which is why `commands::assets`'
-/// `the_chooser_offers_producers_this_build_knows` reads in that direction
+/// **Declared by #508 and produced by #509**, a ticket apart: #508 gave the
+/// planner the rule and gave the three checked-in servers their `hcloud_id`
+/// property, and #509 added [`hcloud`] behind it and the chooser's entry in
+/// `IMPORT_PRODUCERS` (`app/src/lib/ipc/assets.ts`). A producer declared here
+/// with no chooser entry is still the expected state -- Docker is the next one
+/// -- which is why `commands::assets`'
+/// `the_chooser_offers_producers_this_build_knows` reads in one direction
 /// only: every id the chooser sends is one of these, and not the reverse.
 pub const HCLOUD_PRODUCER: &str = "hcloud";
 
@@ -3976,18 +4005,20 @@ pub const HCLOUD_PRODUCER: &str = "hcloud";
 /// `testenv/hetzner/estate.json` carries either as a property -- the context is
 /// on the engine above it -- so declaring one here would be a key that matches
 /// nothing and a promise this build cannot keep. Stream 10 declares it together
-/// with the properties it needs, the way this ticket declares hcloud's together
-/// with the three `hcloud_id` values.
+/// with the properties it needs, the way #508 declared hcloud's together with
+/// the three `hcloud_id` values and #509 gave it something to produce.
 pub const PRODUCERS: &[Producer] = &[
     Producer {
         id: ESTATE_FILE_PRODUCER,
         label: "Estate file",
         origin_key: &[],
+        importer: None,
     },
     Producer {
         id: HCLOUD_PRODUCER,
         label: "Hetzner Cloud",
-        origin_key: &["hcloud_id"],
+        origin_key: &[hcloud::ORIGIN_KEY],
+        importer: Some(Importer::Hcloud),
     },
 ];
 
@@ -3999,7 +4030,7 @@ pub const PRODUCERS: &[Producer] = &[
 /// silently taken as the estate file's: a caller asking for a matching rule
 /// this build does not have would otherwise get the rule that matches on
 /// nothing, and its import would quietly create a second copy of every asset.
-fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
+pub fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
     PRODUCERS.iter().find(|it| it.id == id).ok_or_else(|| {
         IpcError::invalid(format!(
             "{id:?} is not one of the producers this build knows: {}",
@@ -4008,6 +4039,167 @@ fn find_producer(id: &str) -> Result<&'static Producer, IpcError> {
                 .map(|it| it.id)
                 .collect::<Vec<_>>()
                 .join(", ")
+        ))
+    })
+}
+
+/// The credential one run will use.
+///
+/// Carries **where it came from**, because that is what decides whether it is
+/// stored afterwards: a token read out of the keychain is already there, and a
+/// token the reader typed is only worth keeping once something has accepted it.
+///
+/// Beside [`Producer`] rather than inside `hcloud`, because nothing here names
+/// a live system: the second importer would otherwise import its credential
+/// handling from a module named after the first.
+pub struct Token {
+    value: String,
+    /// The reader typed this one on the run it belongs to.
+    typed: bool,
+}
+
+/// Hand-written for [`knobas_secrets::Secret`]'s reason, which is the whole
+/// point of the type: a derived `Debug` puts the credential into every
+/// `tracing` line and every panic message that ever formats a struct
+/// containing one. `typed` is kept because *where this token came from* is the
+/// question a log line about it would be read for.
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Token")
+            .field("value", &"<redacted>")
+            .field("typed", &self.typed)
+            .finish()
+    }
+}
+
+/// The token for this run, or `None` when one is owed.
+///
+/// `typed` is what the caller sent; absence means *read the keychain*, which is
+/// the state a reader who has used this importer before is always in. A `None`
+/// answer is [`Produced::TokenNeeded`]'s cause and is reached **before any
+/// request is made**, so a reader who has never used this importer is asked for
+/// a token rather than shown a refusal from a call made with nothing.
+///
+/// # Errors
+///
+/// [`IpcError::internal`] if the keychain itself failed. Deliberately not
+/// folded into `None`: *the keychain is locked* and *there is no token here*
+/// are different sentences, and answering the first with the second would put
+/// the token field in front of a reader whose credential is fine.
+pub async fn token_for(
+    secrets: &Arc<dyn SecretStore>,
+    producer_id: &str,
+    typed: Option<String>,
+) -> Result<Option<Token>, IpcError> {
+    if let Some(value) = typed
+        .map(|it| it.trim().to_owned())
+        .filter(|it| !it.is_empty())
+    {
+        return Ok(Some(Token { value, typed: true }));
+    }
+    let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::importer(producer_id))
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(stored.map(|secret| Token {
+        value: secret.value,
+        typed: false,
+    }))
+}
+
+/// Hand back what the run answered, keeping a **typed** token if it answered at
+/// all.
+///
+/// **The run's result is an argument rather than something checked before this
+/// is called**, and that is the whole point: *a credential the far end refused
+/// is never stored* is then a property of this function, which a test can hold
+/// it to, instead of a property of the order two lines happen to be written in.
+/// A token read out of the keychain is not written back -- it is already there,
+/// and rewriting it would be a keychain prompt for nothing.
+///
+/// # Errors
+///
+/// The run's own, unchanged, or [`IpcError::internal`] if the keychain refused
+/// the write -- which is not silently swallowed: a reader told *asked once* and
+/// then asked again every time deserves to know why.
+pub async fn remember<T>(
+    secrets: &Arc<dyn SecretStore>,
+    producer_id: &str,
+    token: Token,
+    run: Result<T, IpcError>,
+) -> Result<T, IpcError> {
+    let produced = run?;
+    if token.typed {
+        knobas_secrets::spawn::put(
+            secrets,
+            &KeychainAccount::importer(producer_id),
+            knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, token.value),
+        )
+        .await
+        .map_err(IpcError::internal)?;
+    }
+    Ok(produced)
+}
+
+impl Token {
+    /// The credential itself, for the client that will carry it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+/// Where the servers an [importer](Importer) found and this estate does not hold
+/// will land (#509, second ruling of 2026-09-08).
+///
+/// **A struct and not a bare `Option<String>`, because three answers need three
+/// spellings.** The argument is `Option<Landing>`, and the three are: *nothing
+/// has been said yet* (the argument absent), *under this asset*
+/// (`{ parent: "asset:…" }`), and *at the top of the estate*
+/// (`{ parent: null }`). A bare `Option<String>` gave the last two one spelling
+/// between them, and the collision was not academic: the Import dialog offers
+/// the top, promises it in words, and sent `null` -- which the producer read as
+/// *nothing said yet*, so it asked the same question again. On an estate with
+/// **no assets** there is no other answer to give, so the only button on a
+/// first run did nothing, for ever, for an importer whose whole purpose is to
+/// populate a tree.
+///
+/// `parent: None` is the module's own spelling of the top and not a new one:
+/// [`create`] is *"create an asset under `parent_id`, or at the top of the
+/// estate"*, [`move_to`] is *"or to the top of the estate"*,
+/// [`ImportEntry::parent_id`] is *"`null` only for an asset at the top"*, and
+/// [`FileAsset::parent`] is an `Option` the Import has written as a top-level
+/// asset since #439. `testenv/hetzner/estate.json` has exactly one parentless
+/// asset. An importer that refused the one answer the Import accepts would be
+/// the *"second set of rules"* spec #491's story 69 forbids.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Landing {
+    /// The asset the new servers go under, or `None` for the top of the estate.
+    ///
+    /// `#[serde(default)]` so `{}` reads as the top: an absent key and an
+    /// explicit `null` are one answer here, which is the opposite of the
+    /// distinction the whole type exists to make -- that one is between the
+    /// **argument** being absent and this field being `null`, and those cross
+    /// the bridge as different things.
+    #[serde(default)]
+    pub parent: Option<String>,
+}
+
+/// The live system a producer reads, or a refusal for the one that reads none.
+///
+/// Beside [`find_producer`] and for its reason: an answer a command would
+/// otherwise spell for itself, in a message no test reads. The estate file is
+/// chosen from a disk and there is nothing to run.
+///
+/// # Errors
+///
+/// [`IpcError::invalid`] for [`ESTATE_FILE_PRODUCER`].
+pub fn importer_of(producer: &'static Producer) -> Result<Importer, IpcError> {
+    producer.importer.ok_or_else(|| {
+        IpcError::invalid(format!(
+            "`{}` is not an importer: it is the estate file a person picks off \
+             the disk, and there is no live system to produce one from.",
+            producer.id
         ))
     })
 }
@@ -6126,6 +6318,227 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    fn store() -> Arc<dyn SecretStore> {
+        Arc::new(knobas_secrets::MemoryStore::new())
+    }
+
+    fn under(store: &Arc<dyn SecretStore>, account: &KeychainAccount) -> Option<String> {
+        store.get(account).unwrap().map(|secret| secret.value)
+    }
+
+    /// **A token is asked for only when there is none**, and a stored one is
+    /// used without the reader hearing about it.
+    #[tokio::test]
+    async fn a_token_is_owed_only_when_the_keychain_holds_none() {
+        let store = store();
+        assert!(
+            token_for(&store, HCLOUD_PRODUCER, None)
+                .await
+                .expect("an empty keychain is not a failure")
+                .is_none(),
+            "nothing stored and nothing typed is the one state that owes a question"
+        );
+
+        store
+            .put(
+                &KeychainAccount::importer(HCLOUD_PRODUCER),
+                &knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, "stored-one"),
+            )
+            .unwrap();
+        let found = token_for(&store, HCLOUD_PRODUCER, None)
+            .await
+            .expect("the keychain answers")
+            .expect("a token is stored");
+        assert_eq!(found.as_str(), "stored-one");
+
+        // Blank is absent. A field the reader tabbed through must not be sent
+        // as a credential and must not be stored as one.
+        let typed = token_for(&store, HCLOUD_PRODUCER, Some("   ".to_owned()))
+            .await
+            .expect("the keychain answers")
+            .expect("the stored one still answers");
+        assert_eq!(typed.as_str(), "stored-one");
+    }
+
+    /// **A credential the far end refused is never kept**, and a typed one that
+    /// worked is kept under the importer's own account.
+    ///
+    /// Both directions over one function, because the claim is about the
+    /// *pairing*: a store that wrote on the way in would be green on the first
+    /// half and wrong on the second.
+    #[tokio::test]
+    async fn a_typed_token_is_kept_only_when_the_run_answered() {
+        let account = KeychainAccount::importer(HCLOUD_PRODUCER);
+
+        let refused = store();
+        let token = token_for(&refused, HCLOUD_PRODUCER, Some("bad-token".to_owned()))
+            .await
+            .unwrap()
+            .unwrap();
+        let answer = remember::<hcloud::Produced>(
+            &refused,
+            HCLOUD_PRODUCER,
+            token,
+            Err(IpcError::new(
+                crate::IpcErrorCode::Unauthorized,
+                "unable to authenticate",
+            )),
+        )
+        .await;
+        assert_eq!(
+            answer.expect_err("the run failed").code,
+            crate::IpcErrorCode::Unauthorized
+        );
+        assert_eq!(
+            under(&refused, &account),
+            None,
+            "a token the far end refused is in the keychain"
+        );
+
+        let accepted = store();
+        let token = token_for(&accepted, HCLOUD_PRODUCER, Some("good-token".to_owned()))
+            .await
+            .unwrap()
+            .unwrap();
+        remember(
+            &accepted,
+            HCLOUD_PRODUCER,
+            token,
+            Ok(hcloud::Produced::Ready {
+                file: "{}".to_owned(),
+                new_servers: Vec::new(),
+            }),
+        )
+        .await
+        .expect("the run answered");
+        assert_eq!(under(&accepted, &account), Some("good-token".to_owned()));
+        assert_eq!(
+            under(&accepted, &KeychainAccount::source(HCLOUD_PRODUCER)),
+            None,
+            "an importer's token is not a source's credential (ADR-0015)"
+        );
+
+        // `landing_needed` is an answer too: the run reached the far end, so
+        // the token is kept even though no file came back. Otherwise the reader
+        // is asked for it again on the very next call.
+        let asked = store();
+        let token = token_for(&asked, HCLOUD_PRODUCER, Some("good-token".to_owned()))
+            .await
+            .unwrap()
+            .unwrap();
+        remember(
+            &asked,
+            HCLOUD_PRODUCER,
+            token,
+            Ok(hcloud::Produced::LandingNeeded {
+                servers: vec!["knobas-scratch".to_owned()],
+            }),
+        )
+        .await
+        .expect("the run answered");
+        assert_eq!(under(&asked, &account), Some("good-token".to_owned()));
+    }
+
+    /// A token that came **out** of the keychain is not written back into it.
+    ///
+    /// A rewrite is a keychain prompt for nothing on macOS, and it would make
+    /// every run a write -- so the store is left holding exactly what it held.
+    #[tokio::test]
+    async fn a_stored_token_is_not_written_back() {
+        let store = store();
+        let account = KeychainAccount::importer(HCLOUD_PRODUCER);
+        store
+            .put(
+                &account,
+                &knobas_secrets::Secret {
+                    kind: knobas_source::AuthMethod::ApiToken,
+                    value: "stored-one".to_owned(),
+                    // A field nothing about an importer sets, kept here as the
+                    // marker: a write-back would replace this whole item.
+                    account: Some(knobas_source::instance::Account {
+                        username: "marker".to_owned(),
+                        password: "marker".to_owned(),
+                    }),
+                },
+            )
+            .unwrap();
+
+        let token = token_for(&store, HCLOUD_PRODUCER, None)
+            .await
+            .unwrap()
+            .unwrap();
+        remember(
+            &store,
+            HCLOUD_PRODUCER,
+            token,
+            Ok(hcloud::Produced::Ready {
+                file: "{}".to_owned(),
+                new_servers: Vec::new(),
+            }),
+        )
+        .await
+        .expect("the run answered");
+
+        let kept = store.get(&account).unwrap().expect("still there");
+        assert_eq!(kept.value, "stored-one");
+        assert!(
+            kept.account.is_some(),
+            "the item was rewritten, which is a keychain prompt for nothing"
+        );
+    }
+
+    /// **The credential never reaches a log line or a panic message.**
+    ///
+    /// `knobas_secrets::Secret` hand-writes its `Debug` for this reason and
+    /// has this test; [`Token`] holds the same string and needs the same one,
+    /// because the derived `Debug` a struct gets by default is what puts a
+    /// credential into every `tracing` line that ever formats one. `typed` is
+    /// kept: *where this token came from* is the question a log line about it
+    /// would be read for.
+    #[test]
+    fn a_tokens_debug_prints_no_credential() {
+        let token = Token {
+            value: "hetzner-secret-2f6c9a".to_owned(),
+            typed: true,
+        };
+        let shown = format!("{token:?}");
+        assert!(
+            !shown.contains("hetzner-secret-2f6c9a"),
+            "Debug leaked the token: {shown}"
+        );
+        assert!(shown.contains("redacted"));
+        assert!(shown.contains("typed: true"));
+    }
+
+    /// **The estate file's producer is refused by name, and the name is
+    /// legible.**
+    ///
+    /// Its own function beside [`find_producer`] rather than a `format!` in a
+    /// command, so this test can read the sentence: `cargo fmt` collapsed the
+    /// continuation of this very message once and left fourteen literal spaces
+    /// in the middle of it, which nothing would have caught.
+    #[test]
+    fn the_estate_files_producer_is_refused_by_name_and_hcloud_is_not() {
+        let refused = importer_of(find_producer(ESTATE_FILE_PRODUCER).unwrap())
+            .expect_err("the file a person picks off the disk produces nothing");
+        assert_eq!(refused.code, crate::IpcErrorCode::Invalid);
+        assert!(
+            refused.message.contains(ESTATE_FILE_PRODUCER)
+                && refused.message.contains("picks off the disk"),
+            "the refusal names the producer and reads as a sentence: {}",
+            refused.message
+        );
+        assert!(
+            !refused.message.contains("  "),
+            "a collapsed line continuation left a run of spaces mid-sentence: {}",
+            refused.message
+        );
+        assert_eq!(
+            importer_of(find_producer(HCLOUD_PRODUCER).unwrap()).unwrap(),
+            Importer::Hcloud
+        );
+    }
 
     /// The Monitors tab's per-row rule (issue #452), without a database and
     /// without a keychain.

@@ -194,7 +194,10 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
     let store = MemoryStore::new();
     if with_secret {
         store
-            .put(&id, &Secret::just(AuthMethod::Pat, "tok"))
+            .put(
+                &knobas_secrets::KeychainAccount::source(&id),
+                &Secret::just(AuthMethod::Pat, "tok"),
+            )
             .unwrap();
     }
     let events = Arc::new(Recorder::default());

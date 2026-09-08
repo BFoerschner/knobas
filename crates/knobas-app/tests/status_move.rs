@@ -112,7 +112,7 @@ async fn app(jira_url: &str) -> SourcesState {
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
-            JIRA,
+            &knobas_secrets::KeychainAccount::source(JIRA),
             &Secret::just(AuthMethod::Pat, knobas_mockd::JIRA_TOKEN),
         )
         .expect("the Jira token is stored");

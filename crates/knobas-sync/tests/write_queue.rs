@@ -487,7 +487,10 @@ async fn harness() -> Harness {
     .unwrap();
     let secrets = MemoryStore::new();
     secrets
-        .put(&source, &Secret::just(AuthMethod::Pat, "tok"))
+        .put(
+            &knobas_secrets::KeychainAccount::source(&source),
+            &Secret::just(AuthMethod::Pat, "tok"),
+        )
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));
@@ -864,9 +867,12 @@ async fn an_edited_held_write_sends_what_the_user_wrote() {
 async fn a_source_with_no_credential_keeps_the_write() {
     let h = harness().await;
     let ticket = h.mirror("PAY-13", "a payout fails").await;
-    knobas_secrets::spawn::delete(&h.deps.secrets, &h.source)
-        .await
-        .unwrap();
+    knobas_secrets::spawn::delete(
+        &h.deps.secrets,
+        &knobas_secrets::KeychainAccount::source(&h.source),
+    )
+    .await
+    .unwrap();
 
     let write = h.comment(&ticket, "kept").await;
     let waiting = h.reload(write.id).await;

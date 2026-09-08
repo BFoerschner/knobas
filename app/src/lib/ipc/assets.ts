@@ -810,26 +810,48 @@ export interface ImportProducer {
   id: string;
   /** What the chooser calls it. */
   label: string;
+  /**
+   * It reads a live system, so its text comes from {@link produceEstateFile}
+   * rather than from a file the reader picked off the disk (#509).
+   *
+   * `CONTEXT.md`, *Importer*: **producer** is the wider word, and the estate
+   * file is the one producer that is *not* an importer, because there is no
+   * live system on the other end of it. That difference is the whole of what
+   * the dialog branches on — an `<input type="file">` on one side, a token and
+   * a produce command on the other.
+   *
+   * **Stated, not derived from the id.** The backend's own rule is a field on
+   * `assets::Producer` and its doc says why: *"not `origin_key.is_empty()` …
+   * a check that read the key would be measuring a representation of the thing
+   * rather than the thing"*. A frontend that read `id !== "estate_file"` would
+   * be making exactly that mistake one surface over, and it would draw a *Read*
+   * button on any future producer that reads no live system.
+   * `commands::assets`' `the_chooser_offers_producers_this_build_knows` holds
+   * this flag to `Producer::importer` for every entry.
+   */
+  importer: boolean;
 }
 
 /**
  * The chooser's entries: where an estate file can come from (#508).
  *
- * **One entry today**, and that is the point of having the list at all — the
- * hcloud and Docker importers (spec #491, streams 9 and 10) each add one, and
- * each is a producer the backend already has to know an origin key for. The
+ * **Two entries** since #509: the file a person picks off the disk, and the
+ * hcloud importer. The Docker importer (spec #491, story 67) adds the third,
+ * and each is a producer the backend already has to know an origin key for. The
  * ids here are the authority on what the chooser may send, and
  * `commands::assets`' `the_chooser_offers_producers_this_build_knows` reads
  * this list and checks every id against `assets::PRODUCERS`. The reverse is
- * deliberately not checked: the backend declares `hcloud`'s origin key before
- * anything can produce an hcloud file.
+ * deliberately not checked: the backend may declare a producer's origin key
+ * before anything can produce that producer's file, which is what #508 did for
+ * hcloud and what stream 10 will do for Docker.
  *
  * A **non-empty tuple** rather than an array, so the dialog can open on the
  * first entry without a fallback for a chooser with nothing in it — a state
  * this list is never in and no code should be written for.
  */
 export const IMPORT_PRODUCERS: readonly [ImportProducer, ...ImportProducer[]] = [
-  { id: "estate_file", label: "Estate file" },
+  { id: "estate_file", label: "Estate file", importer: false },
+  { id: "hcloud", label: "Hetzner Cloud", importer: true },
 ];
 
 /**
@@ -852,6 +874,87 @@ export const IMPORT_PRODUCERS: readonly [ImportProducer, ...ImportProducer[]] = 
  */
 export function previewEstateImport(file: string, producer: string): Promise<ImportPreview> {
   return invoke<ImportPreview>("preview_estate_import", { file, producer });
+}
+
+/**
+ * What one run of an importer answered — `assets::hcloud::Produced` (#509).
+ *
+ * Three states and not a record of optionals: two of the three fields would be
+ * meaningless in each, and `{ file: null, needs: null }` is a state the backend
+ * is never in. `state` is the tag, the arrangement {@link PropertyValue} makes
+ * with `kind`.
+ */
+export type Produced = TokenNeeded | LandingNeeded | ProducedFile;
+
+/**
+ * Nothing is stored under this importer's keychain account and no token was
+ * sent — the dialog asks for one, **once**: the backend stores it after the run
+ * succeeds, so the next run comes back with a file instead.
+ */
+export interface TokenNeeded {
+  state: "token_needed";
+}
+
+/**
+ * The live system holds servers this estate does not, and nothing has said
+ * where they go. The dialog asks *land under* — once per run, not once per
+ * server — and calls again with the answer.
+ */
+export interface LandingNeeded {
+  state: "landing_needed";
+  /** The servers that are not in the tree, by name, in the order they came. */
+  servers: string[];
+}
+
+/** The estate file, in the checked-in shape, ready for the preview. */
+export interface ProducedFile {
+  state: "ready";
+  /** The file's text. Nothing in it says which producer made it (#508). */
+  file: string;
+  /** The servers this file would create; empty when the estate holds them all. */
+  new_servers: string[];
+}
+
+/**
+ * Where the servers an importer found and this estate does not hold will land —
+ * `assets::Landing` (#509).
+ *
+ * **Three answers need three spellings**, and this type carries the two that
+ * are answers: `{ parent: "asset:…" }` is *under this asset* and
+ * `{ parent: null }` is *the top of the estate*, which is how `createAsset` and
+ * `moveAsset` already spell a place. The third — *nothing has been said yet* —
+ * is the whole argument being `null`, and is what `landing_needed` asks about.
+ *
+ * The distinction is not academic: a bare `string | null` gave *the top* and
+ * *nothing said yet* one spelling, so a reader who chose the top was asked the
+ * same question again, for ever on an estate with no assets to choose instead.
+ */
+export interface Landing {
+  /** The asset the servers go under, or `null` for the top of the estate. */
+  parent: string | null;
+}
+
+/**
+ * Run one importer against its live system (#509).
+ *
+ * `token` is sent only when the reader has just typed one; otherwise the
+ * backend reads the keychain, under the `importer:` namespace an importer's
+ * credential lives in (ADR-0015 — an importer is not a source, and its token is
+ * not reachable by anything that walks sources). `landUnder` is where the
+ * servers this estate does not hold will land ({@link Landing}), and is owed
+ * only once `landing_needed` has said so — `null` until then, and *never* as a
+ * way of saying *the top*, which is `{ parent: null }`.
+ *
+ * Rejects with `invalid` for a producer the backend does not know or for the
+ * estate file (which is chosen from the disk and produces nothing), and with
+ * `unauthorized` for a token the live system refused.
+ */
+export function produceEstateFile(
+  producer: string,
+  token: string | null,
+  landUnder: Landing | null,
+): Promise<Produced> {
+  return invoke<Produced>("produce_estate_file", { producer, token, landUnder });
 }
 
 /**

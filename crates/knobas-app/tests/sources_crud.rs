@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourceDraft, SourcePatch};
-use knobas_secrets::{MemoryStore, Secret, SecretStore};
+use knobas_secrets::{KeychainAccount, MemoryStore, Secret, SecretStore};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::AuthState;
@@ -152,6 +152,14 @@ struct Fixture {
     id: String,
 }
 
+/// The keychain account a source's credential is stored under, spelled here so
+/// every assertion below reads the key `sources::crud` writes rather than a
+/// bare id -- an absence asserted under the wrong account is a test that passes
+/// against nothing (`knobas_secrets::KeychainAccount`).
+fn account(source_id: &str) -> KeychainAccount {
+    KeychainAccount::source(source_id)
+}
+
 async fn fixture() -> Fixture {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
@@ -223,8 +231,14 @@ async fn adding_a_source_writes_the_secret_first_and_returns_a_summary() {
         "the summary names the credential kind the form submitted"
     );
 
-    assert_eq!(f.secrets.get(&f.id).unwrap().unwrap().value, "pat-one");
-    assert_eq!(f.secrets.get(&f.id).unwrap().unwrap().kind, AuthMethod::Pat);
+    assert_eq!(
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().value,
+        "pat-one"
+    );
+    assert_eq!(
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().kind,
+        AuthMethod::Pat
+    );
 }
 
 /// `auth_kind` comes off the **row**, and `list` and `add` agree about it.
@@ -321,7 +335,7 @@ async fn a_failed_insert_leaves_no_orphaned_keychain_item() {
     assert!(matches!(err, sources::SourcesError::Conflict(_)), "{err:?}");
 
     assert_eq!(
-        f.secrets.get(&f.id).unwrap().unwrap().value,
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().value,
         "pat-one",
         "the failed attempt must not have overwritten or deleted the live secret"
     );
@@ -346,7 +360,7 @@ async fn a_failed_insert_for_a_new_id_removes_the_secret_it_just_wrote() {
         .expect_err("a closed pool cannot insert");
     assert!(matches!(err, sources::SourcesError::Db(_)), "{err:?}");
     assert!(
-        f.secrets.get(&f.id).unwrap().is_none(),
+        f.secrets.get(&account(&f.id)).unwrap().is_none(),
         "the secret written before the failed insert was not removed"
     );
 }
@@ -365,7 +379,7 @@ async fn an_unknown_adapter_kind_is_refused_before_anything_is_written() {
         "{err:?}"
     );
     assert!(
-        f.secrets.get(&f.id).unwrap().is_none(),
+        f.secrets.get(&account(&f.id)).unwrap().is_none(),
         "nothing reached the keychain"
     );
     assert!(
@@ -390,7 +404,7 @@ async fn an_invalid_id_or_interval_is_refused_with_a_reason() {
             "{bad:?} produced {err:?}"
         );
         assert!(
-            f.secrets.get(bad).unwrap().is_none(),
+            f.secrets.get(&account(bad)).unwrap().is_none(),
             "{bad:?} reached the keychain"
         );
     }
@@ -448,7 +462,7 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         "a successful re-entry must not store the connection note: {health:?}"
     );
     assert_eq!(
-        f.secrets.get(&f.id).unwrap().unwrap().value,
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().value,
         "pat-two",
         "one item, overwritten"
     );
@@ -514,12 +528,12 @@ async fn testing_a_draft_writes_nothing_at_all() {
             .all(|c| c.id != f.id)
     );
     assert!(
-        f.secrets.get(&f.id).unwrap().is_none(),
+        f.secrets.get(&account(&f.id)).unwrap().is_none(),
         "a draft never reaches the keychain"
     );
     // ...and nothing at all was written under the *draft's* own name either.
-    assert!(f.secrets.get("").unwrap().is_none());
-    assert!(f.secrets.get("mock").unwrap().is_none());
+    assert!(f.secrets.get(&account("")).unwrap().is_none());
+    assert!(f.secrets.get(&account("mock")).unwrap().is_none());
 }
 
 /// A draft for a saved source with `secret: None` re-tests the stored one --
@@ -552,7 +566,7 @@ async fn a_draft_for_a_saved_source_re_tests_the_stored_secret() {
     // A saved source whose secret has been removed reports that rather than
     // pretending it tested something: `missing_secret` is a different offer
     // from "your credential was rejected" (interfaces §3, "Missing").
-    f.secrets.delete(&f.id).unwrap();
+    f.secrets.delete(&account(&f.id)).unwrap();
     let err = sources::crud::test(
         &f.pool,
         &f.secrets,
@@ -595,7 +609,7 @@ async fn deleting_a_source_removes_its_secret_and_can_purge_its_items() {
             .is_none()
     );
     assert!(
-        f.secrets.get(&f.id).unwrap().is_none(),
+        f.secrets.get(&account(&f.id)).unwrap().is_none(),
         "the keychain item goes with it"
     );
 
@@ -829,7 +843,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
         "and the source must not be schedulable again"
     );
     assert_eq!(
-        f.secrets.get(&f.id).unwrap().unwrap().value,
+        f.secrets.get(&account(&f.id)).unwrap().unwrap().value,
         "still-wrong",
         "the user asked for it to be stored; `unauthorized` means stored and rejected"
     );
@@ -1100,7 +1114,11 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
     .await
     .unwrap();
 
-    let kept = f.secrets.get(&f.id).unwrap().expect("the credential");
+    let kept = f
+        .secrets
+        .get(&account(&f.id))
+        .unwrap()
+        .expect("the credential");
     assert_eq!(kept.value, "uk1_metrics", "the key was kept, not cleared");
     assert_eq!(kept.kind, AuthMethod::ApiToken);
     let account = kept.account.expect("the account was added");
@@ -1142,7 +1160,11 @@ async fn re_entering_the_key_keeps_the_stored_account() {
     .await
     .unwrap();
 
-    let kept = f.secrets.get(&f.id).unwrap().expect("the credential");
+    let kept = f
+        .secrets
+        .get(&account(&f.id))
+        .unwrap()
+        .expect("the credential");
     assert_eq!(kept.value, "uk1_rotated");
     assert_eq!(
         kept.account.expect("the account survived").username,
@@ -1171,17 +1193,27 @@ async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() 
     struct Refuses;
 
     impl SecretStore for Refuses {
-        fn get(&self, _source_id: &str) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+        fn get(
+            &self,
+            _account: &knobas_secrets::KeychainAccount,
+        ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
             Err(knobas_secrets::SecretError::Backend(
                 "the keychain is locked".to_owned(),
             ))
         }
 
-        fn put(&self, _: &str, _: &Secret) -> Result<(), knobas_secrets::SecretError> {
+        fn put(
+            &self,
+            _: &knobas_secrets::KeychainAccount,
+            _: &Secret,
+        ) -> Result<(), knobas_secrets::SecretError> {
             unreachable!("this test only reads")
         }
 
-        fn delete(&self, _: &str) -> Result<(), knobas_secrets::SecretError> {
+        fn delete(
+            &self,
+            _: &knobas_secrets::KeychainAccount,
+        ) -> Result<(), knobas_secrets::SecretError> {
             unreachable!("this test only reads")
         }
     }
@@ -1218,7 +1250,7 @@ async fn a_re_enter_with_nothing_typed_and_nothing_stored_is_refused() {
     sources::crud::add(&f.pool, &f.secrets, &f.registry, a_kuma_source(&f.id, None))
         .await
         .unwrap();
-    f.secrets.delete(&f.id).unwrap();
+    f.secrets.delete(&account(&f.id)).unwrap();
 
     let refused = sources::crud::set_secret(
         &f.pool,
@@ -1233,7 +1265,7 @@ async fn a_re_enter_with_nothing_typed_and_nothing_stored_is_refused() {
         "got {refused:?}"
     );
     assert!(
-        f.secrets.get(&f.id).unwrap().is_none(),
+        f.secrets.get(&account(&f.id)).unwrap().is_none(),
         "a refused re-enter stores nothing"
     );
 }
@@ -1257,5 +1289,5 @@ async fn adding_a_source_with_no_typed_credential_is_refused_by_name() {
             .is_none(),
         "a refused add writes no row"
     );
-    assert!(f.secrets.get(&f.id).unwrap().is_none());
+    assert!(f.secrets.get(&account(&f.id)).unwrap().is_none());
 }

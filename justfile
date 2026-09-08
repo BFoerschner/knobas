@@ -1624,3 +1624,49 @@ atlassian-live:
     # every call it makes to this Jira is a read, and it writes nothing.
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test share_exit -- --ignored --nocapture --test-threads=1
     echo "atlassian-live: every Atlassian-gated live suite green (5 suites); $(( $(date +%s) - t0 ))s so far"
+
+# The **hcloud importer** against the real Hetzner Cloud (issue #509, v1.5
+# stream 9). `crates/knobas-app/tests/estate_live.rs` is the suite and it is one
+# test.
+#
+# WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. The producer is run
+# against a recording in `just check` (`tests/assets_ipc.rs`), which certifies
+# shape: the decode, the file, the origin-key match, the landing. A recording is
+# green forever, so two facts have no witness but this recipe:
+#
+#   1. that Hetzner still answers in that shape;
+#   2. that the three `hcloud_id` values in `testenv/hetzner/estate.json` are
+#      the ids of the three real servers (#508 wrote them from `hcloud server
+#      list`; a *missing* id is red on a mutant, a plausible-but-wrong one is a
+#      second copy of a server and silent).
+#
+# **A RED RUN NAMING A SERVER IS READ FIRST AS A WRONG `hcloud_id` IN THAT
+# FILE**, and only then as a bug in the producer: a wrong id is unknown by id
+# and unmatched by key, so its server previews as *new* and the all-known
+# assertion goes red. That is the orchestrator's reading, posted on #509 under
+# the deputy's ruling of 2026-09-08 on #508, and the suite's own header repeats
+# it where a reader of a stack trace will meet it.
+#
+# NO TUNNEL, NO CONTAINER, NO SEED. hcloud's API is public and this is one
+# `GET /v1/servers` -- read-only, against a shared fixture (`testenv/README.md`:
+# no shared container is stopped by anything here, and nothing here touches
+# one). The `hcloud` contexts named `terra-*` belong to other projects and are
+# not consulted: this reads the *token*, and the token is the project.
+#
+# The variable is **gated rather than skipped on**, `teamcity-live`'s rule and
+# issue #351's: a suite that skipped by name on an unset variable is one libtest
+# counts as a pass, and a green line certifying nothing is worse than a refusal.
+#
+# Serial and unparallelised: one test, one rate-limiter budget, somebody else's
+# server.
+estate-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    just _require-live-env 'the repo-root .env, which is gitignored -- the same
+    HETZNER_API_TOKEN testenv/hetzner/provision.sh reads:
+      cp .env.example .env   # then paste the Hetzner Cloud API token in
+    No tunnel and no seed are needed; this reads hcloud and nothing else.' \
+      HETZNER_API_TOKEN
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test estate_live \
+      -- --ignored --nocapture --test-threads=1

@@ -521,7 +521,7 @@ mod tests {
         let store = knobas_secrets::MemoryStore::new();
         store
             .put(
-                &id,
+                &knobas_secrets::KeychainAccount::source(&id),
                 &knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, "uk1_metrics"),
             )
             .unwrap();
@@ -536,7 +536,7 @@ mod tests {
         let store = knobas_secrets::MemoryStore::new();
         store
             .put(
-                &id,
+                &knobas_secrets::KeychainAccount::source(&id),
                 &knobas_secrets::Secret {
                     kind: knobas_source::AuthMethod::ApiToken,
                     value: "uk1_metrics".to_owned(),

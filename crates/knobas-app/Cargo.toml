@@ -28,6 +28,12 @@ async-trait.workspace = true
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
+# The hcloud importer's transport (#509). The stack every adapter shares --
+# rustls with the platform roots, one rate limiter, one retry budget, one fault
+# mapping -- rather than a `reqwest::Client` of this crate's own, which is the
+# hole `knobas-http` exists to close (`Request` has no `send`). An importer is
+# not a source (ADR-0015), but it is HTTP, and there is one HTTP stack.
+knobas-http = { path = "../knobas-http" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
 # The credential store, behind its trait. The concrete `KeyringStore` is picked

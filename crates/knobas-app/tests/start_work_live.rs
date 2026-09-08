@@ -555,11 +555,14 @@ async fn app(env: &Env, jira_url: &str, account: &str) -> SourcesState {
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
-        .put(GITEA, &Secret::just(AuthMethod::Pat, env.token.clone()))
+        .put(
+            &knobas_secrets::KeychainAccount::source(GITEA),
+            &Secret::just(AuthMethod::Pat, env.token.clone()),
+        )
         .expect("the Gitea token is stored");
     secrets
         .put(
-            JIRA,
+            &knobas_secrets::KeychainAccount::source(JIRA),
             &Secret::just(AuthMethod::Pat, knobas_mockd::JIRA_TOKEN),
         )
         .expect("the Jira token is stored");

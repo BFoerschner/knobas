@@ -386,6 +386,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // here, and until now it answered "command not found" in red.
     preview_estate_import: (args) => estatePreview(args),
     apply_estate_import: (args) => estateApply(args),
+    produce_estate_file: (args) => estateProduce(args),
     // The room's Assets tile (#434). Empty for `context_members`' reason: the
     // fixture has no link graph, so no context holds anything and membership
     // -- assets included -- is honestly nothing. A stored room under
@@ -1338,12 +1339,14 @@ function routeDetail(args: Record<string, unknown>) {
 /**
  * The file an import was handed, or a refusal.
  *
- * **One file and no other.** The parse is `JSON.parse` and a shape check and
- * nothing else, where `assets::plan` is a versioned parser with a closed key
+ * **Two files and no others** since #509: the estate this fixture was built
+ * from, and whatever its own importer last produced ({@link PRODUCED_FILE},
+ * matched as text). The parse is `JSON.parse` and a shape check and nothing
+ * else, where `assets::plan` is a versioned parser with a closed key
  * vocabulary, an id namespace check, a cycle check and a property-kind rule.
  * Re-implementing any of that here would be a second answer to *is this file
- * legal*, and the second answer is the one that goes stale -- so anything that
- * is not the estate this fixture was built from is refused by name.
+ * legal*, and the second answer is the one that goes stale -- so anything else
+ * is refused by name.
  */
 function estateFileOf(args: Record<string, unknown>) {
   let parsed: unknown;
@@ -1353,12 +1356,14 @@ function estateFileOf(args: Record<string, unknown>) {
     throw { code: "invalid", message: "that file is not JSON", source_id: null };
   }
   const file = parsed as { name?: string; assets?: EstateFileAsset[]; routes?: EstateFileRoute[] };
-  if (file.name !== ESTATE.name || !Array.isArray(file.assets) || !Array.isArray(file.routes)) {
+  const ours = file.name === ESTATE.name || String(args.file ?? "") === PRODUCED_FILE;
+  if (!ours || !Array.isArray(file.assets) || !Array.isArray(file.routes)) {
     throw {
       code: "invalid",
       message:
-        `this harness replays one import — "${ESTATE.name}", the estate file it ` +
-        `draws its own Tree from. Any other file is the real command's to parse.`,
+        `this harness replays two imports — "${ESTATE.name}", the estate file it ` +
+        `draws its own Tree from, and the one its own importer just produced. ` +
+        `Any other file is the real command's to parse.`,
       source_id: null,
     };
   }
@@ -1383,6 +1388,82 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
       parent_id: route.asset,
     })),
   ];
+}
+
+/**
+ * `produce_estate_file`: the hcloud importer's three answers, without hcloud
+ * (#509).
+ *
+ * **A state machine and not a recording**, because what a walk through this
+ * harness can certify is the *dialog*: that the token is asked for once, that
+ * *land under* is asked only when a new server exists, and that the file comes
+ * back and is offered. So this fixture holds one flag -- whether a token has
+ * been given -- and one server the estate does not hold, which is enough to
+ * make every branch reachable by hand and none of them reachable twice.
+ *
+ * What it says nothing about is Hetzner: there is no API here, no origin key
+ * and no match. `crates/knobas-app/tests/assets_ipc.rs` witnesses the shape
+ * against a recording and `just estate-live` witnesses the real system, which
+ * is the split stated in `assets::hcloud`'s own header.
+ */
+let IMPORTER_TOKEN: string | null = null;
+
+/** The server this fixture's hcloud holds and the estate does not. */
+const IMPORTER_NEW_SERVER = "knobas-scratch";
+
+/**
+ * The exact text the last produce answered with.
+ *
+ * Held so that {@link estateFileOf} can accept it: that function's rule is
+ * *one file and no other*, and since #509 this harness has two of its own --
+ * the estate it draws its Tree from, and the file its own importer just made.
+ * Compared as **text** rather than by a name or a shape, so widening the rule
+ * did not turn it into a second parser.
+ */
+let PRODUCED_FILE: string | null = null;
+
+function estateProduce(args: Record<string, unknown>) {
+  const token = typeof args.token === "string" ? args.token.trim() : "";
+  if (token !== "") IMPORTER_TOKEN = token;
+  if (IMPORTER_TOKEN === null) return { state: "token_needed" };
+
+  // **The argument being absent is the question; a `Landing` is an answer, and
+  // `{ parent: null }` is the top of the estate** (`assets::Landing`, #509).
+  // Read the way the backend reads it, because reading `{ parent: null }` as
+  // *nothing said yet* is exactly the defect the second ruling of 2026-09-08
+  // was raised on, and a fixture that repeated it would let the walk go green
+  // over it.
+  const landing = (args.landUnder ?? null) as { parent?: string | null } | null;
+  const held = FIXTURE_ESTATE.some((asset) => asset.name === IMPORTER_NEW_SERVER);
+  if (!held && landing === null) {
+    return { state: "landing_needed", servers: [IMPORTER_NEW_SERVER] };
+  }
+  const entry: Record<string, unknown> = {
+    id: "asset:hcloud-164750999",
+    type: "vm",
+    name: IMPORTER_NEW_SERVER,
+    properties: {
+      hcloud_id: "164750999",
+      server_type: "cx23",
+      os: "ubuntu-24.04",
+      location: "fsn1",
+      ip: "203.0.113.9",
+    },
+  };
+  // No `parent` key at all for the top, which is what `FileAsset::parent` reads
+  // as an asset at the top of the estate.
+  const parent = landing?.parent ?? null;
+  if (!held && parent !== null) entry.parent = parent;
+  PRODUCED_FILE = JSON.stringify(
+    { version: 1, name: "Hetzner Cloud", assets: [entry], routes: [] },
+    null,
+    2,
+  );
+  return {
+    state: "ready",
+    file: PRODUCED_FILE,
+    new_servers: held ? [] : [IMPORTER_NEW_SERVER],
+  };
 }
 
 /**

@@ -20,7 +20,15 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetDetail, AssetRow, ImportOutcome, ImportPreview } from "../ipc/assets";
+import type {
+  AssetDetail,
+  AssetRow,
+  ImportOutcome,
+  ImportPreview,
+  Landing,
+  Produced,
+} from "../ipc/assets";
+import type { IpcError } from "../ipc";
 import { createRouter } from "../shell/router.svelte";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
@@ -159,20 +167,57 @@ function detailOf(assetId: string): AssetDetail {
   };
 }
 
+/** What the scripted importer hands back, and what the preview is asked about. */
+const FILE = '{"version":1,"name":"Hetzner Cloud","assets":[],"routes":[]}';
+
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-/** What the two Import commands were handed, in order. */
+/** What the three Import commands were handed, in order. */
 interface Calls {
   previewed: string[];
   applied: string[];
   /** The producer sent with each call, preview and apply alike (#508). */
   producers: string[];
   reads: number;
+  /**
+   * `(producer, token, landUnder)` per `produce_estate_file` call (#509).
+   *
+   * `landUnder` is a {@link Landing} or `null`, and the difference between
+   * `null` and `{ parent: null }` is the whole of what the second ruling of
+   * 2026-09-08 was about — so it is recorded verbatim rather than flattened to
+   * an id, which would have made the two indistinguishable here too.
+   */
+  produces: [string, string | null, Landing | null][];
 }
 
+/**
+ * What the importer answers, one per call, in order.
+ *
+ * A *script* and not one canned answer, because the two questions #509's
+ * criterion is about are two round trips: `token_needed` then `ready`, or
+ * `landing_needed` then `ready`. A stub that answered the same thing twice
+ * could not tell a dialog that asks once from one that asks every time.
+ */
+let script: (Produced | IpcError)[] = [];
+
+/**
+ * The next scripted answer is a **rejection** rather than an answer.
+ *
+ * A knob beside the script, the shape `render`'s `refusal` has for the preview:
+ * the produce port's refusals are what put the token field back, and a port
+ * that could only resolve could not drive that branch at all.
+ */
+let rejectNextProduce = false;
+
 function render(refusal: unknown = null, hash = "#/assets/tree") {
-  const calls: Calls = { previewed: [], applied: [], producers: [], reads: 0 };
+  const calls: Calls = {
+    previewed: [],
+    applied: [],
+    producers: [],
+    reads: 0,
+    produces: [],
+  };
   location.hash = hash;
   const router = createRouter();
   app = mount(AssetsView, {
@@ -207,6 +252,22 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
           calls.producers.push(producer);
           return Promise.resolve(OUTCOME);
         },
+        produceEstateFile: (
+          producer: string,
+          token: string | null,
+          landUnder: Landing | null,
+        ) => {
+          calls.produces.push([producer, token, landUnder]);
+          const answer = script.shift();
+          if (answer === undefined) {
+            return Promise.reject(new Error("the importer was run more times than the test scripted"));
+          }
+          if (rejectNextProduce) {
+            rejectNextProduce = false;
+            return Promise.reject(answer);
+          }
+          return Promise.resolve(answer as Produced);
+        },
       },
     },
   });
@@ -217,6 +278,8 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
 beforeEach(() => {
   target = document.createElement("div");
   document.body.append(target);
+  script = [];
+  rejectNextProduce = false;
 });
 
 afterEach(() => {
@@ -410,8 +473,8 @@ test("Import applies the chosen file and the Tree re-reads", async () => {
  * The chooser (#508): **where the estate file comes from**, and its id on both
  * calls.
  *
- * One entry today — the file a person picks off the disk — and the hcloud and
- * Docker importers (spec #491, streams 9 and 10) each add one. What is
+ * Two entries since #509 — the file a person picks off the disk, and the hcloud
+ * importer — and the Docker one (spec #491, story 67) adds the third. What is
  * asserted is the option's *value* as well as its label, because the value is
  * what crosses the bridge and a chooser drawing the right words over the wrong
  * id would be a preview matched by the wrong rule.
@@ -432,6 +495,7 @@ test("the chooser offers the estate file and sends it with both calls", async ()
   expect(chooser).not.toBeNull();
   expect([...(chooser?.options ?? [])].map((option) => [option.value, option.text])).toEqual([
     ["estate_file", "Estate file"],
+    ["hcloud", "Hetzner Cloud"],
   ]);
   expect(chooser?.value).toBe("estate_file");
 
@@ -472,4 +536,292 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
   );
   expect(apply?.disabled).toBe(true);
   expect(calls.applied).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// The hcloud importer's half of the dialog (#509).
+//
+// The producer itself, the file it builds and the origin-key match are the
+// backend's and are pinned at their own seams
+// (`crates/knobas-app/tests/assets_ipc.rs` against a recording,
+// `just estate-live` against the real Hetzner). What is here is what only this
+// surface can get wrong: that the token is asked for **once**, that *land
+// under* is asked **only when a new server exists**, and that what came back is
+// offered for download.
+// ---------------------------------------------------------------------------
+
+/** Pick the chooser's `hcloud` entry, the way a reader picks it. */
+function chooseImporter() {
+  const chooser = target.querySelector<HTMLSelectElement>(".dlg select");
+  if (!chooser) throw new Error("the dialog draws no chooser");
+  chooser.value = "hcloud";
+  chooser.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+
+/** The token field, or `null` when the dialog is not asking for one. */
+function tokenField(): HTMLInputElement | null {
+  return target.querySelector<HTMLInputElement>('.dlg input[type="password"]');
+}
+
+/**
+ * **The token is asked for once.**
+ *
+ * The first run comes back `token_needed` and no field was on screen before it:
+ * the dialog does not offer a credential box on the chance that one is wanted,
+ * because a token the keychain already holds is one nobody should be asked to
+ * type. The reader types one, the run succeeds, and the field is gone — which
+ * is the half a stub answering the same thing twice could not tell.
+ *
+ * And the token is sent **only on the call the reader typed it for**: the
+ * second call carries `null`, because after that the keychain is where it
+ * lives.
+ */
+test("an importer asks for the token once, and not before it is owed", async () => {
+  script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_servers: [] }];
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+
+  chooseImporter();
+  expect(tokenField()).toBeNull();
+  expect(target.querySelector('input[type="file"]')).toBeNull();
+
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(calls.produces).toEqual([["hcloud", null, null]]);
+  const field = tokenField();
+  expect(field).not.toBeNull();
+
+  field!.value = "a-hetzner-token";
+  field!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+
+  expect(calls.produces).toEqual([
+    ["hcloud", null, null],
+    ["hcloud", "a-hetzner-token", null],
+  ]);
+  expect(tokenField()).toBeNull();
+  expect(calls.previewed).toEqual([FILE]);
+  expect(calls.producers).toEqual(["hcloud"]);
+});
+
+/**
+ * **Land under is asked only when a new server exists.**
+ *
+ * Both halves, because *only* is the word under test: the run whose answer is
+ * `ready` draws no picker at all — which is the run `just estate-live` makes
+ * against the real estate — and the run whose answer is `landing_needed` draws
+ * one, names the servers it is about, and sends back where the reader walked
+ * to.
+ */
+test("land under is asked only when the importer found a server the estate lacks", async () => {
+  script = [{ state: "ready", file: FILE, new_servers: [] }];
+  const quiet = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+
+  expect(quiet.produces).toEqual([["hcloud", null, null]]);
+  expect(target.querySelector(".dlg .pick")).toBeNull();
+  expect(target.textContent).not.toContain("Land under");
+
+  unmount(app!);
+  app = undefined;
+  script = [
+    { state: "token_needed" },
+    { state: "landing_needed", servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
+    { state: "landing_needed", servers: ["knobas-scratch"] },
+    { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
+  ];
+  const asked = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  tokenField()!.value = "a-hetzner-token";
+  tokenField()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+
+  // The token went with the run that reached the far end, so the field is
+  // gone even though no file has come back yet: `landing_needed` is an answer
+  // from a credential that worked, and a box still holding it through the next
+  // step would ask again for something the keychain now has. Found by the
+  // `?fake-ipc` walk, which is why it is asserted here.
+  expect(tokenField()).toBeNull();
+  expect(target.textContent).toContain("knobas-scratch");
+  expect(target.querySelector(".dlg .pick")).not.toBeNull();
+
+  // **The picker opens at the top of the estate, and the top is an answer.**
+  // This is the half that was missing until the second ruling of 2026-09-08:
+  // the walk below steps into an asset first, so nothing ever pressed the
+  // button the picker opens on. Standing here sends `{ parent: null }` — the
+  // spelling that means *the top* — and the run reaches `ready`. A dialog
+  // sending a bare `null` would be asking the same question again, which on an
+  // estate with no asset to walk into is the only thing its only button can do.
+  button("Put them in the top of the estate")?.click();
+  await settle();
+  expect(asked.produces.at(-1)).toEqual(["hcloud", null, { parent: null }]);
+  expect(target.querySelector(".dlg .pick")).toBeNull();
+
+  // …and then the walk-in, which is the ordinary case.
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  // The picker walks the estate: the top level holds the one asset this
+  // fixture has, and standing on it is what says where the servers land.
+  const into = [...target.querySelectorAll<HTMLButtonElement>(".dlg .into")];
+  expect(into.map((row) => row.textContent?.trim())).toEqual(["knobas test estate"]);
+  into[0]?.click();
+  await settle();
+
+  button("Put them in knobas test estate")?.click();
+  await settle();
+  expect(asked.produces).toEqual([
+    ["hcloud", null, null],
+    ["hcloud", "a-hetzner-token", null],
+    ["hcloud", null, { parent: null }],
+    ["hcloud", null, null],
+    ["hcloud", null, { parent: "asset:knobas-estate" }],
+  ]);
+});
+
+/**
+ * **What was produced is offered for download**, under a name that says which
+ * importer made it, and with the file's own text behind the link.
+ *
+ * The href is a blob URL, so what is asserted is that there is one and that the
+ * anchor really is a download rather than a navigation — the bytes behind it
+ * are the string the dialog was handed, which is the same string it sent to the
+ * preview and `calls.previewed` already pins.
+ */
+test("the produced file is offered for download", async () => {
+  script = [{ state: "ready", file: FILE, new_servers: ["knobas-scratch"] }];
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+
+  const link = target.querySelector<HTMLAnchorElement>(".dlg a.dl");
+  expect(link).not.toBeNull();
+  expect(link?.getAttribute("download")).toBe("hcloud-estate.json");
+  expect(link?.getAttribute("href")).toMatch(/^blob:/);
+  expect(link?.textContent?.trim()).toBe("Download hcloud-estate.json");
+  expect(target.textContent).toContain("1 server is new");
+  expect(calls.previewed).toEqual([FILE]);
+});
+
+/**
+ * **Changing the chooser clears what the previous producer got to.**
+ *
+ * A preview is a plan drawn under one producer's **origin key** — the second
+ * matching rule (#508) — so a preview carried across the chooser would offer
+ * *Import* on a plan the backend is not about to run. The Import button going
+ * back to disabled is the part a reader can act on, and the groups going with
+ * it is what says the plan was dropped rather than hidden.
+ *
+ * Written because the `?fake-ipc` walk could see it and no test could: the
+ * header claimed this and a mutant deleting the handler survived all nine
+ * cases before it.
+ */
+test("choosing another producer drops the preview the last one drew", async () => {
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+
+  await choose('{"assets":[]}');
+  expect(calls.previewed).toEqual(['{"assets":[]}']);
+  expect(groups().length).toBeGreaterThan(0);
+  const importButton = () =>
+    [...target.querySelectorAll<HTMLButtonElement>(".dlg button")].find(
+      (candidate) => candidate.textContent?.trim() === "Import",
+    );
+  expect(importButton()?.disabled).toBe(false);
+
+  chooseImporter();
+  await settle();
+
+  expect(groups()).toEqual([]);
+  expect(importButton()?.disabled).toBe(true);
+  expect(target.querySelector(".dlg a.dl")).toBeNull();
+  // And nothing was sent on the way past: the chooser is a choice, not a run.
+  expect(calls.previewed).toEqual(['{"assets":[]}']);
+  expect(calls.produces).toEqual([]);
+});
+
+/**
+ * **A token the far end refuses puts the field back**, which is the second half
+ * of *asks for a token once* (story 62).
+ *
+ * The first half is above: once a token works, the backend keeps it and nobody
+ * is asked again. This is what happens when a token that used to work stops —
+ * revoked in Hetzner, expired, the project moved. There is nowhere else to
+ * re-enter it: an importer is not a source (ADR-0015), so it has no row in the
+ * sources view and no *Re-enter* strip, and a dialog with no way back would
+ * leave the reader holding a keychain item they cannot replace.
+ *
+ * The refusal is `unauthorized` specifically and not any failure: the dialog
+ * reads `IpcError.code`, and putting the field up for an unreachable Hetzner or
+ * a database that is down would ask for a credential that was never the
+ * problem. Both directions are asserted here, which is what makes the branch a
+ * branch rather than a `catch`.
+ */
+test("a token the far end refuses puts the field back, and another fault does not", async () => {
+  script = [
+    { state: "token_needed" },
+    { state: "ready", file: FILE, new_servers: [] },
+    { state: "ready", file: FILE, new_servers: [] },
+  ];
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  tokenField()!.value = "a-token-that-worked";
+  tokenField()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(tokenField()).toBeNull();
+
+  // Hetzner stops accepting it. The refusal is in the dialog, in the backend's
+  // own words, and the field is back with it.
+  script = [{ code: "unauthorized", message: "unable to authenticate", source_id: null }];
+  rejectNextProduce = true;
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(target.textContent).toContain("unable to authenticate");
+  expect(tokenField()).not.toBeNull();
+
+  // …and a fault that is not about the credential leaves it alone: the reader
+  // is told what went wrong, and not asked for a token that was never at fault.
+  script = [{ code: "unreachable", message: "hetzner did not answer", source_id: null }];
+  rejectNextProduce = true;
+  // The field is on screen from the refusal above, so this is asserted from a
+  // run that starts *without* one: choosing the producer again clears it.
+  chooseImporter();
+  await settle();
+  expect(tokenField()).toBeNull();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(target.textContent).toContain("hetzner did not answer");
+  expect(tokenField()).toBeNull();
+  expect(calls.produces.length).toBe(4);
 });

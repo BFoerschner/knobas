@@ -309,9 +309,12 @@ pub(crate) async fn build_source(
         // an empty keychain (§14a), and the keychain is not even asked.
         None => (None, None),
         Some(_) => {
-            let stored = knobas_secrets::spawn::get(&deps.secrets, &cfg.id)
-                .await
-                .map_err(|e| RunFailure::Secret(e.to_string()))?;
+            let stored = knobas_secrets::spawn::get(
+                &deps.secrets,
+                &knobas_secrets::KeychainAccount::source(&cfg.id),
+            )
+            .await
+            .map_err(|e| RunFailure::Secret(e.to_string()))?;
             let stored = stored.ok_or(RunFailure::MissingSecret)?;
             (Some(stored.value), stored.account)
         }

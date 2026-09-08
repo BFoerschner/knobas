@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use crate::{Secret, SecretError, SecretStore};
+use crate::{KeychainAccount, Secret, SecretError, SecretStore};
 
 /// An in-process credential store.
 ///
@@ -17,7 +17,7 @@ use crate::{Secret, SecretError, SecretStore};
 /// store that had thrown it away.
 #[derive(Default)]
 pub struct MemoryStore {
-    items: Mutex<HashMap<String, Secret>>,
+    items: Mutex<HashMap<KeychainAccount, Secret>>,
 }
 
 impl MemoryStore {
@@ -26,7 +26,7 @@ impl MemoryStore {
         Self::default()
     }
 
-    fn items(&self) -> MutexGuard<'_, HashMap<String, Secret>> {
+    fn items(&self) -> MutexGuard<'_, HashMap<KeychainAccount, Secret>> {
         // A panic while holding this lock leaves a plain map with no invariant
         // to violate, so poisoning would only turn one test failure into a
         // second, less informative one.
@@ -35,17 +35,17 @@ impl MemoryStore {
 }
 
 impl SecretStore for MemoryStore {
-    fn get(&self, source_id: &str) -> Result<Option<Secret>, SecretError> {
-        Ok(self.items().get(source_id).cloned())
+    fn get(&self, account: &KeychainAccount) -> Result<Option<Secret>, SecretError> {
+        Ok(self.items().get(account).cloned())
     }
 
-    fn put(&self, source_id: &str, secret: &Secret) -> Result<(), SecretError> {
-        self.items().insert(source_id.to_owned(), secret.clone());
+    fn put(&self, account: &KeychainAccount, secret: &Secret) -> Result<(), SecretError> {
+        self.items().insert(account.clone(), secret.clone());
         Ok(())
     }
 
-    fn delete(&self, source_id: &str) -> Result<(), SecretError> {
-        self.items().remove(source_id);
+    fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
+        self.items().remove(account);
         Ok(())
     }
 }

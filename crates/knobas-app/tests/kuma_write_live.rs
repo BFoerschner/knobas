@@ -183,7 +183,7 @@ async fn app(env: &Env) -> SourcesState {
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
-            KUMA,
+            &knobas_secrets::KeychainAccount::source(KUMA),
             &Secret {
                 kind: AuthMethod::ApiToken,
                 value: env.key.clone(),
@@ -383,7 +383,10 @@ async fn a_pause_on_a_source_with_only_its_api_key_is_refused_before_it_is_queue
     // else, which is what makes the refusal about the account.
     state
         .secrets
-        .put(KUMA, &Secret::just(AuthMethod::ApiToken, env.key.clone()))
+        .put(
+            &knobas_secrets::KeychainAccount::source(KUMA),
+            &Secret::just(AuthMethod::ApiToken, env.key.clone()),
+        )
         .expect("the API key alone is stored");
 
     let refused = write_queue::submit(&state, json!({ "PauseMonitor": { "entity": "kuma:1" } }))

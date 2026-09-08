@@ -72,10 +72,62 @@ pub use memory::MemoryStore;
 use knobas_source::AuthMethod;
 use knobas_source::instance::Account;
 
-/// The keychain account for one source.
-#[must_use]
-pub fn account_for(source_id: &str) -> String {
-    format!("source:{source_id}")
+/// The keychain **account** one item is stored under -- the second half of the
+/// service+account pair (interfaces §3), and the whole of what separates one
+/// stored credential from another under one service.
+///
+/// # Two namespaces, and why this is a type
+///
+/// `source:<source_id>` is every configured [source](knobas_source)'s
+/// credential. `importer:<producer_id>` is an **importer**'s (issue #509,
+/// ADR-0015): an importer produces an estate file from a live system and is
+/// *not* a source -- it mirrors nothing, syncs nothing, and appears nowhere
+/// sources do -- so its token must not be reachable by a `delete_source`, a
+/// credential-health sweep or a `list` that walks sources, and the way to make
+/// that true of every reader at once is for the two to be different accounts
+/// under the same service.
+///
+/// **A newtype rather than a `&str` and a naming function**, because the
+/// namespace has to be applied exactly once. It used to be applied inside
+/// [`KeyringStore`], which meant [`SecretStore`]'s argument was a *source id*
+/// in one reading and an *account* in another; adding a second namespace to
+/// that arrangement leaves every direct caller free to pass either, and the
+/// failure is silent in the worst direction -- a test asserting a credential is
+/// **absent** passes against a key nothing was ever written under. Here the
+/// only two ways to make one are [`source`](Self::source) and
+/// [`importer`](Self::importer), so the compiler asks every call site which it
+/// meant.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KeychainAccount(String);
+
+impl KeychainAccount {
+    /// The account one configured source's credential is stored under.
+    #[must_use]
+    pub fn source(source_id: &str) -> Self {
+        Self(format!("source:{source_id}"))
+    }
+
+    /// The account one importer's credential is stored under (#509).
+    ///
+    /// `producer_id` is `knobas_app::assets::Producer::id` -- `hcloud` today --
+    /// and not an adapter kind: importers and sources are different sets and
+    /// nothing may be shared between the two but this crate.
+    #[must_use]
+    pub fn importer(producer_id: &str) -> Self {
+        Self(format!("importer:{producer_id}"))
+    }
+
+    /// The account as the platform store spells it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for KeychainAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// One credential. `value` is the PAT, password or API token itself.
@@ -171,24 +223,24 @@ pub enum SecretError {
 /// otherwise would hide the fact that a locked keychain waits on a human. Async
 /// callers go through [`spawn`], never straight through this trait.
 pub trait SecretStore: Send + Sync {
-    /// The credential for `source_id`, or `None` if there is none.
+    /// The credential under `account`, or `None` if there is none.
     ///
     /// # Errors
     /// [`SecretError`] if the store failed -- absence is not a failure.
-    fn get(&self, source_id: &str) -> Result<Option<Secret>, SecretError>;
+    fn get(&self, account: &KeychainAccount) -> Result<Option<Secret>, SecretError>;
 
-    /// Store `secret` for `source_id`, replacing whatever was there.
+    /// Store `secret` under `account`, replacing whatever was there.
     ///
     /// # Errors
     /// [`SecretError`] if the store failed.
-    fn put(&self, source_id: &str, secret: &Secret) -> Result<(), SecretError>;
+    fn put(&self, account: &KeychainAccount, secret: &Secret) -> Result<(), SecretError>;
 
-    /// Remove the credential for `source_id`. **Absent is success**: deleting a
+    /// Remove the credential under `account`. **Absent is success**: deleting a
     /// source must not fail because its secret was already gone.
     ///
     /// # Errors
     /// [`SecretError`] if the store failed for any other reason.
-    fn delete(&self, source_id: &str) -> Result<(), SecretError>;
+    fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError>;
 }
 
 /// Current envelope version. Bumped only when the shape changes; a reader that
@@ -311,7 +363,34 @@ mod tests {
     /// load-bearing: changing it strands every stored credential.
     #[test]
     fn the_account_is_the_source_id_prefixed() {
-        assert_eq!(account_for("jira-eu"), "source:jira-eu");
+        assert_eq!(
+            KeychainAccount::source("jira-eu").as_str(),
+            "source:jira-eu"
+        );
+    }
+
+    /// **The importer namespace** (#509, ADR-0015): an importer's token is not
+    /// a source's credential and does not live where a source's does.
+    ///
+    /// Both halves, because the claim is that the two are *separated*: the
+    /// prefix is what a stored item is found under, and no source id can be
+    /// spelled in a way that reaches an importer's account -- a source called
+    /// `importer:hcloud` still lands under `source:importer:hcloud`, which is
+    /// what makes the namespaces disjoint rather than merely different.
+    #[test]
+    fn an_importers_token_lives_under_its_own_namespace() {
+        assert_eq!(
+            KeychainAccount::importer("hcloud").as_str(),
+            "importer:hcloud"
+        );
+        assert_ne!(
+            KeychainAccount::source("hcloud"),
+            KeychainAccount::importer("hcloud")
+        );
+        assert_eq!(
+            KeychainAccount::source("importer:hcloud").as_str(),
+            "source:importer:hcloud"
+        );
     }
 
     /// The envelope is versioned and carries the auth method, so PAT →
@@ -439,21 +518,23 @@ mod tests {
     #[test]
     fn a_memory_store_honours_the_store_contract() {
         let store = MemoryStore::new();
-        assert!(store.get("jira").unwrap().is_none());
+        let jira = KeychainAccount::source("jira");
+        let kuma = KeychainAccount::source("kuma");
+        assert!(store.get(&jira).unwrap().is_none());
         // Deleting something absent is success, not an error: `delete_source`
         // must not fail because the secret was already gone.
-        store.delete("jira").unwrap();
+        store.delete(&jira).unwrap();
 
         store
-            .put("jira", &Secret::just(AuthMethod::Pat, "one"))
+            .put(&jira, &Secret::just(AuthMethod::Pat, "one"))
             .unwrap();
-        assert_eq!(store.get("jira").unwrap().unwrap().value, "one");
+        assert_eq!(store.get(&jira).unwrap().unwrap().value, "one");
 
         // Re-entering overwrites the one item rather than adding a second.
         store
-            .put("jira", &Secret::just(AuthMethod::UserPassword, "two"))
+            .put(&jira, &Secret::just(AuthMethod::UserPassword, "two"))
             .unwrap();
-        let got = store.get("jira").unwrap().unwrap();
+        let got = store.get(&jira).unwrap().unwrap();
         assert_eq!(
             (got.kind, got.value.as_str()),
             (AuthMethod::UserPassword, "two")
@@ -464,7 +545,7 @@ mod tests {
         // this answer coming back.
         store
             .put(
-                "kuma",
+                &kuma,
                 &Secret {
                     kind: AuthMethod::ApiToken,
                     value: "uk1_metrics".into(),
@@ -476,34 +557,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            store
-                .get("kuma")
-                .unwrap()
-                .unwrap()
-                .account
-                .unwrap()
-                .username,
+            store.get(&kuma).unwrap().unwrap().account.unwrap().username,
             "knobas"
         );
-        store.delete("kuma").unwrap();
+        store.delete(&kuma).unwrap();
 
-        store.delete("jira").unwrap();
-        assert!(store.get("jira").unwrap().is_none());
+        store.delete(&jira).unwrap();
+        assert!(store.get(&jira).unwrap().is_none());
     }
 
     /// Two sources are two items; deleting one leaves the other.
     #[test]
     fn sources_do_not_share_an_item() {
         let store = MemoryStore::new();
+        let jira = KeychainAccount::source("jira");
+        let eu = KeychainAccount::source("jira-eu");
         store
-            .put("jira", &Secret::just(AuthMethod::Pat, "a"))
+            .put(&jira, &Secret::just(AuthMethod::Pat, "a"))
             .unwrap();
-        store
-            .put("jira-eu", &Secret::just(AuthMethod::Pat, "b"))
-            .unwrap();
-        store.delete("jira").unwrap();
-        assert!(store.get("jira").unwrap().is_none());
-        assert_eq!(store.get("jira-eu").unwrap().unwrap().value, "b");
+        store.put(&eu, &Secret::just(AuthMethod::Pat, "b")).unwrap();
+        store.delete(&jira).unwrap();
+        assert!(store.get(&jira).unwrap().is_none());
+        assert_eq!(store.get(&eu).unwrap().unwrap().value, "b");
     }
 
     /// The async callers all go through `spawn_blocking`, because a locked
@@ -511,15 +586,13 @@ mod tests {
     #[tokio::test]
     async fn the_spawn_helpers_reach_the_store() {
         let store: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
-        spawn::put(&store, "jira", Secret::just(AuthMethod::Pat, "z"))
+        let jira = KeychainAccount::source("jira");
+        spawn::put(&store, &jira, Secret::just(AuthMethod::Pat, "z"))
             .await
             .unwrap();
-        assert_eq!(
-            spawn::get(&store, "jira").await.unwrap().unwrap().value,
-            "z"
-        );
-        spawn::delete(&store, "jira").await.unwrap();
-        assert!(spawn::get(&store, "jira").await.unwrap().is_none());
+        assert_eq!(spawn::get(&store, &jira).await.unwrap().unwrap().value, "z");
+        spawn::delete(&store, &jira).await.unwrap();
+        assert!(spawn::get(&store, &jira).await.unwrap().is_none());
     }
 
     /// **The `.demo` suffix must survive.** [`KeyringStore`] is handed the

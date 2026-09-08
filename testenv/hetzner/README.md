@@ -75,11 +75,25 @@ when the id it invented is not one the tree holds.
 
 A wrong one is invisible to `just check` -- a missing or a duplicated one is
 red there, but no gate can read hcloud -- and it is **not** invisible to the
-milestone. The witness is stream 9's `just estate-live` (#509): a server whose
-`hcloud_id` here is wrong is unknown by id and unmatched by key, so the
-produced file previews it as *new* against an estate that must preview
-all-known, and the recipe goes red. So a red `estate-live` naming one server is
-read as a wrong value in this file before it is read as a bug in the producer.
+milestone. The witness is `just estate-live` (#509, built), and it is what the
+three ids and every property below rest on: a server whose `hcloud_id` here is
+wrong is unknown by id and unmatched by key, so the produced file previews it
+as *new* against an estate that must preview all-known, and the recipe goes
+red. So a red `estate-live` naming one server is read as a wrong value in this
+file before it is read as a bug in the producer.
+
+**What that recipe measures is wider than the three ids.** It previews the
+produced file and requires *no changes*, so every property the hcloud importer
+writes has to be the key this file carries with the value this file carries:
+`hcloud_id`, `server_type`, `os` (hcloud's image name, where the `vm` type
+declares it), `location`, `ip`, and one property per Hetzner **label** --
+`knobas: testenv` and `role: <product>` on all three. A server resized in
+Hetzner, moved to another location, rebuilt on a newer image, relabelled, or
+given a new address turns `estate-live` red until this file follows. The
+properties this file carries that hcloud has never heard of -- `vcpu`,
+`memory_gb`, `disk_gb`, `ssh_host`, `docker_context`, `compose_profile` -- are
+not in the produced file and are not measured by it: an import is silent about
+what its file does not mention.
 
 Nothing in the file is provisional any more, and the two things that were are
 named here because their settling is what the surrounding tests now rest on.
