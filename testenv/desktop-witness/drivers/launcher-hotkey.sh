@@ -85,7 +85,14 @@ focus_left_query_box() {
 # stayed up. `Launcher.svelte` renders the overlay under `{#if open}`, so a
 # closed launcher takes its input out of the DOM and out of the accessibility
 # tree -- which is directly observable, so it is what gets asserted.
+#
+# The window is asserted first, and that is not belt-and-braces: `ax find`
+# walks the app's windows, so an app that crashed or lost its window exposes
+# none and the count comes back 0 -- "the overlay closed" must not be
+# satisfiable by "the app is gone". The harness proved this window existed
+# minutes ago, so requiring it again costs nothing on a live app.
 launcher_is_closed() {
+    "$ax" wait-window "$pid" 1 >/dev/null 2>&1 || return 1
     [ "$("$ax" find "$pid" "$QUERY_BOX_LABEL" 2>/dev/null)" = 0 ]
 }
 

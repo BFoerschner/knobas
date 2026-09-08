@@ -31,6 +31,12 @@ repo=$PWD
 
 readonly BUNDLE_ID=dev.knobas.desktop
 readonly SIGNING_IDENTITY=knobas-dev
+# The name the app's process has, which is the cargo binary name and not the
+# bundle's `productName` ("knobas"): tauri leaves `Contents/MacOS/knobas-app`.
+# `just witness-unit` pins it against `crates/knobas-app/Cargo.toml`, because
+# every use of it below is a check that would go quietly vacuous if it drifted
+# -- "no knobas is already running" would pass on a machine with two.
+readonly APP_EXECUTABLE=knobas-app
 readonly LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 # The demo profile, not the default one: its own data directory, its own
 # embedded PostgreSQL on its own port and its own keychain service (P13), so a
@@ -171,7 +177,15 @@ note "$SIGNING_IDENTITY"
 # One instance, from one path, is the whole point of launching from the
 # registered bundle; a copy already running would make every assertion below
 # ambiguous about which process answered it.
-running=$(pgrep -f 'knobas\.app/Contents/MacOS/' | tr '\n' ' ' || true)
+# `pgrep -x`, on the process name, rather than `pgrep -f` on the bundle path:
+# `-f` matches the whole command line, so any process that merely *mentions*
+# the path is counted, and one agent running `ps aux | grep
+# knobas.app/Contents/MacOS` while this runs is enough. Measured 2026-09-08:
+# an unrelated `perl` with that path in its arguments made `pgrep -f` answer 2
+# where `pgrep -x knobas-app` answered 1 -- which here is a clean machine
+# refused as "already running", and below is a correct run failing its
+# single-instance assertion.
+running=$(pgrep -x "$APP_EXECUTABLE" | tr '\n' ' ' || true)
 if [ -n "${running// /}" ]; then
     fail "knobas is already running (pid ${running% })." \
         "Quit it first: this witness asserts that exactly one instance is up," \
@@ -242,7 +256,7 @@ step "launching $registered $PROFILE_FLAG"
 open -a "$registered" --args "$PROFILE_FLAG"
 app_pid=
 for _ in $(seq 1 40); do
-    app_pid=$(pgrep -f 'knobas\.app/Contents/MacOS/' | head -1 || true)
+    app_pid=$(pgrep -x "$APP_EXECUTABLE" | head -1 || true)
     [ -n "$app_pid" ] && break
     sleep 0.25
 done
@@ -255,7 +269,7 @@ step "waiting for a window (up to ${WINDOW_TIMEOUT} s)"
 # `|| true` because `set -o pipefail` turns pgrep's "found nothing" exit 1
 # into an aborted run, and "no instances" is a verdict this line has to be
 # allowed to reach rather than a reason to die without saying so.
-instances=$(pgrep -f 'knobas\.app/Contents/MacOS/' | wc -l | tr -d ' ' || true)
+instances=$(pgrep -x "$APP_EXECUTABLE" | wc -l | tr -d ' ' || true)
 [ "$instances" = 1 ] || fail "$instances knobas processes are running, not one." \
     "That is the Launch Services caveat in the README: a second copy was" \
     "started from a path this run did not launch."

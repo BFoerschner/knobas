@@ -33,8 +33,10 @@ readonly WITNESS_README_SECTION='testenv/README.md, "The desktop witness (macOS)
 # site where the paths actually exist.
 normalise_app_path() {
     local path=$1
-    # Collapse runs of separators, then drop trailing ones. `/` itself is not
-    # a bundle path, so it needs no special case.
+    # Collapse runs of separators, then drop trailing ones -- but never the
+    # last character, so `/` normalises to `/` and not to the empty string.
+    # `/` is not a bundle path; that guard is against a caller that passes one,
+    # not a case the harness reaches.
     while [[ $path == *//* ]]; do path=${path//\/\//\/}; done
     while [[ ${#path} -gt 1 && $path == */ ]]; do path=${path%/}; done
     printf '%s\n' "$path"
@@ -60,9 +62,12 @@ paths_match() {
 # probe reports facts and refuses to interpret them; this is the interpreter,
 # and it is where the order of precedence lives.
 #
-# The order is by what a person would have to do about it, not by severity:
-# a missing Accessibility grant is a one-time visit to System Settings, a
-# locked screen is a password, and losing the right to post events is neither.
+# The order below is the order the branches are written in, and it is by what
+# a person would have to do about it rather than by severity: a missing
+# Accessibility grant is a one-time visit to System Settings, losing the right
+# to post events is a second pane to go and look at, and a locked screen is
+# only a password -- which is why it is reported last, since it will be gone by
+# the time anyone reads a message about anything else.
 # `unreadable` is its own answer rather than a default of `granted`: a probe
 # that printed nothing at all (a helper that failed to compile, a truncated
 # pipe) must never read as permission having been granted.

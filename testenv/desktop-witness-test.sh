@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# The desktop witness's own unit tests (issue #500). No screen, no bundle, no
-# signing identity, no macOS: they run wherever bash does, which is why
-# `just check` can carry them and `just desktop-witness` cannot.
+# The desktop witness's own unit tests (issue #500). No screen, no bundle and
+# no signing identity, which is why `just check` can carry them and `just
+# desktop-witness` cannot. Most of them need nothing but bash; the four at the
+# foot compile `ax.swift` and ask the helper its two questions, and skip
+# themselves where macOS and `swiftc` are not both present.
 #
 # What is under test is `desktop-witness-lib.sh`: the path comparison the
 # harness makes against Launch Services' answer, and the reading of the
@@ -172,6 +174,24 @@ else
     check "the launcher's query box still carries the label the driver asserts on" yes no
     printf '  %s no longer has aria-label="Search or act";\n' "$query_box" >&2
     printf '  testenv/desktop-witness/drivers/launcher-hotkey.sh asserts it.\n' >&2
+fi
+
+# --- the process name the harness counts on --------------------------------
+
+# `desktop-witness.sh` finds the running app with `pgrep -x knobas-app`, and
+# that name is the cargo binary name rather than the bundle's `productName`
+# ("knobas"). If it drifted, the harness's "no knobas is already running"
+# check would pass on a machine with one running and its single-instance
+# assertion would never see a second -- both vacuous, both green. The same
+# cheap pin as the label above, in the other direction: a false pass rather
+# than a false failure.
+manifest=../crates/knobas-app/Cargo.toml
+if grep -q '^name = "knobas-app"$' "$manifest"; then
+    check "the app crate still builds a binary called knobas-app" yes yes
+else
+    check "the app crate still builds a binary called knobas-app" yes no
+    printf '  %s no longer declares name = "knobas-app";\n' "$manifest" >&2
+    printf '  testenv/desktop-witness.sh counts processes by that name.\n' >&2
 fi
 
 # --- the helper's own two answers -------------------------------------------

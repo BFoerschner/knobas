@@ -378,9 +378,11 @@ shell:
 # checkout does not have. What can be in the gate is the part of that harness
 # which is a decision rather than a side effect -- how it compares Launch
 # Services' answer against the bundle it built, and how it reads the
-# accessibility probe's three lines. Both are pure text, both have been wrong
-# in this shape before, and neither needs a Mac: this recipe runs wherever
-# bash does.
+# accessibility probe's three lines. Both are pure text and both have been
+# wrong in this shape before. Most of the suite needs nothing but bash; its
+# last four checks compile `ax.swift` and ask the helper for the probe and for
+# a registered path, and skip themselves where macOS and `swiftc` are not both
+# present.
 witness-unit:
     testenv/desktop-witness-test.sh
 
