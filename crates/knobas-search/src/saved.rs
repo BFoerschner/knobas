@@ -52,7 +52,7 @@ use crate::query::{self, EffectiveFilters};
 use crate::sql::{self, SavedQuery};
 use crate::types::SearchFilters;
 use crate::vocab::Vocabulary;
-use crate::{MAX_FILTER_VALUES, MAX_RAW_CHARS, SearchError};
+use crate::{MAX_FILTER_VALUES, SearchError};
 
 /// What the rail says instead of a count when a saved query no longer runs.
 ///
@@ -94,9 +94,20 @@ pub struct SavedList {
 /// query may not name another list).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// Longer than [`MAX_RAW_CHARS`], which `Searcher::search` refuses too.
-    TooLong { chars: usize },
-    /// A chip dimension carries more values than the engine accepts.
+    /// The engine itself refused the stored text, with this message.
+    ///
+    /// Produced by calling `crate::validate` rather than by restating its
+    /// rules: that function is where the launcher's bounds on a query live,
+    /// and a bound added to it has to reach a saved list on the same commit or
+    /// the two drift. Its message is carried through because it already names
+    /// the rule and the numbers.
+    Rejected(String),
+    /// A dimension the **parse** produced carries more values than the engine
+    /// accepts.
+    ///
+    /// Not the same check `crate::validate` makes, which is over the chips a
+    /// *caller* sent and which a saved query has none of: this one is over
+    /// what §4's grammar made of the stored text.
     TooManyValues {
         dimension: &'static str,
         values: usize,
@@ -118,9 +129,7 @@ impl Refusal {
     #[must_use]
     pub fn description(&self) -> String {
         let reason = match self {
-            Self::TooLong { chars } => format!(
-                "the saved query is {chars} characters and the launcher parses {MAX_RAW_CHARS}"
-            ),
+            Self::Rejected(message) => format!("the launcher refuses the saved query: {message}"),
             Self::TooManyValues { dimension, values } => format!(
                 "the saved query narrows by {values} {dimension} and the launcher accepts \
                  {MAX_FILTER_VALUES}"
@@ -157,13 +166,24 @@ pub struct Runnable {
 /// what keeps one bad row from taking the launcher's board down with it.
 pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
     // The engine's own bounds, applied to the stored text before the parser
-    // sees it -- `Searcher::search`'s `validate`, in the same order and for the
-    // same reasons. Read here rather than by calling into the searcher because
-    // this answers with a sentence and that answers with an error.
-    let chars = raw.chars().count();
-    if chars > MAX_RAW_CHARS {
-        return Err(Refusal::TooLong { chars });
-    }
+    // sees it -- and applied by *calling* `crate::validate` rather than by
+    // restating what it checks, so a bound added there reaches a saved list on
+    // the same commit. The limit it clamps is irrelevant here (nothing is
+    // fetched) and its refusal is what this needs.
+    crate::validate(crate::SearchQuery {
+        raw: raw.to_owned(),
+        limit: 1,
+        filters: SearchFilters::default(),
+    })
+    .map_err(|error| {
+        // The message and not the `Display` of the whole error: that prefixes
+        // "invalid query:", and the sentence this ends up in already says the
+        // launcher refused it.
+        Refusal::Rejected(match error {
+            SearchError::Invalid(message) => message,
+            other => other.to_string(),
+        })
+    })?;
 
     let parsed = query::parse(raw, vocab);
     if parsed.list_id.is_some() {
@@ -257,6 +277,11 @@ pub async fn create(
     if label.is_empty() {
         return Err(SearchError::Invalid("a saved list needs a name".to_owned()));
     }
+    // Trimmed here and not at the caller, so it is true of every caller: the
+    // stored text is the list's own blurb on the rail, and trailing space in
+    // it is invisible there and carried into every count the list is ever
+    // asked for.
+    let raw = raw.trim();
     // Refused here rather than stored and shown as *needs attention*: the box
     // has just answered this query, so a query that cannot run is a caller
     // bug, and a row nothing could have produced is a state no reader should
@@ -542,7 +567,7 @@ mod tests {
     #[test]
     fn every_refusal_names_its_own_rule_under_one_heading() {
         let refusals = [
-            Refusal::TooLong { chars: 900 },
+            Refusal::Rejected("query is 900 characters".to_owned()),
             Refusal::TooManyValues {
                 dimension: "sources",
                 values: 40,

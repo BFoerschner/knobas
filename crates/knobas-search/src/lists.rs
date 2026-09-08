@@ -1419,6 +1419,16 @@ mod tests {
             "the fakeSmartLists slice runs past the end of the function:\n{body}"
         );
 
+        // The one string of `saved::Refusal::description`'s that the fixture
+        // also carries: the **heading** the rail draws on a row that needs
+        // attention. The rest of that sentence is a `Refusal` variant's, which
+        // the fixture legitimately stands in for; this word is the one a
+        // reader recognises, so it is the one that may not drift.
+        assert!(
+            fixture.contains(crate::saved::NEEDS_ATTENTION),
+            "fake-tauri.ts no longer carries the heading a needs-attention row draws"
+        );
+
         let found = double_quoted(body);
         let expected: Vec<&str> = BUILTINS
             .iter()

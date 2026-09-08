@@ -3054,11 +3054,14 @@ function fakeSavedLists() {
 /**
  * `create_smart_list`: save the box's query -- **fixture-only**.
  *
- * The id is slugged the way `knobas_search::saved::slug` slugs it, because
- * `list:<id>` is what opens the row this makes and a row the launcher could
- * not address would make the walk look broken. A blank query is refused; every
- * other refusal the real command makes is the grammar's, and this fixture does
- * not have one.
+ * The id is slugged and de-duplicated the way `knobas_search::saved`'s `slug`
+ * and `free_id` do it -- **against the built-ins as well as the saved rows**,
+ * because `list:<id>` is one namespace and a fixture that let a new list take
+ * `mine` would draw two rows under one `{#each}` key. What it does *not* do is
+ * judge the query: every refusal the real command makes past a blank one is
+ * §4's grammar's, and this fixture has no grammar. The panel is what keeps an
+ * unrunnable query away from here -- `Session.canSave` reads the backend's own
+ * interpretation and offers the control on results only.
  */
 function fakeCreateSmartList(args: Record<string, unknown>) {
   const label = String(args["label"] ?? "").trim();
@@ -3066,10 +3069,17 @@ function fakeCreateSmartList(args: Record<string, unknown>) {
   if (label === "" || query === "") {
     throw { code: "invalid", message: "a saved list needs a name and a query", source_id: null };
   }
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  let id = slug === "" ? "list" : slug.slice(0, 48).replace(/-+$/, "");
-  for (let suffix = 2; FIXTURE_SAVED.some((list) => list.id === id); suffix += 1) {
-    id = `${slug}-${suffix}`;
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+  const base = slug === "" ? "list" : slug;
+  const taken = new Set(fakeSmartLists().map((list) => list.id));
+  let id = base;
+  for (let suffix = 2; taken.has(id); suffix += 1) {
+    id = `${base}-${suffix}`;
   }
   FIXTURE_SAVED.push({ id, label, query });
   const made = fakeSavedLists().find((list) => list.id === id);

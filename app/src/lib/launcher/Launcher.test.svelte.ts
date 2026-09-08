@@ -1618,6 +1618,35 @@ test("save as list is offered on a query, never on an empty box", async () => {
 });
 
 /**
+ * The control is off the panels that are not searches (#506).
+ *
+ * `>` and `?` have text in the box and are not queries the engine answers, so
+ * `create_smart_list` would refuse them — and the launcher must not offer a
+ * button whose only outcome is that refusal. The gate is `Session.mode`, which
+ * is read off the **backend's own interpretation**, so this is the backend's
+ * grammar deciding and not a copy of the prefix table on this side.
+ */
+test("save as list is off the palette and the help card", async () => {
+  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  for (const prefix of ["action", "help"] as const) {
+    open({
+      ports: {
+        launcherHome: async () => SAVED_HOME,
+        search: async () =>
+          response({ interpreted: { ...response().interpreted, prefix }, groups: [] }),
+        createSmartList: created,
+      },
+    });
+    await settle();
+    await search(prefix === "action" ? "> sources" : "?");
+    expect(target.querySelector("button.save"), `${prefix} is not a query`).toBeNull();
+    if (app) unmount(app);
+    app = undefined;
+  }
+  expect(created).not.toHaveBeenCalled();
+});
+
+/**
  * Renaming: Enter commits the field, Escape abandons it — and Escape does not
  * reach the launcher's own ladder while the field is open.
  *

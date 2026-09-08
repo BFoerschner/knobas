@@ -182,14 +182,22 @@ export class Session {
   /**
    * Whether this session can save what is in the box as a smart list.
    *
-   * Two things, and both are needed: a caller that supplied the write, and a
-   * query to save. `mode` is not consulted — a `>` palette or a `?` card is
-   * not a query the engine answers, and neither reaches here because both are
-   * refused by {@link Session.saveCurrent} through the backend's own grammar
-   * rather than by a second copy of the prefix table on this side (ruling P2).
+   * Three things: a caller that supplied the write, a query to save, and a
+   * box that is actually showing results. The last is what keeps the control
+   * off the `>` palette, the `?` card and a pasted link — none of which the
+   * engine answers as a search, and all of which `saved::create` would refuse.
+   *
+   * **And it is not a second copy of the prefix table** (ruling P2): {@link
+   * Session.mode} is read off the *backend's own interpretation* of the query,
+   * which is exactly what `modeOf` exists for. The one residue is `t ` — a
+   * worklog prefix draws as results, so the control is offered and the backend
+   * refuses it by name. That refusal names its rule, which is the honest
+   * behaviour for a case the frontend is not entitled to decide.
    */
   get canSave(): boolean {
-    return this.#ports.createSmartList !== undefined && this.raw.trim() !== "";
+    return (
+      this.#ports.createSmartList !== undefined && this.raw.trim() !== "" && this.mode === "results"
+    );
   }
 
   /**
@@ -324,6 +332,11 @@ export class Session {
    */
   dispose(): void {
     this.#cancel();
+    // Whatever else survives a close, this does not: it is a statement about
+    // the query in the box, and the paste branch below empties the box. Left
+    // set, a reopened launcher would read "Saved as list" over a query nobody
+    // saved this time.
+    this.savedId = null;
     if (this.url !== null) {
       this.raw = "";
       this.#clear();

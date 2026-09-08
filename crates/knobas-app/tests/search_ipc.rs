@@ -1541,12 +1541,13 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
     }
 
     let listed = rail(&pool).await;
-    for id in [
+    let broken = [
         "legacy-palette",
         "legacy-alias",
         "legacy-paste",
         "legacy-gone",
-    ] {
+    ];
+    for id in broken {
         let row = listed
             .iter()
             .find(|list| list.id == id)
@@ -1561,14 +1562,24 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
             "{id}: {}",
             row.description
         );
-        // Each says *which* rule refused it, or the reader is told something
-        // is wrong and never what.
-        assert!(
-            row.description.len() > knobas_search::saved::NEEDS_ATTENTION.len() + 20,
-            "{id}: {}",
-            row.description
-        );
     }
+    // Each says *which* rule refused it, or the reader is told something is
+    // wrong and never what -- asserted as *four different sentences* rather
+    // than as a length, because "long enough" is a stand-in for the property
+    // and this is the property.
+    let mut reasons: Vec<&str> = listed
+        .iter()
+        .filter(|list| broken.contains(&list.id.as_str()))
+        .map(|list| list.description.as_str())
+        .collect();
+    assert_eq!(reasons.len(), broken.len());
+    reasons.sort_unstable();
+    reasons.dedup();
+    assert_eq!(
+        reasons.len(),
+        broken.len(),
+        "two of the four rows are refused with the same sentence: {reasons:?}"
+    );
 
     // The rest of the rail is untouched -- which is the half of story 60 that
     // says "rather than an error".

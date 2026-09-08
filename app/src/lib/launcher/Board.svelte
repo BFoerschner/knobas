@@ -124,11 +124,24 @@
 <div class="secl"><span class="lab">Smart lists</span><span class="n">saved local queries</span></div>
 {#each home.smart_lists as list, i (list.id)}
   {@const row = rows[i]}
-  <!-- The hover is on the row and not on the button inside it, so moving the
-       pointer onto *Rename* or *Delete* selects the row those act on rather
-       than leaving the cursor two rows above. -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="slrow" class:on={i === selected} onmouseenter={() => onhover(i)}>
+  <!--
+    The hover is on the row and not on the button inside it, so moving the
+    pointer onto *Rename* or *Delete* selects the row those act on rather than
+    leaving the cursor two rows above.
+
+    `role="presentation"`: the listbox's options are the `.sl` buttons, and
+    this wrapper exists only to put the two controls beside one. Marking it
+    presentational is what keeps it out of the listbox's own structure — the
+    same thing `Launcher.svelte`'s scrim does with its click target. A row
+    being renamed has *no* option, which is honest: its name is a text field
+    for as long as the field is open.
+  -->
+  <div
+    class="slrow"
+    class:on={i === selected}
+    role="presentation"
+    onmouseenter={() => onhover(i)}
+  >
     {#if renaming === list.id}
       <!--
         Renaming in place, on the row it renames. `blur` abandons rather than
@@ -186,7 +199,7 @@
           the keyboard through the row's `Tab` chain, which is where every
           other per-row action in this box lives.
         -->
-        <span class="own">
+        <span class="own" role="presentation">
           <button
             class="mini"
             onclick={() => {

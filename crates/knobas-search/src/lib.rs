@@ -414,7 +414,7 @@ impl Searcher {
 /// than the launcher draws, and answering with a smaller one is what it meant;
 /// a 600-character box or a chip naming forty sources is not a query anybody
 /// typed, and quietly truncating it would answer a question nobody asked.
-fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
+pub(crate) fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
     let chars = query.raw.chars().count();
     if chars > MAX_RAW_CHARS {
         return Err(SearchError::Invalid(format!(
