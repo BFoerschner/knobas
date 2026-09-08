@@ -25,6 +25,18 @@
 //! *this* fixture rather than citing the record, so the harness's own
 //! preparation step is a thing with evidence behind it and not a comment.
 //!
+//! # Take it on a machine that is doing nothing else
+//!
+//! Every assertion in this file is wall-clock against a fixed budget, which is
+//! why all of them are `#[ignore]`d. On a machine carrying another agent's
+//! `just check` this file fails on cases that have never been near the budget:
+//! `browse, no text` was measured at 27 ms and at **429 ms** on the same tree
+//! within an hour of each other on 2026-09-08, and the rail curve came back
+//! non-monotonic, which is a curve saying *measure again* rather than a
+//! reading. `the_plan_does_not_decay_after_the_fifth_execution`'s doc comment
+//! records the same lesson from the other direction, where load made a real
+//! regression pass. Check the load average before quoting a number from here.
+//!
 //! # A curve, not a point
 //!
 //! [`search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items`]
@@ -261,18 +273,19 @@ fn text_of(raw: &str) -> String {
 
 /// The saved-list counts the rail is measured at, ending at the cap.
 ///
-/// Quartered rather than halved, so five points span two orders of magnitude:
-/// what the curve has to show is whether the rail's cost is **linear in the
+/// Doubling from an empty rail, and the last step is always the cap itself.
+///
+/// What the curve has to show is whether the rail's cost is **linear in the
 /// number of lists** -- the shape that makes a cap the right instrument at all
-/// -- and a linear reading wants a wide base rather than a dense one. The last
-/// step is always the cap itself, whatever the cap is, because that is the
-/// point the gate asserts on.
+/// -- and what one more list costs near the cap. Doubling gives both: a wide
+/// base for the slope and its densest points where the constant is decided.
+/// The cap is the last step because it is the point the gate asserts on.
 fn rail_steps(cap: i64) -> Vec<i64> {
     let mut steps = vec![0];
     let mut count = 1;
     while count < cap {
         steps.push(count);
-        count *= 4;
+        count *= 2;
     }
     steps.push(cap);
     steps.dedup();
@@ -488,28 +501,51 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
     // it -- the same `smart_lists` the gate takes, at the size the criterion
     // names, over rails from empty to the cap -- so that the constant is read
     // off a curve rather than chosen for being generous.
+    //
+    // **Both** reads at every step, because `launcher_board` is the one that
+    // binds: it calls `smart_lists` and then reads the recent items, so the
+    // rail's share of the budget is what is left of it after the built-ins and
+    // that second read. A cap chosen off the `smart_lists` column alone would
+    // be a cap the board cannot afford.
     let at_size = curve.last().expect("at least one size").size;
-    println!("--- the rail at {at_size} items: smart_lists by saved-list count ---");
-    let mut rail: Vec<(i64, Timing)> = Vec::new();
+    println!("--- the rail at {at_size} items: the board by saved-list count, p90 ms ---");
+    println!(
+        "{:>4}  {:>10}  {:>12}  {:>15}",
+        "saved", "rows", "smart_lists", "launcher_board"
+    );
+    let mut rail: Vec<(i64, Timing, Timing)> = Vec::new();
     for step in rail_steps(saved::MAX_SAVED_LISTS) {
         clear_the_rail(&pool).await;
         fill_the_rail(&pool, step).await;
         let counted = assert_the_rail_is_counted(&searcher, step).await;
-        let timing = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
+        let lists = timings_of(BOARD_RUNS, || searcher.smart_lists()).await;
+        let board = timings_of(BOARD_RUNS, || searcher.launcher_board()).await;
         println!(
-            "{step:>4} saved {counted:>8} rows counted  p50 {:>5} ms  p90 {:>5} ms  max {:>5} ms",
-            timing.p50, timing.p90, timing.max
+            "{step:>4}  {counted:>10}  {:>12}  {:>15}",
+            lists.p90, board.p90
         );
-        rail.push((step, timing));
+        rail.push((step, lists, board));
     }
-    let empty = rail.first().expect("a rail curve").1.p90;
-    let (steps, at_cap) = *rail.last().expect("a rail curve");
-    let over_empty = at_cap.p90.saturating_sub(empty);
+    let empty = rail.first().expect("a rail curve").2.p90;
+    let (steps, at_cap_lists, at_cap_board) = *rail.last().expect("a rail curve");
+    let over_empty = at_cap_board.p90.saturating_sub(empty);
+    let each = over_empty as f64 / f64::from(u32::try_from(steps.max(1)).unwrap_or(u32::MAX));
     println!(
-        "  => {steps} saved lists cost {over_empty} ms over the empty rail's {empty} ms, \
-         about {:.2} ms each",
-        over_empty as f64 / f64::from(u32::try_from(steps.max(1)).unwrap_or(u32::MAX))
+        "  => {steps} saved lists cost the board {over_empty} ms over the empty rail's \
+         {empty} ms, about {each:.2} ms each"
     );
+    if each < 0.5 {
+        println!(
+            "  => one more list costs less than this clock can read; the cap is not what \
+             the budget is spent on at this size"
+        );
+    } else {
+        println!(
+            "  => at that marginal cost the {BUDGET_MS} ms budget has room for about {:.0} \
+             saved lists beside the built-ins and the recent read",
+            (BUDGET_MS as f64 - empty as f64).max(0.0) / each
+        );
+    }
     println!();
 
     // The pathological case, printed and not gated. See `PATHOLOGICAL`.
@@ -586,10 +622,16 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
         "the rail curve must end at the cap"
     );
     assert!(
-        at_cap.p90 < BUDGET_MS,
+        at_cap_lists.p90 < BUDGET_MS,
         "smart_lists took {} ms at p90 at the cap of {steps} saved lists over \
          {at_size} items (budget {BUDGET_MS} ms)",
-        at_cap.p90
+        at_cap_lists.p90
+    );
+    assert!(
+        at_cap_board.p90 < BUDGET_MS,
+        "launcher_board took {} ms at p90 at the cap of {steps} saved lists over \
+         {at_size} items (budget {BUDGET_MS} ms)",
+        at_cap_board.p90
     );
     println!("worst p90: {worst} ms at {} items", last.size);
 }
