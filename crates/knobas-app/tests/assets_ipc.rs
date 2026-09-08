@@ -4102,10 +4102,14 @@ async fn a_file_that_is_not_an_estate_file_is_refused_and_says_why() {
 ///
 /// `hcloud_id` is optional so that the *same* file can be asked for with the
 /// key and without it, everything else identical -- which is what makes a test
-/// about the key a test about the key. The engine hung off the entry and the
-/// route exposed by it are not things hcloud reads; they are here because the
-/// rename has to reach every mention of an id and only another entry can
-/// witness that.
+/// about the key a test about the key. The engine hung off the entry, the route
+/// exposed by the entry and the route that *lands* on it are not things hcloud
+/// reads; they are here because the rename has to reach every mention of an id
+/// -- an entry's own, another entry's `parent`, a route's `asset` and a route's
+/// `target` -- and only another entry can witness one of them. There are four
+/// mentions in this file because there are four fields in the format that carry
+/// an asset id, and a rename that missed any one of them would leave an id
+/// naming nothing.
 ///
 /// The server's name is deliberately **not** the one the tree carries. The
 /// import never renames, so the preview reports the file's name for the entry
@@ -4124,7 +4128,10 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
                "name":"Docker engine (read from hcloud)","parent":"{entry_id}"}}],
            "routes":[
              {{"id":"route:hcloud-ssh","asset":"{entry_id}","name":"SSH",
-               "url":"ssh://knobas-teamcity"}}]}}"#
+               "url":"ssh://knobas-teamcity"}},
+             {{"id":"route:hcloud-agent","asset":"asset:hcloud-engine",
+               "target":"{entry_id}","name":"Build agent",
+               "url":"http://knobas-teamcity:9090"}}]}}"#
     )
 }
 
@@ -4146,10 +4153,14 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
 ///   count under `asset:hetzner-nbg1` does not move, and the file's own id
 ///   names nothing afterwards;
 /// * and **every mention** of the file's id is rewritten, not just the entry's
-///   own -- the child hung off it lands under the tree's asset and the route
-///   exposed by it is exposed by the tree's asset. An id left behind in either
-///   would have been refused as a dangling reference, which is the failure this
-///   file is shaped to catch.
+///   own -- the child hung off it lands under the tree's asset, the route
+///   exposed by it is exposed by the tree's asset, and the route that lands on
+///   it lands on the tree's asset. Those are the four fields in the format that
+///   carry an asset id (`FileAsset::id`, `FileAsset::parent`, `FileRoute::asset`
+///   and `FileRoute::target`) and there is an assertion for each, because a
+///   rename that reaches three of them passes every other test here. An id left
+///   behind in any of them would have been refused as a dangling reference,
+///   which is the failure this file is shaped to catch.
 #[tokio::test]
 async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second_one() {
     let pool = pool("assets-import-origin-key").await;
@@ -4177,7 +4188,11 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
             .iter()
             .map(|entry| entry.id.as_str())
             .collect::<Vec<_>>(),
-        ["asset:hcloud-engine", "route:hcloud-ssh"],
+        [
+            "asset:hcloud-engine",
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
+        ],
         "and only what the tree really has never seen is new"
     );
     assert_eq!(
@@ -4214,7 +4229,7 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
         outcome.assets_created, 1,
         "the engine is new; the server is an update and not a second server"
     );
-    assert_eq!(outcome.routes_created, 1);
+    assert_eq!(outcome.routes_created, 2);
     assert_eq!(outcome.properties_set, 1, "the one property that differed");
     assert_eq!(
         rows(
@@ -4271,6 +4286,18 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
         1,
         "and the route is exposed by the asset the origin key found"
     );
+    assert_eq!(
+        rows(
+            &pool,
+            "select count(*) as n from knobas.route
+              where id = 'route:hcloud-agent' and target_id = 'asset:hetzner-teamcity'",
+        )
+        .await,
+        1,
+        "and the route that lands on it lands on that asset too -- `target` is \
+         the fourth field in the format that carries an asset id, and the \
+         rename that misses it is the one the other three assertions cannot see"
+    );
 }
 
 /// The same entry **without** the property is new, which is what says the match
@@ -4310,7 +4337,8 @@ async fn the_same_entry_without_its_origin_key_is_new() {
         [
             "asset:hcloud-164750187",
             "asset:hcloud-engine",
-            "route:hcloud-ssh"
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
         ],
         "an entry carrying no origin key is matched by its id alone, and its id \
          is one the tree has never held"
@@ -4345,7 +4373,8 @@ async fn a_producer_that_declares_no_origin_key_matches_by_id_and_nothing_else()
         [
             "asset:hcloud-164750187",
             "asset:hcloud-engine",
-            "route:hcloud-ssh"
+            "route:hcloud-ssh",
+            "route:hcloud-agent"
         ],
         "the estate file declares no origin key, so the id is the whole rule"
     );

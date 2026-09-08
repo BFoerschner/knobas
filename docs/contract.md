@@ -8542,11 +8542,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   property, so declaring one now would be a key that matches nothing.
 
   **What is not touched.** **No migration** — `hcloud_id` is an ordinary custom property in
-  `knobas.asset`'s existing `properties` bag, and this entry claims no number. `0025` is the next
-  free one as this branch stands (`0024_the_checkout_and_its_override.sql` is the last file in
-  `crates/knobas-db/migrations/`) — **and PR #532 (#506) claims `0025`**, so whichever of the two
-  merges second re-reads this sentence on its merge commit and writes the number that is true
-  there. Nothing in this entry depends on the answer, which is the point of claiming none. No new
+  `knobas.asset`'s existing `properties` bag, and this entry claims no number. `0026` is the next
+  free one: PR #532 (#506) merged first and took `0025`
+  (`0025_the_search_a_reader_saved.sql` is the last file in `crates/knobas-db/migrations/`), and
+  this sentence was re-read on the merge commit as the entry said it would be. Nothing in this
+  entry depends on the answer, which is the point of claiming none. No new
   command, no command renamed or removed, no return type changed, **no new event**, no settings
   key, no `Kind`, no reserved namespace, no `WriteOp` (ADR-0006 is untouched: an importer is not a
   source and queues nothing), no `Capability` — `Capability::Import` stays undeclared, per
