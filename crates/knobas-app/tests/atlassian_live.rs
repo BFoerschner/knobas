@@ -1698,7 +1698,8 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         let answered: std::collections::BTreeSet<String> = reachable.iter().cloned().collect();
         println!("SEEDED {key} stands in {standing:?} and reaches {reachable:?}");
         assert_eq!(
-            answered, expected,
+            answered,
+            expected,
             "from {standing:?} this workflow reaches every one of its statuses ({:?}) and none of \
              the {} the instance has besides ({never_reached:?}); the read answered {reachable:?}",
             env.statuses,
@@ -1872,8 +1873,10 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
     // the one the refusal below asks for is one of them. Without this a
     // template that had quietly become all-to-all would leave every assertion
     // below true and none of them about narrowing.
-    for (what, wanted) in [("from the first state", &from_first), ("from the second", &from_second)]
-    {
+    for (what, wanted) in [
+        ("from the first state", &from_first),
+        ("from the second", &from_second),
+    ] {
         assert!(
             wanted.is_subset(&project) && wanted.len() < project.len(),
             "what this workflow offers {what} ({wanted:?}) has to be a proper subset of the \
@@ -1921,7 +1924,11 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
             })),
         )
         .await;
-    assert_eq!(status, 201, "filing a ticket in {}: {created}", env.narrowing.key);
+    assert_eq!(
+        status, 201,
+        "filing a ticket in {}: {created}",
+        env.narrowing.key
+    );
     let key = created["key"]
         .as_str()
         .unwrap_or_else(|| panic!("a created issue has a key: {created}"))
@@ -2038,9 +2045,7 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
         .flatten()
         .find(|t| t["to"]["name"].as_str() == Some(NARROW_SECOND_STATE))
         .and_then(|t| t["id"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| {
-            panic!("{key} has no transition to {NARROW_SECOND_STATE:?}: {offered}")
-        });
+        .unwrap_or_else(|| panic!("{key} has no transition to {NARROW_SECOND_STATE:?}: {offered}"));
     let (status, moved) = env
         .api(
             reqwest::Method::POST,
@@ -2048,7 +2053,10 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
             Some(json!({ "transition": { "id": id } })),
         )
         .await;
-    assert_eq!(status, 204, "moving {key} to {NARROW_SECOND_STATE:?}: {moved}");
+    assert_eq!(
+        status, 204,
+        "moving {key} to {NARROW_SECOND_STATE:?}: {moved}"
+    );
     let standing = env.status_at_jira(&key).await;
     assert_eq!(standing, NARROW_SECOND_STATE, "{key} did not move");
 
