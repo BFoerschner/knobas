@@ -134,6 +134,94 @@ async fn count_of(s: &Searcher, id: &str) -> i64 {
         .count
 }
 
+/// Seed one asset into each of the three estate lists (#504).
+///
+/// By hand and not through `knobas_app::assets`, which this crate does not
+/// depend on and must not: `knobas-search` takes a `PgPool` and reads. What
+/// that costs is `path_text`, which the store maintains and nothing here needs
+/// -- these lists are asserted on membership, and the wire-level check that an
+/// estate row carries its path is `crates/knobas-app/tests/search_ipc.rs`'
+/// business, where the rows are made through the real door.
+///
+/// Two assets, because the three lists are three different rules and one asset
+/// cannot be a negative for any of them:
+///
+/// * `bare` -- nothing attached. *Not monitored*.
+/// * `watched` -- a monitor linked to it, whose payload carries a certificate
+///   with five days left, and an open alert; and an unarchived context holding
+///   it. On *both* other lists, and **off** *Not monitored*, which is the
+///   negative this seed also buys.
+///
+/// Returns the two asset ids.
+async fn estate(pool: &sqlx::PgPool, tag: &str) -> (String, String) {
+    let t = token(tag);
+    let bare = format!("asset:{t}-bare");
+    let watched = format!("asset:{t}-watched");
+    let monitor = format!("kuma:{t}");
+    let context = format!("ctx:{t}");
+
+    for (id, kind, title) in [
+        (&bare, "asset", "bare"),
+        (&watched, "asset", "watched"),
+        (&monitor, "monitor", "the check"),
+        (&context, "ctx", "the room"),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+            .bind(id)
+            .bind(kind)
+            .bind(title)
+            .execute(pool)
+            .await
+            .expect("the entity row");
+    }
+    for (id, name) in [(&bare, "bare"), (&watched, "watched")] {
+        sqlx::query(
+            "insert into knobas.asset (id, type_id, name, path_text) values ($1,'vm',$2,'')",
+        )
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .expect("the asset row");
+    }
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
+         values ($1,'kuma','monitor','the check','', now(), now(),
+                 jsonb_build_object('cert_days_remaining', 5))",
+    )
+    .bind(&monitor)
+    .execute(pool)
+    .await
+    .expect("the mirrored monitor");
+    sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','the room')")
+        .bind(&context)
+        .execute(pool)
+        .await
+        .expect("the context");
+    for (from, to, relation) in [
+        (&watched, &monitor, "monitored-by"),
+        (&context, &watched, "related"),
+    ] {
+        sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at)
+             values ($1,$2,$3,'manual','test', now())",
+        )
+        .bind(from)
+        .bind(to)
+        .bind(relation)
+        .execute(pool)
+        .await
+        .expect("the confirmed link");
+    }
+    sqlx::query("insert into knobas.monitor_alert (entity_id, state) values ($1,'down')")
+        .bind(&monitor)
+        .execute(pool)
+        .await
+        .expect("the open alert");
+    (bare, watched)
+}
+
 /// Table-driven over `BUILTINS`: a typo in any one list's SQL fails here, not
 /// in the launcher. This is the reason the lists are hand-written constants and
 /// not a second little query language.
@@ -168,6 +256,9 @@ async fn every_builtin_runs_and_decodes() {
         Utc::now(),
     )
     .await;
+    // And something in each of the three estate lists, which no mirror row can
+    // reach (#504).
+    estate(&pool, "all").await;
 
     for list in lists::BUILTINS {
         let r = s.smart_list_items(list.id, 20).await.expect(list.id);

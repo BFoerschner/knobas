@@ -403,6 +403,36 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // file: an asset the estate names no Uptime Kuma monitor for is an asset
     // nothing watches, which is exactly what the backend's read answers.
     unmonitored_assets: () => fakeUnmonitored(),
+    // The launcher board (#504). Until now `launcher_home` had no handler at
+    // all, so `⌘K` under `?fake-ipc` drew a red "command not found" over the
+    // whole board -- which is why the three estate lists this ticket adds
+    // could not be looked at in a browser.
+    //
+    // **Everything here is fixture-only** and none of it certifies the bridge.
+    // What it is for is the walk: that the rail draws a row per list with its
+    // count, and that Enter on an estate row hands the shell the Tree's
+    // address. The rules themselves are witnessed at the IPC seam over a real
+    // PostgreSQL, in `crates/knobas-app/tests/search_ipc.rs`.
+    launcher_home: () => ({
+      smart_lists: fakeSmartLists(),
+      // The newest of the fixture's corpus, in the shape `list_entities`
+      // answers in -- the board draws recent rows with the same component.
+      recent: CORPUS.filter((entry) => entry.deleted_at === null)
+        // `recent_sql!`'s order, because the comment above has to be true:
+        // newest first, a row the source never dated last, and the id to
+        // break a tie. CORPUS is in reading order, not date order.
+        .sort(
+          (left, right) =>
+            (right.updated_at ?? "").localeCompare(left.updated_at ?? "") ||
+            left.entity_id.localeCompare(right.entity_id),
+        )
+        .slice(0, 8)
+        .map(mirrorRow),
+      sources: FIXTURE_SOURCES.map((source) => source.health),
+      pending_writes: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
+    }),
+    smart_lists: () => fakeSmartLists(),
+    smart_list_items: (args) => fakeSmartListItems(args),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
@@ -1339,6 +1369,13 @@ function estateSearch(args: Record<string, unknown>) {
     raw?: string;
     filters?: { kinds?: string[] };
   };
+  // `list:<id>` routes to the list and not to the corpus, which is what
+  // `Searcher::search` does with a `Prefix::List` -- and it is the only way a
+  // smart list is ever opened, because `Launcher.svelte` opens one by typing
+  // its id into the box. Without this branch the rail draws but every row on
+  // it answers with the refusal below.
+  const listed = /^list:([a-z0-9-]+)$/.exec((query.raw ?? "").trim());
+  if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",
@@ -2615,6 +2652,187 @@ function fakeAck(args: Record<string, unknown>) {
   }
   FIXTURE_ACKED.add(monitorId);
   return { ...alert, acked_at: new Date().toISOString() };
+}
+
+/**
+ * The launcher's smart-list rail (#504) -- **fixture-only**.
+ *
+ * A restatement of `knobas_search::lists`' seven lists, in this file's own
+ * terms, and a restatement is a copy that can drift: the Rust registry is the
+ * authority and a divergence here is a bug in this file, never a second
+ * opinion. `miniBoard` and `listEntities` carry the same warning for the same
+ * reason. Nothing here proves a predicate; what it lets a browser see is the
+ * rail, the counts beside it and what a row opens.
+ *
+ * **The four mirror lists honestly read 0.** This fixture's corpus is frozen
+ * at `SYNCED_AT` -- 22 August 2026 -- so nothing in it changed today and
+ * nothing synced in the last hour; and no source here carries a username, so
+ * the two `@me` lists are empty for the reason the real ones would be.
+ *
+ * Their **descriptions** are the Rust blurbs, copied, and for the two `@me`
+ * lists that is a divergence rather than a copy: with no identity configured
+ * `lists::describe` replaces the blurb with `describe_missing_identity()` --
+ * three sentences about *Test connection* filling a source's username in.
+ * Restating that here would be the longest copied string in this file and the
+ * likeliest to rot, and it is not what #504 is about. What a walk sees on
+ * those two rows is therefore the blurb where the app would show the advice.
+ *
+ * **The three estate lists are derived from the estate this file draws**, each
+ * from the nearest thing the fixture has to the rule:
+ *
+ * * *Not monitored* is `fakeUnmonitored` -- the assets the estate file names no
+ *   monitor for -- which is what the backend's read answers over a mirror that
+ *   has resolved those names into links.
+ * * *Open alerts in my contexts* is the assets of `fakeOpenAlerts`, **with the
+ *   context half of the rule dropped**: the fixture has no link graph and no
+ *   context holds anything (`context_members` and `context_assets` both answer
+ *   empty), so membership cannot be modelled here at all. An honest fixture
+ *   would therefore answer 0 and the list could not be walked; this answers the
+ *   alerts and says here that the routing clause is missing. What the clause
+ *   does is asserted over a real database in `search_ipc.rs`.
+ * * *Certificates expiring* is the roster rows whose `cert_days_remaining` is
+ *   under thirty -- the one certificate the roster invents, at nine days.
+ *
+ * The change badge is `false` on every row: a badge is a comparison against a
+ * stamp in `knobas.setting`, and this fixture has no setting table to remember
+ * one in. A badge that was always on would be the more misleading of the two.
+ */
+function fakeSmartLists() {
+  const mirror = [
+    ["changed-today", "Changed today", "Everything a source touched since midnight."],
+    [
+      "mine",
+      "My items",
+      "Items your configured accounts are the author of, from the last 30 days.",
+    ],
+    ["mine-stale", "Mine, untouched 14 days", "Yours, and nothing has moved them in a fortnight."],
+    ["just-synced", "Just synced", "What the last hour of syncing brought in."],
+  ] as const;
+  const estate = [
+    [
+      "not-monitored",
+      "Not monitored",
+      "Estate assets with no monitor attached to them.",
+    ],
+    [
+      "alerts-in-context",
+      "Open alerts in my contexts",
+      "Assets a context you have not archived holds, with a monitor in trouble.",
+    ],
+    [
+      "certs-expiring",
+      "Certificates expiring",
+      "Assets whose certificate runs out in under 30 days.",
+    ],
+  ] as const;
+
+  return [
+    ...mirror.map(([id, label, description]) => ({
+      id,
+      label,
+      count: 0,
+      changed: false,
+      description,
+    })),
+    ...estate.map(([id, label, description]) => ({
+      id,
+      label,
+      count: fakeListAssets(id).length,
+      changed: false,
+      description,
+    })),
+  ];
+}
+
+/**
+ * The assets one estate list answers with -- **fixture-only**, see
+ * `fakeSmartLists` for what each stands in for and what it drops.
+ */
+function fakeListAssets(id: string): (typeof FIXTURE_ESTATE)[number][] {
+  const byId = (assetId: string) => FIXTURE_ESTATE.find((asset) => asset.id === assetId);
+  switch (id) {
+    case "not-monitored":
+      return fakeUnmonitored()
+        .map((row) => byId(row.id))
+        .filter((asset) => asset !== undefined);
+    case "alerts-in-context":
+      return fakeOpenAlerts()
+        .flatMap((alert) => alert.assets)
+        .map((asset) => byId(asset.id))
+        .filter((asset) => asset !== undefined);
+    case "certs-expiring":
+      return fakeMonitorRoster()
+        .filter((row) => row.cert_days_remaining !== null && row.cert_days_remaining < 30)
+        .flatMap((row) => row.assets)
+        .map((asset) => byId(asset.id))
+        .filter((asset) => asset !== undefined);
+    default:
+      return [];
+  }
+}
+
+/**
+ * `smart_list_items`: one list's rows, in the shape a search answers in --
+ * which is the whole point of a smart list on this side of the wire, and what
+ * lets the launcher render one with the component it renders results with.
+ *
+ * An unknown id is refused the way the real command refuses it, so a typo in
+ * `list:` under `?fake-ipc` looks like a typo and not like an empty list.
+ *
+ * **The order is the fixture's, not the statement's** -- the last of the
+ * divergences `fakeSmartLists` lists. `rows_over_estate!` returns an estate
+ * list `order by coalesce(path,'') asc, title asc, entity_id asc`; these rows
+ * come back in whatever order the roster and the alert list already build,
+ * because reproducing that ordering here would be a fourth restatement to keep
+ * in step and the walk asserts nothing about it. What a browser sees is which
+ * rows, not which first.
+ */
+function fakeSmartListItems(args: Record<string, unknown>) {
+  const id = String(args["id"] ?? "");
+  const known = fakeSmartLists().some((list) => list.id === id);
+  if (!known) {
+    throw { code: "invalid", message: `unknown smart list: ${id}`, source_id: null };
+  }
+  const limit = Number(args["limit"] ?? 20);
+  const assets = fakeListAssets(id);
+  const hits = assets.slice(0, limit).map((asset) => ({
+    entity_id: asset.id,
+    kind: "asset",
+    source_id: "asset",
+    updated_at: null,
+    synced_at: SYNCED_AT,
+    title: asset.name,
+    path: assetPathText(asset),
+    // A list row was matched against nothing, so it carries no rank and no
+    // excerpt -- the rule the real response follows.
+    rank: 0,
+    snippet: [],
+  }));
+  return {
+    interpreted: {
+      text: "",
+      prefix: "list",
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups:
+      assets.length === 0
+        ? []
+        : [
+            {
+              kind: "asset",
+              label: "Asset",
+              plural: "Assets",
+              monogram: "AS",
+              // The list's total, never the page's.
+              total: assets.length,
+              hits,
+            },
+          ],
+    total: assets.length,
+    took_ms: 2,
+    coverage: [],
+  };
 }
 
 /**

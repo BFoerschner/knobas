@@ -397,3 +397,62 @@ clauses part company: `and origin = $3` **is** pinned, by
 which dies without it; `and relation = $2` is pinned by nothing in either binary. So the correction
 holds for the born-link property the ruling was about, and the origin clause is not unguarded in
 the codebase — a full `just check` goes red on that mutant.
+
+---
+
+## #504 — whether *Open alerts in my contexts* carries the inbox's ack clause
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/504#issuecomment-5577388583>
+
+**The fork:** the ticket says the list "is the inbox's routing rule" and glosses that as "an open
+alert whose asset some unarchived context holds directly or through an ancestor". The inbox's
+sixth-category statement — `alert!()` in `crates/knobas-core/src/inbox.rs` — ends
+`where a.closed_at is null and a.acked_at is null`. **Option A** (built, PR #527): `closed_at is
+null` plus the context clause and no ack clause, so an acked alert stays on the list; pinned by
+`an_acked_alert_is_still_open_and_still_on_the_list`. **Option B:** copy the inbox's statement
+whole, ack clause included, so the list empties as alerts are acked. The count differs by exactly
+the acked alerts.
+
+**Ruling:** option A, as built. This is not a new decision: the documents already answer it, and the
+ticket's two halves say the same thing once *routing rule* is read as the defined term it is. One
+correction to the implementer's citation, and one glossary clause owed on **Alert**.
+
+**Reasoning:** *"Routing rule" is a defined term and the ack is not in it.* Spec §12.3 puts the two
+in consecutive sentences: *"**Alert routing rule (R3, now spec):** an alert reaches the inbox only
+when some context holds the affected asset (directly or via an ancestor or via the context's
+monitors); all open alerts always show in the Assets views and the top-strip count. **Ack** is
+knobas-local: clears the inbox item, writes history, the alert stays open until the monitor
+recovers"*. `CONTEXT.md`'s **Alert** keeps the same split, and its #446 amendment uses the term the
+same way — *"the one place the alert's routing rule and `member_ids` differ"* is about which
+contexts count. So `alert!()`'s statement is the routing rule **plus the inbox's own lifecycle
+clause**, not the rule, and the ticket's gloss is a restatement of the term rather than a second
+reading of it. *"Open" is defined too*: **Alert** says *"open until the monitor recovers … **Only a
+return to *up* closes one**"*, so a list titled *Open alerts* that dropped acked ones would be false
+in its first word, and option B would have to rename the list to be honest. *Which side of the ack
+an asset list sits on is settled* by §12.3's *"all open alerts always show in the Assets views and
+the top-strip count"*: this list draws assets and opens the Tree, so it is an estate surface beside
+the Assets view and the top strip, not a second inbox. *And story 47's "so that the launcher and the
+inbox agree" is about routing, not about a number*: #446's ack writes `acked_at` **and**
+`complete_with` in one transaction, and the inbox's count excludes snoozed items, so copying
+`acked_at is null` alone would still disagree on every snoozed alert — agreeing on the number would
+mean importing the inbox's shelf into a smart list, which is neither ticket's scope. What the two
+surfaces are asked to agree on is *who is told*: an alert on an asset no unarchived context holds is
+in neither, which is the negative the ticket names and the PR pins
+(`an_open_alert_reaches_the_list_through_the_contexts_ancestors`, mutant 3). *The citation:* there is
+no ruling on #446 — the issue has no comments. The sentence the PR quoted is the doc comment on
+`alert!()` itself, #446's implementer reading spec #427 story 62; its substance is right and its
+authority is the glossary and §12.3, so `lists.rs` and the PR body cite those and drop the word
+*ruling*. A doc comment is a reading, and the next reader should be pointed at what it read.
+*The symmetry caution cuts the same way here:* `monitor_roster` keeps a paused monitor because of
+what the roster is for, and this list keeps an acked alert because of what an ack is — seen, not
+fixed (story 62). Neither surface copies another's clause by analogy; each takes the clause its own
+name commits it to.
+
+**If you disagree, the cost of reversing this is:** small in code — `and al.acked_at is null` beside
+`closed_at` in `open_alert_opened_at!` (which `alerts_in_context_pred!` and the badge stamp both
+read), one assertion flipped in `an_acked_alert_is_still_open_and_still_on_the_list`, no migration
+and no wire change — but not only code: the list's label would have to change to say *unacked*, the
+**Alert** clause amended by this PR would be rewritten, and story 47's *"agree"* would still be
+false on snooze, so a reversal that wants the inbox and the launcher to show one number would also
+have to bring the inbox's shelf into the list, which is a design change and not a clause.

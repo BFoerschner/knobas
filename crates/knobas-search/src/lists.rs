@@ -215,17 +215,81 @@
 //!
 //! # The two statements
 //!
-//! [`SUMMARY_SQL`] answers the whole launcher board in **one** pass: the counts
-//! (a `count(*) filter` per list over one scan of `sync.live_item`), the newest
-//! sync stamp in each list (what the change badge compares against), and the
+//! [`SUMMARY_SQL`] answers the whole launcher board in **one round trip**: the
+//! counts (a `count(*) filter` per list, over one scan of `sync.live_item` for
+//! a mirror list and one scan of `knobas.asset` for an estate list), the newest
+//! stamp in each list (what the change badge compares against), and the
 //! per-list "last opened" stamps out of `knobas.setting`. The identity behind
 //! `@me` is the second query, and it is [`crate::vocab::Vocabulary::load`]'s --
 //! the same one every search already makes.
 //!
-//! There is no exception to that single pass, and after the removal above there
-//! is no way to write one: the `builtins!` macro takes `scan:` entries and
-//! nothing else, so a list that is not a `count(*) filter` over this scan
-//! cannot be declared at all.
+//! # Two scans, still one round trip (#504)
+//!
+//! Until #504 the sentence above read *"there is no exception to that single
+//! pass, and after the removal above there is no way to write one: the
+//! `builtins!` macro takes `scan:` entries and nothing else"*. It is no longer
+//! true as written, and the rule it was protecting is: **a list is a
+//! `count(*) filter` over one scan of the corpus it draws from, and the whole
+//! board is still one round trip.**
+//!
+//! What changed is that there is now a second corpus. #504's three lists are
+//! about the **estate** -- *Not monitored*, *Open alerts in my contexts*,
+//! *Certificates expiring* -- and `knobas.asset` is not in `sync.live_item` and
+//! never will be: an asset is a thing knobas owns, not a thing it mirrors
+//! ([`crate::corpus::ASSET`] says the same about search). A predicate over the
+//! mirror cannot answer any of the three, so [`SUMMARY_SQL`] grew a **second
+//! CTE** -- `estate`, one scan of `knobas.asset` -- beside `scan`, and the
+//! final `select` reads both. Two **scans**, one round trip, and the
+//! `builtins!` macro still admits nothing else: a `scan:` entry is a filter
+//! over the mirror scan and an `asset:` entry is a filter over the estate
+//! scan, and there is no third arm.
+//!
+//! *Two scans, not two tables.* The aggregates run over two relations; the
+//! **predicates** reach further -- `knobas.confirmed_link`, `knobas.entity`,
+//! `knobas.monitor_alert`, `sync.live_item` again, and `knobas.context`
+//! through the membership walk. What the rule fixes is what a `count(*)` is
+//! counting, which is one row per thing the list is a list of. See the section
+//! below for what those probes cost and what was measured.
+//!
+//! ## These three are correlated probes, which is the shape that was removed
+//!
+//! Said plainly, because the section above it is about a list that was taken
+//! out for being one. Two of the three predicates are a **correlated
+//! subquery per asset row** -- an open alert on this asset's monitors, a
+//! certificate on this asset's monitors -- which is `cross-key`'s shape and
+//! not the mirror lists'. What makes them affordable is not the shape; it is
+//! the **cardinality of the thing being scanned**. `cross-key` probed a GIN
+//! index once per ticket in a 14-day window of a mirror that grows to 100,000
+//! rows; these probe an index once per **asset**, and the estate is the
+//! smallest table knobas has -- an installation's machines, not its tickets,
+//! which is migration `0019`'s own sentence.
+//!
+//! **Measured, not assumed** (#504, PG 18.6, `explain (analyze, verbose)` over
+//! [`SUMMARY_SQL`] on a two-asset fixture): execution 0.58 ms, planning
+//! 2.72 ms -- planning is the larger half at this size, and the statement is
+//! prepared once per connection. The outer `knobas.asset` scan is a `Seq Scan`
+//! and every probe under it is an `Index Scan` (`item_kind_updated_idx`,
+//! `link_pair_active_idx`, `entity_pkey`). What the fixture is too small to
+//! show is how the per-asset probes scale, and the honest statement of the
+//! bound is the shape: **two probes per asset per predicate**, on a table
+//! whose size is an estate -- and three where the badge stamp is itself a
+//! subquery. Two and not one for the same reason the walk below appears
+//! twice: the planner inlines the estate CTE's inner select, so every
+//! predicate is evaluated once for the `count(*) filter` and again for the
+//! stamp's `filter`, and *Open alerts* and *Certificates expiring* evaluate
+//! their stamp a third time over the rows that passed. Re-measured on the
+//! merge of #527; the first draft of this paragraph said *one*, which was the
+//! same undercount it corrects for the walk one paragraph down.
+//!
+//! The context-membership walk is the one part that is **not** per-asset.
+//! `a.id in `[`held_by_any_context!`] binds nothing from the outer row, so the
+//! planner turns it into a `hashed SubPlan` -- the recursive walk runs once and
+//! is then a hash probe per asset. It appears **twice** in the plan and not
+//! once, because the planner inlines the estate CTE's inner select and so
+//! evaluates the predicate separately for the count and for the badge stamp's
+//! `filter`. Two walks per launcher board, not one per asset.
+//!
+//! [`held_by_any_context!`]: knobas_core::held_by_any_context
 //!
 //! # The change badge
 //!
@@ -327,6 +391,312 @@ macro_rules! rows_over {
     };
 }
 
+/// The rows of one **estate** list -- [`rows_over!`]'s shape over
+/// `knobas.asset` (#504).
+///
+/// A separate template rather than a parameter on [`rows_over!`], because none
+/// of the six expressions the two share is the same expression: an asset has no
+/// `kind` column and no `source_id` column (both are the constants
+/// [`crate::corpus::ASSET`] already uses), its path is a **column** the store
+/// maintains rather than an `ancestor_path_read!` over a payload (the second of
+/// the two cases [`crate::corpus::Corpus::path`] names), and it has one stamp
+/// where a mirrored row has two. A macro with a branch per corpus would be the
+/// same two templates with a conditional over them.
+///
+/// **The order is the estate's own, and it is not [`rows_over!`]'s.** A mirror
+/// list is newest-first because a mirrored row's `item_updated_at` is when the
+/// source last moved it, and that is the reader's question of the mirror. An
+/// asset's `updated_at` is when somebody last *edited the row* -- renamed it,
+/// moved it, set a property -- which is not what puts it in any of these three
+/// lists and would sort *Not monitored* by how recently each gap was typed. So
+/// these rows come back where the estate keeps them: by path, then by name,
+/// then by id, which is `knobas_app::assets`' `UNMONITORED` order and the
+/// inbox's pick order, and which is total -- `id` breaks the tie two siblings
+/// of the same name would leave.
+macro_rules! rows_over_estate {
+    ($pred:expr) => {
+        concat!(
+            "with matched as (\n",
+            "  select a.id as entity_id, 'asset'::text as kind,\n",
+            "         'asset'::text as source_id, a.name as title,\n",
+            "         a.updated_at as item_updated_at, a.updated_at as synced_at,\n",
+            "         nullif(a.path_text, '') as path,\n",
+            "         0::real as rank, null::text as snippet\n",
+            "    from knobas.asset a\n",
+            "   where ",
+            $pred,
+            "\n),\n",
+            "totals as (select kind, count(*) as kind_total from matched group by kind),\n",
+            "picked as (\n",
+            "  select * from matched\n",
+            "   order by coalesce(path, '') asc, title asc, entity_id asc\n",
+            "   limit $2\n",
+            ")\n",
+            "select t.kind as group_kind, t.kind_total as kind_total,\n",
+            "       p.entity_id as entity_id, p.source_id as source_id, p.title as title,\n",
+            "       p.item_updated_at as updated_at, p.synced_at as synced_at,\n",
+            "       p.path as path,\n",
+            "       p.rank as rank, p.snippet as snippet\n",
+            "  from totals t\n",
+            "  left join picked p on p.kind = t.kind\n",
+            " order by t.kind, coalesce(p.path, '') asc, p.title asc, p.entity_id asc\n"
+        )
+    };
+}
+
+/// When the asset row itself was last touched -- *Not monitored*'s badge stamp.
+///
+/// The honest one for that list: what puts an asset on it is the asset
+/// existing with nothing attached, so what is *new* about the list is a new
+/// asset (or one renamed or moved into view). There is no other event; a gap
+/// does not have a timestamp of its own.
+macro_rules! asset_touched_at {
+    () => {
+        "a.updated_at"
+    };
+}
+
+/// Every asset with no confirmed `monitored-by` link to a monitor (#504).
+///
+/// **This is `knobas_app::assets`' `UNMONITORED` predicate, in SQL, and the two
+/// have to stay one rule.** That read is the Monitors tab's *Not monitored*
+/// roster and this is the same roster in the launcher; a reader who saw 16 in
+/// one place and 17 in the other would be right to distrust both. Neither
+/// compiler will say when they stop agreeing, so
+/// [`the_roster_rule_is_spelled_the_way_the_link_table_spells_it`] pins the two
+/// words this statement and that one both hard-code, and
+/// `crates/knobas-app/tests/search_ipc.rs`'
+/// `the_launchers_not_monitored_list_is_the_monitors_tabs_roster` runs both
+/// reads over one estate and compares the answers.
+///
+/// Everything the roster's own doc argues holds here unchanged and is not
+/// re-argued: `not exists` rather than a join because the question is about a
+/// set; **undirected**, because `0011` made the pair unordered; `m.kind =
+/// 'monitor'` so a `monitored-by` link to a ticket is not an attachment;
+/// `knobas.confirmed_link`, so a *proposal* nobody has accepted leaves the
+/// asset on the list, which is the answer the reader wants. `m.id <> a.id` is
+/// carried over the same way and is belt-and-braces here too -- the kind guard
+/// already refuses an asset's own entity row.
+///
+/// The relation and the kind are **literals**, where the roster binds them,
+/// because `concat!` takes literals and nothing else. That is the one
+/// difference between the two statements and it is the reason for the pin
+/// below.
+///
+/// [`the_roster_rule_is_spelled_the_way_the_link_table_spells_it`]: tests::the_roster_rule_is_spelled_the_way_the_link_table_spells_it
+macro_rules! not_monitored_pred {
+    () => {
+        "not exists (select 1
+                        from knobas.confirmed_link l
+                        join knobas.entity m
+                          on m.id in (l.from_id, l.to_id) and m.id <> a.id
+                       where l.relation = 'monitored-by'
+                         and a.id in (l.from_id, l.to_id)
+                         and m.kind = 'monitor')"
+    };
+}
+
+/// The join from a monitor to **the asset it watches**, written once.
+///
+/// Two of the three estate predicates make it -- an open alert's monitor, an
+/// expiring certificate's monitor -- and it is four clauses that have to agree
+/// exactly: **undirected** (`0011` made the pair unordered, so which end a link
+/// was written from is not a fact any read may depend on), the relation, and
+/// the *other* end of the link being the asset the outer scan is standing on.
+/// Two copies of it would be two answers to "what does this monitor watch"
+/// the day one was amended, which is the failure the whole registry is written
+/// against.
+///
+/// `$monitor` is how the caller's own relation spells the monitor's entity id.
+/// It binds `l` as the link alias and reads `a.id` from the outer scan, so a
+/// caller supplies the monitor side and nothing else.
+///
+/// The clauses sit in the `join ... on` rather than in the caller's `where`
+/// because they are what makes the join the join; an inner join reads the same
+/// either way, and this leaves each caller a `where` that is only its own
+/// question.
+macro_rules! monitors_asset {
+    ($monitor:literal) => {
+        concat!(
+            "join knobas.confirmed_link l
+                          on (l.from_id = ",
+            $monitor,
+            " or l.to_id = ",
+            $monitor,
+            ")
+                         and l.relation = 'monitored-by'
+                         and case when l.from_id = ",
+            $monitor,
+            "
+                                  then l.to_id else l.from_id end = a.id"
+        )
+    };
+}
+
+/// When the newest **open** alert on the monitors watching this asset opened,
+/// or `null` if none is open.
+///
+/// Written once and read twice: it is *Open alerts in my contexts*' badge
+/// stamp, and `is not null` is the alert half of that list's predicate. That is
+/// deliberate -- an `exists` beside a `max` would be two spellings of "does
+/// this asset have an open alert", and the day one grew a clause the count and
+/// the badge would answer different questions about the same list.
+///
+/// The join is [`monitors_asset!`], which is the inbox's. Unlike the inbox this
+/// does **not** pick one asset per alert -- the inbox draws one row per alert
+/// and has to choose between the assets a monitor watches, while this draws one
+/// row per *asset* and an asset either has an open alert or has not.
+macro_rules! open_alert_opened_at {
+    () => {
+        concat!(
+            "(select max(al.opened_at)
+                        from knobas.monitor_alert al
+                        ",
+            monitors_asset!("al.entity_id"),
+            "
+                       where al.closed_at is null)"
+        )
+    };
+}
+
+/// An asset with an open alert that some unarchived context holds (#504).
+///
+/// **The context half is `knobas_core::held_by_any_context!` and not a second
+/// reading of it** -- ADR-0008's membership walk, seeded from every unarchived
+/// context at once, whose `held` layer *is* "directly or through an ancestor".
+/// The subquery binds nothing from the outer row, so the planner hashes it.
+///
+/// # Why there is no `acked_at is null` here
+///
+/// Because **the routing rule is a defined term and the ack is not in it.**
+/// Spec §12.3 (`docs/specs/2026-08-23-knobas-design.md`) puts the two in
+/// consecutive sentences: *"**Alert routing rule (R3, now spec):** an alert
+/// reaches the inbox only when some context holds the affected asset (directly
+/// or via an ancestor or via the context's monitors); all open alerts always
+/// show in the Assets views and the top-strip count. **Ack** is knobas-local:
+/// clears the inbox item, writes history, the alert stays open until the
+/// monitor recovers"*. `CONTEXT.md`'s **Alert** keeps the same split, and its
+/// #446 amendment uses the term the same way -- *"the one place the alert's
+/// routing rule and `member_ids` differ"* is about which contexts count, not
+/// about the ack. So `alert!()`'s statement in `knobas_core::inbox` is the
+/// routing rule **plus the inbox's own lifecycle clause**; it is not the rule,
+/// and this list takes the rule.
+///
+/// **And *open* is defined too.** `CONTEXT.md`, **Alert**: *"open until the
+/// monitor recovers … **Only a return to *up* closes one**"*. A list called
+/// *Open alerts* that dropped acked ones would be false in its first word.
+/// Spec §12.3's *"all open alerts always show in the Assets views and the
+/// top-strip count"* is which side of the ack an estate surface sits on, and
+/// this list draws assets and opens the Tree.
+///
+/// The reading `knobas_core::inbox`'s `alert!` doc gives -- *"an acked alert
+/// leaves the inbox and stays in the Assets view"* -- says the same thing, and
+/// is cited here as what it is: a doc comment reading spec #427 story 62, not
+/// an authority of its own. The authority is the glossary and §12.3 above.
+///
+/// Pinned by `an_acked_alert_is_still_open_and_still_on_the_list` in
+/// `crates/knobas-app/tests/search_ipc.rs`. Ruled for v1.5 on 2026-09-08
+/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, #504), which also
+/// records why copying the clause would not have made the two counts agree:
+/// #446's ack writes `acked_at` **and** `complete_with`, and the inbox's count
+/// excludes snoozed items, so the disagreement is a shelf and not a clause.
+macro_rules! alerts_in_context_pred {
+    () => {
+        concat!(
+            open_alert_opened_at!(),
+            " is not null
+                         and a.id in ",
+            knobas_core::held_by_any_context!()
+        )
+    };
+}
+
+/// When knobas last saw a certificate on this asset's monitors with under
+/// [`CERT_DAYS`] days left, or `null` if it saw none.
+///
+/// # A payload read outside an adapter (ADR-0007), and the third one
+///
+/// `KindPaths` has no slot for "days until this certificate expires", so
+/// declaring one would be a `crates/knobas-source/src/**` change and a §10.8
+/// conversation this ticket does not open. The interim discipline therefore
+/// applies in full, and this statement meets all three requirements:
+///
+/// 1. **It misses, never guesses.** `jsonb_typeof(...) = 'number'` is checked
+///    *before* the cast, so a payload carrying `"nine"`, `null` or no such key
+///    at all contributes nothing. Without the guard the `::numeric` cast raises
+///    and the whole launcher board fails to load on one drifted row -- which is
+///    the difference between a miss and an outage, not a matter of taste.
+/// 2. **One named place**, this macro, read by [`certs_expiring_pred!`] for the
+///    predicate and by the summary for the stamp.
+/// 3. **The failure direction is absence.** A drifted key empties the list; it
+///    never puts an asset on it whose certificate is fine.
+///
+/// # The ticket says "the samples", and the samples do not carry it
+///
+/// Issue #504 asks for a list that *"reads the certificate days the samples
+/// carry"*. They do not: migration `0021`'s `knobas.monitor_sample` is
+/// `state` and `response_time_ms` and nothing else, and the certificate
+/// countdown exists only in the mirrored monitor's payload. So the read is the
+/// payload's, which is the only place the number is, and the ticket's phrase is
+/// loose rather than a second design nobody built. Recorded here rather than
+/// left for the next reader to rediscover by grepping `monitor_sample`.
+///
+/// `cert_days_remaining` is the key `knobas_source_kuma::map` writes and
+/// `knobas_app::assets`' `reading_of` already reads for the Monitors tab's
+/// *Cert N d* chip. This is the **third** place that spelling appears and the
+/// second reader of it: a change to what Kuma's certificate countdown is called
+/// in a payload is a change to all three. `the_certificate_key_is_the_one_the_
+/// monitors_tab_draws` is the pin on this side of it.
+///
+/// **`sync.live_item`, never `sync.item`.** `CONTEXT.md`'s **Live item** names
+/// the four readers that reach past the live view -- the Monitors roster
+/// (#448), the detail read (#204), the paste resolver (#496) and the checkout
+/// read (#499) -- and says *"a fifth needs a reason of its own and a line
+/// here"*. This is not one of them and owes no line there.
+///
+/// The consequence, stated because it is where this list and the roster part
+/// company. A monitor whose **source the reader switched off** drops out of
+/// both: the roster keeps the enabled clause and so does the view. A monitor
+/// Kuma **paused or deleted** is tombstoned by the adapter, and it drops out of
+/// *this* list while staying on the roster -- reader 1 is exempt from the
+/// tombstone half precisely so the roster can draw the *Paused* chip and the
+/// monitor's history. There is no equivalent thing to draw here: a countdown
+/// is a number knobas is being told, and nobody is polling a paused check, so
+/// the honest answer is that the asset leaves the list rather than sitting on
+/// it under a reading that has stopped moving.
+macro_rules! expiring_cert_seen_at {
+    () => {
+        concat!(
+            "(select max(m.synced_at)
+                        from sync.live_item m
+                        ",
+            monitors_asset!("m.entity_id"),
+            "
+                       where m.kind = 'monitor'
+                         and jsonb_typeof(m.payload -> 'cert_days_remaining') = 'number'
+                         and (m.payload ->> 'cert_days_remaining')::numeric < 30)"
+        )
+    };
+}
+
+/// How many days left counts as *expiring* -- the ticket's *"under 30 days"*.
+///
+/// Strict: a certificate with exactly 30 days left is **not** on the list, and
+/// neither is one with 31. Written here as well as inside
+/// [`expiring_cert_seen_at!`] -- which cannot read a constant, because
+/// `concat!` takes literals -- so that the number a reader looks up and the
+/// number the statement uses are checked against each other by
+/// `the_certificate_window_is_the_one_the_label_promises`.
+pub const CERT_DAYS: i64 = 30;
+
+/// An asset one of whose monitors carries a certificate expiring inside
+/// [`CERT_DAYS`] (#504).
+macro_rules! certs_expiring_pred {
+    () => {
+        concat!(expiring_cert_seen_at!(), " is not null")
+    };
+}
+
 /// Declare the built-in lists **once**, and generate both the registry and the
 /// single-pass summary from that one declaration.
 ///
@@ -337,24 +707,48 @@ macro_rules! rows_over {
 macro_rules! builtins {
     (
         $( scan: $id:literal, $label:literal, $column:literal, $blurb:literal, $pred:literal; )*
+        $( asset: $aid:literal, $alabel:literal, $acolumn:literal, $ablurb:literal,
+                  $apred:ident, $astamp:ident; )*
     ) => {
         /// Every built-in list, in the order the launcher rail draws them.
+        ///
+        /// The mirror lists first and the estate lists after them, which is
+        /// what the two declaration groups below say and is also the order a
+        /// reader wants: *what moved* before *what is wrong with the machines*.
         pub const BUILTINS: &[BuiltinList] = &[
             $( BuiltinList {
                 id: $id, label: $label, blurb: $blurb, column: $column,
                 rows_sql: rows_over!($pred),
             }, )*
+            $( BuiltinList {
+                id: $aid, label: $alabel, blurb: $ablurb, column: $acolumn,
+                rows_sql: rows_over_estate!($apred!()),
+            }, )*
         ];
 
         /// Counts, freshness and the seen-stamps, in one round trip.
         ///
-        /// `$1` is the identity usernames. `scanned` is the row count the one
-        /// pass covered; it also anchors the generated comma-separated list of
-        /// aggregates, which is why it is first.
+        /// `$1` is the identity usernames. `scanned` is the row count the
+        /// mirror pass covered and `estate_scanned` the estate pass; each also
+        /// anchors its generated comma-separated list of aggregates, which is
+        /// why each is first in its CTE.
         ///
-        /// Every list is a `count(*) filter` over the **same single scan**, and
-        /// that is now a rule rather than a convenience -- see the module docs
-        /// on what the one list that could not be written this way cost.
+        /// **Every list is a `count(*) filter` over one scan of the corpus it
+        /// draws from**, and the whole board is one round trip. There are two
+        /// corpora and therefore two CTEs -- `scan` over `sync.live_item` and
+        /// `estate` over `knobas.asset` -- and the macro admits nothing else:
+        /// a list that is not a filter over one of those two scans cannot be
+        /// declared at all. What the rule fixes is what a `count(*)` counts,
+        /// not how many tables the statement touches: the estate predicates
+        /// probe four more relations, and the module docs say what that costs
+        /// and what was measured.
+        ///
+        /// The estate CTE computes each list's predicate and its badge stamp
+        /// **as columns of an inner select** and aggregates over those, rather
+        /// than writing the predicate inside the aggregate. That is not a
+        /// style choice: two of the three stamps are correlated subqueries, and
+        /// this shape keeps every one of them an ordinary select-list
+        /// expression over `knobas.asset a`.
         const SUMMARY_SQL: &str = concat!(
             "with scan as (\n  select count(*) as scanned",
             $(
@@ -362,17 +756,33 @@ macro_rules! builtins {
                 ",\n    max(i.synced_at) filter (where ", $pred, ") as ", $column, "_at",
             )*
             "\n    from sync.live_item i\n),\n",
+            "estate as (\n  select count(*) as estate_scanned",
+            $(
+                ",\n    count(*) filter (where e.", $acolumn, "_hit) as ", $acolumn,
+                ",\n    max(e.", $acolumn, "_stamp) filter (where e.", $acolumn, "_hit) as ",
+                $acolumn, "_at",
+            )*
+            "\n    from (select a.id",
+            $(
+                ",\n                 ", $apred!(), " as ", $acolumn, "_hit",
+                ",\n                 ", $astamp!(), " as ", $acolumn, "_stamp",
+            )*
+            "\n            from knobas.asset a) e\n),\n",
             "seen as (\n",
             "  select coalesce(\n",
             "           (select value from knobas.setting where key = 'search.smart_list_seen'),\n",
             "           '{}'::jsonb) as v\n",
             ")\n",
-            "select scan.scanned",
+            "select scan.scanned, estate.estate_scanned",
             $(
                 ",\n       scan.", $column, ", scan.", $column, "_at",
                 ",\n       seen.v ->> '", $id, "' as ", $column, "_seen",
             )*
-            "\n  from scan, seen\n"
+            $(
+                ",\n       estate.", $acolumn, ", estate.", $acolumn, "_at",
+                ",\n       seen.v ->> '", $aid, "' as ", $acolumn, "_seen",
+            )*
+            "\n  from scan, estate, seen\n"
         );
     };
 }
@@ -399,6 +809,20 @@ builtins! {
     scan: "just-synced", "Just synced", "just_synced",
         "What the last hour of syncing brought in.",
         "i.synced_at >= now() - interval '1 hour'";
+
+    // The estate (#504). Rows are **assets**, so a row opens the Tree at the
+    // asset -- `Launcher.svelte` addresses a hit of kind `asset` through
+    // `assets/tree.ts`' own encoder, and these lists need nothing of their own
+    // for that.
+    asset: "not-monitored", "Not monitored", "not_monitored",
+        "Estate assets with no monitor attached to them.",
+        not_monitored_pred, asset_touched_at;
+    asset: "alerts-in-context", "Open alerts in my contexts", "alerts_in_context",
+        "Assets a context you have not archived holds, with a monitor in trouble.",
+        alerts_in_context_pred, open_alert_opened_at;
+    asset: "certs-expiring", "Certificates expiring", "certs_expiring",
+        "Assets whose certificate runs out in under 30 days.",
+        certs_expiring_pred, expiring_cert_seen_at;
 }
 
 /// Record that a list was just opened, so its badge clears.
@@ -577,6 +1001,220 @@ mod tests {
                 list.id
             );
         }
+    }
+
+    /// The estate lists are the ones that scan `knobas.asset`, and there are
+    /// exactly three of them.
+    ///
+    /// Read off the statement in both directions, which is
+    /// [`BuiltinList::needs_identity`]'s rule and for its reason: a mirror list
+    /// that started reading `knobas.asset` would be counting machines under a
+    /// heading about tickets, and an estate list that stopped would answer with
+    /// the mirror. The membership is asserted **by id**, so a list moved from
+    /// one group to the other fails here rather than silently changing what it
+    /// counts.
+    ///
+    /// **The alias is what tells the two apart, and that is load-bearing.**
+    /// *Certificates expiring* reads `sync.live_item` too -- inside its
+    /// predicate, as `m` -- so the mirror probe has to be `from sync.live_item
+    /// i`, the outer scan's own alias, or that list would answer to both
+    /// halves. `i` and `a` are the aliases [`rows_over!`] and
+    /// [`rows_over_estate!`] give the relation a list is a list *of*; a
+    /// predicate that wanted either letter would have to shadow it.
+    #[test]
+    fn exactly_the_estate_lists_scan_the_estate() {
+        let over_the_estate: Vec<&str> = BUILTINS
+            .iter()
+            .filter(|l| l.rows_sql.contains("from knobas.asset a"))
+            .map(|l| l.id)
+            .collect();
+        assert_eq!(
+            over_the_estate,
+            ["not-monitored", "alerts-in-context", "certs-expiring"]
+        );
+        let over_the_mirror: Vec<&str> = BUILTINS
+            .iter()
+            .filter(|l| l.rows_sql.contains("from sync.live_item i"))
+            .map(|l| l.id)
+            .collect();
+        assert_eq!(
+            over_the_mirror,
+            ["changed-today", "mine", "mine-stale", "just-synced"]
+        );
+        // And the summary makes both passes, or one group's counts come back
+        // from a statement that never scanned them.
+        assert!(
+            SUMMARY_SQL.contains("from sync.live_item i"),
+            "{SUMMARY_SQL}"
+        );
+        assert!(SUMMARY_SQL.contains("from knobas.asset a"), "{SUMMARY_SQL}");
+        assert!(
+            SUMMARY_SQL.contains("from scan, estate, seen"),
+            "{SUMMARY_SQL}"
+        );
+    }
+
+    /// An estate row is an **asset**, which is what makes a row open the Tree:
+    /// `Launcher.svelte` addresses a hit by its `kind`, and only `asset` gets
+    /// `assets/tree.ts`' encoder. A list answering with any other kind would
+    /// draw rows that open a room detail instead.
+    #[test]
+    fn an_estate_list_answers_with_asset_rows() {
+        for list in BUILTINS
+            .iter()
+            .filter(|l| l.rows_sql.contains("from knobas.asset a"))
+        {
+            assert!(
+                list.rows_sql.contains("'asset'::text as kind"),
+                "{} does not answer with asset rows",
+                list.id
+            );
+            assert!(
+                list.rows_sql.contains("'asset'::text as source_id"),
+                "{} does not name the estate as its source",
+                list.id
+            );
+            // The path is the store's column, never an `ancestor_path_read!`
+            // over a payload -- `corpus::Corpus::path`'s second case.
+            assert!(
+                list.rows_sql.contains("nullif(a.path_text, '') as path"),
+                "{} does not carry where the asset sits",
+                list.id
+            );
+        }
+    }
+
+    /// *Not monitored* is the Monitors tab's roster rule, and the two hard-code
+    /// the same two words where the roster binds them.
+    ///
+    /// `knobas_app::assets`' `UNMONITORED` passes the relation and the monitor
+    /// kind as `$1` and `$2`; this statement cannot, because `concat!` takes
+    /// literals. So the relation is checked against the one constant both
+    /// crates read, `knobas_core::link::MONITORED_BY`. The kind has a constant
+    /// too -- `assets::MONITOR_KIND` -- but it is private to `knobas-app`, a
+    /// crate `knobas-search` cannot depend on without inverting the workspace,
+    /// so the word is compared against itself here and the pin is **one-sided**
+    /// on that half. Named so the next reader knows which half is held.
+    #[test]
+    fn the_roster_rule_is_spelled_the_way_the_link_table_spells_it() {
+        let list = find("not-monitored").unwrap();
+        assert!(
+            list.rows_sql.contains(&format!(
+                "l.relation = '{}'",
+                knobas_core::link::MONITORED_BY
+            )),
+            "{}",
+            list.rows_sql
+        );
+        assert!(
+            list.rows_sql.contains("m.kind = 'monitor'"),
+            "{}",
+            list.rows_sql
+        );
+        // The proposal half: an unconfirmed guess leaves the asset on the list.
+        assert!(
+            list.rows_sql.contains("knobas.confirmed_link"),
+            "{}",
+            list.rows_sql
+        );
+        // The base table's name is **assembled** rather than written out.
+        // `knobas-core`'s `tests/link_reads.rs` scans every shipping source
+        // file for a read of it and says "a doc comment counts: it is what the
+        // next implementer copies" -- and a negative assertion is no
+        // exception, because the scan cannot tell the two apart. Same device,
+        // and same reason, as `tests/sql_containment.rs`' split needle.
+        let base_table = format!("knobas.{}", "link");
+        assert!(
+            !list.rows_sql.contains(&format!("from {base_table} ")),
+            "the roster must not count proposals: {}",
+            list.rows_sql
+        );
+    }
+
+    /// The context half of *Open alerts in my contexts* is ADR-0008's walk and
+    /// not a second reading of it, and the alert half is open-and-not-closed.
+    #[test]
+    fn the_alert_list_routes_by_the_membership_walk_and_nothing_else() {
+        let list = find("alerts-in-context").unwrap();
+        // **The macro's own expansion, not three substrings of it.** A walk
+        // copied out by hand and then amended would satisfy any set of
+        // clauses named here while no longer being ADR-0008's rule, which is
+        // exactly what this test claims it is. `held_by_any_context!` is a
+        // `concat!` of literals, so the thing itself is available to compare
+        // against and a representation of it is not good enough.
+        assert!(
+            list.rows_sql.contains(knobas_core::held_by_any_context!()),
+            "the context half is not `held_by_any_context!`: {}",
+            list.rows_sql
+        );
+        assert!(
+            list.rows_sql.contains("al.closed_at is null"),
+            "{}",
+            list.rows_sql
+        );
+        // Ack is the inbox's clause and not this list's -- see the predicate's
+        // own doc for why.
+        assert!(
+            !list.rows_sql.contains("acked_at"),
+            "an ack is seen, not fixed: {}",
+            list.rows_sql
+        );
+    }
+
+    /// The certificate window a reader looks up and the one the statement uses.
+    ///
+    /// `concat!` cannot read [`CERT_DAYS`], so the number is written twice and
+    /// this is the only thing standing between the two. The blurb is checked as
+    /// well: a label promising thirty days over a statement asking for sixty is
+    /// the same failure one screen further out.
+    #[test]
+    fn the_certificate_window_is_the_one_the_label_promises() {
+        let list = find("certs-expiring").unwrap();
+        assert_eq!(CERT_DAYS, 30);
+        assert!(
+            list.rows_sql.contains(&format!("::numeric < {CERT_DAYS})")),
+            "{}",
+            list.rows_sql
+        );
+        assert!(
+            list.blurb.contains(&format!("under {CERT_DAYS} days")),
+            "{}",
+            list.blurb
+        );
+    }
+
+    /// The key Kuma's adapter writes and the Monitors tab already draws.
+    ///
+    /// Guarded before it is cast, which is the difference between an empty list
+    /// and a launcher board that fails to load on one drifted payload.
+    #[test]
+    fn the_certificate_key_is_the_one_the_monitors_tab_draws() {
+        let list = find("certs-expiring").unwrap();
+        assert!(
+            list.rows_sql
+                .contains("jsonb_typeof(m.payload -> 'cert_days_remaining') = 'number'"),
+            "{}",
+            list.rows_sql
+        );
+        let guard = list.rows_sql.find("jsonb_typeof").expect("the guard");
+        let cast = list.rows_sql.find("::numeric").expect("the cast");
+        assert!(
+            guard < cast,
+            "the cast runs before the guard: {}",
+            list.rows_sql
+        );
+        // The live view, never the base table: `CONTEXT.md`'s **Live item**
+        // names the readers that reach past it and this is not one of them.
+        assert!(
+            list.rows_sql.contains("from sync.live_item m"),
+            "{}",
+            list.rows_sql
+        );
+        assert!(
+            !list.rows_sql.contains("from sync.item"),
+            "{}",
+            list.rows_sql
+        );
     }
 
     /// Exactly the two lists that filter by author read the identity
