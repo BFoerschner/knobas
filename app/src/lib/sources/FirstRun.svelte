@@ -419,7 +419,7 @@
                   The name keeps naming the work, which is what a person
                   opening a demo build came for.
                 -->
-                <span class="sub">21 fixture items · a 23-asset estate · no network, no credential</span>
+                <span class="sub">27 fixture items · a 23-asset estate · no network, no credential</span>
               </button>
             {/if}
             <button class="mod" onclick={() => (adding = true)}>

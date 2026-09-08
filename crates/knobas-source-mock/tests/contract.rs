@@ -829,3 +829,35 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
         );
     }
 }
+
+/// The demo button's subtitle names the size of the corpus it loads, and
+/// nothing made that true until this.
+///
+/// `app/src/lib/sources/FirstRun.svelte` offers *Load the Tidewater dataset*
+/// under `21 fixture items · a 23-asset estate · no network, no credential`.
+/// That sentence was written when a full sync was 21 items, is the first thing
+/// a person opening a demo build reads, and no test on either side of the
+/// bridge could see it: #537 widened the corpus to 27 and found the `21` by
+/// grep. The estate's own count is pinned by `demo.rs`'s
+/// `the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing`,
+/// which reads `testenv/hetzner/estate.json`; this is the work half's.
+///
+/// The oracle is a **real sync through the adapter**, not a sum of fixture
+/// array lengths: what the subtitle claims is what the button produces, and an
+/// `items` that stopped emitting a kind would have to move the sentence too.
+/// `include_str!` rather than a path read, so the file being renamed or moved
+/// fails the build here rather than passing an assertion over an empty string.
+#[tokio::test]
+async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
+    const FIRST_RUN: &str = include_str!("../../../app/src/lib/sources/FirstRun.svelte");
+    let mut sink = VecSink(Vec::new());
+    MockSource::new().sync(None, &mut sink).await.expect("sync");
+
+    let claim = format!("{} fixture items", sink.0.len());
+    assert!(
+        FIRST_RUN.contains(&claim),
+        "FirstRun.svelte must offer the demo load as {claim:?}; \
+         a full sync emits {} items and the subtitle says otherwise",
+        sink.0.len()
+    );
+}

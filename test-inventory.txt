@@ -2130,6 +2130,7 @@ knobas-source-mock	test/contract	passes_the_contract_battery
 knobas-source-mock	test/contract	test_connection_reports_what_it_reached
 knobas-source-mock	test/contract	the_dataset_records_who_triggered_build_1188
 knobas-source-mock	test/contract	the_descriptor_template_is_the_default_instance
+knobas-source-mock	test/contract	the_first_run_subtitle_names_the_size_of_the_corpus_it_loads
 knobas-source-mock	test/contract	the_opt_in_tombstone_reports_one_deterministic_deletion
 knobas-source-mock	test/contract	the_tombstoning_mock_passes_the_contract_battery
 knobas-source-mock	test/contract	write_records_the_comment
