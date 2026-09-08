@@ -8420,9 +8420,13 @@ From this commit on, each of the following requires an orchestrator decision **a
     inside `LauncherBoard` and `LauncherHome` — both write-only in the same sense — and it is in
     no archive, no settings row and no file. `pg_dump` carries tables, and this DTO is not one.
     So there is no older shape to decode and the attribute would document a compatibility nobody
-    can exercise. Checked by reading every mention of the type in the workspace: nine in
-    `knobas-search`, nine in `knobas-app` (five signatures, one field, three in tests), and not
-    one `serde_json::from_*` or `#[derive(FromRow)]` among them. Should a decode site ever appear
+    can exercise. Checked by reading **every** mention of the type in the workspace — 14 in
+    `knobas-search`, 12 in `knobas-app`, none anywhere else — and every one is a construction, a
+    signature, a field, a re-export or a doc link: not one `serde_json::from_*`, and no `FromRow`
+    on this type. (Re-counted by the merge-manager, 2026-09-08. The numbers first written here
+    were *nine and nine*, which left the seam tests and the doc mentions out — the conclusion was
+    right and the audit under it was undercounted, which is the same wrong-count class this PR
+    fixed twice in its own doc comments.) Should a decode site ever appear
     — a share archive that carried saved lists as DTOs, say — that is the commit which owes the
     attribute and an entry of its own.
   * **A database fault is not *needs attention*.** `saved::summaries` propagates
