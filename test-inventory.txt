@@ -43,7 +43,9 @@ knobas-app	lib/knobas_app	backup::share::tests::no_part_at_all_is_no_tables_at_a
 knobas-app	lib/knobas_app	backup::share::tests::no_part_carries_the_settings_table
 knobas-app	lib/knobas_app	backup::share::tests::nothing_carries_the_activity_stream_the_queue_or_the_mirror
 knobas-app	lib/knobas_app	backup::share::tests::the_defaults_are_the_ratified_ones
+knobas-app	lib/knobas_app	checkout::tests::a_stored_template_wins_and_the_platforms_answers_when_nothing_is
 knobas-app	lib/knobas_app	checkout::tests::an_action_that_does_not_exist_is_refused_by_name
+knobas-app	lib/knobas_app	checkout::tests::an_action_with_no_template_on_this_platform_is_not_configured
 knobas-app	lib/knobas_app	checkout::tests::every_action_stores_its_template_under_its_own_key
 knobas-app	lib/knobas_app	checkout::tests::found_by_serialises_as_the_mirror_declares
 knobas-app	lib/knobas_app	checkout::tests::the_kinds_with_a_checkout_are_the_ones_the_panel_is_mounted_for
@@ -399,11 +401,11 @@ knobas-app	test/checkout_ipc	a_repo_with_no_url_has_no_clone_command_and_is_not_
 knobas-app	test/checkout_ipc	a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_back
 knobas-app	test/checkout_ipc	a_template_that_cannot_be_run_is_refused_where_it_is_typed
 knobas-app	test/checkout_ipc	a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout
-knobas-app	test/checkout_ipc	an_action_with_no_template_reports_not_configured
 knobas-app	test/checkout_ipc	an_override_answers_without_a_clones_root
 knobas-app	test/checkout_ipc	an_override_is_what_the_command_is_given
 knobas-app	test/checkout_ipc	an_override_wins_over_the_scan_and_clearing_it_gives_the_scan_back
 knobas-app	test/checkout_ipc	an_underscore_in_a_repo_name_is_not_a_wildcard
+knobas-app	test/checkout_ipc	clearing_a_template_hands_this_platforms_default_back
 knobas-app	test/checkout_ipc	no_clones_root_means_no_scan
 knobas-app	test/checkout_ipc	opening_a_checkout_runs_the_template_with_the_scanned_path
 knobas-app	test/checkout_ipc	purging_the_repo_takes_its_override_with_it

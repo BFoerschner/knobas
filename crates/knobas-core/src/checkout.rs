@@ -341,8 +341,11 @@ pub enum OpenAction {
 }
 
 /// Every action, in the order the panel draws them.
-pub const OPEN_ACTIONS: [OpenAction; 3] =
-    [OpenAction::VsCode, OpenAction::JetBrains, OpenAction::Terminal];
+pub const OPEN_ACTIONS: [OpenAction; 3] = [
+    OpenAction::VsCode,
+    OpenAction::JetBrains,
+    OpenAction::Terminal,
+];
 
 /// The macOS default for each action, in [`OPEN_ACTIONS`] order.
 ///
@@ -402,7 +405,20 @@ impl OpenAction {
     /// as a fact -- and a guess that spawns a process is the wrong kind.
     #[must_use]
     pub fn default_template(self) -> Option<&'static str> {
-        if !cfg!(target_os = "macos") {
+        self.default_template_on(std::env::consts::OS)
+    }
+
+    /// The template this action starts with **on `os`**.
+    ///
+    /// The platform is an argument rather than a `cfg!`, and that is the whole
+    /// reason this function exists: the gate runs on one operating system, so
+    /// a rule written as `cfg!(target_os = ...)` has exactly one half of
+    /// itself under test and the other half is prose. `os` takes
+    /// [`std::env::consts::OS`]'s spelling -- `"macos"`, `"linux"`,
+    /// `"windows"` -- and `default_template` passes this machine's.
+    #[must_use]
+    pub fn default_template_on(self, os: &str) -> Option<&'static str> {
+        if os != "macos" {
             return None;
         }
         let index = OPEN_ACTIONS.iter().position(|action| *action == self)?;
@@ -561,11 +577,7 @@ fn split_words(template: &str) -> Result<Vec<String>, TemplateError> {
 }
 
 /// One word with its placeholder filled in, counting what it substituted.
-fn substitute(
-    word: &str,
-    path: &Path,
-    substitutions: &mut usize,
-) -> Result<String, TemplateError> {
+fn substitute(word: &str, path: &Path, substitutions: &mut usize) -> Result<String, TemplateError> {
     let mut out = String::with_capacity(word.len());
     let mut rest = word;
     while let Some(open) = rest.find('{') {
@@ -730,15 +742,28 @@ mod tests {
     fn quotes_group_a_word_and_are_not_passed_on() {
         assert_eq!(
             expanded("open -a \"Visual Studio Code\" {path}"),
-            ["open", "-a", "Visual Studio Code", "/Users/mara/src/payout-service"]
+            [
+                "open",
+                "-a",
+                "Visual Studio Code",
+                "/Users/mara/src/payout-service"
+            ]
         );
         assert_eq!(
             expanded("open -a 'IntelliJ IDEA' {path}"),
-            ["open", "-a", "IntelliJ IDEA", "/Users/mara/src/payout-service"]
+            [
+                "open",
+                "-a",
+                "IntelliJ IDEA",
+                "/Users/mara/src/payout-service"
+            ]
         );
         // An empty quoted word is still a word: a command line can carry an
         // empty argument, and dropping it would shift every argument after it.
-        assert_eq!(expanded("thing \"\" {path}"), ["thing", "", "/Users/mara/src/payout-service"]);
+        assert_eq!(
+            expanded("thing \"\" {path}"),
+            ["thing", "", "/Users/mara/src/payout-service"]
+        );
     }
 
     /// A path with a space in it is **one** argument, because no shell is
@@ -751,7 +776,12 @@ mod tests {
                 Path::new("/Users/mara/My Code/payout service")
             )
             .expect("expands"),
-            ["open", "-a", "Terminal", "/Users/mara/My Code/payout service"]
+            [
+                "open",
+                "-a",
+                "Terminal",
+                "/Users/mara/My Code/payout service"
+            ]
         );
     }
 
@@ -778,10 +808,19 @@ mod tests {
         let path = Path::new("/src/x");
         assert_eq!(expand("", path), Err(TemplateError::Empty));
         assert_eq!(expand("   \t ", path), Err(TemplateError::Empty));
-        assert_eq!(expand("code {path", path), Err(TemplateError::UnclosedPlaceholder));
-        assert_eq!(expand("open -a \"Visual {path}", path), Err(TemplateError::UnclosedQuote));
+        assert_eq!(
+            expand("code {path", path),
+            Err(TemplateError::UnclosedPlaceholder)
+        );
+        assert_eq!(
+            expand("open -a \"Visual {path}", path),
+            Err(TemplateError::UnclosedQuote)
+        );
         assert_eq!(expand("code .", path), Err(TemplateError::NoPath));
-        assert_eq!(expand("cp {path} {path}", path), Err(TemplateError::RepeatedPath));
+        assert_eq!(
+            expand("cp {path} {path}", path),
+            Err(TemplateError::RepeatedPath)
+        );
     }
 
     /// The three macOS defaults expand to the documented commands.
@@ -800,8 +839,18 @@ mod tests {
         assert_eq!(
             expanded,
             [
-                vec!["open", "-a", "Visual Studio Code", "/Users/mara/src/payout-service"],
-                vec!["open", "-a", "IntelliJ IDEA", "/Users/mara/src/payout-service"],
+                vec![
+                    "open",
+                    "-a",
+                    "Visual Studio Code",
+                    "/Users/mara/src/payout-service"
+                ],
+                vec![
+                    "open",
+                    "-a",
+                    "IntelliJ IDEA",
+                    "/Users/mara/src/payout-service"
+                ],
                 vec!["open", "-a", "Terminal", "/Users/mara/src/payout-service"],
             ]
         );
@@ -809,18 +858,34 @@ mod tests {
 
     /// The defaults are macOS's, and the other platforms have none -- which is
     /// what makes a button there read *not configured* rather than run a guess.
+    ///
+    /// **Both halves run wherever the gate runs**, because the platform is an
+    /// argument. A `cfg!` here would leave the half that is not this machine
+    /// asserted by nothing, and *not configured* is a state no Mac can reach.
     #[test]
     fn only_macos_starts_with_a_template() {
         for (index, action) in OPEN_ACTIONS.into_iter().enumerate() {
             assert_eq!(
-                action.default_template(),
-                if cfg!(target_os = "macos") {
-                    Some(MACOS_DEFAULT_TEMPLATES[index])
-                } else {
-                    None
-                },
+                action.default_template_on("macos"),
+                Some(MACOS_DEFAULT_TEMPLATES[index]),
                 "{}",
                 action.id()
+            );
+            for os in ["linux", "windows", "freebsd", "MACOS", ""] {
+                assert_eq!(
+                    action.default_template_on(os),
+                    None,
+                    "{} on {os}",
+                    action.id()
+                );
+            }
+        }
+        // And this machine's answer is the one its own name selects, which is
+        // the single line the two halves above cannot cover.
+        for action in OPEN_ACTIONS {
+            assert_eq!(
+                action.default_template(),
+                action.default_template_on(std::env::consts::OS)
             );
         }
     }

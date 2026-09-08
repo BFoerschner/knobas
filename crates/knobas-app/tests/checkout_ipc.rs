@@ -742,9 +742,13 @@ async fn an_override_is_what_the_command_is_given() {
     set_override(&pool, &repo.id, Some(&worktree.to_string_lossy()))
         .await
         .unwrap();
-    set_command(&pool, "terminal", Some(&format!("{} {{path}}", stub.display())))
-        .await
-        .unwrap();
+    set_command(
+        &pool,
+        "terminal",
+        Some(&format!("{} {{path}}", stub.display())),
+    )
+    .await
+    .unwrap();
 
     open(&pool, &repo.id, "terminal").await.unwrap();
 
@@ -768,9 +772,13 @@ async fn a_branch_opens_its_repositorys_checkout() {
         .unwrap();
     let workshop = tempfile::tempdir().unwrap();
     let (stub, record) = recording_stub(workshop.path());
-    set_command(&pool, "vscode", Some(&format!("{} {{path}}", stub.display())))
-        .await
-        .unwrap();
+    set_command(
+        &pool,
+        "vscode",
+        Some(&format!("{} {{path}}", stub.display())),
+    )
+    .await
+    .unwrap();
 
     open(&pool, &branch, "vscode").await.unwrap();
 
@@ -811,7 +819,11 @@ async fn a_template_that_cannot_be_run_is_refused_where_it_is_typed() {
         .expect_err("only {path} may be substituted");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("{repo_url}"), "{}", error.message);
-    assert!(error.message.contains("code {repo_url}"), "{}", error.message);
+    assert!(
+        error.message.contains("code {repo_url}"),
+        "{}",
+        error.message
+    );
 
     // A command that would open nothing.
     let error = set_command(&pool, "vscode", Some("code ."))
@@ -846,7 +858,9 @@ async fn a_program_that_will_not_start_names_the_template() {
         .await
         .unwrap();
     let template = "/nonexistent/knobas-not-an-editor {path}";
-    set_command(&pool, "jetbrains", Some(template)).await.unwrap();
+    set_command(&pool, "jetbrains", Some(template))
+        .await
+        .unwrap();
 
     let error = open(&pool, &repo.id, "jetbrains")
         .await
@@ -887,21 +901,20 @@ async fn a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_
     assert_eq!(commands(&pool).await.unwrap(), before);
 }
 
-/// *Not configured*: an action with no template on this platform.
+/// Clearing a template hands **this platform's** default back.
 ///
-/// **The arm this asserts depends on where the gate runs, and only one of the
-/// two is the ticket's criterion.** macOS ships a default for all three
-/// actions, so the state cannot be reached there at all -- clearing the row
-/// hands the default back, which is the other half of the same rule. Off
-/// macOS there is no default, and clearing the row *is* the state, so the
-/// refusal runs. `knobas_core::checkout`'s `only_macos_starts_with_a_template`
-/// pins which platform is which; this is the seam's side of it.
+/// The other arm -- *not configured*, which is what an action with no default
+/// answers -- is `knobas_app::checkout`'s
+/// `an_action_with_no_template_on_this_platform_is_not_configured`, and it is
+/// there rather than here because no Mac can reach the state through a
+/// database: macOS ships a default for all three actions, so clearing the row
+/// is exactly this test. The platform default is an argument to the function
+/// that decides, which is what lets a unit test reach the arm the gate's
+/// machine cannot.
 #[tokio::test]
-async fn an_action_with_no_template_reports_not_configured() {
+async fn clearing_a_template_hands_this_platforms_default_back() {
     let pool = pool().await;
-    let repo = repo(&pool).await;
-    let root = clones_root_with(&repo);
-    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+    set_command(&pool, "jetbrains", Some("idea {path}"))
         .await
         .unwrap();
     set_command(&pool, "jetbrains", None).await.unwrap();
@@ -913,27 +926,10 @@ async fn an_action_with_no_template_reports_not_configured() {
         .find(|command| command.action == "jetbrains")
         .unwrap();
 
-    if cfg!(target_os = "macos") {
-        assert_eq!(
-            jetbrains.template.as_deref(),
-            Some("open -a \"IntelliJ IDEA\" {path}"),
-            "macOS has a default, so *not configured* is unreachable here"
-        );
-    } else {
-        assert_eq!(jetbrains.template, None);
-        let error = open(&pool, &repo.id, "jetbrains")
-            .await
-            .expect_err("no template, nothing to run");
-        assert_eq!(error.code, IpcErrorCode::Invalid);
-        assert!(
-            error.message.contains("not configured"),
-            "{}",
-            error.message
-        );
-        assert!(
-            error.message.contains("Open in JetBrains"),
-            "{}",
-            error.message
-        );
-    }
+    assert!(jetbrains.is_default, "nothing is stored any more");
+    assert_eq!(
+        jetbrains.template.as_deref(),
+        knobas_core::checkout::OpenAction::JetBrains.default_template(),
+        "the platform's own answer is what comes back"
+    );
 }

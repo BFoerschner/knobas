@@ -252,7 +252,12 @@ pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save clon
     "the clones-root Save still has an accessible name of its own"
 pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save {command.label}"' \
     "each open-command Save is named after its own command"
-pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root"' \
+# The **visible label text**, not the `for=`/`id=` pair: the driver focuses
+# this field by its accessible name, which the label element supplies, so a
+# pin on the id would stay green through a rename and let the run fail minutes
+# in. Same for the three command fields, whose names come from
+# `knobas_core::checkout`'s `label()` and are pinned there.
+pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Directory<' \
     "the clones-root field is still labelled Directory"
 # The button the driver presses and the settings field it fills are both named
 # from one Rust string, so this is where the driver's `Open in VS Code` comes

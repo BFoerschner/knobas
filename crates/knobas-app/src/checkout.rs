@@ -59,8 +59,9 @@ fn settable(path: Option<&str>) -> Option<&str> {
 ///
 /// A row that is not a JSON string is a row an older or a broken knobas wrote;
 /// it reads as *unset*, which is the miss direction and the one a person can
-/// fix from the settings pane. A blank one reads as unset too, because
-/// [`write_setting`] never stores one.
+/// fix from the settings pane. A blank one reads as unset too -- every caller
+/// of [`write_setting`] passes what [`settable`] answered, so a blank row is
+/// one an older knobas left behind rather than one this code can make.
 async fn read_setting(pool: &PgPool, key: &str) -> Result<Option<String>, IpcError> {
     let value: Option<serde_json::Value> =
         sqlx::query_scalar("select value from knobas.setting where key = $1")
@@ -428,15 +429,52 @@ pub async fn commands(pool: &PgPool) -> Result<Vec<OpenCommandView>, IpcError> {
     let mut out = Vec::with_capacity(checkout::OPEN_ACTIONS.len());
     for action in checkout::OPEN_ACTIONS {
         let stored = read_setting(pool, &command_key(action)).await?;
-        let is_default = stored.is_none();
-        out.push(OpenCommandView {
-            action: action.id().to_owned(),
-            label: action.label().to_owned(),
-            template: stored.or_else(|| action.default_template().map(str::to_owned)),
-            is_default,
-        });
+        out.push(command_view(action, stored, action.default_template()));
     }
     Ok(out)
+}
+
+/// One row of [`commands`], given what is stored and what the platform starts
+/// with.
+///
+/// The platform's default is an **argument**, and that is why this is a
+/// function at all: `None` for it is *not configured*, which is the state
+/// every action is in off macOS, and the gate runs on a Mac. Written inline it
+/// would be a branch nothing anywhere could execute.
+fn command_view(
+    action: OpenAction,
+    stored: Option<String>,
+    platform_default: Option<&str>,
+) -> OpenCommandView {
+    let is_default = stored.is_none();
+    OpenCommandView {
+        action: action.id().to_owned(),
+        label: action.label().to_owned(),
+        template: stored.or_else(|| platform_default.map(str::to_owned)),
+        is_default,
+    }
+}
+
+/// The template to run, or the refusal a person reads instead.
+///
+/// The platform's default is an argument for [`command_view`]'s reason: with
+/// `None` for it and nothing stored there is no command, and the message that
+/// says so is the one spec #491 asks a non-macOS button to carry. On a Mac
+/// that state is unreachable through the database, so a test is the only
+/// thing that can reach it at all.
+fn template_or_refusal(
+    action: OpenAction,
+    stored: Option<String>,
+    platform_default: Option<&str>,
+) -> Result<String, IpcError> {
+    stored
+        .or_else(|| platform_default.map(str::to_owned))
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "{} is not configured on this platform: set a command for it in Settings",
+                action.label()
+            ))
+        })
 }
 
 /// Set one action's command template, or clear it back to the platform's.
@@ -491,20 +529,12 @@ pub async fn open(pool: &PgPool, entity_id: &str, action: &str) -> Result<(), Ip
             "{entity_id} has no checkout on this machine, so there is nothing to open"
         ))
     })?;
-    let template = read_setting(pool, &command_key(action))
-        .await?
-        .or_else(|| action.default_template().map(str::to_owned))
-        .ok_or_else(|| {
-            IpcError::invalid(format!(
-                "{} is not configured on this platform: set a command for it in Settings",
-                action.label()
-            ))
-        })?;
+    let stored = read_setting(pool, &command_key(action)).await?;
+    let template = template_or_refusal(action, stored, action.default_template())?;
     let argv = checkout::expand(&template, Path::new(&path))
         .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
-    spawn(&argv).map_err(|error| {
-        IpcError::invalid(format!("'{template}' could not be run: {error}"))
-    })
+    spawn(&argv)
+        .map_err(|error| IpcError::invalid(format!("'{template}' could not be run: {error}")))
 }
 
 /// The action with this id, or a refusal naming what was asked for.
@@ -525,9 +555,9 @@ fn open_action(action: &str) -> Result<OpenAction, IpcError> {
 /// one argument and stays one, and a template cannot pipe or chain. `sh -c`
 /// would undo both properties in one line.
 ///
-/// The three standard streams are closed. An editor that prints on startup
-/// would otherwise write into the app's own stdout, and a child that fills a
-/// pipe nobody reads blocks for ever.
+/// The three standard streams go to `/dev/null`. An editor that prints on
+/// startup would otherwise write into the app's own stdout, and a child that
+/// fills a pipe nobody reads blocks for ever.
 ///
 /// The thread exists only to reap. A `Child` that is dropped without being
 /// waited on leaves a zombie for the life of the process, and an editor is
@@ -558,6 +588,58 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// The *not configured* state, which no Mac can reach through the database
+    /// -- macOS has a default for all three -- and which is what every button
+    /// off macOS is in. Reachable here because the platform's default is an
+    /// argument rather than a `cfg!`.
+    #[test]
+    fn an_action_with_no_template_on_this_platform_is_not_configured() {
+        let view = command_view(OpenAction::JetBrains, None, None);
+        assert_eq!(view.template, None);
+        assert!(view.is_default, "nothing is stored, so nothing overrode it");
+
+        let error = template_or_refusal(OpenAction::JetBrains, None, None)
+            .expect_err("no template, nothing to run");
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        assert!(
+            error.message.contains("not configured"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("Open in JetBrains"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("Settings"), "{}", error.message);
+    }
+
+    /// And the two states that do have a command: a stored template wins over
+    /// the platform's, and the platform's answers when nothing is stored.
+    #[test]
+    fn a_stored_template_wins_and_the_platforms_answers_when_nothing_is() {
+        let stored = command_view(
+            OpenAction::VsCode,
+            Some("code {path}".to_owned()),
+            Some("open -a X {path}"),
+        );
+        assert_eq!(stored.template.as_deref(), Some("code {path}"));
+        assert!(!stored.is_default);
+        assert_eq!(
+            template_or_refusal(
+                OpenAction::VsCode,
+                Some("code {path}".to_owned()),
+                Some("open -a X {path}")
+            )
+            .unwrap(),
+            "code {path}"
+        );
+
+        let fallback = command_view(OpenAction::VsCode, None, Some("open -a X {path}"));
+        assert_eq!(fallback.template.as_deref(), Some("open -a X {path}"));
+        assert!(fallback.is_default);
+    }
+
     // -- the spawn half (#501) ---------------------------------------------
 
     /// The settings keys are one string in two places -- here and in whatever
@@ -567,7 +649,10 @@ mod tests {
     /// the function under test.
     #[test]
     fn every_action_stores_its_template_under_its_own_key() {
-        let keys: Vec<String> = checkout::OPEN_ACTIONS.into_iter().map(command_key).collect();
+        let keys: Vec<String> = checkout::OPEN_ACTIONS
+            .into_iter()
+            .map(command_key)
+            .collect();
         assert_eq!(
             keys,
             [

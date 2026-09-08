@@ -8301,7 +8301,10 @@ From this commit on, each of the following requires an orchestrator decision **a
     *started*; an editor drawing a window is not something an IPC call can wait for.
   * `OpenCommandView { action, label, template, is_default }`, mirrored in
     `app/src/lib/ipc/entity.ts`. The **label is on the wire**, so the panel draws one button per
-    row and there is no second spelling of "Open in JetBrains" anywhere to drift.
+    row and no component carries a second spelling of "Open in JetBrains" to drift.
+    `app/src/lib/shell/dev/fake-tauri.ts` restates the three labels and the three macOS
+    templates, as a fixture that answers this command has to; that is the `?fake-ipc` corpus's
+    standing licence and not a second implementation of anything.
 
   **Where the argument rule is enforced.** `knobas_core::checkout::expand(template, path)` takes
   **one `&Path`**, so no field of a mirrored repo is in scope to substitute and widening that
@@ -8313,7 +8316,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   {path}`, `open -a "IntelliJ IDEA" {path}` and `open -a Terminal {path}`; every other platform
   starts with none, and the buttons there read *not configured* until one is set, because knobas
   has never been run off macOS by anyone and a guess that spawns a process is the wrong kind of
-  guess.
+  guess. **The platform is an argument, not a `cfg!`**, in all three deciders --
+  `OpenAction::default_template_on`, `command_view` and `template_or_refusal` -- because the gate
+  runs on one operating system and a rule written as `cfg!(target_os = ...)` has exactly one half
+  of itself under test. *Not configured* is a state no Mac can reach through the database, and
+  those three signatures are what let a test reach it at all.
 
   **What is not touched.** **`crates/knobas-app/capabilities/default.json` is unchanged** — the
   opener plugin's scope stays `http` and `https`, which is the point: the reason this feature is
@@ -8337,21 +8344,28 @@ From this commit on, each of the following requires an orchestrator decision **a
   `a_placeholder_that_is_not_the_path_is_refused_by_name` (six placeholder names, ADR-0016's own
   test), `an_unusable_template_says_what_is_wrong_with_it` (six refusals),
   `the_three_macos_defaults_expand_to_the_documented_commands`,
-  `only_macos_starts_with_a_template` and `every_action_is_found_by_its_own_id`;
-  `knobas_app::checkout`'s `every_action_stores_its_template_under_its_own_key`,
-  `the_open_command_serialises_the_keys_the_mirror_declares` and
-  `an_action_that_does_not_exist_is_refused_by_name`; `commands::entity`'s
+  `only_macos_starts_with_a_template` (both halves, on any platform) and
+  `every_action_is_found_by_its_own_id`; `knobas_app::checkout`'s
+  `every_action_stores_its_template_under_its_own_key`,
+  `the_open_command_serialises_the_keys_the_mirror_declares`,
+  `an_action_that_does_not_exist_is_refused_by_name`,
+  `an_action_with_no_template_on_this_platform_is_not_configured` (the arm the gate's machine
+  cannot reach through a database) and
+  `a_stored_template_wins_and_the_platforms_answers_when_nothing_is`; `commands::entity`'s
   `the_mirror_invokes_the_commands_by_their_registered_names` and `tests/wiring.rs`'s
-  `every_command_is_in_the_handler_list`, which is what makes the three reachable from the window;
-  seven in `crates/knobas-app/tests/checkout_ipc.rs` over scratch databases and a **recording
-  stub** — `opening_a_checkout_runs_the_template_with_the_scanned_path` and
+  `every_command_is_in_the_handler_list`, which is what makes the three reachable from the window,
+  beside `the_window_may_open_http_urls_and_only_http_urls`, which is the standing guard on the
+  opener scope this entry leaves alone; eight in `crates/knobas-app/tests/checkout_ipc.rs` over
+  scratch databases and a **recording stub** —
+  `opening_a_checkout_runs_the_template_with_the_scanned_path` and
   `an_override_is_what_the_command_is_given` assert the argument list a real process was handed,
   `a_branch_opens_its_repositorys_checkout`, `a_repo_with_no_checkout_refuses_and_names_it`,
   `a_template_that_cannot_be_run_is_refused_where_it_is_typed`,
-  `a_program_that_will_not_start_names_the_template` and
-  `a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_back`; and, on the
-  rendered side, six in `CheckoutPanel.test.svelte.ts` (the failure message names the template,
-  which the panel composes itself) and six in `CheckoutsSection.test.svelte.ts`.
+  `a_program_that_will_not_start_names_the_template`,
+  `a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_back` and
+  `clearing_a_template_hands_this_platforms_default_back`; and, on the rendered side, seven in
+  `CheckoutPanel.test.svelte.ts` (the failure message names the template, which the panel
+  composes itself) and six in `CheckoutsSection.test.svelte.ts`.
 
   **One criterion of #501 is open and disclosed**, per the deputy's ruling of 2026-09-08 on #500:
   the desktop witness has not run. `testenv/README.md`'s *What is not witnessed yet* carries it,

@@ -90,8 +90,20 @@ wait_until() {
     die "$what"
 }
 
-present() { [ "$("$ax" find "$pid" "$1" 2>/dev/null)" != 0 ]; }
-exactly_one() { [ "$("$ax" find "$pid" "$1" 2>/dev/null)" = 1 ]; }
+# How many elements carry a label, as a number and never as "whatever `ax`
+# printed". `ax find` writes nothing on stdout when it fails, and an empty
+# answer compared with `!= 0` is *true* -- so a broken helper would make every
+# "it appeared" below pass. The count is read once and matched against digits.
+count_of() {
+    local answer
+    answer=$("$ax" find "$pid" "$1" 2>/dev/null || true)
+    case $answer in
+    '' | *[!0-9]*) printf 'x\n' ;;
+    *) printf '%s\n' "$answer" ;;
+    esac
+}
+present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
+exactly_one() { [ "$(count_of "$1")" = 1 ]; }
 
 # fill <label> <text> -- put <text> in the field called <label>, replacing
 # whatever is in it.
@@ -139,7 +151,12 @@ fill "$CLONES_ROOT_FIELD" "$clones"
 "$ax" press "$pid" "$SAVE_CLONES_ROOT" || die "could not press '$SAVE_CLONES_ROOT'"
 say "clones root set to $clones"
 
-fill "$VSCODE_FIELD" "$stub {path}"
+# The stub's path is **quoted inside the template**: `mktemp -d` answers under
+# `$TMPDIR`, and a `TMPDIR` with a space in it would otherwise make the first
+# word of the template something that is not the stub -- a driver failure
+# wearing the feature's clothes. `expand` groups a quoted word into one
+# argument, which is exactly what this needs.
+fill "$VSCODE_FIELD" "\"$stub\" {path}"
 "$ax" press "$pid" "$SAVE_VSCODE" || die "could not press '$SAVE_VSCODE'"
 say "the '$VSCODE_FIELD' command now runs the stub"
 

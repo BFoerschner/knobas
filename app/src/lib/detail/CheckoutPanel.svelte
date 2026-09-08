@@ -83,27 +83,35 @@
     });
   });
 
-  /** Set or clear the override, and redraw from what the backend now says. */
   /**
-   * The open actions, once.
+   * The open actions, re-read whenever a detail opens.
    *
-   * Read here and not per entity, because the templates are settings and have
-   * nothing to do with which repo is on screen; `$effect` reads no state, so
-   * it runs on mount and not again.
+   * They are settings and have nothing to do with which repo is on screen, so
+   * once on mount would be enough for a panel that is always remounted. It is
+   * not enough for one that is not: somebody who changes a command in Settings
+   * and comes back to a detail that stayed mounted would press a button
+   * disabled by the old answer, or read a failure message naming the old
+   * template. Reading on `entityId` costs one query per opened detail and
+   * removes that state.
    *
-   * A refusal leaves `commands` at `null` and draws no buttons, which is the
-   * same choice the checkout read above makes and for its reason: a repo
+   * A refusal leaves `commands` where it was and draws no buttons, which is
+   * the same choice the checkout read above makes and for its reason: a repo
    * detail is worth drawing without them, and a toast about a read nobody
    * asked for would be noise over the item they did open.
    */
+  const readCommands = latestRead<CheckoutCommand[]>();
+
   $effect(() => {
-    void checkoutCommands().then(
-      (answer) => {
+    void entityId;
+    void readCommands(checkoutCommands, {
+      ok: (answer) => {
         commands = answer;
       },
-      () => {},
-    );
+      fail: () => {},
+    });
   });
+
+  /** Set or clear the override, and redraw from what the backend now says. */
 
   /** Start one action's program at this checkout. */
   async function run(command: CheckoutCommand) {

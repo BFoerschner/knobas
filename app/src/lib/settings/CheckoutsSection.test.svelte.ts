@@ -204,9 +204,14 @@ test("each action draws the command it would run, and says it is the default", a
   // Three of them, one per action: a default nobody has changed is still a
   // default, and the section says so rather than looking like a stored value.
   expect(text().match(/The default on this platform\./g)).toHaveLength(3);
-  // The rule the placeholder exists for, in the words the ADR uses.
-  expect(text()).toContain("{path}");
-  expect(text()).toContain("only");
+  // The rule the placeholder exists for, in the words the ADR uses: this is
+  // the one place a person is told what a command knobas runs can and cannot
+  // be handed, and it is the sentence ADR-0016 is about.
+  expect(text()).toContain(
+    "{path} stands for the checkout, and it is the only thing knobas fills in",
+  );
+  expect(text()).toContain("nothing a source mirrored");
+  expect(text()).toContain("No shell is involved");
 });
 
 test("an action with no template says it is not configured", async () => {

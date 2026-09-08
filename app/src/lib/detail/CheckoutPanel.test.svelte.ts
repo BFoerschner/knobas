@@ -34,6 +34,8 @@ let refuseRead = false;
 let refuseOpen: string | null = null;
 /** Set by the one test about a refused commands read. */
 let refuseCommands = false;
+/** How many times the panel has asked for the open actions. */
+let commandReads = 0;
 let commands: CheckoutCommand[];
 
 const VSCODE = 'open -a "Visual Studio Code" {path}';
@@ -73,10 +75,12 @@ vi.mock("../ipc/entity", () => ({
     writes.push({ entityId, path });
     return Promise.resolve(afterWrite ?? answer);
   },
-  checkoutCommands: () =>
-    refuseCommands
+  checkoutCommands: () => {
+    commandReads += 1;
+    return refuseCommands
       ? Promise.reject({ code: "internal", message: "no database", source_id: null })
-      : Promise.resolve(commands),
+      : Promise.resolve(commands);
+  },
   openCheckout: (entityId: string, action: string) => {
     opens.push({ entityId, action });
     if (action === refuseOpen) {
@@ -146,6 +150,7 @@ beforeEach(() => {
   opens.length = 0;
   refuseOpen = null;
   refuseCommands = false;
+  commandReads = 0;
   commands = configured();
   toasts.items = [];
   target = document.createElement("div");
@@ -367,4 +372,31 @@ test("a refused commands read leaves the panel drawing its checkout and no butto
   expect(text()).toContain("/Users/mara/src/payout-service");
   expect(() => button("Open in VS Code")).toThrow();
   expect(toasts.items).toEqual([]);
+});
+
+test("a second detail re-reads the commands, so a changed template is not stale", async () => {
+  answer = view(FOUND);
+  // A reactive props object, because what is under test is the panel staying
+  // mounted while the address under it changes -- which is what happens when a
+  // reader opens a second repo from the same room, and the case a fresh mount
+  // per test cannot reach.
+  const props = $state({ entityId: REPO });
+  app = mount(CheckoutPanel, { target, props });
+  flushSync();
+  await settle();
+  expect(commandReads).toBe(1);
+
+  // The template somebody just changed in Settings.
+  commands = configured().map((command) =>
+    command.action === "vscode" ? { ...command, template: "code {path}" } : command,
+  );
+  props.entityId = `${REPO}-two`;
+  flushSync();
+  await settle();
+
+  expect(commandReads).toBe(2);
+  refuseOpen = "vscode";
+  button("Open in VS Code").click();
+  await settle();
+  expect(toasts.items.at(-1)?.text).toContain("code {path}");
 });
