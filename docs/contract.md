@@ -8844,18 +8844,23 @@ From this commit on, each of the following requires an orchestrator decision **a
   no ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #509**
   ([comment](https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579197449),
   `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
-  on the `importer` flag and on the keychain namespace. The two sentences stand side by side rather
-  than the first being rewritten, the treatment §10.8 gives every sentence it supersedes.
+  on the `importer` flag and on the keychain namespace, **and its `Landing` argument by the second
+  ruling of 2026-09-08**
+  ([comment](https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579926452), same file,
+  `## #509 (second ruling)`), which is the one part of this entry the first ruling ratified in a
+  shape the code no longer has. The sentences stand side by side rather than the first being
+  rewritten, the treatment §10.8 gives every sentence it supersedes.
 
-  **The IPC schema — one new command, one new DTO, no change to any existing one:**
+  **The IPC schema — one new command, two new DTOs, no change to any existing one:**
 
   ```rust
   #[tauri::command] pub async fn produce_estate_file<R>(app, lifecycle,
-      producer: String, token: Option<String>, land_under: Option<String>)
+      producer: String, token: Option<String>, land_under: Option<assets::Landing>)
       -> Result<assets::hcloud::Produced, IpcError>;
   ```
 
-  mirrored in `app/src/lib/ipc/assets.ts` as `produceEstateFile(producer, token, landUnder)`.
+  mirrored in `app/src/lib/ipc/assets.ts` as
+  `produceEstateFile(producer, token, landUnder: Landing | null)`.
 
   * **On `commands::assets`, and the `commands/` + `ipc/` module layout is unchanged.** The estate
     is what this produces and the two Import commands that consume it already live there — the
@@ -8866,7 +8871,7 @@ From this commit on, each of the following requires an orchestrator decision **a
     derived: a frontend reading `id !== "estate_file"` would be measuring a representation of the
     thing, which is the mistake `Producer::importer`'s own doc refuses one surface over, and
     `the_chooser_offers_producers_this_build_knows` now holds the flag as well as the id.
-  * **`Produced`** is the one new wire shape: a tag-`state` union of `token_needed`,
+  * **`Produced`** is the outward wire shape: a tag-`state` union of `token_needed`,
     `landing_needed { servers }` and `ready { file, new_servers }`, mirrored as
     `TokenNeeded | LandingNeeded | ProducedFile`. A union rather than a record of optionals
     because two of the three fields are meaningless in each state and `{ file: null, needs: null }`
@@ -8876,12 +8881,35 @@ From this commit on, each of the following requires an orchestrator decision **a
     constructed in `assets::hcloud`, serialized outwards, and decoded nowhere: it rides in no
     archive, no settings row, no file and no `pg_dump`, so there is no older shape for an absent
     field to describe. The day one is decoded is the commit that owes the attribute and an entry.
+  * **`Landing` is the inward one**, added by the second ruling of 2026-09-08 and the only shape
+    this entry declares that the backend *decodes*: `struct Landing { parent: Option<String> }`,
+    `deny_unknown_fields`, `Deserialize` only, mirrored as `Landing { parent: string | null }`.
+    **`#[serde(default)]` is owed here and is present, on `parent`** — the sentence every
+    field-on-a-DTO entry since #39 has had to answer, and the answer is the opposite of
+    `Produced`'s: `{}` reads as the top, because an absent key and an explicit `null` are one
+    answer *inside* the record. The distinction the type exists for is one level out — between the
+    **argument** being absent and this field being `null` — and those two do cross the bridge as
+    different things. It is decoded from the bridge and from nowhere else: no archive, no settings
+    row, no file, no `pg_dump`.
   * **`token` and `land_under` are `Option`, and that is not #508's argument in reverse.** #508's
     `producer` is required because a missing producer would have to be read as *some* producer and
     the only safe reading is the one that copies every asset. Here absence has an exact meaning
     and it is the common case: an absent `token` means *read the keychain*, which is what makes
     *asked once* true, and an absent `land_under` means *nothing has been said yet*, which is the
     question `landing_needed` exists to ask. Both callers on the bridge are the Import dialog.
+    **A *present* `land_under` has a domain of its own, and that is the second ruling of
+    2026-09-08.** It was `Option<String>` when the first ruling read this paragraph, which gave
+    *the top of the estate* and *nothing has been said yet* one spelling between them: the dialog
+    offered the top, promised it in words, sent a bare `null`, and the run asked the same question
+    again — on an estate with no assets, the only button there was did nothing, for ever. So a
+    present value is now a `Landing`, whose `parent` is `None` for the top, the spelling
+    `create_asset` and `move_asset` already take and the one `FileAsset::parent` has read as a
+    top-level asset since #439. What the first ruling settled about **absence** is untouched and
+    still exact; what it did not see is that the present value carried two answers in one.
+    `Option<Option<String>>` was the shape not taken — it would rest on the mirror sending
+    `undefined` for one and `null` for the other, an invisible distinction on the wire — and a
+    reserved string for the top is a reserved namespace, which the *what is not touched* list below
+    rules out by name.
   * **No event.** The Tree re-reads after the apply, by the session that made it — the Import's
     own arrangement since #439, unchanged.
   * **One barrel grows one line.** `crates/knobas-app/src/lib.rs`'s handler list gains
