@@ -7,6 +7,7 @@
 //! an id no adapter answers to (`jira`) needs no lock.
 
 use knobas_app::sources::demo;
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// Held by every test that syncs the `mock` source.
 ///
@@ -503,6 +504,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     let preview = knobas_app::assets::preview_import(
         &pool,
         include_str!("../../../testenv/hetzner/estate.json"),
+        ESTATE_FILE_PRODUCER,
     )
     .await
     .expect("the preview");

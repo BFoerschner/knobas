@@ -141,7 +141,8 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
             error,
         })?;
 
-    let estate = crate::assets::apply_import(pool, ESTATE_FILE).await?;
+    let estate =
+        crate::assets::apply_import(pool, ESTATE_FILE, crate::assets::ESTATE_FILE_PRODUCER).await?;
     // Logged rather than returned: `SyncReport` is a frozen wire shape and
     // this is a second load's counts, not the run's. `Load demo data` reports
     // the mirror it can count; what the estate did is in the app log and in

@@ -22,6 +22,22 @@
   story 24's promise made visible *before* the write rather than discovered
   after it.
 
+  ## The chooser (#508)
+
+  *Import from* is where an estate file comes from, and it has **one entry
+  today**: the file a person picked off the disk. `IMPORT_PRODUCERS` in
+  `../ipc/assets` is the list, the hcloud and Docker importers (spec #491,
+  streams 9 and 10) each add one, and what the chosen entry decides on the
+  backend is the **origin key** it declares — the Import's second matching rule
+  (`CONTEXT.md`, *Origin key*), used when a file entry's id is not one the tree
+  holds. That is why the id is sent with the preview *and* with the apply: it is
+  half of what decides the plan.
+
+  With one entry the chooser cannot change, so there is nothing here that
+  reacts to it changing. The entry that arrives next brings its own question
+  with it — where its text comes from, since it is a produce command and not an
+  `<input type="file">` — and answers this one on the way past.
+
   ## The file is read in the webview
 
   `<input type="file">` and the browser's own `File`, not a Tauri file dialog:
@@ -37,6 +53,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import { IMPORT_PRODUCERS } from "../ipc/assets";
   import type {
     applyEstateImport,
     ImportOutcome,
@@ -68,8 +85,12 @@
   let failure = $state<string | null>(null);
   let busy = $state(false);
 
+  /** Which of {@link IMPORT_PRODUCERS} this import is from. */
+  let producer = $state(IMPORT_PRODUCERS[0].id);
+
   /** Unique per instance, so two stacked dialogs cannot share a field id. */
   const fieldId = `estate-file-${Math.random().toString(36).slice(2, 9)}`;
+  const producerId = `import-from-${Math.random().toString(36).slice(2, 9)}`;
 
   /** How a property value reads on one line of the preview. */
   function shown(value: PropertyValue | null): string {
@@ -91,7 +112,7 @@
       // the backend re-decides inside its own transaction, so what is written
       // is what this file says at the moment it is written.
       file = text;
-      preview = await previewImport(text);
+      preview = await previewImport(text, producer);
     } catch (rejection) {
       // In the dialog and in the backend's own words: a file that is not an
       // estate file is refused by name, and the answer to a dialog belongs in
@@ -107,7 +128,7 @@
     busy = true;
     failure = null;
     try {
-      onimported(await applyImport(file));
+      onimported(await applyImport(file, producer));
     } catch (rejection) {
       failure = ipcErrorMessage(rejection);
     } finally {
@@ -131,6 +152,15 @@
 >
   {#snippet body()}
     <div class="fields">
+      <div class="fld">
+        <label class="l" for={producerId}>Import from</label>
+        <select class="inp" id={producerId} bind:value={producer}>
+          {#each IMPORT_PRODUCERS as option (option.id)}
+            <option value={option.id}>{option.label}</option>
+          {/each}
+        </select>
+      </div>
+
       <div class="fld">
         <label class="l" for={fieldId}>Estate file</label>
         <input

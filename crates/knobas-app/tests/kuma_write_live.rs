@@ -50,6 +50,7 @@ use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
 use live_digest::{Connections, Quiet, sync};
 use serde_json::json;
 use sqlx::{PgPool, Row};
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// The configured source id, which is also the monitor entities' namespace.
 const KUMA: &str = "kuma";
@@ -511,7 +512,7 @@ async fn a_monitor_created_through_the_write_queue_is_mirrored_and_attached_to_i
     // And whatever a killed earlier run left under that name.
     kuma_monitor(&["delete", CREATED]);
 
-    let imported = knobas_app::assets::apply_import(&state.pool, ESTATE_FILE)
+    let imported = knobas_app::assets::apply_import(&state.pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate file imports into a fresh profile")
         .value;

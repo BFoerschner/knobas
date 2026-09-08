@@ -19,6 +19,7 @@ use knobas_app::commands::search::{
     search_inner, smart_list_items_inner, smart_lists_inner,
 };
 use knobas_search::{SearchFilters, SearchQuery};
+use knobas_app::assets::ESTATE_FILE_PRODUCER;
 
 /// A pool with the schema on it.
 async fn pool() -> sqlx::PgPool {
@@ -828,7 +829,7 @@ async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
     mirror_monitor(&pool, "knobas-jira", Some(31.0)).await;
     mirror_monitor(&pool, "jira (tunnel)", None).await;
 
-    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE)
+    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the estate imports")
         .value;

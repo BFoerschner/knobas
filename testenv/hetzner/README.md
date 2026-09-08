@@ -65,10 +65,14 @@ an absent one. It also parses the host-list table above and the compose file's
 service list, so adding a fourth server or a new service and forgetting the
 estate file is a red gate rather than a discovery months later, and a server
 whose type or profile changes in one place and not the other is too, as is a
-service recorded on the wrong host. The one thing it cannot check is the
-addresses: `hosts.env` is gitignored, so the public IPs in `estate.json` are
-the only committed copy of them, and `hcloud server list` is what settles a
-disagreement.
+service recorded on the wrong host. The two things it cannot check are the
+addresses and the `hcloud_id`s: `hosts.env` is gitignored, so the public IPs in
+`estate.json` are the only committed copy of them, and the ids have no other
+copy at all -- `hcloud server list` is what settles a disagreement about
+either. The `hcloud_id` on each server (#508) is that server's **origin key**
+(`CONTEXT.md`): what the hcloud importer's produced file matches this server on
+when the id it invented is not one the tree holds, so a wrong one is a second
+copy of the server rather than a red test.
 
 Nothing in the file is provisional any more, and the two things that were are
 named here because their settling is what the surrounding tests now rest on.

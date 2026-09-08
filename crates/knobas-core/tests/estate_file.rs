@@ -420,6 +420,7 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
     let estate = estate();
     let assets = assets(&estate);
     let rows = host_list();
+    let mut hcloud_ids: HashSet<String> = HashSet::new();
     for row in &rows {
         let server = &row.server;
         // By id and not by name: a server and the container on it share a name
@@ -482,6 +483,35 @@ fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
         address.parse::<Ipv4Addr>().unwrap_or_else(|e| {
             panic!("`{server}`'s ip property `{address}` is not an address: {e}")
         });
+
+        // `hcloud_id` is the **origin key** of the hcloud producer
+        // (`CONTEXT.md`; `knobas_app::assets::HCLOUD_PRODUCER`, issue #508):
+        // what a produced file matches an existing asset on when its own id is
+        // not one the tree holds. So a server without one is a server the
+        // importer will create a second copy of, and the estate file is the
+        // only committed copy of the values -- `hcloud server list` is what
+        // settles a disagreement, exactly as it is for the addresses.
+        //
+        // **A string of digits and not a number**, because the two are
+        // different property values (`knobas_app::assets::PropertyValue`:
+        // `"8080"` and `8080` are not one property) and the match is on the
+        // stored value. The producer and this file have to agree on which, and
+        // text is the reading that keeps an identifier out of an f64.
+        let hcloud_id = asset["properties"]["hcloud_id"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "`{server}` needs its `hcloud_id`, written as a string: it                      is the origin key an hcloud import matches this server on"
+                )
+            });
+        assert!(
+            !hcloud_id.is_empty() && hcloud_id.chars().all(|c| c.is_ascii_digit()),
+            "`{server}`'s hcloud_id is `{hcloud_id}`, and hcloud numbers its              servers"
+        );
+        assert!(
+            hcloud_ids.insert(hcloud_id.to_owned()),
+            "`{hcloud_id}` is the hcloud_id of two servers in this file. An              origin key names one thing, and an import of a file carrying it              would be refused rather than guess which"
+        );
 
         // The `runs` column, which is the fact the set-comparison in
         // `every_compose_service_the_notebook_runs_is_recorded` cannot carry:
