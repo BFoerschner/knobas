@@ -1339,12 +1339,14 @@ function routeDetail(args: Record<string, unknown>) {
 /**
  * The file an import was handed, or a refusal.
  *
- * **One file and no other.** The parse is `JSON.parse` and a shape check and
- * nothing else, where `assets::plan` is a versioned parser with a closed key
+ * **Two files and no others** since #509: the estate this fixture was built
+ * from, and whatever its own importer last produced ({@link PRODUCED_FILE},
+ * matched as text). The parse is `JSON.parse` and a shape check and nothing
+ * else, where `assets::plan` is a versioned parser with a closed key
  * vocabulary, an id namespace check, a cycle check and a property-kind rule.
  * Re-implementing any of that here would be a second answer to *is this file
- * legal*, and the second answer is the one that goes stale -- so anything that
- * is not the estate this fixture was built from is refused by name.
+ * legal*, and the second answer is the one that goes stale -- so anything else
+ * is refused by name.
  */
 function estateFileOf(args: Record<string, unknown>) {
   let parsed: unknown;
@@ -1354,12 +1356,14 @@ function estateFileOf(args: Record<string, unknown>) {
     throw { code: "invalid", message: "that file is not JSON", source_id: null };
   }
   const file = parsed as { name?: string; assets?: EstateFileAsset[]; routes?: EstateFileRoute[] };
-  if (file.name !== ESTATE.name || !Array.isArray(file.assets) || !Array.isArray(file.routes)) {
+  const ours = file.name === ESTATE.name || String(args.file ?? "") === PRODUCED_FILE;
+  if (!ours || !Array.isArray(file.assets) || !Array.isArray(file.routes)) {
     throw {
       code: "invalid",
       message:
-        `this harness replays one import — "${ESTATE.name}", the estate file it ` +
-        `draws its own Tree from. Any other file is the real command's to parse.`,
+        `this harness replays two imports — "${ESTATE.name}", the estate file it ` +
+        `draws its own Tree from, and the one its own importer just produced. ` +
+        `Any other file is the real command's to parse.`,
       source_id: null,
     };
   }
@@ -1407,6 +1411,17 @@ let IMPORTER_TOKEN: string | null = null;
 /** The server this fixture's hcloud holds and the estate does not. */
 const IMPORTER_NEW_SERVER = "knobas-scratch";
 
+/**
+ * The exact text the last produce answered with.
+ *
+ * Held so that {@link estateFileOf} can accept it: that function's rule is
+ * *one file and no other*, and since #509 this harness has two of its own --
+ * the estate it draws its Tree from, and the file its own importer just made.
+ * Compared as **text** rather than by a name or a shape, so widening the rule
+ * did not turn it into a second parser.
+ */
+let PRODUCED_FILE: string | null = null;
+
 function estateProduce(args: Record<string, unknown>) {
   const token = typeof args.token === "string" ? args.token.trim() : "";
   if (token !== "") IMPORTER_TOKEN = token;
@@ -1430,13 +1445,14 @@ function estateProduce(args: Record<string, unknown>) {
     },
   };
   if (!held) entry.parent = landUnder;
+  PRODUCED_FILE = JSON.stringify(
+    { version: 1, name: "Hetzner Cloud", assets: [entry], routes: [] },
+    null,
+    2,
+  );
   return {
     state: "ready",
-    file: JSON.stringify(
-      { version: 1, name: "Hetzner Cloud", assets: [entry], routes: [] },
-      null,
-      2,
-    ),
+    file: PRODUCED_FILE,
     new_servers: held ? [] : [IMPORTER_NEW_SERVER],
   };
 }

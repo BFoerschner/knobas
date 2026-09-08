@@ -611,6 +611,7 @@ test("land under is asked only when the importer found a server the estate lacks
   unmount(app!);
   app = undefined;
   script = [
+    { state: "token_needed" },
     { state: "landing_needed", servers: ["knobas-scratch"] },
     { state: "ready", file: FILE, new_servers: ["knobas-scratch"] },
   ];
@@ -621,7 +622,18 @@ test("land under is asked only when the importer found a server the estate lacks
   chooseImporter();
   button("Read Hetzner Cloud")?.click();
   await settle();
+  tokenField()!.value = "a-hetzner-token";
+  tokenField()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
 
+  // The token went with the run that reached the far end, so the field is
+  // gone even though no file has come back yet: `landing_needed` is an answer
+  // from a credential that worked, and a box still holding it through the next
+  // step would ask again for something the keychain now has. Found by the
+  // `?fake-ipc` walk, which is why it is asserted here.
+  expect(tokenField()).toBeNull();
   expect(target.textContent).toContain("knobas-scratch");
   expect(target.querySelector(".dlg .pick")).not.toBeNull();
   // The picker walks the estate: the top level holds the one asset this
@@ -635,6 +647,7 @@ test("land under is asked only when the importer found a server the estate lacks
   await settle();
   expect(asked.produces).toEqual([
     ["hcloud", null, null],
+    ["hcloud", "a-hetzner-token", null],
     ["hcloud", null, "asset:knobas-estate"],
   ]);
 });

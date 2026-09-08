@@ -222,12 +222,17 @@
         tokenWanted = true;
         return;
       }
+      // Anything but `token_needed` is a run that reached the far end, so the
+      // token has been accepted and stored -- the field goes, and the copy in
+      // it with it. Clearing this only on the way to a *file* would leave a
+      // credential on screen through the whole *land under* step, and would
+      // ask again for one the keychain already holds.
+      tokenWanted = false;
+      token = "";
       if (answer.state === "landing_needed") {
         landing = answer.servers;
         return;
       }
-      tokenWanted = false;
-      token = "";
       landing = null;
       produced = answer.new_servers;
       file = answer.file;
