@@ -287,11 +287,7 @@ pub async fn create_smart_list_inner(
 /// # Errors
 ///
 /// See [`rename_smart_list`].
-pub async fn rename_smart_list_inner(
-    pool: &PgPool,
-    id: &str,
-    label: &str,
-) -> Result<(), IpcError> {
+pub async fn rename_smart_list_inner(pool: &PgPool, id: &str, label: &str) -> Result<(), IpcError> {
     Ok(knobas_search::Searcher::new(pool.clone())
         .rename_list(id, label)
         .await?)

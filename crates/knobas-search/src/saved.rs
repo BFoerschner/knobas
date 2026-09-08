@@ -226,12 +226,12 @@ pub async fn all(pool: &PgPool) -> Result<Vec<SavedList>, SearchError> {
 ///
 /// [`SearchError::Db`] if the table cannot be read.
 pub async fn find(pool: &PgPool, id: &str) -> Result<Option<SavedList>, SearchError> {
-    Ok(
-        sqlx::query_as::<_, SavedList>("select id, label, query from knobas.smart_list where id = $1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?,
+    Ok(sqlx::query_as::<_, SavedList>(
+        "select id, label, query from knobas.smart_list where id = $1",
     )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 /// Save a launcher query as a list.

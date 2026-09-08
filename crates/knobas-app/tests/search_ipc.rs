@@ -1230,11 +1230,43 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     let pool = saved_pool("saved-keeps").await;
     let t = token("keep");
     let stamp = "-4 minutes";
-    mirror_row(&pool, "jira:A", "ticket", &format!("{t} one"), "mara", stamp).await;
-    mirror_row(&pool, "jira:B", "ticket", &format!("{t} two"), "mara", stamp).await;
-    mirror_row(&pool, "jira:C", "ticket", &format!("{t} three"), "jonas", stamp).await;
+    mirror_row(
+        &pool,
+        "jira:A",
+        "ticket",
+        &format!("{t} one"),
+        "mara",
+        stamp,
+    )
+    .await;
+    mirror_row(
+        &pool,
+        "jira:B",
+        "ticket",
+        &format!("{t} two"),
+        "mara",
+        stamp,
+    )
+    .await;
+    mirror_row(
+        &pool,
+        "jira:C",
+        "ticket",
+        &format!("{t} three"),
+        "jonas",
+        stamp,
+    )
+    .await;
     mirror_row(&pool, "jira:D", "pr", &format!("{t} four"), "mara", stamp).await;
-    mirror_row(&pool, "jira:E", "ticket", "nothing to do with it", "mara", stamp).await;
+    mirror_row(
+        &pool,
+        "jira:E",
+        "ticket",
+        "nothing to do with it",
+        "mara",
+        stamp,
+    )
+    .await;
 
     let raw = format!("#{t} @mara");
     let made = create_smart_list_inner(&pool, "Mara's open ones", &raw)
@@ -1249,7 +1281,10 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     assert_eq!(wire["needs_attention"], false, "{wire}");
     // A saved list's blurb is the query it stands for.
     assert_eq!(wire["description"], raw, "{wire}");
-    assert_eq!(wire["count"], 2, "the two tickets Mara wrote carrying {t}: {wire}");
+    assert_eq!(
+        wire["count"], 2,
+        "the two tickets Mara wrote carrying {t}: {wire}"
+    );
 
     // And on the rail itself: after the built-ins, never among them.
     let listed = rail(&pool).await;
@@ -1298,7 +1333,11 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     ids.sort();
     assert_eq!(ids, ["jira:A", "jira:B"], "{v}");
     assert_eq!(
-        opened.groups.iter().map(|g| g.kind.as_str()).collect::<Vec<_>>(),
+        opened
+            .groups
+            .iter()
+            .map(|g| g.kind.as_str())
+            .collect::<Vec<_>>(),
         ["ticket"],
         "the PR is out because of the prefix, not because it did not match: {v}"
     );
@@ -1591,7 +1630,9 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
 
     // Opened once, so the seen-stamp exists and the rename can be shown not to
     // have lost it.
-    smart_list_items_inner(&pool, &made.id, 20).await.expect("opens");
+    smart_list_items_inner(&pool, &made.id, 20)
+        .await
+        .expect("opens");
 
     rename_smart_list_inner(&pool, &made.id, "  SEPA  ")
         .await
@@ -1687,7 +1728,11 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
         ("a list of a list", "Alias", "list:mine"),
         ("the help card", "Help", "?"),
         ("nothing to search for", "Nothing", "   "),
-        ("a paste rather than a query", "Paste", &"x".repeat(600) as &str),
+        (
+            "a paste rather than a query",
+            "Paste",
+            &"x".repeat(600) as &str,
+        ),
     ] {
         let refused = create_smart_list_inner(&pool, label, query)
             .await
@@ -1725,7 +1770,9 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
         .expect("saved");
     assert_ne!(made.id, "mine", "a saved list may not shadow a built-in");
     assert_eq!(made.id, "my-items");
-    let clash = create_smart_list_inner(&pool, "mine", &t).await.expect("saved");
+    let clash = create_smart_list_inner(&pool, "mine", &t)
+        .await
+        .expect("saved");
     assert_eq!(clash.id, "mine-2");
     // The proof is what `list:mine` opens, not what the generator returned.
     let built_in = smart_list_items_inner(&pool, "mine", 20)

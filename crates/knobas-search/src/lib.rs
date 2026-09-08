@@ -57,8 +57,8 @@ use sqlx::PgPool;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
-pub use saved::{Refusal, SavedList};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
+pub use saved::{Refusal, SavedList};
 pub use types::{
     EntityRow, FilterAnswer, FilterCoverage, FilterDimension, ParsedQuery, Prefix, ResultGroup,
     SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
@@ -266,11 +266,7 @@ impl Searcher {
     /// [`SearchError::Invalid`] for a blank name, for a query today's grammar
     /// cannot run, and when [`saved::MAX_SAVED_LISTS`] are already saved;
     /// [`SearchError::Db`] if the row cannot be written.
-    pub async fn save_list(
-        &self,
-        label: &str,
-        raw: &str,
-    ) -> Result<SmartListSummary, SearchError> {
+    pub async fn save_list(&self, label: &str, raw: &str) -> Result<SmartListSummary, SearchError> {
         let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
         let created = saved::create(&self.pool, &vocab, label, raw).await?;
         // Read back through the same function the rail reads, rather than
