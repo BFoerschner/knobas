@@ -679,3 +679,42 @@ test("the produced file is offered for download", async () => {
   expect(target.textContent).toContain("1 server is new");
   expect(calls.previewed).toEqual([FILE]);
 });
+
+/**
+ * **Changing the chooser clears what the previous producer got to.**
+ *
+ * A preview is a plan drawn under one producer's **origin key** — the second
+ * matching rule (#508) — so a preview carried across the chooser would offer
+ * *Import* on a plan the backend is not about to run. The Import button going
+ * back to disabled is the part a reader can act on, and the groups going with
+ * it is what says the plan was dropped rather than hidden.
+ *
+ * Written because the `?fake-ipc` walk could see it and no test could: the
+ * header claimed this and a mutant deleting the handler survived all nine
+ * cases before it.
+ */
+test("choosing another producer drops the preview the last one drew", async () => {
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+
+  await choose('{"assets":[]}');
+  expect(calls.previewed).toEqual(['{"assets":[]}']);
+  expect(groups().length).toBeGreaterThan(0);
+  const importButton = () =>
+    [...target.querySelectorAll<HTMLButtonElement>(".dlg button")].find(
+      (candidate) => candidate.textContent?.trim() === "Import",
+    );
+  expect(importButton()?.disabled).toBe(false);
+
+  chooseImporter();
+  await settle();
+
+  expect(groups()).toEqual([]);
+  expect(importButton()?.disabled).toBe(true);
+  expect(target.querySelector(".dlg a.dl")).toBeNull();
+  // And nothing was sent on the way past: the chooser is a choice, not a run.
+  expect(calls.previewed).toEqual(['{"assets":[]}']);
+  expect(calls.produces).toEqual([]);
+});
