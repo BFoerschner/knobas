@@ -1365,3 +1365,125 @@ statement or a budget Björn moves, neither of which a ticket in this loop may d
 in `CONTEXT.md` and no code for part 3; striking the clause entirely is one revert and leaves the
 cap enforced and unnamed. Trivial for part 4: pulling #541 into v1.5 is a milestone edit and
 closing it `wontfix` is one click, and nothing in #540 forecloses either.
+
+---
+
+## #509 — the frozen gate for the produce command, three settled decisions, and three disclosed gaps
+
+Ruled 2026-09-08. Comment:
+<https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579197449>
+
+**The fork:** four, raised by PR #539 and flagged rather than left open — the implementer decided
+each, disclosed them, and held the PR for the gate. (1) The PR adds
+`produce_estate_file(app, lifecycle, producer, token: Option, land_under: Option) -> Produced` on
+`commands::assets`, one line at the foot of `crates/knobas-app/src/lib.rs`'s handler list, the DTO
+`Produced` (mirrored as `TokenNeeded | LandingNeeded | ProducedFile`), a field `importer: boolean`
+on #508's `ImportProducer`, and `knobas_secrets::KeychainAccount` with the `importer:` namespace —
+the IPC command schema and the barrel are on §10.8's list and the namespace is interfaces §3's
+convention, and the entry reads *"claims no ratification"* as #508's did. (2)
+`testenv/hetzner/estate.json` gained two properties per Hetzner server (`location: nbg1` and the
+label `knobas: testenv`), and the producer writes hcloud's image name into the file's existing `os`
+rather than a new `image` — a checked-in fixture that #510 and the live recipes read. (3) The
+`KeychainAccount` newtype and the forty call sites the compiler asked for, in a crate the ticket
+called *"the secrets crate's only change"*. (4) Three gaps the PR body discloses: the recording that
+can never go red when Hetzner changes its JSON; the dialog's `unauthorized` branch, which no test
+holds; and `produce_estate_file`'s body, not driven through `tauri::test`.
+
+**Ruling:** (1) **Authorised, and the entry is sufficient as written; the merge-manager may
+proceed** once the ratification clause, the rulings-file append and parts 4b and 4c are on the
+branch. The ticket names the touch in its own words — *"a token kept in the keychain under the new
+`importer:` namespace (the secrets crate's only change, §10.8 entry)"* and the fifth criterion's
+*"§10.8 entries for the produce command and the namespace"* — and spec #491's stream map row 9 lists
+*"secrets namespace `importer:`; one IPC produce command"* under *Frozen-surface touches*. The
+`importer` flag is not in the spec's count and the fourth criterion is why it exists: a chooser that
+*"asks for the token once"* has to know which of its entries owes a token, and a flag the backend
+states is the reading that does not derive importer-ness from `id !== "estate_file"`. The rule
+recorded four times on #491 covers the count — *"the ticket is the operative text and the spec's
+count is a shorthand, not a prohibition"* — and the orchestrator posts a fifth note there. The
+clause owed: the entry's *"claims no ratification"* sentence **stays** as the history it is and
+gains beside it *"— ratified in his absence by the deputy's ruling of 2026-09-08 on #509"*, the
+wording #496's, #498's, #503's, #505's, #506's and #508's entries carry. (2) **Confirmed on all
+three — `location`, the label under its own key, and `os` — and the answer already existed.** (3)
+**The newtype is right and the churn is authorised**; `crates/knobas-secrets/**` is not on §10.8's
+frozen list, so this was scope and not gate, and the scope sentence is met — the crate's one change
+*is* the namespace, made structural rather than placed beside itself. (4) **(a) the recording owes
+nothing; (b) the `unauthorized` branch owes one vitest case inside #509; (c) the client owes one
+shared constructor inside #509, and the recipe's sentence it makes true.** No glossary change and
+no ADR: **Importer** already says *"its credential is its own, under the `importer:` keychain
+namespace"*, and ADR-0015's consequence *"the secrets crate's key space grows one namespace"* is
+what landed.
+
+**Reasoning:** (1) the freeze exists so that a wire shape or a keychain convention never arrives
+unannounced; each touch was announced in the spec's stream map, named in the ticket's body and its
+first, fourth and fifth criteria, and written up in the section the freeze points at. The smallest
+frozen surface that meets stories 61–65 and 70 is one command, one union and one namespace, and
+that is what landed: no migration (`0026` still free and claimed by nobody), no event, no
+`WriteOp`, no `Capability` — `Capability::Import` stays undeclared per ADR-0015 — nothing in
+`crates/knobas-source/**` or `crates/knobas-http/**`, which knobas-app gained as a *dependency*
+rather than changed. The `Option` arguments are argued against the precedent they depart from
+(#508's required `producer`) and the argument holds: absence has an exact meaning here — *read the
+keychain*, *nothing said yet* — and none there. (2) three sentences decide it: the third criterion's
+*"the preview against the checked-in estate is all-known with **no changes**"*, spec #491 story 65's
+*"with the location kept as a property"*, and `knobas_core::asset`'s `vm` type, which declares
+`p("os", "OS", T)` and declares no `image` while `estate.json` has carried `"os": "ubuntu-24.04"`
+since M4.0. **A producer whose files must preview with no changes against that file has no choice
+of key**, or the criterion is unsatisfiable on a correct implementation — the class this milestone
+named on #398. Story 63's word *image* names what is **read from hcloud**, not the property it
+becomes: the same list says *IPv4* and that key has been `ip` since M4.0, which nobody would read as
+a fork. The file's two additions are in the same class — hcloud reports the location and the label
+for the real servers, the recipe measures the file against what hcloud reports, and a record that
+omitted them was incomplete rather than bent. Bare label keys are the **smaller** change, since
+`role: <product>` is already both a Hetzner label and a hand-written property, so a prefix would
+have put `label_role` beside `role` on all three servers; and the refusal of a label shadowing one
+of the five written keys is `DESCRIPTION_KEY`'s rule one level out. (3) on `origin/main` the
+`source:` prefix was applied in **one store and not the other** — `KeyringStore::entry` called
+`account_for`, `MemoryStore` keyed on the bare id — so every test running against the memory store
+was already measuring a key space the real keychain does not have, and `tests/sources_crud.rs`' nine
+`secrets.get(..).is_none()` assertions would each have stayed green against a key nothing was
+written under: the *check that measures a representation of the thing* class, in the one place where
+a false green means a credential is where the test says it is not. #498's part 3 refused a helper in
+a **frozen** crate because *"additive is not exempt"* there and the entry had claimed the type
+untouched; neither holds here. (4) the standard is #502's and #503's: a gap owes something when the
+unwitnessed direction is the one the feature was cut for, and where it is owed follows the cost of
+the witness. (a) is allocated by spec #491's witness map to `just estate-live`, which ran and came
+back *"3 servers produced, all known, no changes"* — **which discharges #508's `hcloud_id` debt
+exactly as part 3 of the #508 ruling said it would, and nothing more is owed on that debt
+anywhere**; the four-place disclosure is what a green gate needs beside it. (b) the fourth
+criterion's witness is **vitest**, not the `?fake-ipc` walk, and
+`AssetsView.import.test.svelte.ts` already scripts `produceEstateFile` as a port and already rejects
+the preview through a `refusal` knob — one more case there, and the branch the dialog's own header
+calls *"the only way back from a credential the far end stopped accepting"* stops being a branch
+nothing holds. That is mutant H's class, and mutant H is why this PR already has a tenth case.
+Story 62's *asks for a token once* has a second half — what happens when the once-accepted token
+stops working — and a dialog with no way back leaves the reader holding a keychain item they cannot
+replace, since an importer has no sources view. (c) the body's one uncovered decision is the
+**client**: `API`, `Auth::Bearer` and the `User-Agent` were built inline in `commands/assets.rs`
+while `tests/estate_live.rs` built a second copy whose comment read *"a second spelling here would
+be a suite certifying a client the command does not use"* — a second spelling saying it is not one,
+the prose-outruns-the-code class in a test header, which is the one place this milestone has refused
+to leave it. No `tauri::test` run is owed: a scratch `SourcesState` inside the mock runtime would be
+a harness for one command that every other command in the crate does without.
+
+**If you disagree, the cost of reversing this is:** (1) moderate after merge — the command leaves
+the barrel only by a further §10.8 entry, and the `importer:` items a user has stored are keychain
+rows nothing in knobas would delete; there is **no migration**, which is the entry's own point.
+Before merge it is one revert of a branch nothing has built on, except that #510 is blocked on this
+and its Docker producer is written against `produce_estate_file` and `KeychainAccount`, so every day
+widens the reversal. (2) trivial in code — one line for the key, six in `estate.json` for the
+properties, and mutant A is what goes red — but reversing `os` makes criterion 3 unsatisfiable until
+the file changes too, and reversing the two properties makes `just estate-live` red on its next run,
+since hcloud will keep reporting them. (3) low and mechanical — a `&str` returns to the trait and
+the compiler walks the same forty sites back — but it reopens the two-spelling key space, and the
+nine absence assertions would each need to spell their prefix by hand to keep the property the
+newtype gives for free. (4) (a) nothing in code; ruling the recording a sufficient witness would be
+a new exception to ADR-0013, which is Björn's sentence and not the deputy's. (b) trivial — one case
+deleted; the branch keeps working and stops being held. (c) trivial — one function inlined back into
+two places, after which the recipe's header has to say it is a copy.
+
+**Flagged, not ruled:** claim-by-claim verification of the §10.8 entry against the diff is the
+merge-manager's deep pass, as on the six entries before it, and this ruling does not replace it —
+three claims to start with are named in the comment: that `KeychainAccount::source` spells
+`source:<id>` byte-for-byte as `account_for` did (or every configured source's credential on every
+existing machine becomes unreachable, silently, with the gate green), that `Produced` is decoded
+nowhere, and that the share suite's secret-free scan is one that *would* carry the token if
+anything wrote a `source_config`-shaped row for an importer.

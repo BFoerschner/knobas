@@ -60,18 +60,17 @@ fn token() -> String {
     }
 }
 
-/// A client onto the real API, built exactly as `produce_estate_file` builds
-/// one -- the same base URL constant, the same bearer scheme. A second spelling
-/// here would be a suite certifying a client the command does not use.
+/// A client onto the real API -- **the command's own**, not one spelled like
+/// it.
+///
+/// `assets::hcloud::client` is the single constructor and `assets::hcloud::API`
+/// the single base URL, so what this suite drives is what
+/// `produce_estate_file` drives: the same timeouts, the same rate limiter, the
+/// same bearer scheme and the same `User-Agent`. It was two spellings until the
+/// deputy's ruling of 2026-09-08 on #509 (part 4c), and a comment here claiming
+/// otherwise was the whole of what held them together.
 fn client() -> knobas_http::HttpClient {
-    knobas_http::HttpClient::new(knobas_http::HttpConfig {
-        base_url: assets::hcloud::API.to_owned(),
-        adapter_kind: HCLOUD_PRODUCER.to_owned(),
-        adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        auth: knobas_http::Auth::Bearer(token()),
-        ..Default::default()
-    })
-    .expect("a client onto Hetzner Cloud")
+    assets::hcloud::client(assets::hcloud::API, &token()).expect("a client onto Hetzner Cloud")
 }
 
 /// **The real estate is already in the tree: all known, nothing changed.**

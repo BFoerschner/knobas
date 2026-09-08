@@ -227,6 +227,45 @@ fn label_collision(server: &str, key: &str) -> IpcError {
     ))
 }
 
+/// The client this importer talks to hcloud through.
+///
+/// **One constructor, three callers, and that is the point.** The command
+/// applies [`API`], `just estate-live` applies [`API`], and the recorded-shape
+/// suite applies a wiremock URL -- so the live run exercises the client the
+/// command uses rather than a second one spelled the same way. It was two
+/// spellings before the deputy's ruling of 2026-09-08 on #509 (part 4c), and
+/// the live suite's own comment said *"a second spelling here would be a suite
+/// certifying a client the command does not use"* -- which was a second
+/// spelling saying it was not one, the prose-outruns-the-code class in a test
+/// header.
+///
+/// `base_url` is an argument and **not** a setting: hcloud is one instance in
+/// the world, which is why an importer has a token and no base URL, and the
+/// only caller that passes anything else is a test pointing at a server in its
+/// own process. There is no environment variable a mistyped export could point
+/// at a machine of somebody's own.
+///
+/// The `adapter_kind` reaches the `User-Agent` and nothing else
+/// (`knobas/<v> (hcloud/<v>)`), so an admin reading an access log can tell what
+/// called them. It is not an adapter kind in the [registry](crate::sources)'s
+/// sense: no adapter is registered for this and nothing builds a
+/// [`SourceInstance`](knobas_source::instance::SourceInstance) from it.
+///
+/// # Errors
+///
+/// [`IpcError`] if the base URL is not http(s) or the TLS backend cannot be
+/// built -- carrying **no source id**, for [`servers`]' reason.
+pub fn client(base_url: &str, token: &str) -> Result<HttpClient, IpcError> {
+    HttpClient::new(knobas_http::HttpConfig {
+        base_url: base_url.to_owned(),
+        adapter_kind: HCLOUD_PRODUCER.to_owned(),
+        adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+        auth: knobas_http::Auth::Bearer(token.to_owned()),
+        ..Default::default()
+    })
+    .map_err(|error| IpcError::from_source_error(&error, None))
+}
+
 /// Every server one token can see, oldest page first.
 ///
 /// # Errors

@@ -8694,7 +8694,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   gate, and its ruling is recorded on the issue and appended to
   `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #509 when this entry was written**, so this sentence records the flag and claims
-  no ratification.
+  no ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #509**
+  ([comment](https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579197449),
+  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
+  on the `importer` flag and on the keychain namespace. The two sentences stand side by side rather
+  than the first being rewritten, the treatment §10.8 gives every sentence it supersedes.
 
   **The IPC schema — one new command, one new DTO, no change to any existing one:**
 
@@ -8837,13 +8841,18 @@ From this commit on, each of the following requires an orchestrator decision **a
   (both round trips, the parent written only on the new entry, and the two matched servers not
   re-parented), `a_field_this_build_has_never_heard_of_does_not_refuse_the_run`,
   `a_refused_token_is_unauthorized_and_not_an_internal_fault` (and carrying no `source_id`) and
-  `the_estate_file_producer_is_not_an_importer_and_hcloud_is`; `just estate-live`'s
-  `the_real_estate_is_already_in_the_tree`; and, on the rendered side, three in
+  `the_estate_file_producer_is_not_an_importer_and_hcloud_is` — all five over
+  `assets::hcloud::client`, the **one** constructor the command, the recipe and this suite share,
+  so the live run exercises the client the command uses rather than a second one spelled the same
+  way (the deputy's ruling of 2026-09-08 on #509, part 4c); `just estate-live`'s
+  `the_real_estate_is_already_in_the_tree`; and, on the rendered side, four in
   `AssetsView.import.test.svelte.ts` — the token asked for once and not before it is owed, *land
   under* asked only when the importer found a server the estate lacks (both halves, and the token
   field gone once the run reached the far end), the produced file offered for download, and the
   chooser dropping the preview the last producer drew (a plan under one origin key is not a plan
-  under another).
+  under another), and a token the far end refuses putting the field back where an unreachable
+  Hetzner does not — story 62's second half, and the only way back from a credential that stopped
+  being accepted, since an importer has no sources view (ADR-0015).
 
 - **Five IPC commands, one event, one plugin and a second capability — issue #503 (2026-09-08):
   the capture window and its global shortcut.**

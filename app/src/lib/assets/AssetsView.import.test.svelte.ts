@@ -27,6 +27,7 @@ import type {
   ImportPreview,
   Produced,
 } from "../ipc/assets";
+import type { IpcError } from "../ipc";
 import { createRouter } from "../shell/router.svelte";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
@@ -190,7 +191,16 @@ interface Calls {
  * `landing_needed` then `ready`. A stub that answered the same thing twice
  * could not tell a dialog that asks once from one that asks every time.
  */
-let script: Produced[] = [];
+let script: (Produced | IpcError)[] = [];
+
+/**
+ * The next scripted answer is a **rejection** rather than an answer.
+ *
+ * A knob beside the script, the shape `render`'s `refusal` has for the preview:
+ * the produce port's refusals are what put the token field back, and a port
+ * that could only resolve could not drive that branch at all.
+ */
+let rejectNextProduce = false;
 
 function render(refusal: unknown = null, hash = "#/assets/tree") {
   const calls: Calls = {
@@ -241,9 +251,14 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
         ) => {
           calls.produces.push([producer, token, landUnder]);
           const answer = script.shift();
-          return answer === undefined
-            ? Promise.reject(new Error("the importer was run more times than the test scripted"))
-            : Promise.resolve(answer);
+          if (answer === undefined) {
+            return Promise.reject(new Error("the importer was run more times than the test scripted"));
+          }
+          if (rejectNextProduce) {
+            rejectNextProduce = false;
+            return Promise.reject(answer);
+          }
+          return Promise.resolve(answer as Produced);
         },
       },
     },
@@ -256,6 +271,7 @@ beforeEach(() => {
   target = document.createElement("div");
   document.body.append(target);
   script = [];
+  rejectNextProduce = false;
 });
 
 afterEach(() => {
@@ -717,4 +733,67 @@ test("choosing another producer drops the preview the last one drew", async () =
   // And nothing was sent on the way past: the chooser is a choice, not a run.
   expect(calls.previewed).toEqual(['{"assets":[]}']);
   expect(calls.produces).toEqual([]);
+});
+
+/**
+ * **A token the far end refuses puts the field back**, which is the second half
+ * of *asks for a token once* (story 62).
+ *
+ * The first half is above: once a token works, the backend keeps it and nobody
+ * is asked again. This is what happens when a token that used to work stops —
+ * revoked in Hetzner, expired, the project moved. There is nowhere else to
+ * re-enter it: an importer is not a source (ADR-0015), so it has no row in the
+ * sources view and no *Re-enter* strip, and a dialog with no way back would
+ * leave the reader holding a keychain item they cannot replace.
+ *
+ * The refusal is `unauthorized` specifically and not any failure: the dialog
+ * reads `IpcError.code`, and putting the field up for an unreachable Hetzner or
+ * a database that is down would ask for a credential that was never the
+ * problem. Both directions are asserted here, which is what makes the branch a
+ * branch rather than a `catch`.
+ */
+test("a token the far end refuses puts the field back, and another fault does not", async () => {
+  script = [
+    { state: "token_needed" },
+    { state: "ready", file: FILE, new_servers: [] },
+    { state: "ready", file: FILE, new_servers: [] },
+  ];
+  const calls = render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  tokenField()!.value = "a-token-that-worked";
+  tokenField()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(tokenField()).toBeNull();
+
+  // Hetzner stops accepting it. The refusal is in the dialog, in the backend's
+  // own words, and the field is back with it.
+  script = [{ code: "unauthorized", message: "unable to authenticate", source_id: null }];
+  rejectNextProduce = true;
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(target.textContent).toContain("unable to authenticate");
+  expect(tokenField()).not.toBeNull();
+
+  // …and a fault that is not about the credential leaves it alone: the reader
+  // is told what went wrong, and not asked for a token that was never at fault.
+  script = [{ code: "unreachable", message: "hetzner did not answer", source_id: null }];
+  rejectNextProduce = true;
+  // The field is on screen from the refusal above, so this is asserted from a
+  // run that starts *without* one: choosing the producer again clears it.
+  chooseImporter();
+  await settle();
+  expect(tokenField()).toBeNull();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  expect(target.textContent).toContain("hetzner did not answer");
+  expect(tokenField()).toBeNull();
+  expect(calls.produces.length).toBe(4);
 });

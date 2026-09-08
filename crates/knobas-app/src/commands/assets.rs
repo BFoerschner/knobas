@@ -611,21 +611,14 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
         return Ok(assets::hcloud::Produced::TokenNeeded);
     };
 
+    // The client is `assets::hcloud::client`'s and not built here, so the live
+    // recipe and the recorded-shape suite exercise the one the command uses
+    // rather than a second one spelled the same way (#509, part 4c of the
+    // deputy's ruling of 2026-09-08). Only the base URL differs between the
+    // three callers, and only a test passes anything but `hcloud::API`.
     let run = match importer {
         assets::Importer::Hcloud => {
-            let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
-                base_url: assets::hcloud::API.to_owned(),
-                // The `User-Agent` only (`knobas/<v> (hcloud/<v>)`), so an
-                // admin reading an access log can tell what called them. It is
-                // not an adapter kind: no adapter is registered for this and
-                // `sources::Registry` has never heard of it.
-                adapter_kind: producer.id.to_owned(),
-                adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-                auth: knobas_http::Auth::Bearer(credential.as_str().to_owned()),
-                ..Default::default()
-            })
-            .map_err(|error| IpcError::from_source_error(&error, None));
-            match client {
+            match assets::hcloud::client(assets::hcloud::API, credential.as_str()) {
                 Ok(client) => assets::hcloud::produce(&pool, &client, land_under.as_deref()).await,
                 Err(refused) => Err(refused),
             }

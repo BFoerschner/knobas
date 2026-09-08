@@ -6352,16 +6352,18 @@ async fn spawn_mock_hcloud(body: &str) -> wiremock::MockServer {
     server
 }
 
-/// A client pointed at `server`, built the way the command builds the real one.
+/// A client pointed at `server` -- **the command's own constructor**, with the
+/// one thing a test may move: where it points.
+///
+/// `assets::hcloud::client` is that constructor and the base URL is its only
+/// argument beside the token, so this suite drives the client
+/// `produce_estate_file` drives, under the timeouts, the limiter, the retry
+/// budget and the fault mapping it drives it under. A `HttpConfig` built here
+/// would be a suite certifying a client nothing ships (#509, part 4c of the
+/// deputy's ruling of 2026-09-08).
 fn hcloud_client(server: &wiremock::MockServer) -> knobas_http::HttpClient {
-    knobas_http::HttpClient::new(knobas_http::HttpConfig {
-        base_url: format!("{}/v1", server.uri()),
-        adapter_kind: "hcloud".to_owned(),
-        adapter_version: "test".to_owned(),
-        auth: knobas_http::Auth::Bearer(HCLOUD_TOKEN.to_owned()),
-        ..Default::default()
-    })
-    .expect("a client onto the fake hcloud")
+    assets::hcloud::client(&format!("{}/v1", server.uri()), HCLOUD_TOKEN)
+        .expect("a client onto the fake hcloud")
 }
 
 /// **Every server the token sees is already in the tree, and nothing changes.**
