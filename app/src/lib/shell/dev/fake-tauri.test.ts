@@ -814,16 +814,20 @@ test("every barrel command is either answered by the fixture or recorded as out 
   const commands = [...barrelCommands().keys()];
   const answered = new Set(Object.keys(demoHandlers()));
 
-  const unanswered = commands.filter((cmd) => !answered.has(cmd)).sort();
-  expect(unanswered).toEqual([...recorded()].sort());
-
-  // A group that stops being true in the other direction: a command that has
-  // gained a handler must leave the list, or the record lies about the walk.
+  // First the direction a fixture change breaks: a command that has gained a
+  // handler has to leave the list, or the record lies about the walk. This is
+  // checked before the set equality so that the failure names the command and
+  // the group it is still filed under, rather than a diff of fifty-two names.
   for (const { surface, commands: group } of UNANSWERED) {
     for (const cmd of group) {
       expect(answered.has(cmd), `${cmd} is answered now; drop it from "${surface}"`).toBe(false);
     }
   }
+
+  // Then the direction a barrel change breaks: a command that landed with no
+  // handler and no entry here.
+  const unanswered = commands.filter((cmd) => !answered.has(cmd)).sort();
+  expect(unanswered).toEqual([...recorded()].sort());
 });
 
 /** Every group says what witnesses it instead, and no command is filed twice. */
