@@ -13,7 +13,7 @@
  * `App.svelte`, exempting only files inside the harness directory itself;
  * a test one level up would be a second door into the fixture.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -646,6 +646,9 @@ test("the fixture's expiring certificates are the roster rows under thirty days"
  */
 const IPC_DIR = join(process.cwd(), "src/lib/ipc");
 
+/** The repo root, which Vitest's own root (`app/`) is one level under. */
+const REPO_ROOT = join(process.cwd(), "..");
+
 /**
  * Every command name the IPC barrel invokes, read off disk.
  *
@@ -830,12 +833,23 @@ test("every barrel command is either answered by the fixture or recorded as out 
   expect(unanswered).toEqual([...recorded()].sort());
 });
 
-/** Every group says what witnesses it instead, and no command is filed twice. */
-test("the census names a witness for every surface and files each command once", () => {
+/**
+ * Every group says what witnesses it instead, and no command is filed twice.
+ *
+ * The witness paths are **resolved on disk**, not pattern-matched: a record
+ * that pointed at a suite somebody has since renamed would be a record of a
+ * witness that is not there, which is the failure this whole file exists to
+ * stop one level up.
+ */
+test("the census names a witness that exists for every surface, and files each command once", () => {
   const all = recorded();
   expect(new Set(all).size, "a command is recorded in two groups").toBe(all.length);
   for (const { surface, witness, commands } of UNANSWERED) {
     expect(commands.length, `${surface} records no command`).toBeGreaterThan(0);
-    expect(witness, `${surface} names no witness`).toMatch(/\.(rs|ts)$/);
+    const paths = witness.split(", ");
+    expect(paths.length, `${surface} names no witness`).toBeGreaterThan(0);
+    for (const path of paths) {
+      expect(existsSync(join(REPO_ROOT, path)), `${surface} names ${path}, which is not in the tree`).toBe(true);
+    }
   }
 });
