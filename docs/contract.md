@@ -2147,15 +2147,16 @@ nothing.
 
 ### Amendments from the asset type-table drop (2026-09-11, binding) — issue #493
 
-The table lost three types in v1.5 and this file went on giving the old count in five places, because
-#493's own criterion 1 required `docs/contract.md` byte-identical and the drop had nowhere to be
-recorded. `grep -n '#493' docs/contract.md` answered nothing until this section. It is that record,
-filed under #515 and ruled there by a Fable deputy for Björn, who is away for this milestone and
-reverses this with one label: the type table is *"code, not a constraint"* (roadmap, v1.5 stream 1)
-and `crates/knobas-core/src/asset.rs` is not on §10.8's list, so the drop owes a §9 record rather
-than the frozen-contract gate. The five stale sentences keep their wording and each carries an
-italic pointer here, which is the #112 convention above — *the old text stands and the amendment
-carries the new truth*.
+The table lost three types in v1.5 and this file went on giving the old count in five places,
+because #493 listed `docs/contract.md` among the records that *"keep the words"* and its criterion 1
+pinned the scrub's search over this file to what that search *"found before"*, so the drop was left
+with nowhere to be recorded. `grep -n '#493' docs/contract.md` answered nothing until this section.
+It is that record, filed under #515 and ruled there by a Fable deputy for Björn, who is away for
+this milestone and reverses this with one label: the type table is *"code, not a constraint"*
+(roadmap, v1.5 stream 1) and `crates/knobas-core/src/asset.rs` is not on §10.8's list, so the drop
+owes a §9 record rather than the frozen-contract gate. The five stale sentences keep their wording
+and each carries an italic pointer here, which is the #112 convention above — *the old text stands
+and the amendment carries the new truth*.
 
 **`knobas_core::asset::TYPES` holds sixteen, from commit `5cd0bb09` (#493, PR #513):** `site`,
 `hypervisor`, `vm`, `container_engine`, `container`, `service`, `module`, `runtime`,
@@ -2167,8 +2168,8 @@ carries it (*"the generic *runtime* replacing a vendor-branded type; v1.5 droppe
 below it"*), and design §12.1's *Types* row records both the drop and its reason: *"The three
 dropped types hung below *runtime* and nothing real was ever filed under them."* Every count of the
 **types** in §10.8 below is the one spec #427 named, not the one the build carries; the two
-sentences that use the same word of `assets` **commands** are counting commands and stand as they
-are.
+sentences below that give the same number of `assets` **commands** are counting commands, not types,
+and stand as they are.
 
 **A row still carrying one of the three reads as an unknown type, and that is what "reads as
 `custom`" meant.** #493's criterion 3 and spec #491 story 4 both say such a row *"reads as
