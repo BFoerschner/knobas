@@ -984,6 +984,27 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
 /// configuration" half is a measurement rather than a coincidence of this
 /// container's setting.
 ///
+/// *The fixture guard* (issue #564): the shape claim is a measurement only
+/// while the server's own spelling is rooted somewhere other than the
+/// configured base, so the suite asserts that and goes red the day it stops
+/// being true. Before #564 this half had no guard: run with
+/// `KNOBAS_TEAMCITY_URL=http://localhost:8111`, the container's own *Server
+/// URL*, it passed green while witnessing nothing, and only the configuration
+/// test below went red.
+///
+/// The guard compares **hosts**, not whole strings. Measured against the seeded
+/// server on 2026-09-11 (TeamCity 2026.1.3, build 222742): this server composes
+/// a build's `webUrl` on the same path knobas does, so the two strings agree
+/// character for character whenever the hosts coincide --
+/// `http://localhost:8111/buildConfiguration/Payout_IntegrationTests/1` from
+/// both ends, in every transcript since PR #514. Whole-string inequality
+/// therefore *is* host inequality here, and only while that path coincidence
+/// holds: a server that changed the path would make the two strings differ on
+/// every fixture, and a whole-string guard would stay green while guarding
+/// nothing -- the failure this guard exists to catch. So what it asks is
+/// whether the served URL sits under the configured base, and nothing about
+/// the path.
+///
 /// *That it opens*: each composed URL is fetched at its absolute address with
 /// the credential the adapter uses. The adapter's own HTTP client is not
 /// reachable from a test -- `HttpRest` is crate-private and joins every path
@@ -1040,14 +1061,38 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
             Some(composed.clone()),
             "the mirror holds the URL knobas composed from the configured base URL"
         );
-        // What the server would have said, for the record -- the suite asserts
-        // nothing about it, because it is a fact about the container's
-        // *Server URL* setting and not about the adapter.
+        // What the server would have said. Asserted about only in the negative
+        // below, and that negative is what keeps the equality above a
+        // measurement rather than a coincidence of this container's *Server
+        // URL* setting (issue #564).
+        // A placeholder here would pass the guard below on the placeholder
+        // itself, so the guard would stop guarding without ever going red --
+        // exactly the failure mode the guard exists to prevent. A server that
+        // stopped serving `webUrl` changes this suite's premise and must say so
+        // in red.
         let served = seeded.build(id).await["webUrl"]
             .as_str()
-            .unwrap_or("<not served>")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the seeded server serves no `webUrl` for build {id}, so the guard \
+                     below cannot say the server's spelling still differs from the \
+                     configured one -- this suite's premise has changed and the \
+                     composition's shape is no longer pinned to anything the server says"
+                )
+            })
             .to_owned();
         println!("SEEDED {id}: composed {composed} -- server's own webUrl {served}");
+        // The guard, and it compares **hosts** rather than whole strings, for
+        // the reason the doc comment above gives.
+        assert!(
+            !served.starts_with(&format!("{}/", seeded.url)),
+            "this suite can only witness the composition while the server's own spelling is \
+             rooted somewhere other than the configured base. The server's own {served} sits \
+             under {}, so KNOBAS_TEAMCITY_URL is the container's own *Server URL* and the \
+             assertion above would pass either way -- point the suite at the other spelling \
+             of this host",
+            seeded.url
+        );
 
         let status = seeded.status_of(&composed).await;
         assert_eq!(
@@ -1076,10 +1121,25 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
     .await;
     let alt_builds = of_kind(&alt_items, "build");
     assert_eq!(alt_builds.len(), builds.len(), "the same corpus");
+    // Whole-URL equality, not a prefix (issue #564): a prefix passes a URL whose
+    // path is wrong under the second spelling, and the path is half of what the
+    // composition decides. What this half cannot do is kill a mapping that read
+    // the record, because the alternate spelling here *is* the server's own --
+    // that is the first loop's equality against the configured base, plus the
+    // guard above it.
     for it in &alt_builds {
+        let id: i64 = it
+            .entity
+            .key
+            .strip_prefix("build:")
+            .expect("build keys are build:<id>")
+            .parse()
+            .expect("the key carries the numeric id");
+        let build_type = it.payload["buildTypeId"].as_str().expect("buildTypeId");
         let url = it.web_url.as_deref().expect("every build has a URL");
-        assert!(
-            url.starts_with(&alternate),
+        assert_eq!(
+            url,
+            format!("{alternate}/buildConfiguration/{build_type}/{id}"),
             "a source configured with {alternate} must mirror URLs under it, not under \
              the server's own root URL: {url}"
         );
@@ -1112,8 +1172,11 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
 /// its **query kept verbatim**, so a composition that dropped `?mode=builds`
 /// would never equal the address a reader copies out of the UI, and the paste
 /// would miss. The suite prints the server's own `webUrl` beside the composed
-/// one, for the record: it is a fact about the container's setting, not about
-/// the adapter, so nothing is asserted about it.
+/// one and guards on it in the negative, in the host shape the build test's doc
+/// comment above reasons out: nothing is asserted about the server's *path*,
+/// which is its own setting's business, only that its root is not the
+/// configured base -- because while it is, the equality above passes either
+/// way.
 ///
 /// A 200 here says the same weaker thing the build test's does -- TeamCity
 /// 2026.1 serves its single-page-application shell for any path under
@@ -1170,12 +1233,17 @@ async fn a_build_configurations_web_url_is_composed_from_the_configured_base_url
             })
             .to_owned();
         println!("SEEDED {id}: composed {composed} -- server's own webUrl {served}");
-        assert_ne!(
-            served, composed,
+        // A **host** comparison since #564, where it was a whole-string
+        // `assert_ne!(served, composed)`. The two say the same thing on this
+        // server only because the paths coincide -- see the guard's reasoning in
+        // `a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200`.
+        assert!(
+            !served.starts_with(&format!("{}/", seeded.url)),
             "this suite can only witness the composition while the server's own spelling \
-             differs from the configured one. They are equal, so KNOBAS_TEAMCITY_URL is the \
-             container's own *Server URL* and the assertion above would pass either way -- \
-             point the suite at the other spelling of this host"
+             differs from the configured one. The server's own {served} sits under {}, so \
+             KNOBAS_TEAMCITY_URL is the container's own *Server URL* and the assertion above \
+             would pass either way -- point the suite at the other spelling of this host",
+            seeded.url
         );
 
         assert_eq!(
