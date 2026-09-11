@@ -52,6 +52,25 @@
 //! read the pair undirected, so no panel changes. Only the reconciliation cares
 //! which end owns the row.
 //!
+//! # A birth and a death are lines; an edit is not
+//!
+//! [`create`] writes one `created` line and [`delete`] one `deleted` line, each
+//! inside the transaction it describes, and nothing else in this module writes
+//! any (#524). The asymmetry is #409's, and it is about how often the thing
+//! happens rather than about how important it is: `knobas.activity` is
+//! append-only, so a line the editor's 700 ms autosave writes can never be
+//! collapsed afterwards, and an afternoon on one note would be forty lines
+//! about one thought. A birth and a death happen once each, so the flood
+//! argument does not reach them.
+//!
+//! The birth line is also what pairs the log's two halves. A link a note is
+//! born with is `manual`, so the panel lets a reader withdraw one and
+//! `commands::entity`'s `unlink_inner` writes an `unlinked` line for it; the
+//! `created` line names every withdrawable born link by the id that `unlinked`
+//! line carries ([`DrawnLink`], whose doc says which links those are and why
+//! that is all of them), so the reader who withdraws one is looking at both
+//! ends of the same story.
+//!
 //! [entity]: crate::entity
 
 use chrono::{DateTime, Utc};
@@ -60,6 +79,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::CoreError;
+use crate::activity;
 use crate::entity::EntityRef;
 use crate::link::{LinkEnd, Origin};
 
@@ -173,6 +193,40 @@ pub struct BornLink {
     pub relation: String,
 }
 
+/// One link a note really **was** born with, in the three words the activity
+/// log uses for a link.
+///
+/// The same three keys `commands::entity`'s `link_detail` writes on a `linked`
+/// or an `unlinked` line, and deliberately so: they are what lets a reader of
+/// the note's history pair the birth with a later withdrawal. A born link is
+/// [`Origin::Manual`], so the links panel does let a reader withdraw one, and
+/// until #524 that wrote an `unlinked` line whose partner never existed.
+///
+/// **What was drawn, not what was asked for.** [`draw_born_links`] takes these
+/// out of the insert's own `returning`, so a target no `knobas.entity` row
+/// carries contributes nothing here -- there is no link, so there is no id a
+/// withdrawal could ever name. A caller naming the same target twice under one
+/// relation likewise contributes one, because one is what the `on conflict`
+/// drew.
+///
+/// The third such case, and the reason that is the right rule rather than a
+/// shortfall: a born link under [`REF_RELATION`] whose target the body *also*
+/// names is drawn by [`reconcile_refs`] a statement earlier, so the born insert
+/// conflicts and this list omits it. The row that exists is then `implied`, and
+/// `implied` is the one origin the links panel refuses to withdraw -- so it can
+/// never write the `unlinked` line this list exists to give a partner to. Every
+/// link that *can* be withdrawn from a new note is in here.
+#[derive(Clone, Debug, Serialize)]
+struct DrawnLink {
+    /// `knobas.link.id` -- the id an `unlinked` line will carry.
+    link_id: Uuid,
+    /// The other end. The note is always the `from` end, so this is the half
+    /// the reader does not already know.
+    to_id: String,
+    /// The stored relation, as it was folded.
+    relation: String,
+}
+
 /// Write a new note, the links its body already names, and the links it is
 /// **born with**.
 ///
@@ -206,6 +260,31 @@ pub struct BornLink {
 /// 2026-09-08 (#502); ADR-0011 is why the earlier wording here was corrected
 /// rather than left standing.
 ///
+/// # One line, for the birth
+///
+/// The last thing in the transaction is a single `created` line on the note's
+/// own entity, actor the author, detail `{ title, born: [{ link_id, to_id,
+/// relation }] }` (#524). One line and not three: a birth is **one event**, so
+/// it does not reach the argument #409 refused a line per note edit with --
+/// `knobas.activity` is append-only and a 700 ms-debounced autosave would
+/// flood it -- and announcing each born link separately would say a note's
+/// links were worth a line while the note's own birth stayed silent.
+///
+/// `born` carries [`DrawnLink`]s, which is what makes the line the partner a
+/// withdrawal needs: the same three keys `link_detail` writes, so an
+/// `unlinked` line's `link_id` is one of these. It is **`[]` and never
+/// absent** when nothing was drawn -- a key that is missing reads as a line
+/// written before this existed, and a reader of the log can act on the
+/// difference.
+///
+/// Inside the transaction, after the links, for both of the obvious reasons:
+/// the ids it names do not exist until the inserts have run, and a line
+/// describing a note that rolled back would be a birth the log records and the
+/// database never had.
+///
+/// [`save`] writes no line at all, and neither does [`reconcile_refs`] -- see
+/// [`save`].
+///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the write fails.
@@ -216,7 +295,8 @@ pub async fn create(
     born_with: &[BornLink],
     author: &str,
 ) -> Result<NoteRow, CoreError> {
-    let id = EntityRef::new("note", &Uuid::new_v4().to_string()).to_string();
+    let entity = EntityRef::new("note", &Uuid::new_v4().to_string());
+    let id = entity.to_string();
     let mut tx = pool.begin().await?;
 
     sqlx::query(
@@ -238,7 +318,15 @@ pub async fn create(
     .await?;
 
     reconcile_refs(&mut tx, &id, body_md, author).await?;
-    draw_born_links(&mut tx, &id, born_with, author).await?;
+    let born = draw_born_links(&mut tx, &id, born_with, author).await?;
+    activity::record_with(
+        &mut *tx,
+        author,
+        "created",
+        Some(&entity),
+        serde_json::json!({ "title": row.title, "born": born }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(row)
 }
@@ -257,37 +345,51 @@ pub async fn create(
 /// and it is written all the same so that the two inserts in this module state
 /// the same rule rather than one of them relying on its caller.
 ///
-/// **No activity line, and that is a gap worth naming.** Nothing in this module
-/// writes one: not the note, not its `[[ref]]` links. So a born link can be
-/// withdrawn from the panel -- it is `manual`, the panels allow it -- and leave
-/// an `unlinked` line whose `linked` partner never existed, against the pairing
-/// `commands::entity`'s `link_detail` promises a reader of the log. Recording
-/// one *here* would announce a note's links while the note's own birth stayed
-/// silent; the honest fix is a line for the birth, covering the note and both
-/// links at once, and that is a ticket rather than a clause.
+/// **No line here either, and this one is not a gap.** The links a note is born
+/// with are announced by the note's own `created` line, which [`create`] writes
+/// once for the birth and names every one of them in -- that is what pairs a
+/// later `unlinked` with something, and announcing each link *here* would say a
+/// note's links were events while the note itself was not (#524, closing the
+/// gap this comment used to name).
+///
+/// Which is why the drawn rows come back rather than being dropped: the
+/// `returning` is the only place the ids exist, and the line is composed from
+/// them. `fetch_optional`, because both of this statement's silences are real
+/// ones -- a target no row carries matches nothing in the `select`, and a
+/// conflict inserts nothing -- and in both the honest answer is that no link
+/// was drawn for that input.
 async fn draw_born_links(
     tx: &mut Transaction<'_, Postgres>,
     note_id: &str,
     born_with: &[BornLink],
     author: &str,
-) -> Result<(), CoreError> {
+) -> Result<Vec<DrawnLink>, CoreError> {
+    let mut drawn = Vec::with_capacity(born_with.len());
     for born in born_with {
-        sqlx::query(
+        let row: Option<(Uuid, String, String)> = sqlx::query_as(
             "insert into knobas.link (from_id, to_id, relation, origin, created_by)
              select $1, e.id, $2, $3, $4
                from knobas.entity e
               where e.id = $5 and e.id <> $1
-             on conflict do nothing",
+             on conflict do nothing
+             returning id, to_id, relation",
         )
         .bind(note_id)
         .bind(&born.relation)
         .bind(Origin::Manual.as_str())
         .bind(author)
         .bind(born.target.to_string())
-        .execute(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await?;
+        if let Some((link_id, to_id, relation)) = row {
+            drawn.push(DrawnLink {
+                link_id,
+                to_id,
+                relation,
+            });
+        }
     }
-    Ok(())
+    Ok(drawn)
 }
 
 /// Rewrite a note's title and body, and bring its `[[refs]]` back into step.
@@ -299,6 +401,14 @@ async fn draw_born_links(
 /// Neither is an error and neither writes a note -- a save is an edit of
 /// something that is there, and resurrecting a deleted note from a stale editor
 /// would be the opposite of what *delete* meant.
+///
+/// **No activity line, and none per `[[ref]]`** -- Björn's ruling of
+/// 2026-09-05 (#409), which [`create`]'s birth line does not reopen.
+/// `knobas.activity` is append-only, the editor's autosave calls this every
+/// 700 ms of pause, and a line per save could not be collapsed after the fact;
+/// `crate::time::worklog` reads `knobas.note.updated_at` instead, which one
+/// afternoon overwrites rather than accumulates. `reconcile_refs` is silent for
+/// the same reason twice over: it runs on every one of those saves.
 ///
 /// # Errors
 ///
@@ -373,34 +483,62 @@ pub async fn get(pool: &PgPool, id: &EntityRef) -> Result<Option<NoteRow>, CoreE
 /// derivation, and #53's panel is what shows them, marked.
 ///
 /// `Ok(false)` when there was no note to delete -- idempotent, like
-/// [`crate::link::unlink`].
+/// [`crate::link::unlink`], and a call that mutated nothing announces nothing.
+///
+/// # One line, for the death
+///
+/// A `deleted` line on the note's own entity, inside this transaction, detail
+/// `{ title }` (#524). It is the other half of [`create`]'s birth line: one
+/// event, and a history panel that showed a birth and no death would be the
+/// orphan in the other direction. The address survives the body -- that is
+/// what the paragraph above is about -- so the line is named on something a
+/// reader can still open.
+///
+/// The title comes out of the `delete`'s own `returning`, which is the last
+/// moment it exists to be read. It is also what answers "was there a note",
+/// so this is one statement rather than a read and a write that could disagree.
+///
+/// `actor` and not `author`, which is [`create`]'s word: `create` binds it to
+/// `knobas.link.created_by` as well as to the line, and a note's author is a
+/// fact about the note. Here it reaches nothing but
+/// [`crate::activity::ActivityRow::actor`], and the person who deletes a note
+/// is not the person who wrote it.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the write fails.
-pub async fn delete(pool: &PgPool, id: &EntityRef) -> Result<bool, CoreError> {
-    let id = id.to_string();
+pub async fn delete(pool: &PgPool, id: &EntityRef, actor: &str) -> Result<bool, CoreError> {
+    let note_id = id.to_string();
     let mut tx = pool.begin().await?;
 
-    let deleted = sqlx::query("delete from knobas.note where id = $1")
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-    if deleted == 0 {
+    let deleted: Option<(String,)> =
+        sqlx::query_as("delete from knobas.note where id = $1 returning title")
+            .bind(&note_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((title,)) = deleted else {
         tx.rollback().await?;
         return Ok(false);
-    }
+    };
 
     // No body, so no refs: the empty set is the whole reconciliation.
-    withdraw_refs_other_than(&mut tx, &id, &[]).await?;
+    withdraw_refs_other_than(&mut tx, &note_id, &[]).await?;
 
     // `deleted_at is null` keeps the *first* deletion's timestamp, exactly as
     // the sweep and `ENTITY_UPSERT` do.
     sqlx::query("update knobas.entity set deleted_at = now() where id = $1 and deleted_at is null")
-        .bind(&id)
+        .bind(&note_id)
         .execute(&mut *tx)
         .await?;
+
+    activity::record_with(
+        &mut *tx,
+        actor,
+        "deleted",
+        Some(id),
+        serde_json::json!({ "title": title }),
+    )
+    .await?;
 
     tx.commit().await?;
     Ok(true)

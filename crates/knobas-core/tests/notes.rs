@@ -153,7 +153,7 @@ async fn deleting_a_note_removes_its_body_and_tombstones_its_address() {
     let id = EntityRef::parse(&written.id).unwrap();
     assert_eq!(link::entries_of(&pool, &target).await.unwrap().len(), 1);
 
-    assert!(note::delete(&pool, &id).await.unwrap());
+    assert!(note::delete(&pool, &id, ACTOR).await.unwrap());
     assert!(note::get(&pool, &id).await.unwrap().is_none());
 
     let (deleted_at,): (Option<chrono::DateTime<chrono::Utc>>,) =
@@ -172,7 +172,7 @@ async fn deleting_a_note_removes_its_body_and_tombstones_its_address() {
     );
 
     // Idempotent: a second delete deleted nothing, and says so.
-    assert!(!note::delete(&pool, &id).await.unwrap());
+    assert!(!note::delete(&pool, &id, ACTOR).await.unwrap());
     // And editing a note that is gone is not the same as editing one that
     // never existed -- both answer `None` rather than writing a new note.
     assert!(
@@ -196,7 +196,7 @@ async fn a_note_that_does_not_exist_reads_as_nothing() {
             .unwrap()
             .is_none()
     );
-    assert!(!note::delete(&pool, &nobody).await.unwrap());
+    assert!(!note::delete(&pool, &nobody, ACTOR).await.unwrap());
     assert!(note::refs_of(&pool, &nobody).await.unwrap().is_empty());
 }
 

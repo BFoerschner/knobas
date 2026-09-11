@@ -8221,7 +8221,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   same panel, whose only refusal is `implied`, and it was never announced by a `linked` line
   either (`assets/mod.rs`, `knobas-sync/src/attach.rs`), so what #502 adds is a second population
   to a milestone-old class. Ruled not owed here by the deputy on 2026-09-08 and filed as **#524**,
-  outside v1.5 for Björn to place.
+  outside v1.5 for Björn to place. **#524 closed it on 2026-09-11**: `note::create` now writes one
+  `created` line inside this same transaction, naming every born link by the `link_id` a later
+  `unlinked` line carries, `note::delete` writes one `deleted` line, and a save still writes none
+  (#409) --- no migration, no IPC change, and nothing in this entry's frozen surfaces moved.
 
   **No field on the note, and no membership write.** `CONTEXT.md`'s **Capture** says the first;
   the second is ADR-0008, whose seed is *"every confirmed link touching the context's own `ctx:`

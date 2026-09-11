@@ -822,6 +822,18 @@ fn relation_of(value: Option<&str>) -> String {
 /// The line is named on the link's `from` end, so `to_id` is the end the reader
 /// does not already know. One helper, because `linked` and `unlinked` describe
 /// the same link and a reader of the log has to be able to pair them.
+///
+/// **These three keys are a shape a second writer depends on.**
+/// `knobas_core::note`'s `DrawnLink` spells them again for the `born[]` entries
+/// of a note's `created` line (#524), so that a born link withdrawn from the
+/// panel pairs with the birth that drew it. They are not one type: this one
+/// carries a fourth key for a proposal's `reason` and lives where `LinkRow`
+/// does, while `born[]` is composed from an insert's `returning` inside the
+/// store's own transaction, where no `LinkRow` exists. What holds them equal is
+/// `a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it`, which
+/// reads one against the other -- so a key **renamed** here fails that test.
+/// A key *added* here would not, and would not need to: `born[]` promising less
+/// than a line does is what it already promises.
 fn link_detail(link: &LinkRow) -> serde_json::Value {
     let mut detail = serde_json::json!({
         "link_id": link.id,
@@ -1331,7 +1343,13 @@ pub async fn save_note_inner(
 ///
 /// `Ok(false)` when there was nothing to delete. Idempotent, like
 /// [`unlink_inner`]: a second *Delete* on a note already gone is not an error,
-/// and the caller can tell the two apart.
+/// and the caller can tell the two apart -- and, like `unlink_inner`, the call
+/// that mutated nothing writes no activity line.
+///
+/// The `deleted` line the first call *does* write is the store's
+/// ([`knobas_core::note::delete`], #524), inside the transaction that took the
+/// body; [`ACTOR`] is who it is attributed to, the same word every other
+/// mutation in this module signs with.
 ///
 /// # Errors
 ///
@@ -1339,7 +1357,7 @@ pub async fn save_note_inner(
 /// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
 pub async fn delete_note_inner(pool: &PgPool, note_id: &str) -> Result<bool, IpcError> {
     let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
-    Ok(knobas_core::note::delete(pool, &id).await?)
+    Ok(knobas_core::note::delete(pool, &id, ACTOR).await?)
 }
 
 /// One note, with its refs and its links.
