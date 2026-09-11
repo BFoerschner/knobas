@@ -13,7 +13,7 @@
  * `App.svelte`, exempting only files inside the harness directory itself;
  * a test one level up would be a second door into the fixture.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -610,5 +610,228 @@ test("the fixture's expiring certificates are the roster rows under thirty days"
   expect(noCert.length).toBeGreaterThan(0);
   for (const id of noCert) {
     expect(expiring.has(id), `${id} has no certificate and is on the list`).toBe(false);
+  }
+});
+
+/**
+ * # The census: what the `?fake-ipc` walk cannot reach (#544)
+ *
+ * `invoke` throws *"no handler for ${cmd}"* on a command this fixture does
+ * not answer, and a screen that reads before it draws — `BackupSection.svelte`
+ * puts every one of its buttons behind `{#if status && !error}` — then renders
+ * an error instead of itself. So the walk's reach is exactly the fixture's
+ * handler table, and **fifty-two of the barrel's commands are outside it**.
+ *
+ * That is not a bug to be fixed by teaching the fixture everything. The
+ * deputy's ruling of 2026-09-08 on #507 gives the reason for one of them and
+ * it holds for the rest: *"a fake `share_export` would certify nothing about
+ * an archive and would be a second copy of `ShareParts::tables()`, the copy
+ * that drifts"*. What was missing was the **record** — nothing said which
+ * surfaces the substituted witness cannot see, so the next criterion written
+ * around a walk over Settings → Backup would have been found out by hand.
+ *
+ * This is that record, kept as a test rather than as prose, so it cannot go
+ * stale quietly:
+ *
+ * * the command set is **parsed from `app/src/lib/ipc/*.ts`**, never hand
+ *   listed, so a command that lands there arrives here on its own;
+ * * the handler set is `demoHandlers()` itself, not a copy of it;
+ * * their difference must equal [`UNANSWERED`] exactly — a new unanswered
+ *   command fails this test until someone either answers it or writes it down
+ *   with the seam suite that witnesses it instead, and a command that *gains*
+ *   a handler fails it until it leaves the list.
+ *
+ * Editing [`UNANSWERED`] is the point, not a workaround. What the test forbids
+ * is editing it by accident.
+ */
+const IPC_DIR = join(process.cwd(), "src/lib/ipc");
+
+/**
+ * Every command name the IPC barrel invokes, read off disk.
+ *
+ * The generic is optional in the pattern on purpose: `invoke<T>("cmd")` is the
+ * house style, and a future `invoke("cmd")` written without one must still be
+ * counted rather than silently slip past the census.
+ */
+function barrelCommands(): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const name of readdirSync(IPC_DIR)) {
+    if (!name.endsWith(".ts")) continue;
+    const text = readFileSync(join(IPC_DIR, name), "utf8");
+    for (const [, cmd] of text.matchAll(/\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+      found.set(cmd!, name);
+    }
+  }
+  return found;
+}
+
+/**
+ * The surfaces `?fake-ipc` cannot open, grouped, each with the seam suite that
+ * is the witness there instead.
+ *
+ * A group's witness is where the behaviour is actually asserted — a real
+ * database and, where a source is on the other end, the trait-level fake or
+ * the live instance ADR-0013 asks for. None of them is a browser walk, which
+ * is the whole point: the walk certifies layout and interaction, and for these
+ * surfaces it certifies nothing at all because it never reaches them.
+ */
+const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
+  {
+    surface: "Settings → Backup: the status read, a backup now, the Share… export, the schedule, the restore",
+    witness: "crates/knobas-app/tests/backup_ipc.rs, crates/knobas-app/tests/share_exit.rs, app/src/lib/settings/BackupSection.test.svelte.ts",
+    commands: ["backup_status", "backup_now", "share_export", "set_backup_schedule", "restore_backup"],
+  },
+  {
+    surface: "The inbox and its notifications",
+    witness: "crates/knobas-app/tests/inbox_ipc.rs",
+    commands: [
+      "inbox_items",
+      "inbox_count",
+      "snooze_inbox_item",
+      "complete_inbox_item",
+      "notify",
+      "notification_kinds",
+      "set_notification_kinds",
+    ],
+  },
+  {
+    surface: "The timer and the day's blocks",
+    witness: "crates/knobas-app/tests/time_ipc.rs",
+    commands: [
+      "current_timer",
+      "start_timer",
+      "stop_timer",
+      "timer_heartbeat",
+      "ad_hoc_block",
+      "create_block",
+      "update_block",
+      "delete_block",
+      "day_blocks",
+    ],
+  },
+  {
+    surface: "The worklog draft and the week timesheet",
+    witness: "crates/knobas-app/tests/worklog_ipc.rs, crates/knobas-app/tests/week_ipc.rs",
+    commands: ["worklog_draft", "log_work", "log_all_preview", "log_all", "week_timesheet"],
+  },
+  {
+    surface: "The standup digest, its protocol and the action items it publishes",
+    witness: "crates/knobas-app/tests/standup_ipc.rs, crates/knobas-app/tests/protocol_ipc.rs",
+    commands: [
+      "standup_digest",
+      "standup_protocol",
+      "publish_standup_protocol",
+      "standup_publish_target",
+      "set_standup_publish_target",
+      "create_action_item_ticket",
+    ],
+  },
+  {
+    surface: "Start work, and the merge follow that closes it",
+    witness: "crates/knobas-app/tests/start_work.rs",
+    commands: [
+      "start_work_flow",
+      "start_work_run",
+      "start_work_retry",
+      "start_work_skip",
+      "start_work_amend",
+      "follow_merges",
+    ],
+  },
+  {
+    surface: "The status select's read of what the workflow offers",
+    witness: "crates/knobas-app/tests/status_move.rs",
+    commands: ["reachable_transitions"],
+  },
+  {
+    surface: "Linking, unlinking and deleting a note",
+    witness: "crates/knobas-app/tests/entity.rs",
+    commands: ["create_link", "unlink", "delete_note"],
+  },
+  {
+    surface: "Writing a route in the estate",
+    witness: "crates/knobas-app/tests/assets_ipc.rs",
+    commands: ["create_route", "edit_route", "delete_route"],
+  },
+  {
+    surface: "A source's assets",
+    witness: "crates/knobas-app/tests/assets_ipc.rs",
+    commands: ["source_assets"],
+  },
+  {
+    surface: "Settings → Monitoring",
+    witness: "crates/knobas-app/tests/assets_ipc.rs, app/src/lib/settings/MonitoringSection.test.svelte.ts",
+    commands: ["monitoring_settings", "set_monitoring_settings"],
+  },
+  {
+    surface: "Settings → Passive attribution",
+    witness: "crates/knobas-app/tests/time_ipc.rs, app/src/lib/settings/PassiveSection.test.svelte.ts",
+    commands: ["passive_attribution", "set_passive_attribution"],
+  },
+  {
+    surface: "Editing a source and backfilling it",
+    witness: "crates/knobas-app/tests/ipc.rs, crates/knobas-app/tests/sources_crud.rs",
+    commands: ["update_source", "backfill_source"],
+  },
+];
+
+/** Every command [`UNANSWERED`] claims the fixture does not answer. */
+function recorded(): string[] {
+  return UNANSWERED.flatMap((group) => group.commands);
+}
+
+/**
+ * The negative control, and it is load-bearing: a parse that found nothing
+ * would make the census's difference empty and the census would pass while
+ * saying nothing at all. So the parse has to find **every command the fixture
+ * does answer** — eighty of them today — and at least one command in every
+ * barrel module that imports `invoke`.
+ */
+test("the parse finds every command the fixture answers, in every module that invokes one", () => {
+  const commands = barrelCommands();
+  const answered = Object.keys(demoHandlers());
+
+  expect(answered.length).toBeGreaterThan(50);
+  for (const cmd of answered) {
+    expect([...commands.keys()], `${cmd} is answered but the parse did not find it in the barrel`).toContain(cmd);
+  }
+
+  const modules = new Set(commands.values());
+  for (const name of readdirSync(IPC_DIR)) {
+    if (!name.endsWith(".ts")) continue;
+    const text = readFileSync(join(IPC_DIR, name), "utf8");
+    if (!text.includes('from "@tauri-apps/api/core"')) continue;
+    expect(modules, `${name} imports invoke and the parse found no command in it`).toContain(name);
+  }
+});
+
+/**
+ * The census itself. See the block comment above [`UNANSWERED`] for why a
+ * failure here is a prompt to write the new command down rather than to teach
+ * the fixture to answer it.
+ */
+test("every barrel command is either answered by the fixture or recorded as out of the walk's reach", () => {
+  const commands = [...barrelCommands().keys()];
+  const answered = new Set(Object.keys(demoHandlers()));
+
+  const unanswered = commands.filter((cmd) => !answered.has(cmd)).sort();
+  expect(unanswered).toEqual([...recorded()].sort());
+
+  // A group that stops being true in the other direction: a command that has
+  // gained a handler must leave the list, or the record lies about the walk.
+  for (const { surface, commands: group } of UNANSWERED) {
+    for (const cmd of group) {
+      expect(answered.has(cmd), `${cmd} is answered now; drop it from "${surface}"`).toBe(false);
+    }
+  }
+});
+
+/** Every group says what witnesses it instead, and no command is filed twice. */
+test("the census names a witness for every surface and files each command once", () => {
+  const all = recorded();
+  expect(new Set(all).size, "a command is recorded in two groups").toBe(all.length);
+  for (const { surface, witness, commands } of UNANSWERED) {
+    expect(commands.length, `${surface} records no command`).toBeGreaterThan(0);
+    expect(witness, `${surface} names no witness`).toMatch(/\.(rs|ts)$/);
   }
 });
