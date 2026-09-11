@@ -1336,10 +1336,9 @@ from the gate because its *run* is.
    `/Applications/knobas.app`, three old worktrees, the root checkout's debug
    *and* release bundles, and five stale DMG mount points. Moving
    `/Applications/knobas.app` aside was not enough — LS then named the root
-   checkout's debug bundle. What worked, and what the three runs recorded below
-   were made with -- two green and one stopped at the demo-corpus gap -- is
-   unregistering every other path and putting back afterwards the ones that
-   still exist on disk:
+   checkout's debug bundle. What worked, and what every run recorded below was
+   made with, is unregistering every other path and putting back afterwards the
+   ones that still exist on disk:
 
    ```sh
    LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -1440,6 +1439,34 @@ observed**: a program a person chose in Settings, started by the button on a
 branch detail, holding the path the disk answered with and nothing the mirror
 holds. It is a run of the head it was made on and not of what merged — the
 run of the merge head is the merge-manager's, and it is **#525**'s second
+criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
+
+**`capture` is green again since #548**, run from `.worktrees/issue-548` at
+08:49 CEST on 2026-09-11 against `dev.knobas.desktop` built and signed by
+`knobas-dev`, with every other registered path unregistered for the length of
+the run and put back afterwards. The probe answered `trusted 1 / post-events 1
+/ screen-locked 0` before the build and again after it:
+
+```
+capture: bringing Finder to the front
+capture: Finder has the screen; knobas is behind it
+capture: pressing CmdOrCtrl+Alt+Shift+K
+capture: before the keystroke, windows titled 'Capture': no
+capture: after the keystroke, windows titled 'Capture': yes (1)
+capture: the capture window is up, with the caret in it
+capture: typing a capture whose title will be 'Retry storm from the capture witness'
+capture: pressing 'Open in knobas'
+capture: knobas is frontmost again and the capture window has gone
+capture: the note is open in the main window, titled 'Retry storm from the capture witness'
+capture: the links panel reads 'CAPTURED FROM': the capture attached what was in front of the reader
+```
+
+Those middle two lines are the **waypoint in both directions**: knobas had no
+window of that name while Finder held the screen, and one the moment the
+shortcut was pressed, counted the same way on the same tree — so the wait says
+the keystroke did it. The line after the button is the mirror, the same count
+back at zero. It is a run of the head it was made on and not of what merged;
+the run of the merge head is the merge-manager's, and it is **#525**'s third
 criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 
 #### What the first runs answered
@@ -1558,10 +1585,13 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   harness refuses unless the copy Launch Services names is the one it just
   built, and there were **ten** registered paths on 2026-09-08: `/Applications`,
   three old worktrees, the root checkout's debug and release bundles, and five
-  stale DMG mount points. The three runs above -- two green, one stopped at the
-  demo-corpus gap -- were made with the others unregistered
-  (`lsregister -u <path>`) and every one that still existed on disk put back
-  afterwards; nothing was moved or deleted. **A merge-manager
+  stale DMG mount points. Three were left on 2026-09-11 (`/Applications` and
+  the root checkout's two), and every run recorded above was made with the
+  others unregistered (`lsregister -u <path>`) and every one that still existed
+  on disk put back afterwards; nothing was moved or deleted. **A worktree's own
+  bundle is left registered by the harness** — it registers what it built and
+  puts back only what was registered before — so a merged-and-deleted worktree
+  is where the stale entries come from. **A merge-manager
   re-running these recipes has to do the same**, or the harness will refuse with
   *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
   the winner. **The harness is not going to do it for you, and that is ruled
