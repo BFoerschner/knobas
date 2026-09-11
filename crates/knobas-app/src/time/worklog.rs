@@ -451,7 +451,8 @@ const AUTHORED_ITEMS: &str = "select i.entity_id, i.title, i.item_updated_at
 ///
 /// The prefix is `knobas_core::entity`'s -- notes are minted `EntityRef::new(
 /// "note", ..)` and `note` is one of its `RESERVED_NAMESPACES` -- spelled as a
-/// literal here for the reason `crate::standup`'s `namespace_of` gives, and
+/// literal here for the reason `crate::assets`' `NAMESPACE` gives for spelling
+/// its own rather than indexing that array, *"an index is not a name"*, and
 /// safe to spell because the tests mint their notes through `note::create`
 /// rather than by writing the id: a namespace renamed under this clause fails
 /// `a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_title`
