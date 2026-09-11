@@ -10,9 +10,34 @@
 //! outlive the run -- `test_util::run_nonce` is `{pid}-{nanos}`, so an earlier
 //! run's scratch directory can never match this process's stamp and is
 //! deleted.
+//!
+//! # Which corpus list each pin passes, and why most of them pass one (#541)
+//!
+//! The launcher searches [`corpus::ALL`] -- four corpora -- since #436, and
+//! `tests/perf.rs`'s plan pin was widened to match it by #541. Most of the pins
+//! **here** deliberately stay on [`corpus::LIVE_ITEM`], and the reason is the
+//! one that ticket refuses its own obvious fix for: [`seed`] below writes
+//! mirror rows and nothing else, so `corpus::ALL` in this file would union
+//! three relations with no rows in them and assert the same result set over a
+//! wider name. Every such call carries a line saying what about that pin is the
+//! mirror's, or -- where one test builds the statement more than once -- naming
+//! the call above it that does.
+//!
+//! Four pins do move, and they are the four whose assertion **does not depend
+//! on which rows exist** -- an empty result set, a schema that is still there,
+//! a count of named prepared statements, and a server error that an absurd
+//! `updated:` window either raises or does not. For those, the empty branches
+//! are not a weakness: what they pin is the statement, and over `corpus::ALL`
+//! it is the statement the launcher builds.
+//!
+//! `tests/corpus_seam.rs` is the file that runs all four corpora **with rows in
+//! each**: it seeds an item, a note, an asset and a route and drives the
+//! builder directly. `tests/search.rs` drives
+//! [`Searcher`](knobas_search::Searcher), so every test in it *builds* over
+//! `corpus::ALL` -- over a fixture of mirror items and notes, and no estate.
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_search::corpus::LIVE_ITEM;
+use knobas_search::corpus::{self, LIVE_ITEM};
 use knobas_search::query::EffectiveFilters;
 use knobas_search::sql::{query_as_with, search_sql};
 
@@ -134,6 +159,7 @@ async fn a_generated_query_runs_and_carries_every_column_the_launcher_draws() {
     let rows = run(
         &pool,
         search_sql(
+            // The mirror's own columns: `source_id`, and `synced_at` apart from `item_updated_at`.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -216,6 +242,8 @@ async fn the_best_match_comes_first_and_recency_only_breaks_ties() {
     let rows = run(
         &pool,
         search_sql(
+            // Rank over the mirror's title-above-body weighting; ranking across corpora is
+            // `corpus_seam.rs::ranking_is_comparable_across_corpora`.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -277,6 +305,7 @@ async fn rows_tied_on_rank_and_timestamp_are_ordered_by_entity_id() {
     let rows = run(
         &pool,
         search_sql(
+            // A tie broken inside one relation's rows, and only the mirror has rows here.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -341,7 +370,13 @@ async fn an_absurd_updated_window_answers_instead_of_erroring() {
         let rows = run(
             &pool,
             search_sql(
-                &[&LIVE_ITEM],
+                // `corpus::ALL`: the clamp is spliced into each corpus's own
+                // `updated_at`, and what this pin guards -- the server raising
+                // `timestamp out of range` -- is an error at execution, which
+                // needs no rows to happen. Nothing else runs a saturating
+                // window over the union; `corpus_seam.rs` runs an ordinary
+                // 30-day one.
+                corpus::ALL,
                 Some(&tag),
                 false,
                 &EffectiveFilters {
@@ -404,6 +439,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
     let full = run(
         &pool,
         search_sql(
+            // Per-kind totals over the mirror's five kinds.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -420,6 +456,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
     let one = run(
         &pool,
         search_sql(
+            // Same test, same reason as the call above: the mirror's own kinds.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -442,6 +479,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
     let capped = run(
         &pool,
         search_sql(
+            // Same test, same reason again, with `per_group` as the cut.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -496,6 +534,8 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
         async move {
             let rows = run(
                 &pool,
+                // The filter matrix reads the mirror's own `author`,
+                // `source_id` and `kind` columns.
                 search_sql(&[&LIVE_ITEM], Some(&tag), false, &filters, 10, 50),
             )
             .await;
@@ -614,6 +654,7 @@ async fn a_half_typed_word_matches_as_a_prefix_and_a_finished_one_does_not() {
     let typing = run(
         &pool,
         search_sql(
+            // A prefix match against a seeded mirror row.
             &[&LIVE_ITEM],
             Some(&tag),
             true,
@@ -628,6 +669,7 @@ async fn a_half_typed_word_matches_as_a_prefix_and_a_finished_one_does_not() {
     let finished = run(
         &pool,
         search_sql(
+            // Same test, same reason as the call above: one seeded mirror row.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -651,7 +693,11 @@ async fn a_stopword_only_query_returns_nothing_instead_of_failing() {
         let rows = run(
             &pool,
             search_sql(
-                &[&LIVE_ITEM],
+                // `corpus::ALL`: the assertion is that nothing comes back at
+                // all, so the three empty branches cost it nothing and the
+                // `null::tsquery` guard is pinned on every corpus's `fts`
+                // expression rather than on the mirror's.
+                corpus::ALL,
                 Some("the"),
                 prefix_last,
                 &EffectiveFilters::default(),
@@ -686,6 +732,10 @@ async fn browse_mode_orders_by_recency_and_ranks_nothing() {
     let rows = run(
         &pool,
         search_sql(
+            // Browse ordering under a `source:` filter naming a seeded source.
+            // Every corpus carries a `source_id`, but the other three's are the
+            // constants `'note'`, `'asset'` and `'route'`, which no seed can
+            // name; only the mirror's is a column.
             &[&LIVE_ITEM],
             None,
             false,
@@ -735,6 +785,7 @@ async fn a_tombstoned_item_is_not_a_result() {
 
     let query = || {
         search_sql(
+            // `sync.live_item`'s tombstone filter, which is this corpus and no other.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -765,7 +816,11 @@ async fn hostile_text_is_a_search_term_and_nothing_else() {
     let rows = run(
         &pool,
         search_sql(
-            &[&LIVE_ITEM],
+            // `corpus::ALL`: hostile text travels as a bind for every corpus alike, and what is
+            // asserted -- an empty result and a schema that is still there -- needs no rows. So
+            // this runs it against all four corpora's spliced fragments, which is the launcher's
+            // real surface.
+            corpus::ALL,
             Some(evil),
             true,
             &EffectiveFilters {
@@ -825,7 +880,10 @@ async fn the_launchers_statement_is_never_a_named_prepared_statement() {
 
     let query = || {
         search_sql(
-            &[&LIVE_ITEM],
+            // `corpus::ALL`, which is the statement the launcher actually builds. Its own docs
+            // say it: no corpus and no clock are involved in a count of named prepared
+            // statements, so there is nothing here for three empty branches to weaken.
+            corpus::ALL,
             Some("ledger"),
             false,
             &EffectiveFilters::default(),
