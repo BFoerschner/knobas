@@ -489,9 +489,21 @@ const MY_COMMENTS: &str = "select id, entity_id, queued_at from knobas.write_que
 /// takes the row (the entity survives, tombstoned). That is the right answer
 /// -- the reader deleted it -- and not an omission to chase through the
 /// tombstone. Since #524 the deletion *is* an activity line, so it reaches a
-/// draft through [`MY_ACTIVITY`] instead, as one more checkbox the reader can
-/// leave unticked -- [`NOT_WORK`]'s stated failure direction, and its `created`
-/// sibling joins the ones contexts and assets have written all along.
+/// draft through [`MY_ACTIVITY`] instead -- as `- deleted <uuid>`, since
+/// [`key_of`] on a `note:` id is the uuid.
+///
+/// **So a note written and deleted in one interval is two checkboxes, and one
+/// written and kept is two as well**: this read's bullet with the title, and
+/// `created`'s with the uuid. Said plainly rather than left to be found. It is
+/// [`NOT_WORK`]'s stated failure direction -- *"a verb that ought to be here
+/// and is not shows up as one extra checkbox the reader unchecks; nothing is
+/// ever lost by an omission"* -- and it is not a class #524 opened: a born link
+/// withdrawn from the panel writes its `unlinked` line on the **note's own id**
+/// (`commands::entity`'s `record_link_activity` names the line on `from_id`),
+/// so `- unlinked <uuid>` has been reachable since #502. `NOT_WORK` is keyed on
+/// the verb alone and `created`/`deleted` are contexts' and assets' too, so the
+/// list cannot be where this is answered; narrowing the read by kind would be,
+/// and that is a decision about worklog drafts rather than about the stream.
 ///
 /// `title` is never empty: `note::save` stores `named(title)`, which is the
 /// title or the word for a note without one, so the bullet always has a word

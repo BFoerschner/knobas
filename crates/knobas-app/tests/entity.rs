@@ -2454,6 +2454,12 @@ fn born_triples(line: &knobas_core::activity::ActivityRow) -> Vec<(String, Strin
     }))
 }
 
+/// The same triples in one order, so two independent readings of one set
+/// compare as sets rather than as whatever order each happened to produce.
+///
+/// `born[]` is written in the order the links were drawn and `entries_of`
+/// reads newest first, so neither order is the other's and pinning either
+/// would be pinning something no rule promises.
 fn sorted_triples(
     entries: impl Iterator<Item = (String, String, String)>,
 ) -> Vec<(String, String, String)> {

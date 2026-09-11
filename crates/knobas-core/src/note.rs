@@ -66,9 +66,10 @@
 //! The birth line is also what pairs the log's two halves. A link a note is
 //! born with is `manual`, so the panel lets a reader withdraw one and
 //! `commands::entity`'s `unlink_inner` writes an `unlinked` line for it; the
-//! `created` line names every born link by the id that `unlinked` line carries
-//! ([`DrawnLink`]), so the reader who withdraws one is looking at both ends of
-//! the same story in one history panel.
+//! `created` line names every withdrawable born link by the id that `unlinked`
+//! line carries ([`DrawnLink`], whose doc says which links those are and why
+//! that is all of them), so the reader who withdraws one is looking at both
+//! ends of the same story.
 //!
 //! [entity]: crate::entity
 
@@ -207,6 +208,14 @@ pub struct BornLink {
 /// withdrawal could ever name. A caller naming the same target twice under one
 /// relation likewise contributes one, because one is what the `on conflict`
 /// drew.
+///
+/// The third such case, and the reason that is the right rule rather than a
+/// shortfall: a born link under [`REF_RELATION`] whose target the body *also*
+/// names is drawn by [`reconcile_refs`] a statement earlier, so the born insert
+/// conflicts and this list omits it. The row that exists is then `implied`, and
+/// `implied` is the one origin the links panel refuses to withdraw -- so it can
+/// never write the `unlinked` line this list exists to give a partner to. Every
+/// link that *can* be withdrawn from a new note is in here.
 #[derive(Clone, Debug, Serialize)]
 struct DrawnLink {
     /// `knobas.link.id` -- the id an `unlinked` line will carry.
@@ -489,10 +498,16 @@ pub async fn get(pool: &PgPool, id: &EntityRef) -> Result<Option<NoteRow>, CoreE
 /// moment it exists to be read. It is also what answers "was there a note",
 /// so this is one statement rather than a read and a write that could disagree.
 ///
+/// `actor` and not `author`, which is [`create`]'s word: `create` binds it to
+/// `knobas.link.created_by` as well as to the line, and a note's author is a
+/// fact about the note. Here it reaches nothing but
+/// [`crate::activity::ActivityRow::actor`], and the person who deletes a note
+/// is not the person who wrote it.
+///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the write fails.
-pub async fn delete(pool: &PgPool, id: &EntityRef, author: &str) -> Result<bool, CoreError> {
+pub async fn delete(pool: &PgPool, id: &EntityRef, actor: &str) -> Result<bool, CoreError> {
     let note_id = id.to_string();
     let mut tx = pool.begin().await?;
 
@@ -518,7 +533,7 @@ pub async fn delete(pool: &PgPool, id: &EntityRef, author: &str) -> Result<bool,
 
     activity::record_with(
         &mut *tx,
-        author,
+        actor,
         "deleted",
         Some(id),
         serde_json::json!({ "title": title }),
