@@ -617,10 +617,11 @@ test("the fixture's expiring certificates are the roster rows under thirty days"
  * # The census: what the `?fake-ipc` walk cannot reach (#544)
  *
  * `invoke` throws *"no handler for ${cmd}"* on a command this fixture does
- * not answer, and a screen that reads before it draws — `BackupSection.svelte`
+ * not answer, and a section that reads before it draws — `BackupSection.svelte`
  * puts every one of its buttons behind `{#if status && !error}` — then renders
- * an error instead of itself. So the walk's reach is exactly the fixture's
- * handler table, and **fifty-two of the barrel's commands are outside it**.
+ * that error instead of itself. So the walk's reach is exactly the fixture's
+ * handler table, and [`UNANSWERED`] is everything outside it: whole surfaces,
+ * not stray commands.
  *
  * That is not a bug to be fixed by teaching the fixture everything. The
  * deputy's ruling of 2026-09-08 on #507 gives the reason for one of them and
@@ -649,8 +650,15 @@ const IPC_DIR = join(process.cwd(), "src/lib/ipc");
 /** The repo root, which Vitest's own root (`app/`) is one level under. */
 const REPO_ROOT = join(process.cwd(), "..");
 
+/** The IPC barrel's modules, with their text, read off disk. */
+function ipcModules(): { name: string; text: string }[] {
+  return readdirSync(IPC_DIR)
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => ({ name, text: readFileSync(join(IPC_DIR, name), "utf8") }));
+}
+
 /**
- * Every command name the IPC barrel invokes, read off disk.
+ * Every command name the barrel invokes, against the module that invokes it.
  *
  * The generic is optional in the pattern on purpose: `invoke<T>("cmd")` is the
  * house style, and a future `invoke("cmd")` written without one must still be
@@ -658,9 +666,7 @@ const REPO_ROOT = join(process.cwd(), "..");
  */
 function barrelCommands(): Map<string, string> {
   const found = new Map<string, string>();
-  for (const name of readdirSync(IPC_DIR)) {
-    if (!name.endsWith(".ts")) continue;
-    const text = readFileSync(join(IPC_DIR, name), "utf8");
+  for (const { name, text } of ipcModules()) {
     for (const [, cmd] of text.matchAll(/\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
       found.set(cmd!, name);
     }
@@ -669,8 +675,8 @@ function barrelCommands(): Map<string, string> {
 }
 
 /**
- * The surfaces `?fake-ipc` cannot open, grouped, each with the seam suite that
- * is the witness there instead.
+ * The surfaces `?fake-ipc` cannot open, grouped, each with the seam suites that
+ * are the witness there instead.
  *
  * A group's witness is where the behaviour is actually asserted — a real
  * database and, where a source is on the other end, the trait-level fake or
@@ -678,15 +684,19 @@ function barrelCommands(): Map<string, string> {
  * is the whole point: the walk certifies layout and interaction, and for these
  * surfaces it certifies nothing at all because it never reaches them.
  */
-const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
+const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[] = [
   {
     surface: "Settings → Backup: the status read, a backup now, the Share… export, the schedule, the restore",
-    witness: "crates/knobas-app/tests/backup_ipc.rs, crates/knobas-app/tests/share_exit.rs, app/src/lib/settings/BackupSection.test.svelte.ts",
+    witnesses: [
+      "crates/knobas-app/tests/backup_ipc.rs",
+      "crates/knobas-app/tests/share_exit.rs",
+      "app/src/lib/settings/BackupSection.test.svelte.ts",
+    ],
     commands: ["backup_status", "backup_now", "share_export", "set_backup_schedule", "restore_backup"],
   },
   {
     surface: "The inbox and its notifications",
-    witness: "crates/knobas-app/tests/inbox_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/inbox_ipc.rs"],
     commands: [
       "inbox_items",
       "inbox_count",
@@ -699,7 +709,7 @@ const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
   },
   {
     surface: "The timer and the day's blocks",
-    witness: "crates/knobas-app/tests/time_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/time_ipc.rs"],
     commands: [
       "current_timer",
       "start_timer",
@@ -714,12 +724,12 @@ const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
   },
   {
     surface: "The worklog draft and the week timesheet",
-    witness: "crates/knobas-app/tests/worklog_ipc.rs, crates/knobas-app/tests/week_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/worklog_ipc.rs", "crates/knobas-app/tests/week_ipc.rs"],
     commands: ["worklog_draft", "log_work", "log_all_preview", "log_all", "week_timesheet"],
   },
   {
     surface: "The standup digest, its protocol and the action items it publishes",
-    witness: "crates/knobas-app/tests/standup_ipc.rs, crates/knobas-app/tests/protocol_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/standup_ipc.rs", "crates/knobas-app/tests/protocol_ipc.rs"],
     commands: [
       "standup_digest",
       "standup_protocol",
@@ -731,7 +741,7 @@ const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
   },
   {
     surface: "Start work, and the merge follow that closes it",
-    witness: "crates/knobas-app/tests/start_work.rs",
+    witnesses: ["crates/knobas-app/tests/start_work.rs"],
     commands: [
       "start_work_flow",
       "start_work_run",
@@ -743,37 +753,40 @@ const UNANSWERED: { surface: string; witness: string; commands: string[] }[] = [
   },
   {
     surface: "The status select's read of what the workflow offers",
-    witness: "crates/knobas-app/tests/status_move.rs",
+    witnesses: ["crates/knobas-app/tests/status_move.rs"],
     commands: ["reachable_transitions"],
   },
   {
     surface: "Linking, unlinking and deleting a note",
-    witness: "crates/knobas-app/tests/entity.rs",
+    witnesses: ["crates/knobas-app/tests/entity.rs"],
     commands: ["create_link", "unlink", "delete_note"],
   },
   {
     surface: "Writing a route in the estate",
-    witness: "crates/knobas-app/tests/assets_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/assets_ipc.rs"],
     commands: ["create_route", "edit_route", "delete_route"],
   },
   {
     surface: "A source's assets",
-    witness: "crates/knobas-app/tests/assets_ipc.rs",
+    witnesses: ["crates/knobas-app/tests/assets_ipc.rs"],
     commands: ["source_assets"],
   },
   {
     surface: "Settings → Monitoring",
-    witness: "crates/knobas-app/tests/assets_ipc.rs, app/src/lib/settings/MonitoringSection.test.svelte.ts",
+    witnesses: [
+      "crates/knobas-app/tests/assets_ipc.rs",
+      "app/src/lib/settings/MonitoringSection.test.svelte.ts",
+    ],
     commands: ["monitoring_settings", "set_monitoring_settings"],
   },
   {
     surface: "Settings → Passive attribution",
-    witness: "crates/knobas-app/tests/time_ipc.rs, app/src/lib/settings/PassiveSection.test.svelte.ts",
+    witnesses: ["crates/knobas-app/tests/time_ipc.rs", "app/src/lib/settings/PassiveSection.test.svelte.ts"],
     commands: ["passive_attribution", "set_passive_attribution"],
   },
   {
     surface: "Editing a source and backfilling it",
-    witness: "crates/knobas-app/tests/ipc.rs, crates/knobas-app/tests/sources_crud.rs",
+    witnesses: ["crates/knobas-app/tests/ipc.rs", "crates/knobas-app/tests/sources_crud.rs"],
     commands: ["update_source", "backfill_source"],
   },
 ];
@@ -787,22 +800,21 @@ function recorded(): string[] {
  * The negative control, and it is load-bearing: a parse that found nothing
  * would make the census's difference empty and the census would pass while
  * saying nothing at all. So the parse has to find **every command the fixture
- * does answer** — eighty of them today — and at least one command in every
- * barrel module that imports `invoke`.
+ * does answer**, and at least one command in every barrel module that imports
+ * `invoke` — the second half because a module whose commands are all on the
+ * census could drop out of the walk silently under the first.
  */
 test("the parse finds every command the fixture answers, in every module that invokes one", () => {
   const commands = barrelCommands();
   const answered = Object.keys(demoHandlers());
 
-  expect(answered.length).toBeGreaterThan(50);
+  expect(answered.length, "a fixture this small cannot control anything").toBeGreaterThan(50);
   for (const cmd of answered) {
     expect([...commands.keys()], `${cmd} is answered but the parse did not find it in the barrel`).toContain(cmd);
   }
 
   const modules = new Set(commands.values());
-  for (const name of readdirSync(IPC_DIR)) {
-    if (!name.endsWith(".ts")) continue;
-    const text = readFileSync(join(IPC_DIR, name), "utf8");
+  for (const { name, text } of ipcModules()) {
     if (!text.includes('from "@tauri-apps/api/core"')) continue;
     expect(modules, `${name} imports invoke and the parse found no command in it`).toContain(name);
   }
@@ -820,7 +832,7 @@ test("every barrel command is either answered by the fixture or recorded as out 
   // First the direction a fixture change breaks: a command that has gained a
   // handler has to leave the list, or the record lies about the walk. This is
   // checked before the set equality so that the failure names the command and
-  // the group it is still filed under, rather than a diff of fifty-two names.
+  // the group it is still filed under, rather than a diff of every name here.
   for (const { surface, commands: group } of UNANSWERED) {
     for (const cmd of group) {
       expect(answered.has(cmd), `${cmd} is answered now; drop it from "${surface}"`).toBe(false);
@@ -837,18 +849,17 @@ test("every barrel command is either answered by the fixture or recorded as out 
  * Every group says what witnesses it instead, and no command is filed twice.
  *
  * The witness paths are **resolved on disk**, not pattern-matched: a record
- * that pointed at a suite somebody has since renamed would be a record of a
+ * pointing at a suite somebody has since renamed would be a record of a
  * witness that is not there, which is the failure this whole file exists to
  * stop one level up.
  */
 test("the census names a witness that exists for every surface, and files each command once", () => {
   const all = recorded();
   expect(new Set(all).size, "a command is recorded in two groups").toBe(all.length);
-  for (const { surface, witness, commands } of UNANSWERED) {
+  for (const { surface, witnesses, commands } of UNANSWERED) {
     expect(commands.length, `${surface} records no command`).toBeGreaterThan(0);
-    const paths = witness.split(", ");
-    expect(paths.length, `${surface} names no witness`).toBeGreaterThan(0);
-    for (const path of paths) {
+    expect(witnesses.length, `${surface} names no witness`).toBeGreaterThan(0);
+    for (const path of witnesses) {
       expect(existsSync(join(REPO_ROOT, path)), `${surface} names ${path}, which is not in the tree`).toBe(true);
     }
   }
