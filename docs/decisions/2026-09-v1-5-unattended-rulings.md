@@ -1,6 +1,6 @@
 # Unattended v1.5 rulings — from 2026-09-07, Fable as deputy
 
-Björn, 2026-09-07: *"let a fable subagent decide whenever there's a decision to be made since I won't be there."* The `/v15-next` loop dispatches one Fable subagent — the **deputy** — per fork, in the shape of the 2026-08-29 batch (`2026-08-29-unattended-batch-rulings.md`): each ruling is posted as a comment on its issue, beginning `Ruling (deputy for Björn, <date>):`, and the PR that acts on it appends the same four parts here, in the order ruled. The deputy first looks for an answer that already exists — the ticket, spec #491, `CONTEXT.md`, the ADRs, the decision records, the grilling's rulings — and quotes it; only an open fork gets a new ruling.
+Björn, 2026-09-07: *"let a fable subagent decide whenever there's a decision to be made since I won't be there."* The `/v15-next` loop dispatches one Fable subagent — the **deputy** — per fork, in the shape of the 2026-08-29 batch (`2026-08-29-unattended-batch-rulings.md`): each ruling is posted as a comment on its issue, beginning `Ruling (deputy for Björn, <date>):`, and the PR that acts on it appends the same four parts here, in the order ruled. **The PR that acts on it** is the first PR the ruling's chain produces, or a docs-only PR when there is none: a ruling whose ticket closes on transcripts rather than on a merge has no commit of its own to carry a section, and the section rides in the next one downstream (ruled on #552, 2026-09-11; the precedent is #525's, which rode in #549). The deputy first looks for an answer that already exists — the ticket, spec #491, `CONTEXT.md`, the ADRs, the decision records, the grilling's rulings — and quotes it; only an open fork gets a new ruling.
 
 What counts as a fork, and what does not, is the loop's *Decisions in Björn's absence* section. A ruling here binds the milestone; Björn reverses one with a follow-up ticket, and a ruling that settles something architectural gets its ADR through the implementer, per this directory's README.
 
@@ -2182,3 +2182,164 @@ shared-infrastructure sentence already flagged on #503. And whether the loop fil
 should name tickets by shape (*any ticket whose merge runs `just desktop-witness`*) rather than by
 number, which would have covered #525, #537, #547 and #548 without a ruling each. Both Björn's, on
 his return.
+
+---
+
+## #491 — the v1.5 exit: what holds, what is missing, and the spec's label
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/491#issuecomment-5631011183>
+
+**The fork:** the loop's Step 4, dispatched on *"v1.5 exit: every ticket closed, every live recipe
+green on its last run, the release run green — exited, or what is missing"*. Two limits were set on
+the answer: it is made on the record (`testenv/README.md`, the tracker, this file), because the live
+recipes spend a shared Hetzner fixture and the desktop witness takes the Mac's screen; and it must
+say what happens to #491 itself and its `ready-for-agent` label. The state, verified rather than
+taken from the orchestrator's report: milestone 13 holds 28 issues, 27 closed and every one
+`COMPLETED`, the one open issue this spec; no PR open; no open issue `in-progress`; `origin/main` at
+`76899b84`; tag `v1.0.0` and release run `34160263470` of 2026-09-07 `success`; #525 closed on all
+four criteria.
+
+**Ruling:** **not exited — one thing is missing, and it is a runner's ticket, not a code change.**
+(1) Clause one holds: every ticket is closed — #492–#510 and the eight the loop filed on rulings
+(#518, #522, #525, #531, #533, #537, #547, #548), and the desktop half meets #525's standard, three
+green transcripts each of the head that merged (`launcher-hotkey` on `d7738927`, `open-in-editor` on
+`ee6a866e`/`1fe5705a`, `capture` on `8c067a59`/`76899b84`), each ending `desktop-witness: ok` with
+`screen-locked 0` before and after. (2) Clause three holds: the release run is green, and spec
+#491's stream 0 names *"the dispatched release workflow, as v0.1.0"* as its witness; whether `main`
+at the exit is tagged v1.5.0 is flagged, not ruled. (3) **Clause two does not hold.** The working
+model lists eight recipes and the `justfile` carries exactly those eight; one, `estate-live`, is
+green on a head nothing has moved under. The other seven were last green on heads this milestone
+then changed in the two places a live run exists to certify: every adapter crate (#520) and the sync
+engine's `build_source` keychain read (#539). No recipe has a red on record, and no run of any of
+the seven on `main` as it will be exited exists. **So the milestone gets one ticket — *The v1.5 exit
+sweep: every live recipe on the exit head*, `ready-for-agent`, in #525's shape: a runner, no PR,
+closed on transcripts.** A tunnel ticket, the runner the environment's one owner, all eight recipes
+on the exit head serially and foreground in the working model's order, each transcript verbatim with
+the head's SHA and **the counts read, not the summary line**, the fixture left as found. A recipe
+that cannot be started is reported by name with its refusal, never skipped quietly. **A red is not
+fixed on that ticket**: it is filed as its own v1.5 ticket with the transcript, and fork kinds 3 and
+4 decide through the deputy whether the fixture or the code owes it — *the recipes a fix reaches
+re-run on the fix's merge head*. (4) `ready-for-agent` comes off #491 now and nothing goes on: the
+spec is not a dispatch and Step 2 has been returning it as a false candidate every iteration. #491
+stays open until the exit and closes, as completed, in the iteration that closes milestone 13, with
+the exit ruling as its closing comment in #427's shape; the orchestrator strips `in-progress` from
+the twenty-four closed tickets still carrying it. No glossary entry and no ADR.
+
+**Reasoning:** a milestone exit here has meant a live sweep since M3 — the roadmap's *"each exit
+runs every live suite"*, M3.3's *"every live suite green, run by Björn"*, M4's *"every live suite
+green, and the paperwork merged"* — and v1.5's section keeps the gate and strikes nothing of the
+sweep. ADR-0013 is why the sweep is the evidence: *"every adapter and every write path is tested
+against the real system, and no mock is a witness for any acceptance or exit criterion"*, and *"the
+adapter's certificate stays its `just <system>-live` recipe"*. Step 4's *"green on its last run"* is
+the orchestrator's compression of that, and the two readings part company exactly when a recipe's
+last run predates a change to what it certifies — true of seven of eight. This milestone already
+ruled that way for the desktop half: the README's *"both are runs of the head they were made on, not
+of what merged"* is why the 04:55 transcripts did not discharge #525. The ticket's shape follows
+#525's precedent, and Step 4 itself says *"file it as a ticket in the milestone with
+`ready-for-agent` and keep looping"*. The cost is bounded by the README's own measurements.
+
+**If you disagree, the cost of reversing this is:** one label and one comment — close the sweep
+ticket `wontfix`, take the exit on the record, close milestone 13 and #491 — and nothing in code,
+because this ruling merges and unmerges nothing. What that spends is the exit's evidence: a
+milestone closed with seven of its eight adapter certificates last read before it changed every
+adapter crate and the sync engine, which is the trade #525's ruling refused for the desktop half.
+Reversing part 4 is one label put back. If the sweep finds a red the cost is the same whenever it is
+paid, and cheaper on a head that has not moved on.
+
+**Flagged, not ruled:** whether Step 4 should say *green on the exit head* rather than *green on its
+last run*; whether `main` at the exit is tagged and released as v1.5.0 (spec #491 tags only v1.0.0
+and says nothing either way); whether the working model's 2026-08-24 sentence about a high-effort
+review over the milestone's accumulated diff is still a rule — it is on the record, it is not in
+Step 4's fork, and this ruling neither adds it nor strikes it; and the items already collected in
+the #525 ruling.
+
+---
+
+## #552 — the `kuma-live` red: who owes it, the witness in both directions, and where the paperwork rides
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/552#issuecomment-5631229490>
+
+**The fork:** fork kind 3, *"a live recipe red for a reason in the fixture rather than the code"*.
+The exit sweep #551 ran all eight recipes on `main` `76899b84`; seven are green (70 tests over
+fourteen suites, counts read) and `just kuma-live` is red — `live_kuma` 9 run, 1 ok, 8 failed, every
+failure `Unauthorized { status: Some(401) }`, and under `set -e` neither `kuma_write_live` nor
+`alert_chain_live` (M4.1's exit witness) ran, so the recipe had **no verdict on the exit head in
+either direction**. The diagnosis, checked against the files it names: `testenv/kuma-api-key` in the
+root checkout holds key id 4; the instance's `api_key` table holds exactly one key, id 6,
+`knobas-seed`, minted 2026-09-07 15:42 by a sibling worktree's seed, four hours after this
+checkout's file was written; and `kuma-seed.mjs`'s keep-branch is `if (mine && HOST_HAS_KEY)`, where
+`HOST_HAS_KEY` comes from `seed-kuma.sh`'s `[ -s "$KEY_FILE" ] && HAVE=1`. That tests *a key of that
+name exists* and *this host has a file*, never *the file's key still authenticates*. Two candidate
+fixes, not exclusive: **(a)** delete the stale file by hand so the seed's `else` branch re-mints —
+seconds, no PR; **(b)** the seed verifies the host's key before keeping it, as `seed-gitea.sh` step
+8 does for the Gitea token — a PR, a mutation proof, a re-run on the merge head. Subordinate: the
+#491 exit ruling said *"the runner who acts on this appends it"*, and that runner was forbidden to
+commit.
+
+**Ruling:** (1) **The seed owes the red, and the fix is code: #552, `ready-for-agent`, v1.5, one
+implementer.** The property: **`./seed-kuma.sh` keeps the key in `kuma-api-key` only while it still
+authenticates against the instance; a key the instance answers `401` to is re-minted, and the seed
+says so.** That is the sentence `testenv/README.md` already writes for Gitea. Where the check lives
+is the implementer's call — the shell shape in `seed-kuma.sh` before it sets `HAVE` is the smaller
+change and the one leaned to, not ruled. **Nothing outside `testenv/**` and docs is touched**: not
+`crates/knobas-source-kuma`, not the suites, not the recipe's three-suite order. The `401` the
+suites reported is the adapter being right about a dead credential, and
+`a_wrong_api_key_is_the_credential_health_path` witnesses that class on purpose. (2) **The witness
+is measured in both directions on the real instance (ADR-0013), in the PR body.** (i) Dead key, then
+re-mint: with `kuma-api-key` holding a well-formed key the instance does not have, `./seed-kuma.sh`
+logs the re-mint and writes a new file, and that file answers `200` on `/metrics`. (ii) Live key,
+then kept: a second run prints its keep line and leaves the file's bytes unchanged. A fix that
+re-mints on every run would pass (i), kill every sibling tree's copy on each run, and be the
+collision the README describes from the other side. Then `just kuma-live` green on the branch head,
+all three suites, counts read. (3) **Nobody deletes `testenv/kuma-api-key` by hand ahead of the
+PR** — not because (a) is wrong, but because it buys nothing (b) does not deliver sooner, and it
+destroys the one naturally occurring instance of the fault, which is the mutant 2(i) runs against.
+(4) **The seven green transcripts on `76899b84` stand as the exit's evidence**, because the PR
+touches nothing they certify; that holds only while the PR stays inside `testenv/**` and docs, and
+**the merge-manager checks the file list, not the claim**. The merge-manager re-runs `just
+kuma-live` foreground on the branch head it squashes, rebased onto `main` so the squash commit's
+tree is that head's tree (#525's condition (d)), from a tree whose `kuma-api-key` it names as dead
+or absent beforehand, and posts the transcript on #551 with the branch SHA and the squash SHA. The
+orchestrator then closes #551 on eight green transcripts, seven on `76899b84` and one on the merge
+head. (5) **Both this ruling and the #491 exit ruling are appended here in #552's PR, in the order
+ruled**, and the header's *"the PR that acts on it"* is corrected to *the first PR the ruling's
+chain produces, or a docs-only PR when there is none*; the same PR rewrites the README's `just
+kuma-live` bullet. The terminal case — the *exited* ruling itself, which no PR acts on — rides in a
+docs-only PR in PR #490's shape, merged before milestone 13 is closed. (6) `needs-triage` comes off
+and `ready-for-agent` goes on; the implementer's worktree needs `testenv/hetzner/hosts.env`, and it
+is a tunnel-class ticket. No glossary entry and no ADR.
+
+**Reasoning:** the answer existed in three places and is quoted rather than re-decided. First, the
+working model names the class this keep-branch belongs to: *"a check that measures a representation
+of the thing instead of the thing … All of them fail green, which is why reading a passing run will
+never find one."* `[ -s kuma-api-key ]` measures a file's presence and reads it as a credential's
+validity, and the sweep is the reading of a passing seed that found nothing; (a) alone would leave
+that check in place and re-arm it for the next sibling seed. Second, the standard is already in the
+tree: `seed-gitea.sh` step 8 solves the same problem for the sibling seed in the same directory, and
+the README documents it as the expected behaviour — a Kuma seed that does less is a half-convention
+across two files in one directory. Third, #525's ruling set the direction for fixture-class reds
+this milestone, *"Each fix is to `testenv/**` … and never to the app"*. ADR-0013 decides the
+witness: a dead key is a fault the real instance produces on demand, so it is witnessed live, and
+both directions are asked for because #525's condition (b) already found that a one-direction
+witness *"would also pass on a `Capture` that never opened"*. Part 4's head reasoning is the exit
+ruling's own, *"a green of an older head certifies that head"*. Part 5 corrects one word of a ruling
+this deputy wrote — *runner* for *PR* — because the #525 precedent was the same shape and
+`git log -S'## #525'` names `1fe5705a` (#549), a fix PR two tickets downstream, not the runner.
+
+**If you disagree, the cost of reversing this is:** (1) low before the PR opens — one label, and the
+runner deletes `testenv/kuma-api-key` and re-runs `just kuma-live` on `76899b84`, which is (a) and
+takes minutes; after the merge, nothing to unmerge on any frozen surface, since the PR is
+`testenv/**` and docs. What (a)-alone spends is the next hour lost to the same `401` by the next
+tree that runs after a sibling seeds. (2) is one PR-body paragraph. (3) is a file deletion. (4)
+reversing the *branch head rebased onto main* reading costs one more `kuma-live` run after the
+squash; reversing *the seven greens stand* costs a second full sweep for seven recipes whose
+subjects did not move. (5) is a section moved between two PRs and one clause in a header. (6) is a
+label.
+
+**Flagged, not ruled:** whether the environment wants the lock the README says it does not have
+(*"closing it properly would mean a lock the tooling does not have"*), now that both seeds heal a
+dead credential and the remaining collision is the mid-run one; and whether this file's header
+should say outright that a ruling no PR acts on rides in a docs-only PR, so the next milestone's
+exit does not need part 5.

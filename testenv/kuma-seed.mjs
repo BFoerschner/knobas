@@ -47,9 +47,11 @@ const KUMA_URL = process.env.KUMA_URL ?? "http://uptime-kuma:3001";
 const USER = process.env.KUMA_USER ?? "knobas";
 const PASS = process.env.KUMA_PASS ?? "knobas-dev";
 const KEY_NAME = "knobas-seed";
-// Set by seed-kuma.sh when testenv/kuma-api-key already exists on the host.
-// Kuma returns an API key's clear text exactly once, at creation, so a key
-// that exists here with no file there is unrecoverable and worthless.
+// Set by seed-kuma.sh when testenv/kuma-api-key holds a key this instance
+// still answers 200 to -- the host verifies before it claims (issue #552),
+// because a file is not a credential. Kuma returns an API key's clear text
+// exactly once, at creation, so a key that exists here with no working copy
+// there is unrecoverable and worthless.
 const HOST_HAS_KEY = process.env.KNOBAS_HAVE_KEY === "1";
 
 const log = (...a) => console.error("kuma-seed:", ...a);
@@ -205,14 +207,16 @@ const keys = await listen("apiKeyList", () => call("getAPIKeyList").then((r) => 
 const mine = (keys ?? []).find((k) => k.name === KEY_NAME);
 
 if (mine && HOST_HAS_KEY) {
-  log(`API key ${KEY_NAME} exists and the host still has it; keeping`);
+  log(`API key ${KEY_NAME} exists and the host's copy still authenticates; keeping`);
   console.log("KEEP");
 } else {
   if (mine) {
     // Unrecoverable: Kuma hands the clear text out once. Replacing it is the
     // only way back to a working /metrics, and leaving it would be a key
-    // nobody can use sitting in the list forever.
-    log(`API key ${KEY_NAME} exists but the host has no copy; replacing it`);
+    // nobody can use sitting in the list forever. "No working copy" covers
+    // both halves of what the host checked: no file at all, and a file whose
+    // key the instance has since rotated away (issue #552).
+    log(`API key ${KEY_NAME} exists but the host has no working copy; replacing it`);
     ok(await call("deleteAPIKey", mine.id), "deleteAPIKey");
   }
   const res = ok(await call("addAPIKey", { name: KEY_NAME, expires: null, active: true }), "addAPIKey");

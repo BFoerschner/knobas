@@ -205,14 +205,21 @@ it at the same time will break each other. Four ways:
   UI.
 
 - **`just kuma-live` re-mints the API key** when the worktree it runs from has
-  no `kuma-api-key` — Kuma hands a key's clear text out once, so a key that
-  exists in the instance with no copy on the host is replaced. A second agent
-  running it mid-run makes the first agent's `/metrics` requests answer 401,
-  which reads as a credential defect and is not one. It also adds and deletes
-  four monitors of its own -- `knobas-live-scratch` and `knobas-write-scratch`
-  through `kuma-monitor.sh`, `knobas-live-created` and `knobas-write-created`
-  through knobas' own create (#453) -- which is why the sweep above matters: a
-  killed run's leftovers are removed by the next `./seed-kuma.sh`.
+  no `kuma-api-key`, or has one the instance no longer answers to — Kuma hands
+  a key's clear text out once, so `seed-kuma.sh` verifies the recorded key
+  against `/metrics` and keeps it **while it still authenticates**, exactly as
+  `seed-gitea.sh` does with the Gitea token, and replaces it when it does not
+  (since 2026-09-11, #552) — and only on an answer the instance actually gave,
+  because re-minting destroys the instance's key: a probe that gets no answer
+  at all refuses rather than guessing. So a sibling's re-mint heals itself on
+  your next `./seed-kuma.sh` instead of handing the suites a 401 — but a
+  second agent running it *mid-run* still makes the first agent's `/metrics`
+  requests answer 401, which reads as a credential defect and is not one. It
+  also adds and deletes four monitors of its own -- `knobas-live-scratch` and
+  `knobas-write-scratch` through `kuma-monitor.sh`, `knobas-live-created` and
+  `knobas-write-created` through knobas' own create (#453) -- which is why the
+  sweep above matters: a killed run's leftovers are removed by the next
+  `./seed-kuma.sh`.
 
 So: **claim the environment before running `./seed`, `just gitea-live`,
 `just gitea-live-capped`, `just start-work-live` or `just kuma-live`, and say
