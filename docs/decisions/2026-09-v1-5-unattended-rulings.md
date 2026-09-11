@@ -2611,3 +2611,57 @@ class, and what it buys is that #544's guarantee holds by construction rather th
 **If you disagree, the cost of reversing this is:** trivial — one test deleted, nothing else moves;
 before merge, a label. Reversing the identifier for a call pattern is one regex, and it re-opens the
 dead-exemption hole criterion 2 names. Reversing the placement is `gh issue edit 560 --milestone ""`.
+
+---
+
+## #561 — which of three cures takes the duplicate note bullet out of a worklog draft
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/561#issuecomment-5633869374>
+
+**The fork:** the ticket's three cures — (1) narrow `MY_ACTIVITY` by entity kind so `note:` lines
+leave the draft, (2) dedupe candidates on `entity_id` preferring the titled one, (3) give an
+activity bullet a title instead of `key_of` — and placement.
+
+**Ruling:** cure 1. `MY_ACTIVITY` stops offering lines whose `entity_id` names a note. A note
+reaches a draft through `MY_NOTES` and nothing else, whatever the line's verb — `created`,
+`deleted`, `linked`, `unlinked`, and any verb yet to come; where the narrowing lives, in the SQL or
+in a filter after the read, is the implementer's. `NOT_WORK` is untouched and stays keyed on the
+verb alone. The doc comments follow: `MY_ACTIVITY`'s says which kind it excludes and why, and
+#559's paragraph on `MY_NOTES` (*"So a note written and deleted in one interval is two checkboxes,
+and one written and kept is two as well"*) is rewritten to say it no longer is — rewritten, not
+deleted, so the working-out stays. `CONTEXT.md`'s **Note** entry gains one clause on its #524
+amendment: a draft sees a note through its `updated_at` and through nothing in the stream. No ADR.
+The witness is three tests in the IPC-seam suite beside
+`the_candidates_are_the_readers_own_work_inside_the_interval`: a note born with a link, saved and
+with that link withdrawn inside the interval is **exactly one** candidate carrying its title; a note
+created and deleted inside the interval is **no** candidate; a context created inside the interval
+is still its `activity` candidate, so the narrowing is by kind and not by verb. No IPC change —
+`Candidate` and `CandidateSource` stay as they are — no migration, no §10.8 entry. Gate-only, in the
+v1.5 follow-ups milestone.
+
+**Reasoning:** the answer already exists in Björn's #409 ruling, and three of its sentences decide
+the three cures. *"Bullets say something a person would say … a note's bullet uses the note's
+**title**, never its uuid"* — cures 2 and 3 each keep a uuid bullet on the table (cure 2 has no
+titled partner for a deletion, since `note::delete` takes the row; cure 3 needs a title for a row
+that is gone), and cure 1 leaves none. *"A note deleted inside the interval does not appear … That
+is correct: they deleted it. Do not chase it through the tombstone."* — #559's `- deleted <uuid>`
+reaching the draft through `MY_ACTIVITY` contradicts that ruling, and only cure 1 restores it.
+*"each fact is read from the table it already lives in"* — a note's fact lives in `knobas.note`, and
+a second reader of it is the double narration #409 refused. #409 put *"Any change to `NOT_WORK`,
+`MY_ACTIVITY`"* out of scope, which bound that ticket and not this one; the #524 ruling and the code
+it left say where the answer belongs: *"`NOT_WORK` is keyed on the verb alone … so the list cannot
+be where this is answered; narrowing the read by kind would be, and that is a decision about worklog
+drafts rather than about the stream."* What cure 1 gives up is `- unlinked <uuid>` as a draft
+candidate, and giving it up is right: a link is *"never write-back"* (`CONTEXT.md`, **Write-back**),
+a worklog comment is text sent to Jira, and a uuid bullet is the shape #409 was filed to keep out of
+one. The stream keeps every line; only the draft stops reading them. Placement follows the exit
+ruling's test for a ticket found mid-way — *"Nothing a witness reads is in it"* — so it is a
+gate-only follow-up in the container built for those. Not `wontfix`: the ticket's own diagnosis is
+that #409's failure shape is *"now reachable for every note"*, and every capture (#503) is such a
+note inside whatever interval the timer is running.
+
+**If you disagree, the cost of reversing this is:** small — one clause in a query, two doc comments
+and one glossary clause, and three seam tests, none of them on a frozen surface; before merge, a
+label. A reversal to cure 2 or 3 is a follow-up ticket that has to say which uuid bullet it wants a
+draft to show, and why #409's sentence on deleted notes no longer holds.

@@ -2105,6 +2105,47 @@ async fn line(pool: &PgPool, verb: &str, at: DateTime<Utc>) {
         .expect("the line is moved into the interval");
 }
 
+/// Move **every** activity line about `entity_id` into the interval, and
+/// insist there were `expected` of them.
+///
+/// [`line`]'s reason, for the lines a fixture does not write by hand: the
+/// verbs below are written by `note::create`, `note::delete` and
+/// `unlink_inner` inside the transaction of the real call, stamped `now()`,
+/// so the only way to have them happen on a day in 2026 is to move them
+/// afterwards.
+///
+/// **`expected` is asserted, not returned**, because the tests below are about
+/// lines *not* becoming candidates, and a fixture that moved nothing would
+/// pass every one of them while witnessing none: a writer that stopped writing
+/// its line, or an id spelled differently than the one it names the line on,
+/// fails here instead.
+async fn lines_about(pool: &PgPool, entity_id: &str, at: DateTime<Utc>, expected: u64) {
+    let moved = sqlx::query("update knobas.activity set at = $1 where entity_id = $2")
+        .bind(at)
+        .bind(entity_id)
+        .execute(pool)
+        .await
+        .expect("the lines move")
+        .rows_affected();
+    assert_eq!(
+        moved, expected,
+        "the fixture moved the lines it meant to about {entity_id}"
+    );
+}
+
+/// Put a note's `updated_at` -- the stamp the draft's note read keys on --
+/// inside the interval, insisting there is a note there to stamp.
+async fn note_stamped(pool: &PgPool, note_id: &str, at: DateTime<Utc>) {
+    let moved = sqlx::query("update knobas.note set updated_at = $1 where id = $2")
+        .bind(at)
+        .bind(note_id)
+        .execute(pool)
+        .await
+        .expect("the note is moved into the interval")
+        .rows_affected();
+    assert_eq!(moved, 1, "there is a note row at {note_id} to stamp");
+}
+
 /// A comment write the reader queued through knobas, **at a moment this test
 /// dictates**, in whatever state the queue has reached.
 ///
@@ -2180,12 +2221,7 @@ async fn note_edited(pool: &PgPool, title: &str, at: DateTime<Utc>, saves: usize
             .expect("the note saves")
             .expect("the note is there");
     }
-    sqlx::query("update knobas.note set updated_at = $1 where id = $2")
-        .bind(at)
-        .bind(&row.id)
-        .execute(pool)
-        .await
-        .expect("the note is moved into the interval");
+    note_stamped(pool, &row.id, at).await;
     row.id
 }
 
@@ -2568,6 +2604,187 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         "{}",
         draft.comment
     );
+}
+
+/// **A note reaches a draft through the note read and nothing else** (#561).
+///
+/// The whole life of one note inside one interval: born with a link, saved,
+/// and that link withdrawn. Three real calls, and between them they write two
+/// activity lines on the note's **own** entity id -- `created` (#524) and
+/// `unlinked` (#502, `record_link_activity` names the line on `from_id`) --
+/// on top of the `knobas.note` row the note read already sees.
+///
+/// Before this ticket that was three checkboxes for one note, two of them
+/// reading `- created 0192ab3c-...`: `key_of` on a `note:` id is the bare
+/// uuid, and `WorklogDraft.svelte` ticks every candidate by default, so a
+/// reader who did not untick them sent that uuid to Jira. #409's rule is the
+/// other one -- *"a note's bullet uses the note's title, never its uuid"* --
+/// and the cure ruled for it is that the activity read stops offering `note:`
+/// lines at all, whatever their verb.
+///
+/// `== 1` and not `>= 1`, scoped to this note's freshly minted id, because
+/// "one note, one checkbox" is the whole claim; and the uuid is asserted
+/// absent from the **comment**, which is the thing that would have reached the
+/// ticket.
+#[tokio::test]
+async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_title() {
+    use knobas_app::commands::entity::unlink_inner;
+    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+    use knobas_app::time::worklog::CandidateSource;
+
+    let pool = scratch("worklog-note-one-checkbox").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    let room = create_context_inner(&pool, "Payout retries")
+        .await
+        .expect("a context to capture into");
+    let born = create_note_inner(
+        &pool,
+        Some("SEPA retry window"),
+        None,
+        &[NoteLinkInput {
+            target_id: room.id.clone(),
+            relation: "captured-in".to_owned(),
+        }],
+    )
+    .await
+    .expect("a note, born with its link");
+    let note_id = born.note.id.clone();
+    let note_ref = knobas_core::entity::EntityRef::parse(&note_id).expect("a note id");
+    knobas_core::note::save(&pool, &note_ref, "SEPA retry window", "rolled back", "user")
+        .await
+        .expect("the note saves")
+        .expect("the note is there");
+    let drawn = born.links.first().expect("the born link was drawn").link.id;
+    unlink_inner(&pool, &drawn.to_string())
+        .await
+        .expect("the withdrawal goes through")
+        .expect("a born link is manual, so the panel may withdraw it");
+
+    // Both lines the three calls wrote on the note, and the note's own stamp,
+    // inside the interval -- so every door the draft has onto this note is
+    // open at once.
+    lines_about(&pool, &note_id, at(10, 20), 2).await;
+    note_stamped(&pool, &note_id, at(10, 20)).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    let mine: Vec<&knobas_app::time::worklog::Candidate> = draft
+        .candidates
+        .iter()
+        .filter(|c| c.entity_id.as_deref() == Some(note_id.as_str()))
+        .collect();
+    assert_eq!(
+        mine.len(),
+        1,
+        "one note is one checkbox, however many lines its life wrote: {:?}",
+        draft.candidates
+    );
+    assert_eq!(mine[0].id, note_id, "the note's own id, already namespaced");
+    assert_eq!(mine[0].source, CandidateSource::Note, "{:?}", mine[0]);
+    assert_eq!(mine[0].bullet, "- edited the note SEPA retry window");
+
+    let uuid = note_id.split_once(':').expect("a namespaced id").1;
+    assert!(
+        !draft.comment.contains(uuid),
+        "no bullet in the comment says a note's uuid: {}",
+        draft.comment
+    );
+}
+
+/// **A note created and deleted inside one interval is no candidate** (#561).
+///
+/// #409 ruled on exactly this case -- *"A note deleted inside the interval does
+/// not appear ... That is correct: they deleted it. Do not chase it through the
+/// tombstone."* -- and since #524 wrote a `deleted` line the activity read was
+/// chasing it: the note row is gone, so the note read is silent, and the draft
+/// offered `- deleted 0192ab3c-...` instead.
+///
+/// Both of this note's lines are moved into the interval, so the test fails if
+/// the read is narrowed by verb rather than by kind: `created` and `deleted`
+/// are contexts' and assets' verbs too, which is why `NOT_WORK` could not be
+/// where this was answered.
+#[tokio::test]
+async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all() {
+    use knobas_app::commands::entity::create_note_inner;
+
+    let pool = scratch("worklog-note-deleted").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    let born = create_note_inner(&pool, Some("Wrong ticket"), None, &[])
+        .await
+        .expect("a note");
+    let note_id = born.note.id.clone();
+    let note_ref = knobas_core::entity::EntityRef::parse(&note_id).expect("a note id");
+    assert!(
+        knobas_core::note::delete(&pool, &note_ref, "user")
+            .await
+            .expect("the deletion goes through"),
+        "the note was there to delete"
+    );
+
+    lines_about(&pool, &note_id, at(10, 20), 2).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.entity_id.as_deref() == Some(note_id.as_str())),
+        "a note the reader deleted is not their afternoon: {:?}",
+        draft.candidates
+    );
+    let uuid = note_id.split_once(':').expect("a namespaced id").1;
+    assert!(
+        !draft.comment.contains(uuid),
+        "and its uuid is not in the comment either: {}",
+        draft.comment
+    );
+}
+
+/// **The narrowing is by kind, not by verb** (#561).
+///
+/// An ad-hoc context's birth writes `created` on its own `ctx:<uuid>`
+/// (`create_context_inner`), and it has no second reader the way a note does:
+/// drop it and a draft loses the only signal it carries for a room the reader
+/// opened while the clock ran. So it is still a candidate, from the activity
+/// read, with the bullet it has always had.
+///
+/// That bullet says the context's uuid, which is the shape #409 dislikes and
+/// which this ticket did **not** set out to fix -- it is pinned here as what
+/// the code does today, so that a narrowing which quietly swept every
+/// `created` line out of the draft fails rather than passing as a tidier
+/// version of the same cure.
+#[tokio::test]
+async fn a_context_created_inside_the_interval_is_still_its_activity_candidate() {
+    use knobas_app::commands::entity::create_context_inner;
+    use knobas_app::time::worklog::CandidateSource;
+
+    let pool = scratch("worklog-context-created").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    let room = create_context_inner(&pool, "Payout retries")
+        .await
+        .expect("a context");
+    lines_about(&pool, &room.id, at(10, 20), 1).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    let mine: Vec<&knobas_app::time::worklog::Candidate> = draft
+        .candidates
+        .iter()
+        .filter(|c| c.entity_id.as_deref() == Some(room.id.as_str()))
+        .collect();
+    assert_eq!(
+        mine.len(),
+        1,
+        "a context created in the interval is still a candidate: {:?}",
+        draft.candidates
+    );
+    assert_eq!(mine[0].source, CandidateSource::Activity, "{:?}", mine[0]);
+    let uuid = room.id.split_once(':').expect("a namespaced id").1;
+    assert_eq!(mine[0].bullet, format!("- created {uuid}"));
 }
 
 /// **An afternoon of typing is one checkbox** (#409).
