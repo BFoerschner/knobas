@@ -1212,6 +1212,16 @@ a line, presses *Open in knobas*, and asserts that knobas is frontmost again,
 the capture window is gone, and the note is open with `CAPTURED FROM` in its
 links panel.
 
+**The capture window is counted as a window, on both sides of the keystroke**
+(#548). `ax windows` lists what knobas has open, one line per window with its
+title, and the driver counts the ones titled `Capture` just before the shortcut
+and again after it: none, then exactly one. Counting *named elements* is the
+question this driver used to ask and it is a representation of the window --
+the word `Capture` is on the window's title, its web area and its text area at
+once, all three correct, so `exactly_one` counted 3 and refused a window that
+was open. The closing assertion is the same count going back to zero, and an
+answer that could not be read is never zero.
+
 Every accessible name any driver acts on is pinned against the file that
 carries it by `just witness-unit`, so an edit to one reads as a stale driver
 at the gate rather than as a failed run minutes into somebody's screen. **A
@@ -1229,6 +1239,15 @@ status line and a rendered paragraph arrive as a **value** (`AXValue`, which
 only `ax values` reads). `open-in-editor` waited for a heading as a name for as
 long as it existed, and its pin was green the whole time. Only a run can tell
 the two apart, which is what this harness is for.
+
+**And a pin says nothing about how many elements answer** — which is #548's
+bill for the same belief. Three files give the capture window the word
+`Capture`: `capture.rs`'s `.title`, `capture.html`'s `<title>` and
+`CaptureWindow.svelte`'s `aria-label`. Each pin was green, each name is right,
+and `ax find` answered `3` where the driver asked for one. The third question a
+driver can ask is therefore about **windows** and not about names at all: `ax
+windows` prints one line per window with its title, and `window_count` reads
+it.
 
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
@@ -1254,10 +1273,12 @@ merely begun, its reading of what the record says, and whether the stub's path
 can go into a command template without the quotes it may not type (#547) --
 and the four `capture` is: the title a typed paragraph gives its note, the
 whole-line match its readings are found by, the reading of `ax frontmost`'s
-answer, and the rendered-name rule above, which both drivers share. Two more
+answer, and the rendered-name rule above, which both drivers share. Four more
 belong to neither: `reading_verdict` and `waypoint_verdict`, which say whether
-a wait witnessed the step before it or was merely true on both sides of it. A
-driver is not exempt from the gate because its *run* is.
+a wait witnessed the step before it or was merely true on both sides of it, and
+`window_count` and `count_verdict` (#548), which read a list of windows and
+turn a count of them into the same one-word verdict. A driver is not exempt
+from the gate because its *run* is.
 
 ### The prerequisites
 
@@ -1365,10 +1386,24 @@ three faults the first run found, which are fixed, and the two gaps that remain.
 predate #503's review commits: `b4dc71d7` moved the capture window's `close`
 port from a component prop into `createCapture`'s defaults, so the last line of
 the `capture` transcript above — *knobas is frontmost again and the capture
-window has gone* — has not been asserted against the wiring that merged. The
+window has gone* — had not been asserted against the wiring that merged. The
 merge-manager's re-run on the merge head refused with `screen-locked` at 06:20
-CEST on 2026-09-08, and the re-run is **owed to #525**, which carries all three
+CEST on 2026-09-08, and the re-run was **owed to #525**, which carries all three
 runs again. The deputy's second ruling of 2026-09-08 on #503, parts 1 and 2.
+
+**That `capture` green was a race, and #548 is what it cost.** #525's runner
+drove the same driver on the merge head at 16:57 and it refused the capture
+window it had just opened. The two runs had the same inputs: on the branch
+commit the 04:55 green was taken from, `capture.sh`'s assertion,
+`ax.swift` and all three of the app's `Capture` names are byte-identical to
+what merged, so `b4dc71d7` is **not** the cause and nothing in the app
+regressed. What the old `exactly_one "$CAPTURE_BOX"` could only ever have been
+green on is a **half-built window**: before the shortcut the count is 0, with
+the window's webview up it is 3 (the window, the web area and the text area,
+measured on #548's dump), and the one state in between — the `AXWindow` built
+and its document not yet loaded — is the only one that counts 1. Which of those
+the first poll landed in was the difference between the two runs. Counting
+windows (#548) has no such state.
 
 **One driver has still never been driven, and the corpus is no longer why.**
 `open-in-editor` used to stop where it always said it would — *the demo profile
@@ -1473,6 +1508,27 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   some of them** — straight quotes, and a double hyphen, which the same
   preference pane turns into a dash. The template is one unquoted word now, and
   `path_is_one_word` refuses to type a path that would have needed the quotes.
+
+#### What the first unlocked run broke, and what #548 fixed
+
+* **A wait on a name three elements carry.** `capture.sh` asked `ax find` for
+  `exactly_one` element called `Capture`, and the capture window is named that
+  three times over — `AXWindow` title from `crates/knobas-app/src/capture.rs`'s
+  `.title("Capture")`, `AXWebArea` description from `app/capture.html`'s
+  `<title>`, `AXTextArea` title and description from `CaptureWindow.svelte`'s
+  `aria-label`. Every one of the three is correct and every `witness-unit` pin
+  over them was green. The count was 3 while the window was up, so the driver
+  reported the window whose text area held the caret as *never appeared*.
+* **And widening the count would not have fixed it.** `present` in place of
+  `exactly_one` goes green here and goes green just as well on a main window
+  that ever comes to carry that name with no capture window anywhere: the
+  question *did the capture window appear?* is about a **window**, and a count
+  of named elements is a representation of it. `ax windows` grew for that, and
+  the driver counts windows titled `Capture` **before** the keystroke and after
+  it — none, then exactly one — so the wait means the keystroke. The closing
+  assertion is the same count back at zero, and `ax windows` refusing (no
+  window at all: a quit app, a screen locked mid-run) reads as `x` rather than
+  zero, so a dead process cannot satisfy *the capture window has gone*.
 
 #### What is still not witnessed
 

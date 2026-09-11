@@ -247,6 +247,42 @@ func press(pid: pid_t, label: String) -> Int32 {
     return 0
 }
 
+/// The application's windows, one per line: `window<tab><its title>`.
+///
+/// **The question `find` cannot answer, which is the whole of #548.**
+/// `matching()` walks every element under every window and counts the two
+/// attributes a *name* can arrive in. That is the right question for a button
+/// and the wrong one for a window: the capture window puts the word `Capture`
+/// on three elements at once -- the `AXWindow`'s title from `capture.rs`'s
+/// `.title("Capture")`, the `AXWebArea`'s description from `capture.html`'s
+/// `<title>`, and the `AXTextArea`'s from `CaptureWindow.svelte`'s
+/// `aria-label` -- and each of the three is correct. A driver asking *is that
+/// window open?* wants the windows, not the named elements underneath them.
+///
+/// The key is repeated rather than numbered, in the same tab-separated shape
+/// every other subcommand answers in: what a caller does with this is count
+/// the windows answering to a title, and a repeated key needs no parser. An
+/// untitled window still prints its line -- `window<tab>` -- so a list cannot
+/// lose its last entry to `$( )`'s trailing-newline strip, and a caller can
+/// tell *no windows* from *one window with no title*.
+///
+/// A refusal when there are none, like `dump`'s. No window at all is what a
+/// locked screen, a quit app and a pid that was never an application all look
+/// like, and a caller that read an empty list as *the window has closed* would
+/// pass its closing assertion on an app that had died mid-run.
+func windowTitles(pid: pid_t) -> Int32 {
+    let found = windows(of: pid)
+    if found.isEmpty {
+        FileHandle.standardError.write(
+            Data("ax: pid \(pid) exposes no window (it has none, or the screen is locked)\n".utf8))
+        return 1
+    }
+    for window in found {
+        print("window\t\(text(window, kAXTitleAttribute as String))")
+    }
+    return 0
+}
+
 /// Every string **value** under this app's windows, one per line.
 ///
 /// The third way an element can carry text, and the one `find` deliberately
@@ -422,6 +458,8 @@ case "find" where arguments.count == 3 && integer(1) != nil:
     status = find(pid: pid_t(integer(1)!), label: arguments[2])
 case "values" where arguments.count == 2 && integer(1) != nil:
     status = values(pid: pid_t(integer(1)!))
+case "windows" where arguments.count == 2 && integer(1) != nil:
+    status = windowTitles(pid: pid_t(integer(1)!))
 case "frontmost" where arguments.count == 1:
     status = frontmost()
 case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
@@ -450,6 +488,7 @@ default:
                    ax focused <pid>
                    ax find <pid> <label>
                    ax values <pid>
+                   ax windows <pid>
                    ax frontmost
                    ax dump <pid> <depth>
                    ax focus <pid> <label>

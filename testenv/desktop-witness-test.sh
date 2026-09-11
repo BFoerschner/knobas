@@ -534,6 +534,73 @@ check "an unreadable after-reading is not a witness" unreadable \
 check "a verdict this rule does not know is unreadable, not a pass" unreadable \
     "$(waypoint_verdict no maybe)"
 
+# --- counting windows rather than names (#548) ------------------------------
+#
+# `capture.sh` waited for `exactly_one` element called `Capture`, and the
+# capture window carries that word on three at once -- its `AXWindow` title,
+# its `AXWebArea` description and its `AXTextArea` name, from three files, each
+# of them right. The count was 3 for as long as the window was up, so the
+# driver refused the window it had just opened. These are the two decisions in
+# the fix, which is all of it that can be tested without a screen.
+#
+# The fixtures are the shape `ax windows` answers in: one line per window, the
+# key repeated, the title in the second tab-separated field. The two-window one
+# is what the dump on #548 measured -- the capture window and the main window,
+# in that order.
+
+capture_up=$(printf 'window\tCapture\nwindow\tknobas\n')
+main_only=$(printf 'window\tknobas\n')
+
+check "the capture window is counted while it is open" 1 \
+    "$(window_count "$capture_up" Capture)"
+check "no window is titled Capture before the shortcut" 0 \
+    "$(window_count "$main_only" Capture)"
+check "the main window answers to its own title" 1 "$(window_count "$capture_up" knobas)"
+# The whole reason this is not `ax find`: three elements of the open capture
+# window carry the name and there is exactly **one** window, which is what the
+# question "did the capture window appear?" is about.
+check "the three elements named Capture are still one window" 1 \
+    "$(window_count "$capture_up" Capture)"
+# Whole-field equality on the title. A substring test is how a window that is
+# not the capture window answers for the one that is.
+check "a window whose title merely contains the word is not a match" 0 \
+    "$(window_count "$(printf 'window\tCapture notes\n')" Capture)"
+# An untitled window prints its key and an empty field, so a list cannot lose
+# its last entry to the trailing-newline strip and *no windows* stays
+# distinguishable from *one window with no title*.
+check "an untitled window is a window, and not a missing answer" 0 \
+    "$(window_count "$(printf 'window\t\n')" Capture)"
+# The answer that must never be 0. The helper refuses when it can see no window
+# -- a locked screen, a quit app -- and read as 0 that would satisfy this
+# driver's closing assertion, which is that the capture window has *gone*.
+check "an empty answer is unreadable, not a window that closed" x \
+    "$(window_count "" Capture)"
+check "an answer in some other shape is unreadable, not zero" x \
+    "$(window_count "$(printf 'ax: pid 95163 exposes no window\n')" Capture)"
+
+check "no window of that name reads as absent" no "$(count_verdict 0)"
+check "one reads as present" yes "$(count_verdict 1)"
+# How many is a separate assertion, made separately by the driver: two capture
+# windows and none are two different faults.
+check "two read as present too" yes "$(count_verdict 2)"
+check "the unreadable count is not an absent window" unreadable "$(count_verdict x)"
+check "an empty count is unreadable" unreadable "$(count_verdict "")"
+
+# The two composed, which is how the driver reads them: a count on each side of
+# the keystroke, and one word for the pair.
+check "no capture window before the shortcut and one after it is a witness" witnessed \
+    "$(waypoint_verdict "$(count_verdict 0)" "$(count_verdict 1)")"
+# The green that would witness nothing, and the reason the before-count is
+# taken at all: a window already open cannot have been opened by the keystroke.
+check "a capture window already open before the shortcut witnesses nothing" too-early \
+    "$(waypoint_verdict "$(count_verdict 1)" "$(count_verdict 1)")"
+check "a shortcut that opened no window is named as that" never-appeared \
+    "$(waypoint_verdict "$(count_verdict 0)" "$(count_verdict 0)")"
+check "an unreadable before-count is not a witness" unreadable \
+    "$(waypoint_verdict "$(count_verdict x)" "$(count_verdict 1)")"
+check "an unreadable after-count is not a witness" unreadable \
+    "$(waypoint_verdict "$(count_verdict 0)" "$(count_verdict x)")"
+
 check "the frontmost bundle is read out of the helper's own shape" com.apple.finder \
     "$(frontmost_bundle "$(printf 'pid\t431\nbundle\tcom.apple.finder\n')")"
 check "a frontmost answer with no bundle reads as nothing" "" \
@@ -543,6 +610,19 @@ check "a frontmost answer with no bundle reads as nothing" "" \
 
 pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Capture"' \
     "the capture window's box still has its accessible name"
+# The **window's own title**, which is what `ax windows` answers with and what
+# the driver's step 4 now waits on. It is a different fact from the box's
+# `aria-label` above, from a different file, and the two happen to be the same
+# word -- which is exactly how one wait came to be asked of both.
+#
+# **And this pin is not the witness of it**, said here because #547 was billed
+# for the opposite belief. It measures that the driver's constant is not stale
+# against the Rust string. Whether the accessibility API answers `AXTitle` with
+# that string on that window is a question only a run can put, and this file
+# cannot: `just witness-unit` has no window server. The run is `just
+# desktop-witness capture`, and the transcript is in testenv/README.md.
+pin_label ../crates/knobas-app/src/capture.rs '.title("Capture")' \
+    "the capture window is still built under the title the driver waits for"
 pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Open in knobas"' \
     "the capture window's button still has its accessible name"
 pin_label ../app/src/lib/settings/CaptureSection.svelte 'aria-label="Save capture shortcut"' \
@@ -604,6 +684,18 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
         check "the path the lookup returns exists" yes yes
     else
         check "the path the lookup returns exists" yes no
+    fi
+
+    # The window list, against a pid that is not an application at all -- this
+    # script's own shell. **The refusal is the assertion**: `ax windows` prints
+    # nothing and exits non-zero when it can see no window, which is what
+    # `window_count` reads as `x`, and a version that printed an empty list and
+    # exited 0 would make `capture.sh`'s closing *the capture window has gone*
+    # pass on an app that had died mid-run.
+    if "$helper/ax" windows $$ >/dev/null 2>&1; then
+        check "the window list refuses a process with no window" yes no
+    else
+        check "the window list refuses a process with no window" yes yes
     fi
 
     # An identifier nothing claims: the lookup must refuse rather than print a

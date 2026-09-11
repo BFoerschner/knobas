@@ -20,7 +20,9 @@
 #   3. **Finder frontmost**, asserted and not assumed, because a capture
 #      shortcut that only worked while knobas had the keyboard would pass every
 #      other line of this file;
-#   4. the keystroke opening the capture window, with the caret in its box;
+#   4. the keystroke opening the capture window -- **a window of knobas' own
+#      that was not there one keystroke earlier** (#548) -- with the caret in
+#      its box;
 #   5. a line typed, and *Open in knobas* pressed;
 #   6. knobas frontmost again, the capture window gone, and the note open with
 #      *captured from* in its links panel.
@@ -60,6 +62,13 @@ SHORTCUT_FIELD=$(rendered_label 'Shortcut')
 readonly SHORTCUT_FIELD
 readonly SAVE_SHORTCUT='Save capture shortcut'
 readonly CAPTURE_BOX='Capture'
+# The **window**'s title, which is `capture.rs`'s `.title("Capture")` and a
+# different fact from the box's `aria-label` above, even though the two are the
+# same word. Spelled twice rather than once because they are two names on two
+# things, from two files, and a rename of either must not silently re-point the
+# other: this one is what `ax windows` answers with and what step 4 waits on,
+# the one above is what the caret is checked against.
+readonly CAPTURE_WINDOW='Capture'
 readonly OPEN_IN_MAIN='Open in knobas'
 readonly QUERY_BOX='Search or act'
 
@@ -110,6 +119,8 @@ die() {
     { "$ax" frontmost 2>&1 || true; } | sed 's/^/capture:   /' >&2
     printf 'capture: the focused element at that moment:\n' >&2
     { "$ax" focused "$pid" 2>&1 || true; } | sed 's/^/capture:   /' >&2
+    printf 'capture: the windows knobas has open:\n' >&2
+    { "$ax" windows "$pid" 2>&1 || true; } | sed 's/^/capture:   /' >&2
     printf 'capture: every string on knobas'"'"' windows:\n' >&2
     { "$ax" values "$pid" 2>&1 || true; } | sed 's/^/capture:   /' >&2
     printf 'capture: the windows as the accessibility tree sees them:\n' >&2
@@ -147,6 +158,24 @@ count_of() {
 present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
 exactly_one() { [ "$(count_of "$1")" = 1 ]; }
+
+# How many of knobas' **windows** are titled '$CAPTURE_WINDOW' -- a number, or
+# `x` when the helper could see no window at all.
+#
+# A different question from the three above, and #548 is the bill for asking
+# theirs: `ax find` counts elements carrying a *name*, and the capture window
+# carries its word on three of them -- the window, the web area and the text
+# area -- each correctly. `exactly_one "$CAPTURE_BOX"` therefore counted 3 for
+# as long as the window was up, and this driver refused the window it had just
+# opened. `ax windows` answers about windows, which is what "did the capture
+# window appear?" means.
+capture_windows() { window_count "$("$ax" windows "$pid" 2>/dev/null || true)" "$CAPTURE_WINDOW"; }
+
+# The capture window has gone: knobas still answers with windows, and none of
+# them is the capture one. `= 0` and not `!= 1`, so that `x` -- no window at
+# all, which is a quit app or a screen that locked mid-run -- is a refusal here
+# rather than the closing assertion of this run passing on a dead process.
+capture_window_gone() { [ "$(capture_windows)" = 0 ]; }
 
 # fill <label> <text> -- put <text> in the field called <label>, replacing
 # whatever is in it.
@@ -281,9 +310,69 @@ say "$OTHER_APP has the screen; knobas is behind it"
 
 # --- 4. the shortcut, from somebody else's screen ----------------------------
 
+# **Counted on both sides of the keystroke, and the first count is the point
+# (#548).** A wait that could already be satisfied before the shortcut proves
+# nothing about the shortcut -- and this one could: the word `Capture` is on the
+# capture window's title, its web area and its text area at once, so the old
+# `exactly_one "$CAPTURE_BOX"` was a count of 3 on a window that was open and
+# would have been a count of 1 on anything in the main window that ever came to
+# carry that name. The count before the keystroke is what makes the count after
+# it mean the keystroke, and counting *windows* is what makes either of them
+# mean the window.
 say "pressing $ACCELERATOR"
+before=$(count_verdict "$(capture_windows)")
+say "before the keystroke, windows titled '$CAPTURE_WINDOW': $before"
+
 "$ax" key "$KEY_K" command option shift
-wait_until "the capture window never appeared" exactly_one "$CAPTURE_BOX"
+
+count=$(capture_windows)
+after=$(count_verdict "$count")
+deadline=$((SECONDS + SETTLE_SECONDS))
+while [ "$after" != yes ] && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 0.2
+    count=$(capture_windows)
+    after=$(count_verdict "$count")
+done
+say "after the keystroke, windows titled '$CAPTURE_WINDOW': $after ($count)"
+
+case $(waypoint_verdict "$before" "$after") in
+witnessed) ;;
+too-early)
+    die "a window titled '$CAPTURE_WINDOW' was already open before the shortcut," \
+        "so waiting for one witnesses nothing about the shortcut." \
+        "Either a previous run left its capture window up -- the harness quits" \
+        "the app between runs, so that would be new -- or something else in" \
+        "knobas now opens a window of that name. Until that is answered this" \
+        "step cannot say the keystroke did anything."
+    ;;
+never-appeared)
+    die "the capture window never appeared." \
+        "The shortcut was reported as *registered* above and $OTHER_APP had the" \
+        "screen, so what failed is between the window server and the window:" \
+        "check that the combination reached the plugin's handler and that" \
+        "capture::open_window built a window -- a build that fails is logged" \
+        "and swallowed, because its caller is a keystroke with no window to" \
+        "report into."
+    ;;
+*)
+    die "knobas' windows could not be read either side of the shortcut" \
+        "(before: $before, after: $after)." \
+        "'ax windows' refuses when it can see no window at all, which is a quit" \
+        "app or a screen that locked mid-run. That is not a measurement of the" \
+        "capture window in either direction, so this refuses rather than" \
+        "reading an empty answer as a window that never opened."
+    ;;
+esac
+
+# And exactly one of them, which the verdict above deliberately does not say:
+# `count_verdict` answers *some* or *none*, and two capture windows is its own
+# fault -- a shortcut handled twice, or an `open_window` that built a second
+# instead of focusing the one it found.
+[ "$count" = 1 ] || die \
+    "$count windows are titled '$CAPTURE_WINDOW', and the shortcut opens one." \
+    "capture::open_window focuses the window it finds rather than building a" \
+    "second, so more than one means the handler ran twice or the label changed."
+
 # The caret, and not merely the window: the whole promise is that the next
 # keystroke is the note, and a window that opened without focus would swallow
 # the sentence typed below into whatever was behind it.
@@ -307,7 +396,7 @@ say "pressing '$OPEN_IN_MAIN'"
 # --- 6. the note, and its two links ------------------------------------------
 
 wait_until "knobas never came forward after '$OPEN_IN_MAIN'" is_frontmost dev.knobas.desktop
-wait_until "the capture window is still open after '$OPEN_IN_MAIN'" absent "$CAPTURE_BOX"
+wait_until "the capture window is still open after '$OPEN_IN_MAIN'" capture_window_gone
 say "knobas is frontmost again and the capture window has gone"
 
 # The title `capture_title` says this typing produces, on screen -- which is the
