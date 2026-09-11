@@ -424,3 +424,72 @@ waypoint_verdict() {
     *) printf 'unreadable\n' ;;
     esac
 }
+
+# --- counting windows rather than names (issue #548) ------------------------
+#
+# The other half of what makes a wait a witness, one attribute over. #547 was a
+# wait on a name the accessibility API never answers with; #548 is a wait on a
+# name it answers with **three times**, all of them right. `capture.sh` asked
+# `ax find` for `exactly_one` element called `Capture` and the capture window
+# carries that word on its `AXWindow` (`capture.rs`'s `.title`), its `AXWebArea`
+# (`capture.html`'s `<title>`) and its `AXTextArea` (`CaptureWindow.svelte`'s
+# `aria-label`) -- so the count was 3 for as long as the window was up and the
+# driver reported the window it was looking at as never having appeared.
+#
+# The lesson is not "count differently". It is that *is that window open?* is a
+# question about **windows**, and a count of named elements is a representation
+# of it: widening `exactly_one` to `present` would have gone green here and gone
+# green just as well on a main window that had grown an element of that name
+# with no capture window anywhere. `ax windows` asks the question directly, and
+# these two functions are the reading of its answer.
+
+# window_count <ax windows output> <title>
+#
+# How many of the application's windows are called <title> -- a number, or `x`
+# when the answer cannot be read.
+#
+# **`x` and not 0**, for the reason `count_of`'s sentinel exists in the drivers:
+# the helper prints nothing when it can see no window, which is a locked screen,
+# a quit app or a pid that was never an application, and `capture.sh`'s closing
+# assertion is that the capture window has **gone**. Read as 0, an app that died
+# mid-run would satisfy it -- the check that cannot fail, one line after the
+# check that matters.
+#
+# Whole-**field** equality on the title, read out of the tab-separated line
+# rather than matched over it with `grep`: a window called `Capture notes` is
+# not the capture window, and a substring test is how the wrong window answers
+# for the right one.
+window_count() {
+    printf '%s\n' "$1" | awk -F'\t' -v want="$2" '
+        $1 == "window" { seen = 1; if ($2 == want) found++ }
+        END { if (seen) print found + 0; else print "x" }
+    '
+}
+
+# count_verdict <count>
+#
+# A count turned into the word `waypoint_verdict` reads: `yes`, `no` or
+# `unreadable`.
+#
+# The bridge between a count and a waypoint, so that a driver counting windows
+# and a driver reading lines refuse on the same rule. `x` -- and anything else
+# that is not a number -- is `unreadable` rather than `no`, which is the whole
+# reason a count comes back as `x` in the first place.
+#
+# **Two functions where `reading_verdict` is one**, and the number is why: a
+# line is on the screen or it is not, and there is nothing else to ask about it,
+# while a count of windows is also the answer to *how many*, which `capture.sh`
+# asserts separately from the waypoint. Folding the count into the verdict would
+# throw away the only number in the answer.
+#
+# **How many is not this function's question.** Any number above zero is `yes`;
+# whether *exactly* one window of that name is open is a separate assertion, and
+# the driver makes it separately, because two capture windows and none are two
+# different faults and folding them into one word would lose that.
+count_verdict() {
+    case $1 in
+    '' | *[!0-9]*) printf 'unreadable\n' ;;
+    0) printf 'no\n' ;;
+    *) printf 'yes\n' ;;
+    esac
+}

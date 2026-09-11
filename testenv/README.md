@@ -1212,6 +1212,16 @@ a line, presses *Open in knobas*, and asserts that knobas is frontmost again,
 the capture window is gone, and the note is open with `CAPTURED FROM` in its
 links panel.
 
+**The capture window is counted as a window, on both sides of the keystroke**
+(#548). `ax windows` lists what knobas has open, one line per window with its
+title, and the driver counts the ones titled `Capture` just before the shortcut
+and again after it: none, then exactly one. Counting *named elements* is the
+question this driver used to ask and it is a representation of the window --
+the word `Capture` is on the window's title, its web area and its text area at
+once, all three correct, so `exactly_one` counted 3 and refused a window that
+was open. The closing assertion is the same count going back to zero, and an
+answer that could not be read is never zero.
+
 Every accessible name any driver acts on is pinned against the file that
 carries it by `just witness-unit`, so an edit to one reads as a stale driver
 at the gate rather than as a failed run minutes into somebody's screen. **A
@@ -1229,6 +1239,15 @@ status line and a rendered paragraph arrive as a **value** (`AXValue`, which
 only `ax values` reads). `open-in-editor` waited for a heading as a name for as
 long as it existed, and its pin was green the whole time. Only a run can tell
 the two apart, which is what this harness is for.
+
+**And a pin says nothing about how many elements answer** — which is #548's
+bill for the same belief. Three files give the capture window the word
+`Capture`: `capture.rs`'s `.title`, `capture.html`'s `<title>` and
+`CaptureWindow.svelte`'s `aria-label`. Each pin was green, each name is right,
+and `ax find` answered `3` where the driver asked for one. The third question a
+driver can ask is therefore about **windows** and not about names at all: `ax
+windows` prints one line per window with its title, and `window_count` reads
+it.
 
 **Scope: OS-level features only.** That is the v1.5 grilling's ruling, and the
 reason for it is that those features have no instance to run a suite against.
@@ -1254,10 +1273,12 @@ merely begun, its reading of what the record says, and whether the stub's path
 can go into a command template without the quotes it may not type (#547) --
 and the four `capture` is: the title a typed paragraph gives its note, the
 whole-line match its readings are found by, the reading of `ax frontmost`'s
-answer, and the rendered-name rule above, which both drivers share. Two more
+answer, and the rendered-name rule above, which both drivers share. Four more
 belong to neither: `reading_verdict` and `waypoint_verdict`, which say whether
-a wait witnessed the step before it or was merely true on both sides of it. A
-driver is not exempt from the gate because its *run* is.
+a wait witnessed the step before it or was merely true on both sides of it, and
+`window_count` and `count_verdict` (#548), which read a list of windows and
+turn a count of them into the same one-word verdict. A driver is not exempt
+from the gate because its *run* is.
 
 ### The prerequisites
 
@@ -1315,10 +1336,9 @@ driver is not exempt from the gate because its *run* is.
    `/Applications/knobas.app`, three old worktrees, the root checkout's debug
    *and* release bundles, and five stale DMG mount points. Moving
    `/Applications/knobas.app` aside was not enough — LS then named the root
-   checkout's debug bundle. What worked, and what the three runs recorded below
-   were made with -- two green and one stopped at the demo-corpus gap -- is
-   unregistering every other path and putting back afterwards the ones that
-   still exist on disk:
+   checkout's debug bundle. What worked, and what every run recorded below was
+   made with, is unregistering every other path and putting back afterwards the
+   ones that still exist on disk:
 
    ```sh
    LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -1365,10 +1385,27 @@ three faults the first run found, which are fixed, and the two gaps that remain.
 predate #503's review commits: `b4dc71d7` moved the capture window's `close`
 port from a component prop into `createCapture`'s defaults, so the last line of
 the `capture` transcript above — *knobas is frontmost again and the capture
-window has gone* — has not been asserted against the wiring that merged. The
+window has gone* — had not been asserted against the wiring that merged. The
 merge-manager's re-run on the merge head refused with `screen-locked` at 06:20
-CEST on 2026-09-08, and the re-run is **owed to #525**, which carries all three
+CEST on 2026-09-08, and the re-run was **owed to #525**, which carries all three
 runs again. The deputy's second ruling of 2026-09-08 on #503, parts 1 and 2.
+
+**And what turned that green into #548's red is unmeasurable.** #525's runner
+drove the same driver on the merge head at 16:57 and it refused the capture
+window it had just opened. **What is measured is that nothing the assertion
+depends on differed**: across every commit of the #503 branch and the squash
+`2b8460bf` that merged it, `capture.sh`'s `exactly_one "$CAPTURE_BOX"` line,
+`ax.swift` and all three of the app's `Capture` names are byte-identical — so
+`b4dc71d7` is **not** the cause and nothing in the app regressed. Why one run
+of that code was green and the other red cannot be recovered: neither
+transcript records a count, and the worktree the 04:55 run was made in is gone.
+What the code says, and it is a reading rather than a second measurement, is
+that the old assertion had only one state it could ever be true in — `0` before
+the shortcut, `3` with the window's webview up (measured on #548's dump), and
+`1` only while the `AXWindow` exists and its document has not loaded, which
+`capture::open_window` rebuilds on every press. That would make the green a
+race the run happened to win. **Nothing here rests on it**: the assertion is
+wrong under either reading, and counting windows has no such state.
 
 **One driver has still never been driven, and the corpus is no longer why.**
 `open-in-editor` used to stop where it always said it would — *the demo profile
@@ -1405,6 +1442,34 @@ observed**: a program a person chose in Settings, started by the button on a
 branch detail, holding the path the disk answered with and nothing the mirror
 holds. It is a run of the head it was made on and not of what merged — the
 run of the merge head is the merge-manager's, and it is **#525**'s second
+criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
+
+**`capture` is green again since #548**, run from `.worktrees/issue-548` at
+08:49 CEST on 2026-09-11 against `dev.knobas.desktop` built and signed by
+`knobas-dev`, with every other registered path unregistered for the length of
+the run and put back afterwards. The probe answered `trusted 1 / post-events 1
+/ screen-locked 0` before the build and again after it:
+
+```
+capture: bringing Finder to the front
+capture: Finder has the screen; knobas is behind it
+capture: pressing CmdOrCtrl+Alt+Shift+K
+capture: before the keystroke, windows titled 'Capture': no
+capture: after the keystroke, windows titled 'Capture': yes (1)
+capture: the capture window is up, with the caret in it
+capture: typing a capture whose title will be 'Retry storm from the capture witness'
+capture: pressing 'Open in knobas'
+capture: knobas is frontmost again and the capture window has gone
+capture: the note is open in the main window, titled 'Retry storm from the capture witness'
+capture: the links panel reads 'CAPTURED FROM': the capture attached what was in front of the reader
+```
+
+Those middle two lines are the **waypoint in both directions**: knobas had no
+window of that name while Finder held the screen, and one the moment the
+shortcut was pressed, counted the same way on the same tree — so the wait says
+the keystroke did it. The line after the button is the mirror, the same count
+back at zero. It is a run of the head it was made on and not of what merged;
+the run of the merge head is the merge-manager's, and it is **#525**'s third
 criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 
 #### What the first runs answered
@@ -1474,6 +1539,27 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   preference pane turns into a dash. The template is one unquoted word now, and
   `path_is_one_word` refuses to type a path that would have needed the quotes.
 
+#### What the first unlocked run broke, and what #548 fixed
+
+* **A wait on a name three elements carry.** `capture.sh` asked `ax find` for
+  `exactly_one` element called `Capture`, and the capture window is named that
+  three times over — `AXWindow` title from `crates/knobas-app/src/capture.rs`'s
+  `.title("Capture")`, `AXWebArea` description from `app/capture.html`'s
+  `<title>`, `AXTextArea` title and description from `CaptureWindow.svelte`'s
+  `aria-label`. Every one of the three is correct and every `witness-unit` pin
+  over them was green. The count was 3 while the window was up, so the driver
+  reported the window whose text area held the caret as *never appeared*.
+* **And widening the count would not have fixed it.** `present` in place of
+  `exactly_one` goes green here and goes green just as well on a main window
+  that ever comes to carry that name with no capture window anywhere: the
+  question *did the capture window appear?* is about a **window**, and a count
+  of named elements is a representation of it. `ax windows` grew for that, and
+  the driver counts windows titled `Capture` **before** the keystroke and after
+  it — none, then exactly one — so the wait means the keystroke. The closing
+  assertion is the same count back at zero, and `ax windows` refusing (no
+  window at all: a quit app, a screen locked mid-run) reads as `x` rather than
+  zero, so a dead process cannot satisfy *the capture window has gone*.
+
 #### What is still not witnessed
 
 * **`captured-in`, and it is not a debt.** A capture's second born link needs a
@@ -1502,10 +1588,13 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   harness refuses unless the copy Launch Services names is the one it just
   built, and there were **ten** registered paths on 2026-09-08: `/Applications`,
   three old worktrees, the root checkout's debug and release bundles, and five
-  stale DMG mount points. The three runs above -- two green, one stopped at the
-  demo-corpus gap -- were made with the others unregistered
-  (`lsregister -u <path>`) and every one that still existed on disk put back
-  afterwards; nothing was moved or deleted. **A merge-manager
+  stale DMG mount points. Three were left on 2026-09-11 (`/Applications` and
+  the root checkout's two), and every run recorded above was made with the
+  others unregistered (`lsregister -u <path>`) and every one that still existed
+  on disk put back afterwards; nothing was moved or deleted. **A worktree's own
+  bundle is left registered by the harness** — it registers what it built and
+  puts back only what was registered before — so a merged-and-deleted worktree
+  is where the stale entries come from. **A merge-manager
   re-running these recipes has to do the same**, or the harness will refuse with
   *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
   the winner. **The harness is not going to do it for you, and that is ruled
