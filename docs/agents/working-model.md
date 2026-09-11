@@ -45,10 +45,14 @@ Implementation now runs ticket-driven:
   third gate waits on it. **A PR carries its transcript** for any change under
   `crates/knobas-search/src/` that touches the search statement, the board or rail queries,
   `lists.rs`, `saved.rs` or `corpus.rs`, and for any change to `saved::MAX_SAVED_LISTS`. The recipe
-  itself only prints: the head SHA and `uptime`'s one-minute load average before the build and after
-  the last test, and no verdict on them. It has no gate variables to refuse on and it never refuses
-  on load — a threshold would go red on a correct tree whenever a browser was open, which is the
-  criterion that cannot pass — so the *"read the counts"* rule above lands here as: read the two
+  itself only prints the machine's numbers: the head SHA and `uptime`'s one-minute load average
+  before the build and after the last test, and no verdict on them. It has no gate variables to
+  refuse on and it never refuses on load — a threshold would go red on a correct tree whenever a
+  browser was open, which is the criterion that cannot pass. It does refuse on one thing that is not
+  the machine, which is the *"read the counts"* rule above applied to itself: under `--ignored` a
+  benchmark that lost its `#[ignore]`, was renamed, or fell out of the recipe's target list is not a
+  failure — libtest prints `0 passed; 0 failed` and cargo exits 0 — so the recipe adds up the
+  harness's own `test result:` lines and exits 1 when the total is not the six it pins. Read the two
   load lines before you quote anything between them. Whether a transcript is a *reading* is the #533 re-run
   standard's question, and the standard is quoted rather than paraphrased here
   (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`): *"its numbers count only under
