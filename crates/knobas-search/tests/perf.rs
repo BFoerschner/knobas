@@ -78,6 +78,18 @@
 //! them answers. Until #541 it built its statement over `corpus::LIVE_ITEM`
 //! alone, which stopped being the launcher's statement at #436.
 //!
+//! **One database, so what a test seeds the later ones inherit.**
+//! `knobas_db::test_util` gives this *binary* one database and libtest runs the
+//! tests in name order, which puts the two budget gates and the estate test
+//! before the plan pin and
+//! [`the_plan_does_not_decay_after_the_fifth_execution`] after it. So the
+//! budget readings are taken on the mirror alone as they always were, and the
+//! decay test now runs over the notes as well -- which costs it nothing it
+//! measures, because what it asserts is a *ratio* between halves of one run and
+//! not an absolute time. Anything added here that a budget gate must not see
+//! has to seed later in the alphabet than that gate, and this paragraph is
+//! where that fact lives.
+//!
 //! ## The rail carries the saved-list cap (#533)
 //!
 //! `knobas.smart_list` was **empty in this fixture** when #506 added it: with
@@ -845,11 +857,14 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 ///
 /// Positional, and checked against `corpus::ALL.len()` before it is used. A
 /// fifth corpus added to the launcher with no fixture behind it should stop the
-/// plan pin rather than arrive silently as a branch nobody named.
+/// plan pin rather than arrive silently as a branch nobody named. The *order* is
+/// the report's and nothing else's: a reordered `corpus::ALL` would print the
+/// wrong names beside the right numbers, and every assertion below is per branch
+/// either way.
 const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
 
 /// Every branch the launcher unions holds rows, read through the launcher's own
-/// statement.
+/// statement -- and how many of them the pinned query matches, printed.
 ///
 /// **The line between widening a plan pin and appearing to.** The pin below is
 /// on a plan, and a plan over an empty relation is not a plan the planner had
@@ -863,7 +878,23 @@ const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
 /// corpus's `relation`, `scope` or join stopped reaching its own rows. The
 /// `totals` CTE counts every row the branch can reach rather than the page's
 /// worth, so the limit below bounds what comes back and not what is counted.
-async fn assert_every_branch_has_rows(pool: &sqlx::PgPool) {
+///
+/// # Rows are what is asserted; matches are what is printed
+///
+/// The two are not the same question and this reports both, because the
+/// difference between them is the one thing about this fixture a reader has to
+/// know. The estate's assets and routes hold rows and match **nothing** of
+/// `text`: `testing::seed_estate` carries none of the mirror's markers, so what
+/// those two branches contribute to the plan below is a scan the planner has to
+/// cost and statistics it has to read, and no rows in the match set.
+///
+/// That is the honest state of the fixture rather than a thing to infer from
+/// its absence, so the number is printed beside the row count and a zero is
+/// visible. It is not *asserted*, because making it non-zero means putting a
+/// marker into `seed_estate`, which moves the fixture underneath
+/// [`the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items`] and
+/// the reading recorded on it -- a different ticket's call.
+async fn assert_every_branch_has_rows(pool: &sqlx::PgPool, text: &str) {
     assert_eq!(
         corpus::ALL.len(),
         BRANCHES.len(),
@@ -874,20 +905,31 @@ async fn assert_every_branch_has_rows(pool: &sqlx::PgPool) {
         BRANCHES.len()
     );
     for (name, branch) in BRANCHES.iter().zip(corpus::ALL) {
-        let built = sql::search_sql(&[branch], None, false, &EffectiveFilters::default(), 10, 40);
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
-        let total: u64 = group::group(rows, &KindCatalog::default())
-            .iter()
-            .map(|found| u64::from(found.total))
-            .sum();
-        println!("branch {name:<7} {total:>7} rows");
+        let rows = branch_total(pool, branch, None).await;
+        let matching = branch_total(pool, branch, Some(text)).await;
+        println!("branch {name:<7} {rows:>7} rows, {matching:>7} matching {text:?}");
         assert!(
-            total > 0,
+            rows > 0,
             "the {name} branch reached no rows, so the plan below would be taken \
              over a relation the planner has nothing to do in -- `corpus::ALL` \
              over an empty corpus is the one-corpus pin this test stopped being"
         );
     }
+}
+
+/// How many rows one corpus answers with, over every kind it holds.
+///
+/// `text` is `None` for browse -- every row the branch can reach -- and
+/// `Some(q)` for the rows that query matches. Either way it is the launcher's
+/// own statement over that one corpus, and the count is the `totals` CTE's,
+/// which is taken over the whole match and not over the page.
+async fn branch_total(pool: &sqlx::PgPool, branch: &corpus::Corpus, text: Option<&str>) -> u64 {
+    let built = sql::search_sql(&[branch], text, false, &EffectiveFilters::default(), 10, 40);
+    let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
+    group::group(rows, &KindCatalog::default())
+        .iter()
+        .map(|found| u64::from(found.total))
+        .sum()
 }
 
 /// The two plan defects task 10 found, pinned so they cannot come back.
@@ -939,6 +981,11 @@ async fn assert_every_branch_has_rows(pool: &sqlx::PgPool) {
 /// statement's, so the ratio the assertion reads is conservative: every buffer
 /// the other three branches touch is charged against the mirror's matches, and
 /// the margin at the time of writing is still an order of magnitude.
+///
+/// **What each branch contributes is printed, not assumed.**
+/// [`assert_every_branch_has_rows`] reports both a branch's rows and how many
+/// of them match `ledger`, and its docs carry what the difference means -- the
+/// estate's two branches hold rows and match none of this query.
 #[tokio::test]
 #[ignore = "needs a corpus large enough for the planner's choice to be real"]
 async fn the_match_set_is_not_joined_row_by_row() {
@@ -952,7 +999,7 @@ async fn the_match_set_is_not_joined_row_by_row() {
     // tag of its own would put a second estate beside the first and make the
     // other test's report a reading of two.
     testing::seed_estate(&pool, "bench").await.unwrap();
-    assert_every_branch_has_rows(&pool).await;
+    assert_every_branch_has_rows(&pool, "ledger").await;
 
     let built = sql::search_sql(
         corpus::ALL,
@@ -966,7 +1013,11 @@ async fn the_match_set_is_not_joined_row_by_row() {
     println!("{plan}");
 
     let matches = testing::match_count(&pool, "ledger").await.unwrap();
-    assert_eq!(matches, 100_000, "`ledger` is in every row of the fixture");
+    assert_eq!(
+        matches, 100_000,
+        "`ledger` is in every row of the mirror, which is what `match_count` \
+         reads -- the notes carry it too and are not in this number"
+    );
 
     let buffers = total_buffers(&plan);
     assert!(

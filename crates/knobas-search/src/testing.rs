@@ -368,7 +368,10 @@ pub async fn seed_notes(pool: &PgPool, rows: i64) -> Result<(), SearchError> {
 /// One `&'static str`, for [`INSERT_ITEMS`]' reason: `tests/sql_containment.rs`
 /// fails the build if any file in this crate but `crate::sql` so much as names
 /// the runtime-SQL wrapper, and a statement built with `format!` reaches for
-/// it.
+/// it. So the `512` and the `20` below are [`FILLER_WORDS`] and [`BODY_WORDS`]
+/// spelled literally, exactly as [`INSERT_ITEMS`] spells them, and the two
+/// statements have to be changed together or the two fixtures stop being drawn
+/// from one vocabulary.
 const INSERT_NOTES: &str = r"
 insert into knobas.note (id, title, body_md, created_at, updated_at)
 select 'note:bench-' || g,

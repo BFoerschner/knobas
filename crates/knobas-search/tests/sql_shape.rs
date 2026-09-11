@@ -19,19 +19,22 @@
 //! one that ticket refuses its own obvious fix for: [`seed`] below writes
 //! mirror rows and nothing else, so `corpus::ALL` in this file would union
 //! three relations with no rows in them and assert the same result set over a
-//! wider name. Each such call carries the line that says what about it is the
-//! mirror's.
+//! wider name. Every such call carries a line saying what about that pin is the
+//! mirror's, or -- where one test builds the statement more than once -- naming
+//! the call above it that does.
 //!
-//! Three pins do move, and they are the three whose assertion **does not depend
+//! Four pins do move, and they are the four whose assertion **does not depend
 //! on which rows exist** -- an empty result set, a schema that is still there,
-//! a count of named prepared statements. For those, the empty branches are not
-//! a weakness: what they pin is the statement, and over `corpus::ALL` it is the
-//! statement the launcher builds.
+//! a count of named prepared statements, and a server error that an absurd
+//! `updated:` window either raises or does not. For those, the empty branches
+//! are not a weakness: what they pin is the statement, and over `corpus::ALL`
+//! it is the statement the launcher builds.
 //!
-//! The two files that run all four corpora with rows in them are
-//! `tests/corpus_seam.rs`, which drives the builder directly, and
-//! `tests/search.rs`, which drives [`Searcher`](knobas_search::Searcher) and so
-//! goes through `corpus::ALL` on every test in it.
+//! `tests/corpus_seam.rs` is the file that runs all four corpora **with rows in
+//! each**: it seeds an item, a note, an asset and a route and drives the
+//! builder directly. `tests/search.rs` drives
+//! [`Searcher`](knobas_search::Searcher), so every test in it *builds* over
+//! `corpus::ALL` -- over a fixture of mirror items and notes, and no estate.
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::corpus::{self, LIVE_ITEM};
@@ -367,9 +370,13 @@ async fn an_absurd_updated_window_answers_instead_of_erroring() {
         let rows = run(
             &pool,
             search_sql(
-                // The answer asserted is a seeded mirror hit; `search.rs` runs
-                // the clamp over all four.
-                &[&LIVE_ITEM],
+                // `corpus::ALL`: the clamp is spliced into each corpus's own
+                // `updated_at`, and what this pin guards -- the server raising
+                // `timestamp out of range` -- is an error at execution, which
+                // needs no rows to happen. Nothing else runs a saturating
+                // window over the union; `corpus_seam.rs` runs an ordinary
+                // 30-day one.
+                corpus::ALL,
                 Some(&tag),
                 false,
                 &EffectiveFilters {
@@ -449,7 +456,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
     let one = run(
         &pool,
         search_sql(
-            // The same page under a limit of one, and the same kinds.
+            // Same test, same reason as the call above: the mirror's own kinds.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -472,7 +479,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
     let capped = run(
         &pool,
         search_sql(
-            // The same again under `per_group`, and the same kinds.
+            // Same test, same reason again, with `per_group` as the cut.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -662,7 +669,7 @@ async fn a_half_typed_word_matches_as_a_prefix_and_a_finished_one_does_not() {
     let finished = run(
         &pool,
         search_sql(
-            // The same row, with the word finished rather than half typed.
+            // Same test, same reason as the call above: one seeded mirror row.
             &[&LIVE_ITEM],
             Some(&tag),
             false,
@@ -725,7 +732,10 @@ async fn browse_mode_orders_by_recency_and_ranks_nothing() {
     let rows = run(
         &pool,
         search_sql(
-            // Browse ordering under a `source:` filter, which only the mirror can carry.
+            // Browse ordering under a `source:` filter naming a seeded source.
+            // Every corpus carries a `source_id`, but the other three's are the
+            // constants `'note'`, `'asset'` and `'route'`, which no seed can
+            // name; only the mirror's is a column.
             &[&LIVE_ITEM],
             None,
             false,
