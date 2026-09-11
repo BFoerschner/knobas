@@ -13,7 +13,7 @@
  * `App.svelte`, exempting only files inside the harness directory itself;
  * a test one level up would be a second door into the fixture.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -855,10 +855,12 @@ test("every barrel command is either answered by the fixture or recorded as out 
 /**
  * Every group says what witnesses it instead, and no command is filed twice.
  *
- * The witness paths are **resolved on disk**, not pattern-matched: a record
- * pointing at a suite somebody has since renamed would be a record of a
+ * The witness paths are **resolved on disk as files**, not pattern-matched: a
+ * record pointing at a suite somebody has since renamed would be a record of a
  * witness that is not there, which is the failure this whole file exists to
- * stop one level up.
+ * stop one level up. It has to be a file and not merely a path that resolves,
+ * because the two paths that resolve without naming a suite are exactly the
+ * two a slip would produce -- `""`, which is the repo root, and a directory.
  */
 test("the census names a witness that exists for every surface, and files each command once", () => {
   const all = recorded();
@@ -867,7 +869,9 @@ test("the census names a witness that exists for every surface, and files each c
     expect(commands.length, `${surface} records no command`).toBeGreaterThan(0);
     expect(witnesses.length, `${surface} names no witness`).toBeGreaterThan(0);
     for (const path of witnesses) {
-      expect(existsSync(join(REPO_ROOT, path)), `${surface} names ${path}, which is not in the tree`).toBe(true);
+      const full = join(REPO_ROOT, path);
+      const isSuite = existsSync(full) && statSync(full).isFile();
+      expect(isSuite, `${surface} names ${path}, which is not a file in the tree`).toBe(true);
     }
   }
 });
