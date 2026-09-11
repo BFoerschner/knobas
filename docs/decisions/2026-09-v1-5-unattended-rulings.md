@@ -2814,7 +2814,7 @@ later that paragraph is stale in the one fact a tag would be cut on. The sentenc
 2026-09-11"* paragraph (line 143), and reads:
 
 > **The v1.5 follow-ups (milestone 14) closed 2026-09-11**, ruled exited by the Fable deputy
-> (https://github.com/BFoerschner/knobas/issues/541#issuecomment-5635424552): the ten maintenance
+> (<https://github.com/BFoerschner/knobas/issues/541#issuecomment-5635424552>): the ten maintenance
 > tickets the v1.5 exit left — #515, #516, #524, #541, #544, #554, #556, #560, #561, #564 — merged as
 > `72cf54e5..4bd1ca61` under the per-ticket witness rule and no sweep, since the container is not a
 > planned milestone and has no exit criteria of its own; `main` after the batch is `4bd1ca61`, and
