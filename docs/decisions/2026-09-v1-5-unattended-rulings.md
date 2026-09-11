@@ -2499,3 +2499,46 @@ witness"* because the public instance's window held no personal build, which was
 every earlier run and is a corpus property, not a red; and whether a ticket found during a milestone
 gets a written rule for which milestone it lands in, since this milestone answered that question
 three times by ruling and once by report.
+
+---
+
+## #554 — the three stale key names, and the lock the environment does not get
+
+Ruled 2026-09-11, in the ticket's triage comment. Its heading is `Triage (deputy for Björn,
+2026-09-11):`, not the `Ruling (deputy for Björn, <date>):` this file's header names; it carries a
+ruling all the same, and it closes one of the two items #552's *Flagged, not ruled* left open, so it
+is recorded here. Comment:
+<https://github.com/BFoerschner/knobas/issues/554#issuecomment-5632603526>
+
+**The fork:** two. (1) #554's own part 2 offered the implementer a choice — rename `HAVE`,
+`KNOBAS_HAVE_KEY` and `HOST_HAS_KEY`, *"or are left alone with a recorded reason"* — and an
+unattended agent picking between those is picking what the next reader believes. (2) #552's
+*Flagged, not ruled*: whether the environment wants the lock `testenv/README.md` says it does not
+have (*"closing it properly would mean a lock the tooling does not have"*), now that both seeds heal
+a dead credential on their next run and the only collision left is the mid-run one.
+
+**Ruling:** (1) **`ready-for-agent`, tunnel-class, both parts in one PR.** (2) **The "left alone"
+option is struck: all three names change**, on both sides of the container boundary, to say the
+host's copy answered `200`. The names themselves are the implementer's. The witness is the one the
+ticket asks for and #553 already landed — a dead key re-mints, a live key is kept with its bytes
+unchanged, an unanswered port refuses and touches neither the file nor the instance's key list —
+**repeated, not invented**. (3) **No lock is built.** The mid-run collision is answered by
+dispatching tunnel-class tickets **one at a time**, the cap the loop already carried, rather than by
+a second mechanism in the tooling for a rule one orchestrator enforces by sequencing. The README's
+sentence stays true and stays as written. The consequence for this backlog: #516 and #554 run
+serially, never side by side.
+
+**Reasoning:** for (2), the merge-manager of #553 wrote the reason when it filed the ticket — the
+names are what the next reader believes, and a name that still asks *does a file exist* re-arms the
+question #552 removed from the code. What made it a fork at all was cost, not doubt: the rename
+crosses a container boundary and its one-sided failure is silent, so it needs a live witness. That
+witness exists as a written procedure in #553's PR body, which makes the expensive half a repeat
+rather than a design. For (3), the working model's concurrency rule and this file's own record
+already carry the answer: the collision needs two agents seeding at once, and the loop's dispatch
+is where that is decided. A lock would be a second place to be wrong about it.
+
+**If you disagree, the cost of reversing this is:** (2) is Björn ruling the names stay — then part 2
+collapses back to a recorded reason beside them, the live witness is not spent, and part 1 (the
+recipe comment) stands either way. (3) is a follow-up ticket for a `$TMPDIR` lock in the shape of
+the gate slots (#425), a shape that already exists in the `justfile`; nothing in this PR has to come
+out first.

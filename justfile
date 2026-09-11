@@ -1221,11 +1221,17 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # how many monitors of each type the estate holds while another is adding one
 # of its own.
 #
-# ONE ENVIRONMENT, ONE OWNER. `seed-kuma.sh` re-mints the API key when the
-# worktree it runs from has no `kuma-api-key`, so a second agent seeding
-# mid-run makes the first agent's `/metrics` requests answer 401. Claim the
-# environment before you run this. testenv/README.md, "One environment, one
-# owner at a time".
+# ONE ENVIRONMENT, ONE OWNER. `seed-kuma.sh` re-mints the API key on either of
+# two triggers: the worktree it runs from holds no `kuma-api-key`, or it holds
+# one the instance answers 401 or 403 to (#552). Re-minting destroys the
+# instance's old key, so a second agent seeding mid-run makes the first agent's
+# `/metrics` requests answer 401 -- and the 401 trigger makes that trade
+# mutual, because the tree that got 401ed heals by re-minting in turn, which
+# 401s the tree that just seeded. Only an answer the instance actually gave
+# counts: `000` from a published port that is not answering, a 5xx, a proxy's
+# 404 -- none of those is an answer, and the seed refuses rather than guess.
+# Claim the environment before you run this.
+# testenv/README.md, "One environment, one owner at a time".
 kuma-live:
     #!/usr/bin/env bash
     set -euo pipefail
