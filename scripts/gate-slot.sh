@@ -2,10 +2,12 @@
 # GATE SLOTS -- the mutual exclusion every gate-sized recipe takes before it
 # starts. Sourced, never run: it defines three functions and does nothing else,
 # so the slot is held by the *recipe's* shell and released by that shell's own
-# traps. `just test` and `just search-perf` both source it, so there is one
-# implementation of the protocol rather than two that can drift apart -- a
-# second, slightly different taker on the same directory is how a mutual
-# exclusion stops being one.
+# traps.
+#
+# WHAT SOURCES IT, which is the roster and lives only here: `just test` (and
+# so `just check`) and `just search-perf`. One implementation rather than two
+# that can drift apart -- a second, slightly different taker on the same
+# directory is how a mutual exclusion stops being one.
 #
 # At most two gate-sized recipes run on one machine at a time (Björn,
 # 2026-09-06, #425; the measurement is #422's). The ceiling is SysV shared

@@ -42,9 +42,9 @@ Implementation now runs ticket-driven:
   line. It sits *beside* `just check` and never inside it, for the reason the file gives: every
   assertion is wall-clock against a fixed budget, and inside a gate that runs two at a time it would
   measure the machine rather than the search. It takes a gate slot the way `just test` does, so a
-  third gate waits on it. **A PR carries its transcript** when it changes anything under
-  `crates/knobas-search/src/` that touches the search statement, the board or the rail queries —
-  `lists.rs`, `saved.rs`, `corpus.rs` — and whenever it changes `saved::MAX_SAVED_LISTS`. The recipe
+  third gate waits on it. **A PR carries its transcript** for any change under
+  `crates/knobas-search/src/` that touches the search statement, the board or rail queries,
+  `lists.rs`, `saved.rs` or `corpus.rs`, and for any change to `saved::MAX_SAVED_LISTS`. The recipe
   itself only prints: the head SHA and `uptime`'s one-minute load average before the build and after
   the last test, and no verdict on them. It has no gate variables to refuse on and it never refuses
   on load — a threshold would go red on a correct tree whenever a browser was open, which is the

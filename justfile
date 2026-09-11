@@ -478,10 +478,10 @@ clippy-libs:
 # descendants explicitly with `TERM` (deepest first, so xargs cannot start
 # the next binary after its current one dies) before closing the pipe.
 #
-# GATE SLOTS. At most two gate-sized recipes run on one machine at a time --
-# this one and `search-perf` -- and the protocol that enforces it lives in
-# `scripts/gate-slot.sh`, sourced below, with the measurement and the whole
-# reasoning in its header. In short: one of `KNOBAS_GATE_SLOTS` (default 2)
+# GATE SLOTS. At most two gate-sized recipes run on one machine at a time. The
+# protocol that enforces it lives in `scripts/gate-slot.sh`, sourced below,
+# with the measurement, the whole reasoning, and the list of what sources it in
+# its header -- one place, so a third gate is one edit. In short: one of `KNOBAS_GATE_SLOTS` (default 2)
 # symlinks under `$TMPDIR/knobas-gate-slots` is taken before this recipe does
 # anything else, a third gate prints one line naming the holders and polls up
 # to `KNOBAS_GATE_SLOT_WAIT` seconds, and the slot is released by the same
@@ -701,23 +701,26 @@ test:
 # within an hour on 2026-09-08. In the gate it would be a check that measures
 # the machine instead of the thing.
 #
-# IT PRINTS AND IT NEVER REFUSES. A recipe that refused above a load threshold
-# would go red on a correct tree whenever a browser was open -- a criterion
-# that cannot pass. So it reports the head SHA, whether the tree is clean, and
-# `uptime`'s one-minute load average twice, once before the build and once
-# after the last test, and leaves the judgement of whether those numbers are a
-# *reading* to the reader under the #533 re-run standard
-# (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`): nothing
-# else on the machine for the whole run, both load averages below the
-# machine's twelve cores, a monotonic rail curve in both columns, and the
-# whole transcript quoted. Two marks rather than one because the standard asks
-# for the average at start *and* at end, and because a sibling that arrived
-# mid-run is exactly what a once-sampled average misses.
+# IT PRINTS AND IT DOES NOT JUDGE. A recipe that refused above a load
+# threshold would go red on a correct tree whenever a browser was open -- a
+# criterion that cannot pass. So it reports the head SHA, whether the tree is
+# clean, and `uptime`'s one-minute load average twice, once before the build
+# and once after the last test, and leaves the judgement of whether those
+# numbers are a *reading* to the reader under the #533 re-run standard, which
+# is quoted where it belongs -- `docs/agents/working-model.md`, this recipe's
+# entry, off `docs/decisions/2026-09-v1-5-unattended-rulings.md`'s `## #533`.
+# Two marks rather than one because that standard asks for the average at
+# start *and* at end, and because a sibling that arrived mid-run is exactly
+# what a once-sampled average misses.
 #
-# IT STILL GOES RED. The exit status is cargo's -- a failed budget assertion
-# is a non-zero exit and libtest names the test -- so a caller can gate on it,
-# and the recipe's own last line says what that status was rather than leaving
-# it to a trailing `echo` to swallow.
+# IT STILL GOES RED, on two things and neither of them the machine. The exit
+# status is cargo's -- a failed budget assertion is a non-zero exit and
+# libtest names the test -- and it is 1 when the harness ran a different
+# number of tests than the pin below says, which is the #351 class: with
+# `--ignored`, a benchmark that lost its `#[ignore]` is not a failure but a
+# green over nothing measured. The recipe's own last lines say what the
+# status and the count were rather than leaving them to a trailing `echo` to
+# swallow.
 #
 # IT TAKES A GATE SLOT, through `scripts/gate-slot.sh`, the same protocol and
 # the same directory `test` uses: it seeds 100 k rows several times over and
@@ -726,12 +729,28 @@ test:
 search-perf:
     #!/usr/bin/env bash
     set -euo pipefail
+    # How many tests the two targets are pinned to run under `--ignored`: five
+    # in `tests/perf.rs` and one in `tests/coverage.rs`. It is a pin like the
+    # inventory's, and moving it is the price of adding a benchmark --
+    # `test-inventory.txt`'s `knobas-search<TAB>test/perf` and
+    # `test/coverage` lines are where the names themselves live.
+    expected=6
+    log=
     # shellcheck source=scripts/gate-slot.sh disable=SC1091
     . ./scripts/gate-slot.sh
-    trap 'release_slot' EXIT
-    trap 'release_slot; trap - INT; kill -INT $$' INT
-    trap 'release_slot; trap - TERM; kill -TERM $$' TERM
+    # Armed before the `mktemp` they clean up, so an interrupt in between
+    # leaks nothing. `cargo` runs in the FOREGROUND, unlike `test`'s pool:
+    # bash runs a trap only after the foreground command returns, so a signal
+    # aimed at this shell alone reaches cargo only when it is done -- which
+    # here is what is wanted, because the slot should be held for exactly as
+    # long as the run is. A terminal Ctrl-C goes to the process group and
+    # reaches cargo directly.
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
     hold_gate_slot search-perf
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-search-perf.XXXXXX")
 
     # One greppable line per mark: `search-perf: before ...` and
     # `search-perf: after ...`. The load average is `uptime`'s first figure on
@@ -747,12 +766,38 @@ search-perf:
     }
 
     mark before
-    status=0
+    status=0 run_from=$SECONDS
+    # Through `tee` so the run is still watchable line by line -- `--nocapture`
+    # is the point of it -- while the counts below are read off the harness's
+    # own `test result:` lines rather than off this recipe's confidence.
+    # `pipefail` is what makes `$?` cargo's status and not tee's.
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-search \
       --test perf --test coverage \
-      -- --ignored --nocapture --test-threads=1 || status=$?
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
     mark after
-    echo "search-perf: cargo exited $status after ${SECONDS} s"
+    # Two numbers, because `SECONDS` alone would fold a slot wait of up to
+    # fifteen minutes into what reads as cargo's own time.
+    echo "search-perf: cargo exited $status after $((SECONDS - run_from)) s;" \
+         "the recipe, slot wait included, took ${SECONDS} s"
+    # READ THE COUNTS (the working model's rule for this list, #351). With
+    # `--ignored`, a benchmark that lost its `#[ignore]` -- or was renamed, or
+    # filtered out by a typo in the target list -- is not a failure: libtest
+    # prints `0 passed; 0 failed` and cargo exits 0, and the recipe would
+    # report a green over a measurement that never happened. That is the one
+    # refusal here, and it is a refusal about whether anything was measured,
+    # never about the machine the measurement was taken on.
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "search-perf: $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected are pinned." >&2
+        echo "  Either a benchmark lost its #[ignore] (it is in 'just check'" >&2
+        echo "  now, where a wall-clock budget must not be), or one was added" >&2
+        echo "  or renamed and this recipe's pin has not moved with it." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
     echo "search-perf: these are timings; whether they are a reading is the #533"
     echo "search-perf: re-run standard's question, not this recipe's --"
     echo "search-perf: docs/decisions/2026-09-v1-5-unattended-rulings.md, '## #533'."
