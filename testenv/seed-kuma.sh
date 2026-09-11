@@ -53,12 +53,17 @@ HOSTS=hetzner/hosts.env
 # does not cover the forward), so a dead forward would otherwise read as a
 # dead key and re-mint on a guess, 401ing every sibling worktree's copy: the
 # collision README.md's "One environment, one owner at a time" describes.
-HAVE=0
+#
+# The name says what was measured: the instance answered 200 to the key on
+# disk. It is not "a key file is here" -- that is the question this script
+# stopped asking in #552, and a name that still asked it is how the next reader
+# comes to believe the old answer (issue #554).
+KEY_AUTHENTICATED=0
 if [ -s "$KEY_FILE" ]; then
   code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
            -u ":$(cat "$KEY_FILE")" "$PROBE_URL" || true)
   case "$code" in
-    200) HAVE=1 ;;
+    200) KEY_AUTHENTICATED=1 ;;
     401|403)
       echo "seed-kuma: the API key in $KEY_FILE no longer authenticates ($code); minting a new one" ;;
     *)
@@ -71,8 +76,13 @@ fi
 
 # stdout is the protocol channel (one line: KEY=... or KEEP); the container's
 # progress goes to stderr and straight through to the terminal.
+#
+# `KNOBAS_KEY_AUTHENTICATED` is half a contract: kuma-seed.mjs reads that exact
+# name, and an unset variable reads there as "did not authenticate", so a
+# rename on this side alone re-mints on every run and still passes a single
+# `just kuma-live` (issue #554). Rename both halves or neither.
 out=$(docker compose --profile seed run --rm -T \
-        -e KNOBAS_HAVE_KEY="$HAVE" \
+        -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
         -e KNOBAS_HETZNER_TEAMCITY_IP="${KNOBAS_HETZNER_TEAMCITY_IP:-}" \
         -e KNOBAS_HETZNER_JIRA_IP="${KNOBAS_HETZNER_JIRA_IP:-}" \
         -e KNOBAS_HETZNER_CONFLUENCE_IP="${KNOBAS_HETZNER_CONFLUENCE_IP:-}" \

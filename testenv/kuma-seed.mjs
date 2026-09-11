@@ -51,8 +51,16 @@ const KEY_NAME = "knobas-seed";
 // still answers 200 to -- the host verifies before it claims (issue #552),
 // because a file is not a credential. Kuma returns an API key's clear text
 // exactly once, at creation, so a key that exists here with no working copy
-// there is unrecoverable and worthless.
-const HOST_HAS_KEY = process.env.KNOBAS_HAVE_KEY === "1";
+// there is unrecoverable and worthless. The name says the host measured an
+// answer, not that it found a file (issue #554).
+//
+// The variable name is half a contract with seed-kuma.sh across the container
+// boundary, and the failure is silent in one direction: an unset variable is
+// not "1", so a rename there without this one reads as "did not authenticate"
+// and re-mints on EVERY run -- killing every sibling worktree's copy, while a
+// single `just kuma-live` still passes because one run only ever exercises the
+// re-mint side.
+const HOST_KEY_AUTHENTICATED = process.env.KNOBAS_KEY_AUTHENTICATED === "1";
 
 const log = (...a) => console.error("kuma-seed:", ...a);
 const die = (msg) => { log("FAILED:", msg); process.exit(1); };
@@ -206,7 +214,7 @@ for (const m of monitors) {
 const keys = await listen("apiKeyList", () => call("getAPIKeyList").then((r) => ok(r, "getAPIKeyList")));
 const mine = (keys ?? []).find((k) => k.name === KEY_NAME);
 
-if (mine && HOST_HAS_KEY) {
+if (mine && HOST_KEY_AUTHENTICATED) {
   log(`API key ${KEY_NAME} exists and the host's copy still authenticates; keeping`);
   console.log("KEEP");
 } else {
