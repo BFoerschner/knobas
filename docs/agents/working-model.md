@@ -24,10 +24,11 @@ Implementation now runs ticket-driven:
   output in its body, and the merge-manager re-runs it before squashing. The recipes, in full —
   keep this list current, a suite whose recipe is missing from it is one nobody knows to run:
   `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
-  `just teamcity-live-seeded`, `just atlassian-live`, `just kuma-live` (#442), and
+  `just teamcity-live-seeded`, `just atlassian-live`, `just kuma-live` (#442),
   `just estate-live` (#509 — the hcloud importer, which is not an adapter but is a read of a
   real system and is the only witness for the `hcloud_id` values in
-  `testenv/hetzner/estate.json`); a PR runs
+  `testenv/hetzner/estate.json`), and `just search-perf` (#556 — the one recipe on this list that
+  is not a live suite: the launcher's perf gate, which the next bullet covers); a PR runs
   whichever its change reaches, and one touching the start-work flow reaches `start-work-live`. `just check` stays as it is; the
   live run is in addition to it, never inside it. A mockd run is not a substitute: the real
   container is the witness, a mock certifies nothing, and mockd is deprecated.
@@ -35,6 +36,34 @@ Implementation now runs ticket-driven:
   evidence that N tests ran: a suite gated on an unset variable used to skip every test and report
   success, so every recipe now refuses to start without its gate variables (#351, table in
   `testenv/README.md`, *The live recipes*).
+- **`just search-perf` is that list's one non-live recipe (#556).** It is the launcher's perf gate —
+  the five `#[ignore]`d benchmarks in `crates/knobas-search/tests/perf.rs` and the sixth of the same
+  class in `tests/coverage.rs` — and until #556 it was run by a person typing the file's own cargo
+  line. It sits *beside* `just check` and never inside it, for the reason the file gives: every
+  assertion is wall-clock against a fixed budget, and inside a gate that runs two at a time it would
+  measure the machine rather than the search. It takes a gate slot the way `just test` does, so a
+  third gate waits on it. **A PR carries its transcript** for any change under
+  `crates/knobas-search/src/` that touches the search statement, the board or rail queries,
+  `lists.rs`, `saved.rs` or `corpus.rs`, and for any change to `saved::MAX_SAVED_LISTS`. The recipe
+  itself only prints the machine's numbers: the head SHA and `uptime`'s one-minute load average
+  before the build and after the last test, and no verdict on them. It has no gate variables to
+  refuse on and it never refuses on load — a threshold would go red on a correct tree whenever a
+  browser was open, which is the criterion that cannot pass. It does refuse on one thing that is not
+  the machine, which is the *"read the counts"* rule above applied to itself: under `--ignored` a
+  benchmark that lost its `#[ignore]`, was renamed, or fell out of the recipe's target list is not a
+  failure — libtest prints `0 passed; 0 failed` and cargo exits 0 — so the recipe adds up the
+  harness's own `test result:` lines and exits 1 when the total is not the six it pins. Read the two
+  load lines before you quote anything between them. Whether a transcript is a *reading* is the #533 re-run
+  standard's question, and the standard is quoted rather than paraphrased here
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`): *"its numbers count only under
+  four conditions, all stated in the merge comment — (a) nothing else on the machine **for the whole
+  run**, not at the instant it starts, the orchestrator holding a slot for it the way the desktop cap
+  holds the screen, because a watcher firing on a once-sampled one-minute average is exactly what let
+  a sibling in mid-run; (b) the one-minute load average **at start and at end**, both below the
+  machine's twelve cores; (c) a **monotonic rail curve** in both columns, which is the test of whether
+  the run was a reading at all; (d) the **whole transcript quoted**, every block, so a contaminated
+  25 k or 50 k row is visible rather than omitted. Under those conditions a green is the gate's green
+  and a red is real … a red taken outside them is not a reading and is not quoted."*
 - **Termination is objective, not vibes:** the agent's work ends when findings are resolved AND
   `just check` is green; hard cap 3 review rounds, then Björn adjudicates.
 - **Merging is delegated to a merge-manager agent (amended 2026-08-28 — Björn, overriding the

@@ -317,7 +317,7 @@ _test-executables:
                    "server\t\($pkg)\tbin/\(.target.name)\t\(.executable)\t\($dir)"
                  else empty end'
 
-# shellcheck over every tracked script in testenv/.
+# shellcheck over every tracked script in testenv/ and scripts/.
 #
 # It lives here because the workflow that used to own it does not run. The
 # `testenv` workflow is disabled along with `check` (billing, 2026-08-29), so
@@ -351,10 +351,10 @@ shell:
         if head -n 1 -- "$f" | grep -qE '^#!.*\b(ba)?sh\b'; then
             scripts+=("$f")
         fi
-    done < <(git ls-files -- testenv)
+    done < <(git ls-files -- testenv scripts)
 
     if [ ${#scripts[@]} -eq 0 ]; then
-        echo "error: shebang discovery matched no scripts under testenv/ --" >&2
+        echo "error: shebang discovery matched no scripts under testenv/ or scripts/ --" >&2
         echo "  nothing was linted. Fix the discovery, do not delete this guard." >&2
         exit 1
     fi
@@ -478,60 +478,15 @@ clippy-libs:
 # descendants explicitly with `TERM` (deepest first, so xargs cannot start
 # the next binary after its current one dies) before closing the pipe.
 #
-# GATE SLOTS. At most two of these recipes run on one machine at a time
-# (Björn, 2026-09-06, #425; the measurement is #422's). The ceiling is SysV
-# shared memory, not CPU: macOS allows 32 segments machine-wide
-# (`kern.sysv.shmmni`), every postmaster holds one, and one gate peaks at 13
-# -- the gate server plus up to 12 transient servers the `knobas-db`
-# lifecycle suite starts. Two gates fit; three fit only when their peaks miss
-# each other, and cost 2.4x the single wall each; five ran the kernel out and
-# every worktree went red with `shmget: No space left on device`. So the
-# recipe takes one of `KNOBAS_GATE_SLOTS` (default 2) slots before it does
-# anything else, and with none free prints one line naming the holders' pids
-# and polls, up to `KNOBAS_GATE_SLOT_WAIT` seconds (default 900), then exits
-# 1 naming the same holders. The slot is held from the recipe's start to after
-# the server has stopped, and released by the same EXIT, INT and TERM traps
-# that close the pipe. For a bare `just test` on a cold tree that start is
-# before the build, so a waiting gate's compile does not share the cores the
-# two running gates are already saturating; under `check` the build has
-# happened in `inventory` by then, and what waits is the run.
-#
-# A slot is a symlink, `$TMPDIR/knobas-gate-slots/slot-<n>`, whose target is
-# the holder's pid. `ln -s` is the atomic primitive: it fails on an existing
-# name like `mkdir` does, and macOS ships no `flock` binary; unlike a
-# directory with a pid file inside it, the link carries its pid from the
-# instant it exists, so no taker can ever see a slot that is held by nobody.
-# A slot whose pid is dead (`kill -0` fails) is a gate that was SIGKILLed or
-# lost its machine, and the next taker reclaims it: unlinks the dead link and
-# takes the slot with a fresh `ln -s`, never adopting it where it lies. The
-# unlink happens under a lock, `mkdir "$slot_root/reclaim"`, because two
-# takers can read the same dead pid, and without the lock the slower one
-# would unlink whatever the faster one had just put there -- a live claim --
-# and a third taker could then join the two already running. Under the lock
-# the re-read cannot go stale: the holder is dead so it cannot release, no
-# other reclaim runs, and a take needs the link to be absent, so what is
-# unlinked is exactly the dead link that was read. A taker that finds the
-# lock held counts the slot as held for this pass and looks again a second
-# later; a lock older than a minute (`find -mmin +1`, BSD and GNU) is a
-# reclaimer that died inside its few milliseconds, and is removed. An
-# interrupted reclaimer removes its own lock from the traps, so what the
-# sweep catches is a SIGKILLed one -- or one paused past the minute (a
-# stopped process, a laptop asleep), whose lock is then removed while it is
-# live, and a second sweeper between the first's `find` and `rmdir` removes a
-# lock a fresh reclaimer has just taken. Those two windows are the residue:
-# each needs a reclaim already in flight, and the worst case is one gate too
-# many, which #422 saw three of run green. The root directory is recreated on
-# every pass, so one removed by hand while a gate waits comes back. What the
-# scheme cannot see: a dead holder's pid recycled onto some unrelated process
-# (the slot then waits for that process; `rm` the link), and another user's
-# gate, whose pid `kill -0` cannot signal and so reads as dead -- this is a
-# one-user machine. The directory is not named `knobas-test-*`, whose prefix
-# the connector's reaper sweeps, nor `knobas-gate.*`, so a count of those
-# still counts gate directories. The
-# waiting line is `test: ...` without the two spaces the per-binary lines
-# carry, so `check`'s sum cannot count it. `check.yml` runs one gate on its
-# runner and takes the first slot without waiting; a `cargo test` by hand is
-# not a gate and takes none.
+# GATE SLOTS. At most two gate-sized recipes run on one machine at a time. The
+# protocol that enforces it lives in `scripts/gate-slot.sh`, sourced below,
+# with the measurement, the whole reasoning, and the list of what sources it in
+# its header -- one place, so a third gate is one edit. In short: one of `KNOBAS_GATE_SLOTS` (default 2)
+# symlinks under `$TMPDIR/knobas-gate-slots` is taken before this recipe does
+# anything else, a third gate prints one line naming the holders and polls up
+# to `KNOBAS_GATE_SLOT_WAIT` seconds, and the slot is released by the same
+# EXIT, INT and TERM traps that close the pipe. The ceiling is SysV shared
+# memory, not CPU: one gate peaks at 13 of macOS's 32 segments.
 #
 # Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
 # pgrep, getconf, `ln -s`, `readlink` and `find -mmin`. `check.yml` on
@@ -545,53 +500,11 @@ test:
     # The traps are armed before anything they clean up exists, so an
     # interrupt between `mktemp` and the server's start leaks nothing.
     gate= server_pid= pool_pid= doc_pid= closed=
-    slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
-    slot= held= reclaim_lock=
-    # One pass over the slots: takes a free one (or one whose holder is
-    # dead) and returns 0 with `slot` set; else returns 1 with `held` naming
-    # the pids that hold them. A dead holder's link is unlinked under the
-    # reclaim lock and the slot taken afresh -- see GATE SLOTS above.
-    take_slot() {
-        local i name holder lock=$slot_root/reclaim
-        held=
-        mkdir -p "$slot_root"
-        for ((i = 1; i <= slots; i++)); do
-            name=$slot_root/slot-$i
-            if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
-            holder=$(readlink "$name" 2>/dev/null || true)
-            if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-                held="$held $holder"; continue
-            fi
-            if mkdir "$lock" 2>/dev/null; then
-                reclaim_lock=$lock
-                holder=$(readlink "$name" 2>/dev/null || true)
-                if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
-                    rm -f "$name"
-                fi
-                rmdir "$lock" 2>/dev/null || true
-                reclaim_lock=
-            elif [ -n "$(find "$slot_root" -maxdepth 1 -name reclaim -mmin +1 2>/dev/null)" ]; then
-                rmdir "$lock" 2>/dev/null || true
-            fi
-            if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
-            holder=$(readlink "$name" 2>/dev/null || true)
-            held="$held ${holder:-?}"
-        done
-        held=${held# }
-        return 1
-    }
-    release_slot() {
-        # A reclaim lock this shell still holds is an interrupt that landed
-        # inside the reclaim's few milliseconds; the sweep must not be what
-        # removes it.
-        [ -z "$reclaim_lock" ] || rmdir "$reclaim_lock" 2>/dev/null || true
-        reclaim_lock=
-        [ -n "$slot" ] || return 0
-        # Only a link that still names this shell: a reclaimer removes a
-        # slot only when its holder is dead, so this is belt and braces.
-        [ "$(readlink "$slot" 2>/dev/null || true)" != "$$" ] || rm -f "$slot"
-        slot=
-    }
+    # `slot`, `release_slot` and `hold_gate_slot`, shared with `search-perf`
+    # so there is one implementation of the slot protocol. Sourced before the
+    # traps below, which call `release_slot`.
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -618,35 +531,7 @@ test:
     trap 'stop_run; close_pipe; release_slot; trap - INT; kill -INT $$' INT
     trap 'stop_run; close_pipe; release_slot; trap - TERM; kill -TERM $$' TERM
 
-    slots=${KNOBAS_GATE_SLOTS:-2}
-    case $slots in
-        ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOTS must be a whole number of at least 1, not '$slots'" >&2; exit 1 ;;
-    esac
-    slots=$((10#$slots))
-    if [ "$slots" -lt 1 ]; then
-        echo "error: KNOBAS_GATE_SLOTS must be at least 1 (0 would let no gate ever start)" >&2; exit 1
-    fi
-    # Seconds; 0 is one try and no wait.
-    slot_wait=${KNOBAS_GATE_SLOT_WAIT:-900}
-    case $slot_wait in
-        ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOT_WAIT must be a whole number of seconds, not '$slot_wait'" >&2; exit 1 ;;
-    esac
-    slot_wait=$((10#$slot_wait))
-    wait_from=$SECONDS announced=
-    until take_slot; do
-        waited=$((SECONDS - wait_from))
-        if [ -z "$announced" ]; then
-            announced=1
-            echo "test: all $slots gate slots are held (pids $held); waiting up to $slot_wait s for one to free"
-        fi
-        if [ "$waited" -ge "$slot_wait" ]; then
-            echo "error: all $slots gate slots are held (pids $held); waited $waited s for one to free, giving up" >&2
-            exit 1
-        fi
-        sleep 1
-    done
-    waited=$((SECONDS - wait_from))
-    [ "$waited" -eq 0 ] || echo "test: gate slot free after $waited s"
+    hold_gate_slot test
 
     gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
     just _test-executables > "$gate/executables"
@@ -797,6 +682,126 @@ test:
         exit 1
     fi
     echo "test: ok: $count binaries and $doc_crates doc-test crates, $totals, in ${SECONDS} s"
+
+# The launcher's perf gate (#556). Beside `just check`, never inside it.
+#
+# WHAT IT RUNS. The five `#[ignore]`d tests in
+# `crates/knobas-search/tests/perf.rs` and the sixth of the same class in
+# `tests/coverage.rs` (`the_author_probe_stays_inside_the_launchers_budget`,
+# which that file marks *"`#[ignore]`d for the same reason `tests/perf.rs`
+# is"*). One `cargo test` over both targets, which cargo runs one after the
+# other, `--test-threads=1` so no two of them are timing each other. Until
+# this recipe existed the file was run by a human typing its doc comment's
+# cargo line, and `just check` cannot run it: binaries there run without
+# `--ignored`.
+#
+# WHY NOT IN `check`. Every assertion in `perf.rs` is wall-clock against a
+# fixed budget, `just check` runs two at a time beside other agents' builds,
+# and `browse, no text` was measured at 27 ms and at 429 ms on the same tree
+# within an hour on 2026-09-08. In the gate it would be a check that measures
+# the machine instead of the thing.
+#
+# IT PRINTS AND IT DOES NOT JUDGE. A recipe that refused above a load
+# threshold would go red on a correct tree whenever a browser was open -- a
+# criterion that cannot pass. So it reports the head SHA, whether the tree is
+# clean, and `uptime`'s one-minute load average twice, once before the build
+# and once after the last test, and leaves the judgement of whether those
+# numbers are a *reading* to the reader under the #533 re-run standard, which
+# is quoted where it belongs -- `docs/agents/working-model.md`, this recipe's
+# entry, off `docs/decisions/2026-09-v1-5-unattended-rulings.md`'s `## #533`.
+# Two marks rather than one because that standard asks for the average at
+# start *and* at end, and because a sibling that arrived mid-run is exactly
+# what a once-sampled average misses.
+#
+# IT STILL GOES RED, on two things and neither of them the machine. The exit
+# status is cargo's -- a failed budget assertion is a non-zero exit and
+# libtest names the test -- and it is 1 when the harness ran a different
+# number of tests than the pin below says, which is the #351 class: with
+# `--ignored`, a benchmark that lost its `#[ignore]` is not a failure but a
+# green over nothing measured. The recipe's own last lines say what the
+# status and the count were rather than leaving them to a trailing `echo` to
+# swallow.
+#
+# IT TAKES A GATE SLOT, through `scripts/gate-slot.sh`, the same protocol and
+# the same directory `test` uses: it seeds 100 k rows several times over and
+# starts a postmaster per test binary, so it counts against the two-gate
+# ceiling and a third gate waits on it.
+search-perf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # How many tests the two targets are pinned to run under `--ignored`: five
+    # in `tests/perf.rs` and one in `tests/coverage.rs`. It is a pin like the
+    # inventory's, and moving it is the price of adding a benchmark --
+    # `test-inventory.txt`'s `knobas-search<TAB>test/perf` and
+    # `test/coverage` lines are where the names themselves live.
+    expected=6
+    log=
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
+    # Armed before the `mktemp` they clean up, so an interrupt in between
+    # leaks nothing. `cargo` runs in the FOREGROUND, unlike `test`'s pool:
+    # bash runs a trap only after the foreground command returns, so a signal
+    # aimed at this shell alone reaches cargo only when it is done -- which
+    # here is what is wanted, because the slot should be held for exactly as
+    # long as the run is. A terminal Ctrl-C goes to the process group and
+    # reaches cargo directly.
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
+    hold_gate_slot search-perf
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-search-perf.XXXXXX")
+
+    # One greppable line per mark: `search-perf: before ...` and
+    # `search-perf: after ...`. The load average is `uptime`'s first figure on
+    # either wording it has -- macOS prints `load averages: 2.71 2.83 2.90`,
+    # Linux `load average: 0.52, 0.58, 0.59`. One space after the colon, never
+    # the two `check`'s per-binary sum counts on.
+    mark() {
+        local when=$1 tree=clean
+        [ -z "$(git status --porcelain)" ] || tree=dirty
+        echo "search-perf: $when head=$(git rev-parse HEAD) tree=$tree" \
+             "load1=$(uptime | sed -E 's/.*load averages?:[[:space:]]*//; s/[,[:space:]].*//')" \
+             "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+
+    mark before
+    status=0 run_from=$SECONDS
+    # Through `tee` so the run is still watchable line by line -- `--nocapture`
+    # is the point of it -- while the counts below are read off the harness's
+    # own `test result:` lines rather than off this recipe's confidence.
+    # `pipefail` is what makes `$?` cargo's status and not tee's.
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-search \
+      --test perf --test coverage \
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
+    mark after
+    # Two numbers, because `SECONDS` alone would fold a slot wait of up to
+    # fifteen minutes into what reads as cargo's own time.
+    echo "search-perf: cargo exited $status after $((SECONDS - run_from)) s;" \
+         "the recipe, slot wait included, took ${SECONDS} s"
+    # READ THE COUNTS (the working model's rule for this list, #351). With
+    # `--ignored`, a benchmark that lost its `#[ignore]` -- or was renamed, or
+    # filtered out by a typo in the target list -- is not a failure: libtest
+    # prints `0 passed; 0 failed` and cargo exits 0, and the recipe would
+    # report a green over a measurement that never happened. That is the one
+    # refusal here, and it is a refusal about whether anything was measured,
+    # never about the machine the measurement was taken on.
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "search-perf: $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected are pinned." >&2
+        echo "  Either a benchmark lost its #[ignore] (it is in 'just check'" >&2
+        echo "  now, where a wall-clock budget must not be), or one was added" >&2
+        echo "  or renamed and this recipe's pin has not moved with it." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
+    echo "search-perf: these are timings; whether they are a reading is the #533"
+    echo "search-perf: re-run standard's question, not this recipe's --"
+    echo "search-perf: docs/decisions/2026-09-v1-5-unattended-rulings.md, '## #533'."
+    exit "$status"
 
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
