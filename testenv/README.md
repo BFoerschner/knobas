@@ -1390,19 +1390,22 @@ merge-manager's re-run on the merge head refused with `screen-locked` at 06:20
 CEST on 2026-09-08, and the re-run was **owed to #525**, which carries all three
 runs again. The deputy's second ruling of 2026-09-08 on #503, parts 1 and 2.
 
-**That `capture` green was a race, and #548 is what it cost.** #525's runner
+**And what turned that green into #548's red is unmeasurable.** #525's runner
 drove the same driver on the merge head at 16:57 and it refused the capture
-window it had just opened. The two runs had the same inputs: on the branch
-commit the 04:55 green was taken from, `capture.sh`'s assertion,
-`ax.swift` and all three of the app's `Capture` names are byte-identical to
-what merged, so `b4dc71d7` is **not** the cause and nothing in the app
-regressed. What the old `exactly_one "$CAPTURE_BOX"` could only ever have been
-green on is a **half-built window**: before the shortcut the count is 0, with
-the window's webview up it is 3 (the window, the web area and the text area,
-measured on #548's dump), and the one state in between — the `AXWindow` built
-and its document not yet loaded — is the only one that counts 1. Which of those
-the first poll landed in was the difference between the two runs. Counting
-windows (#548) has no such state.
+window it had just opened. **What is measured is that nothing the assertion
+depends on differed**: across every commit of the #503 branch and the squash
+`2b8460bf` that merged it, `capture.sh`'s `exactly_one "$CAPTURE_BOX"` line,
+`ax.swift` and all three of the app's `Capture` names are byte-identical — so
+`b4dc71d7` is **not** the cause and nothing in the app regressed. Why one run
+of that code was green and the other red cannot be recovered: neither
+transcript records a count, and the worktree the 04:55 run was made in is gone.
+What the code says, and it is a reading rather than a second measurement, is
+that the old assertion had only one state it could ever be true in — `0` before
+the shortcut, `3` with the window's webview up (measured on #548's dump), and
+`1` only while the `AXWindow` exists and its document has not loaded, which
+`capture::open_window` rebuilds on every press. That would make the green a
+race the run happened to win. **Nothing here rests on it**: the assertion is
+wrong under either reading, and counting windows has no such state.
 
 **One driver has still never been driven, and the corpus is no longer why.**
 `open-in-editor` used to stop where it always said it would — *the demo profile

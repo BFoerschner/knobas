@@ -270,6 +270,10 @@ func press(pid: pid_t, label: String) -> Int32 {
 /// locked screen, a quit app and a pid that was never an application all look
 /// like, and a caller that read an empty list as *the window has closed* would
 /// pass its closing assertion on an app that had died mid-run.
+///
+/// `windowTitles` rather than `windows`, which is the subcommand's name and is
+/// already taken by the element lookup every other subcommand is built on --
+/// the same reason `wait-window` is `waitForWindow`.
 func windowTitles(pid: pid_t) -> Int32 {
     let found = windows(of: pid)
     if found.isEmpty {

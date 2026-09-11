@@ -556,11 +556,11 @@ check "the capture window is counted while it is open" 1 \
 check "no window is titled Capture before the shortcut" 0 \
     "$(window_count "$main_only" Capture)"
 check "the main window answers to its own title" 1 "$(window_count "$capture_up" knobas)"
-# The whole reason this is not `ax find`: three elements of the open capture
-# window carry the name and there is exactly **one** window, which is what the
-# question "did the capture window appear?" is about.
-check "the three elements named Capture are still one window" 1 \
-    "$(window_count "$capture_up" Capture)"
+# Two of them, which is the input to the driver's separate exactly-one
+# assertion: a count that could only say *some* or *none* would report a
+# shortcut handled twice as the same answer as one handled once.
+check "two windows of that title are counted as two" 2 \
+    "$(window_count "$(printf 'window\tCapture\nwindow\tknobas\nwindow\tCapture\n')" Capture)"
 # Whole-field equality on the title. A substring test is how a window that is
 # not the capture window answers for the one that is.
 check "a window whose title merely contains the word is not a match" 0 \

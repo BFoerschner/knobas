@@ -455,9 +455,10 @@ waypoint_verdict() {
 # mid-run would satisfy it -- the check that cannot fail, one line after the
 # check that matters.
 #
-# Whole-line equality on the title, matched on the tab-separated field rather
-# than by `grep`: a window called `Capture notes` is not the capture window, and
-# a substring test is how the wrong window answers for the right one.
+# Whole-**field** equality on the title, read out of the tab-separated line
+# rather than matched over it with `grep`: a window called `Capture notes` is
+# not the capture window, and a substring test is how the wrong window answers
+# for the right one.
 window_count() {
     printf '%s\n' "$1" | awk -F'\t' -v want="$2" '
         $1 == "window" { seen = 1; if ($2 == want) found++ }
@@ -474,6 +475,12 @@ window_count() {
 # and a driver reading lines refuse on the same rule. `x` -- and anything else
 # that is not a number -- is `unreadable` rather than `no`, which is the whole
 # reason a count comes back as `x` in the first place.
+#
+# **Two functions where `reading_verdict` is one**, and the number is why: a
+# line is on the screen or it is not, and there is nothing else to ask about it,
+# while a count of windows is also the answer to *how many*, which `capture.sh`
+# asserts separately from the waypoint. Folding the count into the verdict would
+# throw away the only number in the answer.
 #
 # **How many is not this function's question.** Any number above zero is `yes`;
 # whether *exactly* one window of that name is open is a separate assertion, and
