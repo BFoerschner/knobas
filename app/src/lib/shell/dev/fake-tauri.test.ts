@@ -802,7 +802,8 @@ function recorded(): string[] {
  * saying nothing at all. So the parse has to find **every command the fixture
  * does answer**, and at least one command in every barrel module that imports
  * `invoke` — the second half because a module whose commands are all on the
- * census could drop out of the walk silently under the first.
+ * census (`backup.ts` is exactly that) could drop out of the parse silently
+ * under the first.
  */
 test("the parse finds every command the fixture answers, in every module that invokes one", () => {
   const commands = barrelCommands();
@@ -813,9 +814,15 @@ test("the parse finds every command the fixture answers, in every module that in
     expect([...commands.keys()], `${cmd} is answered but the parse did not find it in the barrel`).toContain(cmd);
   }
 
+  // This half walks the directory itself rather than calling `ipcModules()`,
+  // and the duplication is the point: a control that shared the parse's own
+  // view of which files exist could not see a file the parse stopped reading.
+  // (It could not, and the mutant proved it: narrowing `ipcModules()`'s filter
+  // left this loop iterating the same shortened list and agreeing with it.)
   const modules = new Set(commands.values());
-  for (const { name, text } of ipcModules()) {
-    if (!text.includes('from "@tauri-apps/api/core"')) continue;
+  for (const name of readdirSync(IPC_DIR)) {
+    if (!name.endsWith(".ts")) continue;
+    if (!readFileSync(join(IPC_DIR, name), "utf8").includes('from "@tauri-apps/api/core"')) continue;
     expect(modules, `${name} imports invoke and the parse found no command in it`).toContain(name);
   }
 });
