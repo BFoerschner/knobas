@@ -618,8 +618,10 @@ test("the fixture's expiring certificates are the roster rows under thirty days"
  *
  * `invoke` throws *"no handler for ${cmd}"* on a command this fixture does
  * not answer, and a section that reads before it draws — `BackupSection.svelte`
- * puts every one of its buttons behind `{#if status && !error}` — then renders
- * that error instead of itself. So the walk's reach is exactly the fixture's
+ * puts its three header actions behind `{#if status && !error}` and everything
+ * below them behind `{:else if status}` — then renders that error instead of
+ * itself, leaving only a *Retry* that rejects the same way. So the walk's reach
+ * is exactly the fixture's
  * handler table, and [`UNANSWERED`] is everything outside it: whole surfaces,
  * not stray commands.
  *
@@ -816,9 +818,10 @@ test("the parse finds every command the fixture answers, in every module that in
 
   // This half walks the directory itself rather than calling `ipcModules()`,
   // and the duplication is the point: a control that shared the parse's own
-  // view of which files exist could not see a file the parse stopped reading.
-  // (It could not, and the mutant proved it: narrowing `ipcModules()`'s filter
-  // left this loop iterating the same shortened list and agreeing with it.)
+  // filter could not see a module the parse stopped reading. (It could not, and
+  // the mutant proved it: narrowing `ipcModules()`'s filter left this loop
+  // iterating the same shortened list and agreeing with it.) The two halves do
+  // still share `IPC_DIR`, so this controls which files are read, not where.
   const modules = new Set(commands.values());
   for (const name of readdirSync(IPC_DIR)) {
     if (!name.endsWith(".ts")) continue;
