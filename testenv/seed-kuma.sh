@@ -10,8 +10,12 @@ set -eu
 cd "$(dirname "$0")"
 
 KEY_FILE=kuma-api-key
-HAVE=0
-[ -s "$KEY_FILE" ] && HAVE=1
+# Kuma's published port from docker-compose.yml, and `/metrics` is the one
+# endpoint an API key opens (README.md, the credential table), which is what
+# makes it the probe below. Hardcoded like `seed`'s own copy: the port is the
+# compose file's, not the caller's, and a half-honoured override is worse than
+# none -- `./seed --env-kuma` hands the suites 127.0.0.1:3001 regardless.
+PROBE_URL=http://127.0.0.1:3001/metrics
 
 # Three of the monitors ping the Hetzner servers by IP, and the IPs are in
 # hetzner/hosts.env, which provision.sh writes and .gitignore keeps out of the
@@ -32,6 +36,38 @@ HOSTS=hetzner/hosts.env
   exit 1; }
 # shellcheck source=/dev/null
 . "./$HOSTS"
+
+# A key file is a credential only while the instance still answers to it. Kuma
+# hands a key's clear text out exactly once, so a sibling worktree's seed that
+# re-minted `knobas-seed` leaves this tree holding a well-formed key the
+# instance no longer has, and `[ -s "$KEY_FILE" ]` alone cannot tell the two
+# apart (issue #552). So the key is probed before it is kept, which is what
+# seed-gitea.sh step 8 does for the Gitea token in this same directory.
+#
+# Three outcomes, not two, and the third is the point. Re-minting DESTROYS the
+# instance's key, so it may only happen on an answer the instance actually
+# gave: 200 keeps, 401 and 403 re-mint, and anything else -- `000` from a
+# published port that is not answering, a 5xx, a proxy's 404 -- refuses. This
+# is the only call the script makes over the host's port (everything else goes
+# to `uptime-kuma:3001` on the compose network, and the compose healthcheck
+# does not cover the forward), so a dead forward would otherwise read as a
+# dead key and re-mint on a guess, 401ing every sibling worktree's copy: the
+# collision README.md's "One environment, one owner at a time" describes.
+HAVE=0
+if [ -s "$KEY_FILE" ]; then
+  code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
+           -u ":$(cat "$KEY_FILE")" "$PROBE_URL" || true)
+  case "$code" in
+    200) HAVE=1 ;;
+    401|403)
+      echo "seed-kuma: the API key in $KEY_FILE no longer authenticates ($code); minting a new one" ;;
+    *)
+      echo "seed-kuma: $PROBE_URL answered '$code', so the key in $KEY_FILE can be neither" >&2
+      echo "seed-kuma: kept nor replaced -- re-minting on a guess would 401 every other" >&2
+      echo "seed-kuma: worktree's copy. Is the port up? docker compose up -d --wait uptime-kuma" >&2
+      exit 1 ;;
+  esac
+fi
 
 # stdout is the protocol channel (one line: KEY=... or KEEP); the container's
 # progress goes to stderr and straight through to the terminal.
