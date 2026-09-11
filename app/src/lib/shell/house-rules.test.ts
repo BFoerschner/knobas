@@ -372,3 +372,50 @@ test("only the launcher and the note editor resolve a pasted URL to an entity", 
     "lib/notes/NoteView.svelte",
   ]);
 });
+
+/** The IPC barrel, as a path rather than as a spelling. */
+const IPC_DIR = join(ROOT, "lib/ipc");
+
+/**
+ * **Every command the app invokes goes through the IPC barrel** (#544, #560).
+ *
+ * The `?fake-ipc` census in `lib/shell/dev/fake-tauri.test.ts` parses the
+ * command set out of `app/src/lib/ipc/*.ts` and subtracts `demoHandlers()`,
+ * so — in that test's own words — *"a command that lands there arrives here
+ * on its own"*: a new command either gains a fake handler or is written down
+ * as unanswered, with the seam suite that witnesses it instead.
+ *
+ * That guarantee is exactly as wide as the directory the census reads, and
+ * nothing but this rule holds it there. A component that called `invoke`
+ * itself would be answered by neither the fixture nor the record: the walk
+ * under `?fake-ipc` would quietly stop reaching a surface while the census
+ * stayed green, which is the census measuring the barrel and reporting on the
+ * app.
+ *
+ * So the two have to agree on the directory. The census reads the **direct
+ * children** of `app/src/lib/ipc/` (`readdirSync`, no recursion, `.ts` only),
+ * and this rule allows the same set — a module at `lib/ipc/<sub>/x.ts` is an
+ * offence here until the census learns to walk nested modules.
+ *
+ * Tests are out of the scan, for the reason the rule above gives: a suite that
+ * mocks `invoke` names what it stands in for, and that is a fixture rather
+ * than a caller.
+ *
+ * The one exemption is spelled in the expected list rather than filtered out
+ * of the scan, and that is what makes this rule fail in both directions.
+ * `fake-tauri.ts` *defines* the fake bridge's `invoke` — it is the other end
+ * of the call, not a caller — so it has to be **found**; a rule whose pattern
+ * or scan reached nothing at all would leave the list empty and fail here,
+ * rather than passing as a lint tuned to pass.
+ */
+test("nothing outside the IPC barrel invokes a command", () => {
+  expect(
+    offenders(
+      (text, file) =>
+        !/\.test\.(svelte\.)?ts$/.test(file) &&
+        !(dirname(file) === IPC_DIR && file.endsWith(".ts")) &&
+        /\binvoke\b/.test(codeOf(text)),
+    ),
+    "a module outside `lib/ipc/` reached for `invoke` — the ?fake-ipc census in lib/shell/dev/fake-tauri.test.ts parses only lib/ipc/*.ts, so that command is invisible to both the fixture and its record of what the walk cannot reach",
+  ).toEqual(["lib/shell/dev/fake-tauri.ts"]);
+});
