@@ -1449,8 +1449,11 @@ and a form assertion cannot say that a build which *should* be on a page is miss
   `viewLog.html?buildId=` / `viewType.html?buildTypeId=` forms mockd served are an older UI's; the
   real server still resolves them but no longer emits them, and the adapter passes the field through
   untouched (P5). *Superseded in part by the #495 amendment below (2026-09-07): the adapter composes
-  a build's URL from the configured base URL and no longer reads `webUrl`; this sentence is left as
-  history rather than rewritten.* The host in a real `webUrl` is the server's configured root URL
+  a build's URL from the configured base URL and no longer reads `webUrl`; and in the rest by the
+  #516 amendment below (2026-09-11), which does the same for a build configuration — so the field is
+  passed through nowhere now and is asked for at neither level. This sentence is left as history
+  rather than rewritten, and the two URL **shapes** it records are the ones the two compositions
+  spell.* The host in a real `webUrl` is the server's configured root URL
   (`http://localhost:8111` on the seeded server) and not the one the request went to; mockd uses
   its own bound address, and nothing in knobas depends on either.
 - **Compared and found in agreement, so nothing changed**: the JSON error envelope (#113) on 400
@@ -1898,7 +1901,11 @@ reached**, measured 2026-09-07 through the tunnel with the source configured at
 reader, so the name was requested and never read, exactly the #33 section's `percentageComplete`
 case. Pinned by `the_selectors_ask_for_nothing_no_reader_looks_at`, whose `unread` list gains the
 pair with its reason. `BUILD_TYPE_FIELDS` keeps `webUrl`: `map::build_config_item` still reads it,
-and a build **configuration**'s URL is unchanged by this entry. A build's `payload` therefore no
+and a build **configuration**'s URL is unchanged by this entry. *Superseded by the #516 amendment
+below (2026-09-11), which applies this entry to that one record: `BUILD_TYPE_FIELDS` drops `webUrl`,
+`struct BuildType` stops parsing it, and a configuration's URL is composed too. This sentence is
+left as history rather than rewritten; the resolver consequence two paragraphs below is the defect
+#516 closes.* A build's `payload` therefore no
 longer carries the server's `webUrl`, which is not a narrowing of what a payload promises: a payload
 is the raw record an item carries verbatim, and for TeamCity the record is what `fields=` returned.
 
@@ -2205,6 +2212,106 @@ paragraph above gets its `"??"`, its `custom: true` and its refusal at the creat
 names to be in the table. That last one is a subset check and guards only the six types the estate
 actually uses: dropping `middleware`, `schema` or `reverse_proxy` would pass it, and the count
 assertion above is what would go red.
+
+---
+
+### Amendments from the TeamCity build-configuration URL composition (2026-09-11, binding) — issue #516
+
+The #495 section above ends by recording what it deliberately left behind: *"`BUILD_TYPE_FIELDS`
+keeps `webUrl` … a build **configuration**'s URL is unchanged by this entry"*, and, three paragraphs
+later, the consequence — *"A link copied out of the TeamCity UI carries the *server's* spelling, so
+it will not equal the composed `web_url` of a source configured with another."* That was true of
+builds until #495 and stayed true of configurations after it, so a `buildType:` entity inherited
+exactly the mismatch #495 removed. This entry closes it, on the same terms: triaged and dispatched
+by a Fable deputy for Björn, who is away for this milestone and can overturn it; the change is in
+`crates/knobas-source-teamcity/**` and `crates/knobas-app/tests/**`, neither of which §10.8 freezes,
+so **no §10.8 entry is owed**. §4.2 pins TeamCity's endpoints and the requirement that every request
+carry an explicit `fields=`; it does not pin a selector's contents. No migration, no IPC surface, no
+glossary change and no ADR.
+
+**§4.2 TeamCity a build configuration's `web_url` is composed, from this commit:**
+`<the source's configured base URL>/buildConfiguration/<buildTypeId>?mode=builds` — the rule builds
+already follow since #495, and the rule Jira (`/browse/<key>`) and Confluence follow for their own
+reason: the URL the user typed is the one reachable from the user's machine. No *no URL* branch is
+owed here and none was written, which is the one way this differs from a build's composition: a
+configuration's id **is** its key (`build_config_key`), so a record with a blank one is not an item
+this mapping can produce at all, where a build's `buildTypeId` is a second identifier the record may
+simply not carry.
+
+**The query is part of the address, and that is a decision rather than a transcription.** Migration
+`0023` normalises a pasted URL with *"fragment out, the path's trailing slash out, scheme and host
+down-cased, query kept verbatim"*, so `?mode=builds` has to be spelled by the composition or the
+paste can never equal the stored column. The shape is measured, not guessed: on 2026-09-11, through
+the tunnel, `/app/rest/buildTypes?fields=count,buildType(id,webUrl)` on the seeded TeamCity 2026.1
+answered `http://localhost:8111/buildConfiguration/<id>?mode=builds` for all three seeded
+configurations, and the 2026-09-02 §4.2 bullet above had recorded the same shape from the other
+direction. `tests/live_teamcity_seeded.rs` pins it against the real server, so a server that ever
+serves another shape turns that suite red and the composition follows it rather than drifting.
+
+**The server's own `webUrl` is no longer read, and the measurement is the same one #495 made.**
+TeamCity fills the field in from the server's *Server URL* setting, which is a fact about the server
+and not about the reader: the seeded container answers `http://localhost:8111/…` **however it is
+reached**, measured 2026-09-11 with the source configured at `http://127.0.0.1:8111`. Mirrored
+verbatim, that is an *Open in browser* pointing at whatever `localhost:8111` happens to be on the
+reader's machine — and, since spec #491, a paste from the configured source's own UI that misses.
+
+**§4.2 TeamCity `BUILD_TYPE_FIELDS` drops `webUrl`, and `struct BuildType` stops parsing it**: with
+the composition above there is no reader, so the name was requested and never read, exactly the #33
+section's `percentageComplete` case and exactly what #495 did to `BUILD_FIELDS` at both levels. No
+`#[allow(dead_code)]`, for the reason the #495 ruling gives — it would silence the one device the
+crate has for finding a name nobody reads. Pinned by
+`the_selectors_ask_for_nothing_no_reader_looks_at`, whose `unread` list gains the
+`BUILD_TYPE_FIELDS`/`webUrl` pair with its reason, and whose sibling
+`the_field_selectors_cover_everything_the_mapping_reads` loses it from the other list in the same
+commit — the two lists are complements, and a name in both would be a contradiction rather than a
+belt and braces. A configuration's `payload` therefore no longer carries the server's `webUrl`,
+which narrows nothing a payload ever promised: CONTEXT.md's **Payload** is the raw source record an
+item carries verbatim, and for TeamCity the record is what `fields=` returned. `rest.rs`'s
+`a_build_types_listing_parses` keeps a fixture page that still *names* a `webUrl`, and now asserts
+that the parse drops it rather than erroring — so a mirror still holding pages from before this
+commit is not a re-parse hazard.
+
+**The resolver consequence, closed rather than inherited.** The #495 section's last paragraph told
+#496 to expect this class of miss for configurations. It is gone for a source configured at the
+host its reader uses, and the *other* half of that paragraph stands unchanged and on purpose: the
+same path under the **server's own** spelling of the host still misses, because spec #491 matches
+exactly on the stored `web_url` after normalisation on both sides and puts per-adapter URL parsers
+out of scope. Both halves are one test — `knobas-app`'s
+`a_teamcity_configuration_link_resolves_under_the_configured_host_only` — so a per-adapter parser
+added later would go red on the assertion that says the spec forbids it.
+
+Pinned by: `map::tests::a_build_configurations_web_url_is_composed_from_the_configured_base_url`
+(the record names one host, the mirror holds the other, query and all, and the three paste-shaped
+base URLs of #495's `the_base_url_is_joined_the_way_a_user_pasted_it` join the same way) and
+`a_build_configuration_maps_to_a_build_config_item`, whose URL assertion is now the composed one;
+`sync::tests::every_configuration_a_run_emits_carries_a_url_composed_from_the_base_url`, the seam
+`map`'s own tests cannot reach — `execute` is the only holder of the base URL, and a run that
+threaded it to the builds and not to the configurations would leave every `buildType:` entity
+pointing at the server's own host; `tests/mockd.rs`'s
+`a_mirrored_build_carries_what_the_ui_and_the_index_read`, which asserts the configuration's whole
+URL beside the build's and whose `assert_no_violations()` is what says a real selector parser
+accepts the narrowed `BUILD_TYPE_FIELDS`; `knobas-app`'s `tests/url_resolve.rs`'s
+`a_teamcity_configuration_link_resolves_under_the_configured_host_only`, over a scratch database and
+the real `0023` expression index — a `RESOLVE_URL` that compared paths with the host stripped, the
+per-adapter parser spec #491 puts out of scope, reddens it; and `tests/live_teamcity_seeded.rs`'s
+`a_build_configurations_web_url_is_composed_from_the_configured_base_url_and_answers_200`, which
+asserts the **whole** URL against the seeded server for all three configurations, fetches each one,
+and re-syncs the same corpus under a second spelling of the host so that "the URL follows the
+configuration" is a measurement and not a coincidence of this container's setting. That live test
+also asserts, per configuration, that the server's own `webUrl` and the composed one **differ**:
+without that guard the suite would quietly stop witnessing anything the day someone pointed
+`KNOBAS_TEAMCITY_URL` at the container's own *Server URL*, since equality against the configured
+base would then pass whether the mapping composed or read. The suffix assertion it replaces in
+`the_seeded_projects_and_configurations_land_by_id_and_name` is the reason this ticket existed as a
+ticket rather than as a red test: `ends_with("/buildConfiguration/<id>?mode=builds")` passes under
+every host there is.
+
+**The seam's guard is measured rather than asserted.** Handing `build_config_item` a literal host in
+`execute` reddens exactly two tests — the `sync::tests` one above and `tests/mockd.rs`'s — and
+nothing else in the crate: the other 108 lib tests stay green, `map`'s own new test included,
+because they call `build_config_item` directly and never go through `execute`. That is the same
+shape as the #495 section's closing sentence about `TeamCitySource::sync`, and the reason a change
+to the run's threading is not covered by the unit tests alone.
 
 ---
 

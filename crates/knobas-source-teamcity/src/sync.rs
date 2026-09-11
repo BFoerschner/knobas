@@ -263,7 +263,7 @@ pub(crate) async fn execute(
     let mut pushed = 0usize;
     for (id, t) in &configs {
         if previous.is_none() || touched.contains(id) {
-            sink.item(map::build_config_item(source_id, &t.raw, &t.rec))
+            sink.item(map::build_config_item(source_id, base_url, &t.raw, &t.rec))
                 .await?;
             pushed += 1;
         }
@@ -1289,6 +1289,40 @@ mod tests {
             assert_eq!(
                 it.web_url,
                 Some(format!("{TEST_BASE_URL}/buildConfiguration/{config}/{id}")),
+                "{}",
+                it.entity.key
+            );
+        }
+    }
+
+    /// **And down to every configuration** (issue #516), which #495 left
+    /// reading the server's own `webUrl`.
+    ///
+    /// The same seam and the same failure: `execute` is the only holder of the
+    /// base URL, and a run that threaded it to the builds and not to the
+    /// configurations would leave every `buildType:` entity pointing at
+    /// whatever host the server thinks it is -- with `map`'s own tests green,
+    /// because they call `build_config_item` directly.
+    #[tokio::test]
+    async fn every_configuration_a_run_emits_carries_a_url_composed_from_the_base_url() {
+        let rest = tidewater();
+        let (items, _) = run(&rest, &TeamCityConfig::default(), None).await;
+        let configs: Vec<&SyncItem> = items
+            .iter()
+            .filter(|i| i.kind == crate::KIND_BUILD_CONFIG)
+            .collect();
+        assert_eq!(configs.len(), 3, "{:?}", keys(&items));
+        for it in configs {
+            let id = it
+                .entity
+                .key
+                .strip_prefix("buildType:")
+                .expect("configuration keys");
+            assert_eq!(
+                it.web_url,
+                Some(format!(
+                    "{TEST_BASE_URL}/buildConfiguration/{id}?mode=builds"
+                )),
                 "{}",
                 it.entity.key
             );

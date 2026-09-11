@@ -288,6 +288,84 @@ async fn two_jira_instances_resolve_their_own_items_only() {
     );
 }
 
+/// Story 9 for the source the corpus above does not carry, and the reason it
+/// is worth its own test (issue #516).
+///
+/// TeamCity fills its own `webUrl` in from the server's *Server URL* setting,
+/// so the address the server puts in a record names whatever host the server
+/// thinks it is -- `http://localhost:8111/...` on the seeded container, however it
+/// is reached. Issue #495 made a **build**'s mirrored `web_url` a composition
+/// from the configured base URL for that reason, and #516 did the same for a
+/// build **configuration**, which #495 left behind. This is what the change
+/// buys a reader: the link they copy out of the TeamCity UI of the source they
+/// configured names the entity.
+///
+/// **The query is half the address.** A configuration's page is
+/// `/buildConfiguration/<id>?mode=builds`, and `0023` normalises a pasted URL
+/// with its query kept verbatim -- so the composition and the paste agree only
+/// because the composition spells the query too.
+///
+/// The miss beside it is spec #491's rule, unchanged and deliberately not
+/// softened: the *same path* under the server's own spelling of the host is a
+/// host nothing in this mirror came from, so it misses. A per-adapter URL
+/// parser that recognised `/buildConfiguration/` whatever host it sat on is
+/// what the spec puts out of scope, and this assertion is what would go red if
+/// one were added.
+#[tokio::test]
+async fn a_teamcity_configuration_link_resolves_under_the_configured_host_only() {
+    let pool = pool("url_teamcity_config").await;
+    mirror(
+        &pool,
+        "teamcity:buildType:Payout_Build",
+        "build_config",
+        "teamcity",
+        "https://ci.tidewater.example/buildConfiguration/Payout_Build?mode=builds",
+    )
+    .await;
+
+    assert_eq!(
+        pair(
+            resolved(
+                &pool,
+                "https://ci.tidewater.example/buildConfiguration/Payout_Build?mode=builds",
+            )
+            .await
+        ),
+        Some((
+            "teamcity:buildType:Payout_Build".to_owned(),
+            "build_config".to_owned()
+        )),
+        "the address the UI of the configured source puts in the address bar"
+    );
+
+    // The same path under the host the server names itself by -- which is
+    // exactly the string the mirror would have held before #516, and exactly
+    // the miss that made the ticket.
+    assert_eq!(
+        resolved(
+            &pool,
+            "http://localhost:8111/buildConfiguration/Payout_Build?mode=builds"
+        )
+        .await
+        .map(|found| found.entity_id),
+        None,
+        "a host nothing in this mirror came from is a miss, path or no path"
+    );
+
+    // And the query really is carried: the same configuration's page reached
+    // without it is not the address the mirror holds.
+    assert_eq!(
+        resolved(
+            &pool,
+            "https://ci.tidewater.example/buildConfiguration/Payout_Build"
+        )
+        .await
+        .map(|found| found.entity_id),
+        None,
+        "`0023` keeps a query verbatim, so a URL without one is another URL"
+    );
+}
+
 /// Story 15: a stale link explains itself. The read is over `sync.item` and
 /// not `sync.live_item`, so a withdrawn entity resolves and the detail's own
 /// banner says it is gone -- which is a better answer than *Not in the

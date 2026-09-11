@@ -53,8 +53,14 @@ pub(crate) const BUILD_ID_FIELDS: &str = "id";
 /// What `/app/rest/buildTypes` is asked for. Without an explicit `fields=`,
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.
+///
+/// **No `webUrl`** (issue #516), for the reason `BUILD_FIELDS` below dropped
+/// it at both levels one ticket earlier: a build configuration's URL is
+/// knobas' own composition from the configured base URL now -- see
+/// [`map::build_config_web_url`](crate::map) -- so the server's own is a name
+/// no reader in `map` looks at, and `struct BuildType` no longer parses it.
 pub(crate) const BUILD_TYPE_FIELDS: &str =
-    "count,nextHref,buildType(id,name,projectId,projectName,description,webUrl)";
+    "count,nextHref,buildType(id,name,projectId,projectName,description)";
 
 /// What `/app/rest/builds` is asked for. The nested `buildType(...)` is what
 /// makes client-side project scoping possible: the locator grammar has no
@@ -66,8 +72,9 @@ pub(crate) const BUILD_TYPE_FIELDS: &str =
 /// name no reader in `map` looks at, and `struct Build` no longer parses it.
 /// The `percentageComplete` precedent below is the same rule:
 /// `the_selectors_ask_for_nothing_no_reader_looks_at` keeps both. The nested
-/// `buildType(webUrl)` goes with it; nothing has ever read that one, and
-/// `BUILD_TYPE_FIELDS` is where a configuration's URL comes from.
+/// `buildType(webUrl)` goes with it; nothing has ever read that one, and since
+/// issue #516 a configuration's URL is composed too, so `BUILD_TYPE_FIELDS`
+/// asks for no `webUrl` either.
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
@@ -142,7 +149,6 @@ pub(crate) struct BuildType {
     /// Prose a human wrote about the configuration, and part of what
     /// `map::build_config_item` puts in the search blob.
     pub description: Option<String>,
-    pub web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -412,9 +418,13 @@ mod tests {
         assert_eq!(bt.name.as_deref(), Some("Integration Tests"));
         assert_eq!(bt.project_id.as_deref(), Some("Payout"));
         assert_eq!(bt.description.as_deref(), Some("Runs the SEPA suite"));
-        assert_eq!(
-            bt.web_url.as_deref(),
-            Some("https://ci.example.com/buildConfiguration/Payout_IntegrationTests")
+        // The record still *carries* a `webUrl` -- this fixture is a page from
+        // before issue #516 dropped the name from `BUILD_TYPE_FIELDS` -- and
+        // the parse drops it on the floor rather than erroring, which is what
+        // makes the drop safe for a mirror still holding older raw pages.
+        assert!(
+            env.items[0]["webUrl"].is_string(),
+            "the fixture page names a URL, so the parse above is what dropped it"
         );
         // Everything but the id is optional: a trimmed or older server omits
         // fields rather than sending nulls, and a missing description must not
@@ -422,7 +432,6 @@ mod tests {
         let bare: BuildType =
             serde_json::from_value(env.items[1].clone()).expect("sparse buildType");
         assert_eq!(bare.description, None);
-        assert_eq!(bare.web_url, None);
     }
 
     #[test]
@@ -741,14 +750,7 @@ mod tests {
                 "BUILD_FIELDS misses {needed}"
             );
         }
-        for needed in [
-            "id",
-            "name",
-            "projectId",
-            "projectName",
-            "description",
-            "webUrl",
-        ] {
+        for needed in ["id", "name", "projectId", "projectName", "description"] {
             assert!(
                 BUILD_TYPE_FIELDS.contains(needed),
                 "BUILD_TYPE_FIELDS misses {needed}, so `map::build_config_item` reads it as None \
@@ -826,6 +828,17 @@ mod tests {
                 "href",
                 "mockd serves `build(href)`, so this is not a violation -- it is response size \
                  and a payload key nothing in `map` reads",
+            ),
+            (
+                BUILD_TYPE_FIELDS,
+                "BUILD_TYPE_FIELDS",
+                "webUrl",
+                "a build configuration's URL is composed from the configured base URL since \
+                 issue #516 -- `<base>/buildConfiguration/<id>?mode=builds` -- so `struct \
+                 BuildType` no longer parses the server's own and no reader in `map` looks at \
+                 it; TeamCity fills that field in from the server's *Server URL* setting, which \
+                 names whatever host the server thinks it is rather than the host this source \
+                 is configured at",
             ),
             (
                 BUILD_TYPE_FIELDS,

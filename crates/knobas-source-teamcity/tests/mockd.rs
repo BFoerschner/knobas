@@ -279,6 +279,26 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
         cfg.updated_at, None,
         "TeamCity dates no configuration, and `now()` is forbidden"
     );
+    // P5 again, and the whole URL for the same reason as the build's: since
+    // issue #516 a configuration's address is composed too, from the base URL
+    // this source is configured with, in the shape a TeamCity 2026.1 serves --
+    // `/buildConfiguration/<id>?mode=builds`, the query included. mockd serves
+    // exactly what a selector asks for and `BUILD_TYPE_FIELDS` no longer asks
+    // for `webUrl`, so the record carries none and the URL below is knobas'.
+    assert!(
+        cfg.payload.get("webUrl").is_none(),
+        "the record names no URL, so the one below is knobas' own: {}",
+        cfg.payload
+    );
+    assert_eq!(
+        cfg.web_url,
+        Some(format!(
+            "{}/buildConfiguration/{}?mode=builds",
+            server.base_url().trim_end_matches('/'),
+            failed.cfg
+        )),
+        "the adapter can say where a human reads this configuration"
+    );
     server.assert_no_violations();
 }
 
