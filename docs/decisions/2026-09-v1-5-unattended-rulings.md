@@ -2343,3 +2343,159 @@ label.
 dead credential and the remaining collision is the mid-run one; and whether this file's header
 should say outright that a ruling no PR acts on rides in a docs-only PR, so the next milestone's
 exit does not need part 5.
+
+---
+
+## #491 (second ruling) — the v1.5 exit, dispatched a second time after the sweep
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/491#issuecomment-5631698324>
+
+**The fork:** Step 4 of the `/v15-next` loop file, verbatim: *"If no candidate is free, no ticket is
+in-progress and no PR is open, the milestone is done: dispatch the deputy once more on the fork
+'v1.5 exit: every ticket closed, every live recipe green on its last run, the release run green —
+exited, or what is missing' and, on a ruling of exited, close the milestone … comment the ruling on
+#491, and `ScheduleWakeup` with `stop: true`."* The fork is the loop's seventh kind of decision,
+*"The milestone exit"*, and the delegation covers it. The ruling of 07:29 the same day settled
+clauses one and three and said the second dispatch *"needs nothing beyond this one and the eight
+transcripts: parts 1 and 2 above are settled and are not re-argued."* What changed since, verified
+on the tracker and the tree rather than taken from the orchestrator: #551 closed on eight
+transcripts; #552 ruled at 07:51, its PR #553 merged as `16d0dee0` at 08:23; `main` and
+`origin/main` are `16d0dee0`; milestone 13 reads 29 closed, 1 open, the open one this spec, and
+every closed one `COMPLETED`; no pull request is open; no open issue carries `in-progress`; tag
+`v1.0.0` exists and run `34160263470` still reads `success`. One new question was put to this
+ruling: whether #554, filed `needs-triage` with no milestone, belongs in v1.5 and holds the exit.
+
+**Ruling: exited.** Nothing is missing. #554 stays out of the milestone. The closing iteration owes
+five things, in the order of part 4 below.
+
+**(1) Clause two holds. Every live recipe is green on its last run, and its last run is a run of the
+tree that is `main`.** The eight transcripts on #551, counts read from each rather than from the
+sweep's table:
+
+| recipe | head | counts read |
+|---|---|---|
+| `just gitea-live` | `76899b84` | 12 run, 12 ok, 0 failed |
+| `just gitea-live-capped` | `76899b84` | 1 run, 1 ok, 0 failed |
+| `just start-work-live` | `76899b84` | 1 run, 1 ok, 0 failed |
+| `just teamcity-live` | `76899b84` | 12 run, 12 ok, 0 failed |
+| `just teamcity-live-seeded` | `76899b84` | 8 + 1 over two suites, 9 ok, 0 failed |
+| `just atlassian-live` | `76899b84` | 14 + 15 + 13 + 2 + 1 over five suites, 45 ok, 0 failed |
+| `just kuma-live` | `c516588`, squashed as `16d0dee0` | 9 + 3 + 1 over three suites, 13 ok, 0 failed |
+| `just estate-live` | `76899b84` | 2 run, 2 ok, 0 failed |
+
+The seven on `76899b84` stand under part 4 of the #552 ruling, which bounds them to a PR that stays
+inside `testenv/**` and docs. `git diff --name-only 76899b84 16d0dee0` is exactly four paths:
+`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `testenv/README.md`, `testenv/kuma-seed.mjs`,
+`testenv/seed-kuma.sh`. No crate, no suite, no `justfile`. The merge-manager read the same list on
+the branch before squashing, and the eighth run is a run of the tree that is now `main`: the branch
+tree and the squash tree share the id `ae37f72d`, which is #525's condition (d) as applied by the
+#552 ruling. That run started from a tree whose `kuma-api-key` was named `401 (DEAD)` beforehand,
+the seed printed `no longer authenticates (401); minting a new one`, and all three suites then ran,
+so `alert_chain_live`, M4.1's exit witness, has its verdict back. The fixture was left as found on
+the merge-manager's own account: the roster the eight names in `monitors.json`, the canary rebound,
+no container stopped, the tunnel as found. Nothing has moved under any recipe since: `main` is one
+commit past `76899b84`, and that commit is the four files above.
+
+**(2) Clauses one and three are settled and are not re-argued.** The only change to clause one is two
+more tickets, #551 and #552, both closed as completed; the milestone's count is twenty-nine closed
+and this spec. Clause three is unchanged.
+
+**(3) #554 is filed right. It stays out of v1.5, `needs-triage`, no milestone, and the exit does not
+wait on it.** This milestone put a ticket found mid-way into v1.5 twice, and the test was the same
+both times: the exit's own witness. #531 went in under the #501 ruling because a spurious red at the
+desktop gate *"would send the runner down that path for a defect that is not there"*; #547 and #548
+went in under the #525 ruling because the exit witness itself was red. Six other tickets found
+during v1.5 went out, listed in the closing report's section 7 as *"Filed outside this milestone,
+for you to place"*, and that is #554's class. Nothing a witness reads is in it. The property #552
+ruled, *"keeps the key in `kuma-api-key` only while it still authenticates against the instance; a
+key the instance answers `401` to is re-minted, and the seed says so"*, is landed and witnessed in
+three directions in #553's body, and the seed's log line is the one the transcript shows. A recipe
+comment in the `justfile` that names one trigger where there are now two, and three variable names
+that lag their comments, mislead no run: the seed heals the dead key whichever name the variable
+carries. The merge-manager was right to leave both out of #553, because the `justfile` is outside
+the bound and touching it would have cost a second sweep for a comment. #554's own part 2 says why
+it is not a rename-and-go, and that argues for its own witness on its own ticket, not for a place in
+a milestone whose exit evidence is already taken. Björn places it. The closing comment on #491 lists
+it as the seventh unplaced ticket beside #515, #516, #524, #529, #541 and #544.
+
+**(4) What the closing iteration owes, in this order.**
+
+(a) **A docs-only PR carrying this ruling, merged before anything closes.** Part 5 of the #552 ruling
+set this and it is confirmed with one narrowing. It appends this ruling to this file as `## #491
+(second ruling)`, after the `## #552` section, in the four-part shape; the file's header already says
+a ruling no PR acts on rides in a docs-only PR, so no header change. It adds one dated sentence to
+the v1.5 section of `docs/roadmap.md`, the treatment M4 got in that section's first line: v1.5
+closed 2026-09-11 on this ruling in Björn's absence, `main` at the exit named by SHA, eight live
+recipes green on #551, and Björn reverses with a follow-up ticket. **The PR is `docs/**` and nothing
+else.** PR #490 is the shape for the title and the body, not for the file list: #490 touched doc
+comments in two crates, and this PR may not, because the eight greens rest on the tree not moving
+under any recipe. The merge-manager checks `git diff --name-only` against the branch point and
+refuses anything outside `docs/`. **No `Closes #491` line**, inside or outside backticks: #491 closes
+by hand in step (c), with its closing comment, and a keyword would close it at the merge with none.
+The orchestrator opens it; a merge-manager merges it under its brief as written.
+
+(b) **The orchestrator strips `in-progress` from the twenty-five closed v1.5 tickets still carrying
+it.** The 07:29 ruling said twenty-four; #552 closed with the label on and makes twenty-five: #492 to
+#510, #518, #522, #531, #537, #547, #552. The label on a closed ticket is a false answer to Step 1's
+query and holds nothing.
+
+(c) **The closing comment on #491, then #491 closed as completed.** In #427's shape, the sentence M4
+got: v1.5 is complete, every ticket #492 to #510 and the ten the loop filed (#518, #522, #525, #531,
+#533, #537, #547, #548, #551, #552) closed, the exit sweep #551 green on eight transcripts, v1.0.0
+released on run `34160263470`, the deputy ruled the close on 2026-09-11 with this comment's URL, and
+`main` at the squash SHA of the PR in (a). The seven unplaced tickets from part 3 go in the same
+comment. Then `gh issue close 491 --reason completed`. No label goes on.
+
+(d) **Milestone 13 closed** with the API call Step 4 names.
+
+(e) **`ScheduleWakeup` with `stop: true`.**
+
+No tag is cut at the exit: whether `main` is released as v1.5.0 was flagged at 07:29 and is not ruled
+here. No glossary entry and no ADR: nothing architectural is decided, and the rules applied are the
+07:29 and 07:51 rulings, the working model's, and ADR-0013's as written.
+
+**Reasoning:** the answer to clause two is the 07:29 ruling's own test, applied to eight transcripts
+that now exist. That ruling said a green certifies *"the head it was made on"*, and the #552 ruling
+said what makes a later head the same for a recipe's purposes: *"The PR touches nothing they
+certify, no adapter crate, no engine, no seed those suites read a credential from."* The file list is
+read from `git`, which is the working model's rule for this class, *"a check that measures a
+representation of the thing instead of the thing"*, turned the right way: the claim was checked
+against the diff, twice, by the merge-manager and here. The eighth transcript is worth more than a
+green because it is the fault reproduced and healed, the mutant the #552 ruling refused to let anyone
+delete. ADR-0013 is the reason the sweep was the evidence at all, *"the adapter's certificate stays
+its `just <system>-live` recipe"*, and now every certificate is read on the tree being exited. Part 3
+follows the rule this milestone already used twice for a ticket found mid-way, and the reading that
+keeps the ticket's scope unchanged: spec #491's ten streams are done, and #554 is a comment and three
+names in `testenv/**`, not a stream and not a witness. Part 4(a) narrows #490 because the bound in
+the #552 ruling is a bound on the tree, and a doc comment in a crate is a change to the tree the
+sweep certified; the roadmap sentence is owed because the v1.5 section's own hold paragraph says a
+decision should read *"as a decision and not as an omission"*, and a milestone closed by a deputy
+with no dated line in the roadmap would read as the second. Part 4(c) keeps #491 out of the PR's
+closing keyword for the reason the 07:29 ruling gave: #427 closed with a sentence naming `main` at
+its exit, and a keyword closes with none. The order in part 4 is the #552 ruling's *"merged before
+milestone 13 is closed"*, with the reason spelled out: the closing comment names the SHA the PR
+produces, so the PR goes first.
+
+**If you disagree, the cost of reversing this is:** the exit itself, one label and two API calls:
+reopen milestone 13 and #491, and file the ticket that names what was missing. Nothing in code,
+because this ruling merges one docs-only PR and touches no crate, seed, suite or recipe. Reversing
+part 3 is `gh issue edit 554 --milestone v1.5 --add-label ready-for-agent` and a re-run of `just
+kuma-live` on its merge head; what that spends is the exit held for a comment fix while the seven
+greens rest on a tree that has not moved. Reversing part 4(a)'s narrowing is a doc comment in a
+crate, and its price is that the merge-manager can no longer read the file list as the bound.
+Reversing the roadmap sentence is a deletion. Reversing part 4(b) is twenty-five labels put back, and
+nothing depends on them. Reversing the v1.5.0 decision that was not made costs nothing, because
+`main` at the exit is a SHA in the roadmap and in the closing comment, and a tag can be cut on it any
+day.
+
+**Flagged, not ruled:** the three items of the 07:29 ruling stand unchanged — Step 4's wording
+(*green on the exit head* rather than *green on its last run*), the v1.5.0 tag, and the working
+model's high-effort review over the milestone's accumulated diff, which no ruling in this milestone
+added or struck. The #552 ruling's two items stand too: the lock the README says the tooling does not
+have, and this file's header, which #553 has now corrected in the form that ruling asked about. Two
+new: `just teamcity-live`'s transcript carries a test that says of itself *"this run is NOT a
+witness"* because the public instance's window held no personal build, which was equally true of
+every earlier run and is a corpus property, not a red; and whether a ticket found during a milestone
+gets a written rule for which milestone it lands in, since this milestone answered that question
+three times by ruling and once by report.
