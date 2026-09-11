@@ -2742,3 +2742,144 @@ and two doc comments; reversing part 3 is one line; reversing criterion 3 is one
 `starts_with`. Reversing the placement or the cap is a label and a sentence in the milestone
 description, and the cap's price for staying is that #564 waits for #554, which is minutes to an
 hour.
+
+## Milestone 14 (v1.5 follow-ups) — the exit
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/541#issuecomment-5635424552>
+
+The exit ruling of milestone 14, `v1.5 follow-ups`, posted on #541 because the container has no spec
+issue and #541 is its last ticket.
+
+**The fork:** *"the exit of milestone `v1.5 follow-ups`: ten of ten tickets closed, zero open issues
+anywhere on the tracker, no open PRs, no worktrees, the tunnel down, the fixture handed back
+unchanged, `main` at `4bd1ca61` — exited, or what is missing."* Four questions were put to it, and
+none may be assumed: whether a live sweep is owed on the exit head; whether either of two candidates
+the merge-managers named and left unfiled is a ticket; whether the roadmap owes a dated line; and
+whether the batch's one process finding belongs in a durable document. The state, verified on the
+tracker and the tree rather than taken from the orchestrator: milestone 14 reads 10 closed, 0 open,
+its own state still `open`; all ten (#515, #544, #524, #556, #516, #554, #560, #561, #564, #541)
+`CLOSED` / `COMPLETED`; `gh issue list --state open` and `gh pr list --state open` both empty; `git
+worktree list` is the root checkout alone; `main` and `origin/main` both `4bd1ca61` after a fetch; no
+`ssh -L` process on this machine. The batch is `72cf54e5..4bd1ca61`, ten squash commits (#557, #558,
+#559, #563, #562, #565, #566, #567, #568, #569). Seven of the ten closed tickets still carry
+`in-progress` (#515, #544, #524, #516, #561, #564, #541).
+
+**Ruling: exited.** Nothing is missing that a ticket or a run would supply; what the closing
+iteration owes is paperwork, listed in part 5.
+
+**(1) No live sweep is owed on `4bd1ca61`, and no recipe is re-run.** Every one of the nine recipes
+on the working model's list is green on a tree that is `main`'s for everything it certifies, and the
+reading is taken from `git diff --name-only`, twice, not from a claim:
+
+| recipe | last green, as a tree | what moved under it since |
+|---|---|---|
+| `just teamcity-live-seeded` | PR #568's body: *"Live re-run on the merge head: `just teamcity-live-seeded` exit 0 — `live_teamcity_seeded` 9 passed in 20.31 s, `teamcity_seeded_live` 1 passed in 1.32 s"* on `f550fab8`, whose tree id `1d3b8779…` is the squash `3830fa9c`'s | `git diff --name-only 3830fa9c 4bd1ca61` is three paths, all `crates/knobas-search/`: `src/testing.rs`, `tests/perf.rs`, `tests/sql_shape.rs`. The recipe runs `cargo test -p knobas-source-teamcity --test live_teamcity_seeded` and `-p knobas-app --test teamcity_seeded_live`; `knobas-source-teamcity` does not depend on `knobas-search` at all, `knobas-app` depends on it without `test-util`, and `testing.rs` sits behind `#[cfg(any(test, feature = "test-util"))]` (`lib.rs:48`). Two integration-test files of another crate and a fixture module neither binary compiles: nothing it certifies moved. |
+| `just kuma-live` | PR #565's body: *"Head `98ccdd86…`, rebased onto `origin/main` `e10a7042`"*, three suites 9 / 3 / 1 passed, counts read; tree id `2d2ba13d…` is the squash `f0daedd8`'s | `git diff --name-only f0daedd8 4bd1ca61` is ten paths. One is source linked into a suite the recipe runs: `crates/knobas-app/src/time/worklog.rs` (#567), into `kuma_write_live` and `alert_chain_live`, and its code hunk is one clause in the worklog-draft candidate read (`and entity_id not like 'note:%'`). What those two suites certify is the recipe's own sentence — *"the op decoded, the instance's write ops read out of the keychain, the queue row, the flush, the mirror re-read"* — and the alert chain; the draft read is on neither. The rest: `CONTEXT.md`, a frontend test, `time_ipc.rs`, the three `knobas-search` files, `knobas-source-teamcity/tests/live_teamcity_seeded.rs` (a test target of a crate no Kuma suite builds), the decision record, `test-inventory.txt`. No `knobas-source-kuma`, no `knobas-core`/`knobas-http`/`knobas-source`, no `testenv/**`, and the `justfile`'s only hunk after `e10a7042` is the `kuma-live` comment #565 itself wrote. |
+| `just gitea-live`, `just gitea-live-capped`, `just start-work-live`, `just atlassian-live`, `just estate-live` | #551, `76899b84` | `git diff --name-only 72cf54e5 4bd1ca61` (and `76899b84..72cf54e5` is #553's four `testenv/**` and docs paths, read at the v1.5 exit) touches no Gitea, Jira, Confluence or hcloud crate, no seed of theirs, no `WriteOp`, no descriptor, no `knobas-sync`. The `justfile` moved by #563's gate-slot extraction and `search-perf` recipe and by #565's comment; no live recipe's `cargo test` line changed. The `knobas-app` and `knobas-core` sources the batch touched (`commands/entity.rs`, `time/worklog.rs`, `note.rs`) are none of the four classes the rule names, which is why #524, #561 and #541 were classed gate-only by the milestone description and the #561 ruling (*"No IPC change … no migration, no §10.8 entry. Gate-only"*) and owed no live run when they merged; nothing changes that after they merged. |
+| `just teamcity-live` (the public instance) | #551, `76899b84` | The one adapter crate the batch changed is `crates/knobas-source-teamcity/src/{map,rest,sync}.rs` (#562). Which recipe that change reaches was ruled on #516: *"the adapter's certificate is `just teamcity-live-seeded`; the PR body carries its transcript with the counts read, and the merge-manager re-runs it on the head it squashes"* — done on #562's squash tree and again on #568's. The public suite's only assertions on the changed value are `item.web_url.is_some()` (`live_teamcity.rs:321, 355`), which a composed URL satisfies by construction; a re-run there could not go red on what #562 changed, and an instrument that cannot fail is the class this batch caught nine of, not a witness. The recipe says of itself *"A GREEN HERE SAYS NOTHING ABOUT THE SEEDED SERVER, IN EITHER DIRECTION"*. |
+| `just search-perf` | PR #569's body, `0332e851` (tree of the squash `4bd1ca61`), 6 of 6 | nothing: it is the exit head. |
+
+**(2a) No ticket for the estate branches matching zero of the marker.** The criterion was rows, and
+that is settled three times over: the #533 ruling (*"three of the four branches sit at zero **rows**
+… a relation with no rows in it gives the planner no choice to make"*), the #541 triage (*"a fixture
+with **rows in every branch** … asserts each branch's **row count** is above zero **before** it
+measures"*), and the #569 merge-manager's independent read (*"The concern named is a relation with
+nothing to scan, never one that fails to match a term"*). What a follow-up would buy is already
+witnessed elsewhere: the pin's own mutant is red over the four-corpus statement (`q as materialized`
+→ 407,720 buffers, `just search-perf`, 6 tests), and the direction *estate rows in the match set* is
+measured by `the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items`, which seeds the
+estate, searches terms that hit it, asserts hits above zero and p90 under `BUDGET_MS`. What it would
+cost is named in `perf.rs:893-896`: a marker in `seed_estate` *"moves the fixture underneath [that
+gate] and the reading recorded on it"*, and #533's reading is a recorded claim, not a number to move
+for a detector already red. The zero is printed beside the row count, which is the treatment of a
+limit the working model asks for.
+
+**(2b) No ticket for `BRANCHES` being positional.** The runtime guard `assert_eq!(corpus::ALL.len(),
+BRANCHES.len(), …)` fails red when the count moves, and a reorder of `corpus::ALL` would mislabel a
+printed report line and pass no assertion falsely — so it is not the working model's fail-green
+class, only a label. The type-level cure needs `Corpus::kind` made public (it is `pub(crate)`,
+`corpus.rs`) or a name field on `Corpus`: a change to the crate's source for a test report's
+captions, which the #541 triage bounded out (*"`Searcher::search`, `BUDGET_MS`, the summary statement
+and `saved::MAX_SAVED_LISTS` are untouched"*) and the merge-manager called *"neither a blocker"*.
+Nothing is filed; the doc comment at `perf.rs:855-864` already says what the guard is and is not.
+
+**(3) The roadmap owes one dated sentence, not a section.** The v1.5 exit's reason — *"a milestone
+closed by a deputy with no dated line in the roadmap would read as an omission rather than a
+decision"* — does not reach the container for its own sake: milestone 14 is not in the plan, so its
+absence from the plan is not an omission. It reaches the v1.5 close paragraph, which is the only
+place the roadmap names *"`main` at the exit"* by SHA and flags the v1.5.0 tag on it; ten merges
+later that paragraph is stale in the one fact a tag would be cut on. The sentence goes in
+`docs/roadmap.md`, the v1.5 section, as a short paragraph directly after the *"v1.5 closed
+2026-09-11"* paragraph (line 143), and reads:
+
+> **The v1.5 follow-ups (milestone 14) closed 2026-09-11**, ruled exited by the Fable deputy
+> (<https://github.com/BFoerschner/knobas/issues/541#issuecomment-5635424552>): the ten maintenance
+> tickets the v1.5 exit left — #515, #516, #524, #541, #544, #554, #556, #560, #561, #564 — merged as
+> `72cf54e5..4bd1ca61` under the per-ticket witness rule and no sweep, since the container is not a
+> planned milestone and has no exit criteria of its own; `main` after the batch is `4bd1ca61`, and
+> every live certificate stands on it (`just teamcity-live-seeded` and `just kuma-live` re-read
+> inside the batch on the trees that became `3830fa9c` and `f0daedd8`, the other six on `76899b84`,
+> nothing they certify moved; `just search-perf`, #556, joined the recipe list). Whether a v1.5.0 tag
+> is cut, and on which of `72cf54e5` and `4bd1ca61`, stays Björn's.
+
+**(4) The negative-control finding goes in `docs/agents/working-model.md`, not an ADR and not only a
+brief.** The decisions README draws the line: an ADR *"fixes a shape the code is then obliged to
+keep"*, a rule *"about how agents work that no crate can enforce"* is operational — and the working
+model is where the standing mutation rules already live (*"a check that measures a representation of
+the thing instead of the thing"*, and the two numbered rules under *"A mutation script never runs a
+tree-wide destructive checkout"*). The entry: a new bold paragraph directly after that rule's closing
+sentence (*"…it is your own tooling deleting it."*), headed **"A negative control prints the diff
+that proves it was applied (rule, 2026-09-11 — the v1.5 follow-ups batch)."** Its body is the
+implementer brief's amendment, carried verbatim: *"A mutation applied with a substitution whose
+escaping silently does not match reports success and changes nothing: the suite then prints all-green
+and reads as a killed-nothing result, when in truth nothing was mutated. Assert the substitution, and
+print the `-`/`+` diff before the run."* — plus two instruments beside it: PR #569's own *"A compile
+error is not a killed mutant"*, which is on the record, and a driver's emptiness check that compared
+against the index rather than `HEAD`, which is the orchestrator's report and is written as such; and
+the batch's tally as the orchestrator reported it, nine assertions that could not fail across ten
+tickets, every one caught by mutation and none by review, two inside the commit that removed another.
+The orchestrator's docs-only PR writes it (part 5); it is `docs/**`.
+
+**(5) What the closing iteration owes, in this order**, the v1.5 exit's part 4 applied: (a) one
+docs-only PR — `docs/**` and nothing else, the merge-manager refusing any other path in `git diff
+--name-only` — appending this ruling to `docs/decisions/2026-09-v1-5-unattended-rulings.md` as `##
+Milestone 14 (v1.5 follow-ups) — the exit` after the `## #564` section, adding the roadmap sentence
+of part 3 and the working-model paragraph of part 4; no `Closes` keyword anywhere in it; merged
+before anything closes. (b) The orchestrator strips `in-progress` from #515, #544, #524, #516, #561,
+#564 and #541 — *"the label on a closed ticket is a false answer to Step 1's query"*. (c) Milestone
+14 closed with the API call, after (a) merges, so the record names the head. No tag is cut. No
+glossary entry, no ADR, no ticket filed.
+
+**Reasoning:** the answers existed and are quoted rather than re-decided. For part 1 the standard is
+the v1.5 exit's own: a green certifies *"the head it was made on"*, and the #552 ruling says what
+makes a later head the same for a recipe — *"the PR touches nothing they certify … the merge-manager
+checks the file list, not the claim"*; the two re-reads inside this batch are runs of trees identical
+to their squash commits by tree id, which is #525's condition (d) as #552 applied it. What separates
+this exit from v1.5's is not leniency but the milestone's own description: v1.5 *"changed every
+adapter crate (#520) and the sync engine"* under a planned milestone whose section keeps *"each exit
+runs every live suite"*; milestone 14 *"is not a planned milestone in the M0–v1.5 sense, it is a
+container so the ticket loop can find its work"*, with no exit criteria, and its witness rule is the
+working model's per-PR one — *"a PR touching an adapter crate, a `WriteOp`, the descriptor, or the
+sync engine carries its live run's output in its body, and the merge-manager re-runs it before
+squashing … a PR runs whichever its change reaches"* — which every tunnel-class ticket met on its own
+squash tree. ADR-0013 decides what a re-run would be worth: *"a mock certifies nothing"*, and neither
+does a suite that cannot go red on the change. Parts 2a and 2b keep *"the ticket's scope unchanged"*
+and the reading that spends no recorded measurement; part 3 applies the v1.5 exit's reason exactly as
+far as it reaches; part 4 follows the decisions README's line and puts the rule beside its siblings,
+where the next implementer's brief is copied from.
+
+**If you disagree, the cost of reversing this is:** the exit itself is two API calls — reopen
+milestone 14, file the ticket naming what was missing — and nothing in code. Part 1: one runner's
+ticket in #551's shape, nine recipes on `4bd1ca61`, a tunnel and an hour, against certificates whose
+file lists are quoted above. Part 2a: one ticket, a marker in `seed_estate`, and the estate gate's
+reading re-taken on a quiet machine. Part 2b: one ticket, a public accessor on `Corpus` and a dozen
+lines in `perf.rs`. Part 3: a deletion. Part 4: a paragraph deleted, and the rule lives on only in a
+scratchpad brief nothing versions. Part 5(a) is a docs PR; 5(b) seven labels put back.
+
+**Flagged, not ruled:** the v1.5.0 tag and its SHA; Step 4's wording (*green on the exit head*), still
+as flagged at the v1.5 exit; a base URL with a path prefix (`…/guestAuth`) composes a `web_url` for
+builds since #495 and for configurations since #562 that no suite has fetched and the resolver never
+does (spec #491: *"Not-in-mirror → Open in browser, never a live fetch"*), equally true before this
+batch; and whether the working model's list should say, for each recipe, which crates and paths its
+change-reaches test covers, so the next exit reads a table instead of building one.
