@@ -2641,15 +2641,20 @@ async fn a_birth_line_is_written_even_when_no_born_link_could_be_drawn() {
         .unwrap();
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(lines[0].verb, "created");
+    // Presence first, emptiness second, and in that order on purpose: an
+    // absent key indexes as a json `null`, which the equality below would
+    // refuse all by itself -- so asking about presence afterwards would be a
+    // question nothing could ever answer no to.
+    assert!(
+        lines[0].detail.get("born").is_some(),
+        "a key that is absent and a key that is empty are different facts: {:?}",
+        lines[0].detail
+    );
     assert_eq!(
         lines[0].detail["born"],
         serde_json::json!([]),
         "empty, and there: {:?}",
         lines[0].detail
-    );
-    assert!(
-        lines[0].detail.get("born").is_some(),
-        "a key that is absent and a key that is empty are different facts"
     );
 }
 
