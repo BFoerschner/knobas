@@ -992,18 +992,24 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
 /// URL*, it passed green while witnessing nothing, and only the configuration
 /// test below went red.
 ///
-/// The guard compares **hosts**, not whole strings. Measured against the seeded
-/// server on 2026-09-11 (TeamCity 2026.1.3, build 222742): this server composes
-/// a build's `webUrl` on the same path knobas does, so the two strings agree
-/// character for character whenever the hosts coincide --
-/// `http://localhost:8111/buildConfiguration/Payout_IntegrationTests/1` from
-/// both ends, in every transcript since PR #514. Whole-string inequality
-/// therefore *is* host inequality here, and only while that path coincidence
-/// holds: a server that changed the path would make the two strings differ on
-/// every fixture, and a whole-string guard would stay green while guarding
-/// nothing -- the failure this guard exists to catch. So what it asks is
-/// whether the served URL sits under the configured base, and nothing about
-/// the path.
+/// What the guard asks is whether the served URL sits **under the configured
+/// base**, and nothing about the path the server appends. A prefix, so it
+/// covers scheme, host, port and whatever path the base itself carries (the
+/// public instance's `/guestAuth`); on a base without one, which is every
+/// fixture this suite runs against, that is a host comparison and the ruling
+/// names it as one.
+///
+/// Measured against the seeded server on 2026-09-11 (TeamCity 2026.1.3, build
+/// 222742): this server appends the same path knobas composes, so the two URLs
+/// differ in the host and nowhere else. Every transcript since PR #514 prints
+/// the pair, e.g. `composed
+/// http://127.0.0.1:8111/buildConfiguration/Payout_IntegrationTests/1 --
+/// server's own webUrl
+/// http://localhost:8111/buildConfiguration/Payout_IntegrationTests/1`. So a
+/// whole-string `assert_ne!` would say the same thing as this guard, and only
+/// while that path coincidence holds: a server that changed the path would make
+/// the two strings differ on every fixture, and a whole-string guard would stay
+/// green while guarding nothing -- the failure this guard exists to catch.
 ///
 /// *That it opens*: each composed URL is fetched at its absolute address with
 /// the credential the adapter uses. The adapter's own HTTP client is not
@@ -1140,8 +1146,9 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
         assert_eq!(
             url,
             format!("{alternate}/buildConfiguration/{build_type}/{id}"),
-            "a source configured with {alternate} must mirror URLs under it, not under \
-             the server's own root URL: {url}"
+            "a source configured with {alternate} must mirror the whole URL it composes \
+             under that base -- path and all, not merely a URL beginning with it, and not \
+             one under the server's own root URL: {url}"
         );
         assert_eq!(
             seeded.status_of(url).await,
@@ -1213,12 +1220,12 @@ async fn a_build_configurations_web_url_is_composed_from_the_configured_base_url
             "the mirror holds the URL knobas composed from the configured base URL"
         );
         // What the server would have said. Asserted about only in the negative
-        // below, and that negative is the whole point of the ticket: the two
-        // strings differ, so a mapping that read the record could not have
-        // produced the one above.
-        // A placeholder here would pass the `assert_ne!` below on the
-        // placeholder itself, so the guard would stop guarding without ever
-        // going red -- exactly the failure mode the guard exists to prevent.
+        // below, and that negative is the whole point of the ticket: the server
+        // roots its own spelling elsewhere, so a mapping that read the record
+        // could not have produced the one above.
+        // A placeholder here would pass the guard below on the placeholder
+        // itself, so the guard would stop guarding without ever going red --
+        // exactly the failure mode the guard exists to prevent.
         // A server that stopped serving `webUrl` changes this ticket's premise
         // and must say so in red.
         let served = seeded.build_type(id).await["webUrl"]
