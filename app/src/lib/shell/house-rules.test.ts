@@ -407,6 +407,15 @@ const IPC_DIR = join(ROOT, "lib/ipc");
  * of the call, not a caller — so it has to be **found**; a rule whose pattern
  * or scan reached nothing at all would leave the list empty and fail here,
  * rather than passing as a lint tuned to pass.
+ *
+ * `codeOf` removes comments and keeps quoted text, and a `.svelte` file is
+ * scanned whole, so the word in a string literal or in template prose — an
+ * error message reading *"could not invoke the command"* — lands here too.
+ * That is the error in the direction this rule can afford: it over-reports a
+ * file that is not calling anything, which is a red gate somebody reads,
+ * where under-reporting is the silent hole the rule exists to close. The fix
+ * for a false positive is to name the file in the list below or to reword the
+ * string, never to weaken the pattern until it stops matching.
  */
 test("nothing outside the IPC barrel invokes a command", () => {
   expect(
