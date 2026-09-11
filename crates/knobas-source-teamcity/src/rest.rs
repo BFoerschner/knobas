@@ -424,7 +424,7 @@ mod tests {
         // makes the drop safe for a mirror still holding older raw pages.
         assert!(
             env.items[0]["webUrl"].is_string(),
-            "the fixture page names a URL, so the line below is about the parse"
+            "the fixture page names a URL, so the parse above is what dropped it"
         );
         // Everything but the id is optional: a trimmed or older server omits
         // fields rather than sending nulls, and a missing description must not

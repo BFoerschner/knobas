@@ -636,9 +636,19 @@ mod tests {
             "projectName": "Payout",
             "webUrl": "https://ci.example.com/buildConfiguration/Payout_Build?mode=builds"
         });
-        assert_eq!(
-            raw["webUrl"], "https://ci.example.com/buildConfiguration/Payout_Build?mode=builds",
-            "the record says one host..."
+        // The fixture's discriminating power, measured rather than assumed:
+        // the record has to name a host the configured base is *not*, or the
+        // assertion below would pass whether the mapping composed or read.
+        // `assert_eq!` against the literal three lines up would say nothing --
+        // it would compare the literal with itself. This is the same guard the
+        // live suite keeps against the seeded server, where the two spellings
+        // are the server's `localhost` and the source's `127.0.0.1`.
+        assert!(
+            !raw["webUrl"]
+                .as_str()
+                .expect("the fixture names a URL")
+                .starts_with(BASE),
+            "the record says one host and {BASE} is the other"
         );
         let bt: BuildType = serde_json::from_value(raw.clone()).expect("buildType");
         let it = build_config_item("teamcity", BASE, &raw, &bt);

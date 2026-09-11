@@ -1153,9 +1153,21 @@ async fn a_build_configurations_web_url_is_composed_from_the_configured_base_url
         // below, and that negative is the whole point of the ticket: the two
         // strings differ, so a mapping that read the record could not have
         // produced the one above.
+        // A placeholder here would pass the `assert_ne!` below on the
+        // placeholder itself, so the guard would stop guarding without ever
+        // going red -- exactly the failure mode the guard exists to prevent.
+        // A server that stopped serving `webUrl` changes this ticket's premise
+        // and must say so in red.
         let served = seeded.build_type(id).await["webUrl"]
             .as_str()
-            .unwrap_or("<not served>")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the seeded server serves no `webUrl` for {id}, so the guard below \
+                     cannot say the server's spelling still differs from the configured \
+                     one -- this suite's premise has changed and the composition's shape \
+                     is no longer pinned to anything the server says"
+                )
+            })
             .to_owned();
         println!("SEEDED {id}: composed {composed} -- server's own webUrl {served}");
         assert_ne!(
