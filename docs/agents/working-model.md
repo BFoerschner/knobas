@@ -35,6 +35,27 @@ Implementation now runs ticket-driven:
   evidence that N tests ran: a suite gated on an unset variable used to skip every test and report
   success, so every recipe now refuses to start without its gate variables (#351, table in
   `testenv/README.md`, *The live recipes*).
+- **One recipe in that list is not live: `just search-perf` (#556).** It is the launcher's perf gate —
+  the five `#[ignore]`d benchmarks in `crates/knobas-search/tests/perf.rs` and the sixth of the same
+  class in `tests/coverage.rs` — and until #556 it was run by a person typing the file's own cargo
+  line. It sits *beside* `just check` and never inside it, for the reason the file gives: every
+  assertion is wall-clock against a fixed budget, and inside a gate that runs two at a time it would
+  measure the machine rather than the search. It takes a gate slot the way `just test` does, so a
+  third gate waits on it. **A PR carries its transcript** when it changes anything under
+  `crates/knobas-search/src/` that touches the search statement, the board or the rail queries —
+  `lists.rs`, `saved.rs`, `corpus.rs` — and whenever it changes `saved::MAX_SAVED_LISTS`. The recipe
+  itself only prints: the head SHA and `uptime`'s one-minute load average before the build and after
+  the last test, and no verdict on them. Whether a transcript is a *reading* is the #533 re-run
+  standard's question, and the standard is quoted rather than paraphrased here
+  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`): *"its numbers count only under
+  four conditions, all stated in the merge comment — (a) nothing else on the machine **for the whole
+  run**, not at the instant it starts, the orchestrator holding a slot for it the way the desktop cap
+  holds the screen, because a watcher firing on a once-sampled one-minute average is exactly what let
+  a sibling in mid-run; (b) the one-minute load average **at start and at end**, both below the
+  machine's twelve cores; (c) a **monotonic rail curve** in both columns, which is the test of whether
+  the run was a reading at all; (d) the **whole transcript quoted**, every block, so a contaminated
+  25 k or 50 k row is visible rather than omitted. Under those conditions a green is the gate's green
+  and a red is real … a red taken outside them is not a reading and is not quoted."*
 - **Termination is objective, not vibes:** the agent's work ends when findings are resolved AND
   `just check` is green; hard cap 3 review rounds, then Björn adjudicates.
 - **Merging is delegated to a merge-manager agent (amended 2026-08-28 — Björn, overriding the

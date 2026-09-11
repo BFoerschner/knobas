@@ -66,7 +66,7 @@ jobs:
       # It also keeps the step off the exit code of a tool nothing here pins:
       # the runner image upgrades shellcheck without asking, and "no arguments
       # is an error" is a behaviour, not a promise.
-      - name: shellcheck every script in testenv/
+      - name: shellcheck every script in testenv/ and scripts/
         run: |
           set -euo pipefail
           scripts=()
@@ -75,10 +75,10 @@ jobs:
             if head -n 1 -- "$f" | grep -qE '^#!.*\b(ba)?sh\b'; then
               scripts+=("$f")
             fi
-          done < <(git ls-files -z -- 'testenv/**' | tr '\0' '\n')
+          done < <(git ls-files -z -- 'testenv/**' 'scripts/**' | tr '\0' '\n')
 
           if [ ${#scripts[@]} -eq 0 ]; then
-            echo "::error::shebang discovery matched no scripts under testenv/ -- nothing was linted. Fix the discovery, do not delete this guard."
+            echo "::error::shebang discovery matched no scripts under testenv/ or scripts/ -- nothing was linted. Fix the discovery, do not delete this guard."
             exit 1
           fi
 
