@@ -2665,3 +2665,80 @@ note inside whatever interval the timer is running.
 and one glossary clause, and three seam tests, none of them on a frozen surface; before merge, a
 label. A reversal to cure 2 or 3 is a follow-up ticket that has to say which uuid bullet it wants a
 draft to show, and why #409's sentence on deleted notes no longer holds.
+
+---
+
+## #564 — where the last tunnel ticket goes, and what a fixture guard compares
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/564#issuecomment-5633870021>
+
+**The fork:** placement, and two forks the body leaves an unattended implementer: criterion 3's
+*"Consider whether … If it should not, say why in the PR"*, and the guard's shape, since criterion 1
+says *"the same shape as the configuration test's"* and that shape is a whole-string
+`assert_ne!(served, composed)` whose meaning for a build rests on a fact the test does not pin.
+
+**Ruling:**
+
+1. **Placed**: `ready-for-agent`, `v1.5 follow-ups`. The tunnel line becomes #516 → #554 → #564:
+   dispatch only once #554 is closed and no other tunnel ticket is in flight — the cap the milestone
+   description already carries (*"ONE AT A TIME and never side by side"*). Gate-only tickets run
+   beside it.
+2. **The guard is a host guard, and says so.** It asserts that the server's own `webUrl` for the
+   build does not sit under the configured base — `served.starts_with(&format!("{}/", seeded.url))`
+   is false — and keeps the configuration test's two other parts exactly: a **panic**, never a
+   placeholder, when the server serves no `webUrl` (its comment says why: *"A placeholder here would
+   pass the `assert_ne!` below on the placeholder itself, so the guard would stop guarding without
+   ever going red"*), and a message naming `KNOBAS_TEAMCITY_URL` and the other spelling.
+   `Seeded::build` already asks for `webUrl`, so no selector moves. Why the host and not the whole
+   string: on TeamCity 2026.1 the two strings share their path — every transcript since PR #514
+   prints `composed http://127.0.0.1:8111/buildConfiguration/Payout_IntegrationTests/1 -- server's
+   own webUrl http://localhost:8111/buildConfiguration/Payout_IntegrationTests/1` — so today
+   whole-string inequality *is* host inequality; a later server that changed the path would make the
+   two strings differ on every fixture, and a whole-string guard would stay green while guarding
+   nothing, which is the failure this ticket exists to fix. The guard's doc comment records the
+   measured path coincidence and its date.
+3. **The configuration test's guard is brought to the same host shape in the same PR.** It is the
+   same one-line fact in the same file, witnessed by the same run; a fourth ticket for it would spend
+   a second tunnel-serial recipe run on one line. Its panic and message stay as they are.
+4. **Criterion 3 is ruled yes**: the second-spelling loop asserts whole-URL equality,
+   `format!("{alternate}/buildConfiguration/{build_type}/{id}")` with `build_type` read from
+   `payload["buildTypeId"]` as the first loop reads it, replacing `starts_with(&alternate)`. Stated
+   plainly so the PR does not overclaim: this half cannot kill the record-reading mutant when the
+   alternate *is* the server's own spelling — PR #562 says so of the configuration test — and what
+   equality adds is the path under the second spelling, which a prefix passes wrong. The witness of
+   the composition remains the first loop plus the guard.
+5. **Witness (ADR-0013):** the guard shown red live, with `KNOBAS_TEAMCITY_URL=http://localhost:8111`
+   and the token from `eval "$(./seed --env)"`, failing in **both** guards' own messages and nowhere
+   earlier; `just teamcity-live-seeded` green on the branch head, counts from both suites, re-run by
+   the merge-manager on the head it squashes; `just check` green (the file is `#[ignore]`d, so this
+   is compile and clippy); the fixture left as found.
+6. No §10.8 entry (`crates/knobas-source-teamcity/**` is not on the frozen list), no contract §9
+   section, no glossary entry, no ADR.
+
+**Reasoning:** placement is the exit ruling's own test applied once more. *"Nothing a witness reads
+is in it"* was the ground for keeping #554 out of v1.5, and this ticket is that class turned the
+other way: it is the witness itself, and its only home is the container built for what the exit
+left. The cap is the #554 triage ruling, quoted: *"dispatching tunnel-class tickets one at a time —
+the cap the loop already carried — rather than by a second mechanism in the tooling"*; `just
+teamcity-live-seeded` spends the same Hetzner-backed environment #554's `just kuma-live` does, and
+`testenv/README.md`'s *One environment, one owner at a time* says how two owners break each other.
+The guard's shape follows the working-model rule the #552 ruling applied — *"a check that measures a
+representation of the thing instead of the thing"* — read against what the guard is for, which the
+body states in one sentence: *"the day `KNOBAS_TEAMCITY_URL` is pointed at the container's own Server
+URL and the two spellings coincide"*; the thing is the host, so the guard compares hosts. Part 3
+widens the ticket by one line rather than leaving a guard of a known-weaker shape beside the fixed
+one in the same file; the reading that keeps *"the ticket's scope unchanged"* would cost a tunnel
+run, and the ticket's own criterion 2 forbids a guard that *"passes because its scan reaches
+nothing"*, which a path change would make of the configuration guard too. Criterion 3 follows the
+#516 ruling's reason for the configuration test — *"a suffix would pass it, equality against the
+configured base cannot"* — applied to a prefix, and stays inside the criterion's own scope. ADR-0013
+decides the witness: a fixture whose configured base is the server's own spelling is a state the real
+instance produces on demand, so the red is shown live and not by a unit fake.
+
+**If you disagree, the cost of reversing this is:** low — one live test file, no frozen surface, and
+a re-run of `just teamcity-live-seeded`. Reversing the host guard for a whole-string one is two lines
+and two doc comments; reversing part 3 is one line; reversing criterion 3 is one line back to
+`starts_with`. Reversing the placement or the cap is a label and a sentence in the milestone
+description, and the cap's price for staying is that #564 waits for #554, which is minutes to an
+hour.
