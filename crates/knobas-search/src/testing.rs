@@ -298,6 +298,89 @@ pub async fn seed_sources(pool: &PgPool) -> Result<(), SearchError> {
     Ok(())
 }
 
+/// Fill `knobas.note` with `rows` deterministic notes, and make them
+/// measurable.
+///
+/// **The branch of the launcher's union nothing else seeds.** [`seed_corpus`]
+/// fills the mirror and [`seed_estate`] fills the estate's two corpora; without
+/// this one a statement built over `corpus::ALL` reaches `knobas.note` at zero
+/// rows, and a branch with no rows is a branch the planner has no choice to
+/// make in. A plan pinned over such a fixture is a plan pinned over one corpus
+/// wearing the name of four, which is what issue #541 was filed about.
+///
+/// # The shape, and why
+///
+/// The same `w<n>` filler vocabulary and the same twenty body words per row as
+/// the mirror ([`FILLER_WORDS`], [`BODY_WORDS`]), so a query written for one
+/// fixture is selective in the same way over the other and two branches of one
+/// union are comparable -- [`seed_estate`]'s rule, for [`seed_estate`]'s
+/// reason.
+///
+/// **`ledger` is in every row**, exactly as it is in every row of the mirror
+/// and for the same purpose: it is the pathological term `tests/perf.rs` takes
+/// its plan pin on, and a note branch matching none of it would contribute an
+/// index probe and no work behind it. None of the mirror's other markers are
+/// here. A note is not a ticket, and a fixture whose every corpus answered
+/// every case would have stopped being able to tell them apart.
+///
+/// `body_md` is markdown, as [`crate::corpus::NOTE`] says it is, and the filler
+/// is prose: what the index holds is the words, and `#` and `[[ref]]`
+/// punctuation would add a shape to the fixture without adding a lexeme to it.
+///
+/// Idempotent: every id is `note:bench-<n>`, so two calls insert once.
+/// `vacuum (analyze)` outside the transaction, for [`prepare`]'s reason -- a
+/// GIN index whose pending list has not been merged is read linearly, and the
+/// measurement is then of the list.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if any statement fails.
+pub async fn seed_notes(pool: &PgPool, rows: i64) -> Result<(), SearchError> {
+    let mut tx = pool.begin().await?;
+    // A note lives in the address space (`note_entity_fk`, migration 0006), so
+    // the entity row comes first and the body hangs off it -- the order
+    // `knobas_core::note::create` writes in.
+    sqlx::query(
+        r"
+        insert into knobas.entity (id, kind, title, updated_at)
+        select 'note:bench-' || g, 'note', 'NOTE-' || g,
+               now() - make_interval(mins => (g % 100000)::int)
+          from generate_series(1, $1) g
+        on conflict (id) do nothing",
+    )
+    .bind(rows)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(INSERT_NOTES)
+        .bind(rows)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    sqlx::query("vacuum (analyze) knobas.note")
+        .execute(pool)
+        .await?;
+    sqlx::query("analyze knobas.entity").execute(pool).await?;
+    Ok(())
+}
+
+/// One `&'static str`, for [`INSERT_ITEMS`]' reason: `tests/sql_containment.rs`
+/// fails the build if any file in this crate but `crate::sql` so much as names
+/// the runtime-SQL wrapper, and a statement built with `format!` reaches for
+/// it.
+const INSERT_NOTES: &str = r"
+insert into knobas.note (id, title, body_md, created_at, updated_at)
+select 'note:bench-' || g,
+       'NOTE-' || g || ' w' || ((g * 37 + 101) % 512),
+       (select string_agg('w' || ((g * 37 + i * 101) % 512), ' ')
+          from generate_series(1, 20) i)
+         || ' ledger',
+       now() - make_interval(mins => (g % 100000)::int),
+       now() - make_interval(mins => (g % 100000)::int)
+  from generate_series(1, $1) g
+on conflict (id) do nothing";
+
 /// How many rows one query matches -- the fixture property the timings depend
 /// on.
 ///

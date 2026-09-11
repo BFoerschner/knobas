@@ -62,6 +62,22 @@
 //! fixture had been replaced and its description had not, in the one file
 //! whose stated purpose is to say what the fixture is.
 //!
+//! ## Which fixture each test builds, and why they differ (#541)
+//!
+//! The two budget gates measure the **mirror**: they seed
+//! [`knobas_search::testing::seed_corpus`] and nothing else, because what they
+//! are held to is spec §14's *"~100 k items"* and a curve over corpus size.
+//! [`the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items`] adds
+//! [`testing::seed_estate`] beside it, because #436's claim is about the estate.
+//!
+//! [`the_match_set_is_not_joined_row_by_row`] needs a third thing again: it
+//! pins a **plan**, and a plan is only a plan over relations the planner has
+//! rows in. So it seeds all four branches the launcher unions -- the mirror,
+//! [`testing::seed_notes`], and the estate's assets and routes -- and
+//! [`assert_every_branch_has_rows`] refuses to measure anything until each of
+//! them answers. Until #541 it built its statement over `corpus::LIVE_ITEM`
+//! alone, which stopped being the launcher's statement at #436.
+//!
 //! ## The rail carries the saved-list cap (#533)
 //!
 //! `knobas.smart_list` was **empty in this fixture** when #506 added it: with
@@ -110,11 +126,11 @@
 
 use std::time::Instant;
 
-use knobas_search::corpus::LIVE_ITEM;
+use knobas_search::corpus;
 use knobas_search::query::EffectiveFilters;
 use knobas_search::{
-    KindCatalog, SearchFilters, SearchQuery, Searcher, SmartListSummary, Vocabulary, saved, sql,
-    testing,
+    KindCatalog, RawHit, SearchFilters, SearchQuery, Searcher, SmartListSummary, Vocabulary, group,
+    saved, sql, testing,
 };
 
 /// The budget, from spec §14.
@@ -122,6 +138,15 @@ const BUDGET_MS: u128 = 100;
 
 /// The exit criterion's corpus size, and the two smaller points of the curve.
 const SIZES: [i64; 3] = [25_000, 50_000, 100_000];
+
+/// How many notes the plan pin's fixture carries.
+///
+/// An **upper bound**, which is what `ESTATE_SHAPE` is chosen to be and for the
+/// same reason: the number a branch is measured against has to be one no
+/// installation will exceed, not a plausible one. Ten thousand notes is
+/// twenty-seven years of writing one a day, and a person who reaches it has a
+/// larger note corpus than knobas was designed for rather than a typical one.
+const NOTE_ROWS: i64 = 10_000;
 
 /// How many runs make one reading of the board's reads, and one rail step.
 ///
@@ -815,6 +840,56 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
     );
 }
 
+/// What each branch of [`corpus::ALL`] is called in the report below, in the
+/// launcher's own order.
+///
+/// Positional, and checked against `corpus::ALL.len()` before it is used. A
+/// fifth corpus added to the launcher with no fixture behind it should stop the
+/// plan pin rather than arrive silently as a branch nobody named.
+const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
+
+/// Every branch the launcher unions holds rows, read through the launcher's own
+/// statement.
+///
+/// **The line between widening a plan pin and appearing to.** The pin below is
+/// on a plan, and a plan over an empty relation is not a plan the planner had
+/// to choose: passing `corpus::ALL` over a fixture that seeds only the mirror
+/// would be the same one-corpus statement under a wider name, which is the
+/// outcome #541 was filed to prevent rather than to produce.
+///
+/// Browse mode through `sql::search_sql`, one corpus at a time, and **not** a
+/// `select count(*)` per table: a count written here would be a second spelling
+/// of what a branch holds, and it would go on answering after the day a
+/// corpus's `relation`, `scope` or join stopped reaching its own rows. The
+/// `totals` CTE counts every row the branch can reach rather than the page's
+/// worth, so the limit below bounds what comes back and not what is counted.
+async fn assert_every_branch_has_rows(pool: &sqlx::PgPool) {
+    assert_eq!(
+        corpus::ALL.len(),
+        BRANCHES.len(),
+        "the launcher unions {} corpora and this fixture names {}: a corpus was \
+         added without a seed behind it, and the pin below would take its plan \
+         over an empty relation",
+        corpus::ALL.len(),
+        BRANCHES.len()
+    );
+    for (name, branch) in BRANCHES.iter().zip(corpus::ALL) {
+        let built = sql::search_sql(&[branch], None, false, &EffectiveFilters::default(), 10, 40);
+        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
+        let total: u64 = group::group(rows, &KindCatalog::default())
+            .iter()
+            .map(|found| u64::from(found.total))
+            .sum();
+        println!("branch {name:<7} {total:>7} rows");
+        assert!(
+            total > 0,
+            "the {name} branch reached no rows, so the plan below would be taken \
+             over a relation the planner has nothing to do in -- `corpus::ALL` \
+             over an empty corpus is the one-corpus pin this test stopped being"
+        );
+    }
+}
+
 /// The two plan defects task 10 found, pinned so they cannot come back.
 ///
 /// Both were invisible to every functional test in this crate -- the rows are
@@ -842,15 +917,45 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 /// `Hash Join`" would pin the planner's current choice rather than the cost of
 /// getting it wrong, and would fail on a future PostgreSQL that found a third,
 /// better plan.
+///
+/// # The statement is the launcher's, over all four corpora (#541)
+///
+/// It was over `corpus::LIVE_ITEM` alone from M1 until #541, and it stopped
+/// being the launcher's statement at **#436**, where `Searcher::search` began
+/// building over [`corpus::ALL`]. A pin on a plan nobody executes is a detector
+/// that has quietly narrowed, and this one had.
+///
+/// Passing `corpus::ALL` is **not on its own the fix**, and the ticket says so:
+/// three branches at zero rows is `corpus::ALL` spelled over a one-corpus
+/// statement, because a relation with nothing in it gives the planner no choice
+/// to make. So the fixture seeds all four --
+/// [`testing::seed_notes`] for `knobas.note` and [`testing::seed_estate`] for
+/// the estate's assets and routes, beside the mirror's 100 k items -- and
+/// [`assert_every_branch_has_rows`] runs each branch's own fragments through
+/// the builder and refuses the measurement until every one of them answers with
+/// rows.
+///
+/// `matches` stays the **mirror's** match count while `buffers` is the whole
+/// statement's, so the ratio the assertion reads is conservative: every buffer
+/// the other three branches touch is charged against the mirror's matches, and
+/// the margin at the time of writing is still an order of magnitude.
 #[tokio::test]
 #[ignore = "needs a corpus large enough for the planner's choice to be real"]
 async fn the_match_set_is_not_joined_row_by_row() {
     let pool = pool().await;
     testing::seed_sources(&pool).await.unwrap();
     testing::seed_corpus(&pool, 100_000).await.unwrap();
+    testing::seed_notes(&pool, NOTE_ROWS).await.unwrap();
+    // The tag `the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items`
+    // uses, and deliberately: `seed_estate` is idempotent per tag, so whichever
+    // of the two runs first pays for the estate and the other gets it free. A
+    // tag of its own would put a second estate beside the first and make the
+    // other test's report a reading of two.
+    testing::seed_estate(&pool, "bench").await.unwrap();
+    assert_every_branch_has_rows(&pool).await;
 
     let built = sql::search_sql(
-        &[&LIVE_ITEM],
+        corpus::ALL,
         Some("ledger"),
         false,
         &EffectiveFilters::default(),
