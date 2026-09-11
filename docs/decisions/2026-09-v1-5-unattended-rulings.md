@@ -2542,3 +2542,72 @@ collapses back to a recorded reason beside them, the live witness is not spent, 
 recipe comment) stands either way. (3) is a follow-up ticket for a `$TMPDIR` lock in the shape of
 the gate slots (#425), a shape that already exists in the `justfile`; nothing in this PR has to come
 out first.
+
+---
+
+## #560 — the milestone a mid-batch ticket joins, and what the `invoke` rule matches so its exemption is not dead
+
+Ruled 2026-09-11. Comment:
+<https://github.com/BFoerschner/knobas/issues/560#issuecomment-5633868757>
+
+**The fork:** placement — does the ticket join `v1.5 follow-ups` for the running loop, wait for a
+later milestone, or go `wontfix` — and, inside it, what the rule matches, so an implementer has no
+fork left. The body's grep (`invoke<\|invoke(`) finds one file outside `lib/ipc/`,
+`shell/dev/fake-tauri.ts`; but that file *defines* `invoke` (`const invoke = async (cmd …)`,
+`fake-tauri.ts:92`) and never calls it, so a rule on the call pattern would find nothing there, and
+its exemption would be dead — the failure mode the body's criterion 2 names.
+
+**Ruling:**
+
+1. **Placed**: milestone `v1.5 follow-ups`, `ready-for-agent`; gate-only, no cap, no dependency. It
+   joins the gate-only pool after #541 in the running order and runs beside a tunnel ticket.
+2. **The rule matches the identifier `\binvoke\b` in `codeOf(text)`** — comments and strings out, as
+   the `resolveUrl` rule does — not a call pattern. Measured on `2375a745`: over every `.svelte` and
+   `.ts` outside `app/src/lib/ipc/`, tests excluded, the identifier appears in code in exactly one
+   file, `lib/shell/dev/fake-tauri.ts`. The three other mentions (`health.svelte.ts:19`,
+   `kind-registry.svelte.ts:16`, `toasts.svelte.ts:6`) are block comments `codeOf` removes. Every
+   `import { invoke } from "@tauri-apps/api/core"` is in `lib/ipc/*.ts` (seven modules);
+   `FirstRun.svelte:80` imports `Channel` only.
+3. **The allowed set is exactly what the census reads**: the direct children of `app/src/lib/ipc/` —
+   `fake-tauri.test.ts:58`, `readdirSync(IPC_DIR).filter((name) => name.endsWith(".ts"))`,
+   non-recursive. A file at `lib/ipc/<sub>/x.ts` is an offender under this rule until the census
+   learns nested modules; the rule's doc comment says the two must agree on the directory and names
+   the census test.
+4. **Shape: the `resolveUrl` rule's** — `offenders(…)` compared with
+   `toEqual(["lib/shell/dev/fake-tauri.ts"])`. The expected list *is* the exemption, so criterion 2's
+   two directions fall out of one assertion: a component that gains `invoke` reddens by name;
+   emptying the list reddens because the fake is found; and a scan that reaches nothing cannot pass,
+   because `[]` is not the list.
+5. **Tests out of the scan** (`/\.test\.(svelte\.)?ts$/`), as the `resolveUrl` rule already does and
+   for the reason its comment gives: a suite that mocks `invoke` names what it stands in for and is a
+   fixture rather than a caller. No blanket `DEV_DIR` exclusion: the fake is exempted by name and
+   nothing else under `shell/dev/` is.
+6. **No app code touched, no doc change owed**: the test's doc comment carries the reason and cites
+   the census in `fake-tauri.test.ts` as the guarantee it protects. No glossary entry, no ADR, no
+   §10.8 entry (`app/src/lib/shell/**` is not on the frozen list).
+
+Acceptance criteria (the body's three, made exact): `house-rules.test.ts` gains the rule as in 2–5
+and `just check` is green; and the PR body carries a mutation proof, three runs of the one file with
+the baseline restored between — (a) `invoke<void>("brand_new_command")` added to a `.svelte` or `.ts`
+file outside `lib/ipc/`, red naming that file; (b) the expected list emptied, red naming
+`fake-tauri.ts`; (c) the identifier pattern broken (`\bnotinvoke\b`), red because the list is then
+unmet. (c) is the negative control criterion 2 asks for.
+
+**Reasoning:** the placement answer exists in the #491 exit ruling and in this milestone's own
+description, and is quoted rather than re-decided. The exit ruling's test for a ticket found mid-way
+is *"Nothing a witness reads is in it"*, and that sent #554 out of v1.5 into the container built
+afterwards; milestone 14 is *"a container so the ticket loop can find its work"*, and the
+orchestrator is instructed to run the loop until nothing is left, so a gate-only test with no
+dependency has no reason to wait for a milestone that does not exist. The premise the rule protects
+is the #544 PR's own sentence: *"Outside the tests, nothing but `app/src/lib/ipc/*.ts` calls `invoke`
+at all, so the barrel really is the whole surface the census has to cover"* — true today and enforced
+by nothing, which is the working model's class of *"a check that measures a representation of the
+thing instead of the thing"*: the census measures the barrel and reads it as the app. The identifier
+ruling follows from criterion 2 as written: an exemption the pattern cannot reach is a rule tuned to
+pass, the thing `house-rules.test.ts`'s own `SELF` comment warns against (*"a lint that has been
+tuned to pass rather than to catch"*). Not `wontfix`: the cost is one test in a file built for this
+class, and what it buys is that #544's guarantee holds by construction rather than by habit.
+
+**If you disagree, the cost of reversing this is:** trivial — one test deleted, nothing else moves;
+before merge, a label. Reversing the identifier for a call pattern is one regex, and it re-opens the
+dead-exemption hole criterion 2 names. Reversing the placement is `gh issue edit 560 --milestone ""`.
