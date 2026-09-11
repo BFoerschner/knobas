@@ -2146,6 +2146,27 @@ async fn note_stamped(pool: &PgPool, note_id: &str, at: DateTime<Utc>) {
     assert_eq!(moved, 1, "there is a note row at {note_id} to stamp");
 }
 
+/// Every candidate on a draft that is about `entity_id`.
+///
+/// The question all three of the tests below ask -- one note is one checkbox,
+/// a deleted note is none, a context is still one -- so it is asked once here
+/// and counted at each call site.
+fn candidates_about<'a>(
+    draft: &'a knobas_app::time::worklog::Draft,
+    entity_id: &str,
+) -> Vec<&'a knobas_app::time::worklog::Candidate> {
+    draft
+        .candidates
+        .iter()
+        .filter(|c| c.entity_id.as_deref() == Some(entity_id))
+        .collect()
+}
+
+/// The uuid half of a local entity id -- what `key_of` would put in a bullet.
+fn uuid_of(entity_id: &str) -> &str {
+    entity_id.split_once(':').expect("a namespaced id").1
+}
+
 /// A comment write the reader queued through knobas, **at a moment this test
 /// dictates**, in whatever state the queue has reached.
 ///
@@ -2636,7 +2657,7 @@ async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_tit
     configure_jira(&pool, "mara.lindqvist").await;
     block(&pool, TICKET, (9, 0), (11, 0)).await;
 
-    let room = create_context_inner(&pool, "Payout retries")
+    let ctx = create_context_inner(&pool, "Payout retries")
         .await
         .expect("a context to capture into");
     let born = create_note_inner(
@@ -2644,7 +2665,7 @@ async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_tit
         Some("SEPA retry window"),
         None,
         &[NoteLinkInput {
-            target_id: room.id.clone(),
+            target_id: ctx.id.clone(),
             relation: "captured-in".to_owned(),
         }],
     )
@@ -2669,11 +2690,7 @@ async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_tit
     note_stamped(&pool, &note_id, at(10, 20)).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
-    let mine: Vec<&knobas_app::time::worklog::Candidate> = draft
-        .candidates
-        .iter()
-        .filter(|c| c.entity_id.as_deref() == Some(note_id.as_str()))
-        .collect();
+    let mine = candidates_about(&draft, &note_id);
     assert_eq!(
         mine.len(),
         1,
@@ -2684,9 +2701,8 @@ async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_tit
     assert_eq!(mine[0].source, CandidateSource::Note, "{:?}", mine[0]);
     assert_eq!(mine[0].bullet, "- edited the note SEPA retry window");
 
-    let uuid = note_id.split_once(':').expect("a namespaced id").1;
     assert!(
-        !draft.comment.contains(uuid),
+        !draft.comment.contains(uuid_of(&note_id)),
         "no bullet in the comment says a note's uuid: {}",
         draft.comment
     );
@@ -2700,10 +2716,13 @@ async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_tit
 /// chasing it: the note row is gone, so the note read is silent, and the draft
 /// offered `- deleted 0192ab3c-...` instead.
 ///
-/// Both of this note's lines are moved into the interval, so the test fails if
-/// the read is narrowed by verb rather than by kind: `created` and `deleted`
-/// are contexts' and assets' verbs too, which is why `NOT_WORK` could not be
-/// where this was answered.
+/// Both of this note's lines are moved into the interval, so a narrowing that
+/// reached only the birth leaves the death behind and fails here. Which of
+/// `created` and `deleted` a verb list would have caught is not this test's
+/// question -- adding both to `NOT_WORK` satisfies it, and loses a context's
+/// own birth, which is what
+/// `a_context_created_inside_the_interval_is_still_its_activity_candidate`
+/// is for.
 #[tokio::test]
 async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all() {
     use knobas_app::commands::entity::create_note_inner;
@@ -2728,16 +2747,12 @@ async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all()
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
     assert!(
-        !draft
-            .candidates
-            .iter()
-            .any(|c| c.entity_id.as_deref() == Some(note_id.as_str())),
+        candidates_about(&draft, &note_id).is_empty(),
         "a note the reader deleted is not their afternoon: {:?}",
         draft.candidates
     );
-    let uuid = note_id.split_once(':').expect("a namespaced id").1;
     assert!(
-        !draft.comment.contains(uuid),
+        !draft.comment.contains(uuid_of(&note_id)),
         "and its uuid is not in the comment either: {}",
         draft.comment
     );
@@ -2747,8 +2762,8 @@ async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all()
 ///
 /// An ad-hoc context's birth writes `created` on its own `ctx:<uuid>`
 /// (`create_context_inner`), and it has no second reader the way a note does:
-/// drop it and a draft loses the only signal it carries for a room the reader
-/// opened while the clock ran. So it is still a candidate, from the activity
+/// drop it and a draft loses the only signal it carries for a context the
+/// reader made while the clock ran. So it is still a candidate, from the activity
 /// read, with the bullet it has always had.
 ///
 /// That bullet says the context's uuid, which is the shape #409 dislikes and
@@ -2765,17 +2780,13 @@ async fn a_context_created_inside_the_interval_is_still_its_activity_candidate()
     configure_jira(&pool, "mara.lindqvist").await;
     block(&pool, TICKET, (9, 0), (11, 0)).await;
 
-    let room = create_context_inner(&pool, "Payout retries")
+    let ctx = create_context_inner(&pool, "Payout retries")
         .await
         .expect("a context");
-    lines_about(&pool, &room.id, at(10, 20), 1).await;
+    lines_about(&pool, &ctx.id, at(10, 20), 1).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
-    let mine: Vec<&knobas_app::time::worklog::Candidate> = draft
-        .candidates
-        .iter()
-        .filter(|c| c.entity_id.as_deref() == Some(room.id.as_str()))
-        .collect();
+    let mine = candidates_about(&draft, &ctx.id);
     assert_eq!(
         mine.len(),
         1,
@@ -2783,8 +2794,7 @@ async fn a_context_created_inside_the_interval_is_still_its_activity_candidate()
         draft.candidates
     );
     assert_eq!(mine[0].source, CandidateSource::Activity, "{:?}", mine[0]);
-    let uuid = room.id.split_once(':').expect("a namespaced id").1;
-    assert_eq!(mine[0].bullet, format!("- created {uuid}"));
+    assert_eq!(mine[0].bullet, format!("- created {}", uuid_of(&ctx.id)));
 }
 
 /// **An afternoon of typing is one checkbox** (#409).

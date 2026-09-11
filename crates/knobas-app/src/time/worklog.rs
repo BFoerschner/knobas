@@ -446,8 +446,16 @@ const AUTHORED_ITEMS: &str = "select i.entity_id, i.title, i.item_updated_at
 ///
 /// **By kind, not by verb.** `created` and `deleted` are contexts' and assets'
 /// verbs too, so [`NOT_WORK`] could not be where this was answered without
-/// losing real work: `- created <uuid>` for an ad-hoc room is still a
+/// losing real work: `- created <uuid>` for an ad-hoc context is still a
 /// candidate, and still the only signal a draft carries for one.
+///
+/// The prefix is `knobas_core::entity`'s -- notes are minted `EntityRef::new(
+/// "note", ..)` and `note` is one of its `RESERVED_NAMESPACES` -- spelled as a
+/// literal here for the reason `crate::standup`'s `namespace_of` gives, and
+/// safe to spell because the tests mint their notes through `note::create`
+/// rather than by writing the id: a namespace renamed under this clause fails
+/// `a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_title`
+/// instead of quietly widening the draft again.
 ///
 /// What the narrowing gives up is `- unlinked <uuid>` as a candidate, the one
 /// trace a draft carried for a link withdrawn from a note. `knobas.activity`
