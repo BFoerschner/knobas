@@ -270,6 +270,21 @@ impl Seeded {
         body
     }
 
+    /// One build configuration's record, `webUrl` included -- which the
+    /// adapter's own selector stopped asking for in issue #516, so this is
+    /// deliberately *not* "as the adapter asks for it": it is what the server
+    /// would have said, so that a test can show the two strings differ.
+    async fn build_type(&self, id: &str) -> serde_json::Value {
+        let (status, body) = self
+            .get(&format!(
+                "app/rest/buildTypes/id:{id}?fields=id,name,projectId,projectName,description,\
+                 webUrl"
+            ))
+            .await;
+        assert_eq!(status, 200, "buildType {id}: {body}");
+        body
+    }
+
     fn source(&self, config: serde_json::Value) -> Box<dyn Source> {
         self.source_with(&self.url, &self.token, config)
     }
@@ -806,13 +821,18 @@ async fn the_seeded_projects_and_configurations_land_by_id_and_name() {
              omits the key rather than sending null: {}",
             it.payload
         );
-        assert!(
-            it.web_url
-                .as_deref()
-                .is_some_and(|u| u.ends_with(&format!("/buildConfiguration/{id}?mode=builds"))),
-            "the configuration's webUrl takes the `/buildConfiguration/<id>?mode=builds` shape a \
-             TeamCity 2026.1 serves: {:?}",
-            it.web_url
+        // **The whole URL, not its tail** (issue #516). A suffix match passes
+        // whatever host the string is rooted at, which is exactly the bug: the
+        // server fills its own `webUrl` in from its *Server URL* setting and
+        // answers `http://localhost:8111/...` however it is reached, so a
+        // source configured at any other spelling stored a URL naming a machine
+        // the reader may not be sitting at. Equality against the configured
+        // base is the assertion a mapping that read the record cannot pass.
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some(format!("{}/buildConfiguration/{id}?mode=builds", seeded.url).as_str()),
+            "the configuration's URL is composed from the configured base URL, in the \
+             `/buildConfiguration/<id>?mode=builds` shape a TeamCity 2026.1 serves"
         );
         assert_eq!(it.updated_at, None, "TeamCity dates no configuration");
         assert!(
@@ -1072,6 +1092,126 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
     println!(
         "SEEDED: {} builds re-mirrored under {alternate}",
         alt_builds.len()
+    );
+}
+
+/// **The same certificate for a build configuration** (issue #516), which
+/// #495 deliberately left reading the server's own `webUrl`.
+///
+/// The reason the two are separate tests is that they were separate defects:
+/// #495 fixed builds and recorded, in `docs/contract.md` §9, that a
+/// configuration's URL was unchanged by it and that a link copied out of the
+/// TeamCity UI would therefore miss against a source configured with another
+/// spelling. This is that sentence being closed, and it is measured the same
+/// way -- whole-URL equality against the configured base, each URL fetched, and
+/// the corpus re-synced under a **second spelling of the same host** so that
+/// "the URL follows the configuration" is a measurement rather than a
+/// coincidence of this container's *Server URL* setting.
+///
+/// The query is not decoration. Migration `0023` normalises a pasted URL with
+/// its **query kept verbatim**, so a composition that dropped `?mode=builds`
+/// would never equal the address a reader copies out of the UI, and the paste
+/// would miss. The suite prints the server's own `webUrl` beside the composed
+/// one, for the record: it is a fact about the container's setting, not about
+/// the adapter, so nothing is asserted about it.
+///
+/// A 200 here says the same weaker thing the build test's does -- TeamCity
+/// 2026.1 serves its single-page-application shell for any path under
+/// `/buildConfiguration/` -- so what it certifies is the host, the route and the
+/// credential. That the configuration itself exists is certified beside it, by
+/// the ids this suite reads back from `/app/rest/buildTypes`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_build_configurations_web_url_is_composed_from_the_configured_base_url_and_answers_200() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    // Through the adapter's own client, and first: it is what makes the base
+    // URL below one the adapter reaches rather than one a test asserted about.
+    let connected = seeded
+        .source(serde_json::json!({}))
+        .test_connection()
+        .await
+        .unwrap_or_else(|e| panic!("the adapter's own client must reach {}: {e:?}", seeded.url));
+    println!("SEEDED connected as {:?}", connected.account);
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let configs = of_kind(&items, "build_config");
+    assert_eq!(configs.len(), 3, "the three seeded configurations");
+
+    for it in &configs {
+        let id = it
+            .entity
+            .key
+            .strip_prefix("buildType:")
+            .expect("configuration keys are buildType:<id>");
+        let composed = format!("{}/buildConfiguration/{id}?mode=builds", seeded.url);
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some(composed.as_str()),
+            "the mirror holds the URL knobas composed from the configured base URL"
+        );
+        // What the server would have said. Asserted about only in the negative
+        // below, and that negative is the whole point of the ticket: the two
+        // strings differ, so a mapping that read the record could not have
+        // produced the one above.
+        let served = seeded.build_type(id).await["webUrl"]
+            .as_str()
+            .unwrap_or("<not served>")
+            .to_owned();
+        println!("SEEDED {id}: composed {composed} -- server's own webUrl {served}");
+        assert_ne!(
+            served, composed,
+            "this suite can only witness the composition while the server's own spelling \
+             differs from the configured one. They are equal, so KNOBAS_TEAMCITY_URL is the \
+             container's own *Server URL* and the assertion above would pass either way -- \
+             point the suite at the other spelling of this host"
+        );
+
+        assert_eq!(
+            seeded.status_of(&composed).await,
+            200,
+            "the composed URL must reach a page on the real server: {composed}"
+        );
+    }
+
+    // The same corpus under a second spelling of the loopback host. Both reach
+    // the same container, so the *only* thing that can differ between the two
+    // runs is which URL the adapter was configured with -- which is the claim.
+    let Some(alternate) = alternate_host(&seeded.url) else {
+        panic!(
+            "KNOBAS_TEAMCITY_URL is {:?} and this suite knows no second spelling of its \
+             host, so the half of this test that separates a composed URL from the \
+             server's own cannot run. Point it at 127.0.0.1 or localhost, or teach \
+             `alternate_host` this host.",
+            seeded.url
+        );
+    };
+    let (alt_items, _) =
+        full(&*seeded.source_with(&alternate, &seeded.token, serde_json::json!({}))).await;
+    let alt_configs = of_kind(&alt_items, "build_config");
+    assert_eq!(alt_configs.len(), configs.len(), "the same corpus");
+    for it in &alt_configs {
+        let id = it
+            .entity
+            .key
+            .strip_prefix("buildType:")
+            .expect("configuration keys are buildType:<id>");
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some(format!("{alternate}/buildConfiguration/{id}?mode=builds").as_str()),
+            "a source configured with {alternate} must mirror URLs under it, not under the \
+             server's own root URL"
+        );
+        assert_eq!(
+            seeded
+                .status_of(it.web_url.as_deref().expect("just asserted"))
+                .await,
+            200,
+            "and the second spelling reaches the server too"
+        );
+    }
+    println!(
+        "SEEDED: {} configurations re-mirrored under {alternate}",
+        alt_configs.len()
     );
 }
 

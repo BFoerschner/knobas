@@ -91,9 +91,44 @@ fn status_element(state: Option<&str>, status: Option<&str>) -> Option<String> {
 /// the rule `knobas-source-confluence`'s mapping already follows for a page
 /// with no web link.
 fn build_web_url(base_url: &str, build_config_id: Option<&str>, id: i64) -> Option<String> {
-    let base = base_url.trim().trim_end_matches('/');
+    let base = root(base_url);
     let config = build_config_id.map(str::trim).filter(|c| !c.is_empty())?;
     Some(format!("{base}/buildConfiguration/{config}/{id}"))
+}
+
+/// The configured base URL as a **root a path can be appended to**: the way a
+/// user pasted it, minus what a paste picks up.
+///
+/// Stray whitespace at either end and a trailing slash go; a path prefix such
+/// as the public instance's `/guestAuth` stays, because it is part of where
+/// this TeamCity lives rather than punctuation. Shared by both composers so
+/// that `web_url` cannot mean one thing for a build and another for its
+/// configuration: the two are separate functions because the **shapes** differ,
+/// and nothing else about them should.
+fn root(base_url: &str) -> &str {
+    base_url.trim().trim_end_matches('/')
+}
+
+/// Where a human reads a build **configuration**, composed from the source's
+/// configured base URL for the reason [`build_web_url`] gives, and not read
+/// off the record (issue #516).
+///
+/// `<base>/buildConfiguration/<id>?mode=builds` -- **the query included**.
+/// Migration `0023`'s normalisation keeps a query verbatim, so a link copied
+/// out of the TeamCity UI resolves against this column only if the composition
+/// spells the same query the server does. Measured against the seeded server on
+/// 2026-09-11 (TeamCity 2026.1): `buildTypes?fields=buildType(webUrl)` answers
+/// `http://localhost:8111/buildConfiguration/<id>?mode=builds` for all three
+/// seeded configurations, whatever host the request arrived on.
+/// `tests/live_teamcity_seeded.rs` pins that shape against the real server, so
+/// a server that ever serves another one turns that suite red and this
+/// composition follows it.
+///
+/// No *no URL* branch, unlike a build's: the id **is** the key (see
+/// [`build_config_key`]), so a configuration with a blank one is not an item
+/// this mapping can produce at all.
+fn build_config_web_url(base_url: &str, id: &str) -> String {
+    format!("{}/buildConfiguration/{id}?mode=builds", root(base_url))
 }
 
 /// Map one build, in the namespace of the instance that fetched it and under
@@ -188,8 +223,11 @@ pub(crate) fn build_item(
     }
 }
 
+/// Map one build configuration, in the namespace of the instance that fetched
+/// it and under the base URL that instance is configured with.
 pub(crate) fn build_config_item(
     source_id: &str,
+    base_url: &str,
     raw: &serde_json::Value,
     bt: &BuildType,
 ) -> SyncItem {
@@ -207,7 +245,11 @@ pub(crate) fn build_config_item(
         // launcher on every sync.
         updated_at: None,
         payload: raw.clone(),
-        web_url: bt.web_url.clone(),
+        // Knobas' own composition; the record's `webUrl` is deliberately not
+        // read, and since issue #516 `BUILD_TYPE_FIELDS` no longer asks for it
+        // and `struct BuildType` no longer parses it. See
+        // [`build_config_web_url`].
+        web_url: Some(build_config_web_url(base_url, &bt.id)),
         deleted: false,
     }
 }
@@ -458,7 +500,7 @@ mod tests {
             "webUrl": "https://ci.example.com/buildConfiguration/Payout_IntegrationTests"
         });
         let bt: BuildType = serde_json::from_value(raw.clone()).expect("buildType");
-        let it = build_config_item("teamcity", &raw, &bt);
+        let it = build_config_item("teamcity", BASE, &raw, &bt);
         assert_eq!(
             it.entity.to_string(),
             "teamcity:buildType:Payout_IntegrationTests"
@@ -472,7 +514,11 @@ mod tests {
         );
         assert_eq!(
             it.web_url.as_deref(),
-            Some("https://ci.example.com/buildConfiguration/Payout_IntegrationTests")
+            Some(
+                "https://ci.tidewater.example/buildConfiguration/Payout_IntegrationTests\
+                 ?mode=builds"
+            ),
+            "the configured base URL, not the `webUrl` the record above carries"
         );
         assert_eq!(it.author, None);
         // TeamCity gives a configuration no timestamp, and `now()` is
@@ -489,7 +535,7 @@ mod tests {
     fn a_bare_build_configuration_still_maps() {
         let raw = serde_json::json!({ "id": "Ledger_Deploy_Staging" });
         let bt: BuildType = serde_json::from_value(raw.clone()).expect("buildType");
-        let it = build_config_item("teamcity", &raw, &bt);
+        let it = build_config_item("teamcity", BASE, &raw, &bt);
         assert_eq!(it.title, "Ledger_Deploy_Staging");
         assert_eq!(it.entity.key, "buildType:Ledger_Deploy_Staging");
         assert!(!it.body_text.is_empty());
@@ -507,7 +553,7 @@ mod tests {
         let bt: BuildType =
             serde_json::from_value(serde_json::json!({ "id": "Payout_Build" })).expect("bt");
         assert_eq!(
-            build_config_item("teamcity-eu", &serde_json::json!({}), &bt)
+            build_config_item("teamcity-eu", BASE, &serde_json::json!({}), &bt)
                 .entity
                 .to_string(),
             "teamcity-eu:buildType:Payout_Build"
@@ -566,6 +612,70 @@ mod tests {
             Some("https://ci.tidewater.example/buildConfiguration/Payout_IntegrationTests/1187"),
             "...and the mirror holds the other, under the id the key is built from"
         );
+    }
+
+    /// **The same, for a build configuration** (issue #516): the record's own
+    /// `webUrl` names one host and the mirror holds the configured base.
+    ///
+    /// #495 left this one record reading the server's spelling, so a
+    /// `buildType:` entity inherited exactly the resolver mismatch #495
+    /// removed for builds. The fixture below is what makes the assertion able
+    /// to fail: the record still *carries* a `webUrl`, under a different host,
+    /// and `struct BuildType` simply no longer parses it -- so a mapping that
+    /// went back to reading the record would produce
+    /// `https://ci.example.com/...` and this test would say so by name.
+    ///
+    /// The **query is part of the address**, not decoration: migration `0023`
+    /// normalises a pasted URL with its query kept verbatim, so a composition
+    /// that dropped `?mode=builds` would never equal the link a reader copies
+    /// out of the TeamCity UI.
+    #[test]
+    fn a_build_configurations_web_url_is_composed_from_the_configured_base_url() {
+        let raw = serde_json::json!({
+            "id": "Payout_Build", "name": "Build", "projectId": "Payout",
+            "projectName": "Payout",
+            "webUrl": "https://ci.example.com/buildConfiguration/Payout_Build?mode=builds"
+        });
+        assert_eq!(
+            raw["webUrl"], "https://ci.example.com/buildConfiguration/Payout_Build?mode=builds",
+            "the record says one host..."
+        );
+        let bt: BuildType = serde_json::from_value(raw.clone()).expect("buildType");
+        let it = build_config_item("teamcity", BASE, &raw, &bt);
+        assert_eq!(
+            it.web_url.as_deref(),
+            Some("https://ci.tidewater.example/buildConfiguration/Payout_Build?mode=builds"),
+            "...and the mirror holds the other, query and all"
+        );
+        // A base URL as a paste carries it -- a trailing slash, stray
+        // whitespace, a path prefix -- joins the same way a build's does.
+        for (configured, root) in [
+            (
+                "https://ci.tidewater.example/",
+                "https://ci.tidewater.example",
+            ),
+            (
+                "  https://ci.tidewater.example  ",
+                "https://ci.tidewater.example",
+            ),
+            (
+                "https://teamcity.jetbrains.com/guestAuth",
+                "https://teamcity.jetbrains.com/guestAuth",
+            ),
+        ] {
+            assert_eq!(
+                build_config_item("teamcity", configured, &raw, &bt).web_url,
+                Some(format!(
+                    "{root}/buildConfiguration/Payout_Build?mode=builds"
+                )),
+                "base URL {configured:?}"
+            );
+        }
+        // And the payload is the record the selector returned, which since
+        // this change no longer asks for `webUrl` -- the fixture above is a
+        // record from *before* it, kept so the assertion has something to be
+        // wrong about.
+        assert_eq!(it.payload, raw);
     }
 
     /// A base URL as a paste usually carries it -- a trailing slash, stray
