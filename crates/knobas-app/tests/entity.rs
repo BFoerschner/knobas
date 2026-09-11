@@ -2354,7 +2354,12 @@ async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
     )
     .await
     .unwrap();
-    assert_eq!(born.links.len(), 2, "the fixture drew both: {:?}", born.links);
+    assert_eq!(
+        born.links.len(),
+        2,
+        "the fixture drew both: {:?}",
+        born.links
+    );
 
     let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
     let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
@@ -2391,7 +2396,10 @@ async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
         .iter()
         .map(|(_, to_id, relation)| (to_id.as_str(), relation.as_str()))
         .collect();
-    assert!(targets.contains(&(ctx.id.as_str(), CAPTURED_IN)), "{targets:?}");
+    assert!(
+        targets.contains(&(ctx.id.as_str(), CAPTURED_IN)),
+        "{targets:?}"
+    );
     assert!(
         targets.contains(&(ticket.as_str(), CAPTURED_FROM)),
         "{targets:?}"
@@ -2416,7 +2424,8 @@ async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
         serde_json::json!(withdrawn_id)
     );
     assert!(
-        said.iter().any(|(link_id, _, _)| *link_id == withdrawn_id.to_string()),
+        said.iter()
+            .any(|(link_id, _, _)| *link_id == withdrawn_id.to_string()),
         "the withdrawn link's id is one the birth line already named: {said:?}"
     );
     // Both lines are named on the note, so the two halves of the story are
