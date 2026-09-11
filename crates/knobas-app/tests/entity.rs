@@ -2304,6 +2304,340 @@ async fn a_born_link_survives_the_notes_first_autosave() {
     assert!(members.contains(&born.note.id), "{members:?}");
 }
 
+/// A note's birth is **one** line in the activity stream, and the links it was
+/// born with are named in it by the ids a later `unlinked` will use (#524).
+///
+/// The pairing is the whole ticket. A born link is `Origin::Manual`, so the
+/// links panel lets a reader withdraw one, and `unlink_inner` writes an
+/// `unlinked` line carrying `link_id` -- which until this ticket had no
+/// `linked` partner anywhere, because nothing in `knobas_core::note` had ever
+/// written a line. The `created` line's `born[]` is that partner, in the three
+/// keys `link_detail` writes, so the two lines pair in the note's own history.
+///
+/// **One line, not three.** Counted with `==`, scoped to the note's own
+/// freshly-minted entity id -- which no other test in this binary can touch --
+/// so a writer that announced each link as well as the birth fails here rather
+/// than passing unnoticed. That is #409's rule seen from the other side: a
+/// birth is one event.
+///
+/// The expected `born[]` is built from `born.links`, the array the links panel
+/// is drawn from, and *not* from the detail under test: `link::entries_of`
+/// reads the rows back out of `knobas.link`, while the line was composed from
+/// the insert's own `returning`. Two independent readings of the same fact,
+/// which is what makes the equality worth asserting. The literal relations and
+/// targets are pinned beside it so the set cannot agree with itself while
+/// being about the wrong links.
+#[tokio::test]
+async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+
+    let ctx = create_context_inner(&pool, &format!("Capture {}", unique()))
+        .await
+        .unwrap();
+    let (ticket, _unused) = linkable_pair(&pool).await;
+
+    let born = create_note_inner(
+        &pool,
+        Some("Standup"),
+        None,
+        &[
+            NoteLinkInput {
+                target_id: ctx.id.clone(),
+                relation: CAPTURED_IN.to_owned(),
+            },
+            NoteLinkInput {
+                target_id: ticket.clone(),
+                relation: CAPTURED_FROM.to_owned(),
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(born.links.len(), 2, "the fixture drew both: {:?}", born.links);
+
+    let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
+    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+        .await
+        .unwrap();
+    assert_eq!(
+        lines.len(),
+        1,
+        "one line for the birth, and none per link: {lines:?}"
+    );
+    let line = &lines[0];
+    assert_eq!(line.verb, "created");
+    assert_eq!(line.actor, "user");
+    assert_eq!(
+        line.entity_id.as_deref(),
+        Some(born.note.id.as_str()),
+        "named on the note's own entity, which is where its history panel reads"
+    );
+    assert_eq!(line.detail["title"], serde_json::json!("Standup"));
+
+    // What the line says it was born with, against what the panel draws.
+    let said = born_triples(line);
+    let drawn: Vec<(String, String, String)> = sorted_triples(born.links.iter().map(|entry| {
+        (
+            entry.link.id.to_string(),
+            entry.link.to_id.clone(),
+            entry.link.relation.clone(),
+        )
+    }));
+    assert_eq!(said, drawn, "`born[]` names the links that were drawn");
+    // ... and they are the links this fixture asked for, not a set agreeing
+    // with itself about two others.
+    let targets: Vec<(&str, &str)> = said
+        .iter()
+        .map(|(_, to_id, relation)| (to_id.as_str(), relation.as_str()))
+        .collect();
+    assert!(targets.contains(&(ctx.id.as_str(), CAPTURED_IN)), "{targets:?}");
+    assert!(
+        targets.contains(&(ticket.as_str(), CAPTURED_FROM)),
+        "{targets:?}"
+    );
+
+    // The payoff: withdraw one from the panel and the `unlinked` line it
+    // writes has a partner to pair with, in the same history.
+    let withdrawn_id = born
+        .links
+        .iter()
+        .find(|entry| entry.link.relation == CAPTURED_FROM)
+        .expect("the captured-from link")
+        .link
+        .id;
+    let withdrawn = unlink_inner(&pool, &withdrawn_id.to_string())
+        .await
+        .unwrap()
+        .expect("a born link is manual, so the panel may withdraw it");
+    assert_eq!(withdrawn.activity.verb, "unlinked");
+    assert_eq!(
+        withdrawn.activity.detail["link_id"],
+        serde_json::json!(withdrawn_id)
+    );
+    assert!(
+        said.iter().any(|(link_id, _, _)| *link_id == withdrawn_id.to_string()),
+        "the withdrawn link's id is one the birth line already named: {said:?}"
+    );
+    // Both lines are named on the note, so the two halves of the story are
+    // reachable through one read rather than one of them being unpairable.
+    // (`Detail.svelte`'s history panel is fed by `EntityDetail`, which a note
+    // has none of -- so the surface is the stream itself, which is what this
+    // ticket's title says.)
+    assert_eq!(
+        withdrawn.activity.entity_id.as_deref(),
+        Some(born.note.id.as_str())
+    );
+}
+
+/// `born[].link_id`, `to_id` and `relation` out of a `created` line, sorted so
+/// two readings of the same set compare.
+fn born_triples(line: &knobas_core::activity::ActivityRow) -> Vec<(String, String, String)> {
+    let born = line.detail["born"]
+        .as_array()
+        .unwrap_or_else(|| panic!("`born` is an array on {:?}", line.detail));
+    sorted_triples(born.iter().map(|entry| {
+        (
+            entry["link_id"].as_str().expect("link_id").to_owned(),
+            entry["to_id"].as_str().expect("to_id").to_owned(),
+            entry["relation"].as_str().expect("relation").to_owned(),
+        )
+    }))
+}
+
+fn sorted_triples(
+    entries: impl Iterator<Item = (String, String, String)>,
+) -> Vec<(String, String, String)> {
+    let mut out: Vec<_> = entries.collect();
+    out.sort();
+    out
+}
+
+/// #409 stands: no autosave writes a line, however much the body's `[[refs]]`
+/// make the reconciliation do.
+///
+/// The editor's autosave fires every 700 ms of pause, and `knobas.activity` is
+/// append-only, so a line per save could not be collapsed after the fact --
+/// which is why `crate::time::worklog` reads `knobas.note.updated_at` for an
+/// afternoon of typing instead. The two saves here are the reconciliation's
+/// full range: one draws a ref link, the next withdraws it and draws another.
+/// If either wrote a line, an hour on one note would be dozens of them.
+#[tokio::test]
+async fn saving_a_note_writes_no_activity_line_however_much_it_reconciles() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{create_note_inner, save_note_inner};
+
+    let born = create_note_inner(&pool, Some("Runbook"), None, &[])
+        .await
+        .unwrap();
+    let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
+    let after_birth: Vec<i64> = recent_activity_inner(&pool, 200, Some(&note_ref))
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(after_birth.len(), 1, "the birth, and nothing else yet");
+
+    let first = save_note_inner(&pool, &born.note.id, "Runbook", "see [[mock:PAY-231]]")
+        .await
+        .unwrap();
+    assert_eq!(first.refs.len(), 1, "the body really named one");
+    assert!(
+        first
+            .links
+            .iter()
+            .any(|entry| entry.other.entity_id == "mock:PAY-231"),
+        "and the reconciliation really drew it: {:?}",
+        first.links
+    );
+
+    let second = save_note_inner(&pool, &born.note.id, "Runbook", "see [[mock:PAY-198]]")
+        .await
+        .unwrap();
+    let still: Vec<&str> = second
+        .links
+        .iter()
+        .map(|entry| entry.other.entity_id.as_str())
+        .collect();
+    assert_eq!(
+        still,
+        ["mock:PAY-198"],
+        "the second save withdrew one link and drew another: {still:?}"
+    );
+
+    let after_saves: Vec<i64> = recent_activity_inner(&pool, 200, Some(&note_ref))
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(
+        after_saves, after_birth,
+        "a save is not an event in the stream -- not for the note, not per ref"
+    );
+}
+
+/// A note's death is one line too, on the address that survives it (#524).
+///
+/// A stream that showed a birth and no death would be the orphan in the other
+/// direction. The address is what makes it possible: `note::delete` takes the
+/// body and *tombstones* the `knobas.entity` row, so the line is named on an
+/// id that still resolves and the scoped read below still finds both lines
+/// after the note itself is gone.
+///
+/// The title is read before the row goes, which is the only moment it is there
+/// to read; `deleted` with no title would be a line naming a `note:` uuid and
+/// nothing a person recognises.
+///
+/// The tombstone is asserted through the *ticket's* links panel rather than by
+/// querying `knobas.entity`: a born link is `manual`, so the delete does not
+/// withdraw it, and what a reader of the ticket sees is the note still there
+/// and marked. That is the fact the surviving address buys, read where it is
+/// spent.
+#[tokio::test]
+async fn deleting_a_note_writes_one_deleted_line_on_the_address_that_survives() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner, delete_note_inner};
+
+    let (ticket, _unused) = linkable_pair(&pool).await;
+    let born = create_note_inner(
+        &pool,
+        Some("Scratch"),
+        Some("a thought"),
+        &[NoteLinkInput {
+            target_id: ticket.clone(),
+            relation: CAPTURED_FROM.to_owned(),
+        }],
+    )
+    .await
+    .unwrap();
+    let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
+
+    assert!(delete_note_inner(&pool, &born.note.id).await.unwrap());
+
+    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+        .await
+        .unwrap();
+    let verbs: Vec<&str> = lines.iter().map(|row| row.verb.as_str()).collect();
+    assert_eq!(verbs, ["deleted", "created"], "newest first: {lines:?}");
+    assert_eq!(lines[0].actor, "user");
+    assert_eq!(
+        lines[0].detail,
+        serde_json::json!({ "title": "Scratch" }),
+        "the stored title, read while there was still a row to read it from"
+    );
+
+    // The address really did survive to carry it.
+    let back = links_on(&pool, &ticket).await;
+    let entry = back
+        .iter()
+        .find(|entry| entry.other.entity_id == born.note.id)
+        .expect("the body goes, the address stays, and the link to it with it");
+    assert!(
+        entry.other.deleted_at.is_some(),
+        "tombstoned, so the panel marks it instead of dangling"
+    );
+
+    // Idempotent, as it was: a second delete mutated nothing, so it announces
+    // nothing -- the same rule `unlink_inner` follows.
+    assert!(!delete_note_inner(&pool, &born.note.id).await.unwrap());
+    assert_eq!(
+        recent_activity_inner(&pool, 200, Some(&note_ref))
+            .await
+            .unwrap()
+            .len(),
+        2,
+        "two lines, still"
+    );
+}
+
+/// The line is written even when no born link could be drawn, and `born` is
+/// then `[]` rather than missing.
+///
+/// The observation is the note; a born link is the attribution, and
+/// `note::create` already writes the note when a target no row ever carried
+/// leaves nothing to link to. The line is part of the observation, so it goes
+/// with it. **Empty, not absent**, per #502's second ruling: a reader who
+/// meets `born: []` knows the note was born with no links, where a missing key
+/// would read as a line written before this feature existed.
+#[tokio::test]
+async fn a_birth_line_is_written_even_when_no_born_link_could_be_drawn() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
+
+    let gone = format!("ctx:{}", uuid::Uuid::new_v4());
+    let born = create_note_inner(
+        &pool,
+        Some("Captured in a context nothing ever carried"),
+        None,
+        &[NoteLinkInput {
+            target_id: gone,
+            relation: CAPTURED_IN.to_owned(),
+        }],
+    )
+    .await
+    .unwrap();
+    assert!(born.links.is_empty(), "{:?}", born.links);
+
+    let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
+    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+        .await
+        .unwrap();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].verb, "created");
+    assert_eq!(
+        lines[0].detail["born"],
+        serde_json::json!([]),
+        "empty, and there: {:?}",
+        lines[0].detail
+    );
+    assert!(
+        lines[0].detail.get("born").is_some(),
+        "a key that is absent and a key that is empty are different facts"
+    );
+}
+
 /// Story 9 over the seam: a ref whose target the source withdrew stays
 /// visible and marked.
 ///

@@ -1331,7 +1331,13 @@ pub async fn save_note_inner(
 ///
 /// `Ok(false)` when there was nothing to delete. Idempotent, like
 /// [`unlink_inner`]: a second *Delete* on a note already gone is not an error,
-/// and the caller can tell the two apart.
+/// and the caller can tell the two apart -- and, like `unlink_inner`, the call
+/// that mutated nothing writes no activity line.
+///
+/// The `deleted` line the first call *does* write is the store's
+/// ([`knobas_core::note::delete`], #524), inside the transaction that took the
+/// body; [`ACTOR`] is who it is attributed to, the same word every other
+/// mutation in this module signs with.
 ///
 /// # Errors
 ///
@@ -1339,7 +1345,7 @@ pub async fn save_note_inner(
 /// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
 pub async fn delete_note_inner(pool: &PgPool, note_id: &str) -> Result<bool, IpcError> {
     let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
-    Ok(knobas_core::note::delete(pool, &id).await?)
+    Ok(knobas_core::note::delete(pool, &id, ACTOR).await?)
 }
 
 /// One note, with its refs and its links.

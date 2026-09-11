@@ -488,7 +488,10 @@ const MY_COMMENTS: &str = "select id, entity_id, queued_at from knobas.write_que
 /// A note deleted inside the interval is not here, because `note::delete`
 /// takes the row (the entity survives, tombstoned). That is the right answer
 /// -- the reader deleted it -- and not an omission to chase through the
-/// tombstone.
+/// tombstone. Since #524 the deletion *is* an activity line, so it reaches a
+/// draft through [`MY_ACTIVITY`] instead, as one more checkbox the reader can
+/// leave unticked -- [`NOT_WORK`]'s stated failure direction, and its `created`
+/// sibling joins the ones contexts and assets have written all along.
 ///
 /// `title` is never empty: `note::save` stores `named(title)`, which is the
 /// title or the word for a note without one, so the bullet always has a word
