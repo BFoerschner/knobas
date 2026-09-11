@@ -430,9 +430,42 @@ const AUTHORED_ITEMS: &str = "select i.entity_id, i.title, i.item_updated_at
 ///
 /// `entity_id is not null` for the same reason [`NOT_WORK`] exists: a line
 /// with nothing behind it has nothing to say about the afternoon.
+///
+/// **And no line about a note, whatever its verb** (#561). A note reaches a
+/// draft through [`MY_NOTES`] and nothing else, which is #409's rule -- *"each
+/// fact is read from the table it already lives in"* -- applied to the one
+/// entity two of these four reads can both see. Since #524 a note's birth and
+/// death are each a line on the note's own `note:<uuid>`, and a born link
+/// withdrawn from the panel has written `unlinked` there since #502; [`key_of`]
+/// on such an id is the bare uuid, so each of them arrived as `- created
+/// 0192ab3c-...`, pre-ticked, beside the titled bullet [`MY_NOTES`] was
+/// already offering for the same note. That is the shape #409 was filed to
+/// keep out of a worklog comment -- *"a note's bullet uses the note's title,
+/// never its uuid"* -- and its rule for a deleted note, *"they deleted it; do
+/// not chase it through the tombstone"*, which the `deleted` line was undoing.
+///
+/// **By kind, not by verb.** `created` and `deleted` are contexts' and assets'
+/// verbs too, so [`NOT_WORK`] could not be where this was answered without
+/// losing real work: `- created <uuid>` for an ad-hoc context is still a
+/// candidate, and still the only signal a draft carries for one.
+///
+/// The prefix is `knobas_core::entity`'s -- notes are minted `EntityRef::new(
+/// "note", ..)` and `note` is one of its `RESERVED_NAMESPACES` -- spelled as a
+/// literal here for the reason `crate::assets`' `NAMESPACE` gives for spelling
+/// its own rather than indexing that array, *"an index is not a name"*, and
+/// safe to spell because the tests mint their notes through `note::create`
+/// rather than by writing the id: a namespace renamed under this clause fails
+/// `a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_title`
+/// instead of quietly widening the draft again.
+///
+/// What the narrowing gives up is `- unlinked <uuid>` as a candidate, the one
+/// trace a draft carried for a link withdrawn from a note. `knobas.activity`
+/// keeps every such line and the note's own history panel still reads them;
+/// it is only the draft that stops.
 const MY_ACTIVITY: &str = "select id, at, verb, entity_id from knobas.activity
       where actor = $1 and at >= $2 and at <= $3
         and entity_id is not null
+        and entity_id not like 'note:%'
         and verb <> all($4)
       order by at, id";
 
@@ -488,21 +521,27 @@ const MY_COMMENTS: &str = "select id, entity_id, queued_at from knobas.write_que
 /// A note deleted inside the interval is not here, because `note::delete`
 /// takes the row (the entity survives, tombstoned). That is the right answer
 /// -- the reader deleted it -- and not an omission to chase through the
-/// tombstone. Since #524 the deletion *is* an activity line, so it reaches a
-/// draft through [`MY_ACTIVITY`] instead -- as `- deleted <uuid>`, since
-/// [`key_of`] on a `note:` id is the uuid.
+/// tombstone. Since #524 the deletion *is* an activity line, and for three
+/// weeks it reached a draft through [`MY_ACTIVITY`] anyway -- as `- deleted
+/// <uuid>`, since [`key_of`] on a `note:` id is the uuid.
 ///
-/// **So a note written and deleted in one interval is two checkboxes, and one
-/// written and kept is two as well**: this read's bullet with the title, and
-/// `created`'s with the uuid. Said plainly rather than left to be found. It is
-/// [`NOT_WORK`]'s stated failure direction -- *"a verb that ought to be here
-/// and is not shows up as one extra checkbox the reader unchecks; nothing is
-/// ever lost by an omission"* -- and it is not a class #524 opened: a born link
-/// withdrawn from the panel writes its `unlinked` line on the **note's own id**
+/// **So a note written and deleted in one interval was two checkboxes, and one
+/// written and kept was two as well**: this read's bullet with the title, and
+/// `created`'s with the uuid. It no longer is -- #561 narrowed [`MY_ACTIVITY`]
+/// by kind, and **this read is now the only door a note has into a draft** --
+/// and the working-out is rewritten rather than deleted, because it is what
+/// chose that cure over deduplicating the candidates or giving an activity
+/// bullet a title. It was [`NOT_WORK`]'s stated failure direction -- *"a verb
+/// that ought to be here and is not shows up as one extra checkbox the reader
+/// unchecks; nothing is ever lost by an omission"* -- but the extra checkbox
+/// here said a uuid, which is the sentence #409 was filed to keep out of a
+/// comment sent to Jira, and `WorklogDraft.svelte` ticks every candidate by
+/// default. Nor was it a class #524 opened: a born link withdrawn from the
+/// panel writes its `unlinked` line on the **note's own id**
 /// (`commands::entity`'s `record_link_activity` names the line on `from_id`),
-/// so `- unlinked <uuid>` has been reachable since #502. `NOT_WORK` is keyed on
+/// so `- unlinked <uuid>` had been reachable since #502. `NOT_WORK` is keyed on
 /// the verb alone and `created`/`deleted` are contexts' and assets' too, so the
-/// list cannot be where this is answered; narrowing the read by kind would be,
+/// list could not be where this was answered; narrowing the read by kind was,
 /// and that is a decision about worklog drafts rather than about the stream.
 ///
 /// `title` is never empty: `note::save` stores `named(title)`, which is the
