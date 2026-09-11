@@ -2145,6 +2145,66 @@ offered is a non-empty proper subset of what the project has, and deletes it —
 template that quietly became all-to-all fails the seed rather than leaving the suite green and about
 nothing.
 
+### Amendments from the asset type-table drop (2026-09-11, binding) — issue #493
+
+The table lost three types in v1.5 and this file went on giving the old count in five places, because
+#493's own criterion 1 required `docs/contract.md` byte-identical and the drop had nowhere to be
+recorded. `grep -n '#493' docs/contract.md` answered nothing until this section. It is that record,
+filed under #515 and ruled there by a Fable deputy for Björn, who is away for this milestone and
+reverses this with one label: the type table is *"code, not a constraint"* (roadmap, v1.5 stream 1)
+and `crates/knobas-core/src/asset.rs` is not on §10.8's list, so the drop owes a §9 record rather
+than the frozen-contract gate. The five stale sentences keep their wording and each carries an
+italic pointer here, which is the #112 convention above — *the old text stands and the amendment
+carries the new truth*.
+
+**`knobas_core::asset::TYPES` holds sixteen, from commit `5cd0bb09` (#493, PR #513):** `site`,
+`hypervisor`, `vm`, `container_engine`, `container`, `service`, `module`, `runtime`,
+`database_server`, `database`, `schema`, `table`, `reverse_proxy`, `middleware`, `network` and
+`custom`. **`scenario`, `step` and `connector` left.** They were the three that hung below
+`runtime`, and they belonged to the low-code runtime that left the plan on 2026-09-06; the adapter
+for the real system behind it left for good the day after. Spec #491 ruled the drop, roadmap M4.0
+carries it (*"the generic *runtime* replacing a vendor-branded type; v1.5 dropped the three types
+below it"*), and design §12.1's *Types* row records both the drop and its reason: *"The three
+dropped types hung below *runtime* and nothing real was ever filed under them."* Every count of the
+**types** in §10.8 below is the one spec #427 named, not the one the build carries; the two
+sentences that use the same word of `assets` **commands** are counting commands and stand as they
+are.
+
+**A row still carrying one of the three reads as an unknown type, and that is what "reads as
+`custom`" meant.** #493's criterion 3 and spec #491 story 4 both say such a row *"reads as
+`custom`"*; the deputy ruling of 2026-09-07 (`docs/decisions/2026-09-v1-5-unattended-rulings.md`)
+read that as the property-level statement it is and changed no read-path code. The row comes back
+from the asset read with `type_id` `"scenario"`, `type_label` `"scenario"` and monogram `"??"` —
+#439's existing rule in `crates/knobas-app/src/assets/mod.rs` for a type the table does not carry —
+while `properties_of` returns every stored key as `custom: true` and no declared property, which is
+the *custom* the sentence is about. `assets::edit` refuses nothing on the type's account.
+`assets::create` refuses the type outright, being the one door over a table that no longer names it.
+No migration was owed and none was made: `type_id` is open text, for the reason the #428 entry above
+gives.
+
+**No §10.8 entry is owed, and this is the record of why.** `crates/knobas-core/src/asset.rs` is not
+on §10.8's list, and the table's *contents* are not a frozen surface: what #429 froze is the
+`asset_types` command and the `AssetType` and `TypedProperty` wire shapes, and a const losing rows
+changes neither. The five sentences this section corrects all sit inside §10.8 entries — #428's
+`0017`, #429 and #449 — and the pointers amend their **prose**, which is what #112 prescribes for a
+superseded sentence; not one frozen *surface* named by §10.8's list moves. The one frozen-list file
+#493 did touch, `crates/knobas-source/src/lib.rs`, it touched as two `//!` prose lines, which the
+#518 ruling (2026-09-08, same decisions file) settled as not a §10.8 touch, and settled by quoting
+`5cd0bb09` itself: *"commit `5cd0bb09` (PR #513) rewrote two `//!` lines of the same file, touched
+`docs/contract.md` not at all, wrote no entry, and merged."* So the drop owes a §9 record and
+nothing in §10.8, and the missing §9 record is the defect #515 names.
+
+Pinned by: `knobas-app`'s `tests/assets_ipc.rs`'s
+`the_type_table_answers_with_no_pool_and_carries_the_schema_and_the_suggestions`, whose first
+assertion is `assert_eq!(types.len(), 16, ...)` over the answer the create dialog reads, so the
+count in this section and the count on the wire go red together; the same file's
+`a_row_whose_type_the_table_dropped_reads_back_and_edits_like_a_custom_asset`, which is where the
+paragraph above gets its `"??"`, its `custom: true` and its refusal at the create door; and
+`knobas-core`'s `tests/estate_file.rs`, which requires every type `testenv/hetzner/estate.json`
+names to be in the table. That last one is a subset check and guards only the six types the estate
+actually uses: dropping `middleware`, `schema` or `reverse_proxy` would pass it, and the count
+assertion above is what would go red.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
@@ -5716,7 +5776,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `type_id` is open text because the interesting half of a type cannot be written in SQL: each of
   the nineteen carries a monogram and an *ordered* property schema, so a constraint would be a
   second, partial copy of a table whose useful part lived elsewhere. `assets::create` is the one
-  door and refuses a type it does not know.
+  door and refuses a type it does not know. *Superseded in part by the #493 amendment in §9 above
+  (2026-09-11): sixteen since v1.5 dropped `scenario`, `step` and `connector`; the count above is
+  spec #427's and stands as history.*
 
   **The type table is `knobas_core::asset`, not part of the module pair, and that is deliberate.**
   It has a second reader: `knobas-core`'s `tests/estate_file.rs`, which checks that every type
@@ -5860,7 +5922,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `testenv/hetzner/estate.json` actually uses is one the table suggests — so the conventions
   answer to an estate that exists (ADR-0013) rather than to a diagram. **A suggestion is never a
   constraint**: nothing enforces it, `assets::create` still takes any declared type under any
-  parent, and the dialog offers all nineteen whatever is listed.
+  parent, and the dialog offers all nineteen whatever is listed. *Superseded in part by the #493
+  amendment in §9 above (2026-09-11): the dialog offers sixteen, `scenario`, `step` and `connector`
+  having left the table in v1.5; the sentence stands as history.*
 
   **Why the table crosses the bridge rather than being copied.** Two things the frontend cannot
   answer on its own, and neither is a matter of taste. The first is *which types are usual here*.
@@ -5868,7 +5932,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   declared key with `value: null`, there is no kind in a `null`, and `assets::edit` refuses a
   typed key given the wrong kind by name — so an editor without the schema would be guessing
   whether a service's `port` wants `8080` or `"8080"`. A nineteen-entry copy in TypeScript would
-  also be the half that goes stale, and the ids travel in the share export.
+  also be the half that goes stale, and the ids travel in the share export. *Superseded in part by
+  the #493 amendment in §9 above (2026-09-11): a copy in TypeScript would now be sixteen entries;
+  the argument is untouched and the sentence stands as history.*
 
   **It takes no state, and answers without a pool.** The one command in this pair that does:
   the table is a `const`, so the answer is the same before bring-up as after it and a create
@@ -5878,7 +5944,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   `tests/assets_ipc.rs`'s registration loop, whose marker is `not_ready`, cannot cover it and
   `the_type_table_answers_with_no_pool_and_carries_the_schema_and_the_suggestions` stands in its
   place, asserting the nineteen, the schema *in its declared order with its kinds*, and the
-  suggestions.
+  suggestions. *Superseded in part by the #493 amendment in §9 above (2026-09-11): the assertion
+  reads `16` since v1.5 dropped `scenario`, `step` and `connector`; the sentence stands as history.*
 
   **Which barrels were appended**: one line at the foot of `crates/knobas-app/src/lib.rs`'s
   `generate_handler!` list, after #428's group of six. `app/src/lib/ipc/index.ts` needs none —
@@ -7637,6 +7704,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   **only the types present**, where the chips draw all six including zeroes: six fixed states where
   a vanishing chip would move its neighbour under the pointer, against up to nineteen types over an
   estate somebody built by hand, where an option with nothing behind it can only empty the list.
+  *Superseded in part by the #493 amendment in §9 above (2026-09-11): up to sixteen types since v1.5
+  dropped `scenario`, `step` and `connector`; the sentence stands as history.*
 
   **`not exists` and not a left join**, because the question is about a set: an asset watched by
   three monitors is one row of the answer either way, and a join would need a `distinct` over a
