@@ -1,3 +1,6 @@
+This is a toy project just to see how far agents can go with minimal supervision!
+
+
 # knobas
 
 knobas is a personal work cockpit: a desktop app (Rust + Tauri) that pulls Jira,
