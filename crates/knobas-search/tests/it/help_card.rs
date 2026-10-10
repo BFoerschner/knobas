@@ -32,7 +32,7 @@ struct Entry {
 }
 
 fn card() -> Vec<Entry> {
-    let text = include_str!("../../../app/src/lib/launcher/syntax.json");
+    let text = include_str!("../../../../app/src/lib/launcher/syntax.json");
     serde_json::from_str(text).expect("syntax.json is a list of card entries")
 }
 

@@ -1,17 +1,17 @@
 //! An install where knobas does not know who the user is.
 //!
-//! A test binary of its own, and that is the point rather than an accident:
-//! the identity behind `@me` is the union of every enabled source's configured
+//! A file of its own, and that is the point rather than an accident: the
+//! identity behind `@me` is the union of every enabled source's configured
 //! username, so "no identity" is a property of the **whole database**. Any test
 //! sharing a database with one that configures an account cannot observe it.
-//! `knobas_db::test_util` gives one database per test binary, fresh per run
-//! (`run_nonce` is `{pid}-{nanos}`, so an earlier run's scratch directory can
-//! never match this process's stamp and is deleted) -- so this file is the
-//! isolation, and it is also why the hardcoded entity id below needs no
-//! `on conflict`: it is the only test in the only run that will ever insert it.
+//! `knobas_db::test_util` gives one database per calling source file, fresh per
+//! run (named after `run_nonce`, which is `{pid}-{nanos}`) -- so this file is
+//! the isolation, even as a module of the crate's one test binary (ADR-0017),
+//! and it is also why the hardcoded entity id below needs no `on conflict`: it
+//! is the only test in the only run that will ever insert it.
 //!
 //! The other half -- an install that does have an account -- is
-//! `a_configured_identity_leaves_the_blurb_alone` in `tests/lists.rs`. Both
+//! `a_configured_identity_leaves_the_blurb_alone` in `tests/it/lists.rs`. Both
 //! states are pinned, so a fixture cannot flatter the behaviour by only ever
 //! exercising one.
 

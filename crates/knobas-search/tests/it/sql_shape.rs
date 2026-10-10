@@ -30,9 +30,9 @@
 //! are not a weakness: what they pin is the statement, and over `corpus::ALL`
 //! it is the statement the launcher builds.
 //!
-//! `tests/corpus_seam.rs` is the file that runs all four corpora **with rows in
+//! `tests/it/corpus_seam.rs` is the file that runs all four corpora **with rows in
 //! each**: it seeds an item, a note, an asset and a route and drives the
-//! builder directly. `tests/search.rs` drives
+//! builder directly. `tests/it/search.rs` drives
 //! [`Searcher`](knobas_search::Searcher), so every test in it *builds* over
 //! `corpus::ALL` -- over a fixture of mirror items and notes, and no estate.
 

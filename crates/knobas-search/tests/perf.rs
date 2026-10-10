@@ -936,10 +936,10 @@ async fn branch_total(pool: &sqlx::PgPool, branch: &corpus::Corpus, text: Option
 ///
 /// Both were invisible to every functional test in this crate -- the rows are
 /// identical either way -- and both cost about 2.5x on a 100 k corpus. They are
-/// pinned here rather than in `tests/sql_shape.rs` because neither is
+/// pinned here rather than in `tests/it/sql_shape.rs` because neither is
 /// observable at all on a small corpus: with a few thousand rows PostgreSQL
 /// picks a hash join whatever it believes about selectivity, so an assertion
-/// there would pin nothing. That is the same lesson `tests/home.rs` learned
+/// there would pin nothing. That is the same lesson `tests/it/home.rs` learned
 /// about plan assertions in review round 2.
 ///
 /// **1. `q` must be `not materialized`.** A materialised CTE is opaque to the
@@ -1063,7 +1063,7 @@ async fn the_match_set_is_not_joined_row_by_row() {
 /// with load in the direction that fails green.
 ///
 /// The deterministic pin is
-/// `tests/sql_shape.rs::the_launchers_statement_is_never_a_named_prepared_statement`,
+/// `tests/it/sql_shape.rs::the_launchers_statement_is_never_a_named_prepared_statement`,
 /// which reads `pg_prepared_statements` -- the thing itself, with no clock and
 /// no corpus in the path. This test keeps its threshold at 2x, where it is a
 /// coarse backstop for a gross regression and the source of the numbers the

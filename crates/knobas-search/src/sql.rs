@@ -4,7 +4,7 @@
 //! `AssertSqlSafe`; keep it in one reviewed query-builder module. Never bind
 //! `tsquery` -- bind text into `websearch_to_tsquery('english', $1)`, compute
 //! the tsquery once as a FROM item. Never map `tsvector` to `String`."* This is
-//! that module, and `tests/sql_containment.rs` fails the build if anything else
+//! that module, and `tests/it/sql_containment.rs` fails the build if anything else
 //! in the crate so much as names the type.
 //!
 //! # Why the confinement holds
@@ -515,7 +515,7 @@ where
 /// The plan the launcher's own statement runs under.
 ///
 /// Behind `test-util` and living **here** because this is the module
-/// `AssertSqlSafe` is confined to (`tests/sql_containment.rs` fails the build
+/// `AssertSqlSafe` is confined to (`tests/it/sql_containment.rs` fails the build
 /// if it is named anywhere else). Prepending `explain` to a statement built by
 /// [`search_sql`] is exactly as sound as running it: the text still came out of
 /// the builder and every value still travels as a bind.

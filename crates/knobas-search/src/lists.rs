@@ -209,8 +209,8 @@
 //! Every list is a hand-written `&'static str`, which is what makes this module
 //! satisfy the runtime-SQL rule (roadmap §4 gotcha 2) *natively*: nothing here
 //! is assembled at run time, so the assert-safe wrapper never appears and
-//! `tests/sql_containment.rs` has nothing to catch. A typo in any one list's
-//! SQL is caught by `tests/lists.rs`, which runs every entry of [`BUILTINS`]
+//! `tests/it/sql_containment.rs` has nothing to catch. A typo in any one list's
+//! SQL is caught by `tests/it/lists.rs`, which runs every entry of [`BUILTINS`]
 //! rather than a representative one.
 //!
 //! # The two statements
@@ -813,7 +813,7 @@ macro_rules! builtins {
 /// `concat!` takes literals and nothing else. The two statements agreeing is
 /// load-bearing -- a read of one key and a write to another is a badge that
 /// never clears -- so `the_two_statements_agree_on_the_seen_key` checks it, and
-/// `tests/lists.rs` exercises the round trip against a real database.
+/// `tests/it/lists.rs` exercises the round trip against a real database.
 pub const SEEN_KEY: &str = "search.smart_list_seen";
 
 builtins! {
@@ -1044,7 +1044,7 @@ mod tests {
     /// The summary has to project a column per list, under the name the
     /// decoder reads. Generated from one declaration, so this pins the
     /// generator rather than a hand-maintained table -- and the statement is
-    /// *executed* in `tests/lists.rs`, which is what proves the columns exist.
+    /// *executed* in `tests/it/lists.rs`, which is what proves the columns exist.
     #[test]
     fn the_summary_projects_every_lists_three_columns() {
         for list in BUILTINS {
@@ -1183,7 +1183,7 @@ mod tests {
         // file for a read of it and says "a doc comment counts: it is what the
         // next implementer copies" -- and a negative assertion is no
         // exception, because the scan cannot tell the two apart. Same device,
-        // and same reason, as `tests/sql_containment.rs`' split needle.
+        // and same reason, as `tests/it/sql_containment.rs`' split needle.
         let base_table = format!("knobas.{}", "link");
         assert!(
             !list.rows_sql.contains(&format!("from {base_table} ")),

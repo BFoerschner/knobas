@@ -156,7 +156,7 @@ pub fn filler_share() -> f64 {
 ///
 /// The statement below is one `&'static str`. It is written out rather than
 /// formatted from the table above because the runtime-SQL wrapper is confined
-/// to [`crate::sql`], and `tests/sql_containment.rs` fails the build if any
+/// to [`crate::sql`], and `tests/it/sql_containment.rs` fails the build if any
 /// other file in this crate so much as **names** that type -- prose included,
 /// which is why this sentence does not. An earlier draft of this module built
 /// the statement with `format!` and reached for the wrapper; the scan caught
@@ -365,7 +365,7 @@ pub async fn seed_notes(pool: &PgPool, rows: i64) -> Result<(), SearchError> {
     Ok(())
 }
 
-/// One `&'static str`, for [`INSERT_ITEMS`]' reason: `tests/sql_containment.rs`
+/// One `&'static str`, for [`INSERT_ITEMS`]' reason: `tests/it/sql_containment.rs`
 /// fails the build if any file in this crate but `crate::sql` so much as names
 /// the runtime-SQL wrapper, and a statement built with `format!` reaches for
 /// it. So the `512` and the `20` below are [`FILLER_WORDS`] and [`BODY_WORDS`]

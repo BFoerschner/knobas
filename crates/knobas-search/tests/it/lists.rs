@@ -76,7 +76,7 @@ fn token(tag: &str) -> String {
 /// The two timestamps are **bound**, not formatted into the statement: they are
 /// the only thing that decides which lists a row lands in, and this crate's one
 /// runtime-SQL module is `src/sql.rs` (roadmap §4 gotcha 2, enforced by
-/// `tests/sql_containment.rs` -- which scans `tests/` too).
+/// `tests/it/sql_containment.rs` -- which scans `tests/` too).
 #[allow(clippy::too_many_arguments)]
 async fn seed(
     pool: &sqlx::PgPool,
@@ -562,8 +562,8 @@ async fn typing_a_list_in_the_box_answers_like_the_command() {
 
 /// With an account configured, `mine` says what it is rather than why it is
 /// empty. The other half of this -- the install with no username at all -- is
-/// `tests/lists_no_identity.rs`, which needs a database no source is
-/// configured in and therefore a test binary of its own.
+/// `tests/it/lists_no_identity.rs`, which needs a database no source is
+/// configured in and therefore a source file of its own.
 #[tokio::test]
 async fn a_configured_identity_leaves_the_blurb_alone() {
     let _guard = SERIAL.lock().await;
