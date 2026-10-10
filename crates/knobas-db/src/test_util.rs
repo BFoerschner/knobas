@@ -1,23 +1,28 @@
-//! One database per test binary, shared by every test in it -- on a server of
-//! the binary's own, or on the one server a `just test` starts for the whole
-//! run.
+//! One database per calling source file, shared by every test in that file --
+//! on a server of the binary's own, or on the one server a `just test` starts
+//! for the whole run.
 //!
 //! Enabled by the `test-util` feature (not `cfg(test)` -- that is not set for
 //! a crate's own `tests/` directory, nor for downstream crates).
 //!
-//! Every caller gets the *same* database, so tests must isolate themselves
-//! with unique keys. Truncating shared tables would break tests running
-//! concurrently in the same binary.
+//! Every caller in one file gets the *same* database, so tests must isolate
+//! themselves with unique keys. Truncating shared tables would break tests
+//! running concurrently in the same file. A caller in another file -- in the
+//! same binary or not -- gets another database: the key is the file
+//! `#[track_caller]` reports, so a file merged into a crate's one test binary
+//! (ADR-0017) keeps the isolation it had as a binary of its own.
 //!
 //! # Two ways to a server
 //!
-//! With [`GATE_URL_VAR`] (`KNOBAS_TEST_DB_URL`) unset -- `cargo test -p` by
-//! hand -- the binary runs `initdb`, starts a postmaster in its scratch root
-//! and uses the `knobas` database on it. That is the zero-config path, and it
-//! is what everything below the layout section describes.
+//! The *server* is decided once per process; each file's database on it is a
+//! `create database` and a migration, named after this run's nonce.
 //!
-//! With it set, the binary goes to the server the URL names instead: a
-//! `create database` and a migration on a server somebody else started, in
+//! With [`GATE_URL_VAR`] (`KNOBAS_TEST_DB_URL`) unset -- `cargo test -p` by
+//! hand -- the binary runs `initdb` and starts a postmaster in its scratch
+//! root. That is the zero-config path, and it is what everything below the
+//! layout section describes.
+//!
+//! With it set, the binary goes to the server the URL names instead, in
 //! place of a whole bring-up. `just test` sets it, from the server the
 //! `knobas-test-server` binary ([`serve_until_closed`]) starts once per run;
 //! sixty-odd binaries each starting a postmaster of their own was most of the
@@ -65,12 +70,14 @@
 //! `knobas-test-4242` may be the leftovers of a run that died an hour ago,
 //! server and all. See [`take_over`].
 
+use std::collections::HashMap;
 use std::fs::{File, TryLockError};
 use std::io::{Read, Write};
+use std::panic::Location;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sqlx::{Connection, PgPool};
@@ -102,49 +109,110 @@ const CLAIM_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest pause between attempts while waiting for a contended lock.
 const CLAIM_BACKOFF_CAP: Duration = Duration::from_millis(100);
 
-/// A pool onto this test binary's shared database, starting the server on
-/// first use.
+/// A pool onto the calling source file's shared database, starting the server
+/// on first use.
 ///
 /// The returned pool belongs to the calling runtime and should be dropped with
 /// it -- see the module docs for why it is not shared.
+///
+/// A plain function returning the future rather than an `async fn`, because
+/// `#[track_caller]` does nothing on an `async fn` and the caller's file is
+/// what picks the database.
 ///
 /// # Panics
 ///
 /// Panics if the database cannot be started, or if the pool cannot connect --
 /// there is no useful way for a test to continue without one.
-pub async fn test_pool() -> PgPool {
-    test_connector()
-        .await
-        .pool(TEST_POOL_SIZE)
-        .await
-        .expect("connect a test pool to the shared embedded postgres")
+#[track_caller]
+pub fn test_pool() -> impl Future<Output = PgPool> + Send + 'static {
+    let file = Location::caller().file();
+    async move {
+        database_of_file(file)
+            .await
+            .pool(TEST_POOL_SIZE)
+            .await
+            .expect("connect a test pool to the shared embedded postgres")
+    }
 }
 
-/// How to reach this test binary's shared database, for a test that needs
-/// connections rather than a pool -- the scheduler's runs hold one each
-/// (interfaces §10.6(c)).
+/// How to reach the calling source file's shared database, for a test that
+/// needs connections rather than a pool -- the scheduler's runs hold one each
+/// (interfaces §10.6(c)). Within one file it is [`test_pool`]'s database.
 ///
 /// # Panics
 ///
 /// Panics if the database cannot be started.
-pub async fn test_connector() -> crate::embedded::Connector {
-    static SHARED: tokio::sync::OnceCell<Shared> = tokio::sync::OnceCell::const_new();
+#[track_caller]
+pub fn test_connector() -> impl Future<Output = crate::embedded::Connector> + Send + 'static {
+    let file = Location::caller().file();
+    database_of_file(file)
+}
 
-    SHARED
+/// The database of the source file `file`, created and migrated on its first
+/// call and the same one on every call after.
+///
+/// Keyed by the file rather than the process: a test file merged into a
+/// crate's one test binary (ADR-0017) is then exactly as isolated as it was as
+/// a binary of its own, without its call sites changing.
+async fn database_of_file(file: &'static str) -> crate::embedded::Connector {
+    static FILES: OnceLock<Mutex<HashMap<&'static str, Arc<FileDatabase>>>> = OnceLock::new();
+
+    let entry = {
+        let mut files = FILES
+            .get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let ordinal = files.len();
+        Arc::clone(files.entry(file).or_insert_with(|| {
+            Arc::new(FileDatabase {
+                ordinal,
+                connector: tokio::sync::OnceCell::new(),
+            })
+        }))
+    };
+
+    entry
+        .connector
         .get_or_init(|| async {
-            match std::env::var(GATE_URL_VAR) {
-                Ok(url) => Shared::on_the_gate_server(&url).await,
-                Err(_) => Shared::on_a_server_of_its_own().await,
-            }
+            // An ordinal rather than the file's name: PostgreSQL silently
+            // truncates a name past 63 bytes, and two long paths could then
+            // meet on one database.
+            let name = format!(
+                "knobas_test_{}_{}",
+                identifier_slug(run_nonce()),
+                entry.ordinal
+            );
+            create_migrated_database(&shared_server().await.connector, &name).await
         })
         .await
-        .connector
         .clone()
 }
 
-/// This binary's shared database, decided once per process.
-struct Shared {
-    /// Reaches the shared database.
+/// One source file's database, created on first use.
+struct FileDatabase {
+    /// The order this file first asked in, which names its database.
+    ordinal: usize,
+    connector: tokio::sync::OnceCell<crate::embedded::Connector>,
+}
+
+/// This binary's server, decided once per process.
+async fn shared_server() -> &'static Server {
+    static SERVER: tokio::sync::OnceCell<Server> = tokio::sync::OnceCell::const_new();
+
+    SERVER
+        .get_or_init(|| async {
+            match std::env::var(GATE_URL_VAR) {
+                Ok(url) => Server::the_gates(&url).await,
+                Err(_) => Server::of_its_own().await,
+            }
+        })
+        .await
+}
+
+/// The server this binary's databases live on.
+struct Server {
+    /// Reaches the server; which database it names does not matter, since
+    /// every use goes through [`create_migrated_database`], which moves it.
     connector: crate::embedded::Connector,
     /// The server this binary started, kept here so its `Drop` -- which would
     /// stop the server -- never runs; statics are never dropped. `None` when
@@ -152,10 +220,10 @@ struct Shared {
     _own_server: Option<EmbeddedDb>,
 }
 
-impl Shared {
+impl Server {
     /// The zero-config path: a server of this binary's own in its scratch
-    /// root, and the `knobas` database on it.
-    async fn on_a_server_of_its_own() -> Shared {
+    /// root.
+    async fn of_its_own() -> Server {
         let root_dir = scratch_root();
         claim(&root_dir);
         reap_abandoned(&root_dir);
@@ -165,7 +233,7 @@ impl Shared {
         })
         .await
         .expect("start embedded postgres for tests");
-        Shared {
+        Server {
             connector: db.connector(),
             _own_server: Some(db),
         }
@@ -173,12 +241,11 @@ impl Shared {
 
     /// The gate path: the server `url` names is somebody else's -- reached
     /// through `existing_url`, so it is never owned and never stopped from
-    /// here -- and this binary gets a database of its own on it, named the
-    /// way [`scratch_database`] names its databases and migrated.
+    /// here.
     ///
     /// No claim and no sweep: this binary has no scratch root, and the gate's
     /// server did the sweeping when it started.
-    async fn on_the_gate_server(url: &str) -> Shared {
+    async fn the_gates(url: &str) -> Server {
         let gate = EmbeddedDb::start(DbConfig {
             // Ignored on the `existing_url` branch; there is no root to name.
             root_dir: PathBuf::new(),
@@ -186,16 +253,14 @@ impl Shared {
         })
         .await
         .unwrap_or_else(|error| panic!("connect to the gate's server at {GATE_URL_VAR}: {error}"));
-        let server = gate.connector();
+        let connector = gate.connector();
         // The handle's own pool is the only thing `stop` closes for a server
         // it does not own, and nothing here uses that pool.
         gate.stop()
             .await
             .expect("close the handle on the gate's server");
-
-        let name = format!("knobas_test_{}", identifier_slug(run_nonce()));
-        Shared {
-            connector: create_migrated_database(&server, &name).await,
+        Server {
+            connector,
             _own_server: None,
         }
     }
@@ -228,8 +293,7 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
 
-    let server = test_connector().await;
-    create_migrated_database(&server, &name).await
+    create_migrated_database(&shared_server().await.connector, &name).await
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:
@@ -379,10 +443,11 @@ pub async fn serve_until_closed(
 /// a child process can do it.
 ///
 /// After a full `just test` the gate server's root holds one database per
-/// test binary plus every `scratch_database`: 355 databases, 4 GB, and about
-/// 10 s of unlinking, a fifth of the whole run spent after the last test has
-/// reported (#421). Nothing reads the files again, so on Unix the unlinking
-/// is handed to an `rm -rf` and this process exits at once.
+/// test source file plus every `scratch_database` -- at one per binary, when
+/// #421 measured it, 355 databases, 4 GB, and about 10 s of unlinking, a fifth
+/// of the whole run spent after the last test had reported. Nothing reads the
+/// files again, so on Unix the unlinking is handed to an `rm -rf` and this
+/// process exits at once.
 ///
 /// The child keeps the root's ownership lock while it works: `lock` is the
 /// held lock file, handed to it as its stdin, and a `flock` lock belongs to

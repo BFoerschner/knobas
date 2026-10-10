@@ -1,3 +1,7 @@
+// A crate root resolves `mod` beside itself, so the path is spelled out.
+#[path = "embedded/elsewhere.rs"]
+mod elsewhere;
+
 use knobas_db::{DbConfig, EmbeddedDb};
 
 #[tokio::test]
@@ -1018,23 +1022,12 @@ struct Landing {
 /// What a child process of this binary reports through the test above, with
 /// `KNOBAS_TEST_DB_URL` set to `url`.
 ///
-/// A child rather than `set_var` in this process: the shared connector is
-/// decided once per process, and the other tests here have already decided it.
+/// A child rather than `set_var` in this process: the shared server is decided
+/// once per process, and the other tests here have already decided it.
 fn landing_of_a_child_with(url: &str) -> Landing {
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "the_shared_connector_never_lands_on_the_maintenance_database",
-            "--nocapture",
-        ])
-        .env("KNOBAS_TEST_DB_URL", url)
-        .output()
-        .expect("re-run this binary as a child");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "the child failed:\n{stdout}\n{}",
-        String::from_utf8_lossy(&output.stderr)
+    let stdout = stdout_of_a_child(
+        "the_shared_connector_never_lands_on_the_maintenance_database",
+        Some(url),
     );
     let landed = stdout
         .lines()
@@ -1089,4 +1082,144 @@ async fn the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_
     );
 
     ours.stop().await.unwrap();
+}
+
+/// This binary re-run as a child on the one test named `test`, with
+/// `KNOBAS_TEST_DB_URL` set to `url` or, for `None`, removed -- its stdout,
+/// once it has passed.
+///
+/// A child that ran no test at all passes too: libtest prints `running 0
+/// tests` for an `--exact` name that matches nothing, and exits 0. Every
+/// reader of the output would then fail on a missing line at best, so the
+/// count is checked here, where the cause is known.
+fn stdout_of_a_child(test: &str, url: Option<&str>) -> String {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+    child.args(["--exact", test, "--nocapture"]);
+    match url {
+        Some(url) => child.env("KNOBAS_TEST_DB_URL", url),
+        None => child.env_remove("KNOBAS_TEST_DB_URL"),
+    };
+    let output = child.output().expect("re-run this binary as a child");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        output.status.success(),
+        "the child failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ran = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("running "))
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|count| count.parse::<u32>().ok())
+        .unwrap_or_else(|| panic!("no `running N tests` line in:\n{stdout}"));
+    assert_ne!(ran, 0, "the child ran no test named {test}:\n{stdout}");
+    stdout
+}
+
+/// The database `pool` is on.
+async fn database_of(pool: &sqlx::PgPool) -> String {
+    let (database,): (String,) = sqlx::query_as("select current_database()")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    database
+}
+
+/// The database `connector` reaches.
+async fn database_of_connector(connector: &knobas_db::embedded::Connector) -> String {
+    use sqlx::Connection;
+
+    let mut conn = connector.connect().await.unwrap();
+    let (database,): (String,) = sqlx::query_as("select current_database()")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+    database
+}
+
+/// The shared database belongs to the calling source file: every call from
+/// one file -- `test_pool` or `test_connector` -- meets the same database, and
+/// a call from `elsewhere.rs`, compiled into this same binary, meets another.
+/// A test file merged into a crate's one test binary (ADR-0017) is then as
+/// isolated as it was as a binary of its own.
+///
+/// Prints `files=<this file's> <elsewhere's>` for the parents below, which
+/// re-run it on each of the two paths to a server.
+#[tokio::test]
+async fn the_shared_database_follows_the_calling_source_file() {
+    let here = database_of(&knobas_db::test_util::test_pool().await).await;
+    let here_again = database_of(&knobas_db::test_util::test_pool().await).await;
+    let here_connector = database_of_connector(&knobas_db::test_util::test_connector().await).await;
+    let there = elsewhere::database_of_test_pool().await;
+    let there_connector = elsewhere::database_of_test_connector().await;
+
+    println!("files={here} {there}");
+    assert_eq!(here, here_again, "two calls from one file, two databases");
+    assert_eq!(
+        here, here_connector,
+        "test_connector and test_pool disagree within one file"
+    );
+    assert_eq!(
+        there, there_connector,
+        "test_connector and test_pool disagree within elsewhere.rs"
+    );
+    assert_ne!(here, there, "two source files share one database");
+}
+
+/// The two databases a child's `files=` line names.
+fn files_of(stdout: &str) -> (String, String) {
+    let files = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("files="))
+        .unwrap_or_else(|| panic!("no files= line in:\n{stdout}"));
+    let (here, there) = files
+        .split_once(' ')
+        .unwrap_or_else(|| panic!("a files= line names two databases: {files}"));
+    (here.to_owned(), there.to_owned())
+}
+
+/// On the gate path, per file: the child, pointed at this test's server,
+/// passes the per-file test -- and both databases it names are on this
+/// server, migrated, so the child really was on the gate path rather than a
+/// server of its own.
+#[tokio::test]
+async fn on_the_gate_server_each_source_file_gets_a_database_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let ours = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let stdout = stdout_of_a_child(
+        "the_shared_database_follows_the_calling_source_file",
+        Some(&maintenance_url(dir.path())),
+    );
+    let (here, there) = files_of(&stdout);
+
+    for database in [&here, &there] {
+        let pool = sqlx::PgPool::connect(&database_url(dir.path(), database))
+            .await
+            .unwrap_or_else(|error| panic!("{database} is not on this test's server: {error}"));
+        let (migrated,): (bool,) =
+            sqlx::query_as("select to_regclass('knobas.entity') is not null")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(migrated, "{database} arrived unmigrated");
+        pool.close().await;
+    }
+
+    ours.stop().await.unwrap();
+}
+
+/// On the zero-config path, per file: the child, with `KNOBAS_TEST_DB_URL`
+/// removed, starts a server of its own and passes the per-file test there.
+#[test]
+fn on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own() {
+    let stdout = stdout_of_a_child("the_shared_database_follows_the_calling_source_file", None);
+    let (here, there) = files_of(&stdout);
+    assert_ne!(here, there);
 }
