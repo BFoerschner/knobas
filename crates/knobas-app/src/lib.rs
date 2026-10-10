@@ -117,7 +117,7 @@ impl AppState {
     ///
     /// It exists because a [`tauri::State`] cannot be built by hand, so a
     /// command body is unreachable from a mock app until its state is managed
-    /// -- see `tests/ipc.rs`, where `demo_load`'s profile guard is checked
+    /// -- see `tests/it/ipc.rs`, where `demo_load`'s profile guard is checked
     /// against a pool pointing at nothing (the guard has to refuse before any
     /// query, and that is what makes the test say so). Streams D, E and F test
     /// their commands through this one blessed path rather than each inventing

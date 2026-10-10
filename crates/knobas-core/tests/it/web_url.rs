@@ -6,7 +6,7 @@
 //! twin written to check it would be a second rule to keep in step. That is
 //! the reasoning `ancestor_path.rs` records for `ancestor_path_read!`, and
 //! this file is its sibling: the normalisation's *semantics* are pinned here,
-//! against the database, and `crates/knobas-app/tests/url_resolve.rs` pins
+//! against the database, and `crates/knobas-app/tests/it/url_resolve.rs` pins
 //! what the command built on it answers.
 //!
 //! **Every assertion is written as a pair or as an absence.** A normalisation

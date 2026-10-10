@@ -2351,7 +2351,7 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
 ///    **assignee** (`map.rs`). So this test borrows a seeded ticket by
 ///    assigning it to the suite's own account, and gives it back.
 ///
-/// Every one of the three can be green in `tests/standup_ipc.rs` while this
+/// Every one of the three can be green in `tests/it/standup_ipc.rs` while this
 /// join is broken, and the third is the one no scratch fixture can settle: it
 /// rests on what the *adapter* puts in `author`, against a real server, for
 /// the account the source is really configured as.
@@ -2628,7 +2628,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
 /// the no-field arm has no real product to witness it, and is the adapter's
 /// unit test's alone.
 ///
-/// That the call **writes nothing** is `tests/sources_crud.rs`'s claim over
+/// That the call **writes nothing** is `tests/it/sources_crud.rs`'s claim over
 /// the mock; it is not re-asserted on the row here, because the scheduler
 /// [`app`] starts may run the source on its own clock and write a verdict of
 /// its own.

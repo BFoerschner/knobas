@@ -1,11 +1,11 @@
 //! Logging a day's work, from the draft to the local copy that names it
 //! (issue #280).
 //!
-//! `tests/time_ipc.rs` has the draft's reads -- which blocks a day is made of,
+//! `tests/it/time_ipc.rs` has the draft's reads -- which blocks a day is made of,
 //! what the candidates are. This is the half that needs a source on the other
 //! end of the write queue, and the source here is a **trait-level fake**: it
 //! records the op it was handed and answers a receipt, exactly as
-//! `tests/inbox_ipc.rs`'s does.
+//! `tests/it/inbox_ipc.rs`'s does.
 //!
 //! # Why a fake and not a Jira
 //!

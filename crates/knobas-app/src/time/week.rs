@@ -55,7 +55,7 @@
 //! one statement, and nothing leaves `sent`), so this is a backstop rather
 //! than a column anybody has seen; if a path to it ever appears, *held* is
 //! the least wrong of the four and the cell will want revisiting with it.
-//! `tests/week_ipc.rs`'s `a_discard_leaves_a_worklog_jira_answered_for_alone`
+//! `tests/it/week_ipc.rs`'s `a_discard_leaves_a_worklog_jira_answered_for_alone`
 //! builds that fixture and reads the cell, so the claim is pinned rather than
 //! merely written down.
 //!

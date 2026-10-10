@@ -92,7 +92,7 @@ pub(crate) fn tombstone(source_id: &str, id: &str, name: &str) -> SyncItem {
 /// bug. `websearch_to_tsquery('english', …)` drops `up` and `down` as
 /// stopwords, so a query that is only a state lexes to the empty tsquery and
 /// matches nothing. Measured, and pinned by
-/// `crates/knobas-app/tests/adapter_to_mirror.rs`'s
+/// `crates/knobas-app/tests/it/adapter_to_mirror.rs`'s
 /// `a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name`. The
 /// state still belongs in this string: it is the excerpt the launcher draws
 /// under the title, which is the half of story 52 that is deliverable.
@@ -175,7 +175,7 @@ monitor_status{monitor_id=\"99\",monitor_name=\"future\",monitor_type=\"http\",m
     /// the state are the first thing the indexed text says, so a launcher row
     /// shows the state under the title. It does **not** make the state a search
     /// term -- see [`body_text`]'s own doc, and
-    /// `crates/knobas-app/tests/adapter_to_mirror.rs`, which measures `down`
+    /// `crates/knobas-app/tests/it/adapter_to_mirror.rs`, which measures `down`
     /// lexing to the empty tsquery and finding nothing.
     #[test]
     fn the_indexed_text_leads_with_the_name_and_the_state() {

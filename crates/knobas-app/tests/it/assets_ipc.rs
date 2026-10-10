@@ -1,7 +1,7 @@
 //! The estate at the seam the nine commands are shims over, and at the seam
 //! Tauri dispatches through (issues #428, #429, #431, #434 and #435).
 //!
-//! Two halves, the same split `tests/backup_ipc.rs` and `tests/time_ipc.rs`
+//! Two halves, the same split `tests/it/backup_ipc.rs` and `tests/it/time_ipc.rs`
 //! make:
 //!
 //! * the *behaviour* -- create a three-level tree, read it column by column,
@@ -13,7 +13,7 @@
 //!   `tauri::test` mock runtime.
 //!
 //! Every behavioural test gets a **database of its own**
-//! (`knobas_db::test_util::scratch_database`), not the binary's shared one.
+//! (`knobas_db::test_util::scratch_database`), not the file's shared one.
 //! The estate is a tree with one top level, and the reads this file makes
 //! hardest use of -- "what does the top of the estate hold" and "what does
 //! this asset's history say" -- are answers about a *whole* database. Two
@@ -3213,7 +3213,7 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
 /// Embedded rather than read at run time, so this suite and the file's own
 /// checker (`knobas-core`'s `tests/it/estate_file.rs`) fail together the day it
 /// stops being true.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
 
 /// The monitor list `seed-kuma.sh` creates in Uptime Kuma, embedded.
 ///
@@ -3222,7 +3222,7 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 /// the one place the two are read together. Embedded for `ESTATE_FILE`'s
 /// reason -- so a change to either file is a red gate here rather than a
 /// discovery later.
-const MONITORS_FILE: &str = include_str!("../../../testenv/monitors.json");
+const MONITORS_FILE: &str = include_str!("../../../../testenv/monitors.json");
 
 /// One count.
 async fn rows(pool: &PgPool, statement: &'static str) -> i64 {
@@ -5829,7 +5829,7 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
 /// read off the file the component ships.
 #[test]
 fn the_tabs_own_action_table_is_keyed_by_those_same_spellings() {
-    const MONITORS_VIEW: &str = include_str!("../../../app/src/lib/assets/MonitorsView.svelte");
+    const MONITORS_VIEW: &str = include_str!("../../../../app/src/lib/assets/MonitorsView.svelte");
 
     for op in [assets::PAUSE_MONITOR, assets::RESUME_MONITOR] {
         assert!(
@@ -6793,7 +6793,7 @@ fn the_estate_file_producer_is_not_an_importer_and_hcloud_is() {
 // witnessed by `just estate-live` and by nothing here (ADR-0013;
 // `crates/knobas-app/tests/estate_live.rs`).
 //
-// **They are `#[cfg(unix)]`**, `tests/checkout_ipc.rs`' stub's arrangement and
+// **They are `#[cfg(unix)]`**, `tests/it/checkout_ipc.rs`' stub's arrangement and
 // for its reason: the stub is a `#!/bin/sh` script made executable through
 // `PermissionsExt`, which does not compile on Windows. On Windows this
 // criterion is unwitnessed, and this comment says so rather than a green run
@@ -6840,7 +6840,7 @@ const DOCKER_PS_TEAMCITY: &str = concat!(
 /// and from the other side: a producer that put the context anywhere else in
 /// the list gets *no context named `ps`* rather than an answer.
 ///
-/// One argument per line in `argv`, `tests/checkout_ipc.rs`' rule: the count is
+/// One argument per line in `argv`, `tests/it/checkout_ipc.rs`' rule: the count is
 /// half of what is under test, and a space-joined line could not tell one
 /// argument holding a space from two arguments.
 #[cfg(unix)]
@@ -7444,7 +7444,7 @@ fn the_docker_producer_is_an_importer_and_declares_the_two_part_key() {
 /// The pool is **unreachable**, which is what makes this a statement about
 /// order: the refusal is reached before anything queries, so a guard that ran
 /// after the first read would surface a connection error instead of this
-/// sentence. `tests/ipc.rs`' `demo_load_is_refused_outside_the_demo_profile`
+/// sentence. `tests/it/ipc.rs`' `demo_load_is_refused_outside_the_demo_profile`
 /// is the same arrangement.
 #[test]
 fn the_docker_importer_takes_no_credential_and_says_so() {

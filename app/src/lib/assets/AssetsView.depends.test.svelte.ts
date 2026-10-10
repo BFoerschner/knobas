@@ -11,7 +11,7 @@
  *
  * **What is witnessed here is the panel, not the walk.** Whether the closure
  * is right — descendants, both relations, a cycle walked once, the routes left
- * out of the count — is `crates/knobas-app/tests/assets_ipc.rs` over a real
+ * out of the count — is `crates/knobas-app/tests/it/assets_ipc.rs` over a real
  * PostgreSQL and the real estate file. What is this file's is the half a
  * reader touches: the count is the assets', the path and the relation are on
  * every line, the routes are beneath and outside the number, and the panel

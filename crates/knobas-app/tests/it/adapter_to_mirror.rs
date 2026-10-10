@@ -183,7 +183,7 @@ async fn dedicated() -> sqlx::PgConnection {
         .expect("a connection outside every pool")
 }
 
-/// A per-test instance id. The embedded server is shared across the binary, so
+/// A per-test instance id. The database is shared across the file, so
 /// a hardcoded namespace would make two tests each other's fixture.
 fn unique_id() -> String {
     format!("seam-{}", uuid::Uuid::new_v4().simple())
@@ -640,7 +640,7 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
 /// each suite is green about its own copy. It is `/metrics` as the pinned image
 /// (2.5.3) answered on 2026-09-06, and `crates/knobas-source-kuma/tests/live_kuma.rs`
 /// is what keeps it current.
-const KUMA_METRICS: &str = include_str!("../../knobas-source-kuma/tests/it/support/metrics.txt");
+const KUMA_METRICS: &str = include_str!("../../../knobas-source-kuma/tests/it/support/metrics.txt");
 
 /// The API key the fake below accepts, and the `Authorization` it arrives as:
 /// HTTP Basic with an empty username, which is how Kuma authenticates
@@ -867,7 +867,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
 
     // ...and out again through the launcher's own read. Scoped by the source id
     // this test minted, because the database is shared with every other test in
-    // this binary.
+    // this file.
     let found = knobas_app::commands::search::search_inner(
         &pool,
         knobas_search::SearchQuery {
@@ -945,12 +945,12 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
 /// were.
 ///
 /// A scratch database of its own, unlike the rest of this file: the import
-/// resolves a name against *every* monitor the mirror holds, and this binary's
+/// resolves a name against *every* monitor the mirror holds, and this file's
 /// shared database has another test's Kuma in it.
 #[tokio::test]
 async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
     /// The file the demo profile and `estate_exit.rs` load -- the real estate.
-    const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+    const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
 
     let kuma = spawn_mock_kuma().await;
     let scratch = knobas_db::test_util::scratch_database("kuma-estate-import").await;

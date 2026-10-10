@@ -37,7 +37,7 @@ use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
 use knobas_core::suggest::{RuleClass, SuggestionEntry};
 use knobas_sync::mirror::{declared_inline_union, declared_union, interface_body};
 
-const MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
+const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
 
 /// The keys `value` serializes to must be exactly `expected`, and exactly what
 /// `interface <name>` in `entity.ts` declares -- both directions.

@@ -1,6 +1,6 @@
 //! The week timesheet's numbers, and *Log all* (issue #283).
 //!
-//! `tests/time_ipc.rs` has the timer and the day's blocks; `tests/worklog_ipc.rs`
+//! `tests/it/time_ipc.rs` has the timer and the day's blocks; `tests/it/worklog_ipc.rs`
 //! has one day becoming one worklog. This is the week: the four numbers a cell
 //! carries, and the bulk write that turns a week's unlogged blocks into one
 //! worklog per day and ticket.

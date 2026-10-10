@@ -1108,7 +1108,7 @@ gitea-live-capped:
 # WHICH RECIPE CERTIFIES WHAT. `gitea-live` above certifies the *adapter*
 # against the shapes interfaces §4.2 fixes. This one certifies the *flow* over
 # it: the real orchestrator, the real write queue, the real adapters and a real
-# database. Its sibling `tests/start_work.rs` proves the same sequence against a
+# database. Its sibling `tests/it/start_work.rs` proves the same sequence against a
 # fake dispatcher and runs inside `just check`; nothing there touches a server.
 # Until this recipe existed nothing ran this file at all, and what an unrun
 # suite accumulates is what #347 found in it: an assertion no implementation
@@ -1676,7 +1676,7 @@ atlassian-live:
 # producer against the four engines `testenv/hetzner/estate.json` names.
 #
 # WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. Both producers are
-# run against a fake in `just check` (`tests/assets_ipc.rs`: a recorded hcloud
+# run against a fake in `just check` (`tests/it/assets_ipc.rs`: a recorded hcloud
 # answer, and a stub docker executable), which certifies shape -- the decode,
 # the file, the origin-key match, the argument rule, the landing. A recording
 # and a stub are green forever, so these facts have no witness but this recipe:

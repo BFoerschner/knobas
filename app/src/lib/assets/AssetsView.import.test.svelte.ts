@@ -9,7 +9,7 @@
  * ## What is asserted here, and what is asserted elsewhere
  *
  * Which properties survive an import is the **backend's** rule and is pinned
- * at its own seam (`crates/knobas-app/tests/assets_ipc.rs`): a second copy of
+ * at its own seam (`crates/knobas-app/tests/it/assets_ipc.rs`): a second copy of
  * *"a hand edit is any activity line by the user on that property"* in the
  * frontend would be the copy that goes stale. What is here is the part only
  * this view can get wrong — that choosing a file previews rather than
@@ -483,7 +483,7 @@ test("Import applies the chosen file and the Tree re-reads", async () => {
  * plan: an apply that dropped it would write a plan the reader was never
  * shown. `assets::preview_import` and `assets::apply_import` refuse a producer
  * they do not know, so the id itself is checked at its own seam
- * (`crates/knobas-app/tests/assets_ipc.rs`) and not spelled out twice here.
+ * (`crates/knobas-app/tests/it/assets_ipc.rs`) and not spelled out twice here.
  */
 test("the chooser offers the estate file and sends it with both calls", async () => {
   const calls = render();
@@ -544,7 +544,7 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
 //
 // The producer itself, the file it builds and the origin-key match are the
 // backend's and are pinned at their own seams
-// (`crates/knobas-app/tests/assets_ipc.rs` against a recording,
+// (`crates/knobas-app/tests/it/assets_ipc.rs` against a recording,
 // `just estate-live` against the real Hetzner). What is here is what only this
 // surface can get wrong: that the token is asked for **once**, that *land
 // under* is asked **only when a new server exists**, and that what came back is

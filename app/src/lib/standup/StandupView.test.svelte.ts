@@ -6,7 +6,7 @@
  * spec #272's testing decisions, and the reason nothing here reaches into the
  * component's state. The bridge is injected, so no Tauri and no database: what
  * the backend puts on the three lists is
- * `crates/knobas-app/tests/standup_ipc.rs`'s, and what is asserted here is
+ * `crates/knobas-app/tests/it/standup_ipc.rs`'s, and what is asserted here is
  * that the view asks for the right days and draws the answer as something a
  * reader can act on.
  */

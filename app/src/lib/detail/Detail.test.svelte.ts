@@ -398,7 +398,7 @@ test("an undeclared kind is browsable — §3a's promise", async () => {
  * The adapter's own words win when it has any.
  *
  * The backend resolves `kind_info` now (`commands/entity.rs::kind_info_for`,
- * pinned by `tests/entity.rs`), so this is the path every configured source's
+ * pinned by `tests/it/entity.rs`), so this is the path every configured source's
  * detail takes; the null-`kind_info` test above is what covers the fallback.
  */
 test("a declared kind_info names the header", async () => {

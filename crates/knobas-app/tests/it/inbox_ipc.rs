@@ -10,7 +10,7 @@
 //! exists in no other file: `knobas-core/tests/it/inbox.rs` stops at the
 //! derivation and `knobas-sync/tests/it/write_queue.rs` starts at a submitted
 //! write. Both can be green while the join between them is broken, which is
-//! the argument `tests/adapter_to_mirror.rs` makes for its own seam.
+//! the argument `tests/it/adapter_to_mirror.rs` makes for its own seam.
 //!
 //! **The dispatcher is a fake `Source`** that records what it was asked to do,
 //! so the assertion is on the op the adapter received rather than on a row
@@ -18,7 +18,7 @@
 //!
 //! # Why every test gets a database of its own
 //!
-//! The derivation is a pass over the whole mirror, so the binary's shared
+//! The derivation is a pass over the whole mirror, so the file's shared
 //! database would put every other test's fixtures in this one's stream. The
 //! same reasoning `knobas-core/tests/it/inbox.rs` records. `scratch_database`
 //! hands back a `Connector`, which is also what the flush loop's

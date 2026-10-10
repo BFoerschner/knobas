@@ -48,7 +48,7 @@ pub async fn demo_load<R: tauri::Runtime>(
 ) -> Result<knobas_sync::SyncReport, IpcError> {
     // Before the pool is even asked for: the wrong profile must write nothing
     // at all, and "refused" must not be confusable with "the database was
-    // busy". `tests/ipc.rs` pins that ordering against an unreachable pool.
+    // busy". `tests/it/ipc.rs` pins that ordering against an unreachable pool.
     if !profile.allows_demo_data() {
         return Err(IpcError::invalid(format!(
             "demo data belongs to the demo profile -- start knobas with {} (or `just demo`)",
@@ -250,7 +250,7 @@ pub async fn credential_health<R: tauri::Runtime>(
 /// `CommandArg` but no `Deserialize`, and the only route from
 /// `Option<Channel<_>>` to `CommandArg` is the blanket impl over `Deserialize`,
 /// so the wrapped form does not compile. P3's documented fallback is therefore
-/// in force, and the evidence is pinned in `crates/knobas-app/tests/ipc.rs`.
+/// in force, and the evidence is pinned in `crates/knobas-app/tests/it/ipc.rs`.
 ///
 /// # Errors
 /// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a source that
@@ -790,7 +790,7 @@ mod tests {
     /// The attribute above the item is deliberately *not* part of the anchor:
     /// `#[tauri::command]` written anywhere in `src/commands/**`, string
     /// literals included, is a command declaration as far as
-    /// `tests/wiring.rs::every_command_is_in_the_handler_list` is concerned.
+    /// `tests/it/wiring.rs::every_command_is_in_the_handler_list` is concerned.
     fn body_of(source: &str, signature: &str) -> Option<String> {
         let code = strip_line_comments(source);
         let at = code

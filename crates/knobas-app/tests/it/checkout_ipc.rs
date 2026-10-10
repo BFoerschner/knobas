@@ -13,7 +13,7 @@
 //! # Why every test gets a database of its own
 //!
 //! The clones root is **one `knobas.setting` row per database**, and every test
-//! here either sets it or asserts what it is. Sharing this binary's database --
+//! here either sets it or asserts what it is. Sharing this file's database --
 //! the pattern `contexts_ipc.rs` uses, and the right one where every fixture is
 //! namespaced by an id -- would put the tests in each other's setting: measured,
 //! and three of them failed on it. A global setting cannot be namespaced, so
@@ -41,7 +41,7 @@ async fn pool() -> PgPool {
         .expect("a pool onto the scratch db")
 }
 
-/// A token no other test in this binary writes.
+/// A token no other test in this file writes.
 fn unique() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -434,7 +434,7 @@ async fn a_branch_with_no_repository_in_the_mirror_is_no_checkout() {
 /// One source may hold `tidewater/payout` and `tidewater/payout-service`, and
 /// the first is a strict prefix of the second — so a branch of
 /// `payout-service` starts with *both* repo ids, and the shorter one is a
-/// different repository with a different clone. Nothing else in this binary
+/// different repository with a different clone. Nothing else in this file
 /// can see it: every other test gives its source one repo, and the ordering
 /// clause is invisible while that is true.
 #[tokio::test]
@@ -495,7 +495,7 @@ async fn a_branch_resolves_to_the_longest_repo_id_it_starts_with() {
 /// repository lookup would match a branch of `payoutXsvc` -- a *different*
 /// repository, with a different clone on the disk -- and the panel would show
 /// somebody the wrong working tree. `starts_with` has no pattern in it, and
-/// this is the only test in the binary that can tell the two apart, because
+/// this is the only test in the file that can tell the two apart, because
 /// every other fixture's ids are wildcard-free.
 #[tokio::test]
 async fn an_underscore_in_a_repo_name_is_not_a_wildcard() {

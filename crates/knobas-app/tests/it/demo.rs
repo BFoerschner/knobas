@@ -1,6 +1,6 @@
 //! Demo mode against a real PostgreSQL.
 //!
-//! `test_util` hands every test in this binary the *same* database, and the
+//! `test_util` hands every test in this file the *same* database, and the
 //! binary runs them concurrently -- so the absolute row counts below are only
 //! meaningful while nothing else is syncing `mock`. Every test that syncs
 //! `mock` **on that shared database** takes [`MOCK`] for its whole duration; a
@@ -403,10 +403,10 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
 /// whole chain from `fixtures/tidewater/work.json` through `MockSource::sync`
 /// and the upsert to the room a reader sees.
 ///
-/// Scoped to `mock` because this binary shares one database and the census is a
+/// Scoped to `mock` because this file shares one database and the census is a
 /// pass over the whole live corpus. Every test here mirrors under `mock` today,
 /// so the filter changes nothing yet; it is what keeps this an equality about
-/// the demo dataset rather than about whatever a later test in this binary
+/// the demo dataset rather than about whatever a later test in this file
 /// happens to mirror beside it.
 #[tokio::test]
 async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
@@ -470,7 +470,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     knobas_db::migrate::run(&pool).await.unwrap();
 
     let file: serde_json::Value =
-        serde_json::from_str(include_str!("../../../testenv/hetzner/estate.json"))
+        serde_json::from_str(include_str!("../../../../testenv/hetzner/estate.json"))
             .expect("the estate file parses");
     let ids = |key: &str| -> Vec<String> {
         file[key]
@@ -513,7 +513,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     demo::demo_load_inner(&pool).await.unwrap();
     let preview = knobas_app::assets::preview_import(
         &pool,
-        include_str!("../../../testenv/hetzner/estate.json"),
+        include_str!("../../../../testenv/hetzner/estate.json"),
         ESTATE_FILE_PRODUCER,
     )
     .await
@@ -563,7 +563,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     .fetch_all(&pool)
     .await
     .expect("the origin lines the imports wrote");
-    // Per entity and not an absolute count of the table: this binary's
+    // Per entity and not an absolute count of the table: this file's
     // database is shared and several of its tests call `demo_load_inner`, so
     // how many *summary* lines there are depends on which of them have run.
     // How many origin lines one asset has does not -- it is one, for every
@@ -603,7 +603,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 /// **Its own database, and therefore no [`MOCK`] guard.** The clones root is
 /// one `knobas.setting` row per database, which cannot be namespaced by a
 /// fixture id -- the reason `checkout_ipc.rs` gives for its own scratch
-/// database. A test that set it on this binary's shared pool would be setting
+/// database. A test that set it on this file's shared pool would be setting
 /// it for every other test here.
 #[tokio::test]
 async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {

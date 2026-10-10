@@ -5,7 +5,7 @@
  * The seam is **a rendered view in, user-visible text and addresses out** —
  * spec #272's testing decisions, and the reason nothing here reaches into the
  * component's state. The bridge is injected, so no Tauri and no database: what
- * the backend does with these calls is `crates/knobas-app/tests/time_ipc.rs`'s,
+ * the backend does with these calls is `crates/knobas-app/tests/it/time_ipc.rs`'s,
  * and what is asserted here is that the view asks for the right thing and
  * draws the answer.
  *

@@ -42,7 +42,7 @@ const written: string[] = [];
  * Recorded rather than answered: this file cannot see a link a note carries,
  * only the one it asked for, and what the room decides *is* the argument. The
  * links themselves are checked where the database is, in
- * `crates/knobas-app/tests/entity.rs`.
+ * `crates/knobas-app/tests/it/entity.rs`.
  */
 const born: (NoteLinkInput[] | undefined)[] = [];
 

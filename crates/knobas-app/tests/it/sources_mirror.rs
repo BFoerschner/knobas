@@ -11,8 +11,8 @@
 //! way the mirror declares it must deserialize into the Rust type. A renamed
 //! field there is a form whose submissions Tauri rejects at run time.
 
-const MIRROR: &str = include_str!("../../../app/src/lib/ipc/sources.ts");
-const ENTITY_MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
+const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
+const ENTITY_MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
 
 /// The keys `value` serializes to must be exactly `expected`, and exactly what
 /// the mirror's `interface <name>` declares -- both directions.
@@ -698,4 +698,4 @@ fn the_mirror_invokes_the_write_queue_commands_by_their_registered_names() {
     }
 }
 
-const SOURCES_COMMANDS: &str = include_str!("../src/commands/sources.rs");
+const SOURCES_COMMANDS: &str = include_str!("../../src/commands/sources.rs");

@@ -5,7 +5,7 @@
  * The seam is spec #272's: **a rendered view in, user-visible text and the
  * calls it made out.** Nothing here reaches into the component's state, and
  * nothing here re-tests the backend — what a publish *does* is
- * `crates/knobas-app/tests/protocol_ipc.rs`'s, and what is asserted here is
+ * `crates/knobas-app/tests/it/protocol_ipc.rs`'s, and what is asserted here is
  * which question the reader is asked first and what the answer is turned into.
  *
  * The one rule this file is really about is story 68: **with two Confluence

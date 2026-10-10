@@ -46,7 +46,7 @@ async fn the_archive_carries_the_owned_schema_and_leaves_the_mirror_out() {
     // those read the archive's *table of contents*, which lists a table
     // whether or not it has rows. That notes come back with their contents is
     // proved where it is observable, by the round trip in
-    // `knobas-app/tests/backup.rs`.
+    // `knobas-app/tests/it/backup.rs`.
     let note_id = format!("note:{}", unique("scope"));
     let entity_id = format!("mock:{}", unique("scope"));
     // A note is an entity (`0006`'s `note_entity_fk`), so its address goes in

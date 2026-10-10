@@ -4,7 +4,7 @@
  *
  * The seam is spec #272's — **a rendered view in, user-visible text and
  * addresses out**. The bridge is injected, so no Tauri and no database: what
- * the backend makes of these calls is `crates/knobas-app/tests/week_ipc.rs`'s.
+ * the backend makes of these calls is `crates/knobas-app/tests/it/week_ipc.rs`'s.
  *
  * Fixtures use the **local** `Date` constructor, the discipline
  * `DayReview.test.svelte.ts` records: a week is a local thing and these tests

@@ -266,7 +266,7 @@ check "trailing blank lines are not a second argument" "/src/x" \
 #
 # The driver polls for the stub's output, and until this ticket it broke on
 # `[ -s "$record" ]` -- any non-empty file. Its Rust twin, `recorded()` in
-# `crates/knobas-app/tests/checkout_ipc.rs`, waits for the trailing newline,
+# `crates/knobas-app/tests/it/checkout_ipc.rs`, waits for the trailing newline,
 # which is the write having *finished*. A wait on non-emptiness can hand the
 # comparison half a line, and half a line is reported as *the command was not
 # given the checkout path*: the feature blamed for a race in the harness, on
@@ -352,7 +352,7 @@ rm -rf "$records"
 # pins the spelling of the Rust condition, which is all a shell test can see of
 # it -- the same cheap cross-file pin as the labels below, and for the same
 # reason.
-twin=../crates/knobas-app/tests/checkout_ipc.rs
+twin=../crates/knobas-app/tests/it/checkout_ipc.rs
 if grep -qF "text.ends_with('\\n')" "$twin"; then
     check "the Rust twin still waits for the trailing newline" yes yes
 else

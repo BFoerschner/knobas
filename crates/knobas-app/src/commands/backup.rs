@@ -264,7 +264,7 @@ mod tests {
 
     /// The five commands, named in the mirror's `invoke` calls.
     ///
-    /// `tests/ipc.rs` proves they are registered and dispatch; this proves the
+    /// `tests/it/ipc.rs` proves they are registered and dispatch; this proves the
     /// frontend calls them by the names they are registered under. A typo on
     /// either side is a call that fails only at run time.
     #[test]

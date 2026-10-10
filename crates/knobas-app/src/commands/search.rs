@@ -16,7 +16,7 @@
 //! only place a behaviour lives is a behaviour no test can reach. Each command
 //! here is therefore two lines (resolve the pool, call the inner function) and
 //! everything worth asserting is in the `_inner`, which takes a `&PgPool` and
-//! is exercised by `tests/search_ipc.rs`. `demo_load_inner` set the pattern.
+//! is exercised by `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
 
 use sqlx::PgPool;
 use tauri::State;
@@ -497,7 +497,7 @@ mod tests {
     /// A search failure arrives as a code the frontend can branch on.
     ///
     /// The database arm is covered against a real closed pool in
-    /// `tests/search_ipc.rs`; this pins the two that a caller can provoke, and
+    /// `tests/it/search_ipc.rs`; this pins the two that a caller can provoke, and
     /// pins them here because the `From` impl is the only decision this module
     /// makes.
     #[test]

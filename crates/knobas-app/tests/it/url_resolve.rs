@@ -8,7 +8,7 @@
 //! decoding -- through the `tauri::test` mock runtime.
 //!
 //! Every behavioural test gets a **database of its own**
-//! (`knobas_db::test_util::scratch_database`) rather than the binary's shared
+//! (`knobas_db::test_util::scratch_database`) rather than the file's shared
 //! one. Resolution is a question about a *whole* mirror: "no row anywhere
 //! carries this URL" is the miss, and two tests sharing a database would make
 //! one of them the other's fixture -- a URL another test seeded is
@@ -452,7 +452,7 @@ async fn a_row_with_no_address_is_unreachable_by_paste() {
 #[test]
 fn the_migration_carries_the_macros_expression_verbatim() {
     const MIGRATION: &str =
-        include_str!("../../knobas-db/migrations/0023_the_url_a_paste_names.sql");
+        include_str!("../../../knobas-db/migrations/0023_the_url_a_paste_names.sql");
     let expression = knobas_core::web_url_normalized!("web_url");
     assert!(
         MIGRATION.contains(expression),

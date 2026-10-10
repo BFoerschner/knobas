@@ -47,8 +47,8 @@ use knobas_search::{SearchFilters, SearchQuery};
 use sqlx::PgPool;
 
 /// The estate as provisioned, embedded -- the same bytes `sources::demo` and
-/// `tests/assets_ipc.rs` embed.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+/// `tests/it/assets_ipc.rs` embed.
+const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
 
 /// The container the checklist follows, and the server that holds it.
 ///
@@ -83,7 +83,7 @@ const NOTEBOOK: &str = "asset:notebook";
 /// being shutdown"*, in three of the seven tests here, decided by scheduling.
 /// A connector is configuration, so it crosses runtimes safely and each test
 /// opens connections of its own onto the same database, which is what
-/// `test_util::test_pool` does for a binary's shared one.
+/// `test_util::test_pool` does for a file's shared one.
 static ESTATE: tokio::sync::OnceCell<knobas_db::embedded::Connector> =
     tokio::sync::OnceCell::const_new();
 

@@ -24,7 +24,7 @@
 //! `tests/start_work_live.rs` is `#[ignore]`d because it needs a seeded Gitea
 //! in a container. This flow touches Jira and nothing else, and `knobas-mockd`
 //! serves Jira in-process on a random port — the treatment
-//! `tests/adapter_to_mirror.rs` gets, and for the same reason: it runs in
+//! `tests/it/adapter_to_mirror.rs` gets, and for the same reason: it runs in
 //! `just check`, so the two green halves of "the shell queues it" and "the
 //! source refuses it" cannot drift apart unnoticed.
 //!

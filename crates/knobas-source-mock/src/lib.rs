@@ -550,7 +550,7 @@ fn tombstoned_item(source_id: &str) -> SyncItem {
 /// key. Absence is the miss direction, and a value invented here would take it
 /// away from every reader downstream. Pinned by
 /// `a_demo_ticket_with_no_project_syncs_and_its_payload_names_none` in
-/// `knobas-app/tests/demo.rs`.
+/// `knobas-app/tests/it/demo.rs`.
 fn ticket_payload(t: &Ticket) -> serde_json::Value {
     let mut payload = serde_json::to_value(t).expect("a fixture record must serialize");
     if let Some(project) = &t.project {

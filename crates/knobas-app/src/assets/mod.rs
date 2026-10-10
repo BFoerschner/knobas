@@ -2171,7 +2171,7 @@ pub fn offer_actions(rows: &mut [MonitorRow], offered: &HashMap<String, Vec<Stri
 /// every file under `crates/*/src/` that names the SPI's write op -- a roster
 /// read is not one, and must not look like one.
 ///
-/// `tests/assets_ipc.rs`'s `the_monitors_tab_offers_the_ops_the_spi_names`
+/// `tests/it/assets_ipc.rs`'s `the_monitors_tab_offers_the_ops_the_spi_names`
 /// holds both spellings to `WriteOp::identifier`, from a file that scan does
 /// not read. `pub` for that test's sake and no other caller's.
 pub const PAUSE_MONITOR: &str = "pause_monitor";
@@ -2180,7 +2180,7 @@ pub const RESUME_MONITOR: &str = "resume_monitor";
 /// (issue #453): *Create monitor for this asset*. Here beside its two siblings
 /// for their reason -- one place in this crate spells what a surface offers,
 /// and `write_choke_point` must not read a roster or a pane read as a write
-/// path. `tests/assets_ipc.rs` holds it to `WriteOp::identifier`.
+/// path. `tests/it/assets_ipc.rs` holds it to `WriteOp::identifier`.
 pub const CREATE_MONITOR: &str = "create_monitor";
 
 /// What the *Not monitored* roster draws: an asset nothing watches, with where
@@ -4655,7 +4655,7 @@ struct RouteInsert {
 /// *preview writes nothing* is made structural rather than merely asserted:
 /// every statement it runs is a `select`, and the one thing that could make
 /// that untrue -- a write added here by somebody reaching for the plan's own
-/// helpers -- is undone on the way out. `tests/assets_ipc.rs`'s
+/// helpers -- is undone on the way out. `tests/it/assets_ipc.rs`'s
 /// `a_preview_writes_nothing_at_all` counts the tables either side of it.
 ///
 /// # Errors

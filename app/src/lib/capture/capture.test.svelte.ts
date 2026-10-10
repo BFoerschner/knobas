@@ -2,7 +2,7 @@
  * The capture window's state (issue #503, criterion 2).
  *
  * The seam is `createCapture`'s ports: a keystroke in, IPC calls out. What the
- * backend then stores is `crates/knobas-app/tests/capture_ipc.rs`'s, and which
+ * backend then stores is `crates/knobas-app/tests/it/capture_ipc.rs`'s, and which
  * links a note is *allowed* to be born with is #502's; what is asserted here is
  * the window's own five decisions — when a note is created, when it is not, what
  * its title is, what each exit does, and which two links the recorded pair

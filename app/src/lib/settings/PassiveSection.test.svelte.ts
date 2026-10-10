@@ -3,7 +3,7 @@
  *
  * The seam is the one the rest of the settings view uses: a rendered section
  * in, user-visible text and bridge calls out. What the backend does with the
- * two calls is `crates/knobas-app/tests/time_ipc.rs`'s; what is asserted here
+ * two calls is `crates/knobas-app/tests/it/time_ipc.rs`'s; what is asserted here
  * is that the section draws what is **stored**, sends what was clicked, and
  * says so when it could not ask.
  */

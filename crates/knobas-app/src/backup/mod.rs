@@ -191,7 +191,7 @@ pub struct BackupState {
 impl BackupState {
     /// The state, without starting the nightly task.
     ///
-    /// Public because `tests/backup_ipc.rs` builds one over a scratch database
+    /// Public because `tests/it/backup_ipc.rs` builds one over a scratch database
     /// and a temporary directory; there is nothing in it a production caller
     /// could misuse, unlike `AppState::over_pool`, so it is not behind a
     /// feature.
@@ -695,7 +695,7 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// One pass of the background task: back up if one is due, then sweep, twice.
 ///
 /// A function rather than the body of the loop so that
-/// `tests/backup_ipc.rs` can run one pass and read what it did; the loop
+/// `tests/it/backup_ipc.rs` can run one pass and read what it did; the loop
 /// around it decides only how often.
 ///
 /// **Neither sweep is conditional on the export.** Observations age out on a

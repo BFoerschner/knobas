@@ -172,7 +172,7 @@ impl CaptureState {
 ///
 /// The seam, and it is here so that the two decisions above it -- *what is
 /// stored* and *what is reported* -- can be driven by a test with no window
-/// server, no event loop and no keyboard. `tests/capture_ipc.rs` registers a
+/// server, no event loop and no keyboard. `tests/it/capture_ipc.rs` registers a
 /// stand-in that refuses one named accelerator, which is the ticket's *"IPC-seam
 /// test with a shortcut the plugin refuses"*: the assertion is about the answer
 /// the settings pane gets, and that answer must not depend on which application

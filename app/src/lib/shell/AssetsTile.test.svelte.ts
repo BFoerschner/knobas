@@ -4,7 +4,7 @@
  * The seam is `Tile.test.svelte.ts`': a rendered tile in, user-visible text
  * and the read it issued out. Who is a *member* is the backend's one statement
  * and is asserted over a real database in
- * `crates/knobas-app/tests/assets_ipc.rs`; what is asserted here is that the
+ * `crates/knobas-app/tests/it/assets_ipc.rs`; what is asserted here is that the
  * tile draws the answer whole — the path included — and that a failed read
  * does not look like an empty room.
  *

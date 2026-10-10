@@ -1,7 +1,7 @@
 //! The backup settings surface, at the seam the commands are shims over, and
 //! at the seam Tauri dispatches through.
 //!
-//! Two halves, the same split `tests/search_ipc.rs` and `tests/ipc.rs` make:
+//! Two halves, the same split `tests/it/search_ipc.rs` and `tests/it/ipc.rs` make:
 //!
 //! * the *behaviour* -- schedule, export, retention, restore -- driven through
 //!   `knobas_app::backup`, which is what each `#[tauri::command]` calls;

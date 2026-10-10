@@ -1477,7 +1477,7 @@ mod tests {
     ///
     /// This asserts the *query*. The round trip -- the response, and the value
     /// landing in `sync.item.payload` -- is
-    /// `knobas-app/tests/adapter_to_mirror.rs`'s
+    /// `knobas-app/tests/it/adapter_to_mirror.rs`'s
     /// `a_classic_projects_epic_link_reaches_the_stored_payload` (issue #125).
     /// Both halves, because either alone is green while the join is broken.
     #[test]

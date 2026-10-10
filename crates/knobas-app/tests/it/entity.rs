@@ -1,6 +1,6 @@
 //! The room's read, against a real PostgreSQL and the mock corpus.
 //!
-//! `test_util` hands every test in this binary the *same* database, so the
+//! `test_util` hands every test in this file the *same* database, so the
 //! corpus is seeded once (see [`seeded`]) and every assertion below is written
 //! to survive another test running beside it: relative counts and set
 //! membership, never absolute row totals.
@@ -55,7 +55,7 @@ fn no_paths() -> knobas_core::payload::Declarations {
 /// The corpus every test reads: the demo load, plus the one tombstone the
 /// fixture does not otherwise contain.
 ///
-/// Seeded at most once per test binary. The guard is held across the whole
+/// Seeded at most once per test file. The guard is held across the whole
 /// seed rather than around each half: two concurrent full syncs of the same
 /// source would each be correct on their own, but the sweep of the plain
 /// fixture and the tombstone run interleaved decide `PAY-198`'s state by
@@ -82,7 +82,7 @@ async fn seeded() -> PgPool {
     pool
 }
 
-/// A token no other test in this binary writes.
+/// A token no other test in this file writes.
 ///
 /// `knobas.activity` is shared with every other test here, so a run's own
 /// lines have to be findable by something only it wrote -- a fixed verb would
@@ -187,7 +187,7 @@ async fn an_empty_filter_list_means_unfiltered_not_empty() {
 /// The page is a window on the filtered set, and `total` describes the set.
 ///
 /// Scoped to the `mock` source, and that is not tidiness: the database is
-/// shared by every test in this binary, so an unfiltered read is a moving
+/// shared by every test in this file, so an unfiltered read is a moving
 /// target — a row another test inserts between the two calls below shifts the
 /// window and makes page two repeat a row from page one. The mock corpus is
 /// written once, by [`seeded`], under a mutex.
@@ -262,7 +262,7 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
 /// database's is its own collation -- and the two disagree the moment a title
 /// starts with a lowercase letter. Every title in the mock corpus happened to
 /// start with a capital, so the disagreement never showed; the first test in
-/// this binary to write a lowercase title made it fail here, in a test that has
+/// this file to write a lowercase title made it fail here, in a test that has
 /// nothing to do with that test's subject (#442, whose monitors really are
 /// called `gitea` and `canary`), and scoping this read to `mock` was the fix.
 ///
@@ -426,7 +426,7 @@ async fn the_recency_window_is_bound_as_a_parameter() {
 ///
 /// Rows of this test's own in a source id nothing else uses, for the reason
 /// [`the_recency_window_is_bound_as_a_parameter`] seeds its own: the corpus is
-/// shared with every other test in this binary.
+/// shared with every other test in this file.
 #[tokio::test]
 async fn a_project_narrows_the_room_within_its_sources() {
     let pool = seeded().await;
@@ -1129,7 +1129,7 @@ async fn a_disabled_sources_entity_opens_with_the_marker_until_reenabled() {
 #[tokio::test]
 async fn activity_can_be_scoped_to_one_entity() {
     let pool = seeded().await;
-    // The activity table is shared with every other test in this binary, so
+    // The activity table is shared with every other test in this file, so
     // this run's lines are found by a verb nobody else writes.
     let verb = format!("opened-{}", unique());
     let mine = knobas_core::entity::EntityRef::parse("mock:PAY-231").unwrap();
@@ -1243,7 +1243,7 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
 // *made* through `create_link_inner` and *observed* through `get_entity_inner`
 // and `recent_activity_inner` -- three different commands, so nothing here can
 // pass by agreeing with itself. Nothing asserts SQL, store internals, or a
-// count of the whole table: the corpus is shared by every test in this binary.
+// count of the whole table: the corpus is shared by every test in this file.
 
 /// Two run-unique entities that are in the mirror, which is what a link needs
 /// at both ends to be *read back*: `get_entity_inner` joins `sync.item`, so an
@@ -1609,7 +1609,7 @@ async fn unlinking_keeps_the_row_and_the_pair_can_be_linked_again() {
 ///
 /// Read back through `recent_activity_inner` *and* through the entity detail's
 /// own history, because those are the two surfaces that draw it (§12.1, §2a) --
-/// and counted with `== 1`, scoped by a verb nobody else in this binary writes,
+/// and counted with `== 1`, scoped by a verb nobody else in this file writes,
 /// so a second row would fail rather than pass unnoticed.
 #[tokio::test]
 async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
@@ -1722,7 +1722,7 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
 
     // The empty state is half the criterion, so it is asserted rather than
     // assumed: the demo fixture ships no links, and this is the only test in
-    // this binary that links `mock:PAY-231` -- every other link test uses
+    // this file that links `mock:PAY-231` -- every other link test uses
     // `linkable_pair`'s run-unique ids for at least one end. A second test
     // linking this entity would fail here, deliberately and not by ordering:
     // the criterion is "Nothing linked yet" being *replaced*.
@@ -1885,7 +1885,7 @@ async fn a_relations_case_does_not_split_its_group() {
 ///
 /// The ref points at a **run-unique mirrored entity** (`linkable_pair`) rather
 /// than at a fixture key, for the reason every link test in this file does:
-/// the database is shared by the whole binary, and
+/// the database is shared by the whole file, and
 /// `a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel` asserts
 /// that `mock:PAY-231` has *no* links -- a note that referred to it would break
 /// that test, from here, by ordering. It is still a real mirror row and not a
@@ -2315,7 +2315,7 @@ async fn a_born_link_survives_the_notes_first_autosave() {
 /// keys `link_detail` writes, so the two lines pair in the note's own history.
 ///
 /// **One line, not three.** Counted with `==`, scoped to the note's own
-/// freshly-minted entity id -- which no other test in this binary can touch --
+/// freshly-minted entity id -- which no other test in this file can touch --
 /// so a writer that announced each link as well as the birth fails here rather
 /// than passing unnoticed. That is #409's rule seen from the other side: a
 /// birth is one event.

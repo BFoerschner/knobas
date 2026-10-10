@@ -430,7 +430,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // What it is for is the walk: that the rail draws a row per list with its
     // count, and that Enter on an estate row hands the shell the Tree's
     // address. The rules themselves are witnessed at the IPC seam over a real
-    // PostgreSQL, in `crates/knobas-app/tests/search_ipc.rs`.
+    // PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
     launcher_home: () => ({
       smart_lists: fakeSmartLists(),
       // The newest of the fixture's corpus, in the shape `list_entities`
@@ -456,7 +456,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // and what they certify is the panel -- the rail drawing a saved row
     // beside the built-ins, the rename field, the two-press delete. The table,
     // the counts, the badge and the grammar's verdict are witnessed at the IPC
-    // seam over a real PostgreSQL, in `crates/knobas-app/tests/search_ipc.rs`.
+    // seam over a real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
     create_smart_list: (args) => fakeCreateSmartList(args),
     rename_smart_list: (args) => fakeRenameSmartList(args),
     delete_smart_list: (args) => fakeDeleteSmartList(args),
@@ -1241,7 +1241,7 @@ function assetDetail(args: Record<string, unknown>) {
  * would show containment on every asset in the browser and the two relation
  * words would be unwalkable. They exist nowhere else: no seed writes them, no
  * import produces them, and the panel's real witness is
- * `crates/knobas-app/tests/assets_ipc.rs` over a scratch PostgreSQL, where the
+ * `crates/knobas-app/tests/it/assets_ipc.rs` over a scratch PostgreSQL, where the
  * links are drawn by the test.
  *
  * `from` depends on / runs on `to`, which is the direction the read walks:
@@ -1407,7 +1407,7 @@ function importEntries(file: { assets: EstateFileAsset[]; routes: EstateFileRout
  * certifying a dialog nobody ships.
  *
  * What it says nothing about is Hetzner: there is no API here, no origin key
- * and no match. `crates/knobas-app/tests/assets_ipc.rs` witnesses the shape
+ * and no match. `crates/knobas-app/tests/it/assets_ipc.rs` witnesses the shape
  * against a recording and `just estate-live` witnesses the real system, which
  * is the split stated in `assets::hcloud`'s own header.
  */
@@ -1442,7 +1442,7 @@ let PRODUCED_FILE: string | null = null;
  * whole reason this state has to be invented here.
  *
  * As above, it says nothing about docker: there is no CLI here and no match.
- * `crates/knobas-app/tests/assets_ipc.rs` drives a stub docker and
+ * `crates/knobas-app/tests/it/assets_ipc.rs` drives a stub docker and
  * `just estate-live` drives the four real contexts.
  */
 function dockerProduce() {
@@ -1535,7 +1535,7 @@ function estateProduce(args: Record<string, unknown>) {
  * property, so it cannot tell a value the file wrote from a value a person
  * typed, and a group composed by guessing would put the dialog's most
  * consequential sentence in front of a reader with nothing behind it. What
- * answers that group is `crates/knobas-app/tests/assets_ipc.rs`, over a real
+ * answers that group is `crates/knobas-app/tests/it/assets_ipc.rs`, over a real
  * PostgreSQL, and the dialog's rendering of all three groups is
  * `AssetsView.import.test.svelte.ts`.
  *
@@ -1624,7 +1624,7 @@ function estateApply(args: Record<string, unknown>) {
  * answers the same *shape* and a different question, which is all a browser
  * pass needs: what it certifies is that the box draws its offers and that
  * taking one opens the columns. What certifies the query itself is
- * `crates/knobas-app/tests/search_ipc.rs`, against a real database.
+ * `crates/knobas-app/tests/it/search_ipc.rs`, against a real database.
  */
 function estateSearch(args: Record<string, unknown>) {
   const query = (args.query ?? {}) as {
@@ -2183,7 +2183,7 @@ const NOTES = new Map<
  * the command as two links, and that the panel then draws a chip for each.
  * Whether the rows exist, whether they make the note a member of the context,
  * and what happens to a target no row ever carried are questions only a
- * database can answer, and `crates/knobas-app/tests/entity.rs` asks them there.
+ * database can answer, and `crates/knobas-app/tests/it/entity.rs` asks them there.
  */
 function createNote(args: Record<string, unknown>) {
   const id = `note:${Math.random().toString(16).slice(2, 6)}`;
@@ -3217,7 +3217,7 @@ function fakeSmartLists() {
  * verdict is `saved::plan`'s, over §4's grammar and this installation's
  * vocabulary, and a second reading of that in TypeScript is exactly the copy
  * that drifts. What the walk sees is the two states drawn; what decides them
- * is asserted over a real database in `crates/knobas-app/tests/search_ipc.rs`.
+ * is asserted over a real database in `crates/knobas-app/tests/it/search_ipc.rs`.
  */
 const FIXTURE_SAVED: { id: string; label: string; query: string; broken?: boolean }[] = [
   { id: "gitea-boxes", label: "Gitea boxes", query: "gitea" },
