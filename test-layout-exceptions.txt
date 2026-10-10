@@ -1,0 +1,162 @@
+# Top-level test files that stay test binaries of their own (ADR-0017).
+#
+# Every other integration test lives in its crate's one binary,
+# `tests/it/main.rs`, as a module named after the file it came from.
+# `scripts/test-layout.sh guard`, run by `just check`, fails on a top-level
+# `crates/<crate>/tests/*.rs` that this list does not name, and on an entry
+# whose file no longer exists.
+#
+# One file per line: `<crate>/<file>` (the file without `.rs`), then its reason.
+# The reason is required. Lines starting with `#` and blank lines are ignored.
+
+# --- Permanent (ADR-0017) ---------------------------------------------------
+
+# Binaries a recipe runs by name with `--test`; a rename would break a recipe
+# the gate never runs, because the live suites are `#[ignore]`d there.
+knobas-app/alert_chain_live  just kuma-live runs it with --test alert_chain_live
+knobas-app/atlassian_live  just atlassian-live runs it with --test atlassian_live
+knobas-app/confluence_live  just atlassian-live runs it with --test confluence_live
+knobas-app/estate_live  just estate-live runs it with --test estate_live
+knobas-app/kuma_write_live  just kuma-live runs it with --test kuma_write_live
+knobas-app/share_exit  just atlassian-live runs it with --test share_exit
+knobas-app/start_work_live  just start-work-live runs it with --test start_work_live
+knobas-app/teamcity_seeded_live  just teamcity-live-seeded runs it with --test teamcity_seeded_live
+knobas-search/coverage  just search-perf runs it with --test coverage
+knobas-search/perf  just search-perf runs it with --test perf
+knobas-source-confluence/live_confluence_seeded  just atlassian-live runs it with --test live_confluence_seeded
+knobas-source-gitea/live_gitea  just gitea-live runs it with --test live_gitea
+knobas-source-gitea/live_gitea_capped  just gitea-live-capped runs it with --test live_gitea_capped
+knobas-source-jira/live_jira_seeded  just atlassian-live runs it with --test live_jira_seeded
+knobas-source-kuma/live_kuma  just kuma-live runs it with --test live_kuma
+knobas-source-teamcity/live_teamcity  just teamcity-live runs it with --test live_teamcity
+knobas-source-teamcity/live_teamcity_seeded  just teamcity-live-seeded runs it with --test live_teamcity_seeded
+
+# knobas-db, whole: embedded.rs re-runs its own binary with --exact and relies
+# on the shared connector being decided once per process.
+knobas-db/backup  knobas-db stays as it is; merging its three files saves two links
+knobas-db/embedded  re-runs its own binary with --exact and needs one connector per process
+knobas-db/schema  knobas-db stays as it is; merging its three files saves two links
+
+# A wall-clock limit of 5 s or less: a merged binary's extra load could turn
+# the deadline into a red gate.
+knobas-http/transport  asserts elapsed() < 5 s on a call its send budget ends early
+knobas-mockd/jira_harness  a 5 s timeout around stop() and 2 s request timeouts
+knobas-source-gitea/litter_guard  asserts elapsed() < 5 s on a 250 ms cleanup budget
+knobas-sync/scheduler_loop  a 5 s timeout on pool.acquire() and 50 ms ticks
+
+# --- Pending merge (TEMPORARY, #571) ----------------------------------------
+#
+# Not exceptions: files waiting for their crate's merge ticket, listed so the
+# guard holds from the day it landed. Each crate's merge ticket deletes its
+# own lines; the last one (#579) deletes this section.
+
+# knobas-app (#579)
+knobas-app/adapter_to_mirror  pending merge into tests/it/ (#579)
+knobas-app/assets_ipc  pending merge into tests/it/ (#579)
+knobas-app/backup_ipc  pending merge into tests/it/ (#579)
+knobas-app/backup  pending merge into tests/it/ (#579)
+knobas-app/capture_ipc  pending merge into tests/it/ (#579)
+knobas-app/checkout_ipc  pending merge into tests/it/ (#579)
+knobas-app/config_schema_mirror  pending merge into tests/it/ (#579)
+knobas-app/contexts_ipc  pending merge into tests/it/ (#579)
+knobas-app/demo  pending merge into tests/it/ (#579)
+knobas-app/entity_mirror  pending merge into tests/it/ (#579)
+knobas-app/entity  pending merge into tests/it/ (#579)
+knobas-app/estate_exit  pending merge into tests/it/ (#579)
+knobas-app/inbox_ipc  pending merge into tests/it/ (#579)
+knobas-app/ipc  pending merge into tests/it/ (#579)
+knobas-app/protocol_ipc  pending merge into tests/it/ (#579)
+knobas-app/search_ipc  pending merge into tests/it/ (#579)
+knobas-app/sources_crud  pending merge into tests/it/ (#579)
+knobas-app/sources_mirror  pending merge into tests/it/ (#579)
+knobas-app/sources_registry  pending merge into tests/it/ (#579)
+knobas-app/standup_ipc  pending merge into tests/it/ (#579)
+knobas-app/start_work  pending merge into tests/it/ (#579)
+knobas-app/status_move  pending merge into tests/it/ (#579)
+knobas-app/suggestions_ipc  pending merge into tests/it/ (#579)
+knobas-app/time_ipc  pending merge into tests/it/ (#579)
+knobas-app/url_resolve  pending merge into tests/it/ (#579)
+knobas-app/week_ipc  pending merge into tests/it/ (#579)
+knobas-app/wiring  pending merge into tests/it/ (#579)
+knobas-app/worklog_ipc  pending merge into tests/it/ (#579)
+
+# knobas-core (#575)
+knobas-core/ancestor_path  pending merge into tests/it/ (#575)
+knobas-core/checkout_scan  pending merge into tests/it/ (#575)
+knobas-core/contexts  pending merge into tests/it/ (#575)
+knobas-core/estate_file  pending merge into tests/it/ (#575)
+knobas-core/inbox  pending merge into tests/it/ (#575)
+knobas-core/link_reads  pending merge into tests/it/ (#575)
+knobas-core/mini_board  pending merge into tests/it/ (#575)
+knobas-core/notes  pending merge into tests/it/ (#575)
+knobas-core/payload_paths  pending merge into tests/it/ (#575)
+knobas-core/projects  pending merge into tests/it/ (#575)
+knobas-core/stores  pending merge into tests/it/ (#575)
+knobas-core/suggestions  pending merge into tests/it/ (#575)
+knobas-core/web_url  pending merge into tests/it/ (#575)
+knobas-core/write_queue  pending merge into tests/it/ (#575)
+
+# knobas-mockd (#577)
+knobas-mockd/allowlist  pending merge into tests/it/ (#577)
+knobas-mockd/cluster  pending merge into tests/it/ (#577)
+knobas-mockd/jira_contract  pending merge into tests/it/ (#577)
+knobas-mockd/jira_issue  pending merge into tests/it/ (#577)
+knobas-mockd/jira_search  pending merge into tests/it/ (#577)
+knobas-mockd/specs_pinned  pending merge into tests/it/ (#577)
+knobas-mockd/state  pending merge into tests/it/ (#577)
+knobas-mockd/teamcity_contract  pending merge into tests/it/ (#577)
+knobas-mockd/teamcity  pending merge into tests/it/ (#577)
+knobas-mockd/violations  pending merge into tests/it/ (#577)
+
+# knobas-search (#574)
+knobas-search/ancestor_path  pending merge into tests/it/ (#574)
+knobas-search/corpus_seam  pending merge into tests/it/ (#574)
+knobas-search/help_card  pending merge into tests/it/ (#574)
+knobas-search/home  pending merge into tests/it/ (#574)
+knobas-search/lists_no_identity  pending merge into tests/it/ (#574)
+knobas-search/lists  pending merge into tests/it/ (#574)
+knobas-search/search  pending merge into tests/it/ (#574)
+knobas-search/sql_containment  pending merge into tests/it/ (#574)
+knobas-search/sql_shape  pending merge into tests/it/ (#574)
+knobas-search/vocab  pending merge into tests/it/ (#574)
+
+# knobas-secrets (#578)
+knobas-secrets/keyring_local  pending merge into tests/it/ (#578)
+
+# knobas-source-gitea (#578)
+knobas-source-gitea/client  pending merge into tests/it/ (#578)
+knobas-source-gitea/contract  pending merge into tests/it/ (#578)
+knobas-source-gitea/sync  pending merge into tests/it/ (#578)
+knobas-source-gitea/write  pending merge into tests/it/ (#578)
+
+# knobas-source-jira (#578)
+knobas-source-jira/field_discovery  pending merge into tests/it/ (#578)
+knobas-source-jira/mockd  pending merge into tests/it/ (#578)
+
+# knobas-source-kuma (#578)
+knobas-source-kuma/contract  pending merge into tests/it/ (#578)
+
+# knobas-source-mock (#578)
+knobas-source-mock/contract  pending merge into tests/it/ (#578)
+
+# knobas-source-teamcity (#578)
+knobas-source-teamcity/mockd  pending merge into tests/it/ (#578)
+
+# knobas-sync (#576)
+knobas-sync/alerts  pending merge into tests/it/ (#576)
+knobas-sync/attach  pending merge into tests/it/ (#576)
+knobas-sync/backfill  pending merge into tests/it/ (#576)
+knobas-sync/config  pending merge into tests/it/ (#576)
+knobas-sync/cursor  pending merge into tests/it/ (#576)
+knobas-sync/dedicated  pending merge into tests/it/ (#576)
+knobas-sync/progress  pending merge into tests/it/ (#576)
+knobas-sync/run_log_recovery  pending merge into tests/it/ (#576)
+knobas-sync/run_log  pending merge into tests/it/ (#576)
+knobas-sync/run  pending merge into tests/it/ (#576)
+knobas-sync/samples  pending merge into tests/it/ (#576)
+knobas-sync/scheduler_run  pending merge into tests/it/ (#576)
+knobas-sync/stats  pending merge into tests/it/ (#576)
+knobas-sync/sweep  pending merge into tests/it/ (#576)
+knobas-sync/write_activity  pending merge into tests/it/ (#576)
+knobas-sync/write_choke_point  pending merge into tests/it/ (#576)
+knobas-sync/write_queue  pending merge into tests/it/ (#576)

@@ -52,7 +52,7 @@ check:
     #!/usr/bin/env bash
     set -euo pipefail
     front_log= cargo_log= front_pid= cargo_pid=
-    cargo_recipes=(fmt shell witness-unit clippy clippy-libs inventory test)
+    cargo_recipes=(fmt shell test-layout witness-unit clippy clippy-libs inventory test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -383,8 +383,42 @@ shell:
 # last four checks compile `ax.swift` and ask the helper for the probe and for
 # a registered path, and skip themselves where macOS and `swiftc` are not both
 # present.
+#
+# The test-layout script's own tests (issue #573) ride here too: they are bash
+# against fixture trees, need nothing installed, and take under a second.
 witness-unit:
     testenv/desktop-witness-test.sh
+    scripts/test-layout-test.sh
+
+# The integration-test layout guard of ADR-0017 (issue #573): a top-level
+# `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its
+# reason, and every entry there must name a file that exists. Everything else is
+# a module of the crate's one binary, `tests/it/main.rs`. Files are found on
+# disk, not with `git ls-files`, because cargo compiles an untracked one too.
+test-layout:
+    scripts/test-layout.sh guard
+
+# The rename check a crate's merge PR runs (issue #573): the working tree's
+# `test-inventory.txt` must be BASE's with every test of CRATES' merged files
+# moved from `test/<file>` to `test/it` as `<file>::<name>`, byte for byte, and
+# nothing else changed. Run `just inventory-update` first.
+#
+#     just inventory-rename knobas-search
+#
+# BASE defaults to the merge-base with `main`, not `main` itself: a sibling PR
+# that lands while this one is open changes `main`'s inventory, and those lines
+# are not this merge's. On a branch rebased onto `main` the two are the same.
+inventory-rename +CRATES:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base=${BASE:-$(git merge-base HEAD main)}
+    old=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-base.XXXXXX")
+    trap 'rm -f "$old"' EXIT
+    trap 'rm -f "$old"; trap - INT; kill -INT $$' INT
+    trap 'rm -f "$old"; trap - TERM; kill -TERM $$' TERM
+    git show "$base:test-inventory.txt" >"$old"
+    echo "inventory-rename: old inventory from $(git rev-parse --short "$base")"
+    scripts/test-layout.sh rename "$old" test-inventory.txt {{CRATES}}
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
