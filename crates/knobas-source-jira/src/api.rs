@@ -153,7 +153,7 @@ mod tests {
 
     /// Every call in this trait, once, against `knobas-mockd`.
     ///
-    /// `tests/mockd.rs` drives the adapter and therefore only reaches the
+    /// `tests/it/mockd.rs` drives the adapter and therefore only reaches the
     /// endpoints a *sync* happens to need -- and with `fields=comment,worklog`
     /// honoured, the fixture's containers arrive complete, so
     /// [`JiraApi::comments`] and [`JiraApi::worklogs`] are never called over the

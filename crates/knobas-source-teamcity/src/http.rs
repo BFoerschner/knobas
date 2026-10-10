@@ -21,7 +21,7 @@
 //! default header on every request it builds. That is what makes "always" a
 //! structural property rather than a habit -- and `knobas-mockd` answers a
 //! TeamCity request without it with 406 plus a recorded violation (deviation
-//! 1), so `tests/mockd.rs` is where the guarantee is actually witnessed.
+//! 1), so `tests/it/mockd.rs` is where the guarantee is actually witnessed.
 //!
 //! Confining every mention of `knobas-http` to this one file is on purpose: a
 //! change requested from the orchestrator then costs one file to apply, not a

@@ -726,7 +726,7 @@ mod tests {
     ///
     /// This is a *representation* check and it cannot see the thing that
     /// actually matters -- whether the server recognises the names. That is
-    /// `tests/mockd.rs`'s job: mockd answers an unknown name with 400 and a
+    /// `tests/it/mockd.rs`'s job: mockd answers an unknown name with 400 and a
     /// recorded violation, so a selector that drifts from the contract fails
     /// there, loudly, rather than here.
     #[test]
@@ -864,7 +864,7 @@ mod tests {
         }
         // ...and the one that is *not* budget: `paused` is not a field on a
         // build, so `BUILD_FIELDS` asking for it is a 400 and a recorded
-        // violation, and `tests/mockd.rs` would fail on
+        // violation, and `tests/it/mockd.rs` would fail on
         // `assert_no_violations()`. Adding a reader would not make this legal,
         // which is the opposite of the advice above -- hence its own case.
         assert!(

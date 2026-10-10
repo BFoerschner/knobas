@@ -7,7 +7,7 @@
 //!   PostgreSQL and asserts on stored rows -- with a *stand-in* adapter whose
 //!   payload is `{"key": …, "payload_version": 1}`. It proves the engine's
 //!   backfill semantics and nothing about any adapter's record.
-//! * `knobas-source-jira/tests/mockd.rs` drives the real adapter over real
+//! * `knobas-source-jira/tests/it/mockd.rs` drives the real adapter over real
 //!   HTTP against `knobas-mockd` and asserts on the parsed [`SyncItem`] --
 //!   with no database anywhere. It proves the query and the parsing and
 //!   nothing about what is stored.
@@ -640,7 +640,7 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
 /// each suite is green about its own copy. It is `/metrics` as the pinned image
 /// (2.5.3) answered on 2026-09-06, and `crates/knobas-source-kuma/tests/live_kuma.rs`
 /// is what keeps it current.
-const KUMA_METRICS: &str = include_str!("../../knobas-source-kuma/tests/support/metrics.txt");
+const KUMA_METRICS: &str = include_str!("../../knobas-source-kuma/tests/it/support/metrics.txt");
 
 /// The API key the fake below accepts, and the `Authorization` it arrives as:
 /// HTTP Basic with an empty username, which is how Kuma authenticates

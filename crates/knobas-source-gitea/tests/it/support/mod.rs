@@ -10,10 +10,10 @@
 //! from its OpenAPI document (`/swagger.v1.json`: `Repository`, `Branch`,
 //! `PullRequest`, `Commit`, `Comment`).
 
-// This module is compiled separately into every test binary that declares
-// `mod support;`, and each of them uses a different part of it -- so without
-// this, `clippy --all-targets -- -D warnings` fails on whatever one of them
-// happens not to call.
+// Every module of the crate's test binary that uses this (`client`, `contract`,
+// `sync`, `write`) uses a different part of it -- so without this,
+// `clippy --all-targets -- -D warnings` fails on whatever none of them happens
+// to call.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,7 +1,7 @@
 //! The one test that touches a real keychain. **Never run by `just check`.**
 //!
 //! Run it by hand on macOS with:
-//!     cargo test -p knobas-secrets --test keyring_local -- --ignored
+//!     cargo test -p knobas-secrets --test it keyring_local -- --ignored
 //! It writes under a per-run service name and deletes what it wrote, so it
 //! cannot collide with the credentials a real knobas stored.
 

@@ -610,7 +610,7 @@ mod tests {
     /// reads more. A bound of N reads would have given up after the same reads
     /// after the same seconds both times, whatever the budget said.
     ///
-    /// Not in `tests/contract.rs`, where issue #486 placed it, and the
+    /// Not in `tests/it/contract.rs`, where issue #486 placed it, and the
     /// deviation is recorded rather than taken quietly: [`KumaSocket`] is
     /// `pub(crate)`, so the test-only deadline override the same paragraph
     /// asks for is unreachable from an integration test -- which leaves a test

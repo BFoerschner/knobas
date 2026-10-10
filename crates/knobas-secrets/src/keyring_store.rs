@@ -9,7 +9,7 @@ use crate::{KeychainAccount, Secret, SecretError, SecretStore, decode, encode};
 /// The OS keychain, under one service name.
 ///
 /// Never exercised by `just check` -- see the crate docs. The `#[ignore]`d test
-/// in `tests/keyring_local.rs` is what proves this half works, run by hand on
+/// in `tests/it/keyring_local.rs` is what proves this half works, run by hand on
 /// macOS.
 ///
 /// The service name is **taken, not computed**: `new` is handed whatever

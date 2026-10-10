@@ -164,7 +164,7 @@
 //!     Since #297 the adapter's `test_connection` **probes** that path, and
 //!     the WADL declares it, so every probe against mockd records one
 //!     `Unimplemented` violation. No route is added — this crate is frozen —
-//!     and `knobas-source-jira/tests/mockd.rs` asserts that violation and no
+//!     and `knobas-source-jira/tests/it/mockd.rs` asserts that violation and no
 //!     other instead.
 //!
 //!     **Measured against the real product** (issue #276, Jira 10.3.24 seeded

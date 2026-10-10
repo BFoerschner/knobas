@@ -12,9 +12,9 @@
 //! re-asserts them against it. If the two ever disagree, the recording is what
 //! is out of date.
 
-// One test binary declares `mod support;` today (`contract.rs`), and it does not
-// call every item here -- `Fake::start` and `Fake::serving` are both used, but a
-// helper added for the next binary would be dead until that binary exists. The
+// One test module uses this today (`contract.rs`), and it does not call every
+// item here -- `Fake::start` and `Fake::serving` are both used, but a helper
+// added for the next module would be dead until that module exists. The
 // allow is what keeps `clippy --all-targets -- -D warnings` from deciding that
 // for us, and it is the same one the Gitea suite's support module carries.
 #![allow(dead_code)]

@@ -81,7 +81,7 @@ use crate::{JiraConfig, time::parse_jira_time};
 /// value reaches `payload` and the search index as if the dataset had said it
 /// (the #28 ruling). They are one fixture field away, not one constant away.
 ///
-/// Certified at the wire, not here: `tests/mockd.rs`'s
+/// Certified at the wire, not here: `tests/it/mockd.rs`'s
 /// `a_synced_issue_carries_epic_membership_links_and_resolution` runs this
 /// exact query against the mock and ends in `assert_no_violations()`, so a
 /// name this instance would refuse fails there rather than silently thinning
@@ -1391,7 +1391,7 @@ mod tests {
     /// **out** of the list, and the reason it is out.
     ///
     /// The positive half of #32's widening is certified at the wire --
-    /// `tests/mockd.rs` runs this exact query against the mock and ends in
+    /// `tests/it/mockd.rs` runs this exact query against the mock and ends in
     /// `assert_no_violations()`, which is the only thing that can say the
     /// server would accept it. What no wire test can say is why a name is
     /// absent, and that is what went wrong the first time: the list stopped at

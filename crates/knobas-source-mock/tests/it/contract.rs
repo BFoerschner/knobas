@@ -856,7 +856,7 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
 /// fails the build here rather than passing an assertion over an empty string.
 #[tokio::test]
 async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
-    const FIRST_RUN: &str = include_str!("../../../app/src/lib/sources/FirstRun.svelte");
+    const FIRST_RUN: &str = include_str!("../../../../app/src/lib/sources/FirstRun.svelte");
     let mut sink = VecSink(Vec::new());
     MockSource::new().sync(None, &mut sink).await.expect("sync");
 

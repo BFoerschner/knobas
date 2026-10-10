@@ -1,10 +1,8 @@
 //! What one run emits, and what it leaves behind in the cursor.
 
-mod support;
-
+use crate::support::{self, Fake, PAGE, State, TOKEN, branch, instance, source};
 use knobas_source::contract::VecSink;
 use knobas_source::{Source, SourceError, SyncItem};
-use support::{Fake, PAGE, State, TOKEN, branch, instance, source};
 
 async fn full(source: &dyn Source) -> (Vec<SyncItem>, String) {
     let mut sink = VecSink(Vec::new());

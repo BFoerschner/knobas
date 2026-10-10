@@ -4,10 +4,8 @@
 //! every commit; `tests/live_gitea.rs` runs the *same* battery against the real
 //! seeded container, which is what exit criterion B is measured against.
 
-mod support;
-
+use crate::support::{Fake, State, TOKEN, dead_url, instance};
 use knobas_source::contract::{Fault, battery};
-use support::{Fake, State, TOKEN, dead_url, instance};
 
 #[tokio::test]
 async fn passes_the_contract_battery() {

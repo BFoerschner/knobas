@@ -312,7 +312,7 @@ mod tests {
     ///
     /// Both halves of the new rule are pinned elsewhere and **neither crosses
     /// this line**. `sync`'s unit tests hand a [`Page`] to `last_page` from a
-    /// fake that constructs `more` itself, and `tests/mockd.rs` reads
+    /// fake that constructs `more` itself, and `tests/it/mockd.rs` reads
     /// `nextHref` off the wire with a bare `reqwest`. Between them sit two
     /// lines -- the `envelope.next_href.is_some()` in [`HttpRest::list`] and
     /// [`ListEnvelope`]'s `nextHref` rename -- and deleting either puts every
