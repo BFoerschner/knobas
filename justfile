@@ -467,8 +467,8 @@ clippy-libs:
 # A fifo rather than `coproc`: `/bin/bash` on macOS is 3.2, which has none.
 #
 # THE BINARIES RUN IN PARALLEL, not one after another as `cargo test` runs
-# them. 112 binaries, 98 of them under 3 s each, still added up to 71 s of the
-# serial gate; through `xargs -P`, with each binary's stdout and stderr
+# them. 112 binaries (2026-09-05), 98 of them under 3 s each, still added up
+# to 71 s of the serial gate; through `xargs -P`, with each binary's stdout and stderr
 # captured to its own file under the gate directory, the run is as long as
 # its slowest binary plus the queue behind it. Each worker always exits 0 and
 # writes the binary's real status to a file beside its log, because xargs
@@ -482,8 +482,9 @@ clippy-libs:
 # JOBS. `N` is bounded to the core count (`getconf _NPROCESSORS_ONLN`, which
 # both macOS and Linux answer) and chosen by measurement on the 12-core
 # machine, warm tree, re-measured 2026-10-10 after ADR-0017's merges: the
-# numbers are in the recipe beside the constant, with the start order's. `KNOBAS_TEST_JOBS` overrides it, for measuring another value
-# without editing this file.
+# numbers are in the recipe beside the constant, with the start order's.
+# `KNOBAS_TEST_JOBS` overrides it, for measuring another value without
+# editing this file.
 #
 # WHAT IS PRINTED. A passing binary is one line -- package, target, libtest's
 # `N passed; N failed; N ignored;` and its `finished in` time -- printed as
@@ -608,23 +609,26 @@ test:
     # alike (load average 15-28 throughout, from the runs themselves), the
     # whole `just test`:
     #   N=12: 94, 89, 84 s   N=8: 89, 84, 81 s   N=6: 83, 85, 86 s   N=4: 80, 85, 85 s
-    # 4, 6 and 8 cannot be told apart (means 83-85 s, rounds of one N vary by
-    # 5-8 s) and 12 is the slowest. The pool is still CPU-bound, not
+    # 4, 6 and 8 cannot be told apart (means 83-85 s, while rounds of one N
+    # vary by 3-10 s) and 12 is the slowest. The pool is still CPU-bound, not
     # queue-bound: every binary's libtest runs one test thread per core, and
-    # the run is now about as long as its longest binary (`knobas-app`'s
-    # `test/it`, 577 tests, 30-60 s alone). 6 stays, the middle of the flat
+    # the longest binary (`knobas-app`'s `test/it`, 577 tests) takes 30-60 s
+    # of the run under that contention. 6 stays, the middle of the flat
     # region: half the cores, and a connection peak far below the server's
     # 400 (82 client backends at N=6 on 2026-09-05, when the pool was 112
     # binaries; N=12 peaked at 143 then).
     #
     # THE START ORDER is cargo's build order, as `_test-executables` prints
     # it, which starts `knobas-app`'s `test/it` last. Measured the same day,
-    # same way, at N=6: cargo's order 71, 82, 80 s; reversed (that binary
-    # first) 83, 88, 86 s; the seven slowest binaries first (`knobas-app`,
+    # same way, at N=6, in a run of its own just before the one above and
+    # under less load (so compare within each run, not across them): cargo's
+    # order 71, 82, 80 s; reversed (that binary first) 83, 88, 86 s; the
+    # seven slowest binaries first (`knobas-app`,
     # `knobas-core` and `knobas-sync`'s `test/it`, `scheduler_loop`,
     # `knobas-db`'s `embedded`, `schema` and lib) 87, 89, 90 s. Starting the
     # heavy binaries together only stacks their test threads on the same
-    # cores, so no reordering is applied.
+    # cores: it was slower in every round, by 7-16 s. No reordering is
+    # applied.
     jobs=${KNOBAS_TEST_JOBS:-6}
     cores=$(getconf _NPROCESSORS_ONLN)
     case $jobs in

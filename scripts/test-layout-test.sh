@@ -171,7 +171,7 @@ check "a crate that was not named is not renamed" fail \
 
 # A crate whose files are all still on the list renames nothing, so the old
 # inventory "passes" as its own rename -- which is what running the check
-# before deleting the crate's pending-merge lines would otherwise report.
+# before taking the crate's files off the exception list would otherwise report.
 root=$(rename_root)
 printf '%s\n' "knobas-b/home  still waiting for its merge" >>"$root/test-layout-exceptions.txt"
 check "a crate with nothing left to rename is refused" fail \
