@@ -20,7 +20,7 @@
 #     except the files the exception list still names, and with every other
 #     line unchanged -- compared byte for byte after the inventory's own
 #     `LC_ALL=C sort`. A merge PR runs it as `just inventory-rename <crate>...`,
-#     which hands it `main`'s inventory as OLD. "No test was lost" is then a
+#     which hands it the merge-base with `main`'s inventory as OLD. "No test was lost" is then a
 #     comparison and not a judgment: a dropped, added or misplaced line is red.
 #
 # ROOT is the repository root (default: the current directory). The script is
@@ -30,10 +30,19 @@ set -euo pipefail
 
 prog=test-layout
 root=.
+scratch=
+
+# The traps of the justfile's `inventory` recipe: bash runs no EXIT trap when a
+# signal it has no handler for ends the shell, so INT and TERM clean up too and
+# then re-raise.
+cleanup() { [ -z "$scratch" ] || rm -f "$scratch"; }
+trap 'cleanup' EXIT
+trap 'cleanup; trap - INT; kill -INT $$' INT
+trap 'cleanup; trap - TERM; kill -TERM $$' TERM
 
 usage() {
-    echo "usage: $0 [-C ROOT] guard" >&2
-    echo "       $0 [-C ROOT] rename OLD NEW CRATE..." >&2
+    echo "usage: $prog.sh [-C ROOT] guard" >&2
+    echo "       $prog.sh [-C ROOT] rename OLD NEW CRATE..." >&2
     exit 2
 }
 
@@ -65,32 +74,37 @@ exceptions() {
         }
         END { exit bad }
     ' "$list" | LC_ALL=C sort
-    # `sort` would mask awk's status; PIPESTATUS keeps it.
+    # This runs inside `$(...)`, where bash 3.2 does not apply `set -e`, so the
+    # pipeline's failure has to be checked by hand.
     [ "${PIPESTATUS[0]}" -eq 0 ] || die "the exception list is malformed"
 }
 
+# nonblank TEXT -- TEXT's lines without the empty ones, so that an empty list
+# is no lines rather than one blank line.
+nonblank() { printf '%s\n' "$1" | sed '/^$/d'; }
+
 guard() {
     [ $# -eq 0 ] || usage
-    local listed found crate f n=0
+    local listed found='' crate f n=0
     listed=$(exceptions)
 
-    found=$(
-        for crate in "$root"/crates/*/; do
-            [ -d "$crate" ] || continue
-            for f in "$crate"tests/*.rs; do
-                [ -f "$f" ] || continue
-                printf '%s/%s\n' "$(basename "$crate")" "$(basename "$f" .rs)"
-            done
-        done | LC_ALL=C sort
-    )
-    for crate in "$root"/crates/*/; do [ -d "$crate" ] && n=$((n + 1)); done
+    for crate in "$root"/crates/*/; do
+        [ -d "$crate" ] || continue
+        n=$((n + 1))
+        for f in "$crate"tests/*.rs; do
+            [ -f "$f" ] || continue
+            found="$found$(basename "$crate")/$(basename "$f" .rs)
+"
+        done
+    done
+    found=$(printf '%s' "$found" | LC_ALL=C sort)
     # A root with no crates is a guard pointed at the wrong place, not a tree
     # with a clean layout.
     [ "$n" -gt 0 ] || die "no crates under $root/crates -- is -C pointing at the repository root?"
 
     local unlisted stale status=0
-    unlisted=$(LC_ALL=C comm -23 <(printf '%s\n' "$found" | sed '/^$/d') <(printf '%s\n' "$listed" | sed '/^$/d'))
-    stale=$(LC_ALL=C comm -13 <(printf '%s\n' "$found" | sed '/^$/d') <(printf '%s\n' "$listed" | sed '/^$/d'))
+    unlisted=$(LC_ALL=C comm -23 <(nonblank "$found") <(nonblank "$listed"))
+    stale=$(LC_ALL=C comm -13 <(nonblank "$found") <(nonblank "$listed"))
     if [ -n "$unlisted" ]; then
         echo "$prog: top-level test files that are neither tests/it/main.rs nor on test-layout-exceptions.txt:" >&2
         printf '%s\n' "$unlisted" | sed -E 's|^([^/]*)/(.*)$|  crates/\1/tests/\2.rs|' >&2
@@ -105,7 +119,7 @@ guard() {
         status=1
     fi
     [ "$status" -eq 0 ] || exit 1
-    echo "$prog: ok ($n crates, $(printf '%s\n' "$listed" | sed '/^$/d' | wc -l | tr -d ' ') files on the exception list)"
+    echo "$prog: ok ($n crates, $(nonblank "$listed" | wc -l | tr -d ' ') files on the exception list)"
 }
 
 rename() {
@@ -120,14 +134,12 @@ rename() {
             || die "$crate has no tests in $old -- is the crate name right?"
     done
 
-    local listed expected
+    local listed
     listed=$(exceptions)
-    expected=$(mktemp "${TMPDIR:-/tmp}/knobas-test-layout.XXXXXX")
-    # shellcheck disable=SC2064 # the path is fixed now, and must be in the trap
-    trap "rm -f '$expected'" EXIT
+    scratch=$(mktemp "${TMPDIR:-/tmp}/knobas-test-layout.XXXXXX")
     # Entries go to awk space-separated: macOS's awk refuses a newline in a
     # `-v` string, and an entry cannot contain a space (exceptions() checks).
-    awk -F'\t' -v OFS='\t' -v crates="$*" -v listed="$(printf '%s\n' "$listed" | tr '\n' ' ')" '
+    awk -F'\t' -v OFS='\t' -v prog="$prog" -v crates="$*" -v listed="$(printf '%s\n' "$listed" | tr '\n' ' ')" '
         BEGIN {
             n = split(crates, c, " "); for (i = 1; i <= n; i++) merging[c[i]] = 1
             n = split(listed, l, " "); for (i = 1; i <= n; i++) keep[l[i]] = 1
@@ -141,16 +153,15 @@ rename() {
         # the check run before the crate'"'"'s pending-merge lines were deleted.
         END {
             for (cr in merging) if (!(cr in renamed)) {
-                printf "test-layout: %s has no test outside test/it and off the exception list to rename;\n", cr > "/dev/stderr"
+                printf "%s: %s has no test outside test/it and off the exception list to rename;\n", prog, cr > "/dev/stderr"
                 printf "  delete its pending-merge lines from test-layout-exceptions.txt first\n" > "/dev/stderr"
                 bad = 1
             }
             exit bad
         }
-    ' "$old" | LC_ALL=C sort >"$expected"
-    [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+    ' "$old" | LC_ALL=C sort >"$scratch"
 
-    if ! diff -u --label "expected (old inventory, renamed)" --label "$new" "$expected" "$new"; then
+    if ! diff -u --label "expected (old inventory, renamed)" --label "$new" "$scratch" "$new"; then
         echo >&2
         echo "$prog: $new is not $old with $* merged into test/it." >&2
         echo "  '-' lines are tests the rename expected and did not find; '+' lines" >&2
