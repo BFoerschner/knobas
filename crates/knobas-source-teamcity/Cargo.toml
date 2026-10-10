@@ -20,7 +20,7 @@ serde_json.workspace = true
 # A dev-dependency only: nothing in the shipped adapter knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
 # The Tidewater dataset both mock layers share -- every expectation in
-# `tests/mockd.rs` is computed from it rather than hard-coded (spec §14a).
+# `tests/it/mockd.rs` is computed from it rather than hard-coded (spec §14a).
 knobas-source-mock = { path = "../knobas-source-mock" }
 # Two test-only uses: the one deliberately malformed request that proves
 # mockd's violation log is live, and the raw GETs `tests/live_teamcity.rs`

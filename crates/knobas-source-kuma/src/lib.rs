@@ -39,7 +39,7 @@
 //! wrong key gets -- was read off the pinned image (2.5.3) on 2026-09-06 and is
 //! re-asserted against the real server by `tests/live_kuma.rs`, which
 //! `just kuma-live` runs (ADR-0013: the real container is the witness). The
-//! wiremock stand-in in `tests/contract.rs` exists only so `just check` stays
+//! wiremock stand-in in `tests/it/contract.rs` exists only so `just check` stays
 //! docker-free; **if the two disagree, the stand-in is what is wrong.**
 
 mod config;

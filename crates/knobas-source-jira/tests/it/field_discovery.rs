@@ -4,7 +4,7 @@
 //! so the only server in this workspace that can answer it is the real Jira in
 //! `testenv` -- which `tests/live_jira_seeded.rs` uses and which `just check`
 //! never starts. That leaves the **success** direction of discovery with no
-//! offline witness at all: `tests/mockd.rs` certifies the 501, `src/discover.rs`
+//! offline witness at all: `tests/it/mockd.rs` certifies the 501, `src/discover.rs`
 //! certifies the picking, and nothing between them certifies that what was
 //! picked reaches `ConnectionInfo::discovered` rather than being computed and
 //! dropped.

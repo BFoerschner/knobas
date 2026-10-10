@@ -94,7 +94,7 @@
 //!   unreadable cursor, a cursor-version bump), and `branch` is precisely the
 //!   kind links hang off (spec §5a). The adapter's own diff still carries the
 //!   *incremental* case, which the sweep never touches.
-//!   `tests/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`
+//!   `tests/it/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`
 //!   pins the adapter half, so the division of labour cannot drift silently.
 //!
 //! Two holes stay open, and both are ADR-0003's documented residual rather than

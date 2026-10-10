@@ -16,7 +16,7 @@
 //! * `monitor_uptime_ratio`, three sliding windows on a `window` label;
 //! * `monitor_cert_days_remaining`, the certificate countdown of a TLS check.
 //!
-//! The two it does not read are in `tests/support/metrics.txt` beside them, so
+//! The two it does not read are in `tests/it/support/metrics.txt` beside them, so
 //! this is a decision rather than an oversight:
 //!
 //! * `monitor_cert_is_valid` says whether the certificate is still good, which

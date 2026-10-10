@@ -1,7 +1,7 @@
 //! The suite exit criterion **B** is measured on: the real, pinned, seeded
 //! Gitea container from `testenv/docker-compose.yml`.
 //!
-//! # Why this file is the contract and `tests/support/mod.rs` is not
+//! # Why this file is the contract and `tests/it/support/mod.rs` is not
 //!
 //! Everything else in this crate runs against a wiremock stand-in, because
 //! `just check` and CI must stay docker-free (roadmap §3). That fake encodes a
@@ -151,7 +151,7 @@ fn dead_url() -> String {
 ///
 /// That property is certified where the timing does not move under it, and
 /// deliberately not here: docker-free by
-/// `tests/sync.rs::an_idle_run_emits_nothing_and_returns_the_same_bytes` and
+/// `tests/it/sync.rs::an_idle_run_emits_nothing_and_returns_the_same_bytes` and
 /// `::the_position_after_one_change_is_itself_idle_stable`, against a fake whose
 /// `updated_at` stands still unless the test moves it; and live by
 /// `passes_the_contract_battery_against_the_real_container`, whose clause 2
@@ -259,7 +259,7 @@ async fn push_file(
 ///   and
 ///   [`a_commit_pushed_through_the_api_arrives_once_and_only_once_and_so_does_the_next_push`];
 /// * the full->idle pair over the repository-*listing* walk, against the
-///   docker-free fake in `tests/sync.rs` --
+///   docker-free fake in `tests/it/sync.rs` --
 ///   `an_idle_run_emits_nothing_and_returns_the_same_bytes` and
 ///   `the_position_after_one_change_is_itself_idle_stable`, both on the
 ///   unfiltered selection, which walks the same listing an `owners[]` scope
@@ -269,7 +269,7 @@ async fn push_file(
 /// Said exactly, because a record of a coverage loss is worth nothing if it
 /// overstates what is left: **no docker-free test runs an idle pair with
 /// `owners[]` actually set.** `an_owner_filter_drops_everything_else` in
-/// `tests/sync.rs` certifies that the filter is a filter over that same walk,
+/// `tests/it/sync.rs` certifies that the filter is a filter over that same walk,
 /// and it does one full sync rather than a pair. So what this narrowing gives
 /// up outright is the idle pair with the owner filter applied, live or fake;
 /// what it keeps is the idle pair over the walk the filter sits on.
@@ -1134,7 +1134,7 @@ async fn the_discussion_endpoint_does_not_page() {
 
 // -- M2's write-back set, against the real server (issue #43) -----------------
 //
-// The fake in `tests/write.rs` encodes a reading of four endpoints -- the field
+// The fake in `tests/it/write.rs` encodes a reading of four endpoints -- the field
 // names Gitea's `CreateBranchRepoOption`, `CreatePullRequestOption`,
 // `CreateIssueCommentOption` and `CreatePullReviewOptions` declare, and the
 // fact that `event: "APPROVED"` is what separates an approval from a pending

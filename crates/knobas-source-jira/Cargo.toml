@@ -26,7 +26,7 @@ knobas-mockd = { path = "../knobas-mockd" }
 # from the workspace so `cargo tree -i reqwest` stays at one copy.
 reqwest.workspace = true
 serde_json.workspace = true
-# `net` and `io-util` for `tests/field_discovery.rs`'s canned-bytes stub -- the
+# `net` and `io-util` for `tests/it/field_discovery.rs`'s canned-bytes stub -- the
 # only server in this workspace that answers `GET /rest/api/2/field` offline.
 # Named rather than inherited: reqwest happens to turn them on, and a test
 # resting on another crate's feature breaks when that crate changes.

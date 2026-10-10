@@ -24,7 +24,7 @@ use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 /// there is exactly one outbound write path by finding every production file
 /// that so much as *names* the SPI's write op, and this file is a descriptor
 /// rather than a write path. So the strings are written out, and
-/// `the_declared_ops_are_the_spis_own_identifiers` in `tests/contract.rs`
+/// `the_declared_ops_are_the_spis_own_identifiers` in `tests/it/contract.rs`
 /// holds them to `WriteOp::identifier` from a file that scan does not read.
 /// The failure that would otherwise be silent is spelling Kuma's event name
 /// `"pauseMonitor"` here, which the contract battery refuses.

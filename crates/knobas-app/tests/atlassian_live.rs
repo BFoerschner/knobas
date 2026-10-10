@@ -23,7 +23,7 @@
 //!   one POST response, and that nothing downstream could recover if the
 //!   settle dropped it. [`a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror`]
 //!   asserts it at Jira, on the copy, and in the next sync's mirrored payload.
-//! * **The three write ops through the write queue.** `tests/mockd.rs` calls
+//! * **The three write ops through the write queue.** `tests/it/mockd.rs` calls
 //!   `Source::write` directly; the queue is what the *app* calls, and what
 //!   turns an adapter's refusal into the `refused` row the pending-writes panel
 //!   shows. Both halves are asserted against **Jira's own answer**, never
@@ -1234,7 +1234,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
 /// others established. Every assertion is against **Jira's own answer** or
 /// against the queue row, never against knobas' mirror of either.
 ///
-/// The refusal is the interesting one. `tests/mockd.rs` asserts that the
+/// The refusal is the interesting one. `tests/it/mockd.rs` asserts that the
 /// adapter refuses an unreachable status *by name*; what the queue does with
 /// that refusal -- `refused`, terminal, never retried, with the adapter's
 /// sentence on the row for the pending-writes panel to show -- is this file's,
@@ -2623,7 +2623,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
 /// dialog ends up in, because the dialog fills the field from `discovered` --
 /// is [`test_source_answers_the_configured_arm_once_the_saved_source_names_the_field`]'s
 /// (#381), on the same kind of row once its config names the field; at the
-/// adapter it was already `tests/field_discovery.rs`'s and the adapter's own
+/// adapter it was already `tests/it/field_discovery.rs`'s and the adapter's own
 /// live suite's. So two of the three arms reach `test_source` in a test here;
 /// the no-field arm has no real product to witness it, and is the adapter's
 /// unit test's alone.

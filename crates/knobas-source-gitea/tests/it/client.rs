@@ -1,10 +1,8 @@
 //! What the adapter does against a live-shaped server, short of a sync run.
 
-mod support;
-
+use crate::support::{Fake, State, TOKEN, dead_url, instance, source};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{SourceError, WriteOp};
-use support::{Fake, State, TOKEN, dead_url, instance, source};
 
 #[tokio::test]
 async fn test_connection_reports_the_account_and_the_server_version() {
@@ -72,7 +70,7 @@ async fn a_base_url_with_a_path_prefix_is_preserved() {
 /// Battery clause 5 against a server that would have answered: an op this
 /// adapter does not declare is refused **without a request being made**.
 ///
-/// The ops it *does* declare are certified in `tests/write.rs` against a fake
+/// The ops it *does* declare are certified in `tests/it/write.rs` against a fake
 /// that records bodies, and live in `tests/live_gitea.rs`. What only this can
 /// see is the negative: the fake here answers, and the request count not moving
 /// is the proof that nothing was sent.

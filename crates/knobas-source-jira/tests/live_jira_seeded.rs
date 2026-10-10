@@ -5,7 +5,7 @@
 //! Until this file existed the Jira adapter had only ever been run against
 //! `knobas-mockd` -- a mock built from the vendored WADL and from assumptions
 //! about the product, certifying the adapter against a reading of the contract
-//! rather than against Jira. `tests/mockd.rs` still runs in `just check` and is
+//! rather than against Jira. `tests/it/mockd.rs` still runs in `just check` and is
 //! still worth having: it is fast, deterministic, and it records a *violation*
 //! for a path, verb or query parameter the WADL does not declare, which no real
 //! server does. What it cannot do is disagree with the adapter, because the

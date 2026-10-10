@@ -15,7 +15,7 @@
 #
 # `#` is a comment in the exposition format, so this header is part of the
 # document the parser is handed and is skipped by it -- which is itself
-# something `tests/contract.rs` relies on.
+# something `tests/it/contract.rs` relies on.
 # HELP monitor_cert_days_remaining The number of days remaining until the certificate expires
 # TYPE monitor_cert_days_remaining gauge
 

@@ -2,7 +2,7 @@
 //!
 //! Everything else is pure -- the parser, the fold, the mapping and the cursor
 //! all work on values -- so the interesting half of this adapter is tested
-//! without a socket, and `tests/contract.rs` puts a server under it without a
+//! without a socket, and `tests/it/contract.rs` puts a server under it without a
 //! container.
 //!
 //! The transport is [`knobas_http`]'s, and that crate changes only through the

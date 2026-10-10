@@ -3,7 +3,7 @@
 //! Run by `just kuma-live`, never by `just check`: every test here is
 //! `#[ignore]`d and that recipe is what un-ignores them. ADR-0013 -- the real
 //! container is the witness, and a mock certifies nothing -- so the wiremock
-//! recording in `tests/contract.rs` exists only to keep `just check`
+//! recording in `tests/it/contract.rs` exists only to keep `just check`
 //! docker-free, and **if the two disagree, the recording is what is wrong**.
 //!
 //! # What this certifies
@@ -26,7 +26,7 @@
 //! asserted here, in the one honest form it takes against a moving corpus: a
 //! poll that *finds nothing changed* emits nothing and keeps its cursor
 //! ([`an_idle_poll_emits_nothing_and_keeps_its_cursor`]). The battery itself
-//! runs in `tests/contract.rs`, against a recording of this server.
+//! runs in `tests/it/contract.rs`, against a recording of this server.
 //!
 //! **The certificate countdown.** `monitor_cert_days_remaining` has no series
 //! on this estate: every seeded monitor is a plain HTTP check or a ping, and
@@ -632,7 +632,7 @@ fn entity_of(items: &[SyncItem], title: &str) -> String {
 /// **The declaration, against the real server.** The same key, the same Kuma,
 /// two instances: only the one with an account offers anything to write.
 ///
-/// Asserted here as well as in `tests/contract.rs` because the contract
+/// Asserted here as well as in `tests/it/contract.rs` because the contract
 /// battery's copy runs against a recording, and what this adds is that the
 /// account really is optional at *build* time against a live instance -- a
 /// source configured with one is not a source that fails to start.
@@ -855,7 +855,7 @@ async fn a_refused_account_and_a_refused_write_are_different_faults() {
 /// composes is one Uptime Kuma 2.5.3 accepts, the `add` event is the one its
 /// `server.js` registers, and the id it answers with is the id the monitor
 /// really carries in `/metrics`. None of that can be asserted against the
-/// recording in `tests/contract.rs`, which is a scrape of a server that was
+/// recording in `tests/it/contract.rs`, which is a scrape of a server that was
 /// never asked to create anything.
 ///
 /// **The monitor is this suite's own and is deleted however the run ends.**

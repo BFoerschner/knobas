@@ -40,7 +40,7 @@
 //!
 //! # Why the contract battery is not run here
 //!
-//! It is, against `knobas-mockd` (`tests/mockd.rs`) and, since issue #266,
+//! It is, against `knobas-mockd` (`tests/it/mockd.rs`) and, since issue #266,
 //! against a TeamCity we own (`tests/live_teamcity_seeded.rs`). Clause 2 --
 //! an incremental run after no changes emits nothing and hands back the same
 //! cursor -- is not a property any public build server can be held to: builds
@@ -305,7 +305,7 @@ async fn a_scoped_full_sync_lands_under_the_documented_key_forms() {
         vec![format!("buildType:{build_type}").as_str()],
         "the configuration key is buildType:<id>, and the scope holds"
     );
-    // The configuration carries the same shape the builds do; `tests/mockd.rs`
+    // The configuration carries the same shape the builds do; `tests/it/mockd.rs`
     // asserts all of it against the fake, so all of it is re-asserted here.
     for item in &configs {
         assert!(
@@ -596,7 +596,7 @@ async fn a_build_answers_by_id_and_an_id_no_build_has_is_a_404() {
 /// search tokens rest on for this source.
 ///
 /// **This is the measurement; the docker-free half is
-/// `tests/mockd.rs::effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty`**
+/// `tests/it/mockd.rs::effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty`**
 /// (issue #106), which builds a corpus of the right shape rather than counting
 /// the Tidewater fixture's three builds — whose one-in-three is a narrative
 /// ratio and would read as a healthy distribution to anyone who mistook it for
@@ -869,7 +869,7 @@ async fn the_two_facet_dimensions_do_not_open_the_personal_facet() {
 /// half of it is certified too: **without** that prefix the same server
 /// refuses, and the adapter calls that refusal `Unauthorized`.
 ///
-/// `tests/mockd.rs`'s `a_401_is_unauthorized_from_both_entry_points` encodes
+/// `tests/it/mockd.rs`'s `a_401_is_unauthorized_from_both_entry_points` encodes
 /// this against the fake; this is the same shape asked of the server that
 /// decides. It matters beyond the prefix: `Unauthorized` is what puts *Re-enter
 /// password* on screen, and a 401 misread as a protocol failure would report a

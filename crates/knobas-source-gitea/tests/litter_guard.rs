@@ -196,7 +196,7 @@ fn nothing_the_seed_puts_in_the_container_could_be_taken_for_this_suites_litter(
 // ---------------------------------------------------------------------------
 // The stand-in the guard's own deletes run against.
 //
-// `tests/support/mod.rs` cannot carry this: it serves the *adapter's* read
+// `tests/it/support/mod.rs` cannot carry this: it serves the *adapter's* read
 // routes and is deliberately static, and what has to be witnessed here is a
 // server whose listings CHANGE because of a DELETE. So this is a small stateful
 // fake of exactly four routes -- the two listings the guard reads and the two

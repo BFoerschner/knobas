@@ -5,10 +5,8 @@
 //! every commit; `tests/live_kuma.rs` runs against the real seeded container,
 //! which is what the acceptance criteria are measured against.
 
-mod support;
-
+use crate::support::{Fake, KEY, METRICS, adapter, adapter_with_account, dead_url};
 use knobas_source::contract::{Fault, VecSink, battery};
-use support::{Fake, KEY, METRICS, adapter, adapter_with_account, dead_url};
 
 #[tokio::test]
 async fn passes_the_contract_battery() {

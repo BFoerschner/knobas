@@ -16,14 +16,12 @@
 //! `GET`s and a catch-all 401 for everything else, and the read suites rely on
 //! that shape. Writes want a server that records bodies.
 
-mod support;
-
 use knobas_source::{Source, SourceError, WriteOp};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use support::{TOKEN, instance};
+use crate::support::{TOKEN, instance};
 
 /// A Gitea that accepts the four writes and records what it was sent.
 ///
