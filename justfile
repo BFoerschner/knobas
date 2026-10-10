@@ -1214,7 +1214,7 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # neither the exact-set assertions of the suite above it nor its litter
 # clearing.
 #
-# WHICH RECIPE CERTIFIES WHAT. `tests/contract.rs` runs the contract battery
+# WHICH RECIPE CERTIFIES WHAT. `tests/it/contract.rs` runs the contract battery
 # against a *recording* of this server's `/metrics`, so that `just check` stays
 # docker-free (roadmap §3). This one certifies the same shapes against the
 # server that decides them -- the four gauge families and their labels, `"null"`

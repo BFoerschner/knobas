@@ -1436,7 +1436,7 @@ mod tests {
             assert!(
                 !names.contains(&missing),
                 "{missing} is in {fields}: {why}. mockd answers it with 400 + an UnknownField \
-                 violation, so tests/mockd.rs fails too -- but fix it by giving the fixture the \
+                 violation, so tests/it/mockd.rs fails too -- but fix it by giving the fixture the \
                  field, not by widening mockd's set around an invented value."
             );
         }
