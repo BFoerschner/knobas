@@ -55,7 +55,7 @@ fn no_paths() -> knobas_core::payload::Declarations {
 /// The corpus every test reads: the demo load, plus the one tombstone the
 /// fixture does not otherwise contain.
 ///
-/// Seeded at most once per test file. The guard is held across the whole
+/// Seeded at most once into this file's database. The guard is held across the whole
 /// seed rather than around each half: two concurrent full syncs of the same
 /// source would each be correct on their own, but the sweep of the plain
 /// fixture and the tombstone run interleaved decide `PAY-198`'s state by
