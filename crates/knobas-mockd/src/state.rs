@@ -5,7 +5,7 @@
 //!
 //! `knobas_source_mock::fixture()` is prose made machine-readable; Jira needs a
 //! few things the dataset leaves open. These rules are deterministic and are
-//! asserted by value in `tests/state.rs`, because stream A derives its own
+//! asserted by value in `tests/it/state.rs`, because stream A derives its own
 //! expectations from the same fixture — they are a cross-stream contract, not
 //! an implementation detail.
 //!

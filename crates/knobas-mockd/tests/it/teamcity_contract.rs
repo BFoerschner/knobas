@@ -54,9 +54,7 @@
 //! fields and still conform. The goldens are what pin presence; the schemas pin
 //! shape. Neither half is redundant, and neither should be read as the other.
 
-mod common;
-
-use common::{golden, normalise_base_url};
+use crate::common::{golden, normalise_base_url};
 use knobas_mockd::spawn_mock_teamcity;
 
 /// One endpoint, in one table used by both halves of the gate, so an endpoint

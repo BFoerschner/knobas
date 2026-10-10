@@ -9,9 +9,7 @@
 //! that quietly stopped being populated) but would happily pin a body that the
 //! contract forbids.
 
-mod common;
-
-use common::{golden, normalise_base_url};
+use crate::common::{golden, normalise_base_url};
 use knobas_mockd::{allowlist::response_schema, spawn_mock_jira};
 
 /// The endpoints mockd serves, as `(verb, WADL template, request path,
