@@ -100,7 +100,7 @@ async fn pool() -> PgPool {
 }
 
 /// A connection of this run's own -- what `run_from_stored_cursor` now
-/// requires, and what interfaces §10.6(c) is about. `tests/dedicated.rs` is
+/// requires, and what interfaces §10.6(c) is about. `tests/it/dedicated.rs` is
 /// where the property itself is pinned; here it is only the plumbing.
 async fn dedicated() -> sqlx::PgConnection {
     knobas_db::test_util::test_connector()

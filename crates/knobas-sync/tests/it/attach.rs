@@ -10,7 +10,7 @@
 //! runs `knobas_sync::run_once` and then reads `knobas.link`, because the
 //! claim is about *a poll*: a test that called `attach::resolve` directly
 //! would stay green with the call site deleted from `run_locked`, which is the
-//! one failure this file exists to catch. `tests/alerts.rs` records the same
+//! one failure this file exists to catch. `tests/it/alerts.rs` records the same
 //! reasoning for the same reason.
 //!
 //! **Every test gets a database of its own**, that file's arrangement.
@@ -27,7 +27,7 @@ use sqlx::{PgPool, Row};
 
 /// An adapter publishing whichever monitors it is currently told to, by name.
 ///
-/// `tests/alerts.rs`' `Monitors` narrowed to what this file asserts on: what
+/// `tests/it/alerts.rs`' `Monitors` narrowed to what this file asserts on: what
 /// matters here is a monitor's **title**, since the title is what a name
 /// resolves against, and its state is never read.
 struct Monitors {

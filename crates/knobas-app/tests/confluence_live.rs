@@ -22,7 +22,7 @@
 //!   Confluence's own sentence, and the other writer's text is still on the
 //!   page. That is the abort-on-conflict backstop at the wire. Its sibling --
 //!   the *hold*, which fires when the **mirror** moves between queue and flush
-//!   -- is witnessed offline in `crates/knobas-sync/tests/write_queue.rs`, and
+//!   -- is witnessed offline in `crates/knobas-sync/tests/it/write_queue.rs`, and
 //!   the second test below says at length why it cannot be witnessed here.
 //! * **A comment lands on a page**, as the SPI's own `Comment` op with the
 //!   page as its container, and comes back at `children.comment` where the
@@ -781,7 +781,7 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
 ///
 /// The **hold** is knobas' own: it fires when the mirror moves between the
 /// moment a write is queued and the moment it flushes, and it is witnessed by
-/// `crates/knobas-sync/tests/write_queue.rs`'s
+/// `crates/knobas-sync/tests/it/write_queue.rs`'s
 /// `a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions`,
 /// against a real Postgres, a real queue and a real flush.
 ///

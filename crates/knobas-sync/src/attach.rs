@@ -90,7 +90,7 @@ use sqlx::{Postgres, Row, Transaction};
 /// population the row is in but **whether the index already holds the pair** --
 /// `link_pair_active_idx` does not look at `confirmed_at`, so a guard that did
 /// would insert over `monitor_url_host`'s proposal (#478) and fail this poll,
-/// and the next, and every one after. `tests/attach.rs`'
+/// and the next, and every one after. `tests/it/attach.rs`'
 /// `a_proposal_over_the_same_pair_is_left_alone` is that failure as a test.
 const UNATTACHED: &str = "select ast.id as asset_id,
                                  m.entity_id as monitor_id,

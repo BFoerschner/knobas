@@ -1760,7 +1760,7 @@ async fn adding_a_source_produces_exactly_one_run_on_every_interleaving() {
 /// bad sink now **panics** rather than staying quiet. A panic is the one thing
 /// a sink can do that genuinely reaches the run: before #118 it stranded every
 /// sink enrolled after it, and from `Closing::drop` during an unwind it aborted
-/// the process (`crates/knobas-sync/tests/progress.rs` pins both directly on
+/// the process (`crates/knobas-sync/tests/it/progress.rs` pins both directly on
 /// `Watchers`).
 ///
 /// So there are two claims here, and a live sink enrolled *behind* the broken

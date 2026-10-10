@@ -11,7 +11,7 @@
 //! Application code never calls `Source::write`. It calls [`submit`], which
 //! queues the write and then tries it; everything after that is this module's
 //! business. A queue that can be bypassed is not a queue, so the rule is
-//! enforced rather than documented: `tests/write_choke_point.rs` reads the
+//! enforced rather than documented: `tests/it/write_choke_point.rs` reads the
 //! tree and fails if a second call site appears.
 //!
 //! ## What the loop guarantees
@@ -556,7 +556,7 @@ async fn attempt(
 
     // ---------------------------------------------------------------------
     // The one call to `Source::write` in knobas. Everything above decides
-    // whether it may happen; `tests/write_choke_point.rs` is what keeps this
+    // whether it may happen; `tests/it/write_choke_point.rs` is what keeps this
     // the only place it does.
     //
     // Delivery is at-least-once, on purpose (ADR-0012): if knobas dies

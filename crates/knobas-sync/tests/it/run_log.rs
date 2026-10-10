@@ -6,7 +6,7 @@
 //!
 //! `reconcile_abandoned` is **not** tested here: it closes every open run in
 //! the database, which would race the open-run assertions below (tests in one
-//! binary share one database and run concurrently). It has its own binary,
+//! file share one database and run concurrently). It has its own file,
 //! `run_log_recovery.rs`, and therefore its own database.
 
 use knobas_sync::run_log::{self, RunCounts, SyncOutcome, SyncTrigger};

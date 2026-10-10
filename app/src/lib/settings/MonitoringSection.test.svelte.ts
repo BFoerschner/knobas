@@ -3,7 +3,7 @@
  *
  * The seam is the rest of the settings view's: a rendered section in,
  * user-visible text and bridge calls out. What the backend does with the two
- * calls is `crates/knobas-sync/tests/samples.rs`' and the command tests';
+ * calls is `crates/knobas-sync/tests/it/samples.rs`' and the command tests';
  * what is asserted here is that the section draws what is **stored**, posts
  * what was typed, refuses to post a cleared field, and says so when it could
  * not ask.

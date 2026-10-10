@@ -184,7 +184,7 @@ const RECOVERED_ASSETS: &str =
 /// so a shape carrying two numbers would be a shape nothing could be wrong
 /// about -- the reason `OpenAlert` carries no `web_url`. What the reconcile
 /// did is read back from the table, which is where the twelve tests in
-/// `tests/alerts.rs` read it.
+/// `tests/it/alerts.rs` read it.
 ///
 /// # Errors
 ///

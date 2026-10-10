@@ -7,8 +7,8 @@
 //! offline. A *different* fault is news and is announced again; the row
 //! itself still records every attempt.
 //!
-//! In its own binary, deliberately: each test binary gets its own embedded
-//! database, and this is the one place in the queue's suite that counts
+//! In its own file, deliberately: each test file gets a database of its
+//! own, and this is the one place in the queue's suite that counts
 //! activity lines across several flushes. Inside `write_queue.rs` it would
 //! share a database with `the_scheduler_drains_the_queue_on_its_own`, whose
 //! real scheduler calls `flush_all` and reaches *every* configured source --

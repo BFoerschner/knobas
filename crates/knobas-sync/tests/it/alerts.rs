@@ -16,7 +16,7 @@
 //! directions, is a unit test in `src/alerts.rs`; what is here is the wiring
 //! and the sequences a reader would recognise.
 //!
-//! **Every test gets a database of its own**, `tests/samples.rs`' arrangement
+//! **Every test gets a database of its own**, `tests/it/samples.rs`' arrangement
 //! and for its reason: `knobas.setting` is global (the threshold one test
 //! moves is the one another reads a default from) and so is the alert table's
 //! `monitor_alert_one_open_idx`.

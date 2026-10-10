@@ -8,7 +8,7 @@
 //! without an action completing through the queue to a source. That join --
 //! derivation, the offered op, `WriteOp`, the write queue, `Source::write` --
 //! exists in no other file: `knobas-core/tests/it/inbox.rs` stops at the
-//! derivation and `knobas-sync/tests/write_queue.rs` starts at a submitted
+//! derivation and `knobas-sync/tests/it/write_queue.rs` starts at a submitted
 //! write. Both can be green while the join between them is broken, which is
 //! the argument `tests/adapter_to_mirror.rs` makes for its own seam.
 //!

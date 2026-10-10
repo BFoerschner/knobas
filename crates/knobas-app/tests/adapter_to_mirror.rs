@@ -3,7 +3,7 @@
 //! Issue #93. Every other test in this workspace stops one side short of this
 //! join, and the two halves it leaves are each honest on their own:
 //!
-//! * `knobas-sync/tests/backfill.rs` runs the engine against a real embedded
+//! * `knobas-sync/tests/it/backfill.rs` runs the engine against a real embedded
 //!   PostgreSQL and asserts on stored rows -- with a *stand-in* adapter whose
 //!   payload is `{"key": …, "payload_version": 1}`. It proves the engine's
 //!   backfill semantics and nothing about any adapter's record.

@@ -2,7 +2,7 @@
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the other two
 //! adapters' write modules are: knobas has one outbound write path, and
-//! `knobas-sync/tests/write_choke_point.rs` refuses any production file that
+//! `knobas-sync/tests/it/write_choke_point.rs` refuses any production file that
 //! *names* the op enum without implementing the trait. [`crate::source`] --
 //! where `impl Source for TeamCitySource` lives -- unpacks; this performs.
 //!

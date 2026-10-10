@@ -1,8 +1,8 @@
-//! `reconcile_abandoned`, in a binary of its own.
+//! `reconcile_abandoned`, in a file of its own.
 //!
 //! It closes **every** open run in the database, so it cannot share one with
 //! the tests that assert a run is still open: `test_pool()` hands out one
-//! database per test *binary*, and tests within a binary run concurrently, so
+//! database per test *file*, and tests within a file run concurrently, so
 //! a separate file is what buys this its own database.
 
 use knobas_sync::run_log::{self, SyncOutcome, SyncTrigger};

@@ -463,7 +463,7 @@ impl Harness {
 }
 
 /// A migrated database, a configured source whose adapter is the fake, and a
-/// source id unique to this test -- the database is shared by the binary.
+/// source id unique to this test -- the database is shared by the file.
 async fn harness() -> Harness {
     let connector = knobas_db::test_util::test_connector().await;
     let pool = knobas_db::test_util::test_pool().await;

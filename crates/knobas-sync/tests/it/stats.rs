@@ -65,7 +65,7 @@ async fn db_stats_reports_a_size_counts_and_a_per_source_breakdown() {
     );
 
     // Deliberately **not** "the rows sum to `item_count`". The database is
-    // shared across this binary, the totals and the breakdown are two
+    // shared across this file, the totals and the breakdown are two
     // statements, and another test inserting between them makes that assertion
     // fail for a reason that has nothing to do with the code -- which is how it
     // failed in CI on the first run of this file. Two sources with different

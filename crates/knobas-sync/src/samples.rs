@@ -54,7 +54,7 @@
 //!    private helper and its only caller -- reached from [`append`] and from
 //!    nowhere else.
 //! 3. **The failure direction is absence**, pinned by this module's own tests
-//!    and by `tests/samples.rs`'
+//!    and by `tests/it/samples.rs`'
 //!    `a_monitor_whose_state_does_not_resolve_is_sampled_as_a_miss` and
 //!    `a_source_declaring_no_state_path_samples_no_state`. A drifted read
 //!    yields a row whose state is null, which draws as a gap in the Monitors
@@ -266,7 +266,7 @@ fn response_time_of(payload: &Value) -> Option<i32> {
 /// roster and write nothing anyway; what this saves is the query.
 ///
 /// Measured, not assumed: breaking *either* guard alone leaves
-/// `tests/samples.rs`' `a_source_that_emits_no_monitor_kind_writes_no_samples`
+/// `tests/it/samples.rs`' `a_source_that_emits_no_monitor_kind_writes_no_samples`
 /// green, because each is sufficient on its own. The read's filter is the one
 /// that is load-bearing in general -- spec #427 says "a source that emits
 /// `monitor`", not "a source that emits only monitors" -- and

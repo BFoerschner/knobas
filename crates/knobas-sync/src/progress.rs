@@ -434,7 +434,7 @@ mod tests {
     /// different claim and a stronger one -- a variant declared on both sides
     /// and sent by nobody invites a frontend to wait for a state that never
     /// arrives -- and it is asserted by
-    /// `knobas-sync/tests/scheduler_run.rs::every_declared_phase_is_actually_emitted`,
+    /// `knobas-sync/tests/it/scheduler_run.rs::every_declared_phase_is_actually_emitted`,
     /// which drives real runs and collects what comes out.
     #[test]
     fn the_phase_names_match_their_typescript_mirror() {

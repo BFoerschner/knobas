@@ -11,7 +11,7 @@
 //! unpacked, and [`crate::source`] -- which is where `impl Source for
 //! JiraSource` lives -- does the unpacking. That is not a style choice. The
 //! write queue is knobas' only outbound write path, and
-//! `knobas-sync/tests/write_choke_point.rs` enforces it by refusing any
+//! `knobas-sync/tests/it/write_choke_point.rs` enforces it by refusing any
 //! production file that *names* the op enum without implementing the trait; a
 //! dispatch module that named it would read as a second write path.
 //!

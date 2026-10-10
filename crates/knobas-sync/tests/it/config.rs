@@ -1,6 +1,6 @@
 //! The store the scheduler reads its schedule out of, and writes its verdicts
 //! back into. Every test seeds its own uniquely-named source: `test_pool()`
-//! hands out one shared database per test binary, so truncating is not an
+//! hands out one shared database per test file, so truncating is not an
 //! option (`knobas_db::test_util` docs).
 
 use chrono::{Duration as ChronoDuration, Utc};
