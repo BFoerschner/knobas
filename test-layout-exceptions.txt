@@ -80,18 +80,6 @@ knobas-app/week_ipc  pending merge into tests/it/ (#579)
 knobas-app/wiring  pending merge into tests/it/ (#579)
 knobas-app/worklog_ipc  pending merge into tests/it/ (#579)
 
-# knobas-mockd (#577)
-knobas-mockd/allowlist  pending merge into tests/it/ (#577)
-knobas-mockd/cluster  pending merge into tests/it/ (#577)
-knobas-mockd/jira_contract  pending merge into tests/it/ (#577)
-knobas-mockd/jira_issue  pending merge into tests/it/ (#577)
-knobas-mockd/jira_search  pending merge into tests/it/ (#577)
-knobas-mockd/specs_pinned  pending merge into tests/it/ (#577)
-knobas-mockd/state  pending merge into tests/it/ (#577)
-knobas-mockd/teamcity_contract  pending merge into tests/it/ (#577)
-knobas-mockd/teamcity  pending merge into tests/it/ (#577)
-knobas-mockd/violations  pending merge into tests/it/ (#577)
-
 # knobas-secrets (#578)
 knobas-secrets/keyring_local  pending merge into tests/it/ (#578)
 

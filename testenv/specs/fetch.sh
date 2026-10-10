@@ -121,7 +121,7 @@ WIZARD
     echo "==> Swagger 2.0: $(jq -r '.definitions|keys|length' "$out") definitions"
     jq -e '.definitions.Builds, .definitions.Build, .definitions.BuildTypes' "$out" >/dev/null
     echo "==> NOTE: the vendored copy is OpenAPI 3. A Swagger 2.0 re-fetch is a DOWNGRADE;"
-    echo "    crates/knobas-mockd/tests/teamcity_contract.rs reads components.schemas."
+    echo "    crates/knobas-mockd/tests/it/teamcity_contract.rs reads components.schemas."
   fi
   echo "==> ok, and NOT yet vendored. Next:"
   echo "    diff <(jq -S . teamcity.json) <(jq -S . $out)   # keep Björn's hand-added parts"
