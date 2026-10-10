@@ -391,7 +391,7 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
 /// with it -- both landed in #236, after the ticket was drafted.
 ///
 /// What nothing covered is the **other direction**: the fixture and the read
-/// disagreeing. `knobas-core/tests/projects.rs` pins the census over payloads
+/// disagreeing. `knobas-core/tests/it/projects.rs` pins the census over payloads
 /// written by hand, so `project_key_read!` could be pointed at a path the
 /// fixture never writes and every one of those tests would still pass while the
 /// demo profile showed no project rooms at all. That is not hypothetical: #234

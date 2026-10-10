@@ -7,7 +7,7 @@
 //! #45 is explicit that a test showing items appearing does not discharge it
 //! without an action completing through the queue to a source. That join --
 //! derivation, the offered op, `WriteOp`, the write queue, `Source::write` --
-//! exists in no other file: `knobas-core/tests/inbox.rs` stops at the
+//! exists in no other file: `knobas-core/tests/it/inbox.rs` stops at the
 //! derivation and `knobas-sync/tests/write_queue.rs` starts at a submitted
 //! write. Both can be green while the join between them is broken, which is
 //! the argument `tests/adapter_to_mirror.rs` makes for its own seam.
@@ -20,7 +20,7 @@
 //!
 //! The derivation is a pass over the whole mirror, so the binary's shared
 //! database would put every other test's fixtures in this one's stream. The
-//! same reasoning `knobas-core/tests/inbox.rs` records. `scratch_database`
+//! same reasoning `knobas-core/tests/it/inbox.rs` records. `scratch_database`
 //! hands back a `Connector`, which is also what the flush loop's
 //! `RunConnections` needs, so the end-to-end test runs entirely inside its own
 //! database too.
@@ -126,7 +126,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         // source that declares nothing produces no review requests and no
         // assignments -- which is what
         // `a_source_that_declares_no_paths_produces_no_assignments_and_no_review_requests`
-        // asserts in `knobas-core/tests/inbox.rs`.
+        // asserts in `knobas-core/tests/it/inbox.rs`.
         payload_paths: vec![knobas_source::KindPaths {
             kind: "pr".to_owned(),
             reviewers: vec![knobas_source::ListPath {

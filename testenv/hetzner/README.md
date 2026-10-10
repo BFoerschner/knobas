@@ -46,7 +46,7 @@ a copy of them: `knobas_app::sources::demo` imports it on every `just demo`,
 `app/src/lib/shell/dev/fake-tauri.ts` -- the `?fake-ipc` browser harness --
 draws its Tree from it, so a QA screenshot and the demo profile show the same
 estate. Editing this file moves all three at once, which is the point; what
-holds it to a shape is `crates/knobas-core/tests/estate_file.rs`, below.
+holds it to a shape is `crates/knobas-core/tests/it/estate_file.rs`, below.
 
 Ids are stable slugs in the asset namespace (`asset:knobas-jira`), because an
 import keeps them and re-importing recognises them by id. Where a server and
@@ -56,7 +56,7 @@ on it). The PostgreSQL containers are typed `container` and hold their one
 `database`; nothing is typed `database_server`, because here the container *is*
 the server and a node for each would be the same fact twice.
 
-`crates/knobas-core/tests/estate_file.rs` keeps it honest in `just check` --
+`crates/knobas-core/tests/it/estate_file.rs` keeps it honest in `just check` --
 with no container and no database. It asserts that every id is unique, that
 every parent and every route target resolves, that the assets form one tree
 with one root, that every type is in the built-in table, and that no entry
@@ -109,7 +109,7 @@ engine, so four things in this file are now under it:
   changes on every recreate and its name does not. Both are **properties**,
   because that is what the Import's second matching rule reads; the name is
   therefore written twice, once as the entry's name and once as the property,
-  and `crates/knobas-core/tests/estate_file.rs` holds the two equal and holds
+  and `crates/knobas-core/tests/it/estate_file.rs` holds the two equal and holds
   each container's context equal to its engine's. That check is the one thing
   the `hcloud_id`s do not have: a container's key is implied by the rest of this
   file, so a hand edit that renames one and forgets the other is red in `just

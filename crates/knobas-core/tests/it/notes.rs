@@ -6,8 +6,8 @@
 //! end shows the backlink -- and never about how the body was parsed. The
 //! parsing has its own unit tests in `knobas_core::note`.
 //!
-//! Same concurrency contract as `tests/stores.rs`: one database per test
-//! binary, shared by every test in it, so each test seeds ids unique to itself
+//! Same concurrency contract as `tests/it/stores.rs`: one database per test
+//! file, shared by every test in it, so each test seeds ids unique to itself
 //! and nothing truncates.
 
 use knobas_core::entity::EntityRef;

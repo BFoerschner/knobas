@@ -533,7 +533,7 @@ async fn a_classic_projects_epic_link_reaches_the_stored_payload() {
 /// `knobas_core::project_key_read!`'s third arm reads a TeamCity build
 /// configuration's top-level `projectId` only where `i.kind = 'build_config'`
 /// -- a literal in `knobas-core`, which cannot import the adapter's
-/// `KIND_BUILD_CONFIG`. `knobas-core/tests/projects.rs` pins that arm with
+/// `KIND_BUILD_CONFIG`. `knobas-core/tests/it/projects.rs` pins that arm with
 /// hand-written rows that spell the kind the same way, so those tests and the
 /// macro agree by construction; the adapter's own tests pin the kind on a
 /// parsed `SyncItem` and reach no database. Between them the literal and the

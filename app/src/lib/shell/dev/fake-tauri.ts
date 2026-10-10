@@ -659,7 +659,7 @@ interface EstateFileRoute {
  * has no parent and the union's shape changes the day somebody gives a second
  * asset an owner. The cast is the seam, and it is narrow on purpose: the
  * authority on this file is the Rust parser, and what holds the file to a
- * shape is `knobas-core`'s `tests/estate_file.rs` -- eleven tests over the
+ * shape is `knobas-core`'s `tests/it/estate_file.rs` -- eleven tests over the
  * checked-in bytes, in `just check`.
  */
 const ESTATE = ESTATE_FILE as unknown as {

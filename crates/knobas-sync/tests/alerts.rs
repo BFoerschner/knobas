@@ -718,7 +718,7 @@ async fn a_run_reconciles_its_own_sources_monitors_only() {
 /// One asset in the estate, and a confirmed `monitored-by` link to a monitor.
 ///
 /// Written by hand rather than through `knobas_app::assets`, which this crate
-/// cannot depend on -- `tests/contexts.rs` in `knobas-core` makes the same
+/// cannot depend on -- `tests/it/contexts.rs` in `knobas-core` makes the same
 /// trade for the same reason. The relation is the shared constant and not a
 /// literal, so a rename reaches this fixture.
 async fn watched_asset(pool: &PgPool, monitor_id: &str, name: &str, confirmed: bool) -> String {

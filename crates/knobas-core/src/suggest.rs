@@ -177,7 +177,7 @@ macro_rules! driver_head {
 /// than raised, and the row `order by` puts first lands either way. Measured in
 /// #451, and corrected here rather than left standing (ADR-0011, *verify, then
 /// correct or file*): deleting the `distinct on` leaves every test in
-/// `tests/suggestions.rs` green. It stays because it says in the statement
+/// `tests/it/suggestions.rs` green. It stays because it says in the statement
 /// which of two duplicate candidates is meant to land, instead of leaving that
 /// to a constraint firing behind it.
 macro_rules! driver_tail {
@@ -475,7 +475,7 @@ macro_rules! host_of {
 ///
 /// **This is a correction, not a decision.** #478 read `properties->>'hostname'`
 /// against a battery whose fixtures wrote an untagged bag, so the arm passed
-/// every test in `tests/suggestions.rs` and could not fire against a single row
+/// every test in `tests/it/suggestions.rs` and could not fire against a single row
 /// any import or editor had written. What found it is the estate witness #479
 /// added (`knobas-app`'s
 /// `the_monitor_host_rule_proposes_nothing_over_the_real_estate`), which runs

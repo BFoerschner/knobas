@@ -12,7 +12,7 @@
 //!
 //! Everything else about an asset lives in `knobas_app::assets`, under the
 //! §10.8 module-pair exception. This table does not, because it has a **second
-//! reader**: `knobas-core`'s own `tests/estate_file.rs` checks that every type
+//! reader**: `knobas-core`'s own `tests/it/estate_file.rs` checks that every type
 //! the checked-in estate file names is one that exists, and `knobas-core`
 //! cannot depend on `knobas-app`. That test shipped with #438 carrying a
 //! hand-written copy of this list and said so in as many words -- *"this
@@ -178,7 +178,7 @@ use PropertyKind::{Number as N, Text as T, Url as U};
 /// * **What the real estate actually holds.** `testenv/hetzner/estate.json`
 ///   describes provisioned infrastructure, and it holds three pairs the chains
 ///   do not draw -- a site under a site, a VM directly under a site, and a
-///   database inside a container. `knobas-core`'s own `tests/estate_file.rs`
+///   database inside a container. `knobas-core`'s own `tests/it/estate_file.rs`
 ///   asserts that every parent-and-child pair in that file is suggested here,
 ///   so the conventions answer to an estate that exists (ADR-0013) rather than
 ///   to a diagram.

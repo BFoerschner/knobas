@@ -440,7 +440,7 @@ macro_rules! failed_build {
 /// does not carry the declared one, contributes nothing: the miss direction,
 /// unchanged, and pinned by
 /// `an_assignee_the_declaration_does_not_reach_contributes_nothing` in
-/// `knobas-core/tests/inbox.rs`.
+/// `knobas-core/tests/it/inbox.rs`.
 macro_rules! new_assignment {
     () => {
         concat!(

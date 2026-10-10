@@ -1,7 +1,7 @@
 //! The checkout surface as the interface sees it (#499).
 //!
 //! The *finding* is proven in `knobas-core`'s own battery
-//! (`src/checkout.rs`'s normalisation cases and `tests/checkout_scan.rs`'s
+//! (`src/checkout.rs`'s normalisation cases and `tests/it/checkout_scan.rs`'s
 //! walk over a temporary tree). What is asserted here is the join those two
 //! cannot see: the clones root round-tripping through `knobas.setting`, the
 //! override winning over the scan and giving it back when cleared, a branch

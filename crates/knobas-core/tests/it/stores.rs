@@ -2,7 +2,7 @@
 //!
 //! `test_util` roots its server at `$TMPDIR/knobas-test-<pid>` and reaps
 //! earlier runs, so each `cargo test` gets a freshly `initdb`-ed database --
-//! but one database, shared by every test in this binary, and those tests run
+//! but one database, shared by every test in this file, and those tests run
 //! concurrently. Each test therefore seeds entity ids unique to itself rather
 //! than fixed ones, so that its rows are its own; truncating the shared tables
 //! instead would break the tests running beside it.

@@ -44,7 +44,7 @@
 //! real ticket. ADR-0008 draws the line for context membership -- "membership
 //! built from proposals would make the two circular" -- and #41's sentence is
 //! the same one: an unconfirmed guess shown as a link "would be a correctness
-//! bug, not a cosmetic one". `crates/knobas-core/tests/link_reads.rs` is what
+//! bug, not a cosmetic one". `crates/knobas-core/tests/it/link_reads.rs` is what
 //! keeps this file honest about it.
 //!
 //! # What counts as a ticket

@@ -26,7 +26,7 @@
 //! Every step of the walk reads `knobas.confirmed_link`, never `knobas.link`:
 //! the table also holds proposals (#41), the tray *scopes proposals by
 //! membership*, and a membership built from proposals would make the two
-//! circular. `tests/link_reads.rs` is the scan that keeps this true.
+//! circular. `tests/it/link_reads.rs` is the scan that keeps this true.
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -322,7 +322,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// than wrong — an absent member, never a wrong one. Pinned in both seeds:
 /// `a_foreign_or_misshapen_parent_contributes_nothing` for `member_ids`, and
 /// `a_misshapen_parent_seeds_no_context_in_the_merged_walk` for the merged
-/// one, both in `tests/contexts.rs`.
+/// one, both in `tests/it/contexts.rs`.
 ///
 /// Exported for [`held_by_any_context!`]'s sake — a macro's body resolves at
 /// its call site — which is [`context_expansion!`]'s reason too.
@@ -490,7 +490,7 @@ const MEMBER_IDS: &str = concat!(
 /// reaches exactly the union of the walks from each context's seeds — the same
 /// three layers, the same depth, the same `held` recursion. It is checked
 /// rather than argued: `the_merged_walk_is_the_union_of_every_contexts_members`
-/// in `tests/contexts.rs` compares this against [`member_ids`] over
+/// in `tests/it/contexts.rs` compares this against [`member_ids`] over
 /// [`list`]'s own contexts on a fixture that has several.
 ///
 /// **Archived contexts are left out**, which is the one place this and

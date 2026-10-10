@@ -33,7 +33,7 @@
 //! against its own corpus with no database in sight.
 //!
 //! Two implementations of one rule is a drift risk, and it is pinned rather
-//! than hoped: `crates/knobas-core/tests/payload_paths.rs` runs the same
+//! than hoped: `crates/knobas-core/tests/it/payload_paths.rs` runs the same
 //! payload/declaration pairs through both and asserts they agree, so a change
 //! to either that the other does not make turns a test red.
 //!
@@ -465,7 +465,7 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 ///    row (`knobas_search`'s launcher corpora and `knobas_app`'s room and
 ///    entity statements) and nowhere else.
 /// 3. **The failure direction is absence**, pinned by
-///    `knobas-core/tests/ancestor_path.rs` across all six unusable shapes.
+///    `knobas-core/tests/it/ancestor_path.rs` across all six unusable shapes.
 ///
 /// `$payload` is the payload expression, as a literal (`"i.payload"`), because
 /// that is what `concat!` folds: every statement built with this is a
