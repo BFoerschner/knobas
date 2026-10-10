@@ -43,9 +43,3 @@ knobas-http/transport  asserts elapsed() < 5 s on a call its send budget ends ea
 knobas-mockd/jira_harness  a 5 s timeout around stop() and 2 s request timeouts
 knobas-source-gitea/litter_guard  asserts elapsed() < 5 s on a 250 ms cleanup budget
 knobas-sync/scheduler_loop  a 5 s timeout on pool.acquire() and 50 ms ticks
-
-# --- Pending merge (TEMPORARY, #571) ----------------------------------------
-#
-# Not exceptions: files waiting for their crate's merge ticket, listed so the
-# guard holds from the day it landed. Each crate's merge ticket deletes its
-# own lines; the last one (#579) deletes this section.

@@ -150,11 +150,11 @@ rename() {
         }
         { print }
         # A crate with nothing to rename would pass as its own rename: that is
-        # the check run before the crate'"'"'s pending-merge lines were deleted.
+        # the check run before the crate'"'"'s files left the exception list.
         END {
             for (cr in merging) if (!(cr in renamed)) {
                 printf "%s: %s has no test outside test/it and off the exception list to rename;\n", prog, cr > "/dev/stderr"
-                printf "  delete its pending-merge lines from test-layout-exceptions.txt first\n" > "/dev/stderr"
+                printf "  take the files being merged off test-layout-exceptions.txt first\n" > "/dev/stderr"
                 bad = 1
             }
             exit bad
