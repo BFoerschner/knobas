@@ -79,7 +79,7 @@ pub struct EntityRow {
 /// room whose filter said "no sources in particular" would come back empty.
 ///
 /// `Serialize` behind `test-util`, although nothing sends a filter the other
-/// way: it is what lets `tests/entity_mirror.rs` pin an *input* DTO through a
+/// way: it is what lets `tests/it/entity_mirror.rs` pin an *input* DTO through a
 /// round trip, and so see a field this struct has that
 /// `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
 /// that direction -- serde reads a missing `Option` as `None`, so a Rust-only
@@ -1235,7 +1235,7 @@ pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, 
 /// The note is always the **from** end; see [`knobas_core::note::BornLink`].
 ///
 /// `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
-/// it is what lets `tests/entity_mirror.rs` pin an input DTO through a round
+/// it is what lets `tests/it/entity_mirror.rs` pin an input DTO through a round
 /// trip, and so see a field the TypeScript mirror never declares.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "test-util", derive(serde::Serialize))]
@@ -2839,7 +2839,7 @@ pub async fn list_projects(
 /// re-type the two lines it contains -- which is a test that goes on passing
 /// after the command stops doing this. Pinned by
 /// `a_confluence_space_is_a_project_room_and_a_jira_project_is_another` in
-/// `tests/entity.rs`, which dies when the declarations stop being resolved
+/// `tests/it/entity.rs`, which dies when the declarations stop being resolved
 /// here.
 ///
 /// # Errors

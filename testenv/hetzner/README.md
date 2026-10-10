@@ -42,7 +42,7 @@ has not been told about.
 
 Since #440 it has **three** readers, and all three read these bytes rather than
 a copy of them: `knobas_app::sources::demo` imports it on every `just demo`,
-`crates/knobas-app/tests/estate_exit.rs` runs M4.0's exit checklist over it, and
+`crates/knobas-app/tests/it/estate_exit.rs` runs M4.0's exit checklist over it, and
 `app/src/lib/shell/dev/fake-tauri.ts` -- the `?fake-ipc` browser harness --
 draws its Tree from it, so a QA screenshot and the demo profile show the same
 estate. Editing this file moves all three at once, which is the point; what

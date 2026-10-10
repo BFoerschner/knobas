@@ -26,7 +26,7 @@
 //!
 //! What the sharer's profile holds is the real estate --
 //! `testenv/hetzner/estate.json`, the machines this repository is developed
-//! on, as ADR-0013 and `tests/estate_exit.rs` require -- plus the things the
+//! on, as ADR-0013 and `tests/it/estate_exit.rs` require -- plus the things the
 //! criterion names: a room with a member, a link to a Jira ticket, and the two
 //! kinds of private thing a share export exists to leave behind, a note and an
 //! afternoon's work.
@@ -44,7 +44,7 @@
 //!
 //! # What this cannot witness
 //!
-//! The pixels, as `tests/estate_exit.rs` records at length for M4.0: `just
+//! The pixels, as `tests/it/estate_exit.rs` records at length for M4.0: `just
 //! demo` opens a Tauri window and headless Chrome cannot attach to one. The
 //! *Share…* dialog and the archive list are pinned by
 //! `app/src/lib/settings/BackupSection.test.svelte.ts`; what is here is
@@ -62,13 +62,13 @@ use knobas_core::link::Origin;
 use sqlx::PgPool;
 
 /// The estate as provisioned, embedded -- the same bytes `sources::demo`,
-/// `tests/assets_ipc.rs` and `tests/estate_exit.rs` read.
+/// `tests/it/assets_ipc.rs` and `tests/it/estate_exit.rs` read.
 const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 
 /// The container the checklist follows, the server that holds it, and where
 /// the container sits by the names a reader sees.
 ///
-/// The same three `tests/estate_exit.rs` follows, on purpose: M4.0's exit
+/// The same three `tests/it/estate_exit.rs` follows, on purpose: M4.0's exit
 /// asserted them of a freshly imported profile, and this file asserts them of
 /// a profile that has been through an archive and back. Two claims about one
 /// asset, and the pair is what says a share export moved the estate rather
@@ -99,7 +99,7 @@ const NOTE_BODY: &str = "ssh to the box, then `just drain` -- and tell nobody.";
 /// The one restored profile, and the directories the archive travelled
 /// between.
 ///
-/// A `OnceCell` for the reason `tests/estate_exit.rs` holds one: "one machine"
+/// A `OnceCell` for the reason `tests/it/estate_exit.rs` holds one: "one machine"
 /// is the claim, and a helper that restored per test would make each assertion
 /// true of a machine nobody else saw. It holds the **connector** rather than a
 /// pool, because each `#[tokio::test]` builds a runtime of its own and drops
@@ -155,7 +155,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
     assert_eq!(
         (outcome.assets_created, outcome.routes_created),
         (23, 9),
-        "the real estate, as `tests/estate_exit.rs` counts it"
+        "the real estate, as `tests/it/estate_exit.rs` counts it"
     );
 
     // A room, with the server in it. *Add to context* is an ordinary link

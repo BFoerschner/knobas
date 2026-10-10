@@ -61,7 +61,7 @@ pub struct JiraConfig {
     /// this option can name because its id differs per instance.
     ///
     /// Certified end to end, not only in the query string (issue #125):
-    /// `knobas-app/tests/adapter_to_mirror.rs`'s
+    /// `knobas-app/tests/it/adapter_to_mirror.rs`'s
     /// `a_classic_projects_epic_link_reaches_the_stored_payload` configures
     /// this option, syncs against mockd and asserts the epic key on the
     /// `sync.item.payload` column. Until then the round trip could not be run

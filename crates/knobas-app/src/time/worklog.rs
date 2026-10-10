@@ -760,7 +760,7 @@ const LOG: &str = "with made as (
 ///
 /// The middle step of [`log`], and public for one reason: it is the seam where
 /// **the order of the copy and the flush stops mattering**, and a test has to
-/// be able to put the copy second (`tests/worklog_ipc.rs`,
+/// be able to put the copy second (`tests/it/worklog_ipc.rs`,
 /// `a_settle_that_beat_the_copy_still_gives_it_the_id`). Nothing in production
 /// calls it but `log`.
 ///

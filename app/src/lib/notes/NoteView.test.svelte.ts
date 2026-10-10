@@ -43,7 +43,7 @@ function detail(over: Partial<NoteDetail> = {}): NoteDetail {
  * Keyed on the URL **as pasted**, fragment and all. The normalisation that
  * makes `#comment-42` irrelevant is the resolver's own — one rule, written
  * once as SQL in `knobas_core::web_url`, applied to both sides and checked
- * against a real database in `crates/knobas-app/tests/url_resolve.rs`. A
+ * against a real database in `crates/knobas-app/tests/it/url_resolve.rs`. A
  * fixture that re-implemented it here would be a second spelling of it, in a
  * second language, that nothing forces to agree. What this file is entitled to
  * check is the frontend's own half: that what reaches the resolver is what the

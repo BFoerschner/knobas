@@ -953,7 +953,7 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
 /// That *Test connection* writes nothing is
 /// [`testing_a_draft_writes_nothing_at_all`]'s claim and is not restated
 /// here: this fixture shares its database with every other test in the
-/// binary, so "no source rows exist" is a claim about the neighbours rather
+/// file, so "no source rows exist" is a claim about the neighbours rather
 /// than about this call -- which is the shape #300 had just finished fixing
 /// elsewhere. Nothing in the discovery path writes, and the code that would
 /// is the same code that test already covers.

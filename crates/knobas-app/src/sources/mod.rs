@@ -442,7 +442,7 @@ pub async fn start<R: tauri::Runtime>(
 /// A scheduler over an already-open pool, for the IPC tests. **Tests only.**
 ///
 /// It exists because `start` needs an `EmbeddedDb` -- the thing that hands out
-/// connections outside every pool -- and `tests/ipc.rs` has a `test_pool`, not
+/// connections outside every pool -- and `tests/it/ipc.rs` has a `test_pool`, not
 /// a database handle. Everything else is the real thing: the real registry, the
 /// real `TauriEvents`, real runs on real dedicated connections. Behind
 /// `test-util` for the reason `AppState::over_pool` is: a production caller

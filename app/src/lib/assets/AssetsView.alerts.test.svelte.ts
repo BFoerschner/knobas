@@ -9,7 +9,7 @@
  *
  * Which alerts are open is the **backend's** rule and is pinned at its own
  * seam (`crates/knobas-sync/tests/it/alerts.rs` for the reconcile,
- * `crates/knobas-app/tests/assets_ipc.rs` for the read): a second copy of
+ * `crates/knobas-app/tests/it/assets_ipc.rs` for the read): a second copy of
  * *"a crossing into down or warn opens one"* over here would be the copy that
  * goes stale. What is here is the part only this view can get wrong — that the
  * strip is absent when nothing is wrong, that a monitor watching two assets

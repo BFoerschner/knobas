@@ -984,7 +984,7 @@ test("finishing the wizard shows the rooms the demo corpus just wrote", async ()
  * terminal `sync:state` the backend emits once the demo load's run ends,
  * which the projects store already re-lists on. The fake bridge's
  * `demo_load` answers synchronously and fires nothing, so this test fires
- * the event the backend now sends (pinned in `crates/knobas-app/tests/ipc.rs`).
+ * the event the backend now sends (pinned in `crates/knobas-app/tests/it/ipc.rs`).
  *
  * The fixture starts with the source room and an empty census, as the
  * mid-session test does: the switcher nests a project room under its source

@@ -22,7 +22,7 @@ async fn pool() -> PgPool {
     pool
 }
 
-/// A token no other test in this binary writes.
+/// A token no other test in this file writes.
 fn unique() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);

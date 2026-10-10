@@ -24,7 +24,7 @@
 //!   number instead fires either way, which is a value pin doing a drift
 //!   detector's job by accident.
 //!
-//! The idiom is `tests/sources_mirror.rs`'s: `include_str!` the TypeScript,
+//! The idiom is `tests/it/sources_mirror.rs`'s: `include_str!` the TypeScript,
 //! compare it against a real value. The difference is that the mirror there is
 //! a set of `interface` declarations, where a key set is the whole content;
 //! here the mirror is data, so the comparison is over values.
@@ -539,7 +539,7 @@ fn a_top_level_key_the_fixture_drops_is_not_licensed() {
 
 // -- the check itself ----------------------------------------------------------
 
-const FIXTURES: &str = include_str!("../../../app/src/lib/sources/fixtures.ts");
+const FIXTURES: &str = include_str!("../../../../app/src/lib/sources/fixtures.ts");
 
 /// Each fixture const and the adapter kind it transcribes.
 ///

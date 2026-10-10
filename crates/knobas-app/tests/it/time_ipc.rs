@@ -7,7 +7,7 @@
 //! `knobas_app::time` is where the decisions are, and it is reachable without
 //! a window (`commands/time.rs` is shims over it, the arrangement the §10.8
 //! entry ratifies). So the tests drive the store against a real database, the
-//! way `tests/start_work.rs` and `tests/inbox_ipc.rs` do -- a command in, a
+//! way `tests/it/start_work.rs` and `tests/it/inbox_ipc.rs` do -- a command in, a
 //! DTO out -- rather than asserting on SQL or on the row the statement wrote.
 //!
 //! # Why the clock is dictated and not waited for
@@ -26,7 +26,7 @@
 //! There is at most one timer row in a database, by construction (migration
 //! `0013`'s singleton primary key). Two tests sharing one would be deciding
 //! each other's outcomes on the very rule the schema exists to make
-//! structural. The same reasoning `tests/start_work.rs` records for its flows.
+//! structural. The same reasoning `tests/it/start_work.rs` records for its flows.
 
 use chrono::{DateTime, Duration, SubsecRound, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
@@ -2006,7 +2006,7 @@ async fn a_database_no_sweep_has_run_in_has_no_day_past_the_horizon() {
 // The draft's *reads*, against a real database: which blocks a day's interval
 // is made of, what the candidates are, and what the comment says. The other
 // half of the worklog -- queueing the write, the local copy, Jira's id landing
-// on it -- needs a source that answers, and lives in `tests/worklog_ipc.rs`
+// on it -- needs a source that answers, and lives in `tests/it/worklog_ipc.rs`
 // behind a trait-level fake (the layer ADR-0013 keeps).
 
 /// The reader's day, and the offset their machine sends with it. UTC here, so

@@ -485,7 +485,7 @@ macro_rules! asset_touched_at {
 /// compiler will say when they stop agreeing, so
 /// [`the_roster_rule_is_spelled_the_way_the_link_table_spells_it`] pins the two
 /// words this statement and that one both hard-code, and
-/// `crates/knobas-app/tests/search_ipc.rs`'
+/// `crates/knobas-app/tests/it/search_ipc.rs`'
 /// `the_launchers_not_monitored_list_is_the_monitors_tabs_roster` runs both
 /// reads over one estate and compares the answers.
 ///
@@ -615,7 +615,7 @@ macro_rules! open_alert_opened_at {
 /// an authority of its own. The authority is the glossary and §12.3 above.
 ///
 /// Pinned by `an_acked_alert_is_still_open_and_still_on_the_list` in
-/// `crates/knobas-app/tests/search_ipc.rs`. Ruled for v1.5 on 2026-09-08
+/// `crates/knobas-app/tests/it/search_ipc.rs`. Ruled for v1.5 on 2026-09-08
 /// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, #504), which also
 /// records why copying the clause would not have made the two counts agree:
 /// #446's ack writes `acked_at` **and** `complete_with`, and the inbox's count

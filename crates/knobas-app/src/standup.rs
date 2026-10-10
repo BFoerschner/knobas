@@ -166,7 +166,7 @@ const ATTRIBUTED: &str = "attributed";
 /// rename here would not fail -- it would silently stop matching, and every
 /// logged afternoon would be on the standup twice.
 ///
-/// The pin lives in `tests/standup_ipc.rs`
+/// The pin lives in `tests/it/standup_ipc.rs`
 /// (`a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well`, whose
 /// fixture spells the queue line from the enum rather than from the word), and
 /// it lives there rather than here because `crates/*/src/**` may not name the
@@ -421,7 +421,7 @@ struct WriteRow {
 /// once out of `knobas.worklog`, which is the richer copy and the one that
 /// survives a pruned queue.
 ///
-/// Both halves are pinned in `tests/standup_ipc.rs`, and the verb takes two
+/// Both halves are pinned in `tests/it/standup_ipc.rs`, and the verb takes two
 /// fixtures because it carries two rules:
 /// `a_write_is_one_line_however_many_states_the_queue_narrates` says a write is
 /// **one** line however often the queue speaks, and

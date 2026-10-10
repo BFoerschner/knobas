@@ -32,7 +32,7 @@ use knobas_db::backup;
 use knobas_search::{SearchFilters, SearchQuery};
 use sqlx::PgPool;
 
-/// A token nothing else in this binary can match.
+/// A token nothing else in this file can match.
 fn token(tag: &str) -> String {
     format!("zb{tag}{}", uuid::Uuid::new_v4().simple())
 }
@@ -351,7 +351,7 @@ async fn a_restore_refuses_a_database_that_already_holds_knobas_data() {
     backup::dump(&connector, &archive).await.expect("a backup");
 
     // The shared database is populated by construction -- every test in this
-    // binary is in it.
+    // file is in it.
     let error = backup::restore(&connector, &archive)
         .await
         .expect_err("a populated knobas must not be overwritten");

@@ -6,7 +6,7 @@
  * out** — `StandupView.test.svelte.ts` and `DayReview.test.svelte.ts`'s, and
  * the reason nothing here reaches into the component's state. The bridge is
  * injected through `ports`, so no Tauri and no database: what the backend puts
- * on a column and in the pane is `crates/knobas-app/tests/assets_ipc.rs`'s,
+ * on a column and in the pane is `crates/knobas-app/tests/it/assets_ipc.rs`'s,
  * and what is asserted here is that a cold address draws one column per level
  * with the path marked in each, and that the pane draws the answer.
  *
@@ -482,7 +482,7 @@ interface Over {
  * ancestor path. What that difference costs is named rather than hidden: this
  * fake certifies the *box* — what it asks for, which hit it reveals, what the
  * list shows — and what certifies the query is
- * `crates/knobas-app/tests/search_ipc.rs`, where the same filter runs against
+ * `crates/knobas-app/tests/it/search_ipc.rs`, where the same filter runs against
  * `corpus::ASSET` on a real database.
  */
 function matchesFor(query: SearchQuery, estate: AssetRow[]): SearchResponse {

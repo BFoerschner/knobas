@@ -140,7 +140,7 @@ async fn count_of(s: &Searcher, id: &str) -> i64 {
 /// depend on and must not: `knobas-search` takes a `PgPool` and reads. What
 /// that costs is `path_text`, which the store maintains and nothing here needs
 /// -- these lists are asserted on membership, and the wire-level check that an
-/// estate row carries its path is `crates/knobas-app/tests/search_ipc.rs`'
+/// estate row carries its path is `crates/knobas-app/tests/it/search_ipc.rs`'
 /// business, where the rows are made through the real door.
 ///
 /// Two assets, because the three lists are three different rules and one asset

@@ -27,7 +27,7 @@
 //! The shortcut is **one `knobas.setting` row per database** and every test
 //! here either sets it or asserts what it is -- `checkout_ipc.rs`'s reason,
 //! measured there: a global setting cannot be namespaced by a fixture id, so
-//! sharing this binary's database would put the tests in each other's setting.
+//! sharing this file's database would put the tests in each other's setting.
 
 use std::sync::Mutex;
 

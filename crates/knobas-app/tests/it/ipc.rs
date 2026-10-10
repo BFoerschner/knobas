@@ -431,7 +431,7 @@ fn unreachable_pool() -> sqlx::PgPool {
 /// run on a real dedicated connection.
 ///
 /// `db` is where those dedicated connections come from, and it has to be the
-/// database `pool` is on: a caller on the binary's shared database passes
+/// database `pool` is on: a caller on the file's shared database passes
 /// [`test_connector`](knobas_db::test_util::test_connector), and one on a
 /// database of its own passes that (#300).
 fn sources_state(
@@ -535,7 +535,7 @@ fn demo_load_passes_the_guard_in_the_demo_profile() {
 /// row (out of scope by ruling), and the store only needs `running: false`.
 #[tokio::test(flavor = "multi_thread")]
 async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
-    // A database of its own, not the binary's shared one: `sync_now_answers_..`
+    // A database of its own, not the file's shared one: `sync_now_answers_..`
     // opens a real `mock` run on the shared database, and `status_for` reads
     // whatever run is open for the source -- so on the shared database this
     // emit came back `running: true, run_id: <the sibling's run>` in one gate
@@ -611,7 +611,7 @@ async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
 /// up later.
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
-    // A database of its own, not the binary's shared one -- the remedy
+    // A database of its own, not the file's shared one -- the remedy
     // `demo_load_ends_with_a_terminal_sync_state_for_the_mock` already needed,
     // for the same reason (#300).
     //
@@ -1086,7 +1086,7 @@ async fn creating_a_link_announces_its_activity_line_on_the_event() {
     knobas_db::migrate::run(&pool).await.unwrap();
 
     // Two entities of this test's own: the database is shared by every test in
-    // this binary, and a link is refused if either end has no entity row.
+    // this file, and a link is refused if either end has no entity row.
     let run = uuid::Uuid::new_v4();
     let from = format!("links-{run}:TICKET-1");
     let to = format!("links-{run}:PAGE-1");
@@ -1167,7 +1167,7 @@ async fn unlinking_announces_its_line_and_an_already_withdrawn_link_announces_no
     knobas_db::migrate::run(&pool).await.unwrap();
 
     // Two entities of this test's own: the database is shared by every test in
-    // this binary, and a link is refused if either end has no entity row.
+    // this file, and a link is refused if either end has no entity row.
     let run = uuid::Uuid::new_v4();
     let from = format!("unlinks-{run}:TICKET-1");
     let to = format!("unlinks-{run}:PAGE-1");

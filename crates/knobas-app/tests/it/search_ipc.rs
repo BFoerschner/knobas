@@ -2,13 +2,13 @@
 //!
 //! A `#[tauri::command]` cannot be called without a window, so what is tested
 //! here is the `*_inner` function each command is a two-line shim over -- the
-//! pattern `tests/demo.rs` already uses for `demo_load_inner`. `tests/ipc.rs`
+//! pattern `tests/it/demo.rs` already uses for `demo_load_inner`. `tests/it/ipc.rs`
 //! covers the other half (that the argument shapes decode and the handler list
 //! dispatches); this file covers what the shims are *for*: the wire shape the
 //! hand-written TypeScript mirrors, the error codes the frontend branches on,
 //! and the one DTO that is a composition of two streams' data.
 //!
-//! Every test in this binary shares one database (`knobas_db::test_util`), and
+//! Every test in this file shares one database (`knobas_db::test_util`), and
 //! libtest does not order them. So: nothing truncates, every corpus assertion
 //! is scoped to a token this test seeded, and no assertion is made about an
 //! absolute row count of anything global.
@@ -28,7 +28,7 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
-/// A token nothing else in this binary can match.
+/// A token nothing else in this file can match.
 fn token(tag: &str) -> String {
     format!("zi{tag}{}", uuid::Uuid::new_v4().simple())
 }
@@ -37,7 +37,7 @@ fn token(tag: &str) -> String {
 ///
 /// The source row is what `launcher_home` reads its health out of, so it has
 /// to exist before that assertion -- and it is inserted with `on conflict do
-/// nothing` because another test in this binary may have got there first.
+/// nothing` because another test in this file may have got there first.
 async fn seed(pool: &sqlx::PgPool, tag: &str) -> String {
     let t = token(tag);
     sqlx::query(
@@ -214,8 +214,8 @@ async fn errors_carry_a_code_the_frontend_can_branch_on() {
 /// queue. What is asserted here is that all four halves arrive and are shaped
 /// as the mirror declares them; the *value* of the count belongs to
 /// `launcher_home_counts_the_pending_writes`, which is the only test in this
-/// binary that queues anything and therefore the only one that may say a
-/// number out loud about a table the whole binary shares.
+/// file that queues anything and therefore the only one that may say a
+/// number out loud about a table the whole file shares.
 #[tokio::test]
 async fn launcher_home_reports_source_health_beside_the_lists() {
     let pool = pool().await;
@@ -267,7 +267,7 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
 /// The footer's number is the write queue's *pending* rows (issue #212).
 ///
 /// A delta rather than an absolute, for the reason this file's header gives:
-/// the binary shares one database and `write_queue::counts` is global, so what
+/// the file shares one database and `write_queue::counts` is global, so what
 /// can be pinned is the movement. Both directions are asserted, because the
 /// direction is the decision: queueing a write raises the count, and *holding*
 /// that same write lowers it again -- "N pending writes" says be patient, and a
@@ -728,7 +728,7 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
 // ancestor needs an ancestor somebody drew on purpose.
 
 /// The estate the three lists are read over -- the real file.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
 
 /// How many assets that file holds. A literal, and deliberately not counted out
 /// of the file: a count derived from the fixture agrees with the fixture
@@ -1146,7 +1146,7 @@ async fn every_estate_list_badges_until_it_is_opened() {
 ///
 /// Unlike everything above, a saved list is **global state on the board**: the
 /// row this makes is on every other test's rail, and the counts are read over
-/// a corpus this binary's other tests are also writing to. So these tests take
+/// a corpus this file's other tests are also writing to. So these tests take
 /// a scratch database each, the way the estate-list tests do, and can then say
 /// what the whole rail is rather than only what is somewhere on it.
 async fn saved_pool(label: &str) -> sqlx::PgPool {

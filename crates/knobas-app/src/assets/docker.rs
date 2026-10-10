@@ -22,7 +22,7 @@
 //! argument vector itself, so a context named `; rm -rf /` is one argument
 //! called `; rm -rf /` and docker answers *no context by that name* --
 //! `the_context_is_the_only_thing_substituted_and_it_is_one_argument` below,
-//! and the stub-driven half in `tests/assets_ipc.rs`.
+//! and the stub-driven half in `tests/it/assets_ipc.rs`.
 //!
 //! The **program** is [`PROGRAM`] and is not a setting: ADR-0016's command
 //! templates are for *open in editor* and *open a terminal*, where the binary
@@ -108,7 +108,7 @@
 //! # What is not witnessed here
 //!
 //! That the docker CLI answers in the shape [`containers`] parses is witnessed
-//! by a **stub executable** in `tests/assets_ipc.rs`, which certifies the
+//! by a **stub executable** in `tests/it/assets_ipc.rs`, which certifies the
 //! parse, the argument rule, the landing and the refusals and can never go red
 //! when docker changes its output. That the four real contexts answer in it,
 //! and that the `docker_context` and `container_name` values in

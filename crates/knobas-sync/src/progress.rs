@@ -22,7 +22,7 @@
 //! `Deserialize` impl, so the `Option` has no route to `CommandArg` -- which
 //! is why the command is split into `sync_now` and `sync_now_with_progress`
 //! rather than taking an omittable channel. The verdict and its evidence are
-//! pinned in `crates/knobas-app/tests/ipc.rs`. On *this* side of the bridge
+//! pinned in `crates/knobas-app/tests/it/ipc.rs`. On *this* side of the bridge
 //! the sink is an ordinary `Option<&dyn ProgressSink>`, so the engine has one
 //! code path either way.
 

@@ -22,7 +22,7 @@
 //! index definition cannot expand a Rust macro. That copy is not load-bearing
 //! for correctness: if it drifted, the query would still answer correctly and
 //! would merely stop using the index. It is load-bearing for *speed*, which is
-//! why `crates/knobas-app/tests/url_resolve.rs` asks the planner whether the
+//! why `crates/knobas-app/tests/it/url_resolve.rs` asks the planner whether the
 //! shipped statement still reaches the index -- the same check
 //! `the_view_still_reaches_the_fts_index` makes for the launcher's GIN index.
 //!

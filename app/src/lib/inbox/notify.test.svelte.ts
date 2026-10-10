@@ -682,7 +682,7 @@ test("an alert says nothing until its own category is switched on", async () => 
  * rather than pretending to tell them apart: nobody deletes an inbox item, the
  * rule stops matching -- `acked_at` for the one and `closed_at` for the other
  * -- and both reach this store as an item that is no longer in the stream.
- * Which departure is which is `crates/knobas-app/tests/inbox_ipc.rs`'
+ * Which departure is which is `crates/knobas-app/tests/it/inbox_ipc.rs`'
  * `an_alert_is_acked_from_the_inbox_and_recovery_takes_the_item_and_leaves_a_line`,
  * against the database, and it is the *only* place that distinction is
  * witnessed.

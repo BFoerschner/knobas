@@ -81,7 +81,7 @@ fn every_template_names_its_own_kind_and_declares_a_config_schema() {
 /// dev-dependency is not linked into the app, and `knobas-source` is the SPI
 /// rather than an adapter, which the trailing `-` excludes.
 fn linked_adapter_crates() -> Vec<&'static str> {
-    const MANIFEST: &str = include_str!("../Cargo.toml");
+    const MANIFEST: &str = include_str!("../../Cargo.toml");
     MANIFEST
         .lines()
         .skip_while(|line| line.trim() != "[dependencies]")

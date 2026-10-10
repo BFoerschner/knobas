@@ -25,7 +25,7 @@
  * that the view shows **the backend's own message, in place**, rather than one
  * it composed itself — which is the criterion (*"a cycle is refused with the
  * message the command gives"*). That those are the sentences the real commands
- * answer with is `crates/knobas-app/tests/assets_ipc.rs`'s claim, over a real
+ * answer with is `crates/knobas-app/tests/it/assets_ipc.rs`'s claim, over a real
  * PostgreSQL, and it is deliberately not restated here.
  */
 import { flushSync, mount, unmount } from "svelte";

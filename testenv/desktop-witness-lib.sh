@@ -224,7 +224,7 @@ git_config() {
 # newline.
 #
 # The newline and not merely a non-empty file, because the newline is what
-# `recorded()` waits for in `crates/knobas-app/tests/checkout_ipc.rs`, and the
+# `recorded()` waits for in `crates/knobas-app/tests/it/checkout_ipc.rs`, and the
 # two are watching the same stub write the same file in the same shape. The
 # stub's `> file` is one open and one write, so half a record is unlikely
 # rather than impossible; what half a record produces is a comparison against

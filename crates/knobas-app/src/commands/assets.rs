@@ -25,7 +25,7 @@
 //!
 //! `asset_types` (#429) reads a `const`, not a database, so it has no
 //! `Lifecycle` to ask and no `Result` to answer with -- the shape `app::ping`
-//! and `app_status` already have. It is the reason `tests/assets_ipc.rs` has a
+//! and `app_status` already have. It is the reason `tests/it/assets_ipc.rs` has a
 //! test of its own beside the registration loop, whose `not_ready` marker only
 //! means anything for a command that asks for a pool.
 
@@ -1502,7 +1502,7 @@ mod tests {
     /// are registered under, and registered under the names they are declared
     /// with.
     ///
-    /// `tests/wiring.rs` proves every declared command is in the handler list;
+    /// `tests/it/wiring.rs` proves every declared command is in the handler list;
     /// this proves the *frontend* calls them by those names. A typo on either
     /// side is a call that fails only at run time, with "command not found"
     /// and nothing else in the tree noticing.

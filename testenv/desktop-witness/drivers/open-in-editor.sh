@@ -295,7 +295,7 @@ wait_until "the launcher never answered '$REPO_QUERY' within ${SETTLE_SECONDS} s
 # **Until #537 this is where a run stopped, and not for a fault of the
 # feature**: `knobas_source_mock::items` walked past the fixture's `repos` and
 # `branches`, so `--demo` had no repo entity at all. It carries three of each
-# now, and `crates/knobas-app/tests/demo.rs`'s
+# now, and `crates/knobas-app/tests/it/demo.rs`'s
 # `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds
 # everything below the window: the entity read answering under this query, and
 # `checkout::view` matching a clone whose remote is $REPO_REMOTE. So a failure
@@ -362,7 +362,7 @@ if ! wait_for_record "$record" "$SPAWN_SECONDS"; then
         sed 's/^/open-in-editor:   /' >&2
     die "the stub never finished writing a record after ${SPAWN_SECONDS} s." \
         "A record is finished when it ends in a newline -- the condition" \
-        "recorded() waits for in crates/knobas-app/tests/checkout_ipc.rs."
+        "recorded() waits for in crates/knobas-app/tests/it/checkout_ipc.rs."
 fi
 
 recorded=$(cat "$record")

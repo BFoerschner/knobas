@@ -57,7 +57,7 @@
 //! # What is not witnessed here
 //!
 //! The shape of hcloud's answer is witnessed by a recorded response
-//! (`tests/assets_ipc.rs`); that the real API answers in that shape, under a
+//! (`tests/it/assets_ipc.rs`); that the real API answers in that shape, under a
 //! real token, at the real endpoint, is witnessed by `just estate-live` and by
 //! nothing in `just check` (ADR-0013). The recorded half cannot fail if
 //! Hetzner changes its JSON, and says so rather than implying otherwise.

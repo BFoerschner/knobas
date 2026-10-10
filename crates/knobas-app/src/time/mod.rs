@@ -640,7 +640,7 @@ mod tests {
 
     /// The `ctx:` refusal, at the one seam that decides it.
     ///
-    /// `tests/time_ipc.rs` witnesses it against a real database and a real
+    /// `tests/it/time_ipc.rs` witnesses it against a real database and a real
     /// context row; this is the same rule read off the namespace list, so a
     /// namespace renamed in `knobas_core::entity` fails here without a
     /// PostgreSQL to run against.

@@ -168,7 +168,7 @@ pub fn ping() -> &'static str {
 /// Generic over the runtime for the reason `sync_now` is (§10.2): a bare
 /// `tauri::AppHandle` means `AppHandle<Wry>`, and a command taking one cannot
 /// be registered on the `tauri::test` mock app at all -- which would put this
-/// command out of reach of `tests/ipc.rs`.
+/// command out of reach of `tests/it/ipc.rs`.
 #[tauri::command]
 pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatus {
     let db = app.state::<Lifecycle>().get();
@@ -440,7 +440,7 @@ mod tests {
         //
         // The attribute is **assembled** rather than written out, and no
         // string literal in this test spells it either. That is not cosmetic:
-        // `tests/wiring.rs` scans this same directory for the command
+        // `tests/it/wiring.rs` scans this same directory for the command
         // attribute to build its own list of declared commands, and it strips
         // comments but *not* string literals. A spelled-out copy here is
         // counted as another command whose "name" is the next line of this

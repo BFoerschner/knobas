@@ -3,7 +3,7 @@
  *
  * The seam every other settings section is tested at: a rendered section in,
  * user-visible text and bridge calls out. What the backend stores, and what a
- * refusal is, are `crates/knobas-app/tests/capture_ipc.rs`'s; what is asserted
+ * refusal is, are `crates/knobas-app/tests/it/capture_ipc.rs`'s; what is asserted
  * here is that the field draws what is **stored**, that Save and Clear send what
  * was asked for, and — the one this section exists for — that a shortcut which
  * is stored and **not registered** says so rather than reading as set.

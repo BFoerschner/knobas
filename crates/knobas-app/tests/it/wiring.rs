@@ -171,7 +171,7 @@ fn the_window_may_ask_about_permission_and_nothing_else_about_notifications() {
 /// bundled build in this task's PR body, where the button was clicked.
 #[test]
 fn the_opener_plugin_is_registered() {
-    let code = strip_comments(include_str!("../src/lib.rs"));
+    let code = strip_comments(include_str!("../../src/lib.rs"));
     assert!(
         code.contains(".plugin(tauri_plugin_opener::init())"),
         "the opener plugin is not registered in `run()`, so `opener:allow-open-url` \
@@ -191,8 +191,8 @@ fn the_opener_plugin_is_registered() {
 /// one side and a lockfile refresh on the other is exactly how the two drift.
 #[test]
 fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
-    let manifest = include_str!("../Cargo.toml");
-    let package = include_str!("../../../app/package.json");
+    let manifest = include_str!("../../Cargo.toml");
+    let package = include_str!("../../../../app/package.json");
 
     for plugin in ["opener", "notification"] {
         let crate_pin = manifest
@@ -261,7 +261,7 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// witness is the README's signed-bundle check, which now includes it.
 #[test]
 fn the_notification_plugin_is_registered() {
-    let code = strip_comments(include_str!("../src/lib.rs"));
+    let code = strip_comments(include_str!("../../src/lib.rs"));
     assert!(
         code.contains(".plugin(tauri_plugin_notification::init())"),
         "the desktop notification plugin is not registered in `run()`, so the two \
@@ -273,7 +273,7 @@ fn the_notification_plugin_is_registered() {
 /// The stranded-timer sweep runs during bring-up, and **before the state
 /// reaches `Ready`** (issue #278).
 ///
-/// `tests/time_ipc.rs` proves the sweep closes a block at the last heartbeat.
+/// `tests/it/time_ipc.rs` proves the sweep closes a block at the last heartbeat.
 /// Nothing there proves it is ever *called*: `spawn_bring_up` needs a Tauri
 /// app handle and a real PostgreSQL provisioning, so the call itself has no
 /// seam under test, and a sweep that exists and is never reached looks exactly
@@ -286,7 +286,7 @@ fn the_notification_plugin_is_registered() {
 /// the shell reads when `DbState::Ready` is announced.
 #[test]
 fn the_stranded_timer_sweep_runs_before_the_database_is_announced_ready() {
-    let code = strip_comments(include_str!("../src/lib.rs"));
+    let code = strip_comments(include_str!("../../src/lib.rs"));
     let start = code
         .find("fn spawn_bring_up")
         .expect("bring-up is where a session's one-off work happens");
@@ -377,7 +377,7 @@ fn strip_comments(source: &str) -> String {
 ///   expands each identifier into a path it has to resolve to a command, so a
 ///   name that is not one fails to build. Nothing is needed for that direction.
 /// * **A command that is not registered** is nothing at all. It builds, it
-///   lints, `tests/ipc.rs` still dispatches it -- because that file builds its
+///   lints, `tests/it/ipc.rs` still dispatches it -- because that file builds its
 ///   own `generate_handler!` list, which is a *copy* -- and the frontend's
 ///   `invoke` fails at run time with "command not found". A mutation run said
 ///   so: deleting `commands::entity::list_entities` from `run()` left the whole
@@ -415,7 +415,7 @@ fn every_command_is_in_the_handler_list() {
 
 /// The identifiers inside `run()`'s `tauri::generate_handler![..]`.
 fn handler_list() -> Vec<String> {
-    let code = strip_comments(include_str!("../src/lib.rs"));
+    let code = strip_comments(include_str!("../../src/lib.rs"));
     let start = code
         .find("generate_handler![")
         .expect("run() builds a handler list");
@@ -476,7 +476,7 @@ fn declared_commands() -> Vec<(String, String)> {
 /// builder, and no test that does not read this file can see it (#503).
 #[test]
 fn the_global_shortcut_plugin_is_registered_with_a_handler() {
-    let code = strip_comments(include_str!("../src/lib.rs"));
+    let code = strip_comments(include_str!("../../src/lib.rs"));
     assert!(
         code.contains("tauri_plugin_global_shortcut::Builder::new()"),
         "the global-shortcut plugin is not registered in `run()`, so \
@@ -556,7 +556,7 @@ fn the_capture_window_may_close_itself_and_nothing_more() {
 /// had started registering shortcuts from a webview.
 #[test]
 fn the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half() {
-    let manifest = include_str!("../Cargo.toml");
+    let manifest = include_str!("../../Cargo.toml");
     let pin = manifest
         .lines()
         .find_map(|line| line.trim().strip_prefix("tauri-plugin-global-shortcut = "))
@@ -569,7 +569,7 @@ fn the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half() {
         "`tauri-plugin-global-shortcut = {pin:?}` is not an exact pin"
     );
 
-    let package = include_str!("../../../app/package.json");
+    let package = include_str!("../../../../app/package.json");
     assert!(
         !package.contains("@tauri-apps/plugin-global-shortcut"),
         "the npm half of the global-shortcut plugin was added. Nothing in the \

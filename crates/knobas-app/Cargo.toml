@@ -110,7 +110,7 @@ uuid.workspace = true
 async-trait.workspace = true
 # The scheduler tests inject an in-memory credential store.
 knobas-secrets = { path = "../knobas-secrets" }
-# The HTTP-level Jira mock `tests/adapter_to_mirror.rs` points the real adapter
+# The HTTP-level Jira mock `tests/it/adapter_to_mirror.rs` points the real adapter
 # at: in-process, no Docker, and therefore fit for `just check`. A
 # dev-dependency only -- nothing in the shipped binary knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
@@ -122,7 +122,7 @@ knobas-sync = { path = "../knobas-sync", features = ["test-util"] }
 knobas-app = { path = ".", features = ["test-util"] }
 # The command tests need a real PostgreSQL: `test-util` starts one per binary.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
-# `tauri::test`: the mock runtime `tests/ipc.rs` invokes commands through, so
+# `tauri::test`: the mock runtime `tests/it/ipc.rs` invokes commands through, so
 # ruling P3's decode question is answered by the real IPC pipeline rather than
 # by reading documentation. Feature-unified with the `[dependencies]` entry
 # above -- `cargo test` therefore builds the library with `test` on too, which
@@ -133,9 +133,9 @@ tauri = { version = "2", features = ["test"] }
 # knobas' mirror of it. The workspace's one copy -- `cargo tree -i reqwest`
 # stays at one.
 reqwest.workspace = true
-# `tests/backup.rs` writes archives somewhere that goes away with the test.
+# `tests/it/backup.rs` writes archives somewhere that goes away with the test.
 tempfile = "3"
-# The docker-free stand-in `tests/adapter_to_mirror.rs` points the real Uptime
+# The docker-free stand-in `tests/it/adapter_to_mirror.rs` points the real Uptime
 # Kuma adapter at, serving the recording that crate's own suite serves (#442).
 # mockd would have been the place for it, but mockd is frozen (ADR-0013) and
 # nothing new goes in. It brings no `reqwest` of its own; `cargo tree -i

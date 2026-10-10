@@ -1420,7 +1420,7 @@ carries no repo entity* — because `knobas_source_mock::items` walked past the
 repos and branches `fixtures/tidewater/work.json` has always held. **#537
 closed that**: the corpus now carries three repositories and three branches,
 `mock:payout-service` answers the entity read under the name the driver types,
-and `crates/knobas-app/tests/demo.rs`'s
+and `crates/knobas-app/tests/it/demo.rs`'s
 `the_demo_corpus_answers_the_checkout_the_desktop_driver_opens` holds the whole
 chain below the window — the demo load, the entity read, and `checkout::view`
 matching the very remote the driver writes into the `.git/config` it plants.
@@ -1578,7 +1578,7 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   the links; desktop automation for the shortcut and window"*, and its *Primary
   seam* paragraph names *"the capture links (stored room, derived room,
   foreground present and absent)"* at *"the app's commands over a scratch
-  database"*. That witness is `crates/knobas-app/tests/capture_ipc.rs` and
+  database"*. That witness is `crates/knobas-app/tests/it/capture_ipc.rs` and
   `app/src/lib/capture/capture.test.svelte.ts`, and this driver asserting
   `CAPTURED FROM` is already one link more than that row asks of it. A driver
   step that makes a stored room is welcome later; it is owed to nothing (the

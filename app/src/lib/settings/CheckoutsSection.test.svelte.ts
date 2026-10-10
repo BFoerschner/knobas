@@ -3,7 +3,7 @@
  *
  * The seam every other settings section is tested at: a rendered section in,
  * user-visible text and bridge calls out. What the backend stores is
- * `crates/knobas-app/tests/checkout_ipc.rs`'s, and which templates are legal
+ * `crates/knobas-app/tests/it/checkout_ipc.rs`'s, and which templates are legal
  * is `knobas_core::checkout`'s; what is asserted here is that each field draws
  * what is **stored**, that Save and Clear and Reset send what was asked for,
  * and that a read or a write it could not make says so instead of drawing a

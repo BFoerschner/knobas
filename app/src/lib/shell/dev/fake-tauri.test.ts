@@ -690,7 +690,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   {
     surface: "Settings → Backup: the status read, a backup now, the Share… export, the schedule, the restore",
     witnesses: [
-      "crates/knobas-app/tests/backup_ipc.rs",
+      "crates/knobas-app/tests/it/backup_ipc.rs",
       "crates/knobas-app/tests/share_exit.rs",
       "app/src/lib/settings/BackupSection.test.svelte.ts",
     ],
@@ -698,7 +698,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   },
   {
     surface: "The inbox and its notifications",
-    witnesses: ["crates/knobas-app/tests/inbox_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/inbox_ipc.rs"],
     commands: [
       "inbox_items",
       "inbox_count",
@@ -711,7 +711,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   },
   {
     surface: "The timer and the day's blocks",
-    witnesses: ["crates/knobas-app/tests/time_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/time_ipc.rs"],
     commands: [
       "current_timer",
       "start_timer",
@@ -726,12 +726,12 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   },
   {
     surface: "The worklog draft and the week timesheet",
-    witnesses: ["crates/knobas-app/tests/worklog_ipc.rs", "crates/knobas-app/tests/week_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/worklog_ipc.rs", "crates/knobas-app/tests/it/week_ipc.rs"],
     commands: ["worklog_draft", "log_work", "log_all_preview", "log_all", "week_timesheet"],
   },
   {
     surface: "The standup digest, its protocol and the action items it publishes",
-    witnesses: ["crates/knobas-app/tests/standup_ipc.rs", "crates/knobas-app/tests/protocol_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/standup_ipc.rs", "crates/knobas-app/tests/it/protocol_ipc.rs"],
     commands: [
       "standup_digest",
       "standup_protocol",
@@ -743,7 +743,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   },
   {
     surface: "Start work, and the merge follow that closes it",
-    witnesses: ["crates/knobas-app/tests/start_work.rs"],
+    witnesses: ["crates/knobas-app/tests/it/start_work.rs"],
     commands: [
       "start_work_flow",
       "start_work_run",
@@ -755,40 +755,40 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   },
   {
     surface: "The status select's read of what the workflow offers",
-    witnesses: ["crates/knobas-app/tests/status_move.rs"],
+    witnesses: ["crates/knobas-app/tests/it/status_move.rs"],
     commands: ["reachable_transitions"],
   },
   {
     surface: "Linking, unlinking and deleting a note",
-    witnesses: ["crates/knobas-app/tests/entity.rs"],
+    witnesses: ["crates/knobas-app/tests/it/entity.rs"],
     commands: ["create_link", "unlink", "delete_note"],
   },
   {
     surface: "Writing a route in the estate",
-    witnesses: ["crates/knobas-app/tests/assets_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
     commands: ["create_route", "edit_route", "delete_route"],
   },
   {
     surface: "A source's assets",
-    witnesses: ["crates/knobas-app/tests/assets_ipc.rs"],
+    witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
     commands: ["source_assets"],
   },
   {
     surface: "Settings → Monitoring",
     witnesses: [
-      "crates/knobas-app/tests/assets_ipc.rs",
+      "crates/knobas-app/tests/it/assets_ipc.rs",
       "app/src/lib/settings/MonitoringSection.test.svelte.ts",
     ],
     commands: ["monitoring_settings", "set_monitoring_settings"],
   },
   {
     surface: "Settings → Passive attribution",
-    witnesses: ["crates/knobas-app/tests/time_ipc.rs", "app/src/lib/settings/PassiveSection.test.svelte.ts"],
+    witnesses: ["crates/knobas-app/tests/it/time_ipc.rs", "app/src/lib/settings/PassiveSection.test.svelte.ts"],
     commands: ["passive_attribution", "set_passive_attribution"],
   },
   {
     surface: "Editing a source and backfilling it",
-    witnesses: ["crates/knobas-app/tests/ipc.rs", "crates/knobas-app/tests/sources_crud.rs"],
+    witnesses: ["crates/knobas-app/tests/it/ipc.rs", "crates/knobas-app/tests/it/sources_crud.rs"],
     commands: ["update_source", "backfill_source"],
   },
 ];

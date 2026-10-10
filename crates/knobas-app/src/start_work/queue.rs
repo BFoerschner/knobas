@@ -331,7 +331,7 @@ pub async fn pull_request_on_head(
 ///
 /// **The rule, written once**, because it has two callers: this module, over
 /// what [`PULL_REQUEST_BY_HEAD`] answered, and the [`Steps`] fake in
-/// `tests/start_work.rs`, over the mirror a test dictated. A fake that
+/// `tests/it/start_work.rs`, over the mirror a test dictated. A fake that
 /// classified for itself would be a second opinion about what "open" means,
 /// and the seam tests would then pass against a rule the real read does not
 /// have. That is the whole reason this and [`pull_request_on_head`] are public

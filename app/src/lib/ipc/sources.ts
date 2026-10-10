@@ -443,7 +443,7 @@ export function credentialHealth(): Promise<CredentialHealth[]> {
  * There are two functions rather than one optional argument because
  * `Option<Channel<_>>` is not a valid Tauri command argument (`Channel` has no
  * `Deserialize` impl); the Rust side splits for the same reason, and the
- * evidence is in `crates/knobas-app/tests/ipc.rs`.
+ * evidence is in `crates/knobas-app/tests/it/ipc.rs`.
  */
 export function syncNow(sourceId: string): Promise<number> {
   return invoke<number>("sync_now", { sourceId });

@@ -3,7 +3,7 @@
 //! merged (issue #44).
 //!
 //! Every other test of this feature stops one side short of the real thing.
-//! `tests/start_work.rs` drives the orchestrator against a fake dispatcher and
+//! `tests/it/start_work.rs` drives the orchestrator against a fake dispatcher and
 //! proves the *sequence* -- which ops, in what order, and what happens when one
 //! fails -- with nothing at either end of it. This is the other half: the real
 //! write queue, the real adapters, a real database, and a real Gitea in its
@@ -23,7 +23,7 @@
 //! seeded Jira `just atlassian-live` stands up, and that is not this file.
 //! `just start-work-live`'s header says the same thing at more length.
 //!
-//! # Why this is `#[ignore]`d and `tests/start_work.rs` is not
+//! # Why this is `#[ignore]`d and `tests/it/start_work.rs` is not
 //!
 //! It needs Docker, a seeded Gitea and a token -- the treatment
 //! `crates/knobas-source-gitea/tests/live_gitea.rs` gets, and for the same

@@ -9,7 +9,7 @@
 //!
 //! # What only this can say
 //!
-//! `tests/assets_ipc.rs` runs this producer against a **recording** of what the
+//! `tests/it/assets_ipc.rs` runs this producer against a **recording** of what the
 //! API answered once, which certifies shape and nothing else. Two things it
 //! structurally cannot see, and this suite is the only witness for both:
 //!
@@ -58,8 +58,8 @@
 
 use knobas_app::assets::{self, DOCKER_PRODUCER, ESTATE_FILE_PRODUCER, HCLOUD_PRODUCER};
 
-/// The estate as provisioned, embedded -- the same bytes `tests/assets_ipc.rs`,
-/// `tests/estate_exit.rs` and `sources::demo` read. Embedded rather than read
+/// The estate as provisioned, embedded -- the same bytes `tests/it/assets_ipc.rs`,
+/// `tests/it/estate_exit.rs` and `sources::demo` read. Embedded rather than read
 /// at run time, so this suite and the file move together.
 const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 
@@ -205,7 +205,7 @@ async fn the_real_estate_is_already_in_the_tree() {
 ///
 /// # What only this can say
 ///
-/// `tests/assets_ipc.rs` runs this producer against a **stub executable**,
+/// `tests/it/assets_ipc.rs` runs this producer against a **stub executable**,
 /// which certifies the parse, the argument rule and the refusals and can never
 /// go red. Three things it structurally cannot see, and this is the only
 /// witness for all three:

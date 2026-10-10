@@ -3,7 +3,7 @@
  *
  * The seam is the rendered panel: a `CheckoutView` in, user-visible text and
  * bridge calls out. What the backend does to produce that view is
- * `crates/knobas-app/tests/checkout_ipc.rs`'s, and whether a directory really
+ * `crates/knobas-app/tests/it/checkout_ipc.rs`'s, and whether a directory really
  * holds a clone is `knobas-core`'s; what is asserted here is that the three
  * states each say what they are, that *no checkout* offers the clone command,
  * and that setting and clearing a path go through `set_checkout_override`.

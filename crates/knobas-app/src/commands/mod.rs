@@ -42,7 +42,7 @@ mod tests {
     /// reintroducing the argument produced "8 passed, 2 failed" -- a count a
     /// compile error cannot produce.
     ///
-    /// `tests/ipc.rs` catches it at runtime, but only for the one command each
+    /// `tests/it/ipc.rs` catches it at runtime, but only for the one command each
     /// test names. This is the class-level pin: a *new* command with the wrong
     /// argument fails here, whoever writes it and whichever stream owns the
     /// file.

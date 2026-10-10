@@ -305,7 +305,7 @@ pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupErr
 ///
 /// **It exists so that "nothing secret is in the archive" can be asserted
 /// against the archive** (#454). Nothing in the running app calls it; the
-/// caller is `knobas-app`'s `tests/backup_ipc.rs`, and it is `pub` for that
+/// caller is `knobas-app`'s `tests/it/backup_ipc.rs`, and it is `pub` for that
 /// reason and no other. That is not a test-only convenience but the only
 /// reading of the claim that means anything: a `TABLE DATA` entry in the table
 /// of contents says a table's rows are in the file and says nothing whatever
