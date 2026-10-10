@@ -1,7 +1,7 @@
 //! The vocabulary the launcher grammar parses against, read from a real
 //! PostgreSQL.
 //!
-//! Every test in this binary shares one database (`knobas_db::test_util`), so
+//! Every test in this file shares one database (`knobas_db::test_util`), so
 //! each seeds source ids unique to *itself* and nothing truncates. That matters
 //! more here than elsewhere: `Vocabulary::load` reads **every** configured
 //! source -- disabled ones included, since #200 -- so a row another test in

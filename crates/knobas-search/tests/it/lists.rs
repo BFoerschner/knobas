@@ -14,7 +14,7 @@
 //! absolute count is.
 //!
 //! **The mutex serialises; it does not order.** libtest picks the order, so a
-//! test may run before or after any other test in this binary and must be
+//! test may run before or after any other test in this file and must be
 //! correct either way. That distinction is not pedantry: it is the actual cause
 //! of the one failure this file had. `changed_today_starts_at_midnight_...`
 //! originally looked for its row on a page of 200, and the row it looks for is
@@ -76,7 +76,7 @@ fn token(tag: &str) -> String {
 /// The two timestamps are **bound**, not formatted into the statement: they are
 /// the only thing that decides which lists a row lands in, and this crate's one
 /// runtime-SQL module is `src/sql.rs` (roadmap §4 gotcha 2, enforced by
-/// `tests/sql_containment.rs` -- which scans `tests/` too).
+/// `tests/it/sql_containment.rs` -- which scans `tests/` too).
 #[allow(clippy::too_many_arguments)]
 async fn seed(
     pool: &sqlx::PgPool,
@@ -562,8 +562,8 @@ async fn typing_a_list_in_the_box_answers_like_the_command() {
 
 /// With an account configured, `mine` says what it is rather than why it is
 /// empty. The other half of this -- the install with no username at all -- is
-/// `tests/lists_no_identity.rs`, which needs a database no source is
-/// configured in and therefore a test binary of its own.
+/// `tests/it/lists_no_identity.rs`, which needs a database no source is
+/// configured in and therefore a database of its own (one per source file).
 #[tokio::test]
 async fn a_configured_identity_leaves_the_blurb_alone() {
     let _guard = SERIAL.lock().await;

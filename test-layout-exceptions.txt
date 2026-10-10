@@ -108,18 +108,6 @@ knobas-mockd/teamcity_contract  pending merge into tests/it/ (#577)
 knobas-mockd/teamcity  pending merge into tests/it/ (#577)
 knobas-mockd/violations  pending merge into tests/it/ (#577)
 
-# knobas-search (#574)
-knobas-search/ancestor_path  pending merge into tests/it/ (#574)
-knobas-search/corpus_seam  pending merge into tests/it/ (#574)
-knobas-search/help_card  pending merge into tests/it/ (#574)
-knobas-search/home  pending merge into tests/it/ (#574)
-knobas-search/lists_no_identity  pending merge into tests/it/ (#574)
-knobas-search/lists  pending merge into tests/it/ (#574)
-knobas-search/search  pending merge into tests/it/ (#574)
-knobas-search/sql_containment  pending merge into tests/it/ (#574)
-knobas-search/sql_shape  pending merge into tests/it/ (#574)
-knobas-search/vocab  pending merge into tests/it/ (#574)
-
 # knobas-secrets (#578)
 knobas-secrets/keyring_local  pending merge into tests/it/ (#578)
 

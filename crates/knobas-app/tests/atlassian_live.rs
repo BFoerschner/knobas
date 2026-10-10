@@ -3441,7 +3441,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 ///
 /// Every link of this chain had a witness of its own -- the adapter's live
 /// suite reads the seeded page's `ancestors` off the wire, `knobas-core`
-/// joins a bound payload, `knobas-search`'s `tests/ancestor_path.rs` searches
+/// joins a bound payload, `knobas-search`'s `tests/it/ancestor_path.rs` searches
 /// a fixture page -- and none of them was the sentence the criterion makes:
 /// that a search over *this* mirror of *this* server answers with the path
 /// under the row. So:
@@ -3464,7 +3464,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 /// server rather than off a fixture. The equality below did not have to move
 /// for that (#388 wrote it against whatever the server reports); what moved is
 /// the check on *which* ancestors those are, which now names both ends of the
-/// tree the seed built. `knobas-search`'s `tests/ancestor_path.rs` and
+/// tree the seed built. `knobas-search`'s `tests/it/ancestor_path.rs` and
 /// `knobas-core`'s still pin the separator literal itself.
 ///
 /// Nothing is written, and the search is the plain launcher query with no

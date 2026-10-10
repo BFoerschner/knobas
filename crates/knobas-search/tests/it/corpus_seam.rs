@@ -21,7 +21,7 @@
 //! comparable across both -- and it drives the builder directly, so a
 //! regression shows here before it shows in the launcher.
 //!
-//! Every test in this binary shares one database -- fresh per run, shared
+//! Every test in this file shares one database -- fresh per run, shared
 //! across the tests in it -- so each seeds a token unique to itself.
 //!
 //! [`Corpus`]: knobas_search::corpus::Corpus
@@ -361,7 +361,7 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
     // The shape every route in `testenv/hetzner/estate.json` has -- a loopback
     // host and the port that is the only thing telling the nine of them apart
     // (ADR-0013: the real container is the witness). The port is unique to this
-    // file, so no other test in this binary can match it.
+    // file, so no other test in this file can match it.
     seed_route(
         &pool,
         &route,

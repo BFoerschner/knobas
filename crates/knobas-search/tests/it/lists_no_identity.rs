@@ -1,17 +1,17 @@
 //! An install where knobas does not know who the user is.
 //!
-//! A test binary of its own, and that is the point rather than an accident:
-//! the identity behind `@me` is the union of every enabled source's configured
+//! A file of its own, and that is the point rather than an accident: the
+//! identity behind `@me` is the union of every enabled source's configured
 //! username, so "no identity" is a property of the **whole database**. Any test
 //! sharing a database with one that configures an account cannot observe it.
-//! `knobas_db::test_util` gives one database per test binary, fresh per run
-//! (`run_nonce` is `{pid}-{nanos}`, so an earlier run's scratch directory can
-//! never match this process's stamp and is deleted) -- so this file is the
-//! isolation, and it is also why the hardcoded entity id below needs no
-//! `on conflict`: it is the only test in the only run that will ever insert it.
+//! `knobas_db::test_util` gives one database per calling source file, fresh per
+//! run (named after `run_nonce`, which is `{pid}-{nanos}`) -- so this file is
+//! the isolation, even as a module of the crate's one test binary (ADR-0017),
+//! and it is also why the hardcoded entity id below needs no `on conflict`: it
+//! is the only test in the only run that will ever insert it.
 //!
 //! The other half -- an install that does have an account -- is
-//! `a_configured_identity_leaves_the_blurb_alone` in `tests/lists.rs`. Both
+//! `a_configured_identity_leaves_the_blurb_alone` in `tests/it/lists.rs`. Both
 //! states are pinned, so a fixture cannot flatter the behaviour by only ever
 //! exercising one.
 
@@ -24,7 +24,7 @@ async fn a_list_with_no_identity_configured_says_so_instead_of_reading_empty() {
     // The precondition, asserted rather than forced. Disabling every source
     // "just in case" would have been theatre -- the database is fresh, so there
     // is nothing to disable -- and worse, it would hide the day someone adds a
-    // second test to this binary and configures an account in it. Then the
+    // second test to this file and configures an account in it. Then the
     // failure would be a silently meaningless assertion instead of this line.
     let configured: i64 =
         sqlx::query_scalar("select count(*) from knobas.source_config where enabled")
@@ -33,7 +33,7 @@ async fn a_list_with_no_identity_configured_says_so_instead_of_reading_empty() {
             .unwrap();
     assert_eq!(
         configured, 0,
-        "this binary must hold no configured source; `@me` would resolve and the \
+        "this file's database must hold no configured source; `@me` would resolve and the \
          test would be asserting nothing"
     );
     // A row that *would* be in `mine` if knobas knew any account -- so an

@@ -86,7 +86,7 @@
 //! unasserted -- so [`NOTE`] is a **second corpus that actually runs**:
 //! `knobas.note` is a different relation, a different id space, a different
 //! text composition, and (the point) a corpus whose `kind` and `source_id` are
-//! not columns at all. `tests/corpus_seam.rs` pushes it through the same
+//! not columns at all. `tests/it/corpus_seam.rs` pushes it through the same
 //! builder, the same grouping and the same snippet splitter as `sync.live_item`
 //! and asserts that ranking interleaves across the two. If M4's asset corpus
 //! needs a branch anywhere above [`crate::sql`], that test is where it will
@@ -189,7 +189,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
 /// `headline_text` composes two columns that are not the row's title. A corpus
 /// that needed the builder to grow a branch would need it for one of exactly
 /// those reasons -- and this one needed none, which is what
-/// `tests/corpus_seam.rs` runs rather than asserts.
+/// `tests/it/corpus_seam.rs` runs rather than asserts.
 ///
 /// **The excerpt is markdown source.** `body_md` is what the user typed,
 /// `[[refs]]` and `#` headings included, and [`crate::snippet`] hands it on as
@@ -323,7 +323,7 @@ pub const ASSET: Corpus = Corpus {
 /// **Not fixed here, deliberately.** #436 asks that a route be found by its
 /// URL, and on the estate that exists it is. Widening what `0018`'s `fts`
 /// indexes is a change to a surface ratified the day before and it belongs to
-/// a ticket that says so; `tests/corpus_seam.rs` runs both the positive and
+/// a ticket that says so; `tests/it/corpus_seam.rs` runs both the positive and
 /// the two negatives, so the boundary is a fact the next reader inherits
 /// rather than one they have to measure again.
 ///

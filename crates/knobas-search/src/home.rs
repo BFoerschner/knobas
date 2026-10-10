@@ -12,7 +12,7 @@
 //! `(source_id, item_updated_at desc)` -- **not** `item_updated_at` alone. The
 //! naive form has no index to walk, so it sorts the whole mirror on every
 //! `⌘K`. Reading the newest per kind through the compound index and merging is
-//! index-backed and bounded, and `tests/home.rs` asserts the plan rather than
+//! index-backed and bounded, and `tests/it/home.rs` asserts the plan rather than
 //! trusting the comment: a later "small refactor" that turns the board into a
 //! sequential scan fails there.
 //!
@@ -225,7 +225,7 @@ mod tests {
     use super::*;
 
     /// Each plan variant has to be the *same* statement, or the assertion in
-    /// `tests/home.rs` is about a query nobody runs.
+    /// `tests/it/home.rs` is about a query nobody runs.
     ///
     /// Both of them, because [`recent`] runs both -- see `explain_recent`.
     #[test]
@@ -246,7 +246,7 @@ mod tests {
 
     /// The kinds read walks the index rather than the table.
     ///
-    /// Pinned in the source as well as in the plan (`tests/home.rs`) because
+    /// Pinned in the source as well as in the plan (`tests/it/home.rs`) because
     /// the two catch different mistakes: the plan assertion catches the
     /// planner changing its mind, this catches someone "simplifying" the
     /// recursion back to the `select distinct` that PostgreSQL cannot serve

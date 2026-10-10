@@ -3,7 +3,7 @@
 
   Generated from `syntax.json`, which mirrors the token table in
   `crates/knobas-search/src/query.rs` — and the mirroring is *enforced*, not
-  promised: `crates/knobas-search/tests/help_card.rs` runs every row's probe
+  promised: `crates/knobas-search/tests/it/help_card.rs` runs every row's probe
   through the real parser and fails if the card advertises a filter the grammar
   greys out, greys out one the grammar honours, or leaves a prefix of the
   grammar undocumented.
