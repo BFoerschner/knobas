@@ -1043,8 +1043,8 @@ fn landing_of_a_child_with(url: &str) -> Landing {
 }
 
 /// With `KNOBAS_TEST_DB_URL` set, the shared connector reaches *that* server
-/// -- on a migrated database of the binary's own, not the maintenance database
-/// the URL names -- and two binaries on the same server get two databases.
+/// -- on a migrated database of its own, not the maintenance database the URL
+/// names -- and two binaries on the same server get two databases.
 ///
 /// The server is this test's own, so a child that ignored the variable and
 /// started a server of its own (the mutant: delete the environment read) shows
@@ -1093,13 +1093,30 @@ async fn the_shared_connector_follows_knobas_test_db_url_onto_a_database_of_its_
 /// reader of the output would then fail on a missing line at best, so the
 /// count is checked here, where the cause is known.
 fn stdout_of_a_child(test: &str, url: Option<&str>) -> String {
+    let (_, output) = run_a_child(test, url);
+    stdout_of_a_passed_child(test, &output)
+}
+
+/// This binary re-run as a child on the one test named `test` -- its pid and
+/// output, passed or not.
+fn run_a_child(test: &str, url: Option<&str>) -> (u32, std::process::Output) {
     let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-    child.args(["--exact", test, "--nocapture"]);
+    child
+        .args(["--exact", test, "--nocapture"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     match url {
         Some(url) => child.env("KNOBAS_TEST_DB_URL", url),
         None => child.env_remove("KNOBAS_TEST_DB_URL"),
     };
-    let output = child.output().expect("re-run this binary as a child");
+    let child = child.spawn().expect("re-run this binary as a child");
+    let pid = child.id();
+    let output = child.wait_with_output().expect("wait for the child");
+    (pid, output)
+}
+
+/// A child's stdout, once it has passed and has run at least one test.
+fn stdout_of_a_passed_child(test: &str, output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(
         output.status.success(),
@@ -1217,9 +1234,45 @@ async fn on_the_gate_server_each_source_file_gets_a_database_of_its_own() {
 
 /// On the zero-config path, per file: the child, with `KNOBAS_TEST_DB_URL`
 /// removed, starts a server of its own and passes the per-file test there.
-#[test]
-fn on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own() {
-    let stdout = stdout_of_a_child("the_shared_database_follows_the_calling_source_file", None);
+///
+/// That server outlives the child -- `test_util` keeps it in a `static` -- so
+/// it is adopted and stopped here, rather than left running beside the gate
+/// until the next run's reaper finds it.
+#[tokio::test]
+async fn on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own() {
+    let (pid, output) = run_a_child("the_shared_database_follows_the_calling_source_file", None);
+    stop_the_server_a_child_left(pid).await;
+
+    let stdout = stdout_of_a_passed_child(
+        "the_shared_database_follows_the_calling_source_file",
+        &output,
+    );
     let (here, there) = files_of(&stdout);
     assert_ne!(here, there);
+}
+
+/// Stop the server a finished child started in its scratch root
+/// (`test_util`'s `$TMPDIR/knobas-test-<pid>`), and remove the root and the
+/// lock beside it. The child is gone, so its lock is free and the server is
+/// an orphan, which a start on the same root adopts and owns.
+async fn stop_the_server_a_child_left(pid: u32) {
+    let root = std::env::temp_dir().join(format!("knobas-test-{pid}"));
+    if root.join("data").join("postmaster.pid").exists() {
+        let adopted = EmbeddedDb::start(DbConfig {
+            root_dir: root.clone(),
+            existing_url: None,
+        })
+        .await
+        .expect("adopt the server the child left");
+        assert!(
+            adopted.owns_server(),
+            "the child's server has another owner"
+        );
+        adopted
+            .stop()
+            .await
+            .expect("stop the server the child left");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_file(root.with_file_name(format!("knobas-test-{pid}.lock")));
 }

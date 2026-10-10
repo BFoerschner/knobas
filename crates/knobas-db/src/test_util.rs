@@ -162,6 +162,7 @@ async fn database_of_file(file: &'static str) -> crate::embedded::Connector {
             .get_or_init(Mutex::default)
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        // Taken before `entry` borrows the map; used only if `file` is new.
         let ordinal = files.len();
         Arc::clone(files.entry(file).or_insert_with(|| {
             Arc::new(FileDatabase {
@@ -202,7 +203,7 @@ async fn shared_server() -> &'static Server {
     SERVER
         .get_or_init(|| async {
             match std::env::var(GATE_URL_VAR) {
-                Ok(url) => Server::the_gates(&url).await,
+                Ok(url) => Server::of_the_gate(&url).await,
                 Err(_) => Server::of_its_own().await,
             }
         })
@@ -245,7 +246,7 @@ impl Server {
     ///
     /// No claim and no sweep: this binary has no scratch root, and the gate's
     /// server did the sweeping when it started.
-    async fn the_gates(url: &str) -> Server {
+    async fn of_the_gate(url: &str) -> Server {
         let gate = EmbeddedDb::start(DbConfig {
             // Ignored on the `existing_url` branch; there is no root to name.
             root_dir: PathBuf::new(),
@@ -268,10 +269,10 @@ impl Server {
 
 /// A database of its own on this binary's shared server, migrated and empty.
 ///
-/// The shared database cannot be used by a test that *replaces* its contents:
-/// every other test in the binary is in it, and nothing here truncates. A
-/// restore is exactly such a test -- so it gets its own database instead, which
-/// costs one `create database` rather than a second postmaster.
+/// The file's shared database cannot be used by a test that *replaces* its
+/// contents: every other test in the file is in it, and nothing here
+/// truncates. A restore is exactly such a test -- so it gets its own database
+/// instead, which costs one `create database` rather than a second postmaster.
 ///
 /// The name carries `label` plus a per-call nonce, so two calls (and two runs
 /// against a server that outlived one) never collide. Nothing drops it: the
