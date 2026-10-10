@@ -5,7 +5,7 @@
 //! ids unique per run. `migrate::run` is re-entrant and nothing truncates.
 //!
 //! What the *search* built on this schema does with it is
-//! `crates/knobas-search/tests/search.rs` (ruling P9); what stays here is the
+//! `crates/knobas-search/tests/it/search.rs` (ruling P9); what stays here is the
 //! shape of the columns and indexes it rests on -- the stored `fts` column,
 //! the `sync.live_item` view, the partial link index.
 

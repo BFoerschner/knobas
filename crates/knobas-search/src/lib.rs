@@ -30,7 +30,7 @@
 //! `>`, `?` -- answers with *no rows* and still echoes what it understood,
 //! never invented ones.
 //!
-//! The gotcha-2 confinement is enforced, not merely intended: `tests/
+//! The gotcha-2 confinement is enforced, not merely intended: `tests/it/
 //! sql_containment.rs` fails the build if any file in this crate outside
 //! `sql.rs` so much as names the type, which is also why no other module here
 //! spells it out.

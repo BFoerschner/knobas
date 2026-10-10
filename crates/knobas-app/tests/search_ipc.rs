@@ -716,7 +716,7 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
 // lists is a whole-estate aggregate -- "how many assets has nobody attached a
 // monitor to" is a question about the *table*, not about a token -- so there is
 // no per-test token that can isolate a count, and the delta trick `knobas-
-// search`'s own `tests/lists.rs` uses cannot be applied to a fixture that is a
+// search`'s own `tests/it/lists.rs` uses cannot be applied to a fixture that is a
 // whole file. `knobas_db::test_util::scratch_database` is what the estate tests
 // in `adapter_to_mirror.rs` already reach for, for the same reason.
 //

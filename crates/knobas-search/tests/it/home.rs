@@ -63,7 +63,7 @@ fn token(tag: &str) -> String {
 /// A timestamp strictly newer than every row already in the mirror.
 ///
 /// Seeding at `Utc::now()` is **not** enough to make a row the newest, and
-/// assuming it was cost this file a red gate: another test in this binary
+/// assuming it was cost this file a red gate: another test in this file
 /// seeds at its own `now()`, and under a mutex that serialises without ordering
 /// there is no telling whether that happened a moment before or a moment after.
 /// A row stamped `now() - 5s` then sits *behind* a row another test stamped
@@ -116,7 +116,7 @@ async fn the_board_is_smart_lists_and_the_newest_of_every_kind() {
     // "every kind is on the board" is a fact about the merge and not about one
     // kind happening to hold everything. Stamped *above the mirror's current
     // maximum* rather than around `now()`, so being newest survives whatever
-    // else this binary has already seeded; `n` counts down from the newest.
+    // else this file has already seeded; `n` counts down from the newest.
     //
     // The hazard is seeded first, deliberately, so that "above the mirror's
     // maximum" and "around now()" are not the same thing here. A source whose

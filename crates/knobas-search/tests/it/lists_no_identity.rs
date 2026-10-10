@@ -24,7 +24,7 @@ async fn a_list_with_no_identity_configured_says_so_instead_of_reading_empty() {
     // The precondition, asserted rather than forced. Disabling every source
     // "just in case" would have been theatre -- the database is fresh, so there
     // is nothing to disable -- and worse, it would hide the day someone adds a
-    // second test to this binary and configures an account in it. Then the
+    // second test to this file and configures an account in it. Then the
     // failure would be a silently meaningless assertion instead of this line.
     let configured: i64 =
         sqlx::query_scalar("select count(*) from knobas.source_config where enabled")
@@ -33,7 +33,7 @@ async fn a_list_with_no_identity_configured_says_so_instead_of_reading_empty() {
             .unwrap();
     assert_eq!(
         configured, 0,
-        "this binary must hold no configured source; `@me` would resolve and the \
+        "this file's database must hold no configured source; `@me` would resolve and the \
          test would be asserting nothing"
     );
     // A row that *would* be in `mine` if knobas knew any account -- so an

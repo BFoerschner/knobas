@@ -4,7 +4,7 @@
 //! vocabulary, grammar, statement, grouping -- through the public
 //! [`Searcher`], which is what the IPC command calls.
 //!
-//! Every test in this binary shares one database (`knobas_db::test_util`), so
+//! Every test in this file shares one database (`knobas_db::test_util`), so
 //! each seeds a token unique to itself and searches for *that*. Nothing
 //! truncates, and no test can be made to pass by a row another one left behind.
 //!
@@ -13,7 +13,7 @@
 //! `{pid}-{nanos}`, so a scratch directory an earlier run left behind can never
 //! match this process's stamp, and `take_over` stops its server and deletes it.
 //! What a test can see is exactly what the other tests *in this run of this
-//! binary* have seeded -- and libtest does not order those, so no test may
+//! file* have seeded -- and libtest does not order those, so no test may
 //! assume which of them have already run.
 
 use std::collections::HashSet;
@@ -56,7 +56,7 @@ fn searcher(pool: &sqlx::PgPool) -> Searcher {
 ///
 /// Only ever `jira` and `gitea`, and only from this file: `Vocabulary::load`
 /// reads every enabled source, so a second instance of the *jira* adapter kind
-/// anywhere in this binary would make `/ji` plural and change what
+/// anywhere in this file would make `/ji` plural and change what
 /// `filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them`
 /// asserts.
 async fn seed_sources(pool: &sqlx::PgPool) {
@@ -409,7 +409,7 @@ async fn filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them() {
 /// work. Nothing else in this file would notice.
 ///
 /// The two authors are tokens rather than names, because every test in this
-/// binary shares one database: a filter on a plain `jonas` would be answered
+/// file shares one database: a filter on a plain `jonas` would be answered
 /// with whatever another test seeded under that name.
 #[tokio::test]
 async fn a_named_person_filters_with_or_without_search_text() {
@@ -613,7 +613,7 @@ async fn an_empty_query_is_the_boards_job_not_a_full_table_count() {
 /// The source id is unique to this test on purpose: a browse has no text to
 /// narrow it, so it returns the newest rows of whatever it is pointed at, and
 /// pointing it at a shared `jira` would return whatever the rest of this
-/// binary seeded most recently.
+/// file seeded most recently.
 #[tokio::test]
 async fn a_filter_with_no_text_browses_rather_than_answering_nothing() {
     let pool = pool().await;

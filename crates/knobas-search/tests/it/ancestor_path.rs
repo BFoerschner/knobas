@@ -16,7 +16,7 @@
 //! `type` -- and not a minimal `{"ancestors": [...]}`, because the read has to
 //! find the key on a real record with everything else around it.
 //!
-//! Same database discipline as `search.rs`: one shared database for the binary,
+//! Same database discipline as `search.rs`: one shared database for the file,
 //! a token unique to this test, and nothing truncated.
 //!
 //! [`SearchHit`]: knobas_search::SearchHit
