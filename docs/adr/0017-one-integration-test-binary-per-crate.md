@@ -27,4 +27,4 @@ Decided 2026-10-10 (Björn, grilling session): **each crate's integration tests 
 
 - **A merge proves it lost nothing by a rewrite, not by a count.** Each crate's PR shows that its new `test-inventory.txt` is the old one passed through `test/<file>⇥<name>` → `test/it⇥<file>::<name>`, byte for byte, with a deliberately deleted test shown to break that equality; plus unchanged pass/fail/ignore counts, three back-to-back green gates and one plain `cargo test -p <crate>`.
 - **Every crate's PR reports the four baselines above**, measured the same way; the only threshold is that the gate gets no slower.
-- `KNOBAS_TEST_JOBS` and the order the gate starts binaries in were tuned for about 130 binaries; they are re-measured once every crate is merged.
+- `KNOBAS_TEST_JOBS` and the order the gate starts binaries in were tuned for about 130 binaries; they are re-measured once every crate is merged. Re-measured 2026-10-10 on `0ffc2c07` (#580), at 52 binaries: `KNOBAS_TEST_JOBS` stays 6, because 4, 6 and 8 cannot be told apart and 12 is slower, and the start order stays cargo's, because putting the slowest binaries first measured 6–9 s slower.

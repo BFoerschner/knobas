@@ -481,8 +481,8 @@ clippy-libs:
 #
 # JOBS. `N` is bounded to the core count (`getconf _NPROCESSORS_ONLN`, which
 # both macOS and Linux answer) and chosen by measurement on the 12-core
-# machine, warm tree, idle, 2026-09-05: the numbers are in the recipe beside
-# the constant. `KNOBAS_TEST_JOBS` overrides it, for measuring another value
+# machine, warm tree, re-measured 2026-10-10 after ADR-0017's merges: the
+# numbers are in the recipe beside the constant, with the start order's. `KNOBAS_TEST_JOBS` overrides it, for measuring another value
 # without editing this file.
 #
 # WHAT IS PRINTED. A passing binary is one line -- package, target, libtest's
@@ -601,22 +601,30 @@ test:
     export KNOBAS_TEST_DB_URL="$url"
     export KNOBAS_GATE_DIR="$gate"
 
-    # N = 6. Measured 2026-09-05 on the 12-core machine, warm tree, nothing
-    # else running, this recipe, from its start to its last binary (the
-    # server's teardown afterwards used to add 10-12 s at every N -- `pg_ctl
-    # stop -m fast` plus the removal of a data directory grown to 355
-    # databases and 4 GB -- so `just test` end to end was 46-49 s at N=6;
-    # since #421 the server stops in immediate mode and leaves the removal to
-    # an `rm` that outlives it, and the teardown is under half a second):
-    #   N=12: 43 s, 42 s   N=8: 36 s, 38 s   N=6: 38 s, 34 s, 37 s   N=4: 36 s
-    # From 12 down to 8 the run gets 5 s shorter and below 8 it stops moving.
-    # The pool is CPU-bound, not queue-bound: every binary's libtest runs one
-    # test thread per core, so 6 binaries already offer 72 runnable threads
-    # to 12 cores, and the sum of libtest's own times inflates from 82 s
-    # (serial) to 128/180/245/380 s at N=4/6/8/12 -- pure contention. 6 is
-    # the middle of the flat region: half the cores, the 1-minute load
-    # average near 12 rather than the 18 N=12 reaches, and a connection peak
-    # of 82 client backends against the server's 400 (N=12 peaked at 143).
+    # N = 6. Re-measured 2026-10-10 on 0ffc2c07 (#580), once every crate's
+    # integration tests were one binary (ADR-0017) and the pool had shrunk
+    # from about 130 binaries to 52: the 12-core machine, warm tree, runs
+    # back to back and interleaved round-robin so load drift hits every N
+    # alike (load average 15-28 throughout, from the runs themselves), the
+    # whole `just test`:
+    #   N=12: 94, 89, 84 s   N=8: 89, 84, 81 s   N=6: 83, 85, 86 s   N=4: 80, 85, 85 s
+    # 4, 6 and 8 cannot be told apart (means 83-85 s, rounds of one N vary by
+    # 5-8 s) and 12 is the slowest. The pool is still CPU-bound, not
+    # queue-bound: every binary's libtest runs one test thread per core, and
+    # the run is now about as long as its longest binary (`knobas-app`'s
+    # `test/it`, 577 tests, 30-60 s alone). 6 stays, the middle of the flat
+    # region: half the cores, and a connection peak far below the server's
+    # 400 (82 client backends at N=6 on 2026-09-05, when the pool was 112
+    # binaries; N=12 peaked at 143 then).
+    #
+    # THE START ORDER is cargo's build order, as `_test-executables` prints
+    # it, which starts `knobas-app`'s `test/it` last. Measured the same day,
+    # same way, at N=6: cargo's order 71, 82, 80 s; reversed (that binary
+    # first) 83, 88, 86 s; the seven slowest binaries first (`knobas-app`,
+    # `knobas-core` and `knobas-sync`'s `test/it`, `scheduler_loop`,
+    # `knobas-db`'s `embedded`, `schema` and lib) 87, 89, 90 s. Starting the
+    # heavy binaries together only stacks their test threads on the same
+    # cores, so no reordering is applied.
     jobs=${KNOBAS_TEST_JOBS:-6}
     cores=$(getconf _NPROCESSORS_ONLN)
     case $jobs in
