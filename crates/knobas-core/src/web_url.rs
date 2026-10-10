@@ -13,7 +13,7 @@
 //! whatever else happens. A Rust twin normalising the pasted side would be a
 //! second implementation of one rule, in a different language, that nothing
 //! forces to agree; `ancestor_path_read!` records the same reasoning in
-//! `payload.rs`, and `knobas-core/tests/ancestor_path.rs` is written against
+//! `payload.rs`, and `knobas-core/tests/it/ancestor_path.rs` is written against
 //! the database for it. So the pasted URL is bound as a parameter and put
 //! through [`web_url_normalized!`] too, and the two sides cannot disagree
 //! because they are the same characters.
@@ -58,7 +58,7 @@
 //! anything without a `scheme://` -- normalises to SQL `null`, because both
 //! `substring`s fail to match and `null || null` is `null`. A `null` index
 //! entry equals nothing, so such a row is unreachable by paste rather than
-//! reachable by accident, and `crates/knobas-core/tests/web_url.rs` pins that
+//! reachable by accident, and `crates/knobas-core/tests/it/web_url.rs` pins that
 //! direction across the shapes a mirror can hold.
 
 /// SQL for the *trailing slash and fragment* half of the rule, over a URL

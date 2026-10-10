@@ -3211,7 +3211,7 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
 /// Tidewater-shaped for assets, because a made-up estate proves that the
 /// import parses and not that a real estate fits the model (ADR-0013).
 /// Embedded rather than read at run time, so this suite and the file's own
-/// checker (`knobas-core`'s `tests/estate_file.rs`) fail together the day it
+/// checker (`knobas-core`'s `tests/it/estate_file.rs`) fail together the day it
 /// stops being true.
 const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 

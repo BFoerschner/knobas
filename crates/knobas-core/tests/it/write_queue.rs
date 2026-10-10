@@ -1,7 +1,7 @@
 //! The write queue store, against a real PostgreSQL (issue #42).
 //!
 //! Same shape as `stores.rs` and for the same reason: one database is shared
-//! by every test in this binary and they run concurrently, so each test seeds
+//! by every test in this file and they run concurrently, so each test seeds
 //! entity ids unique to itself rather than truncating tables its neighbours
 //! are using.
 //!
@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// A migrated pool plus a mirrored ticket unique to this run.
 ///
 /// The **source id** is unique too, not just the key: `due` is scoped by
-/// source and the database is shared by every test in this binary, so a fixed
+/// source and the database is shared by every test in this file, so a fixed
 /// namespace would make each test its neighbours' fixture.
 async fn seeded_pool() -> (sqlx::PgPool, EntityRef) {
     let pool = knobas_db::test_util::test_pool().await;

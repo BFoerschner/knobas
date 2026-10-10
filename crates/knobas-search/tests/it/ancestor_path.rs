@@ -3,7 +3,7 @@
 //!
 //! M3.2's exit criterion is "the launcher finds *SEPA payout retry design*
 //! with its ancestor path", and before this file every link of that chain was
-//! witnessed on its own: `knobas-core/tests/ancestor_path.rs` runs the read
+//! witnessed on its own: `knobas-core/tests/it/ancestor_path.rs` runs the read
 //! over a bound payload, `map.rs` asserts the adapter keeps `ancestors` in the
 //! payload, and the launcher row draws whatever path it is handed. What none
 //! of them asserts is that a **search** hands the row one -- that the corpus

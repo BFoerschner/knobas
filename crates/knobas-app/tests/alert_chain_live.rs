@@ -11,7 +11,7 @@
 //!
 //! Every M4.1 ticket before this one witnessed its own layer over a fixture
 //! written for the purpose: `knobas-sync`'s `tests/alerts.rs` over samples
-//! inserted by hand, `knobas-core`'s `tests/inbox.rs` over an alert row
+//! inserted by hand, `knobas-core`'s `tests/it/inbox.rs` over an alert row
 //! inserted by hand, `tests/inbox_ipc.rs` over both. Each of those is green
 //! while the layer under it is wrong about the same monitor, because each one
 //! *writes* what the layer under it was supposed to produce. This file writes

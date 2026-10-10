@@ -73,7 +73,7 @@ const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 /// terminal group ([`MiniBoardColumn::status`] `= None`) instead of being
 /// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
-/// `knobas-core/tests/mini_board.rs`.
+/// `knobas-core/tests/it/mini_board.rs`.
 ///
 /// `$decl` is where the calling statement binds the declarations; each
 /// statement here binds them at the end of its own parameter list.
@@ -89,7 +89,7 @@ macro_rules! status_read {
 /// resolves to nothing simply omits it, which is the whole of what story 8
 /// asks for -- a board that never guesses at what a source did not say. Pinned
 /// by `a_ticket_with_no_recognizable_priority_carries_none` in
-/// `knobas-core/tests/mini_board.rs`.
+/// `knobas-core/tests/it/mini_board.rs`.
 macro_rules! priority_read {
     ($decl:literal) => {
         $crate::declared_string!($decl, "priority")

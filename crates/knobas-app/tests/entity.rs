@@ -557,7 +557,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
 /// configuration (#232).
 ///
 /// The room's predicate and the census are one macro, so this is the room
-/// half of what `knobas-core/tests/projects.rs` pins for the census: a
+/// half of what `knobas-core/tests/it/projects.rs` pins for the census: a
 /// TeamCity project whose configurations have no synced build has a room,
 /// and the room holds the configuration. The `build_config` record spells its
 /// project at the top level -- the shape the adapter stores verbatim -- and

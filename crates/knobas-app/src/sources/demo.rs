@@ -48,7 +48,7 @@ use sqlx::PgPool;
 /// no repository under it, and a file the binary went looking for would be a
 /// demo that works from a checkout and nowhere else. It is the same bytes
 /// `crates/knobas-app/tests/assets_ipc.rs` and `knobas-core`'s
-/// `tests/estate_file.rs` embed, so the three fail together the day the file
+/// `tests/it/estate_file.rs` embed, so the three fail together the day the file
 /// stops being an estate file.
 const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
 

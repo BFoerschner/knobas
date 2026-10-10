@@ -4354,7 +4354,7 @@ pub fn importer_of(producer: &'static Producer) -> Result<Importer, IpcError> {
 /// The estate file, as the Import reads it.
 ///
 /// `deny_unknown_fields` on all three shapes, and it is the decision
-/// `knobas-core`'s `tests/estate_file.rs` made when it closed the file's key
+/// `knobas-core`'s `tests/it/estate_file.rs` made when it closed the file's key
 /// vocabulary: *"a misspelled key reads as an absent optional field, and an
 /// absent optional field is legal everywhere it appears"*. A `parnet` would
 /// hang the asset off the root, a `targets` would land the route on nothing
@@ -7374,7 +7374,7 @@ mod tests {
         );
     }
 
-    /// The estate file's own checker (`knobas-core`'s `tests/estate_file.rs`)
+    /// The estate file's own checker (`knobas-core`'s `tests/it/estate_file.rs`)
     /// and the shapes this module deserialises read **the same keys**.
     ///
     /// The two are the format, written twice in two crates that cannot see
@@ -7393,7 +7393,7 @@ mod tests {
     /// moves the name in the error too.
     #[test]
     fn the_file_shapes_read_the_keys_the_estate_files_own_check_allows() {
-        const CHECK: &str = include_str!("../../../knobas-core/tests/estate_file.rs");
+        const CHECK: &str = include_str!("../../../knobas-core/tests/it/estate_file.rs");
 
         /// The quoted strings of a `const NAME: &[&str] = &[ … ];` list.
         fn listed(source: &str, name: &str) -> BTreeSet<String> {

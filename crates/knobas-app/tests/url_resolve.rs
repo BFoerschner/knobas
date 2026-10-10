@@ -17,7 +17,7 @@
 //! # What is asserted here and what is asserted next door
 //!
 //! The *normalisation rule* -- which spellings of a URL are one link -- is
-//! `crates/knobas-core/tests/web_url.rs`, against the SQL that is its only
+//! `crates/knobas-core/tests/it/web_url.rs`, against the SQL that is its only
 //! implementation. What is here is what the **command** answers over a mirror:
 //! the four sources' shapes, the miss, the tombstone, two instances of one
 //! adapter, and the two properties of the index the rule rests on.

@@ -9,12 +9,12 @@
 //! # Why every test gets a database of its own
 //!
 //! The derivation is a pass over the **whole** mirror -- that is the point of
-//! it -- so the binary's shared database cannot isolate these tests the way
+//! it -- so the file's shared database cannot isolate these tests the way
 //! unique ids isolate the link battery: test A's stream would contain test B's
 //! fixtures, and every "and nothing else is in the stream" assertion in this
 //! file would be decided by scheduling. `scratch_database` costs one `create
 //! database` per test on the same postmaster, and buys assertions that mean
-//! what they say. It is the same reasoning `tests/suggestions.rs` records.
+//! what they say. It is the same reasoning `tests/it/suggestions.rs` records.
 //!
 //! # Why the clock is a fixture
 //!

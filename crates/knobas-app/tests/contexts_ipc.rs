@@ -1,7 +1,7 @@
 //! The contexts IPC surface (#47), against a real PostgreSQL.
 //!
 //! The membership *rule* is proven in `knobas-core`'s own battery
-//! (`crates/knobas-core/tests/contexts.rs`); what is asserted here is the
+//! (`crates/knobas-core/tests/it/contexts.rs`); what is asserted here is the
 //! boundary: which failures map to which codes, that the room's page and the
 //! tray really scope by membership when a stored context asks, and that the
 //! activity log hears a mutation exactly once.

@@ -10,7 +10,7 @@
 //!
 //! Detection is a pass over the **whole** mirror, and that is the point of it:
 //! a rule reads every branch, not the branches one caller nominated. The
-//! binary's shared database therefore cannot isolate these tests the way
+//! file's shared database therefore cannot isolate these tests the way
 //! unique ids isolate the link battery -- test A's `detect` run scans test B's
 //! corpus and proposes into it, so B's `detect` then finds its own suggestion
 //! already there and *correctly* writes nothing. Every negative assertion in

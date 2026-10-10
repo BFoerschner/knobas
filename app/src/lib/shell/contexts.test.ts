@@ -4,7 +4,7 @@
  * (epic / ticket / ad-hoc), whose membership is the fixed one-hop rule over
  * `knobas.confirmed_link` (never the base table — ADR-0008), resolved
  * server-side. What is tested here is the list's shape and order, not the
- * membership rule: that lives in `crates/knobas-core/tests/contexts.rs`.
+ * membership rule: that lives in `crates/knobas-core/tests/it/contexts.rs`.
  */
 import { expect, test } from "vitest";
 

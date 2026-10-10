@@ -193,7 +193,7 @@
 //! question "confirmed, or proposed?" gets asked and the answer cannot drift;
 //! `knobas_core::link::entries_of` reads `knobas.confirmed_link` and
 //! `knobas_core::suggest::proposals` reads `knobas.proposed_link` for exactly
-//! that reason. `knobas-core/tests/link_reads.rs` is what keeps this paragraph
+//! that reason. `knobas-core/tests/it/link_reads.rs` is what keeps this paragraph
 //! from going stale a second time.
 //!
 //! The old `and l.deleted_at is null` is gone from the predicate because it is
@@ -1179,7 +1179,7 @@ mod tests {
             list.rows_sql
         );
         // The base table's name is **assembled** rather than written out.
-        // `knobas-core`'s `tests/link_reads.rs` scans every shipping source
+        // `knobas-core`'s `tests/it/link_reads.rs` scans every shipping source
         // file for a read of it and says "a doc comment counts: it is what the
         // next implementer copies" -- and a negative assertion is no
         // exception, because the scan cannot tell the two apart. Same device,
