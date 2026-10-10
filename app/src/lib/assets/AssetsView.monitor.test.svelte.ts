@@ -10,7 +10,7 @@
  * **What is witnessed here is the gesture, not the write's effect.** Whether a
  * `create_monitor` reaches Uptime Kuma is `just kuma-live`'s claim, and whether
  * the recorded name becomes a `monitored-by` link is `knobas-sync`'s
- * `tests/attach.rs`. What is this file's is narrower and is the half a reader
+ * `tests/it/attach.rs`. What is this file's is narrower and is the half a reader
  * touches: the control is drawn only where a source could take it, the form
  * opens on what knobas already knows, and pressing *Create* records the name
  * **before** it queues the write.

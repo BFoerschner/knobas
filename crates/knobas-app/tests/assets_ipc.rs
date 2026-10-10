@@ -2806,8 +2806,8 @@ async fn a_source_rooms_tile_draws_its_worst_asset_first() {
 /// the end of every run of a source that emits `monitor` (#443).
 ///
 /// By hand and not through `knobas_sync::run_once`, because what is under test
-/// here is the **read**: `crates/knobas-sync/tests/alerts.rs` and
-/// `tests/samples.rs` are where the engine writing these is the claim. Each
+/// here is the **read**: `crates/knobas-sync/tests/it/alerts.rs` and
+/// `tests/it/samples.rs` are where the engine writing these is the claim. Each
 /// call is a poll, so a later one is a newer reading.
 async fn sampled(pool: &PgPool, monitor_id: &str, state: Option<&str>) {
     sqlx::query("insert into knobas.monitor_sample (entity_id, state) values ($1, $2)")

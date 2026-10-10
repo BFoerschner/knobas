@@ -19,7 +19,7 @@
 //! exactly the monitors that are steadily up.
 //!
 //! **Every test here gets a database of its own**, which is not this crate's
-//! usual arrangement (`tests/run.rs` and `tests/sweep.rs` share one and give
+//! usual arrangement (`tests/it/run.rs` and `tests/it/sweep.rs` share one and give
 //! each test a unique source id). Two things in this file are **global** and
 //! cannot be namespaced by a source id: `knobas.setting`, which one test
 //! writes and another reads a default from, and `samples::prune`, which

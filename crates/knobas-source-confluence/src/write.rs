@@ -4,7 +4,7 @@
 //! Deliberately free of [`WriteOp`]: this module takes the values already
 //! unpacked, and [`crate::source`] -- which is where `impl Source for
 //! ConfluenceSource` lives -- does the unpacking. That is not a style choice.
-//! `knobas-sync/tests/write_choke_point.rs` refuses any production file that
+//! `knobas-sync/tests/it/write_choke_point.rs` refuses any production file that
 //! *names* the op enum without implementing the trait, so a dispatch module
 //! that named it would read as a second outbound write path.
 //!

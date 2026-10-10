@@ -279,7 +279,7 @@ pub async fn run_once(
 /// [`RunConnections::open`](crate::scheduler::RunConnections::open), whose one
 /// implementation is `knobas_db::Connector::connect`, which belongs to no pool.
 /// The signature is what makes that the obvious thing to pass;
-/// `tests/dedicated.rs` is what checks it, by measuring the pool from outside
+/// `tests/it/dedicated.rs` is what checks it, by measuring the pool from outside
 /// while a run is parked.
 ///
 /// `pool` is used for exactly one thing: the activity line, written **after**
@@ -723,7 +723,7 @@ async fn run_locked(
         // plans for "something exists under this id again" (#127). Outside the
         // `if`, a poll of the adapter that reused the id would draw
         // `monitored-by` links to a deleted source's monitors.
-        // `tests/attach.rs`' two controls witness the two guards separately
+        // `tests/it/attach.rs`' two controls witness the two guards separately
         // and say which is which.
         attach::resolve(tx, source_id).await?;
     }

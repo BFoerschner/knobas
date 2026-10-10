@@ -1,6 +1,6 @@
 //! One sync run, against a real PostgreSQL.
 //!
-//! `test_util` gives every test in this binary the *same* database, and they
+//! `test_util` gives every test in this file the *same* database, and they
 //! run concurrently, so each test below syncs a source id unique to itself.
 //! Only the mock's own test uses `mock`, which is why it may assert absolute
 //! row counts for that source.
@@ -858,7 +858,7 @@ async fn a_failing_activity_line_does_not_fail_a_committed_sync() {
     let outcome = knobas_sync::run_once(&pool, &src, None).await;
 
     // Dropped before asserting: a failure here must not leave the shared log
-    // with a trigger on it for the rest of the binary.
+    // with a trigger on it for the rest of the file.
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "drop trigger {guard} on knobas.activity"
     )))
