@@ -14,6 +14,7 @@ mod help_card;
 mod home;
 mod lists;
 mod lists_no_identity;
+mod ranking;
 mod search;
 mod sql_containment;
 mod sql_shape;
