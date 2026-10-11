@@ -19,7 +19,8 @@
 //! nothing, a kind that declares nothing, a field that declares nothing.
 
 use knobas_core::payload::{
-    Declarations, KindPaths, ListPath, PayloadPath, resolve_flag, resolve_list, resolve_string,
+    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, resolve_flag, resolve_list,
+    resolve_names_as_parent, resolve_parents, resolve_string,
 };
 use sqlx::{PgPool, Row};
 
@@ -349,6 +350,382 @@ async fn an_undeclared_source_kind_or_field_misses_in_both() {
         "PAY-23",
         jira_shaped,
         (None, None, None, &[]),
+    )
+    .await;
+}
+
+// -- the parent declaration (ADR-0018, #595) ---------------------------------
+//
+// The deputy's ruling of 2026-10-11 on #594 freezes one `at` with two shapes
+// on one condition: the branch on shape lives in exactly one SQL macro
+// (`declared_parents!`, read through `declared_parent_names!`) and one Rust
+// resolver (`resolve_parents`), held together here. Every `under:` read goes
+// through them. So every case below runs through both, and states its answer.
+
+/// A parent as the comparison sees it: its kind and the names it answers to,
+/// in chain order, outermost first.
+type Chain = Vec<(String, Vec<String>)>;
+
+/// The chain the SQL macro yields for one item, ordered by its position and,
+/// inside a parent, by the order its names were declared in.
+async fn chain_in_sql(pool: &PgPool, declarations: &Declarations, entity_id: &str) -> Chain {
+    const PARENTS: &str = concat!(
+        "select p.pos, p.kind from sync.live_item i cross join lateral ",
+        knobas_core::declared_parents!("$1"),
+        " p where i.entity_id = $2 order by p.pos"
+    );
+    const NAMES: &str = concat!(
+        "select n.pos, n.name from sync.live_item i cross join lateral ",
+        knobas_core::declared_parent_names!("$1"),
+        " n where i.entity_id = $2 order by n.pos, n.name_ord"
+    );
+    let parents: Vec<(i64, String)> = sqlx::query_as(PARENTS)
+        .bind(declarations.as_param())
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{entity_id}'s parents must resolve: {e}"));
+    let names: Vec<(i64, String)> = sqlx::query_as(NAMES)
+        .bind(declarations.as_param())
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{entity_id}'s parent names must resolve: {e}"));
+    parents
+        .into_iter()
+        .map(|(pos, kind)| {
+            let of_this: Vec<String> = names
+                .iter()
+                .filter(|(at, _)| *at == pos)
+                .map(|(_, name)| name.clone())
+                .collect();
+            (kind, of_this)
+        })
+        .collect()
+}
+
+/// The names one item answers to **as a parent**, through the database,
+/// sorted: the SQL side is a set.
+async fn self_names_in_sql(
+    pool: &PgPool,
+    declarations: &Declarations,
+    entity_id: &str,
+) -> Vec<String> {
+    const SELF: &str = concat!(
+        "select s.name from sync.live_item i cross join lateral ",
+        knobas_core::declared_names_as_parent!("$1"),
+        " s where i.entity_id = $2 order by s.name"
+    );
+    sqlx::query_scalar(SELF)
+        .bind(declarations.as_param())
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{entity_id}'s own names must resolve: {e}"))
+}
+
+/// Run one item through both implementations of the parent read and assert
+/// they agree with each other **and** with the stated chain and own names.
+#[allow(clippy::too_many_arguments)]
+async fn both_parents(
+    pool: &PgPool,
+    declarations: &Declarations,
+    source: &str,
+    kind: &str,
+    key: &str,
+    payload: serde_json::Value,
+    chain: &[(&str, &[&str])],
+    own_names: &[&str],
+) {
+    item(pool, source, kind, key, &payload).await;
+    let id = format!("{source}:{key}");
+    let expected: Chain = chain
+        .iter()
+        .map(|(kind, names)| {
+            (
+                (*kind).to_owned(),
+                names.iter().map(|n| (*n).to_owned()).collect(),
+            )
+        })
+        .collect();
+
+    let empty = KindPaths::default();
+    let declared = declarations.get(source, kind).unwrap_or(&empty);
+    let rust: Chain = resolve_parents(&payload, &declared.parent)
+        .into_iter()
+        .map(|parent| (parent.kind, parent.names))
+        .collect();
+    assert_eq!(rust, expected, "Rust parent chain for {key}");
+    assert_eq!(
+        chain_in_sql(pool, declarations, &id).await,
+        expected,
+        "SQL parent chain for {key}"
+    );
+
+    let mut own: Vec<String> = own_names.iter().map(|n| (*n).to_owned()).collect();
+    own.sort();
+    let mut rust_own = resolve_names_as_parent(&payload, kind, declarations.of_source(source));
+    rust_own.sort();
+    assert_eq!(rust_own, own, "Rust names {key} answers to as a parent");
+    assert_eq!(
+        self_names_in_sql(pool, declarations, &id).await,
+        own,
+        "SQL names {key} answers to as a parent"
+    );
+}
+
+/// Gitea's repo as one object, Confluence's chain as an array, and a Jira
+/// ticket with two places its parent may be -- the shapes #595 to #599
+/// declare.
+fn parent_declarations() -> Declarations {
+    let repo = |at: &[&str]| ParentPath {
+        kind: "repo".to_owned(),
+        at: PayloadPath::of(at.iter().copied()),
+        names: vec![PayloadPath::of(["full_name"]), PayloadPath::of(["name"])],
+    };
+    Declarations::empty()
+        .with(
+            "gitea",
+            vec![
+                KindPaths {
+                    kind: "commit".to_owned(),
+                    parent: vec![repo(&["repository"])],
+                    ..KindPaths::default()
+                },
+                KindPaths {
+                    kind: "pr".to_owned(),
+                    parent: vec![repo(&["base", "repo"])],
+                    ..KindPaths::default()
+                },
+            ],
+        )
+        .with(
+            "confluence",
+            vec![KindPaths {
+                kind: "page".to_owned(),
+                parent: vec![ParentPath {
+                    kind: "page".to_owned(),
+                    at: PayloadPath::of(["ancestors"]),
+                    names: vec![PayloadPath::of(["title"])],
+                }],
+                ..KindPaths::default()
+            }],
+        )
+        .with(
+            "jira",
+            vec![KindPaths {
+                kind: "ticket".to_owned(),
+                parent: vec![
+                    ParentPath {
+                        kind: "ticket".to_owned(),
+                        at: PayloadPath::of(["fields", "epic"]),
+                        names: vec![PayloadPath::of(["key"])],
+                    },
+                    ParentPath {
+                        kind: "ticket".to_owned(),
+                        at: PayloadPath::of(["fields", "parent"]),
+                        names: vec![PayloadPath::of(["key"])],
+                    },
+                ],
+                ..KindPaths::default()
+            }],
+        )
+}
+
+/// Both shapes `at` may take: one object is the direct parent, an array is the
+/// whole chain, outermost first. A blank or non-string name is dropped from
+/// its parent and the parent stays; a non-object element is dropped from the
+/// chain.
+#[tokio::test]
+async fn a_parent_resolves_the_same_in_sql_and_in_rust_in_both_shapes() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    both_parents(
+        &pool,
+        &declarations,
+        "gitea",
+        "commit",
+        "tidewater/payout-service@c90d11",
+        serde_json::json!({
+            "sha": "c90d11",
+            "repository": { "full_name": "tidewater/payout-service", "name": "payout-service" }
+        }),
+        &[("repo", &["tidewater/payout-service", "payout-service"])],
+        &[],
+    )
+    .await;
+
+    both_parents(
+        &pool,
+        &declarations,
+        "confluence",
+        "page",
+        "4711",
+        serde_json::json!({
+            "title": "SEPA retries",
+            "ancestors": [
+                { "title": "Runbooks" },
+                "not an object",
+                { "title": "  " },
+                { "title": "Payments" }
+            ]
+        }),
+        &[("page", &["Runbooks"]), ("page", &[]), ("page", &["Payments"])],
+        // A page is itself a parent kind Confluence declares, so it answers
+        // to its own title.
+        &["SEPA retries"],
+    )
+    .await;
+}
+
+/// The miss directions: an `at` that leads to a string, a number or nothing
+/// is no parent at all, and so is the empty path, which would otherwise make
+/// every item its own parent. An empty array is an answer -- "no ancestors" --
+/// and not a miss.
+#[tokio::test]
+async fn a_parent_at_that_leads_to_neither_shape_misses_in_both() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    both_parents(
+        &pool,
+        &declarations,
+        "gitea",
+        "commit",
+        "tidewater/payout-service@string",
+        serde_json::json!({ "repository": "tidewater/payout-service" }),
+        &[],
+        &[],
+    )
+    .await;
+    both_parents(
+        &pool,
+        &declarations,
+        "gitea",
+        "commit",
+        "tidewater/payout-service@absent",
+        serde_json::json!({ "sha": "1" }),
+        &[],
+        &[],
+    )
+    .await;
+    both_parents(
+        &pool,
+        &declarations,
+        "confluence",
+        "page",
+        "4712",
+        serde_json::json!({ "title": "Home", "ancestors": [] }),
+        &[],
+        &["Home"],
+    )
+    .await;
+
+    let empty_at = Declarations::empty().with(
+        "gitea",
+        vec![KindPaths {
+            kind: "commit".to_owned(),
+            parent: vec![ParentPath {
+                kind: "repo".to_owned(),
+                at: PayloadPath::of(Vec::<String>::new()),
+                names: vec![PayloadPath::of(["name"])],
+            }],
+            ..KindPaths::default()
+        }],
+    );
+    both_parents(
+        &pool,
+        &empty_at,
+        "gitea",
+        "commit",
+        "tidewater/payout-service@empty-at",
+        serde_json::json!({ "name": "itself" }),
+        &[],
+        &[],
+    )
+    .await;
+}
+
+/// Candidates in declaration order, the first whose `at` resolves winning --
+/// the rule every declared path here follows. A ticket carrying both an epic
+/// and a parent is under its epic; one carrying only a parent is under that.
+#[tokio::test]
+async fn the_first_parent_candidate_that_resolves_wins_in_both() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    both_parents(
+        &pool,
+        &declarations,
+        "jira",
+        "ticket",
+        "PAY-231",
+        serde_json::json!({
+            "key": "PAY-231",
+            "fields": { "epic": { "key": "PAY-100" }, "parent": { "key": "PAY-7" } }
+        }),
+        &[("ticket", &["PAY-100"])],
+        &["PAY-231"],
+    )
+    .await;
+    both_parents(
+        &pool,
+        &declarations,
+        "jira",
+        "ticket",
+        "PAY-232",
+        serde_json::json!({
+            "key": "PAY-232",
+            "fields": { "epic": "PAY-100", "parent": { "key": "PAY-7" } }
+        }),
+        &[("ticket", &["PAY-7"])],
+        &["PAY-232"],
+    )
+    .await;
+}
+
+/// A mirrored parent answers to the names its children's declaration names,
+/// read off its own record: a Gitea repo's `full_name` and `name` sit at its
+/// root exactly as they sit inside a pull request's `base.repo`. A kind no
+/// declaration names as a parent answers to nothing, and so does a source that
+/// declares nothing.
+#[tokio::test]
+async fn a_mirrored_parent_answers_to_its_declared_names_in_both() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    both_parents(
+        &pool,
+        &declarations,
+        "gitea",
+        "repo",
+        "tidewater/payout-service",
+        serde_json::json!({ "full_name": "tidewater/payout-service", "name": "payout-service" }),
+        &[],
+        &["payout-service", "tidewater/payout-service"],
+    )
+    .await;
+    both_parents(
+        &pool,
+        &declarations,
+        "gitea",
+        "branch",
+        "tidewater/payout-service@refs/heads/main",
+        serde_json::json!({ "full_name": "x/y", "name": "main" }),
+        &[],
+        &[],
+    )
+    .await;
+    both_parents(
+        &pool,
+        &Declarations::empty(),
+        "gitea",
+        "repo",
+        "tidewater/other",
+        serde_json::json!({ "full_name": "tidewater/other", "name": "other" }),
+        &[],
+        &[],
     )
     .await;
 }
