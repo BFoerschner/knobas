@@ -97,6 +97,24 @@ async fn seed_asset(pool: &sqlx::PgPool, id: &str, name: &str, properties: serde
     .unwrap();
 }
 
+/// One route on an asset, the way the asset store writes it.
+async fn seed_route(pool: &sqlx::PgPool, id: &str, asset_id: &str, name: &str, url: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'route',$2)")
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.route (id, asset_id, name, url) values ($1,$2,$3,$4)")
+        .bind(id)
+        .bind(asset_id)
+        .bind(name)
+        .bind(url)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 /// One kind's group, or a failure that prints the whole response.
 fn group<'r>(results: &'r SearchResponse, kind: &str) -> &'r ResultGroup {
     results
@@ -119,22 +137,23 @@ fn days_ago(n: i64) -> DateTime<Utc> {
     Utc::now() - Duration::days(n)
 }
 
-/// Story 25, in two mirrored kinds and two kinds knobas owns.
+/// Story 25, in two mirrored kinds and three kinds knobas owns.
 ///
 /// In each kind the title match is the older row, and the body match mentions
 /// the word exactly once -- the comparable item the criterion asks for. A
-/// ticket and a commit are both mirror rows; the note (`knobas.note`) and the
-/// asset (`knobas.asset`) are corpora of their own, so "every kind" is asserted
-/// across the weighting of three relations and not just one. Every mirrored
-/// kind shares `sync.item`'s one `fts`, so the two mirror kinds stand for all
-/// of them.
+/// ticket and a commit are both mirror rows; the note (`knobas.note`), the
+/// asset (`knobas.asset`) and the route (`knobas.route`) are corpora of their
+/// own, so "every kind" is asserted across the weighting of every relation
+/// `corpus::ALL` searches. Every mirrored kind shares `sync.item`'s one `fts`,
+/// so the two mirror kinds stand for all of them.
 ///
-/// **Not routes.** `knobas.route` (migration `0018`) weights a route's name
-/// and its URL both at A, so a route named for the word and a route that only
-/// carries it in its URL tie. Whether a URL is a route's body is the question
-/// #592's PR raised rather than settled.
+/// **A route's body is its URL.** Migration `0018` weighted a route's name and
+/// its URL both at A, so a route named for the word and a route that only
+/// carried it in its URL tied and recency decided. The deputy's ruling on #592
+/// (`docs/decisions/2026-10-unattended-rulings.md`) made the URL the body, and
+/// `0026` moved it to B; the route pair below is that migration's witness.
 #[tokio::test]
-async fn a_title_match_ranks_above_a_body_match_in_mirror_notes_and_assets() {
+async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     let pool = pool().await;
     let t = token("title");
 
@@ -216,8 +235,34 @@ async fn a_title_match_ranks_above_a_body_match_in_mirror_notes_and_assets() {
     )
     .await;
 
+    // A route named for the token, and one whose URL alone carries it -- as
+    // its host, which `to_tsvector` gives a lexeme of its own when the URL
+    // ends at `/` (`corpus::ROUTE`'s table). Both hang off the title asset;
+    // the URL match is created second, so it is the newer.
+    seed_route(
+        &pool,
+        &format!("route:{t}-title"),
+        &format!("asset:{t}-title"),
+        &format!("{t} dashboard"),
+        "http://127.0.0.1:3000/",
+    )
+    .await;
+    seed_route(
+        &pool,
+        &format!("route:{t}-body"),
+        &format!("asset:{t}-title"),
+        "Admin console",
+        &format!("http://{t}:8080/"),
+    )
+    .await;
+
     let r = searcher(&pool).search(q(&t)).await.unwrap();
 
+    assert_eq!(
+        group_ids(&r, "route"),
+        [format!("route:{t}-title"), format!("route:{t}-body")],
+        "{r:?}"
+    );
     assert_eq!(
         group_ids(&r, "asset"),
         [format!("asset:{t}-title"), format!("asset:{t}-body")],
