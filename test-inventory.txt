@@ -1516,8 +1516,8 @@ knobas-search	test/it	lists::the_limit_cuts_the_page_and_not_the_count
 knobas-search	test/it	lists::typing_a_list_in_the_box_answers_like_the_command
 knobas-search	test/it	lists_no_identity::a_list_with_no_identity_configured_says_so_instead_of_reading_empty
 knobas-search	test/it	ranking::a_strong_body_match_still_beats_a_weak_title_match
-knobas-search	test/it	ranking::a_title_match_ranks_above_a_body_match_in_every_kind
-knobas-search	test/it	ranking::the_cap_keeps_the_title_match_and_the_true_total
+knobas-search	test/it	ranking::a_title_match_ranks_above_a_body_match_in_mirror_notes_and_assets
+knobas-search	test/it	ranking::the_cap_and_the_limit_keep_the_title_match_and_the_true_total
 knobas-search	test/it	search::a_clicked_chip_is_applied_and_echoed_like_a_typed_one
 knobas-search	test/it	search::a_deleted_item_disappears_from_the_index
 knobas-search	test/it	search::a_filter_with_no_text_browses_rather_than_answering_nothing

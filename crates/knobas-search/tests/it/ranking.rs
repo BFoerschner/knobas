@@ -15,7 +15,9 @@
 //! can only produce the wrong answer, and a pass is the rank's doing.
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_search::{KindCatalog, SearchFilters, SearchQuery, SearchResponse, Searcher};
+use knobas_search::{
+    KindCatalog, ResultGroup, SearchFilters, SearchQuery, SearchResponse, Searcher,
+};
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
@@ -95,13 +97,18 @@ async fn seed_asset(pool: &sqlx::PgPool, id: &str, name: &str, properties: serde
     .unwrap();
 }
 
-/// The ids of one group's rows, in the order the launcher draws them.
-fn group_ids(results: &SearchResponse, kind: &str) -> Vec<String> {
+/// One kind's group, or a failure that prints the whole response.
+fn group<'r>(results: &'r SearchResponse, kind: &str) -> &'r ResultGroup {
     results
         .groups
         .iter()
         .find(|group| group.kind == kind)
         .unwrap_or_else(|| panic!("no {kind} group in {results:?}"))
+}
+
+/// The ids of one group's rows, in the order the launcher draws them.
+fn group_ids(results: &SearchResponse, kind: &str) -> Vec<String> {
+    group(results, kind)
         .hits
         .iter()
         .map(|hit| hit.row.entity_id.clone())
@@ -118,9 +125,16 @@ fn days_ago(n: i64) -> DateTime<Utc> {
 /// the word exactly once -- the comparable item the criterion asks for. A
 /// ticket and a commit are both mirror rows; the note (`knobas.note`) and the
 /// asset (`knobas.asset`) are corpora of their own, so "every kind" is asserted
-/// across the weighting of three relations and not just one.
+/// across the weighting of three relations and not just one. Every mirrored
+/// kind shares `sync.item`'s one `fts`, so the two mirror kinds stand for all
+/// of them.
+///
+/// **Not routes.** `knobas.route` (migration `0018`) weights a route's name
+/// and its URL both at A, so a route named for the word and a route that only
+/// carries it in its URL tie. Whether a URL is a route's body is the question
+/// #592's PR raised rather than settled.
 #[tokio::test]
-async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
+async fn a_title_match_ranks_above_a_body_match_in_mirror_notes_and_assets() {
     let pool = pool().await;
     let t = token("title");
 
@@ -272,14 +286,15 @@ async fn a_strong_body_match_still_beats_a_weak_title_match() {
     );
 }
 
-/// The per-kind cap and the true total, under the weighting.
+/// The per-kind cap, the global limit and the true total, under the weighting.
 ///
 /// Twelve body matches, all newer than the one title match, in one kind. The
 /// group shows its cap of rows, the title match is the first of them though it
 /// is the oldest row in the kind, and the group still reports all thirteen --
-/// the cut is a page, not a count.
+/// the cut is a page, not a count. The same holds when the global limit cuts
+/// deeper than the cap.
 #[tokio::test]
-async fn the_cap_keeps_the_title_match_and_the_true_total() {
+async fn the_cap_and_the_limit_keep_the_title_match_and_the_true_total() {
     let pool = pool().await;
     let t = token("cap");
 
@@ -305,14 +320,29 @@ async fn the_cap_keeps_the_title_match_and_the_true_total() {
     }
 
     let r = searcher(&pool).search(q(&t)).await.unwrap();
-    let ticket = r
-        .groups
-        .iter()
-        .find(|group| group.kind == "ticket")
-        .unwrap();
+    let ticket = group(&r, "ticket");
 
+    // Ten is the crate's per-kind cap (`PER_GROUP` in `src/lib.rs`, private).
     assert_eq!(ticket.hits.len(), 10, "{r:?}");
-    assert_eq!(ticket.hits[0].row.entity_id, format!("jira:{t}-title"));
-    assert_eq!(ticket.total, 13);
-    assert_eq!(r.total, 13);
+    assert_eq!(
+        ticket.hits[0].row.entity_id,
+        format!("jira:{t}-title"),
+        "{r:?}"
+    );
+    assert_eq!(ticket.total, 13, "{r:?}");
+    assert_eq!(r.total, 13, "{r:?}");
+
+    // And the global limit, cutting below the cap: still the title match
+    // first, still all thirteen counted.
+    let mut narrow = q(&t);
+    narrow.limit = 3;
+    let r = searcher(&pool).search(narrow).await.unwrap();
+    assert_eq!(
+        group_ids(&r, "ticket")[0],
+        format!("jira:{t}-title"),
+        "{r:?}"
+    );
+    assert_eq!(group(&r, "ticket").hits.len(), 3, "{r:?}");
+    assert_eq!(group(&r, "ticket").total, 13, "{r:?}");
+    assert_eq!(r.total, 13, "{r:?}");
 }
