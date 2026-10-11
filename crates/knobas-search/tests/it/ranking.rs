@@ -184,10 +184,13 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     // An asset's "body" is its property values (migration `0019`, weight C):
     // one VM named for the token, one that only carries it as a hostname.
     // Inserted in order, so `updated_at` makes the property match the newer.
+    // The name is two words, not `{t}-db`: `to_tsvector` gives a hyphenated
+    // compound a lexeme for the whole *and* for each part, so the token would
+    // be counted twice in the name and outrank the property at equal weights.
     seed_asset(
         &pool,
         &format!("asset:{t}-title"),
-        &format!("{t}-db"),
+        &format!("{t} primary"),
         serde_json::json!({}),
     )
     .await;
