@@ -392,6 +392,86 @@ async fn the_seeded_content_lands_under_the_documented_key_forms() {
     println!("cursor after the initial sync: {cursor}");
 }
 
+/// A synced commit carries its repo, and `under:` finds it (#595, ADR-0018).
+///
+/// Gitea's commit and branch records name no repository, so the adapter writes
+/// one in; a pull request names it at `base.repo`, which only the real server
+/// can say it does. Every child the seeded repository syncs is read here
+/// through the descriptor's own declaration and `knobas_core::payload`'s
+/// resolver -- the Rust half of the one rule the SQL `under:` predicate is the
+/// other half of, held together by `knobas-core`'s agreement test -- and must
+/// answer to the full name and the bare name, ignoring case, which is what
+/// `under:tidewater/payout-service` and `under:Payout-Service` match on.
+///
+/// The battery above runs clause 6 against the same server, so a declaration
+/// whose `at` or names this server's records do not carry fails there too.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_synced_commit_carries_its_repo_and_is_found_by_under() {
+    use knobas_core::payload::resolve_parents;
+
+    let env = env();
+    let (items, _) = full(&*env.one_repo()).await;
+    let full_name = env.full_name();
+    let bare = full_name
+        .rsplit_once('/')
+        .map(|(_, name)| name.to_owned())
+        .expect("a full name is owner/name");
+    let declarations = knobas_source_gitea::descriptor_template().payload_paths;
+
+    let commits = of_kind(&items, "commit");
+    assert!(!commits.is_empty(), "the seed pushes commits");
+    for commit in &commits {
+        assert_eq!(
+            commit.payload["repository"],
+            serde_json::json!({ "full_name": full_name, "name": bare }),
+            "commit {} carries the repository it sits in",
+            commit.entity
+        );
+    }
+
+    for kind in ["branch", "pr", "commit"] {
+        let declared = &declarations
+            .iter()
+            .find(|paths| paths.kind == kind)
+            .unwrap_or_else(|| panic!("{kind} declares its parent"))
+            .parent;
+        let children = of_kind(&items, kind);
+        assert!(!children.is_empty(), "the seed creates a {kind}");
+        for child in children {
+            let parents = resolve_parents(&child.payload, declared);
+            assert_eq!(
+                parents.len(),
+                1,
+                "{} sits in one repo: {parents:?}",
+                child.entity
+            );
+            assert_eq!(parents[0].kind, "repo");
+            assert_eq!(
+                parents[0].names,
+                [full_name.clone(), bare.clone()],
+                "{} answers to the full name first",
+                child.entity
+            );
+            for typed in [full_name.to_uppercase(), bare.to_uppercase()] {
+                assert!(
+                    parents[0]
+                        .names
+                        .iter()
+                        .any(|name| name.to_lowercase() == typed.to_lowercase()),
+                    "under:{typed} must find {}",
+                    child.entity
+                );
+            }
+            assert!(
+                !child.body_text.contains(&full_name),
+                "{}'s text no longer names its repo",
+                child.entity
+            );
+        }
+    }
+}
+
 /// The three shapes the wiremock fake asserts by construction, re-asserted
 /// against the server that decides them.
 ///
