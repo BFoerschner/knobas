@@ -300,6 +300,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "blocked_statuses",
             "kind",
             "merged",
+            "parent",
             "priority",
             "project_key",
             "project_name",
@@ -307,6 +308,15 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "status_name",
         ],
     );
+}
+
+/// `ParentPath` rides inside a `KindPaths` (ADR-0018), and until the adapter
+/// tickets of #591 land no adapter declares one -- so its keys are read off the
+/// type's own serialization rather than off a template.
+#[test]
+fn the_parent_path_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_source::ParentPath::default()).unwrap();
+    assert_shape("ParentPath", &wire, &["at", "kind", "names"]);
 }
 
 /// `ListPath` rides inside a `KindPaths` and no template the mock serves

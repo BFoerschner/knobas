@@ -92,6 +92,24 @@ export interface KindPaths {
   project_name: PayloadPath[];
   /** Status names this source considers blocked-like, in its own spelling. */
   blocked_statuses: string[];
+  /** Where this item's parent is and what it answers to (ADR-0018). */
+  parent: ParentPath[];
+}
+
+/**
+ * `knobas_core::payload::ParentPath` — where an item's parent sits in its
+ * payload, and the names that parent answers to for `under:` (ADR-0018).
+ */
+export interface ParentPath {
+  /** The parent's entity kind (`repo`, `build_config`). */
+  kind: string;
+  /**
+   * One object (the direct parent) or an array of objects (the chain,
+   * outermost first, the direct parent last).
+   */
+  at: PayloadPath;
+  /** Inside each parent object, the names it answers to; the first is shown. */
+  names: PayloadPath[];
 }
 
 /** What one sync run did — `knobas_sync::SyncReport`. */

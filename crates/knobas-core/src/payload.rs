@@ -107,6 +107,42 @@ pub struct ListPath {
     pub entry: PayloadPath,
 }
 
+/// Where an item's **parent** sits in its payload, and the names that parent
+/// answers to (ADR-0018, `CONTEXT.md`'s **Parent**).
+///
+/// The parent is the entity you can open that an item sits directly inside: a
+/// repo for a commit, a build configuration for a build, the parent page for a
+/// page, the epic for a ticket. It comes from the source, so the adapter says
+/// where it is, the same way it says where a status is. It is neither a link
+/// nor a project.
+///
+/// * `kind` is the parent's entity kind (`repo`, `build_config`). It is
+///   declared rather than looked up because a parent need not be in the
+///   mirror -- an epic outside the synced JQL is still the parent its children
+///   name -- and a suggestion for `under:` still has to say what it is.
+/// * `at` is where the parent is. It leads either to **one object**, the
+///   direct parent, or to **an array of objects**, the whole chain outermost
+///   first with the direct parent last (a Confluence page's `ancestors`). The
+///   array form is what makes `under:` transitive for a source whose records
+///   carry their chain.
+/// * `names` are where, inside each parent object, the names it answers to
+///   live, in the parent's own spelling -- a repo's `owner/name` and its bare
+///   `name`, a configuration's title and its id. `under:<name>` matches them
+///   exactly, ignoring case. The first name is the one a path line shows.
+///
+/// A declaration whose `at` leads nowhere, or to neither shape, is a miss: the
+/// item has no parent as far as knobas knows, which is never a guess.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParentPath {
+    /// The parent's entity kind.
+    pub kind: String,
+    /// Where the parent object, or the chain of them, is.
+    pub at: PayloadPath,
+    /// Where each name the parent answers to sits inside a parent object.
+    #[serde(default)]
+    pub names: Vec<PayloadPath>,
+}
+
 /// What one adapter's records of one entity kind carry, and where.
 ///
 /// **Per kind**, because the answer is: a TeamCity *build* names its project
@@ -166,6 +202,13 @@ pub struct KindPaths {
     /// one record. Matched case-insensitively by its reader.
     #[serde(default)]
     pub blocked_statuses: Vec<String>,
+    /// Where this item's parent is and what it answers to (ADR-0018). Empty
+    /// for a kind with no parent -- an Uptime Kuma monitor, a repo -- and for
+    /// every descriptor serialized before the field existed, so `under:` misses
+    /// on such a kind rather than guessing at one. Candidates in declaration
+    /// order, the first whose `at` resolves winning, like every path here.
+    #[serde(default)]
+    pub parent: Vec<ParentPath>,
 }
 
 /// The [`KindPaths`] field names, as the SQL macros spell them.
@@ -181,6 +224,7 @@ pub mod field {
     pub const MERGED: &str = "merged";
     pub const PROJECT_KEY: &str = "project_key";
     pub const PROJECT_NAME: &str = "project_name";
+    pub const PARENT: &str = "parent";
 
     /// Every field that is a path, in declaration order. `blocked_statuses` is
     /// not here: it is a set of names, not somewhere to look.
@@ -192,6 +236,7 @@ pub mod field {
         MERGED,
         PROJECT_KEY,
         PROJECT_NAME,
+        PARENT,
     ];
 }
 
@@ -661,6 +706,61 @@ mod tests {
         expected.push("blocked_statuses");
         expected.sort_unstable();
         assert_eq!(keys, expected);
+    }
+
+    /// A descriptor serialized by a peer built before ADR-0018 has no
+    /// `parent` key at all. It must still decode, and decode as a kind that
+    /// declares no parent -- which every `under:` read then misses on -- rather
+    /// than failing the whole descriptor.
+    #[test]
+    fn a_descriptor_from_before_parents_decodes_as_declaring_no_parent() {
+        let older = serde_json::json!({
+            "kind": "commit",
+            "status_name": [],
+            "priority": [],
+            "assignee": [],
+            "reviewers": [],
+            "merged": [],
+            "project_key": [],
+            "project_name": [],
+            "blocked_statuses": []
+        });
+        let decoded: KindPaths = serde_json::from_value(older).unwrap();
+        assert!(decoded.parent.is_empty());
+        assert_eq!(
+            decoded,
+            KindPaths {
+                kind: "commit".to_owned(),
+                ..KindPaths::default()
+            }
+        );
+    }
+
+    /// The wire spelling a declared parent travels in: the parent's kind, where
+    /// it sits in the payload, and the names it answers to, each a key path.
+    #[test]
+    fn a_declared_parent_travels_as_kind_place_and_names() {
+        let wire = serde_json::json!({
+            "kind": "build",
+            "parent": [{
+                "kind": "build_config",
+                "at": ["buildType"],
+                "names": [["name"], ["id"]]
+            }]
+        });
+        let decoded: KindPaths = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            decoded.parent,
+            vec![ParentPath {
+                kind: "build_config".to_owned(),
+                at: PayloadPath::of(["buildType"]),
+                names: vec![PayloadPath::of(["name"]), PayloadPath::of(["id"])],
+            }]
+        );
+        assert_eq!(
+            serde_json::to_value(&decoded).unwrap()["parent"],
+            wire["parent"]
+        );
     }
 
     #[test]
