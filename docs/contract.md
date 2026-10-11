@@ -9658,7 +9658,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Tests:** `knobas-core`'s
   `a_descriptor_from_before_parents_decodes_as_declaring_no_parent` (a `KindPaths` with no
   `parent` key decodes, with an empty parent, equal to the default for its kind) and
-  `a_declared_parent_travels_as_kind_place_and_names` (the wire spelling, both directions);
+  `a_declared_parent_travels_as_kind_at_and_names` (the wire spelling, both directions);
   `the_field_names_the_sql_macros_use_are_the_serialized_ones`, now covering `parent`; and the two
   mirror pins above.
 

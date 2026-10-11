@@ -226,8 +226,10 @@ pub mod field {
     pub const PROJECT_NAME: &str = "project_name";
     pub const PARENT: &str = "parent";
 
-    /// Every field that is a path, in declaration order. `blocked_statuses` is
-    /// not here: it is a set of names, not somewhere to look.
+    /// Every field that says where to look, in declaration order: plain
+    /// paths, `reviewers`' list paths and `parent`'s parent declarations.
+    /// `blocked_statuses` is not here: it is a set of names, not somewhere to
+    /// look.
     pub const ALL: &[&str] = &[
         STATUS_NAME,
         PRIORITY,
@@ -739,7 +741,7 @@ mod tests {
     /// The wire spelling a declared parent travels in: the parent's kind, where
     /// it sits in the payload, and the names it answers to, each a key path.
     #[test]
-    fn a_declared_parent_travels_as_kind_place_and_names() {
+    fn a_declared_parent_travels_as_kind_at_and_names() {
         let wire = serde_json::json!({
             "kind": "build",
             "parent": [{
