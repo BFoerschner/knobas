@@ -9619,11 +9619,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   the declaration: a parent need not be in the mirror (ADR-0018's first consequence), yet #601's
   `under:` suggestions carry their kind (`payout-service · repo`) for parents "named by children
   but not mirrored". Only the child's declaration can say what such a parent is. Adding it now
-  saves a second §10.8 touch later. **`at` takes two shapes** for the same reason: the spec takes
-  Confluence's transitive chain "from the existing `ancestors` payload (#284)", an array, while
-  Gitea, TeamCity and Jira name one object. Both are said in one field rather than two, and an
-  `at` that resolves to neither shape is a miss. Like every other field it is a **candidate
-  list**, the first whose `at` resolves winning.
+  saves a second §10.8 touch later. The `kind` part and the two-shape `at` were ratified as within
+  #591's sanctioned change by the deputy's ruling of 2026-10-11 on #594
+  (`docs/decisions/2026-10-unattended-rulings.md`); flagged for Björn's review. **`at` takes two
+  shapes** for the same reason: the spec takes Confluence's transitive chain "from the existing
+  `ancestors` payload (#284)", an array, while Gitea, TeamCity and Jira name one object. Both are
+  said in one field rather than two, and an `at` that resolves to neither shape is a miss. The
+  ruling's condition on the two shapes: the branch on shape lives in exactly one SQL macro and one
+  Rust resolver in `knobas_core::payload`, held together by the agreement test, and no reader
+  spells it inline. Like every other field it is a **candidate list**, the first whose `at`
+  resolves winning.
 
   **The field-name pin.** `payload::field::PARENT = "parent"` joins `field::ALL`, so
   `the_field_names_the_sql_macros_use_are_the_serialized_ones` covers it: a rename now turns that
