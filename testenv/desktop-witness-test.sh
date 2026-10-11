@@ -199,13 +199,14 @@ fi
 
 record='/tmp/knobas witness/record'
 check "the stub records one argument per line, into the path it was given" \
-    "$(printf '#!/bin/sh\nprintf %s "$@" > %s\n' "'%s\\n'" "'$record'")" \
+    "$(printf '#!/bin/sh\nprintf %s "$@" > %s\nmv %s %s\n' "'%s\\n'" \
+        "'$record.tmp'" "'$record.tmp'" "'$record'")" \
     "$(stub_script "$record")"
 # The record path is single-quoted in the script, so a directory with a space
 # in it -- which `mktemp -d` under a Mac's TMPDIR routinely is not, and a
 # worktree under "My Code" routinely is -- stays one word.
 check_contains "the recorded path is quoted in the script" \
-    "> '$record'" "$(stub_script "$record")"
+    "mv '$record.tmp' '$record'" "$(stub_script "$record")"
 
 # --- the path the driver types into a command template (#547) ---------------
 #
@@ -267,7 +268,8 @@ check "trailing blank lines are not a second argument" "/src/x" \
 # The driver polls for the stub's output, and until this ticket it broke on
 # `[ -s "$record" ]` -- any non-empty file. Its Rust twin, `recorded()` in
 # `crates/knobas-app/tests/it/checkout_ipc.rs`, waits for the trailing newline,
-# which is the write having *finished*. A wait on non-emptiness can hand the
+# which a one-line write has when it has *finished*; that a two-line one has
+# finished too is the stub's rename (#583). A wait on non-emptiness can hand the
 # comparison half a line, and half a line is reported as *the command was not
 # given the checkout path*: the feature blamed for a race in the harness, on
 # the one run the witness exists for.
@@ -311,8 +313,9 @@ check_is_record "a record without its trailing newline is not yet a record" no \
 check_is_record "the empty file the stub's redirect opens is not a record" no \
     "$records/empty"
 check_is_record "a path with nothing at it is not a record" no "$records/absent"
-# Two arguments, and a path with a space in it: what makes a record finished is
-# where it ends, not what it says.
+# Two arguments, and a path with a space in it: the condition reads where a
+# record ends, not what it says. (That a two-line record ending in a newline is
+# *all* of it is the stub's rename, not this condition: #583.)
 printf '%s\n%s\n' --wait '/Users/mara/My Code/payout service' >"$records/two"
 check_is_record "a two-line record that ends in a newline is a record" yes \
     "$records/two"
@@ -347,19 +350,20 @@ wait "$writer"
 
 rm -rf "$records"
 
-# The twin, pinned in the direction this ticket's divergence ran: two files
-# waiting on one stub, and only a reader of both can see them disagree. This
-# pins the spelling of the Rust condition, which is all a shell test can see of
-# it -- the same cheap cross-file pin as the labels below, and for the same
-# reason.
+# The twin, pinned in the direction #531's divergence ran: two files writing
+# and waiting on one stub's record, and only a reader of both can see them
+# disagree. What makes a record whole on both sides is the rename (#583), so
+# that is what is pinned: the spelling of the Rust stub's rename, which is all
+# a shell test can see of it -- the same cheap cross-file pin as the labels
+# below, and for the same reason.
 twin=../crates/knobas-app/tests/it/checkout_ipc.rs
-if grep -qF "text.ends_with('\\n')" "$twin"; then
-    check "the Rust twin still waits for the trailing newline" yes yes
+if grep -qF "mv '{0}.tmp' '{0}'" "$twin"; then
+    check "the Rust twin still renames its record into place" yes yes
 else
-    check "the Rust twin still waits for the trailing newline" yes no
-    printf '  %s no longer contains text.ends_with(...) anywhere;\n' "$twin" >&2
-    printf "  recorded()'s wait is what that spelling stands for, and\n" >&2
-    printf '  record_is_complete is the shell copy of it (#531).\n' >&2
+    check "the Rust twin still renames its record into place" yes no
+    printf "  %s no longer contains mv '{0}.tmp' '{0}' anywhere;\n" "$twin" >&2
+    printf "  recording_stub's rename is what that spelling stands for, and\n" >&2
+    printf "  stub_script's is the shell copy of it (#583).\n" >&2
 fi
 
 # --- the accessible names the open-in-editor driver acts on -----------------

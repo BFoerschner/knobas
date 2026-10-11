@@ -670,7 +670,8 @@ async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() 
 /// or not at all: `printf` may write each line separately, and a reader that
 /// saw the first line alone once failed the gate (#583). A rename is atomic;
 /// a trailing newline cannot tell a finished record from a half-written one,
-/// because every line ends in one.
+/// because every line ends in one. The desktop witness's `stub_script` writes
+/// its record the same way, and pins this one to it.
 #[cfg(unix)]
 fn recording_stub(dir: &Path) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
@@ -701,10 +702,8 @@ async fn recorded(record: &Path) -> Vec<String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         // The stub renames a finished record into place, so a record that
-        // exists is a whole one. The newline is the shell twin's condition
-        // (`record_is_complete`, #531), kept so the two still wait for the
-        // same thing; on its own it cannot see a two-line record half
-        // written (#583).
+        // exists is a whole one (#583). The newline is only what a whole
+        // record looks like, the shell twin's `record_is_complete` (#531).
         if let Ok(text) = fs::read_to_string(record)
             && text.ends_with('\n')
         {

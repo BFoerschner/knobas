@@ -361,8 +361,9 @@ if ! wait_for_record "$record" "$SPAWN_SECONDS"; then
     { cat "$record" 2>/dev/null || printf '(nothing at that path)\n'; } |
         sed 's/^/open-in-editor:   /' >&2
     die "the stub never finished writing a record after ${SPAWN_SECONDS} s." \
-        "A record is finished when it ends in a newline -- the condition" \
-        "recorded() waits for in crates/knobas-app/tests/it/checkout_ipc.rs."
+        "The stub renames its record into place when it has written it, and" \
+        "a finished record ends in a newline -- the condition recorded()" \
+        "waits for in crates/knobas-app/tests/it/checkout_ipc.rs."
 fi
 
 recorded=$(cat "$record")

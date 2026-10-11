@@ -169,6 +169,13 @@ readiness_message() {
 # a space-joined line could not tell one argument holding a space from two
 # arguments, and "the checkout path and nothing else" is a claim about both.
 #
+# Written beside the record and renamed onto it, so the record appears whole
+# or not at all. `printf` may write each argument's line separately, and a
+# reader that caught `--wait` alone from a command wrongly given two arguments
+# would see one argument and pass. The Rust twin, `recording_stub` in
+# `crates/knobas-app/tests/it/checkout_ipc.rs`, writes its record the same way
+# and failed the gate once before it did (#583).
+#
 # The record path is baked in rather than taken from the environment: the
 # template the app stores is a command line, the app spawns it with no shell
 # and passes on none of this shell's variables, so an `$RECORD` in here would
@@ -178,7 +185,8 @@ stub_script() {
     # `\n` and the `"\$@"` inside reach the file as written.
     cat <<EOF
 #!/bin/sh
-printf '%s\n' "\$@" > '$1'
+printf '%s\n' "\$@" > '$1.tmp'
+mv '$1.tmp' '$1'
 EOF
 }
 
@@ -223,23 +231,19 @@ git_config() {
 # Whether the stub has finished writing: something is there, and it ends in a
 # newline.
 #
-# The newline and not merely a non-empty file, because the newline is what
-# `recorded()` waits for in `crates/knobas-app/tests/it/checkout_ipc.rs`, and the
-# two are watching the same stub write the same file in the same shape. What
-# half a record produces is a comparison against half a line, reported as *the
-# command was not given the checkout path* -- the feature blamed for a race in
-# the harness, at the one moment the witness matters (#531).
-#
-# Enough here and not in the Rust twin: `printf` may write each argument's
-# line separately, so a two-argument record can end in a newline after its
-# first line. The driver expects exactly one argument, and a one-line record
-# that ends in a newline is whole. `recorded()` reads two-argument records, so
-# its stub renames a finished record into place instead (#583).
+# What makes a record whole is `stub_script`'s rename (#583); this is what a
+# whole record looks like, and the same condition `recorded()` waits for in
+# `crates/knobas-app/tests/it/checkout_ipc.rs`. What half a record produces is
+# a comparison against half a line, reported as *the command was not given the
+# checkout path* -- the feature blamed for a race in the harness, at the one
+# moment the witness matters (#531). The newline alone cannot rule that out: a
+# two-line record half written ends in one too.
 #
 # `-s` as well as the newline test, and it is load-bearing: `tail -c 1` of an
 # empty file prints nothing, which is the same answer it gives for a file that
-# ends in a newline. Without it the empty file the stub's `> file` leaves
-# between its open and its write would read as a finished record.
+# ends in a newline. Without it an empty file -- what a stub writing straight
+# to the record leaves between its open and its write -- would read as a
+# finished record.
 record_is_complete() {
     [ -s "$1" ] && [ -z "$(tail -c 1 "$1")" ]
 }
