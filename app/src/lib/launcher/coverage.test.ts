@@ -7,7 +7,7 @@
 import { expect, test } from "vitest";
 
 import type { FilterAnswer, SearchResponse } from "../ipc";
-import { authorGaps } from "./coverage";
+import { authorGaps, underGaps } from "./coverage";
 
 function response(
   sources: { source_id: string; display_name: string; answer: FilterAnswer }[] | null,
@@ -83,4 +83,33 @@ test("only the author dimension is read, whatever else is in the list", () => {
     ],
   };
   expect(authorGaps(withOther).map((gap) => gap.sourceId)).toEqual(["teamcity"]);
+});
+
+/**
+ * `under:` (#595): a source that declares no parent is named and explained,
+ * one that answered is not, and each dimension is read only by its own reader.
+ */
+test("a source that declares no parent is named under its own dimension", () => {
+  const author = response([
+    { source_id: "teamcity", display_name: "Buildserver", answer: "no_values" },
+  ]);
+  const both: SearchResponse = {
+    ...author,
+    coverage: [
+      ...author.coverage,
+      {
+        dimension: "under",
+        sources: [
+          { source_id: "gitea", display_name: "Gitea", answer: "answered" },
+          { source_id: "kuma", display_name: "Uptime Kuma", answer: "no_values" },
+        ],
+      },
+    ],
+  };
+  expect(underGaps(both)).toEqual([
+    { sourceId: "kuma", name: "Uptime Kuma", reason: "it declares no parent to look under" },
+  ]);
+  expect(authorGaps(both).map((gap) => gap.sourceId)).toEqual(["teamcity"]);
+  expect(underGaps(author)).toEqual([]);
+  expect(underGaps(null)).toEqual([]);
 });

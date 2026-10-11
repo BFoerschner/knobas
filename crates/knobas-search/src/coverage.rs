@@ -145,21 +145,31 @@ struct SourceProbe {
     authored: bool,
 }
 
-/// The author-dimension coverage for one query, or nothing to report.
+/// The coverage for one query, one entry per reported dimension it filtered
+/// on, or nothing to report.
 ///
 /// Empty -- and **no round trip** -- unless the query actually filtered by
-/// author. `mine` counts: `@me` runs through the same `author = any(...)`
-/// predicate and hits the same gap.
+/// author or by parent. `mine` counts: `@me` runs through the same
+/// `author = any(...)` predicate and hits the same gap.
+///
+/// **`under:` (#595) shares the probe and not the verdict.** Which sources
+/// put rows in this query's corpus is the same question for both dimensions,
+/// so it is asked once. What a source can do with `under:` is not measured on
+/// its rows but read off its declaration: a source declaring a parent for none
+/// of its kinds has nothing the filter can match, whatever it has synced --
+/// spec #591's "a source with no kind declaring a parent".
 ///
 /// # Errors
 ///
 /// [`SearchError::Db`] if the probe fails.
-pub(crate) async fn author_coverage(
+pub(crate) async fn report(
     pool: &PgPool,
     vocab: &Vocabulary,
     filters: &EffectiveFilters,
 ) -> Result<Vec<FilterCoverage>, SearchError> {
-    if !filters.filters_by_author() {
+    let by_author = filters.filters_by_author();
+    let by_under = filters.filters_by_under();
+    if !by_author && !by_under {
         return Ok(Vec::new());
     }
     let scoped = in_scope(vocab, filters);
@@ -174,15 +184,28 @@ pub(crate) async fn author_coverage(
         .fetch_all(pool)
         .await?;
 
-    let coverage = coverage_of(&scoped, &probes);
-    // Every source in scope contributed nothing to this query's corpus, so
-    // there is no author gap to explain -- only a kind or a source filter that
-    // matched nothing, which the results already say.
-    Ok(if coverage.sources.is_empty() {
-        Vec::new()
-    } else {
-        vec![coverage]
-    })
+    let mut report = Vec::new();
+    if by_author {
+        report.push(coverage_of(
+            &scoped,
+            &probes,
+            FilterDimension::Author,
+            |probe, _| probe.authored,
+        ));
+    }
+    if by_under {
+        report.push(coverage_of(
+            &scoped,
+            &probes,
+            FilterDimension::Under,
+            |_, source| vocab.declarations.declares_a_parent(&source.id),
+        ));
+    }
+    // A dimension whose sources in scope all contributed nothing to this
+    // query's corpus has no gap to explain -- only a kind or a source filter
+    // that matched nothing, which the results already say.
+    report.retain(|coverage| !coverage.sources.is_empty());
+    Ok(report)
 }
 
 /// The **enabled** configured sources this query is narrowed to, in vocabulary
@@ -225,9 +248,14 @@ fn in_scope<'a>(vocab: &'a Vocabulary, filters: &EffectiveFilters) -> Vec<&'a So
 /// because whatever it is missing from the results, authorship is not the
 /// reason. Iterating the probes instead would order the report by whatever the
 /// grouping happened to return.
-fn coverage_of(scoped: &[&SourceVocab], probes: &[SourceProbe]) -> FilterCoverage {
+fn coverage_of(
+    scoped: &[&SourceVocab],
+    probes: &[SourceProbe],
+    dimension: FilterDimension,
+    answers: impl Fn(&SourceProbe, &SourceVocab) -> bool,
+) -> FilterCoverage {
     FilterCoverage {
-        dimension: FilterDimension::Author,
+        dimension,
         sources: scoped
             .iter()
             .filter_map(|source| {
@@ -235,7 +263,7 @@ fn coverage_of(scoped: &[&SourceVocab], probes: &[SourceProbe]) -> FilterCoverag
                 Some(SourceAnswer {
                     source_id: source.id.clone(),
                     display_name: source.display_name.clone(),
-                    answer: if probe.authored {
+                    answer: if answers(probe, source) {
                         FilterAnswer::Answered
                     } else {
                         FilterAnswer::NoValues
@@ -318,7 +346,9 @@ mod tests {
         // deliberately absent: a source with no rows in scope has no group.
         let probes = [probe("teamcity", false), probe("jira", true)];
 
-        let coverage = coverage_of(&scoped, &probes);
+        let coverage = coverage_of(&scoped, &probes, FilterDimension::Author, |probe, _| {
+            probe.authored
+        });
         assert_eq!(coverage.dimension, FilterDimension::Author);
         assert_eq!(
             coverage

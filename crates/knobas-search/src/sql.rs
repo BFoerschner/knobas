@@ -94,6 +94,10 @@ pub(crate) enum Bind {
     I32(i32),
     /// Row counts: `row_number()` yields `bigint`, and so does `limit`.
     I64(i64),
+    /// The declarations `under:` reads the parent through, bound as one
+    /// `jsonb` the way every path-driven read binds them
+    /// (`Declarations::as_param`).
+    Json(serde_json::Value),
 }
 
 /// A generated statement and the arguments that go with it.
@@ -293,6 +297,8 @@ struct BoundFilters {
     kinds: Option<String>,
     days: Option<String>,
     authors: Option<String>,
+    /// The declarations and the values, in that order: `under:` needs both.
+    under: Option<(String, String)>,
 }
 
 /// Allocate one statement's filter binds, in the order they are read.
@@ -316,6 +322,12 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
         authors: filters
             .filters_by_author()
             .then(|| builder.param(Bind::Texts(filters.authors()))),
+        under: filters.filters_by_under().then(|| {
+            (
+                builder.param(Bind::Json(filters.declarations.as_json())),
+                builder.param(Bind::Texts(filters.under.clone())),
+            )
+        }),
     }
 }
 
@@ -360,6 +372,19 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         predicates.push(match corpus.author {
             Some(author) => format!("{author} = any({authors})"),
             // A corpus with no author column holds nothing of anybody's.
+            None => "false".to_owned(),
+        });
+    }
+    if let Some((declarations, values)) = &bound.under {
+        predicates.push(match corpus.under {
+            // `ud` is the one row the corpus's fragment reads the
+            // declarations and the values from, so the fragment stays a
+            // `&'static str` and the binds stay binds.
+            Some(under) => format!(
+                "exists (select 1 from (select {declarations}::jsonb as d, \
+                 {values}::text[] as v) ud where {under})"
+            ),
+            // A corpus whose rows declare no parent sits beneath nothing.
             None => "false".to_owned(),
         });
     }
@@ -507,6 +532,7 @@ where
             Bind::Texts(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
+            Bind::Json(value) => query.bind(sqlx::types::Json(value)),
         };
     }
     query
@@ -539,6 +565,7 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
             Bind::Texts(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
+            Bind::Json(value) => query.bind(sqlx::types::Json(value)),
         };
     }
     Ok(query
@@ -651,6 +678,7 @@ mod tests {
             mine: !authors.is_empty(),
             identity_authors: authors.iter().map(|s| (*s).to_owned()).collect(),
             named_authors: Vec::new(),
+            ..EffectiveFilters::default()
         }
     }
 
@@ -1153,6 +1181,7 @@ mod tests {
             synced_at: "o.synced_at",
             path: "null::text",
             scope: Some("o.archived is false"),
+            under: None,
         };
         let built = search_sql(
             &[&LIVE_ITEM, &OTHER],

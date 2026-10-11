@@ -155,6 +155,16 @@ pub struct Corpus {
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].
     pub(crate) scope: Option<&'static str>,
+    /// What `under:` matches, as a predicate over a row and a relation `ud`
+    /// carrying the bound declarations (`ud.d`) and the lowercased values
+    /// (`ud.v`), which [`crate::sql`] supplies -- or `None` for a corpus whose
+    /// rows have no declared parent, which an `under:` query then excludes
+    /// outright, as an author filter excludes a corpus with no author.
+    ///
+    /// For the mirror it is the two `knobas_core::payload` reads and nothing
+    /// else (the deputy's ruling of 2026-10-11 on #594): the row sits beneath
+    /// a parent answering to a value, or is that parent, mirrored.
+    pub(crate) under: Option<&'static str>,
 }
 
 /// The synced mirror: M1's only corpus.
@@ -178,6 +188,13 @@ pub const LIVE_ITEM: Corpus = Corpus {
     synced_at: "i.synced_at",
     path: knobas_core::ancestor_path_read!("i.payload"),
     scope: None,
+    under: Some(concat!(
+        "(exists (select 1 from ",
+        knobas_core::declared_parent_names!("ud.d"),
+        " pn where lower(pn.name) = any(ud.v)) or exists (select 1 from ",
+        knobas_core::declared_names_as_parent!("ud.d"),
+        " sn where lower(sn.name) = any(ud.v)))"
+    )),
 };
 
 /// Notes: the corpus of the first kind knobas **owns** rather than mirrors.
@@ -223,6 +240,9 @@ pub const NOTE: Corpus = Corpus {
     // string would draw an empty path line on every note in the launcher.
     path: "null::text",
     scope: None,
+    // Knobas' own rows declare no parent through a payload. An asset's parent
+    // is a column (ADR-0014), and reading it for `under:` is #600.
+    under: None,
 };
 
 /// Assets: the estate, and the corpus this module's own docs designed (#428).
@@ -274,6 +294,9 @@ pub const ASSET: Corpus = Corpus {
     synced_at: "a.updated_at",
     path: "nullif(a.path_text, '')",
     scope: None,
+    // Knobas' own rows declare no parent through a payload. An asset's parent
+    // is a column (ADR-0014), and reading it for `under:` is #600.
+    under: None,
 };
 
 /// Routes: what an asset is reachable at, and the second corpus of the estate
@@ -350,6 +373,9 @@ pub const ROUTE: Corpus = Corpus {
     synced_at: "r.updated_at",
     path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
     scope: None,
+    // Knobas' own rows declare no parent through a payload. An asset's parent
+    // is a column (ADR-0014), and reading it for `under:` is #600.
+    under: None,
 };
 
 /// Every corpus the launcher searches.

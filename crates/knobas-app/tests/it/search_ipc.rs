@@ -1800,3 +1800,51 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     );
     assert!(!rail_row(&pool, "mine").await.saved);
 }
+
+/// The wire between the registry and the search (#595): `search_inner` hands
+/// the compiled-in adapters' declarations to the searcher, so `under:` reads
+/// the parent the **real** Gitea adapter declares. Without that wiring every
+/// `under:` here would match nothing and be reported as unknown -- the
+/// search crate's own tests, which pass the template by hand, could not see
+/// it go.
+#[tokio::test]
+async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
+    let pool = pool().await;
+    let t = token("under");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('gitea', 'gitea', 'Gitea', 'http://x', 'Pat')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let id = format!("gitea:tidewater/{t}@c90d11");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'commit','jitter')")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, 'gitea', 'commit', 'jitter', 'jitter',
+                 jsonb_build_object('sha', 'c90d11', 'repository',
+                   jsonb_build_object('full_name', 'tidewater/' || $2, 'name', $2::text)))",
+    )
+    .bind(&id)
+    .bind(&t)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let response = search_inner(&pool, query(&format!("under:{t}")))
+        .await
+        .unwrap();
+    let hits: Vec<&str> = response
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.as_str()))
+        .collect();
+    assert_eq!(hits, [id.as_str()]);
+    assert!(response.interpreted.unknown_tokens.is_empty());
+}

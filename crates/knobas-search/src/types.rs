@@ -160,6 +160,13 @@ pub enum FilterDimension {
     /// `@jonas`, `author:jonas`, an author chip, or `@me` -- everything that
     /// ends up in the one `author = any(...)` predicate.
     Author,
+    /// `under:<name>` (ADR-0018, #595). Answered by a source that declares a
+    /// parent for any of its kinds; a source that declares none -- an Uptime
+    /// Kuma, whose metrics have no grouping -- has nothing the filter can
+    /// match, and an empty `under:` there is not an empty repo. The second
+    /// dimension #141's list shape was built for: an entry and a variant,
+    /// nothing existing moved.
+    Under,
 }
 
 /// One source, and what it could do with the dimension it is listed under.
@@ -485,11 +492,19 @@ mod tests {
                 "{wire} is missing from app/src/lib/ipc/search.ts"
             );
         }
-        let dimension =
-            serde_json::to_string(&FilterDimension::Author).expect("a dimension serializes");
-        assert!(
-            mirror.contains(&dimension),
-            "{dimension} is missing from app/src/lib/ipc/search.ts"
-        );
+        // Read off the union's own line rather than the whole file: `"under"`
+        // is a word the mirror's comments use, so `contains` would pass with
+        // the member deleted (#595).
+        let union = mirror
+            .lines()
+            .find(|line| line.starts_with("export type FilterDimension ="))
+            .expect("app/src/lib/ipc/search.ts declares the FilterDimension union");
+        for dimension in [FilterDimension::Author, FilterDimension::Under] {
+            let wire = serde_json::to_string(&dimension).expect("a dimension serializes");
+            assert!(
+                union.contains(&wire),
+                "{wire} is missing from the FilterDimension union: {union}"
+            );
+        }
     }
 }

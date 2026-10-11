@@ -37,6 +37,11 @@ const REASON: Record<Exclude<FilterAnswer, "answered">, string> = {
   no_values: "nothing it has synced names a person",
 };
 
+/** The same, for `under:` (#595): what `no_values` means for a parent. */
+const UNDER_REASON: Record<Exclude<FilterAnswer, "answered">, string> = {
+  no_values: "it declares no parent to look under",
+};
+
 /**
  * The sources that could not answer this query's author filter, in the order
  * the response listed them.
@@ -56,6 +61,27 @@ export function authorGaps(response: SearchResponse | null): CoverageGap[] {
         sourceId: source.source_id,
         name: source.display_name,
         reason: REASON[source.answer],
+      },
+    ];
+  });
+}
+
+/**
+ * The sources that could not answer this query's `under:` filter (#595): the
+ * ones whose adapter declares a parent for none of their kinds — an Uptime
+ * Kuma, whose metrics have no grouping. Their absence from an `under:` result
+ * is not an empty repo. Read by dimension, as `authorGaps` is.
+ */
+export function underGaps(response: SearchResponse | null): CoverageGap[] {
+  const coverage = response?.coverage.find((entry) => entry.dimension === "under");
+  if (!coverage) return [];
+  return coverage.sources.flatMap((source) => {
+    if (source.answer === "answered") return [];
+    return [
+      {
+        sourceId: source.source_id,
+        name: source.display_name,
+        reason: UNDER_REASON[source.answer],
       },
     ];
   });
