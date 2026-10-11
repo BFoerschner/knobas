@@ -660,10 +660,11 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
 
     // 4. And a branch of it answers the same checkout, which is the whole
     //    reason the branch keys extend the repo's: `repo_of` finds a branch's
-    //    repository by that prefix and nothing else. The launcher's group
-    //    order puts branches *above* repositories (`knobas_search`'s
-    //    `GROUP_ORDER`), so this is the detail the driver's own ⌘K-and-Return
-    //    is at least as likely to land on.
+    //    repository by that prefix and nothing else. Since #593 the
+    //    launcher's group order puts a repository above its branches (a
+    //    parent kind before its children, `knobas_search`'s `GROUP_ORDER`),
+    //    but a query can match a branch and not its repo, so the driver's
+    //    own ⌘K-and-Return may still land on this detail.
     let branch = view(
         &pool,
         "mock:payout-service@refs/heads/feature/PAY-231-sepa-retry",

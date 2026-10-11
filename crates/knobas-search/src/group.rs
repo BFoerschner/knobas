@@ -18,20 +18,24 @@ use crate::vocab::KindCatalog;
 ///
 /// A launcher whose sections reshuffle per keystroke cannot be used by muscle
 /// memory, so the order is fixed (spec §4 "results grouped by type") and taken
-/// from the round-3 mockup. Kinds not named here -- a source knobas has never
-/// seen -- sort after it, alphabetically, so a new adapter's items appear in a
-/// stable place without an entry being added anywhere (spec §3a).
+/// from the round-3 mockup, with one rule over it: **a parent kind always comes
+/// before its child kinds** (ADR-0018, #593). So `repo` sits above the `pr`,
+/// `commit` and `branch` it holds, `build_config` above `build`, and `asset`
+/// above `route` -- the thing you navigate *to* above the things you scroll
+/// *through*. Kinds not named here -- a source knobas has never seen -- sort
+/// after it, alphabetically, so a new adapter's items appear in a stable place
+/// without an entry being added anywhere (spec §3a).
 pub(crate) const GROUP_ORDER: &[&str] = &[
     "ticket",
     "asset",
+    "repo",
     "pr",
-    "build",
     "build_config",
+    "build",
     "page",
     "note",
     "commit",
     "branch",
-    "repo",
     "route",
     "monitor",
 ];
@@ -185,6 +189,39 @@ mod tests {
             groups.iter().map(|g| g.kind.as_str()).collect::<Vec<_>>(),
             ["ticket", "pr", "build", "page"]
         );
+    }
+
+    /// Every parent -> child kind pair the adapters declare (#591's per-source
+    /// declarations, ADR-0018). The descriptor's parent declaration names a
+    /// payload path and the names the parent answers to, not the parent's
+    /// kind, so this table is the record of which kind sits in which. A kind
+    /// that is its own parent (a page under a page, a ticket under an epic, an
+    /// asset under an asset) orders itself trivially and is not listed.
+    const PARENT_KINDS: &[(&str, &str)] = &[
+        ("repo", "branch"),
+        ("repo", "pr"),
+        ("repo", "commit"),
+        ("build_config", "build"),
+        ("asset", "route"),
+    ];
+
+    /// The rule, not today's list (#593, ADR-0018): a parent kind's group is
+    /// drawn above each of its child kinds', whatever order the rows came in.
+    #[test]
+    fn a_parent_kind_always_comes_before_its_child_kinds() {
+        for (parent, child) in PARENT_KINDS {
+            for rows in [
+                vec![detail(child, 1, "x:c", 0.9), detail(parent, 1, "x:p", 0.1)],
+                vec![detail(parent, 1, "x:p", 0.1), detail(child, 1, "x:c", 0.9)],
+            ] {
+                let groups = group(rows, &KindCatalog::default());
+                assert_eq!(
+                    groups.iter().map(|g| g.kind.as_str()).collect::<Vec<_>>(),
+                    [*parent, *child],
+                    "{parent} must be drawn above its child {child}"
+                );
+            }
+        }
     }
 
     /// A kind no adapter ever declared still has to be grouped and drawn, and

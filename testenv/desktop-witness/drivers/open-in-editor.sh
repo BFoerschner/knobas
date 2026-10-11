@@ -278,9 +278,10 @@ wait_until "the launcher never answered '$REPO_QUERY' within ${SETTLE_SECONDS} s
 # does, so its heading is the honest test for "a repo or branch detail is open".
 # Either will do: the panel a branch draws is its **repository's** checkout
 # (`knobas_app::checkout`'s `repo_of` finds the repo whose entity id the branch's
-# extends), so the button below is the same button either way -- and the
-# launcher's group order puts branches above repositories, so a ⌘K-and-Return
-# on this query may well land on one.
+# extends), so the button below is the same button either way. The launcher's
+# group order puts a repository above its branches since #593, but a query
+# that matches a branch and not its repo still lands a ⌘K-and-Return on the
+# branch.
 #
 # **Read twice, and the first read is the point (#547).** The heading is taken
 # once with the launcher's hit list on screen and once after Return, and
