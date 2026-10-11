@@ -163,8 +163,11 @@ fn sorted(mut ids: Vec<String>) -> Vec<String> {
 async fn under_a_repo_returns_its_branches_prs_and_commits_and_the_repo() {
     let pool = pool().await;
     let t = token();
-    let owner = format!("tidewater{t}");
-    let name = format!("payout-service-{t}");
+    // Stored in mixed case, as a Gitea repo may be named: a fold on only one
+    // side of the comparison -- the typed value's -- would still match a name
+    // stored in lowercase, and nothing would see the other side go.
+    let owner = format!("Tidewater{t}");
+    let name = format!("Payout-Service-{t}");
     let ours = repo(&pool, &owner, &name, "PAY-231: jitter in backoff").await;
     repo(
         &pool,
@@ -176,9 +179,9 @@ async fn under_a_repo_returns_its_branches_prs_and_commits_and_the_repo() {
 
     for raw in [
         format!("under:{owner}/{name}"),
-        format!("under:{name}"),
+        format!("under:{}", name.to_lowercase()),
         format!("under:{}", name.to_uppercase()),
-        format!("UNDER:{owner}/{}", name.to_uppercase()),
+        format!("UNDER:{}/{}", owner.to_lowercase(), name.to_uppercase()),
     ] {
         let response = searcher(&pool).search(q(&raw)).await.unwrap();
         assert_eq!(ids(&response), sorted(ours.clone()), "{raw}");
