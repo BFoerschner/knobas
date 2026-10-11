@@ -9726,7 +9726,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   parent is reported as having nothing the filter can match", and #141's entry above built the report
   for exactly this: *"A second dimension appends an entry and a variant; nothing existing moves."*
   The spec calls the descriptor change "the one frozen-contract touch", and this variant is a second
-  one the spec's own coverage requirement brings with it; it is named here so the review sees it.
+  one the spec's own coverage requirement brings with it. Ratified by the deputy's ruling of
+  2026-10-11 on #595 as required by that ticket's coverage criterion
+  (`docs/decisions/2026-10-unattended-rulings.md`); flagged for Björn's review.
   The answer is read off the declaration, not measured on the corpus: `answered` for a source
   declaring a parent for any kind, `no_values` otherwise, and the same "which sources put rows in
   this query's corpus" probe decides who is listed, so one round trip serves both dimensions.

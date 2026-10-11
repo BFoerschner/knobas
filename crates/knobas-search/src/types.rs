@@ -151,9 +151,10 @@ pub struct FilterCoverage {
 
 /// A filter dimension whose coverage is reported.
 ///
-/// Deliberately an enum with one variant rather than a bare string: the wire
-/// vocabulary is closed, so a UI that branches on it cannot be handed a word
-/// nobody defined.
+/// Deliberately an enum rather than a bare string: the wire vocabulary is
+/// closed, so a UI that branches on it cannot be handed a word nobody defined.
+/// Two variants since #595; a further dimension appends one (#141's entry in
+/// §10.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterDimension {
