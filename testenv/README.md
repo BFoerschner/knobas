@@ -1089,7 +1089,7 @@ through `notify-rust`'s `UNUserNotificationCenter` backend, and a click on
 one of its banners activates *the bundle Launch Services has registered for
 `dev.knobas.desktop`* -- which is the one `tauri build` wrote at
 `target/debug/bundle/macos/knobas.app`, because that is the copy LS saw
-first. Run 3 of the prototype (`prototype/notification-click`, its log)
+first. Run 3 of the #339 prototype (verdict table on the issue)
 launched a copy from elsewhere, and the click started a **second instance**
 from the registered path while the running one waited on. Launched from the
 registered path (run 4) it stayed single-instance and the click landed. If a
