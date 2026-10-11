@@ -34,7 +34,7 @@ The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
 **Project**:
-A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
+A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Scoping to one repo is what its [parent](#parent) relation is for. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
 _Avoid_: container, space (as a synonym for project; it stays as Confluence's own word, ADR-0010), workspace, board (ADR-0009)
 
 **Census**:
@@ -56,6 +56,10 @@ A read into source-shaped data outside the adapter that shaped it. Permitted onl
 
 **Declared path**:
 Where an adapter says one of those things lives in its own payloads — a status, a priority, an assignee, requested reviewers, a merged flag, a project — carried per entity kind on its descriptor. A reader resolves the declaration; a kind that declares none [misses](#miss). (§10.8, issue #277)
+
+**Parent**:
+The entity you can open that an item sits directly inside: a repo for a branch, PR or commit; a build configuration for a build; the parent page for a page; the epic or parent issue for a ticket; the parent asset for an asset, and the exposing asset for a route (the field of ADR-0014, the same concept under the same word). For a synced item, the adapter declares it per kind as a [declared path](#declared-path), and it comes from the source. It is never drawn, so it is **not a [link](#link)**. It is something you can open, so it is **not a [project](#project)**. A parent need not be in the [mirror](#mirror): an epic outside the synced JQL is still the parent its children name. `under:<name>` scopes a search to everything beneath a parent, transitively. It matches the names the adapter declares for that parent kind exactly, ignoring case, and also returns the parent itself when it is mirrored. A child's searchable text never contains its parent's name, because being inside something is a filter and not a word. The launcher row's path line shows the parent chain instead. A title may still name its parent where it means nothing without it (a TeamCity build, `Deploy #42`). (ADR-0018; ruled 2026-10-11, git-usability grilling)
+_Avoid_: container, scope, holder, repository (as the name of this fact)
 
 **Miss**:
 A payload read finding no recognizable shape and contributing nothing — the one failure a payload read is allowed. Guessing is the forbidden alternative.
