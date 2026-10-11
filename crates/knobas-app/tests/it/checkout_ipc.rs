@@ -665,6 +665,12 @@ async fn a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout() 
 /// One argument per line: the whole point is the count as well as the values,
 /// and a space-joined line could not tell one argument holding a space from
 /// two arguments.
+///
+/// Written beside the record and renamed onto it, so the record appears whole
+/// or not at all: `printf` may write each line separately, and a reader that
+/// saw the first line alone once failed the gate (#583). A rename is atomic;
+/// a trailing newline cannot tell a finished record from a half-written one,
+/// because every line ends in one.
 #[cfg(unix)]
 fn recording_stub(dir: &Path) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
@@ -674,7 +680,7 @@ fn recording_stub(dir: &Path) -> (PathBuf, PathBuf) {
     fs::write(
         &stub,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\n",
             record.display()
         ),
     )
@@ -694,13 +700,15 @@ fn recording_stub(dir: &Path) -> (PathBuf, PathBuf) {
 async fn recorded(record: &Path) -> Vec<String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        if let Ok(text) = fs::read_to_string(record) {
-            // A partly written file is possible; `> file` is one open and one
-            // write here, but waiting for the trailing newline costs nothing
-            // and removes the question.
-            if text.ends_with('\n') {
-                return text.lines().map(str::to_owned).collect();
-            }
+        // The stub renames a finished record into place, so a record that
+        // exists is a whole one. The newline is the shell twin's condition
+        // (`record_is_complete`, #531), kept so the two still wait for the
+        // same thing; on its own it cannot see a two-line record half
+        // written (#583).
+        if let Ok(text) = fs::read_to_string(record)
+            && text.ends_with('\n')
+        {
+            return text.lines().map(str::to_owned).collect();
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }

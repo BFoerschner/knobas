@@ -225,12 +225,16 @@ git_config() {
 #
 # The newline and not merely a non-empty file, because the newline is what
 # `recorded()` waits for in `crates/knobas-app/tests/it/checkout_ipc.rs`, and the
-# two are watching the same stub write the same file in the same shape. The
-# stub's `> file` is one open and one write, so half a record is unlikely
-# rather than impossible; what half a record produces is a comparison against
-# half a line, reported as *the command was not given the checkout path* -- the
-# feature blamed for a race in the harness, at the one moment the witness
-# matters (#531).
+# two are watching the same stub write the same file in the same shape. What
+# half a record produces is a comparison against half a line, reported as *the
+# command was not given the checkout path* -- the feature blamed for a race in
+# the harness, at the one moment the witness matters (#531).
+#
+# Enough here and not in the Rust twin: `printf` may write each argument's
+# line separately, so a two-argument record can end in a newline after its
+# first line. The driver expects exactly one argument, and a one-line record
+# that ends in a newline is whole. `recorded()` reads two-argument records, so
+# its stub renames a finished record into place instead (#583).
 #
 # `-s` as well as the newline test, and it is load-bearing: `tail -c 1` of an
 # empty file prints nothing, which is the same answer it gives for a file that
