@@ -240,8 +240,8 @@ pub const NOTE: Corpus = Corpus {
     // string would draw an empty path line on every note in the launcher.
     path: "null::text",
     scope: None,
-    // Knobas' own rows declare no parent through a payload. An asset's parent
-    // is a column (ADR-0014), and reading it for `under:` is #600.
+    // A note is knobas' own and sits inside nothing (see `path`), so it is
+    // beneath no parent `under:` could name.
     under: None,
 };
 

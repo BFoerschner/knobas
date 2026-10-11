@@ -13,7 +13,7 @@
  * sources are worth naming and what to say about each is a *rule*, not a
  * layout, and it has to be assertable without mounting anything.
  */
-import type { FilterAnswer, SearchResponse } from "../ipc";
+import type { FilterAnswer, FilterDimension, SearchResponse } from "../ipc";
 
 /** One source the launcher has something to explain about. */
 export interface CoverageGap {
@@ -52,7 +52,20 @@ const UNDER_REASON: Record<Exclude<FilterAnswer, "answered">, string> = {
  * to explain is noise, and noise is what gets ignored on the day it matters.
  */
 export function authorGaps(response: SearchResponse | null): CoverageGap[] {
-  const coverage = response?.coverage.find((entry) => entry.dimension === "author");
+  return gapsFor(response, "author", REASON);
+}
+
+/**
+ * The sources one dimension's report names as unable to answer, each with
+ * that dimension's reason. One reader for every dimension, so a third is a
+ * reason map and a one-line export rather than another copy of the walk.
+ */
+function gapsFor(
+  response: SearchResponse | null,
+  dimension: FilterDimension,
+  reasons: Record<Exclude<FilterAnswer, "answered">, string>,
+): CoverageGap[] {
+  const coverage = response?.coverage.find((entry) => entry.dimension === dimension);
   if (!coverage) return [];
   return coverage.sources.flatMap((source) => {
     if (source.answer === "answered") return [];
@@ -60,7 +73,7 @@ export function authorGaps(response: SearchResponse | null): CoverageGap[] {
       {
         sourceId: source.source_id,
         name: source.display_name,
-        reason: REASON[source.answer],
+        reason: reasons[source.answer],
       },
     ];
   });
@@ -73,16 +86,5 @@ export function authorGaps(response: SearchResponse | null): CoverageGap[] {
  * is not an empty repo. Read by dimension, as `authorGaps` is.
  */
 export function underGaps(response: SearchResponse | null): CoverageGap[] {
-  const coverage = response?.coverage.find((entry) => entry.dimension === "under");
-  if (!coverage) return [];
-  return coverage.sources.flatMap((source) => {
-    if (source.answer === "answered") return [];
-    return [
-      {
-        sourceId: source.source_id,
-        name: source.display_name,
-        reason: UNDER_REASON[source.answer],
-      },
-    ];
-  });
+  return gapsFor(response, "under", UNDER_REASON);
 }
