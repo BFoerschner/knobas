@@ -12,7 +12,7 @@
 //! click on `notify-rust` rather than on a second wrapper is
 //! `docs/research/2026-09-04-notification-library-alternatives.md`; that the
 //! wait fires inside a signed Tauri bundle from a worker thread was witnessed
-//! by `prototype/notification-click` (the verdict table on #339).
+//! by the #339 prototype (its verdict table is on the issue).
 //!
 //! ## The wait is unbounded, so there is a registry
 //!

@@ -5749,8 +5749,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   and the click comes back as an event. Decided in the 2026-09-04 grilling of #339 (the two Triage
   Notes on the issue) and **ratified by Björn there**; the load-bearing fact — `wait_for_action`
   reporting a banner click from a worker thread inside a signed Tauri bundle — was witnessed first on
-  `prototype/notification-click` (the verdict table on the issue), which stays as the primary
-  source and is neither merged nor deleted.
+  the #339 prototype; its verdict table on the issue is the record that remains (the
+  `prototype/notification-click` branch was deleted 2026-10-11).
 
   **The command.** `notify(draft: NotificationDraft) -> Result<(), IpcError>`, `NotificationDraft` =
   `{ title, body, address }`, appended to the **foot** of `crates/knobas-app/src/lib.rs`'s
