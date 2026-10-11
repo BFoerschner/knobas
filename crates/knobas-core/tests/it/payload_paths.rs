@@ -571,7 +571,11 @@ async fn a_parent_resolves_the_same_in_sql_and_in_rust_in_both_shapes() {
                 { "title": "Payments" }
             ]
         }),
-        &[("page", &["Runbooks"]), ("page", &[]), ("page", &["Payments"])],
+        &[
+            ("page", &["Runbooks"]),
+            ("page", &[]),
+            ("page", &["Payments"]),
+        ],
         // A page is itself a parent kind Confluence declares, so it answers
         // to its own title.
         &["SEPA retries"],

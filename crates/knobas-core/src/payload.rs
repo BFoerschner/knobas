@@ -300,7 +300,8 @@ impl Declarations {
     /// has nothing the filter can match.
     #[must_use]
     pub fn declares_a_parent(&self, source_id: &str) -> bool {
-        self.of_source(source_id).any(|kind| !kind.parent.is_empty())
+        self.of_source(source_id)
+            .any(|kind| !kind.parent.is_empty())
     }
 
     /// The jsonb every path-driven statement binds.
@@ -485,14 +486,19 @@ pub struct ResolvedParent {
 /// is the **empty path**: it addresses the record itself, which is an object,
 /// and an item is never its own parent.
 #[must_use]
-pub fn resolve_parents(payload: &serde_json::Value, candidates: &[ParentPath]) -> Vec<ResolvedParent> {
+pub fn resolve_parents(
+    payload: &serde_json::Value,
+    candidates: &[ParentPath],
+) -> Vec<ResolvedParent> {
     for candidate in candidates {
         if candidate.at.segments().is_empty() {
             continue;
         }
         let objects: Vec<&serde_json::Value> = match at(payload, &candidate.at) {
             Some(object @ serde_json::Value::Object(_)) => vec![object],
-            Some(serde_json::Value::Array(chain)) => chain.iter().filter(|e| e.is_object()).collect(),
+            Some(serde_json::Value::Array(chain)) => {
+                chain.iter().filter(|e| e.is_object()).collect()
+            }
             _ => continue,
         };
         return objects

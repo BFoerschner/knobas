@@ -1591,6 +1591,11 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_a_key_the_records_do_not_have
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_that_leads_to_a_string
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_that_leads_to_an_array_of_strings
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_name_key_the_parent_objects_do_not_carry
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_of_a_kind_the_adapter_does_not_emit
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_into_an_object_that_does_not_have_that_key
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_before_its_last_segment
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
