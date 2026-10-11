@@ -81,7 +81,8 @@ pub use config::{GiteaConfig, config_schema};
 pub use source::{GiteaSource, build};
 
 use knobas_source::{
-    AuthMethod, Capability, KindInfo, KindPaths, ListPath, PayloadPath, SourceDescriptor,
+    AuthMethod, Capability, KindInfo, KindPaths, ListPath, ParentPath, PayloadPath,
+    SourceDescriptor,
 };
 
 /// The adapter kind, and the default instance id (interfaces §4.2).
@@ -203,8 +204,9 @@ pub fn descriptor_template() -> SourceDescriptor {
 
 /// Where a Gitea record keeps what knobas reads (#277, ADR-0007).
 ///
-/// A pull request only: a repository, a branch and a commit carry none of
-/// these facts, and a kind that declares nothing is a miss for every reader.
+/// A pull request's review facts, and every child kind's parent. A repository
+/// declares nothing, and a kind that declares nothing is a miss for every
+/// reader.
 ///
 /// * `reviewers` is Gitea's `requested_reviewers`, each element a user object
 ///   whose `login` is the account -- the same spelling `author` is filled from
@@ -216,20 +218,49 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   not a second candidate: a flag is a boolean here (see
 ///   [`knobas_source::KindPaths::merged`]).
 ///
+/// * `parent` is the repo, for a branch, a pull request and a commit
+///   (ADR-0018, #595). It answers to `full_name` first -- the name a path line
+///   shows -- and to its bare `name`, so `under:tidewater/payout-service` and
+///   `under:payout-service` both reach it. A pull request reads Gitea's own
+///   `base.repo`; a branch's and a commit's records name no repository, so
+///   `map` writes one into the stored payload at `repository`, spelled the
+///   way `base.repo` is. A repository has no parent.
+///
 /// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
 /// in as many words: "Gitea has no such thing here and gets none"), and a
-/// repository is an entity *kind*, not the axis a room is drawn along.
+/// repository is an entity *kind*, not the axis a room is drawn along -- and
+/// it is a parent, which is not a project either (ADR-0018).
 #[must_use]
 fn payload_paths() -> Vec<KindPaths> {
-    vec![KindPaths {
-        kind: KIND_PR.to_owned(),
-        reviewers: vec![ListPath {
-            at: PayloadPath::of(["requested_reviewers"]),
-            entry: PayloadPath::of(["login"]),
-        }],
-        merged: vec![PayloadPath::of(["merged"])],
-        ..KindPaths::default()
-    }]
+    let repo = |at: &[&str]| {
+        vec![ParentPath {
+            kind: KIND_REPO.to_owned(),
+            at: PayloadPath::of(at.iter().copied()),
+            names: vec![PayloadPath::of(["full_name"]), PayloadPath::of(["name"])],
+        }]
+    };
+    vec![
+        KindPaths {
+            kind: KIND_BRANCH.to_owned(),
+            parent: repo(&["repository"]),
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: KIND_PR.to_owned(),
+            reviewers: vec![ListPath {
+                at: PayloadPath::of(["requested_reviewers"]),
+                entry: PayloadPath::of(["login"]),
+            }],
+            merged: vec![PayloadPath::of(["merged"])],
+            parent: repo(&["base", "repo"]),
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: KIND_COMMIT.to_owned(),
+            parent: repo(&["repository"]),
+            ..KindPaths::default()
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -329,6 +360,34 @@ mod tests {
                 "{kind:?} is exhaustive if and only if no {budgets:?} bounds it"
             );
         }
+    }
+
+    /// A branch, a pull request and a commit sit in a repo (ADR-0018, #595),
+    /// and the repo answers to `owner/name` first -- the name a path line
+    /// shows -- and to its bare `name`. A pull request reads Gitea's own
+    /// `base.repo`; a branch and a commit read the `repository` object the
+    /// adapter writes into their payloads (`map`). A repo has no parent.
+    #[test]
+    fn a_branch_pr_and_commit_declare_their_repo_as_parent() {
+        let declared = |kind: &str| {
+            descriptor_template()
+                .payload_paths
+                .into_iter()
+                .find(|paths| paths.kind == kind)
+                .map(|paths| paths.parent)
+                .unwrap_or_default()
+        };
+        let repo = |at: &[&str]| {
+            vec![ParentPath {
+                kind: KIND_REPO.to_owned(),
+                at: PayloadPath::of(at.iter().copied()),
+                names: vec![PayloadPath::of(["full_name"]), PayloadPath::of(["name"])],
+            }]
+        };
+        assert_eq!(declared(KIND_BRANCH), repo(&["repository"]));
+        assert_eq!(declared(KIND_COMMIT), repo(&["repository"]));
+        assert_eq!(declared(KIND_PR), repo(&["base", "repo"]));
+        assert!(declared(KIND_REPO).is_empty());
     }
 
     /// The whole descriptor crosses the IPC bridge as plain data (spec §3a).
