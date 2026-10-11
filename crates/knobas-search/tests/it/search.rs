@@ -243,24 +243,25 @@ async fn finds_by_full_text_and_groups_by_kind_in_a_fixed_order() {
 async fn a_parent_kinds_group_comes_before_its_child_kinds() {
     let pool = pool().await;
     let t = token("parent");
-    let day = |n: i64| Utc::now() - Duration::days(n);
+    // The token goes into the repo's segment, so a child's id still extends
+    // its repo's the way the real keys do.
     for (id, kind, source) in [
-        ("gitea:tidewater/payout-service", "repo", "gitea"),
-        ("gitea:tidewater/payout-service@main", "branch", "gitea"),
-        ("gitea:tidewater/payout-service#7", "pr", "gitea"),
-        ("gitea:tidewater/payout-service@abc123", "commit", "gitea"),
-        ("tc:Payments_Deploy", "build_config", "teamcity"),
-        ("tc:42", "build", "teamcity"),
+        ("gitea:tidewater/{t}", "repo", "gitea"),
+        ("gitea:tidewater/{t}@refs/heads/main", "branch", "gitea"),
+        ("gitea:tidewater/{t}#7", "pr", "gitea"),
+        ("gitea:tidewater/{t}@abc123", "commit", "gitea"),
+        ("teamcity:{t}_Deploy", "build_config", "teamcity"),
+        ("teamcity:{t}_Deploy#42", "build", "teamcity"),
     ] {
         seed(
             &pool,
-            &format!("{id}-{t}"),
+            &id.replace("{t}", &t),
             kind,
             source,
             &format!("{t} {kind}"),
             "Nothing else here.",
             None,
-            day(1),
+            Utc::now() - Duration::days(1),
         )
         .await;
     }

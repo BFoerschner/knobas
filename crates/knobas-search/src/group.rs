@@ -191,12 +191,13 @@ mod tests {
         );
     }
 
-    /// Every parent -> child kind pair the adapters declare (#591's per-source
-    /// declarations, ADR-0018). The descriptor's parent declaration names a
-    /// payload path and the names the parent answers to, not the parent's
-    /// kind, so this table is the record of which kind sits in which. A kind
-    /// that is its own parent (a page under a page, a ticket under an epic, an
-    /// asset under an asset) orders itself trivially and is not listed.
+    /// Every parent -> child kind pair the CONTEXT.md **Parent** entry
+    /// and ADR-0018 name, per source as #591 lists them. The descriptor's parent
+    /// declaration (#594) is planned to name a payload path and the names the
+    /// parent answers to, not the parent's kind, so this table is the record
+    /// of which kind sits in which. A kind that is its own parent (a page under
+    /// a page, a ticket under an epic, an asset under an asset) orders itself
+    /// trivially and is not listed.
     const PARENT_KINDS: &[(&str, &str)] = &[
         ("repo", "branch"),
         ("repo", "pr"),
