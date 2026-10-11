@@ -232,6 +232,54 @@ async fn finds_by_full_text_and_groups_by_kind_in_a_fixed_order() {
     assert!(r.groups.iter().all(|g| g.kind != "page"));
 }
 
+/// A parent kind's group is drawn above its children's (#593, ADR-0018): the
+/// thing you navigate *to* sits above the things you scroll *through*.
+///
+/// Every row carries the token once, in its title, so the ranking has nothing
+/// to say about which group comes first -- and the DB's row order, which is
+/// alphabetical (`branch`, `build`, `build_config`, `commit`, `pr`, `repo`),
+/// puts every child before its parent. Only the fixed order can get this right.
+#[tokio::test]
+async fn a_parent_kinds_group_comes_before_its_child_kinds() {
+    let pool = pool().await;
+    let t = token("parent");
+    // The token goes into the repo's segment, so a child's id still extends
+    // its repo's the way the real keys do.
+    for (id, kind, source) in [
+        ("gitea:tidewater/{t}", "repo", "gitea"),
+        ("gitea:tidewater/{t}@refs/heads/main", "branch", "gitea"),
+        ("gitea:tidewater/{t}#7", "pr", "gitea"),
+        ("gitea:tidewater/{t}@abc123", "commit", "gitea"),
+        ("teamcity:{t}_Deploy", "build_config", "teamcity"),
+        ("teamcity:{t}_Deploy#42", "build", "teamcity"),
+    ] {
+        seed(
+            &pool,
+            &id.replace("{t}", &t),
+            kind,
+            source,
+            &format!("{t} {kind}"),
+            "Nothing else here.",
+            None,
+            Utc::now() - Duration::days(1),
+        )
+        .await;
+    }
+
+    let r = searcher(&pool).search(q(&t)).await.unwrap();
+    let kinds: Vec<&str> = r.groups.iter().map(|g| g.kind.as_str()).collect();
+    let at = |kind: &str| {
+        kinds
+            .iter()
+            .position(|k| *k == kind)
+            .unwrap_or_else(|| panic!("no {kind} group in {kinds:?}"))
+    };
+    for child in ["branch", "pr", "commit"] {
+        assert!(at("repo") < at(child), "repo after {child}: {kinds:?}");
+    }
+    assert!(at("build_config") < at("build"), "{kinds:?}");
+}
+
 #[tokio::test]
 async fn every_row_carries_its_provenance() {
     let pool = pool().await;

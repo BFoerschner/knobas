@@ -1403,6 +1403,7 @@ knobas-search	lib/knobas_search	coverage::tests::a_source_filter_narrows_the_rep
 knobas-search	lib/knobas_search	coverage::tests::a_source_with_nothing_in_scope_gets_no_verdict_at_all
 knobas-search	lib/knobas_search	coverage::tests::only_an_author_query_is_reported_on
 knobas-search	lib/knobas_search	group::tests::a_header_row_becomes_a_group_with_a_total_and_no_hits
+knobas-search	lib/knobas_search	group::tests::a_parent_kind_always_comes_before_its_child_kinds
 knobas-search	lib/knobas_search	group::tests::a_row_with_no_headline_has_no_segments
 knobas-search	lib/knobas_search	group::tests::declared_metadata_wins_over_derived
 knobas-search	lib/knobas_search	group::tests::kinds_outside_the_order_sort_after_it_alphabetically
@@ -1522,6 +1523,7 @@ knobas-search	test/it	search::a_kind_the_limit_cut_still_reports_its_count
 knobas-search	test/it	search::a_named_person_filters_with_or_without_search_text
 knobas-search	test/it	search::a_note_is_found_by_the_same_search_that_finds_a_ticket
 knobas-search	test/it	search::a_notes_snippet_is_segments_of_the_markdown_the_user_typed
+knobas-search	test/it	search::a_parent_kinds_group_comes_before_its_child_kinds
 knobas-search	test/it	search::an_empty_query_is_the_boards_job_not_a_full_table_count
 knobas-search	test/it	search::corpora_that_m1_does_not_have_return_nothing_rather_than_pretending
 knobas-search	test/it	search::every_row_carries_its_provenance
