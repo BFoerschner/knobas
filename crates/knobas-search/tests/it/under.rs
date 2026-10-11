@@ -236,7 +236,10 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
 
     let nope = format!("under:nope-{t}");
     let unknown = searcher(&pool).search(q(&nope)).await.unwrap();
-    assert_eq!(unknown.interpreted.unknown_tokens, [nope.clone()]);
+    assert_eq!(
+        unknown.interpreted.unknown_tokens,
+        std::slice::from_ref(&nope)
+    );
     assert!(ids(&unknown).is_empty());
 
     // One known and one unknown: the known one still scopes, the unknown one
