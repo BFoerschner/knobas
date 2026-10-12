@@ -141,6 +141,19 @@ async fn leads_somewhere(searcher: &Searcher, raw: &str) {
     assert!(response.total > 0, "{raw} was suggested and finds nothing");
 }
 
+/// `under:` and `name` as the query box writes them when a suggestion is
+/// picked: quoted when the name has whitespace in it, bare otherwise -- the
+/// rule `complete()` in `app/src/lib/launcher/suggest.ts` follows (the
+/// deputy's ruling of 2026-10-12 on #597). Probing this spelling, and not the
+/// bare name, is what makes the probe the backend half of the box's round trip.
+fn typed_under(name: &str) -> String {
+    if name.chars().any(char::is_whitespace) {
+        format!("under:\"{name}\"")
+    } else {
+        format!("under:{name}")
+    }
+}
+
 /// The parents whose name carries this test's token, sorted.
 fn parents_of(suggestions: &FilterSuggestions, t: &str) -> Vec<ParentSuggestion> {
     let mut out: Vec<ParentSuggestion> = suggestions
@@ -171,6 +184,10 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     )
     .await;
     commit(&pool, "gitea", &owner, &name).await;
+    // A parent whose names have a space in them, so the probe below runs the
+    // quoted spelling the box completes such a name with.
+    let spaced = format!("Payout Desk {t}");
+    commit(&pool, "gitea", &owner, &spaced).await;
     // A mirrored repo nothing sits in yet: no child declares it, and it is
     // still a parent `under:` reaches -- it answers to its own names.
     let lonely = format!("lonely-{t}");
@@ -229,14 +246,22 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     assert_eq!(
         parents_of(&suggestions, &t),
         [
+            parent(&spaced, "repo"),
+            parent(&format!("{owner}/{spaced}"), "repo"),
             parent(&format!("{owner}/{lonely}"), "repo"),
             parent(&format!("{owner}/{name}"), "repo"),
             parent(&lonely, "repo"),
             parent(&name, "repo"),
         ],
     );
+    assert!(
+        parents_of(&suggestions, &t)
+            .iter()
+            .any(|p| typed_under(&p.name).contains('"')),
+        "no offered parent has a space in its name, so the quoted spelling goes unprobed"
+    );
     for p in parents_of(&suggestions, &t) {
-        leads_somewhere(&searcher(&pool), &format!("under:{}", p.name)).await;
+        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
     }
     for k in &suggestions.kinds {
         leads_somewhere(&searcher(&pool), &format!("kind:{}", k.kind)).await;
@@ -264,7 +289,7 @@ async fn a_parent_only_its_children_name_is_still_offered() {
         ],
     );
     for p in parents_of(&suggestions, &t) {
-        leads_somewhere(&searcher(&pool), &format!("under:{}", p.name)).await;
+        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
     }
 }
 
