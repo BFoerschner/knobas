@@ -11,6 +11,9 @@ use knobas_source::view::{Tone, ViewRow};
 use crate::keys;
 use crate::source::GiteaSource;
 
+/// How many of the default branch's newest commits a *Commits* tab lists.
+pub(super) const LATEST_COMMITS: u32 = 20;
+
 /// How many open pull requests a view reads at most: twenty pages of fifty.
 /// A repository past that has a different problem than its view.
 const PULL_PAGES: u32 = 20;
@@ -152,14 +155,15 @@ pub(super) struct PullRepo {
 
 impl OpenPull {
     /// Whether this pull request is opened **from** `branch` of `owner/repo`
-    /// -- not from a fork's branch of the same name.
+    /// -- not from a fork's branch of the same name, nor from one whose
+    /// repository Gitea no longer names (a deleted fork's head is `null`).
     pub(super) fn is_from(&self, owner: &str, repo: &str, branch: &str) -> bool {
         let Some(head) = &self.head else { return false };
         let same_repo = head
             .repo
             .as_ref()
             .and_then(|r| r.full_name.as_deref())
-            .is_none_or(|name| name == keys::repo_key(owner, repo));
+            .is_some_and(|name| name == keys::repo_key(owner, repo));
         same_repo && head.reference.as_deref() == Some(branch)
     }
 }

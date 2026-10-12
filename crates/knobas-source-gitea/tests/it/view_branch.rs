@@ -354,12 +354,22 @@ async fn the_diff_tab_reads_the_compares_diff() {
 
 #[tokio::test]
 async fn a_branch_with_no_pull_request_says_so() {
+    // A fork's branch of the same name is not this branch, and neither is
+    // one whose repository Gitea no longer names (a deleted fork).
+    let mut from_fork = pull(150, "From a fork", "feature/PAY-231-sepa-retry");
+    from_fork["head"]["repo"] = json!({ "full_name": "jonas/payout-service" });
+    let mut from_gone = pull(151, "From a deleted fork", "feature/PAY-231-sepa-retry");
+    from_gone["head"]["repo"] = Value::Null;
     let server = gitea(Served {
-        pulls: vec![pull(
-            144,
-            "Add payout CSV export",
-            "feature/PAY-236-payout-csv-export",
-        )],
+        pulls: vec![
+            pull(
+                144,
+                "Add payout CSV export",
+                "feature/PAY-236-payout-csv-export",
+            ),
+            from_fork,
+            from_gone,
+        ],
     })
     .await;
     let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();

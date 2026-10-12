@@ -25,9 +25,6 @@ const OVERVIEW: &str = "overview";
 const COMMITS: &str = "commits";
 const DIFF: &str = "diff";
 
-/// How many commits the default branch's *Commits* tab lists.
-const LATEST: u32 = 20;
-
 /// What `compare/{base}...{head}` answers.
 #[derive(Debug, serde::Deserialize)]
 struct Compare {
@@ -38,7 +35,7 @@ struct Compare {
 }
 
 impl Compare {
-    fn ahead(&self) -> u64 {
+    fn commit_count(&self) -> u64 {
         self.total_commits.unwrap_or(self.commits.len() as u64)
     }
 
@@ -111,16 +108,16 @@ async fn whole(
         facts.push(fact("Branch", "default branch".to_owned()));
         let latest: Vec<ListedCommit> = source
             .client
-            .latest_commits_as(owner, repo, branch, LATEST)
+            .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
             .await?;
         (latest, None, None)
     } else {
         let ahead: Compare = source.client.compare_as(owner, repo, base, branch).await?;
         let behind: Compare = source.client.compare_as(owner, repo, branch, base).await?;
         facts.push(fact("Base", base.to_owned()));
-        facts.push(fact("Ahead", ahead.ahead().to_string()));
-        facts.push(fact("Behind", behind.ahead().to_string()));
-        let (count, files) = (ahead.ahead(), ahead.files());
+        facts.push(fact("Ahead", ahead.commit_count().to_string()));
+        facts.push(fact("Behind", behind.commit_count().to_string()));
+        let (count, files) = (ahead.commit_count(), ahead.files());
         (ahead.commits, Some(count), Some(files))
     };
     if pulls.is_empty() {

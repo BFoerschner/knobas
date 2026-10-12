@@ -25,8 +25,6 @@ const PULLS: &str = "pulls";
 const BRANCHES: &str = "branches";
 const COMMITS: &str = "commits";
 
-/// How many of the default branch's commits *Commits* lists.
-const LATEST: u32 = 20;
 /// How many pages of fifty branches a view reads at most.
 const BRANCH_PAGES: u32 = 20;
 /// The longest README a view carries, in characters. A longer one is cut at
@@ -302,7 +300,7 @@ async fn commits(
     } else {
         source
             .client
-            .latest_commits_as(owner, repo, record.default_branch(), LATEST)
+            .latest_commits_as(owner, repo, record.default_branch(), rows::LATEST_COMMITS)
             .await?
     };
     let rows = latest
