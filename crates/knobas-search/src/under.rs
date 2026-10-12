@@ -30,8 +30,8 @@ use crate::query::Parsed;
 /// cannot drift apart (#615).
 ///
 /// Three arms. A parent the live children declare -- mirrored or not, which
-/// is why the kind is the declaration's (#594). A live record answering to
-/// its sibling kinds' declared names, as its own kind. And the estate: every
+/// is why the kind is the declaration's (#594). A live item answering to its
+/// sibling kinds' declared names, as its own kind. And the estate: every
 /// asset, answering to its name as `asset`.
 ///
 /// `sync.live_item`, so a withdrawn item or a disabled source does not vouch
@@ -42,8 +42,7 @@ use crate::query::Parsed;
 /// the same spelling: change one and the other must follow.
 ///
 /// The two payload arms share one scan of `sync.live_item`, through one
-/// lateral, as [`KNOWN_SQL`] read them before the fragment existed: the
-/// query path pays for one pass over the mirror, not two.
+/// lateral: the query path pays for one pass over the mirror, not two.
 macro_rules! parent_names {
     ($decl:literal) => {
         concat!(

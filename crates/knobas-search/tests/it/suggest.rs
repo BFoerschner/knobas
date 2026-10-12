@@ -495,18 +495,19 @@ async fn under_knows_exactly_the_names_the_box_offers() {
         .map(|p| p.name)
         .collect();
 
-    let candidates = [
+    // Every name the seed's parents answer to, one shape or two per arm.
+    let mut parents = vec![
         unmirrored.clone(),
         format!("{owner}/{unmirrored}"),
         lonely.clone(),
         format!("{owner}/{lonely}"),
         rack.clone(),
-        // No parent answers to these: the owner alone, and a name next to one.
-        owner.clone(),
-        format!("{lonely}-not"),
     ];
+    parents.sort();
+    // No parent answers to these: the owner alone, and a name next to one.
+    let decoys = [owner.clone(), format!("{lonely}-not")];
     let mut known = Vec::new();
-    for name in &candidates {
+    for name in parents.iter().chain(&decoys) {
         if under_knows(&searcher, name).await {
             known.push(name.clone());
         }
@@ -527,13 +528,5 @@ async fn under_knows_exactly_the_names_the_box_offers() {
     }
     // The seed reaches every shape, so neither direction was asked of an
     // empty set, and the decoys were not known.
-    let mut expected = vec![
-        unmirrored.clone(),
-        format!("{owner}/{unmirrored}"),
-        lonely.clone(),
-        format!("{owner}/{lonely}"),
-        rack.clone(),
-    ];
-    expected.sort();
-    assert_eq!(known, expected);
+    assert_eq!(known, parents);
 }
