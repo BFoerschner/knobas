@@ -121,6 +121,11 @@ check_eq() {
   checks=$((checks + 1))
   [ "$2" = "$3" ] || fail "$1" "expected: $2" "actual:   $3"
 }
+# check_contains <what> <haystack> <needle>
+check_contains() {
+  checks=$((checks + 1))
+  case $2 in *"$3"*) ;; *) fail "$1" "wanted: $3" "got:    $2" ;; esac
+}
 
 check_eq "TeamCity's run needs Gitea, and Gitea first" \
   "gitea teamcity" "$(live_needs teamcity)"
@@ -134,6 +139,10 @@ check_eq "a product that was up stays up after its run" \
   "" "$(STUB_RUNNING="knobas-gitea knobas-jira knobas-jira-db" live_to_put_back jira)"
 check_eq "a Gitea run from an empty engine stops Gitea" \
   "gitea" "$(STUB_RUNNING="" live_to_put_back gitea)"
+check_eq "a TeamCity run from an empty engine leaves the Gitea it started up" \
+  "gitea" "$(STUB_RUNNING="" live_left_up teamcity)"
+check_eq "a TeamCity run leaves nothing up it did not start" \
+  "" "$(STUB_RUNNING="knobas-gitea" live_left_up teamcity)"
 
 # --- a shared Gitea outlives the JVM run that started it (#698) -------------
 
@@ -143,7 +152,8 @@ check_eq "a Gitea run from an empty engine stops Gitea" \
 # rule: a run stops only its own product, never one it merely needed.
 #
 # Witnessed whole, through `live_session`: a stateful docker stub whose `ps`
-# answers from what `compose up` started and `compose stop` stopped, a fake
+# answers from what `compose up` started and `compose stop` stopped (the stub
+# above answers `ps` from a fixed list, which cannot show Gitea outliving a run), a fake
 # `seed-teamcity.sh` that starts a Gitea user (`live_session gitea`, in the
 # background, holding Gitea until told to let go) while the TeamCity run is
 # inside its seed, and a check after the TeamCity run's EXIT trap has run.
@@ -184,7 +194,8 @@ cat >"$shared/testenv/seed-teamcity.sh" <<SEED
   LIVE_TESTENV=$shared/testenv
   live_session gitea gitea-user
   echo "gitea user: using it" >>"$shared/user.out"
-  while [ ! -e "$shared/user.release" ]; do sleep 0.1; done
+  # Bounded, so an interrupted test leaves no orphan polling a deleted directory.
+  for ((i = 0; i < 300; i++)); do [ ! -e "$shared/user.release" ] || break; sleep 0.1; done
   echo "gitea user: done"
 ) >>"$shared/user.out" 2>&1 </dev/null &
 for ((i = 0; i < 100; i++)); do
@@ -212,12 +223,11 @@ check_eq "the TeamCity session with a Gitea user beside it runs" "0" "$rc"
 grep -q 'using it' "$shared/user.out" 2>/dev/null ||
   fail "the Gitea user turned up during the TeamCity run" "$(cat "$shared/user.out" 2>/dev/null)"
 check_eq "the TeamCity run stopped its own server and agent" "knobas-gitea" "$(cat "$shared/state")"
-case $(cat "$shared/teamcity.out") in
-  *"gitea was started for this run and stays up"*) checks=$((checks + 1)) ;;
-  *) checks=$((checks + 1)); fail "the TeamCity run says it leaves the Gitea it started up" "$(cat "$shared/teamcity.out")" ;;
-esac
+check_contains "the TeamCity run says it leaves the Gitea it started up" \
+  "$(cat "$shared/teamcity.out")" "gitea was started for this run and stays up"
 checks=$((checks + 1))
-if grep -E 'stop( [a-z-]+)* gitea( |$)' "$shared/docker.log" >/dev/null; then
+# Any way of taking it down, not only `compose stop`: a `down`, an `rm`, a kill.
+if grep -E '(^| )(stop|down|rm|kill)( .*)? (knobas-)?gitea( |$)' "$shared/docker.log" >/dev/null; then
   fail "a TeamCity run that started Gitea does not stop it under a Gitea user" "$(cat "$shared/docker.log")"
 fi
 touch "$shared/user.release"
@@ -226,6 +236,8 @@ for ((i = 0; i < 100; i++)); do
   grep -q 'gitea user: done' "$shared/user.out" 2>/dev/null && break
   sleep 0.1
 done
+grep -q 'gitea user: done' "$shared/user.out" 2>/dev/null ||
+  fail "the Gitea user let go when told to" "$(cat "$shared/user.out" 2>/dev/null)"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2

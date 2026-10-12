@@ -258,6 +258,16 @@ live_to_put_back() {
   live_is_up "$1" || echo "$1"
 }
 
+# live_left_up <product> -- the other side of that rule: what a run of this
+# one starts for its needs and leaves up, because it was not up before.
+live_left_up() {
+  local p out=""
+  for p in $(live_needs "$1"); do
+    [ "$p" = "$1" ] || live_is_up "$p" || out="${out:+$out }$p"
+  done
+  echo "$out"
+}
+
 _live_compose() {
   (cd "$LIVE_TESTENV" && docker compose "$@")
 }
@@ -352,9 +362,11 @@ _live_restore() {
 
 # live_session <product> [<recipe>] -- for a recipe: for a JVM product, hold
 # the JVM lock (as <recipe>) for the whole run; bring the product up, export what
-# `./seed --env` prints, and arm EXIT, INT and TERM to put the machine back as
+# `./seed --env` prints, and arm EXIT, INT and TERM to put the product back as
 # this found it. A product that was already up -- `just live-up jira` before a
-# run of `just jira-live` -- is left up; one this started is stopped.
+# run of `just jira-live` -- is left up; one this started is stopped. What it
+# only needed and started -- Gitea, for TeamCity -- stays up (#698,
+# `live_to_put_back`).
 #
 # INT and TERM as well as EXIT, the `gitea-live-capped` rule: bash runs no EXIT
 # trap for a signal it is not trapping, and a Ctrl-C'd run is the one that
@@ -373,10 +385,8 @@ live_session() {
   if live_is_jvm "$1"; then live_lock_hold "${2:-live_session-$1}" || exit 1; fi
   live_guard "$1" || exit 1
   LIVE_PUT_BACK=$(live_to_put_back "$1")
-  local need kept=""
-  for need in $(live_needs "$1"); do
-    [ "$need" = "$1" ] || live_is_up "$need" || kept="$kept $need"
-  done
+  local need kept
+  kept=$(live_left_up "$1")
   live_up "$1"
   eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
   if [ -n "$LIVE_PUT_BACK" ]; then
@@ -385,6 +395,7 @@ live_session() {
     echo "live: $1 was already up and stays up"
   fi
   for need in $kept; do
-    echo "live: $need was started for this run and stays up after it, shared with other worktrees' runs (#698) -- 'just live-down $need' stops it"
+    echo "live: $need was started for this run and stays up after it (#698;" \
+      "other worktrees' runs may share it) -- 'just live-down $need' stops it"
   done
 }
