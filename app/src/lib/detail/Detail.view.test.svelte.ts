@@ -58,6 +58,7 @@ function commit(): EntityDetail {
       updated_at: "2026-08-22T11:42:00Z",
       synced_at: "2026-08-22T14:30:00Z",
       path: null,
+      state: null,
     },
     source: { id: "gitea", display_name: "Tidewater Git", adapter_kind: "gitea", enabled: true },
     kind_info: null,
