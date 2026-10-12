@@ -481,6 +481,6 @@ async fn a_hyphenated_name_is_found_by_its_whole_spelling_and_by_each_part() {
     let searcher = searcher(&pool);
     for typed in [name.clone(), t.clone(), u.clone()] {
         let r = searcher.search(q(&typed)).await.unwrap();
-        assert_eq!(group_ids(&r, "page"), [id.clone()], "{typed}: {r:?}");
+        assert_eq!(group_ids(&r, "page"), [id.as_str()], "{typed}: {r:?}");
     }
 }

@@ -636,16 +636,19 @@ fn clamp_days(days: u32) -> i32 {
 /// whose index is `{fts}`.
 ///
 /// `to_tsvector` gives a hyphenated compound a lexeme for the whole and one
-/// for each part -- `payout-service` is `payout-servic`, `payout` and
-/// `servic` -- so the prefix `payout:*` matches the name twice, and before
-/// #611 a row named `payout-service` scored 2 where one named `payout` scored
-/// 1. The first part is a lexeme of its own, so when a row holds the typed
-/// words *whole* (`q.whole`, the same query with no prefix), it is ranked by
-/// them and the compound adds nothing. A row that only matches as a prefix
-/// -- the word is not finished, or the row holds only longer words -- is
-/// ranked as before, and while a word is unfinished a compound still counts
-/// it twice: the price of keeping this a query and not a migration of every
-/// `fts` column.
+/// for each part (`payout-service` is `payout-servic`, `payout` and
+/// `servic`), so the prefix `payout:*` matches the name twice. Before #611 a
+/// row named `payout-service` scored 2 where a row named `payout` scored 1.
+/// The first part is a lexeme of its own, so a row that holds the typed
+/// words *whole* (`q.whole`, the same query with no prefix) is ranked by
+/// them, and the compound adds nothing.
+///
+/// A row that matches only as a prefix is ranked as before: the word is not
+/// finished yet, or the row holds only longer words. Two costs follow, both
+/// the price of keeping this a query and not a migration of every `fts`
+/// column. While a word is unfinished, a compound still counts it twice. And
+/// a row that holds the word whole is ranked without the longer words it
+/// also holds, so typing `pay` ranks `pay payment` by `pay` alone.
 ///
 /// Matching is untouched: `{fts} @@ q.tsq` decides which rows come back,
 /// this only decides their order.
