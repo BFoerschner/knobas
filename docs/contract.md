@@ -9657,7 +9657,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   declare a parent, owes the clause's type and misspelling checks for it (`at` leads to an object
   or an array of objects, each `names` path to a string). `ancestor_path_read!`'s doc still says
   `KindPaths` has no slot shaped like an ancestor path. That read expires into this field when
-  #596 and #599 move the path line onto it, and its doc changes with them.
+  #596 and #599 move the path line onto it, and its doc changes with them. *Superseded in part by
+  the note on #596's entry below (2026-10-12): after #599 the read is still the path line's
+  fallback, and its retirement is a ticket of its own.*
 
   **The IPC touch.** No command, no event, no module. `payload_paths` already rides inside the
   `SourceDescriptor` that `list_adapters` returns, so `app/src/lib/ipc/sources.ts` gains the
@@ -9801,7 +9803,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   and the built-in lists at `$3`, the four room statements at the `$8` they already bound, and
   the detail statement at a new `$2`, so `get_entity_inner` lists the configured sources first.
   `ancestor_path_read!` expires into the declaration when Confluence declares its page parent on
-  `ancestors` (#599).
+  `ancestors` (#599). *Not yet, as of #599 (2026-10-12, PR #645): Confluence now declares that
+  parent, and for a page the declared chain draws the same line from the same array, but the
+  ancestor read stays as `path_line_read!`'s fallback. #599's criterion keeps `knobas-search`'s
+  `tests/it/ancestor_path.rs` green unchanged, and that test searches with a bare
+  `Searcher::new`, which binds no declarations; without the fallback it fails. Every production
+  read binds them (`Searcher::new(` has no caller in `crates/*/src`), so for a page the fallback
+  is reached only by a declaration-free read. Retiring it is a ticket of its own: that test moves
+  onto `Searcher::declaring`, the fallback leaves `path_line_read!`, and `ancestor_path_read!`'s
+  doc and this sentence change with it.*
 - **One IPC command and four DTOs on the search module — issue #601 (2026-10-12): the query box
   suggests values for `kind:`, `source:` and `under:`.** Spec #591 stories 27-30. Ratified by the
   ticket's own criterion (*"No new IPC module. If a command is added, it gets its §10.8 entry"*)
