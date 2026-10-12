@@ -270,9 +270,9 @@ impl Searcher {
     /// `under:` (#601) -- only values that exist right now; see
     /// [`FilterSuggestions`].
     ///
-    /// Three round trips: the vocabulary every query loads, the kinds with
-    /// rows, and the parents. Read once per launcher opening, and narrowed by
-    /// the box itself as the reader types.
+    /// Four round trips: the vocabulary every query loads, the kinds with
+    /// rows, the parents, and the enabled sources with rows. Read once per
+    /// launcher opening, and narrowed by the box itself as the reader types.
     ///
     /// # Errors
     ///
