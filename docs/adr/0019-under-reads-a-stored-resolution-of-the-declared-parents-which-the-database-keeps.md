@@ -1,12 +1,12 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # `under:` reads a stored resolution of the declared parents, which the database keeps
 
 `under:<name>` (ADR-0018) needs to know which items answer to a name as their parent's, or as a parent themselves. The declarations that say where a parent sits are compiled into the binary, so every query bound them as one jsonb parameter and walked every live item through them. At 100,000 items, with Gitea commits carrying their repository, that walk cost 335 ms to report unknown tokens and about as much again to scope the statement. The launcher's budget is 100 ms (spec §14), and no index can serve a walk whose paths are a query parameter.
 
-Decided 2026-10-12 by the deputy's two rulings on #627; this ADR stays **proposed until Björn signs off on #627**. **The walk's answer is stored, and the database keeps it.**
+Decided 2026-10-12 by the deputy's two rulings on #627, and accepted when Björn signed off on #627 the same day ([comment](https://github.com/BFoerschner/knobas/issues/627#issuecomment-6121166771)). **The walk's answer is stored, and the database keeps it.**
 
 - Migration `0028` adds `sync.parent_declaration`, which holds each adapter template's `payload_paths`.
 - It also adds `sync.item_parent`. For each item and each stored adapter whose declarations reach the item's kind, it holds one `(adapter_kind, name, kind)` row per name the item answers to. It is indexed on `lower(name)`.

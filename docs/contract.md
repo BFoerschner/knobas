@@ -9891,7 +9891,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   unchanged.
 
 - **Migration `0028` — issue #627 (2026-10-12): the parents an item answers to are stored, and
-  the database keeps them. GATED: this entry does not merge until Björn signs off on #627.**
+  the database keeps them. Björn signed it off on #627 on 2026-10-12**
+  ([comment](https://github.com/BFoerschner/knobas/issues/627#issuecomment-6121166771)): the
+  migration as built in PR #630, *"is fine"*.
 
   `under:` walked every live item through the declarations bound per query, on every keystroke.
   At 100,000 items the unknown-token lookup took 335 ms, and the scoped statement about as much,
@@ -9899,8 +9901,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   sign-off before it merges"*. **The deputy's two rulings of 2026-10-12 on #627 decide its shape**
   (`docs/decisions/2026-10-unattended-rulings.md`). The second ruling moved the source-to-adapter
   match to read time, after a trigger on `knobas.source_config` deadlocked `delete_source`. Neither
-  ruling stands in for the sign-off. ADR-0019 records the decision, with status `proposed` until
-  then.
+  ruling stood in for the sign-off. ADR-0019 records the decision, accepted with the sign-off.
 
   **Migration `0028`: two tables, two indexes, functions and triggers on those two tables and on
   `sync.item`. No existing object changes.**
