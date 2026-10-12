@@ -427,6 +427,13 @@ export function createRouter(): Router {
     history.replaceState({ ...kept, [STAMP]: { session, step } }, "");
   }
 
+  /** One step on from here; whatever was ahead is gone, as a browser drops it. */
+  function advance() {
+    state.step += 1;
+    state.last = state.step;
+    stamp(state.step);
+  }
+
   /**
    * Learn where a traversal landed. An entry this session stamped says so;
    * one it did not (an address typed or set from outside the router) is a
@@ -438,9 +445,7 @@ export function createRouter(): Router {
       state.step = found.step;
       return;
     }
-    state.step += 1;
-    state.last = state.step;
-    stamp(state.step);
+    advance();
   }
 
   function read() {
@@ -473,14 +478,10 @@ export function createRouter(): Router {
       if (location.hash !== hash) location.hash = hash;
       // Compared after the assignment, because the webview normalises a hash
       // and an assignment that changes nothing makes no entry.
-      if (location.href !== before) {
-        // A new address is one step on, and whatever was ahead of the old one
-        // is gone, as a browser drops it. Stamped before the webview's own
-        // `hashchange` arrives, so that event reads this step back.
-        state.step += 1;
-        state.last = state.step;
-        stamp(state.step);
-      }
+      // A new address is one step on. Stamped before the webview's own
+      // `hashchange` arrives, so that event reads this step back -- unless a
+      // webview that fires it during the assignment has stamped it already.
+      if (location.href !== before && stampOf(history.state)?.session !== session) advance();
       // Read eagerly rather than waiting for `hashchange`, which browsers fire
       // on a later task: without this every navigation would render a frame
       // late, and assigning an *unchanged* hash fires no event at all, so a

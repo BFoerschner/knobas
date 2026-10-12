@@ -13,11 +13,11 @@
   tiles under it about which room this is.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ipcErrorMessage } from "../ipc";
   import { inbox } from "../inbox/inbox.svelte";
   import { contextMembers, getEntity } from "../ipc/entity";
   import { HOLD_MS, readAhead } from "../detail/view-read";
-  import { untrack } from "svelte";
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";

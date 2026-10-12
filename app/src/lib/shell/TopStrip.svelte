@@ -521,8 +521,8 @@
 <style>
   /*
     The pair is one control drawn as two halves: a shared hairline, a hairline
-    between, no fill until hover. Disabled is `.btn:disabled`'s .4 and nothing
-    else, so the strip stays as quiet as it was when there is nowhere to go.
+    between, no fill until hover. Disabled is .4 opacity, `.btn:disabled`'s value, and
+    nothing else, so the strip stays as quiet as it was when there is nowhere to go.
   */
   .hist {
     display: flex;

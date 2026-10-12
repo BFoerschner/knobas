@@ -166,25 +166,25 @@ export function installKeys(router: Router, handlers: KeyHandlers): () => void {
     else router.goForward();
   }
 
+  const mouse = ["mousedown", "mouseup", "auxclick"] as const;
   window.addEventListener("keydown", onkeydown);
-  for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
-    window.addEventListener(type, onmouse);
-  }
+  for (const type of mouse) window.addEventListener(type, onmouse);
   return () => {
     window.removeEventListener("keydown", onkeydown);
-    for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
-      window.removeEventListener(type, onmouse);
-    }
+    for (const type of mouse) window.removeEventListener(type, onmouse);
   };
 }
 
 /** Whether a key press is history's back or forward, or neither (#693). */
 function historyStep(event: KeyboardEvent): "back" | "forward" | null {
-  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return null;
+  if (event.altKey || event.shiftKey) return null;
+  // The brackets with ⌘ or Ctrl, as browsers bind them on every platform; the
+  // arrows with ⌘ alone, because Ctrl+← / → is the Mac's switch-Spaces.
+  const bracket = event.metaKey || event.ctrlKey;
   const step =
-    event.key === "[" || event.key === "ArrowLeft"
+    (bracket && event.key === "[") || (event.metaKey && event.key === "ArrowLeft")
       ? "back"
-      : event.key === "]" || event.key === "ArrowRight"
+      : (bracket && event.key === "]") || (event.metaKey && event.key === "ArrowRight")
         ? "forward"
         : null;
   if (step === null || inTextField(event.target)) return null;

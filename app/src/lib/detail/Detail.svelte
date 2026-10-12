@@ -101,8 +101,9 @@
     watchQueue(false);
     // Untracked: the effect reads back what it just wrote, and tracking that
     // would re-open the panel every time a view landed.
-    const recalledView = untrack(() => sourceView);
-    if (recalledView) void adoptQueuedSettings(recalledView, mine);
+    untrack(() => {
+      if (sourceView) void adoptQueuedSettings(sourceView, mine);
+    });
     // Both reads at once: the view does not need the row, and starting it a
     // round trip later is a round trip more of placeholder.
     const getting = getEntity(id);
@@ -221,8 +222,9 @@
     try {
       const answer = await entityView(entityId);
       if (mine !== token) return;
-      sourceView = answer;
+      viewAnswered = true;
       viewFailure = null;
+      if (!sameAnswer(sourceView, answer)) sourceView = answer;
     } catch (rejection) {
       if (mine !== token) return;
       push({ text: `Could not re-read this item's view: ${ipcErrorMessage(rejection)}`, tone: "err" });
@@ -1257,7 +1259,7 @@
           <span class="pulse"></span>
           Showing the mirror: {viewFailure}
         </p>
-      {:else if !viewAnswered && viewOverdue}
+      {:else if !viewAnswered && viewOverdue && !viewMemory.drawsNothing(detail.source.id, detail.row.kind)}
         <!-- Past the patience (#693): the mirror now, and the view when it lands. -->
         <p class="mirror-line">
           <span class="pulse"></span>

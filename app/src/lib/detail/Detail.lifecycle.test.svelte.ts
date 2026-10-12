@@ -239,6 +239,7 @@ test("A, then B, then back to A draws A's view at once from memory, and re-reads
 });
 
 test("a source that answered None for a kind draws its next item's generic body with no wait", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   let screen = render(JIRA_1);
   await settle();
   expect(screen.labels()).toContain("Details");
@@ -251,5 +252,10 @@ test("a source that answered None for a kind draws its next item's generic body 
   expect(screen.placeholder()).toBeNull();
   expect(screen.labels()).toContain("Details");
   expect(screen.text()).toContain(`The body of ${JIRA_2}`);
+  expect(screen.text()).not.toContain("Showing the mirror");
+  // Nor is a slow read of a view that is not coming announced: rule 2's
+  // "never noisy about an absence".
+  vi.advanceTimersByTime(1500);
+  await settle();
   expect(screen.text()).not.toContain("Showing the mirror");
 });
