@@ -9890,6 +9890,74 @@ From this commit on, each of the following requires an orchestrator decision **a
   `corpus_seam.rs` and `knobas-core`'s suggestion tests (the readers of `SIMILAR_TEXT`) pass
   unchanged.
 
+- **Migration `0028` — issue #627 (2026-10-12): the parents an item answers to are stored, and
+  the database keeps them. GATED: this entry does not merge until Björn signs off on #627.**
+
+  `under:` walked every live item through the declarations bound per query, on every keystroke:
+  at 100,000 items the unknown-token lookup took 335 ms and the scoped statement about as much,
+  against spec §14's 100 ms. The ticket allows a migration with *"a §10.8 entry and Björn's
+  sign-off before it merges"*. **The shape was ruled by the deputy on 2026-10-12 on #627**
+  (`docs/decisions/2026-10-unattended-rulings.md`); that ruling decides the shape and does not
+  stand in for the sign-off. ADR-0019 records the decision, with status `proposed` until then.
+
+  **Migration `0028` — two tables, two indexes, functions and triggers; nothing existing
+  changes.**
+  - `sync.parent_declaration (adapter_kind text primary key, payload_paths jsonb not null)`: each
+    compiled-in adapter template's `payload_paths`, written whole by `Searcher::declaring` (below).
+  - `sync.item_parent (entity_id text not null references sync.item on delete cascade, name text
+    not null, kind text not null)`, indexed on `lower(name)` and on `entity_id`. Its rows are exactly
+    the `(name, kind)` pairs the two payload arms of `knobas_search::under::parent_names!` yielded
+    per item before this migration, in their original case. Every item has rows, live or not.
+  - `sync.parent_declarations()` builds the source-keyed declarations object from
+    `knobas.source_config` joined to `sync.parent_declaration`, following the rule
+    `Vocabulary::declaring` follows. `sync.resolve_item_parents(text[])` replaces the given items' rows
+    and carries `knobas_core::declared_parent_names!` and `declared_names_as_parent!`, expanded with
+    `$decl` = `decl`, as text. `sync.resolve_source_parents(text[])` and
+    `sync.resolve_all_item_parents()` call it.
+  - Triggers. On `sync.item`, statement-level after insert and after update, over transition tables.
+    The update trigger resolves only rows whose `source_id`, `kind` or `payload` changed, because
+    PostgreSQL refuses a column list beside transition tables. On `sync.parent_declaration`,
+    statement-level after insert, update, delete and truncate: these recompute the sources of each
+    adapter kind touched, and a statement that changed no row returns early. On
+    `knobas.source_config`, row-level after insert, delete, or update of `id` or `kind`: these
+    recompute that source's items. The item triggers take `pg_advisory_xact_lock_shared(627, 0)`
+    and the declaration triggers take `pg_advisory_xact_lock(627, 0)`, so a write and a declaration
+    change that overlap cannot leave a row resolved against superseded declarations.
+  - `sync.item`, `sync.live_item`, `0027`'s `fts` expression and every `knobas` table are untouched.
+    No earlier migration is edited.
+
+  **Readers.** `under::parent_names!` becomes `sync.item_parent` joined to `sync.live_item`, plus
+  the unchanged asset arm. It is still the one fragment `KNOWN_SQL` and `suggest::PARENTS_SQL`
+  share (#615), and neither binds the declarations any more. `corpus::LIVE_ITEM.under` becomes
+  `i.entity_id in (select … from sync.item_parent where lower(name) = any(ud.v))`. The path line
+  still calls `declared_parents!` per result row.
+
+  **Write side.** No Rust on the write path: `knobas-sync`'s writer, every adapter and every
+  `CURSOR_VERSION` are as they were. `knobas_search::Searcher::declaring(pool, templates)` is new
+  and public. It is the one function that both writes `sync.parent_declaration` and builds the
+  searcher from the same list. `knobas_app::commands::search::searcher` calls it with
+  `Registry::builtin().templates()` at bring-up, before the first sync, and on every search command.
+  A call that changes nothing writes no row. **No IPC command, DTO, event or descriptor changes.**
+
+  **Backup.** The `sync` schema is in no archive (§16.12), so `sync.item_parent` is rebuilt and
+  never dumped. A restore lands before any mirror row can exist, and the re-sync's inserts resolve
+  themselves. `knobas-db`'s `backup.rs` is unchanged.
+
+  **Witness.** `knobas-search`'s `tests/it/item_parent.rs`, on real PostgreSQL (ADR-0013):
+  `the_stored_parents_are_the_walk_after_every_change` holds `sync.item_parent` equal to the
+  per-row macro walk. The walk is bound to `Vocabulary::declaring`'s declarations. The comparison
+  runs after an insert, a payload update, a delete, a declaration change and a source configured
+  after its items, with both `at` shapes, an unmirrored parent, a mirrored parent and an asset
+  seeded. It dies when the trigger's names-as-parent arm is removed, and when the recompute on a
+  declaration update is skipped. `the_stored_function_is_the_macros_expansion` dies when either
+  macro's expansion drifts from the stored function. `knobas-app`'s
+  `backup::a_restored_backup_answers_under_as_the_machine_it_came_from` checks a round trip. The
+  benchmark `knobas-search/tests/perf.rs`'s
+  `under_is_under_the_same_budget_beside_a_hundred_thousand_items` read p50 619 / p90 623 ms
+  before and worst p90 58 ms after. `under.rs`, `suggest.rs` (including
+  `under_knows_exactly_the_names_the_box_offers`) and `corpus_seam.rs` pass with their seeds still
+  raw `insert`s.
+
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
 Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.
