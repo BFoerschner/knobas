@@ -103,6 +103,119 @@ live_guard() {
   done
 }
 
+# live_is_jvm <product> -- TeamCity, Jira and Confluence; never Gitea.
+live_is_jvm() {
+  case "$1" in teamcity | jira | confluence) return 0 ;; *) return 1 ;; esac
+}
+
+# THE JVM LOCK (issue #690). `live_guard` refuses a second JVM product, which
+# made the orchestrator hold a whole ticket -- 30-50 minutes of an agent -- in
+# one JVM slot for the few minutes its live run used TeamCity. So every run
+# that starts or uses a JVM product takes one machine-wide lock for the whole
+# run, seeding and the closing `live_down` included, and a run that finds it
+# held WAITS: several JVM tickets are implemented at once and only their live
+# runs take turns. `live_guard` stays behind it as the backstop for a product
+# somebody started by hand.
+#
+# The lock is a symlink, `$TMPDIR/knobas-live-jvm.lock` (outside every
+# worktree; `KNOBAS_LIVE_LOCK` moves it, for the tests), whose target names
+# the holder: `<pid> <epoch taken> <recipe> <worktree>`. `ln -s` is the atomic
+# primitive, as in scripts/gate-slot.sh -- macOS ships no `flock`, and the
+# link carries its holder from the instant it exists, so nobody can see a lock
+# held by nobody. A lock whose pid is dead (`kill -0`) is a run that was
+# SIGKILLed; the next taker removes it under `mkdir "$lock.reclaim"` -- two
+# takers may read the same dead pid, and without the reclaim lock the slower
+# one would unlink the faster one's fresh claim -- and says it took a stale
+# lock over. The wait is `KNOBAS_LIVE_LOCK_WAIT` seconds (default 2700, 45
+# minutes), polled every `KNOBAS_LIVE_LOCK_POLL` (default 2); past it the run
+# refuses, naming the holder. What it cannot see, as for the gate slots: a
+# dead holder's pid recycled onto an unrelated process (the run then waits for
+# that one; `rm` the link).
+#
+# A run started by a holder -- `just atlassian-live` running `just jira-live`
+# -- finds its parent's lock in `KNOBAS_LIVE_LOCK_HOLDER` and goes on under it
+# without taking or releasing anything.
+LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
+LIVE_LOCK_MINE=""
+
+# _live_lock_describe <target> -- the holder, in words.
+_live_lock_describe() {
+  local pid since recipe tree
+  read -r pid since recipe tree <<<"$1"
+  echo "'$recipe' in ${tree:-?} (pid $pid, since $(date -r "$since" '+%H:%M:%S' 2>/dev/null || echo "$since"))"
+}
+
+_live_lock_pid_alive() {
+  local pid=${1%% *}
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# live_lock_hold <recipe> -- return once this shell holds the lock (or runs
+# under a parent that does); return 1, naming the holder, after the wait.
+# Arm `live_lock_release` in the EXIT, INT and TERM traps before calling it.
+live_lock_hold() {
+  local recipe=$1 me target waited announced='' last_report=0 wait_s poll from=$SECONDS
+  # This (sub)shell's own pid: `$$` is the script's in a subshell, and bash
+  # 3.2 has no BASHPID. The exec'd sh's parent is the shell that runs this.
+  me=$(exec sh -c 'echo $PPID')
+  wait_s=${KNOBAS_LIVE_LOCK_WAIT:-2700}
+  poll=${KNOBAS_LIVE_LOCK_POLL:-2}
+  case $wait_s in '' | *[!0-9]*)
+    echo "live: KNOBAS_LIVE_LOCK_WAIT must be a whole number of seconds, not '$wait_s'" >&2; return 1 ;;
+  esac
+  target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
+  if [ -n "${KNOBAS_LIVE_LOCK_HOLDER:-}" ] && [ "$target" = "$KNOBAS_LIVE_LOCK_HOLDER" ] &&
+    _live_lock_pid_alive "$target"; then
+    echo "live: $recipe runs under the JVM lock its caller holds"
+    return 0
+  fi
+  # One word for the recipe field, so the worktree path after it may hold spaces.
+  LIVE_LOCK_MINE="$me $(date +%s) ${recipe// /_} ${LIVE_TESTENV%/testenv}"
+  while :; do
+    if ln -s "$LIVE_LOCK_MINE" "$LIVE_LOCK" 2>/dev/null; then
+      export KNOBAS_LIVE_LOCK_HOLDER=$LIVE_LOCK_MINE
+      waited=$((SECONDS - from))
+      [ -z "$announced" ] || echo "live: $recipe: took the JVM lock after ${waited}s"
+      return 0
+    fi
+    target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
+    if [ -n "$target" ] && ! _live_lock_pid_alive "$target"; then
+      if mkdir "$LIVE_LOCK.reclaim" 2>/dev/null; then
+        if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ]; then
+          rm -f "$LIVE_LOCK"
+          echo "live: $recipe: the JVM lock was stale -- its holder $(_live_lock_describe "$target") is gone; taking it over"
+        fi
+        rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
+        continue
+      elif [ -n "$(find "$LIVE_LOCK.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+        # A reclaimer that died inside its few milliseconds.
+        rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
+      fi
+    fi
+    waited=$((SECONDS - from))
+    if [ -n "$target" ] && [ "$target" != "$announced" ]; then
+      announced=$target
+      echo "live: $recipe: the JVM lock is held by $(_live_lock_describe "$target"); waiting up to ${wait_s}s"
+    elif [ $((waited - last_report)) -ge 300 ]; then
+      last_report=$waited
+      echo "live: $recipe: still waiting for the JVM lock, ${waited}s so far"
+    fi
+    if [ "$waited" -ge "$wait_s" ]; then
+      LIVE_LOCK_MINE=""
+      echo "live: $recipe: the JVM lock is still held by $(_live_lock_describe "${target:-? ? ? ?}") after ${waited}s; giving up" >&2
+      return 1
+    fi
+    sleep "$poll"
+  done
+}
+
+# live_lock_release -- give the lock back, if this shell holds it.
+live_lock_release() {
+  [ -n "$LIVE_LOCK_MINE" ] || return 0
+  [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" != "$LIVE_LOCK_MINE" ] || rm -f "$LIVE_LOCK"
+  LIVE_LOCK_MINE=""
+}
+
 # live_to_put_back <product> -- the products a run of this one starts and must
 # therefore stop again, last-started first: whatever was not already up.
 live_to_put_back() {
@@ -205,7 +318,8 @@ _live_restore() {
   for p in $put_back; do live_down "$p" || true; done
 }
 
-# live_session <product> -- for a recipe: bring the product up, export what
+# live_session <product> [<recipe>] -- for a recipe: for a JVM product, hold
+# the JVM lock (as <recipe>) for the whole run; bring the product up, export what
 # `./seed --env` prints, and arm EXIT, INT and TERM to put the machine back as
 # this found it. A product that was already up -- `just live-up jira` before a
 # run of `just jira-live` -- is left up; one this started is stopped.
@@ -216,11 +330,17 @@ _live_restore() {
 # re-raises. Armed before the first `up`, so an interrupt mid-seed stops what
 # had been started.
 live_session() {
+  # The traps first, holding nothing yet: an interrupt while waiting for the
+  # lock, or a refusal from the guard behind it, gives the lock back.
+  trap '_live_restore; live_lock_release' EXIT
+  trap 'trap - EXIT INT; _live_restore; live_lock_release; kill -INT $$' INT
+  trap 'trap - EXIT TERM; _live_restore; live_lock_release; kill -TERM $$' TERM
+  _live_main "$1" >/dev/null || { live_guard "$1"; exit 1; }
+  # The lock BEFORE the guard: a run queued behind another JVM run must wait
+  # for it, not meet the refusal that run's product causes.
+  if live_is_jvm "$1"; then live_lock_hold "${2:-live_session-$1}" || exit 1; fi
   live_guard "$1" || exit 1
   LIVE_PUT_BACK=$(live_to_put_back "$1")
-  trap '_live_restore' EXIT
-  trap 'trap - EXIT INT; _live_restore; kill -INT $$' INT
-  trap 'trap - EXIT TERM; _live_restore; kill -TERM $$' TERM
   live_up "$1"
   eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
   if [ -n "$LIVE_PUT_BACK" ]; then
