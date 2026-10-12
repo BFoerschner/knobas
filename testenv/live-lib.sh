@@ -199,11 +199,13 @@ live_on_exit() { LIVE_ON_EXIT=("$1" ${LIVE_ON_EXIT[@]+"${LIVE_ON_EXIT[@]}"}); }
 
 LIVE_PUT_BACK=""
 _live_restore() {
-  local hook p
-  for hook in ${LIVE_ON_EXIT[@]+"${LIVE_ON_EXIT[@]}"}; do eval "$hook" || true; done
+  # Taken and cleared before either loop runs: a Ctrl-C during the EXIT trap's
+  # restore runs the INT trap, which must find nothing left to do twice.
+  local hook p hooks=(${LIVE_ON_EXIT[@]+"${LIVE_ON_EXIT[@]}"}) put_back=$LIVE_PUT_BACK
   LIVE_ON_EXIT=()
-  for p in $LIVE_PUT_BACK; do live_down "$p" || true; done
   LIVE_PUT_BACK=""
+  for hook in ${hooks[@]+"${hooks[@]}"}; do eval "$hook" || true; done
+  for p in $put_back; do live_down "$p" || true; done
 }
 
 # live_session <product> -- for a recipe: bring the product up, export what

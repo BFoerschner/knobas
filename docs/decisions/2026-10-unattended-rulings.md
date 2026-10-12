@@ -527,7 +527,6 @@ Ruled 2026-10-12. Comment:
 - No glossary change, no ADR, nothing on §10.8.
 
 **Reasoning, in short:** #154 puts accepted residuals on `delete_source` where the reader meets them. #127 and #632 forbid the purge waiting for a run, which rules out (C). The demo path never had the eventual guarantee (#127's measurement covered the scheduler's `runs` map only), so no run's guarantee changes; the PR widens the demo gap, hence #636 rather than a residual alone. (B) touches `demo.rs`, a second command's destructive path, and needs #154's existence guard and its own witness: a ticket, not a merge-time edit. The cheap close for path 2 (`for no key update of i skip locked`) does not work: the `gone` delete still needs `FOR UPDATE`, which conflicts with `KEY SHARE`, so the purge would wait for the recompute — the wait #632 removes.
-||||||| parent of fcb10301 (Document the on-demand live products and record Björn's decision of 2026-10-12)
 
 ## #633 — live suites run against real products started locally, on demand, one at a time
 
