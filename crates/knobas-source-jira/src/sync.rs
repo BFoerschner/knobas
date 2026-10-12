@@ -187,7 +187,12 @@ impl SyncRun<'_> {
                     continue;
                 }
                 self.complete(&mut raw).await?;
-                let item = map::to_sync_item(self.source_id, self.base_url, &raw);
+                let item = map::to_sync_item(
+                    self.source_id,
+                    self.base_url,
+                    self.cfg.epic_link_field.as_deref(),
+                    &raw,
+                );
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 sink.item(item).await?;
                 emitted += 1;

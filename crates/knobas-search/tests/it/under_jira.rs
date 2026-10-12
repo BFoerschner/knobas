@@ -61,6 +61,34 @@ async fn searcher(pool: &sqlx::PgPool) -> Searcher {
 /// payload, the summary as title. `parent` is the parent issue's key, nested
 /// the way Jira nests it.
 async fn ticket(pool: &sqlx::PgPool, key: &str, summary: &str, parent: Option<&str>) -> String {
+    let fields = fields(summary, parent);
+    store(
+        pool,
+        key,
+        summary,
+        serde_json::json!({ "id": "1", "key": key, "fields": fields }),
+    )
+    .await
+}
+
+/// One child of a **classic** Data Center project, stored the way `map`
+/// stores it with `epic_link_field` configured (#598): no `fields.parent`,
+/// the epic's bare key in the Epic Link custom field, and `epic: {key}`
+/// beside the record -- the descriptor's second parent candidate.
+async fn classic_ticket(pool: &sqlx::PgPool, key: &str, summary: &str, epic: &str) -> String {
+    let mut fields = fields(summary, None);
+    fields["issuetype"] = serde_json::json!({ "name": "Story" });
+    fields["customfield_10108"] = serde_json::json!(epic);
+    store(
+        pool,
+        key,
+        summary,
+        serde_json::json!({ "id": "1", "key": key, "fields": fields, "epic": { "key": epic } }),
+    )
+    .await
+}
+
+fn fields(summary: &str, parent: Option<&str>) -> serde_json::Value {
     let mut fields = serde_json::json!({
         "summary": summary,
         "issuetype": { "name": if parent.is_some() { "Story" } else { "Epic" } },
@@ -73,6 +101,15 @@ async fn ticket(pool: &sqlx::PgPool, key: &str, summary: &str, parent: Option<&s
                         "issuetype": { "name": "Epic" } },
         });
     }
+    fields
+}
+
+async fn store(
+    pool: &sqlx::PgPool,
+    key: &str,
+    summary: &str,
+    payload: serde_json::Value,
+) -> String {
     let id = format!("jira:{key}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$2)")
         .bind(&id)
@@ -87,7 +124,7 @@ async fn ticket(pool: &sqlx::PgPool, key: &str, summary: &str, parent: Option<&s
     )
     .bind(&id)
     .bind(summary)
-    .bind(serde_json::json!({ "id": "1", "key": key, "fields": fields }))
+    .bind(payload)
     .execute(pool)
     .await
     .unwrap();
@@ -124,7 +161,10 @@ async fn under_an_epic_key_returns_its_tickets_and_the_epic() {
     ticket(&pool, &other, "Ledger export", None).await;
     ticket(&pool, &format!("{p}-201"), "Retry exports", Some(&other)).await;
 
-    for raw in [format!("under:{epic}"), format!("under:{}", epic.to_lowercase())] {
+    for raw in [
+        format!("under:{epic}"),
+        format!("under:{}", epic.to_lowercase()),
+    ] {
         let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
         assert_eq!(ids(&response), sorted(ours.clone()), "{raw}");
         assert!(
@@ -198,4 +238,40 @@ async fn a_ticket_carries_its_epic_as_path() {
     ];
     expected.sort();
     assert_eq!(rows, expected);
+}
+
+/// A classic project's children name their epic only through the `epic`
+/// object `map` stores from the Epic Link field (#598), and `under:<key>`
+/// reaches them through the second candidate as it does a next-gen child
+/// through the first -- the two shapes side by side, under one epic.
+#[tokio::test]
+async fn under_an_epic_key_returns_classic_children_through_the_stored_epic() {
+    let pool = pool().await;
+    let p = project();
+    let epic = format!("{p}-100");
+    let ours = vec![
+        ticket(&pool, &epic, "Payout reliability", None).await,
+        classic_ticket(&pool, &format!("{p}-101"), "Retry payouts", &epic).await,
+        ticket(&pool, &format!("{p}-102"), "Cap retries", Some(&epic)).await,
+    ];
+    classic_ticket(&pool, &format!("{p}-201"), "Elsewhere", &format!("{p}-200")).await;
+
+    let response = searcher(&pool)
+        .await
+        .search(q(&format!("under:{epic}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&response), sorted(ours));
+    let paths: Vec<Option<String>> = response
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter())
+        .filter(|h| h.row.entity_id.ends_with("-101"))
+        .map(|h| h.row.path.clone())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![Some(epic.clone())],
+        "the classic child's path line"
+    );
 }

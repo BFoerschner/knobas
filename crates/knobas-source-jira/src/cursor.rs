@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":1,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":3,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":2,
+//! {"v":3,
 //!  "updated_to":"2026-08-22T11:48:00Z",   // the newest `updated` delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"3f0c1a92be44d7e5"}]}
@@ -45,7 +45,14 @@ use chrono::{DateTime, Utc};
 /// running on version 1 may be holding rows whose last change was dropped by
 /// the bug this version fixes, and nothing cheaper than re-reading the source
 /// finds them.
-pub(crate) const CURSOR_VERSION: u8 = 2;
+///
+/// **3** since #598 stores a classic project's epic as `epic: {"key": …}`
+/// beside the record (the deputy's ruling of 2026-10-12 on #598). A stored
+/// item only gains it when it is emitted again, and an unchanged issue never
+/// is -- the lesson of #610 -- so the bump is what makes every upgraded
+/// source re-read every issue once, the same full sync #345's bump made. Jira
+/// is `full_sync_exhaustive`, so that one run re-emits the whole corpus.
+pub(crate) const CURSOR_VERSION: u8 = 3;
 
 /// Interfaces §4.2: "**JQL time resolution is one minute**, so an
 /// exact-boundary watermark drops items. Re-delivery is free -- upserts are
@@ -277,19 +284,31 @@ mod tests {
         );
         let back = JiraCursor::parse(&c.encode()).unwrap();
         assert_eq!(back, c);
-        assert!(c.encode().starts_with(r#"{"v":2,"#), "{}", c.encode());
+        assert!(c.encode().starts_with(r#"{"v":3,"#), "{}", c.encode());
     }
 
     /// Interfaces §4.1: "an unrecognised version means full sync". A corrupt or
     /// future cursor must not wedge a source -- it must re-sync.
     #[test]
     fn an_unreadable_cursor_means_full_sync() {
-        assert!(JiraCursor::parse(r#"{"v":3,"updated_to":null}"#).is_none());
+        assert!(JiraCursor::parse(r#"{"v":4,"updated_to":null}"#).is_none());
         // A *complete* envelope of a version this build does not know: the
         // version check has to be what rejects it, not a missing field.
         assert!(
             JiraCursor::parse(
-                r#"{"v":3,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+                r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+            )
+            .is_none()
+        );
+        // **A version-2 cursor, which is what every source stored before
+        // #598.** Well-formed in every field, fingerprints included, so only
+        // the version refuses it -- and refusing it is what makes the first run
+        // after the upgrade the full sync that stores every classic epic as
+        // `epic` (the deputy's ruling of 2026-10-12 on #598).
+        assert!(
+            JiraCursor::parse(
+                r#"{"v":2,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,
+                    "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
             )
             .is_none()
         );
