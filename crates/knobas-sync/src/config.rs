@@ -342,8 +342,8 @@ pub async fn patch(
 /// the run went on to rewrite a row the purge had already deleted. So `taken`
 /// locks the item *and* its entity, `skip locked`, and the purge acts on those
 /// rows only: an item whose entity the run holds is left whole rather than
-/// deleted and then waited on at its entity. `for no key update` on the
-/// entity, the lock the tombstone's update needs anyway, so that a link or a
+/// deleted and then waited on at its entity. The entity takes `for no key
+/// update`, the lock the tombstone's update needs anyway, so that a link or a
 /// note being written against the entity (`for key share`) is not a reason to
 /// skip it.
 ///
@@ -351,7 +351,8 @@ pub async fn patch(
 /// statement when that run settles. That is why one statement can serve both
 /// callers with the same locking: after a deleted source's run settles,
 /// nothing holds its rows -- only a run of a source writes that source's
-/// update -- so in [`purge_items`] `skip locked` skips nothing.
+/// items and locks their entities for update -- so in [`purge_items`]
+/// `skip locked` skips nothing.
 ///
 /// **Only a run the scheduler started is purged after.** `run_once` called
 /// directly -- *Load demo data* -- is a run nobody re-purges behind, so a
