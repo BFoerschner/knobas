@@ -304,7 +304,8 @@ pub mod field {
     pub const STATE: &str = "state";
 
     /// Every field that says where to look, in declaration order: plain
-    /// paths, `reviewers`' list paths and `parent`'s parent declarations.
+    /// paths, `reviewers`' list paths, `parent`'s parent declarations and
+    /// `state`'s candidates with their value maps.
     /// `blocked_statuses` is not here: it is a set of names, not somewhere to
     /// look.
     pub const ALL: &[&str] = &[
