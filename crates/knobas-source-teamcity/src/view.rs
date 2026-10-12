@@ -375,21 +375,17 @@ fn age(d: chrono::TimeDelta) -> String {
 // --- Parameters ---------------------------------------------------------
 
 /// Own and inherited, in TeamCity's order (by name), every one read-only
-/// until #668. A `password` spec makes the value secret and empty.
+/// until #668. Drawn by [`drawn_value`], the rule the build view uses too.
 fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
     let values: Vec<Setting> = record
         .parameters
         .property
         .iter()
         .map(|p| {
-            let secret = is_password(p);
+            let (value, secret) = drawn_value(&p.name, p.value.as_deref(), is_password(p));
             Setting {
                 name: p.name.clone(),
-                value: if secret {
-                    String::new()
-                } else {
-                    p.value.clone().unwrap_or_default()
-                },
+                value,
                 inherited: p.inherited,
                 secret,
                 editable: false,
@@ -1123,24 +1119,14 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
         .property
         .iter()
         .map(|p| {
-            let raw = p.value.as_deref().unwrap_or_default();
-            let masked = raw.len() >= 3 && raw.bytes().all(|b| b == b'*');
-            let shown = if raw.contains("://") {
-                without_userinfo(raw)
-            } else {
-                Some(raw.to_owned())
-            };
-            let secret = passwords.contains(&p.name.as_str())
-                || is_secure_name(&p.name)
-                || masked
-                || shown.is_none();
+            let (value, secret) = drawn_value(
+                &p.name,
+                p.value.as_deref(),
+                passwords.contains(&p.name.as_str()),
+            );
             Setting {
                 name: p.name.clone(),
-                value: if secret {
-                    String::new()
-                } else {
-                    shown.unwrap_or_default()
-                },
+                value,
                 inherited: false,
                 secret,
                 editable: false,
@@ -1148,6 +1134,25 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
             }
         })
         .collect()
+}
+
+/// A parameter's value as a view draws it, and whether it is a secret -- the
+/// one rule both views use. Secret, and drawn empty, where `password` says the
+/// spec is a password, where the name is one TeamCity stores securely, where
+/// TeamCity masked the value, or where a URL's credential cannot be cut out;
+/// any other URL is drawn without its credential.
+fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) {
+    let raw = raw.unwrap_or_default();
+    let masked = raw.len() >= 3 && raw.bytes().all(|b| b == b'*');
+    let shown = if raw.contains("://") {
+        without_userinfo(raw)
+    } else {
+        Some(raw.to_owned())
+    };
+    match shown {
+        Some(shown) if !(password || is_secure_name(name) || masked) => (shown, false),
+        _ => (String::new(), true),
+    }
 }
 
 /// A parameter whose spec says `password`: its value is never drawn.
