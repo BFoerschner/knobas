@@ -386,9 +386,12 @@ shell:
 #
 # The test-layout script's own tests (issue #573) ride here too: they are bash
 # against fixture trees, need nothing installed, and take under a second.
+# So do the on-demand live products' (issue #633): the one-JVM-product rule
+# and what a run puts back, against a stub `docker`.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
+    testenv/live-test.sh
 
 # The integration-test layout guard of ADR-0017 (issue #573): a top-level
 # `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its
@@ -917,10 +920,10 @@ desktop-witness driver="":
 # a second private recipe -- what the three share is a message and a variable
 # list, not behaviour, and a forwarding recipe would be an indirection with
 # nothing in it.
-gitea_live_env := "testenv/, which is what the lines above this one do:
-  docker compose up -d --wait gitea
-  ./seed-gitea.sh
-  eval \"$(./seed --env)\""
+gitea_live_env := "testenv/live-lib.sh, which is what the line above this one does:
+  live_session gitea   # docker compose up -d --wait gitea, ./seed-gitea.sh,
+                       # eval \"$(./seed --env)\", and Gitea stopped again at
+                       # the end if this run started it (issue #633)"
 
 # THE ALL-SKIPPED RUN. Every live recipe below calls this before it invokes
 # cargo, and it refuses the run in which nothing would have run (issue #351).
@@ -1012,6 +1015,11 @@ _require-live-env SOURCE +NAMES:
 # which this suite never touches. Both steps are idempotent, so re-running this
 # against an already-seeded environment just runs the tests.
 #
+# GITEA IS STARTED ON DEMAND (issue #633). `live_session gitea`
+# (testenv/live-lib.sh) starts it if it is down, seeds it, exports what
+# `./seed --env` prints, and stops it again when the recipe ends if -- and only
+# if -- it was this run that started it. A Gitea that was already up stays up.
+#
 # WHAT IT CREATES AND WHAT IT REMOVES. The suite is not read-only: three of its
 # tests open a branch through Gitea's own API, two of those a pull request on
 # it, and one of those 51 comments. That is deliberate -- exit criterion B is
@@ -1046,12 +1054,9 @@ _require-live-env SOURCE +NAMES:
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd testenv
-    docker compose up -d --wait gitea
-    ./seed-gitea.sh
-    eval "$(./seed --env)"
+    . testenv/live-lib.sh
+    live_session gitea
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
-    cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
 
@@ -1074,8 +1079,9 @@ gitea-live:
 # puts the uncapped container back afterwards, so a later `just gitea-live` is
 # not silently running against a capped server.
 #
-# `INT` and `TERM` as well as `EXIT`, the rule `inventory` above states and
-# `check-ports.sh` follows: bash need not run an `EXIT` trap when a signal it
+# The uncap runs from `live_session`'s traps (`live_on_exit`), ahead of the
+# session stopping a Gitea it started, and those traps are `INT` and `TERM` as
+# well as `EXIT`, the rule `inventory` above states and `check-ports.sh` follows: bash need not run an `EXIT` trap when a signal it
 # has no handler for terminates the shell, and this recipe's slow live run is
 # one somebody will Ctrl-C. Each signal trap **clears the `EXIT` trap first**,
 # then restores, then re-raises -- so the container is uncapped exactly once and
@@ -1095,20 +1101,17 @@ gitea-live:
 gitea-live-capped:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd testenv
-    testenv=$PWD
-    docker compose up -d --wait gitea
-    ./seed-gitea.sh
-    eval "$(./seed --env)"
+    . testenv/live-lib.sh
+    live_session gitea
     # Before the overlay, not after: a run refused for a missing variable must
     # not be one that left the shared container capped on its way out.
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
-    uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
-    trap 'uncap' EXIT
-    trap 'trap - EXIT INT; uncap; kill -INT $$' INT
-    trap 'trap - EXIT TERM; uncap; kill -TERM $$' TERM
-    docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea
-    cd ..
+    # Registered with the session, which runs it from its own EXIT, INT and
+    # TERM traps before it stops a Gitea it started -- so the container is
+    # uncapped first and stopped (or left up) second, whichever way this ends.
+    uncap() { (cd "$LIVE_TESTENV" && docker compose up -d --wait gitea >/dev/null); }
+    live_on_exit uncap
+    (cd "$LIVE_TESTENV" && docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea)
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
       -- --ignored --nocapture --test-threads=1
 
@@ -1188,12 +1191,9 @@ gitea-live-capped:
 start-work-live:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd testenv
-    docker compose up -d --wait gitea
-    ./seed-gitea.sh
-    eval "$(./seed --env)"
+    . testenv/live-lib.sh
+    live_session gitea
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
-    cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1
 
@@ -1372,22 +1372,23 @@ teamcity-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
 
-# The TeamCity adapter against the **seeded, self-hosted** TeamCity from
-# `./seed --teamcity` (issue #266) -- the sibling `teamcity-live` cannot be:
-# a corpus we own, so the suite asserts the seeded content by id, number,
-# status and branch, runs the contract battery (clause 2 included), and
-# queues one build through REST to watch the `sinceBuild` watermark move and
-# then stand still. It deletes what it queued, and clears what a killed run
-# left. The header of `tests/live_teamcity_seeded.rs` states the whole
-# contract, including what it writes.
+# The TeamCity adapter against the **seeded, self-hosted** TeamCity
+# (issue #266) -- the sibling `teamcity-live` cannot be: a corpus we own, so
+# the suite asserts the seeded content by id, number, status and branch, runs
+# the contract battery (clause 2 included), and queues one build through REST
+# to watch the `sinceBuild` watermark move and then stand still. It deletes
+# what it queued, and clears what a killed run left. The header of
+# `tests/live_teamcity_seeded.rs` states the whole contract, including what it
+# writes.
 #
-# The environment is assumed up and seeded, exactly as `gitea-live` obtains
-# its variables: `./seed --env` prints KNOBAS_TEAMCITY_URL and
-# KNOBAS_TEAMCITY_TOKEN once `./seed --teamcity` has run. It is deliberately
-# not brought up here -- the TeamCity profile is opt-in and its seed depends
-# on the Gitea seed for its VCS roots -- so a missing URL or token stops the
-# recipe, through the shared `_require-live-env` guard above, with the three
-# commands to run. testenv/README.md, "TeamCity, end to end".
+# THE PRODUCT IS STARTED HERE, ON THIS MACHINE (issue #633). `live_session
+# teamcity` (testenv/live-lib.sh) starts Gitea -- the VCS roots clone it --
+# and then the server and its agent, seeds all three, exports what `./seed
+# --env` prints, and stops again whatever it started when the recipe ends,
+# however it ends. A TeamCity already up (`just live-up teamcity`) is left
+# up, which is the fast loop: the second run is the suites. It refuses to
+# start while Jira or Confluence is up, naming it. *Stop*, never `down -v`:
+# the TeamCity volumes hold the seeded builds, and the next run finds them.
 #
 # TWO SUITES, in two crates, and the second is not the adapter's (issue #389).
 # `knobas-app`'s `teamcity_seeded_live` is M3.3's exit criterion for this
@@ -1404,283 +1405,157 @@ teamcity-live:
 teamcity-live-seeded:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd testenv
-    eval "$(./seed --env)"
-    just _require-live-env 'seed-state.json, via eval "$(./seed --env)". No entry
-    there means the real TeamCity is not seeded from this tree. From testenv/:
-      docker compose --profile real-teamcity up -d teamcity teamcity-agent
-      ./seed            # Gitea first: the VCS roots point at it
-      ./seed --teamcity' \
+    . testenv/live-lib.sh
+    live_session teamcity
+    just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
+    seed-teamcity.sh has run -- which live_session teamcity, the line above
+    this one, does.' \
       KNOBAS_TEAMCITY_URL KNOBAS_TEAMCITY_TOKEN
-    cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity_seeded \
       -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test teamcity_seeded_live \
       -- --ignored --nocapture --test-threads=1
 
-# The real Jira and Confluence, end to end, inside one licence window: fetch
-# the timebomb keys, stand the pair up, walk both setup wizards, seed the
-# Tidewater content, prove the seed by reading it back, run every live suite
-# gated on the Atlassian URLs, and `down -v` the pair -- from a trap, so the
-# teardown runs when a step fails too (issue #275, ADR-0013).
-#
-# THREE HOURS IS THE WINDOW. The licences are 10-user timebomb keys that
-# expire three hours after they are applied (testenv/README.md, "Jira and
-# Confluence, end to end"); the pair is disposable by design, which is why
-# this recipe ends in `down -v` rather than leaving a seeded environment the
-# way `gitea-live` does.
-#
-# MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
-# with the images already pulled:
-#
-#   2026-09-03, both products brought up at once (the shape before #314): the
-#     pair seeded and verified in about four minutes -- of which the two wizard
-#     walks and Jira's final start are about three and the content seed about
-#     one (310 key placeholders in and out again) -- the live suites about ten
-#     seconds between them once compiled, and `down -v` about ten. This is also
-#     the shape that died twice under seven-agent load, on Jira's post-wizard
-#     start, before a suite ran (#313).
-#
-#   2026-09-03, one product at a time as below: **392 s in all**, with TeamCity
-#     stopped and the machine otherwise busy. Seeded and verified at 317 s, of
-#     which Jira's half is about 160 (56 s to FIRST_RUN, 53 s more before it
-#     served its first wizard step, four POSTs, and a post-wizard restart that
-#     had already finished by the time the wait for it began), Confluence's
-#     about 40 (FIRST_RUN 9 s after `up`, on a VM Jira had just stopped
-#     competing for), and the content seed the rest. The three suites, 26 tests,
-#     ran in 14 s once compiled; the teardown took the balance.
-#
-#   2026-09-03, the same shape re-run on the merged bytes, TeamCity stopped and
-#     two other agents building: **327 s in all**, seeded and verified at 265,
-#     the three suites (28 tests by then) in 22. Same run, the two numbers this
-#     ticket is about: Jira served its wizard 46 s after answering FIRST_RUN --
-#     one progress line, `jira is serving no form yet -- 30s of 600s`, printed
-#     inside that gap -- and the post-wizard wait for RUNNING returned in 0 s
-#     again. Full runs sat between 311 s and 392 s when this was written.
-#     The floor has since moved DOWN rather than up: 295 s on 2026-09-04,
-#     four suites and 39 tests by then, on a machine with nothing else
-#     building (#332's certification run). These numbers measure the
-#     machine as much as the recipe, and the direction the caps below care
-#     about is the slow one, which nothing has moved.
-#
-# The suites are seconds, not hours, so the three-hour window holds with well
-# over two and a half hours of margin either way; the number to re-measure is
-# the one in this header, whenever a suite is added below or the order changes.
-#
-#   2026-09-06, the products on three Hetzner servers (testenv/hetzner/), one
-#     per server, and the recipe still one product at a time: **986 s in all**,
-#     seeded and verified at 883 -- Jira 147 s to FIRST_RUN and 176 s to its
-#     first wizard form on a 2-vCPU cx23, every JVM start CPU-bound, the four
-#     suites 76 s over the tunnel. Which is why, under `KNOBAS_TESTENV_HETZNER=1`
-#     (what `source testenv/hetzner/env` sets), the recipe now starts and seeds
-#     both products AT ONCE -- each has a server of its own, so the 8 GB reason
-#     below does not apply. The local branch is unchanged.
-#
-#   2026-09-06, the parallel shape, Jira and Confluence on cx33s (4 vCPU, 8 GB):
-#     **851 s in all**, seeded and verified at 754. Confluence was FIRST_RUN at
-#     24 s and seeded at 141 s, entirely inside Jira's wait; Jira was FIRST_RUN
-#     at 174 s, served its first form at 350 s, was RUNNING at 576 s -- NO
-#     FASTER than on the cx23 (147 s / 176 s), with the host reporting zero
-#     steal. Jira's start is single-threaded and the cx line is a 2.1 GHz
-#     Skylake, so the 130 s saved is all overlap and none of it the resize.
-#     The content seed pays ~90 ms of tunnel round trip per request on top.
-#     The four suites: 80 s.
-#
-#   2026-09-06, KNOBAS_ATLASSIAN_KEEP=1 on cpx22s (AMD): the pair set up from
-#     empty in 243 s (Jira FIRST_RUN at 72 s, its first form at 141 s, RUNNING at
-#     233 s; Confluence seeded inside that) and then KEPT, its licences renewed
-#     on the servers (testenv/hetzner/renew-licence.sh). Runs after that skip
-#     the wizards and the content seed and are the suites: **226 s** for the
-#     first run after set-up (the content seed from empty), **60 s** for every
-#     run after (seeded and verified at 10 s, four suites in 46 s).
-#
-# THE SEQUENCING IS THE FIX; THE WIDER CAP IN seed-atlassian.sh IS INSURANCE.
-# No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s, and
-# the 392 s and 327 s ones above, all with TeamCity stopped -- and what has kept
-# that cap survivable is the refusal below to start while TeamCity is up. The
-# pair sharing the 8 GB VM with a third JVM is the case that killed #313 and
-# the case nobody has measured.
-#
-# WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
-# a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
-# --test-threads=1`, gated on KNOBAS_JIRA_URL / KNOBAS_CONFLUENCE_URL from
-# `./seed --env`. Three exist: the Jira adapter's `live_jira_seeded` (#276) --
-# sync, payload, cursor, the real 401 -- the app crate's `atlassian_live`,
-# which is the engine-and-queue half (credential health end to end, and the
-# three write ops read back out of Jira), and the Confluence adapter's
-# `live_confluence_seeded` (#284), which is the **only** witness that adapter
-# has: ADR-0013 refused a mockd half for a product with no machine-readable
-# spec. Serial and unparallelised for the reason `gitea-live` gives: one
-# server, and tests that write to it.
-#
-# THE SUITES SHARE ONE SEEDED SERVER, AND EACH TAKES BACK WHAT IT WROTE, from
-# a `Drop` that checks rather than assumes. What a *killed* run leaves is put
-# back by the next run of the suite that wrote it, whose leftover clearing
-# works from `seed-state.json` rather than from anything a run remembers. On
-# the Jira side: a stray issue and a stray comment deleted, a label removed, a
-# status moved back through the workflow -- the union of what either Jira
-# suite writes. On the Confluence side: every seeded page's title put back,
-# which is the whole of what that suite writes (one rename, to witness that a
-# renamed page keeps its content id). Order does not matter, and neither does
-# a re-run: after a green run
-# the server holds exactly the seeded corpus, and a run started against a
-# dirty one prints what it put back. What neither suite can undo is the `PAY`
-# key counter -- the create leaves the project one key further on -- which is
-# why nothing downstream may assume the fixture's keys are the highest ones.
-#
-# THE 8 GB VM. Jira asks for ~4 GB, Confluence ~2 GB, plus a PostgreSQL each,
-# and Docker Desktop's VM here has 8 GB: the pair cannot share it with the
-# seeded TeamCity (~2.2 GB for server and agent), so this recipe REFUSES to
-# start while `knobas-teamcity` is up and prints the `stop` to run. The same
-# 8 GB is why the pair does not comfortably *start* together either -- two JVMs
-# claiming their heaps at once is what pushed Jira's post-wizard restart past
-# its cap under load -- and why the two products are brought up and seeded one
-# at a time below, Jira first. It does
-# not stop it itself, because `--profile real-teamcity stop` is somebody's
-# seeded environment going away under them (testenv/README.md, "One
-# environment, one owner at a time"), and `stop` -- never `down -v` -- is the
-# right verb there: the TeamCity volumes hold the seeded builds.
-#
-# `down -v` NAMES THE FOUR SERVICES. `docker compose --profile real-atlassian
-# down -v` with no service named also takes the default profile's containers
-# and volumes with it -- Gitea and its seeded corpus included (checked with
-# `--dry-run` on Compose v5.1.2). Naming jira, jira-db, confluence and
-# confluence-db removes exactly their four volumes and nothing else.
-#
-# `INT` and `TERM` as well as `EXIT`, the rule `gitea-live-capped` states:
-# each signal trap clears the `EXIT` trap first, tears down once, and
-# re-raises, so a Ctrl-C mid-wizard still leaves no timebombed pair behind.
-atlassian-live:
+# Start one real product on this machine and seed it, or stop it again (issue
+# #633): gitea, teamcity, jira or confluence. Every `*-live` recipe below does
+# this around its own suites; these are for a session of several runs, since
+# a product already up is left up by them. One JVM product at a time: `up`
+# refuses TeamCity, Jira or Confluence while another of the three is up, and
+# names it. `down` stops TeamCity and Gitea (their volumes hold the seeded
+# corpus) and removes Jira and Confluence with their volumes (3-hour timebomb
+# licences: a kept volume is an expired product). testenv/README.md, "Live
+# products, on demand".
+live-up product:
+    testenv/live up {{ quote(product) }}
+
+live-down product:
+    testenv/live down {{ quote(product) }}
+
+live-status:
+    testenv/live status
+
+# The Confluence half of `crates/knobas-app/tests/atlassian_live.rs`, by test
+# name. That file holds both products' app-level tests, and since #633 the two
+# products are never up at once -- so `jira-live` runs the file with these
+# skipped and `confluence-live` runs exactly these. A test added to the file
+# and not listed here runs with Jira: a Jira one passes there, and a Confluence
+# one fails there loudly, on `wiki()`'s unset KNOBAS_CONFLUENCE_URL, which is
+# the prompt to list it. `_atlassian-live-names` refuses a listed name the file
+# no longer has, so a rename cannot quietly shrink the Confluence run.
+atlassian_live_confluence_tests := "a_comment_that_mentions_me_becomes_an_inbox_mention the_launcher_finds_the_seeded_page_with_its_ancestor_path a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved a_page_edited_through_knobas_is_on_the_digest_under_yesterday a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_mirror_survives a_protocol_is_published_under_standup_protocols_and_reads_back a_second_page_with_one_title_in_one_space_is_refused"
+
+_atlassian-live-names:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd testenv
-    testenv=$PWD
-    # `{{{{` is just's escape for a literal double brace; the closing pair passes through as is.
-    if docker ps --format '{{{{.Names}}' | grep -qx knobas-teamcity; then
-      echo "atlassian-live: knobas-teamcity is running, and the Docker VM (8 GB) cannot hold" >&2
-      echo "  the Atlassian pair next to it. Stop it -- stop, not down -v: its volumes hold" >&2
-      echo "  the seeded builds -- and put it back afterwards:" >&2
-      echo "    (cd testenv && docker compose --profile real-teamcity stop teamcity teamcity-agent)" >&2
-      echo "    just atlassian-live" >&2
-      echo "    (cd testenv && docker compose --profile real-teamcity up -d teamcity teamcity-agent)" >&2
-      exit 1
-    fi
+    listed=$(env -u RUSTUP_TOOLCHAIN cargo test -q -p knobas-app --test atlassian_live \
+      -- --ignored --list 2>/dev/null | sed -n 's/: test$//p')
+    for name in {{ atlassian_live_confluence_tests }}; do
+      grep -qx -- "$name" <<<"$listed" || {
+        echo "error: atlassian_live has no test '$name', which the justfile's" >&2
+        echo "  atlassian_live_confluence_tests names. Rename or remove it there." >&2
+        exit 1; }
+    done
+
+# The real Jira, on this machine, inside one licence window (issues #275,
+# #633; ADR-0013): fetch the timebomb keys, start `jira-db` and `jira`, walk
+# the setup wizard, seed the Tidewater content (twice -- the second run must
+# write nothing, #396) and prove it by reading it back, run every live suite
+# gated on the Jira URL, and `down -v` the pair -- from a trap, so the
+# teardown runs when a step fails too. All of that is `live_session jira`
+# (testenv/live-lib.sh); a Jira already up from `just live-up jira` is used
+# as it is and left up.
+#
+# THREE HOURS IS THE WINDOW. The licence is a 10-user timebomb key that expires
+# three hours after it is applied and that a restart does not renew; the
+# product is disposable by design, which is why a run that started it ends in
+# `down -v`. The suites take seconds.
+#
+# MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
+# with the images pulled: see `atlassian-live` below for the pair's history
+# and the issue #633 PR for this recipe's own wall clock.
+#
+# THE SUITES. `live_jira_seeded` (#276) -- sync, payload, cursor, the real
+# 401; the Jira half of the app crate's `atlassian_live` -- credential health
+# end to end, and the three write ops read back out of Jira; and `share_exit`
+# (#455), M4.2's exit witness, every call of which is a read. Serial and
+# unparallelised: one server, and tests that write to it. Each suite takes
+# back what it wrote from a `Drop` that checks rather than assumes, and a
+# killed run's leftovers are put back by the adapter suite's next run, which
+# works from `seed-state.json`. What none can undo is the `PAY` key counter,
+# which is why nothing downstream may assume the fixture's keys are the
+# highest ones.
+#
+# ONE JVM PRODUCT AT A TIME. The session refuses to start while TeamCity or
+# Confluence is up, and names it (8 GB VM: Jira wants ~4 GB). It never stops
+# another product itself: that is somebody's session going away under them.
+jira-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _atlassian-live-names
+    . testenv/live-lib.sh
     t0=$(date +%s)
-    # Above both `up`s below, and it has to stay there: Confluence reads its key
-    # at first start.
-    eval "$(./fetch-timebomb-keys.sh)"
-    teardown() {
-      cd "$testenv"
-      # All four named on every path, including a failure before Confluence was
-      # created: `down -v` on a service with no container is a no-op, and the
-      # alternative -- tearing down only what got started -- is bookkeeping that
-      # would leave a volume behind the first time it was wrong.
-      docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
-      echo "atlassian-live: pair torn down; $(( $(date +%s) - t0 ))s wall clock in all"
-    }
-    if [ "${KNOBAS_ATLASSIAN_KEEP:-}" = 1 ]; then
-      # THE PAIR STAYS UP. On the Hetzner servers the products live between
-      # runs and testenv/hetzner/renew-licence.sh re-applies the timebomb key
-      # on a timer, so there is no three-hour window to fit inside and no
-      # `down -v` at the end: the next run finds both RUNNING, both seeds say
-      # "already set up", the content seed skips everything, and the run is
-      # the suites. Every step below is idempotent, which is what makes this
-      # a flag and not a second recipe. A wipe is explicit, from testenv/
-      # under the shim: `docker compose --profile real-atlassian down -v jira
-      # jira-db confluence confluence-db`.
-      echo "atlassian-live: KNOBAS_ATLASSIAN_KEEP=1 -- the pair is kept, not torn down"
-      # TWO WORDS WITH THE RENEWER ON EACH SERVER (testenv/hetzner/renew-licence.sh).
-      # First: if it last ran more than 120 minutes ago, run it now and wait --
-      # a restart in the middle of a suite is a connection refused, and a
-      # licence with under 30 minutes left is one a slow run could outlive.
-      # Then: leave a run-in-progress marker for this run's duration, which the
-      # renewer's timer waits on before it restarts anything. The marker is
-      # removed from the EXIT trap, so a failed run does not hold the renewer.
-      for _r in jira confluence; do
-        ssh -o ConnectTimeout=10 "knobas-$_r" 'age=$(( $(date +%s) - $(stat -c %Y /opt/knobas/renew-status 2>/dev/null || echo 0) ))
-          if [ "$age" -gt 7200 ]; then echo "atlassian-live: '"$_r"': licence last renewed ${age}s ago; renewing first"; systemctl start knobas-renew-licence.service; fi
-          mkdir -p /opt/knobas && touch /opt/knobas/run-in-progress' &
-      done
-      wait
-      trap 'for _r in jira confluence; do ssh -o ConnectTimeout=10 "knobas-$_r" rm -f /opt/knobas/run-in-progress || true; done' EXIT
-    else
-      trap 'teardown' EXIT
-      trap 'trap - EXIT INT; teardown; kill -INT $$' INT
-      trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
-    fi
-    # ONE PRODUCT AT A TIME, JIRA FIRST. Both JVMs starting together on the 8 GB
-    # VM is what stretched Jira's post-wizard restart past its old 300s cap and
-    # killed two windows before a suite ran (#313 -> #314). Jira now has the VM
-    # to itself until it is RUNNING and its REST answers; Confluence's container
-    # does not exist until then. `--wait` holds for each database's healthcheck
-    # -- the products have none -- and seed-atlassian.sh is what waits for a
-    # state a wizard can be driven from.
-    #
-    # THE LICENCE FETCH STAYS ABOVE BOTH `up`s. Confluence reads ATL_LICENSE_KEY
-    # at first start, so the key has to be in this shell before its container is
-    # created -- which is now the second `up`, not the first. Moving the fetch
-    # down between the two would still work today and would break the moment the
-    # order changed again, so it stays where nothing can get in front of it.
-    if [ "${KNOBAS_TESTENV_HETZNER:-}" = 1 ]; then
-      # ONE SERVER PER PRODUCT (testenv/hetzner/README.md, set by `source
-      # testenv/hetzner/env`): the 8 GB reason for the sequence in the other
-      # branch is gone, so Confluence's whole start and wizard overlap Jira's.
-      # Each product is an `up` then its seed, in a subshell; a failure in
-      # either is this recipe's failure, after the other has finished -- a
-      # half-started pair is what the teardown trap exists for, and it runs on
-      # the exit below. seed-atlassian.sh's `record` locks seed-state.json, so
-      # the two writers cannot lose each other's block.
-      # `--no-recreate`: a container that exists is left as it is, even when
-      # this shell's environment differs from the one it was created with --
-      # which is exactly what happens to a KEPT pair the day Atlassian rotates
-      # the key on its page and CONFLUENCE_LICENSE_KEY changes (measured on a
-      # smaller drift, 2026-09-06: compose rebuilt a healthy Confluence under
-      # the first kept run, and the seed waited 80 s for it to come back). A
-      # config change to a running product is a hand-run `up -d` under the shim.
-      ( docker compose --profile real-atlassian up -d --wait --no-recreate jira-db jira && ./seed-atlassian.sh jira ) &
-      jira_pid=$!
-      ( docker compose --profile real-atlassian up -d --wait --no-recreate confluence-db confluence && ./seed-atlassian.sh confluence ) &
-      confluence_pid=$!
-      status=0
-      wait "$jira_pid" || { status=1; echo "atlassian-live: jira's up or seed failed" >&2; }
-      wait "$confluence_pid" || { status=1; echo "atlassian-live: confluence's up or seed failed" >&2; }
-      [ "$status" -eq 0 ] || exit 1
-    else
-      docker compose --profile real-atlassian up -d --wait jira-db jira
-      ./seed-atlassian.sh jira              # waits for FIRST_RUN, walks Jira's wizard
-      docker compose --profile real-atlassian up -d --wait confluence-db confluence
-      ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
-    fi
-    ./seed-atlassian-content.sh           # the Tidewater content
-    # AND AGAIN, DELIBERATELY. Every step of that script is find-then-skip, and
-    # the skip branch is the only one that reads where a page already sits off
-    # the server instead of choosing it -- so a window that always seeds from
-    # scratch never reaches it, on a script four suites read (#396). The second
-    # run writes nothing and costs seconds; the day it writes twice, or records
-    # a different tree than the first run built, this line is what says so.
-    ./seed-atlassian-content.sh
-    ./seed-atlassian-content.sh --verify  # PAY-231 and one page, read back with its ancestors
-    eval "$(./seed --env)"
-    # `./seed --env` prints the Atlassian block only once seed-state.json has a
-    # `jira`/`confluence` entry, so an unseeded state file yields four suites
-    # that would each stop on their own `need()` -- or, the day one of them
-    # grows a skip, would not. Refused here, once, for all four.
+    live_session jira
     just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
-    seed-atlassian.sh and seed-atlassian-content.sh have run -- which is what
-    the lines above this one in this recipe do.' \
-      KNOBAS_JIRA_URL KNOBAS_JIRA_USER KNOBAS_JIRA_PASSWORD \
-      KNOBAS_CONFLUENCE_URL KNOBAS_CONFLUENCE_USER KNOBAS_CONFLUENCE_PASSWORD
-    echo "atlassian-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_JIRA_URL=$KNOBAS_JIRA_URL KNOBAS_CONFLUENCE_URL=$KNOBAS_CONFLUENCE_URL"
-    cd ..
-    # ---- live suites gated on the Atlassian URLs: one line each, added here ----
+    seed-atlassian.sh and seed-atlassian-content.sh have run for jira -- which
+    live_session jira, the line above this one, does.' \
+      KNOBAS_JIRA_URL KNOBAS_JIRA_USER KNOBAS_JIRA_PASSWORD
+    echo "jira-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_JIRA_URL=$KNOBAS_JIRA_URL"
+    skips=()
+    for name in {{ atlassian_live_confluence_tests }}; do skips+=(--skip "$name"); done
+    # ---- live suites gated on the Jira URL: one line each, added here ----
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira_seeded -- --ignored --nocapture --test-threads=1
-    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1
-    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
-    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test confluence_live -- --ignored --nocapture --test-threads=1
-    # M4.2's exit witness (#455): one test, the share export's Jira clause --
-    # every call it makes to this Jira is a read, and it writes nothing.
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1 --exact "${skips[@]}"
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test share_exit -- --ignored --nocapture --test-threads=1
-    echo "atlassian-live: every Atlassian-gated live suite green (5 suites); $(( $(date +%s) - t0 ))s so far"
+    echo "jira-live: every Jira-gated live suite green (3 suites); $(( $(date +%s) - t0 ))s so far"
+
+# The real Confluence, on this machine, the same shape as `jira-live` above:
+# its timebomb key fetched before the container's first start (Confluence
+# reads it there), `confluence-db` and `confluence` started, the wizard
+# walked, the content seeded twice and verified, every Confluence-gated suite
+# run, and `down -v` from a trap. Refuses while TeamCity or Jira is up.
+#
+# THE SUITES. `live_confluence_seeded` (#284) -- the **only** witness that
+# adapter has, since ADR-0013 refused a mockd half for a product with no
+# machine-readable spec; the Confluence half of `atlassian_live` -- the M3.2
+# exit criterion (a comment that mentions me becomes an inbox item) and
+# Confluence's credential health; and `confluence_live`. They write one
+# title, comments, a page edit and a page under the standup parent, and take
+# each back from a checking `Drop`; a killed run's are put back from
+# `seed-state.json` by the next.
+confluence-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _atlassian-live-names
+    . testenv/live-lib.sh
+    t0=$(date +%s)
+    live_session confluence
+    just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
+    seed-atlassian.sh and seed-atlassian-content.sh have run for confluence --
+    which live_session confluence, the line above this one, does.' \
+      KNOBAS_CONFLUENCE_URL KNOBAS_CONFLUENCE_USER KNOBAS_CONFLUENCE_PASSWORD
+    echo "confluence-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_CONFLUENCE_URL=$KNOBAS_CONFLUENCE_URL"
+    # ---- live suites gated on the Confluence URL: one line each, added here ----
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1 --exact {{ atlassian_live_confluence_tests }}
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test confluence_live -- --ignored --nocapture --test-threads=1
+    echo "confluence-live: every Confluence-gated live suite green (3 suites); $(( $(date +%s) - t0 ))s so far"
+
+# Both Atlassian products, one after the other: `jira-live`, whose session
+# removes Jira again, then `confluence-live`. Never the two at once -- the
+# 8 GB VM holds one JVM product (issue #633) -- so this is the two recipes in
+# sequence and nothing more; a failure in the first stops the second.
+#
+# HISTORY, for the numbers. Until #633 this recipe brought both products up
+# itself, Jira first and Confluence once Jira was RUNNING, and kept both up
+# through the suites: measured 2026-09-03 between 295 s and 392 s in all from
+# empty volumes, of which the wizards and the content seed were ~265 and the
+# suites ~20; both JVMs starting *together* is what died twice under load
+# (#313 -> #314). From 2026-09-06 to 2026-10-12 it ran against Hetzner
+# servers instead (testenv/hetzner/README.md), which live suites no longer
+# use.
+atlassian-live:
+    just jira-live
+    just confluence-live
 
 # **Both importers** against the real systems (issues #509 and #510, v1.5
 # streams 9 and 10). `crates/knobas-app/tests/estate_live.rs` is the suite and
