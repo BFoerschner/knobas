@@ -9,6 +9,9 @@
 //! * *Diff* (deferred, count = files) -- the same compare as a diff
 //!   (`?output=diff`).
 //!
+//! *Behind* is Gitea's count of `/commits?sha={default}&not={branch}`, not
+//! the reverse compare, which would list every commit it counts.
+//!
 //! The default branch itself is measured against nothing: it says *default
 //! branch*, its *Commits* are its latest twenty, and it has no *Diff*.
 
@@ -113,10 +116,22 @@ async fn whole(
         (latest, None, None)
     } else {
         let ahead: Compare = source.client.compare_as(owner, repo, base, branch).await?;
-        let behind: Compare = source.client.compare_as(owner, repo, branch, base).await?;
+        // Behind is a count, so it is read as one; the reverse compare
+        // would list every commit the default branch gained since.
+        let behind = match source
+            .client
+            .count_commits_not_in(owner, repo, base, branch)
+            .await?
+        {
+            Some(count) => count,
+            None => {
+                let behind: Compare = source.client.compare_as(owner, repo, branch, base).await?;
+                behind.commit_count()
+            }
+        };
         facts.push(fact("Base", base.to_owned()));
         facts.push(fact("Ahead", ahead.commit_count().to_string()));
-        facts.push(fact("Behind", behind.commit_count().to_string()));
+        facts.push(fact("Behind", behind.to_string()));
         let (count, files) = (ahead.commit_count(), ahead.files());
         (ahead.commits, Some(count), Some(files))
     };

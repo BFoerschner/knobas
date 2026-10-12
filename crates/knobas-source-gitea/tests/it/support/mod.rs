@@ -654,13 +654,21 @@ impl Fake {
                 ))
                 .mount(&self.server)
                 .await;
+                // Behind, as Gitea counts it: `X-Total-Count` on a
+                // one-commit page of `/commits?sha=main&not={branch}`.
                 let behind = commits_of("main");
-                authed(Mock::given(method("GET")).and(path(format!(
-                    "/api/v1/repos/{full_name}/compare/{wire}...main"
-                ))))
-                .respond_with(ok(
-                    json!({ "total_commits": behind.len(), "commits": behind }),
-                ))
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/commits")))
+                        .and(query_param("sha", "main"))
+                        .and(query_param("not", name))
+                        .and(query_param("limit", "1")),
+                )
+                .respond_with(
+                    ok(json!(behind.iter().take(1).collect::<Vec<_>>()))
+                        .insert_header("X-Total-Count", behind.len().to_string().as_str()),
+                )
+                .with_priority(4)
                 .mount(&self.server)
                 .await;
             }

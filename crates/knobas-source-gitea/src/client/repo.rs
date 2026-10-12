@@ -73,6 +73,34 @@ impl GiteaClient {
         .await
     }
 
+    /// How many commits `sha` has that `not` does not, by Gitea's own
+    /// `X-Total-Count` on a one-commit page of `/commits?sha=…&not=…`
+    /// (measured on 1.27.3, 2026-10-12: it answered 18 for the seeded branch
+    /// the reverse compare listed 18 commits for). The compare API takes no
+    /// `limit` and would list every one of them, which on a branch thousands
+    /// of commits stale is the overview's whole cost. `None` when the server
+    /// sent no readable count.
+    pub(crate) async fn count_commits_not_in(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        not: &str,
+    ) -> Result<Option<u64>, SourceError> {
+        let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
+        let query = [
+            ("sha", sha.to_owned()),
+            ("not", not.to_owned()),
+            ("stat", "false".to_owned()),
+            ("verification", "false".to_owned()),
+            ("files", "false".to_owned()),
+            ("limit", "1".to_owned()),
+        ];
+        let (_, total): (Vec<serde::de::IgnoredAny>, _) =
+            self.get_json_counted(&path, &query).await?;
+        Ok(total.map(|n| n as u64))
+    }
+
     /// One page of a repository's **open** pull requests, most recently
     /// updated first.
     pub(crate) async fn open_pulls_as<T: serde::de::DeserializeOwned>(

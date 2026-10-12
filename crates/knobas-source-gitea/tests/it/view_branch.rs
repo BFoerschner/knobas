@@ -158,7 +158,20 @@ async fn gitea(served: Served) -> MockServer {
     })))
     .mount(&server)
     .await;
-    // Behind: what main has that the branch does not.
+    // Behind: how many commits main has that the branch does not, as
+    // Gitea's own count on a one-commit page (1.27.3 sends it on `/commits`).
+    authed(Mock::given(method("GET")).and(path(format!("{REPO}/commits"))))
+        .and(query_param("sha", "main"))
+        .and(query_param("not", "feature/PAY-231-sepa-retry"))
+        .and(query_param("limit", "1"))
+        .respond_with(
+            ok(json!([listed(MAIN_TIP, "PAY-228 partial refund drift", "2026-08-21T16:00:00Z", &[])]))
+                .insert_header("X-Total-Count", "1"),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    // The same, as the reverse compare: read only when the count is missing.
     authed(Mock::given(method("GET")).and(path(format!(
         "{REPO}/compare/{FEATURE_WIRE}...main"
     ))))
@@ -443,5 +456,46 @@ async fn a_branch_gitea_does_not_have_is_an_error() {
     assert!(
         matches!(gone, Err(SourceError::Protocol { .. })),
         "{gone:?}"
+    );
+}
+
+/// *Behind* is a count, and is read as one: the reverse compare would list
+/// every commit the default branch gained since the branch left it.
+#[tokio::test]
+async fn behind_is_read_as_a_count_not_as_the_reverse_compare() {
+    let server = gitea(Served::default()).await;
+    source(&server)
+        .view(FEATURE, None)
+        .await
+        .expect("the read succeeds")
+        .expect("Gitea draws a branch");
+    let reverse = format!("{REPO}/compare/{FEATURE_WIRE}...main");
+    assert!(
+        !paths(&server).await.iter().any(|p| *p == reverse),
+        "asked for the reverse compare: {:?}",
+        paths(&server).await
+    );
+}
+
+/// A server that sends no count still gets a *Behind*: from the reverse
+/// compare, which lists what the count would have counted.
+#[tokio::test]
+async fn behind_falls_back_to_the_reverse_compare_without_a_count() {
+    let server = gitea(Served::default()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits")))
+        .and(query_param("not", "feature/PAY-231-sepa-retry"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(FEATURE, None)
+        .await
+        .expect("the read succeeds")
+        .expect("Gitea draws a branch");
+    assert!(
+        facts(section(&view, "overview")).contains(&("Behind".to_owned(), "1".to_owned())),
+        "{view:#?}"
     );
 }
