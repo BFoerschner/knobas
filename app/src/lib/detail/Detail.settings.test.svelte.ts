@@ -23,6 +23,8 @@ let submitFails = false;
 let pendingFailsOnce = false;
 /** What `pending_writes` answers next: the open rows. */
 let open: QueuedWrite[] = [];
+/** When set, the next `pending_writes` answers what was open when it was asked, once this resolves. */
+let pendingGate: Promise<void> | null = null;
 let views: SourceView[] = [];
 /** When set, the next `entity_view` waits for this before it answers. */
 let viewGate: Promise<void> | null = null;
@@ -83,7 +85,10 @@ vi.mock("../ipc/sources", () => ({
       pendingFailsOnce = false;
       return Promise.reject({ code: "internal", message: "pool timed out", source_id: null });
     }
-    return Promise.resolve(open);
+    const gate = pendingGate;
+    pendingGate = null;
+    const answer = open;
+    return gate ? gate.then(() => answer) : Promise.resolve(answer);
   },
 }));
 
@@ -228,6 +233,7 @@ beforeEach(async () => {
   pendingFailsOnce = false;
   open = [];
   viewGate = null;
+  pendingGate = null;
   nextId = 41;
   toasts.items = [];
   views = [parameters("5"), parameters("7")];
@@ -430,6 +436,28 @@ test("of two open writes for one row, the newer one marks it", async () => {
   ];
   views = [parameters("5")];
   const screen = render();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
+  expect(screen.value("env.SEPA_RETRIES")).toBe("8");
+  screen.done();
+});
+
+test("a row saved before the queue's first answer keeps its own write's mark", async () => {
+  // The queue the panel opens over: an older refused edit of the row.
+  open = [setting(31, "refused", "env.SEPA_RETRIES", "6", "first try")];
+  let release!: () => void;
+  pendingGate = new Promise((resolve) => (release = resolve));
+  views = [parameters("5")];
+  const screen = render();
+  await settle();
+
+  // The reader saves the row before that read answers; the new write waits.
+  open = [setting(31, "refused", "env.SEPA_RETRIES", "6", "first try"), setting(41, "pending", "env.SEPA_RETRIES", "8", null)];
+  await screen.edit("env.SEPA_RETRIES", "8");
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
+
+  // The open-time read lands late, with only the older write in it.
+  release();
   await settle();
   expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
   expect(screen.value("env.SEPA_RETRIES")).toBe("8");
