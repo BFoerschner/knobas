@@ -349,6 +349,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "pause_monitor",
     "resume_monitor",
     "create_monitor",
+    "merge_pull_request",
 ];
 
 /// What `op` counts as its target having changed.
@@ -376,9 +377,9 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// -- the safe direction, and the only one available without teaching this
 /// module every source's payload shape.
 ///
-/// **The whole mirrored record** -- `"transition"` and `"approve"`, the two ops
-/// that put a *judgement* onto a target whose current state is the whole reason
-/// for the judgement. Any change to the target at all holds the write.
+/// **The whole mirrored record** -- `"transition"`, `"approve"` and
+/// `"merge_pull_request"`, the ops that put a *judgement* onto a target whose
+/// current state is the whole reason for the judgement. Any change to the target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -403,6 +404,12 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   signature on a specific state of a pull request, and a force-push, a new
 ///   commit and a new review comment are all reasons to look again before it
 ///   lands.
+/// * `"merge_pull_request"` for `"approve"`'s reason, and more so (issue
+///   #667): a merge lands whatever the pull request carries *at the flush*, so
+///   a commit pushed after the reader pressed *Merge…* would otherwise go into
+///   the base unread. Somebody else merging or closing it first changes the
+///   record too, and holds the write rather than sending a merge Gitea would
+///   refuse.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
@@ -1165,7 +1172,7 @@ mod tests {
         // The payload the shape carries is where a Confluence page keeps
         // `version.number`, which is why "the mirror's version has passed the
         // one the edit was made against" needs no separate check (#286).
-        for op in ["transition", "approve", "update_page"] {
+        for op in ["transition", "approve", "update_page", "merge_pull_request"] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
                 project(op, Some(&before)),

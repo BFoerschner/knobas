@@ -200,7 +200,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::UpdatePage { entity, .. }
         | WriteOp::PauseMonitor { entity }
         | WriteOp::ResumeMonitor { entity }
-        | WriteOp::CreateMonitor { entity, .. } => entity,
+        | WriteOp::CreateMonitor { entity, .. }
+        | WriteOp::MergePullRequest { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -874,6 +875,13 @@ mod tests {
                     entity: "kuma:8".to_owned(),
                 },
                 "kuma:8",
+            ),
+            (
+                WriteOp::MergePullRequest {
+                    entity: "gitea:tidewater/ledger#142".to_owned(),
+                    style: knobas_source::MergeStyle::Merge,
+                },
+                "gitea:tidewater/ledger#142",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

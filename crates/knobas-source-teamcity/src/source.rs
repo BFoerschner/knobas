@@ -196,7 +196,8 @@ impl Source for TeamCitySource {
             | WriteOp::UpdatePage { .. }
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
-            | WriteOp::CreateMonitor { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::CreateMonitor { .. }
+            | WriteOp::MergePullRequest { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),

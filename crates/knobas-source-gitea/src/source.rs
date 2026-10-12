@@ -167,7 +167,8 @@ impl Source for GiteaSource {
         crate::sync::run(self, cursor, sink).await
     }
 
-    /// Perform one of the four writes M2 ratified for Gitea, or refuse.
+    /// Perform one of the four writes M2 ratified for Gitea, or the merge the
+    /// source views added (#667), or refuse.
     ///
     /// The match unpacks and hands values to [`crate::write`], which never
     /// names `WriteOp`: knobas has one outbound write path and
@@ -210,6 +211,11 @@ impl Source for GiteaSource {
             WriteOp::Approve { entity, body } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
                 write::approve(&self.client, &owner, &repo, index, body).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::MergePullRequest { entity, style } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::merge(&self.client, &owner, &repo, index, style.as_str()).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }
@@ -302,7 +308,13 @@ mod tests {
         assert_eq!(d.entity_kinds.len(), 4);
         assert_eq!(
             d.write_ops,
-            vec!["create_branch", "create_pull_request", "comment", "approve"]
+            vec![
+                "create_branch",
+                "create_pull_request",
+                "comment",
+                "approve",
+                "merge_pull_request"
+            ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly
         // re-grant the sweep the template refuses it.

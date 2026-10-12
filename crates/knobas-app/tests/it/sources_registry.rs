@@ -171,7 +171,15 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
         ),
         (
             "gitea",
-            vec!["create_branch", "create_pull_request", "comment", "approve"],
+            // `merge_pull_request` is the source views' growth (#667), offered
+            // from a pull request's view while Gitea says it can be merged.
+            vec![
+                "create_branch",
+                "create_pull_request",
+                "comment",
+                "approve",
+                "merge_pull_request",
+            ],
         ),
         ("teamcity", vec!["trigger_build", "rerun_build"]),
         // Confluence's three (#286): `create_page` and `update_page` are

@@ -166,6 +166,9 @@ pub const WRITE_OP_CREATE_PULL_REQUEST: &str = "create_pull_request";
 pub const WRITE_OP_COMMENT: &str = "comment";
 /// See [`WRITE_OP_CREATE_BRANCH`].
 pub const WRITE_OP_APPROVE: &str = "approve";
+/// See [`WRITE_OP_CREATE_BRANCH`]. Offered on a pull request's view only while
+/// Gitea says it can be merged (issue #667).
+pub const WRITE_OP_MERGE_PULL_REQUEST: &str = "merge_pull_request";
 
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
@@ -185,14 +188,16 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
-        // M2's ratified Gitea set (issue #43, ADR-0006), and the whole of what
-        // the action bar offers. The battery holds this and `Capability::Write`
+        // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
+        // source views added (issue #667, §10.8), and the whole of what the
+        // action bar offers. The battery holds this and `Capability::Write`
         // to each other in both directions.
         write_ops: vec![
             WRITE_OP_CREATE_BRANCH.to_owned(),
             WRITE_OP_CREATE_PULL_REQUEST.to_owned(),
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_APPROVE.to_owned(),
+            WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
         ],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
@@ -334,7 +339,13 @@ mod tests {
         assert_eq!(d.capabilities, vec![Capability::Write]);
         assert_eq!(
             d.write_ops,
-            vec!["create_branch", "create_pull_request", "comment", "approve"],
+            vec![
+                "create_branch",
+                "create_pull_request",
+                "comment",
+                "approve",
+                "merge_pull_request"
+            ],
             "the action bar is rendered from this list alone (issue #43)"
         );
         assert_eq!(d.auth_methods, vec![AuthMethod::Pat]);

@@ -265,3 +265,80 @@ async fn a_refusal_and_a_blip_arrive_as_different_faults() {
         }
     }
 }
+
+/// Story 10 (spec #660, issue #667): a merge goes to the pull request's
+/// `merge` endpoint, and the style the reader picked is Gitea's `Do`.
+///
+/// `Do` is the one field Gitea's `MergePullRequestOption` requires; a body
+/// without it is a 422, and one spelling the style anywhere else would merge
+/// with the server's default instead of the reader's choice.
+#[tokio::test]
+async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
+    for (style, word) in [
+        (knobas_source::MergeStyle::Merge, "merge"),
+        (knobas_source::MergeStyle::Rebase, "rebase"),
+        (knobas_source::MergeStyle::Squash, "squash"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
+            ))
+            .and(header("Authorization", format!("token {TOKEN}").as_str()))
+            // Gitea answers a merge with an empty 200.
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        source(&server)
+            .write(WriteOp::MergePullRequest {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                style,
+            })
+            .await
+            .expect("a declared op is performed");
+
+        let (verb, path, body) = only_request(&server).await;
+        assert_eq!(verb, "POST");
+        assert_eq!(
+            path,
+            "/api/v1/repos/tidewater/payout-service/pulls/142/merge"
+        );
+        assert_eq!(body, json!({ "Do": word }), "{word}");
+    }
+}
+
+/// A pull request Gitea will not merge -- a conflict, a work-in-progress
+/// title, a merge already made -- is a **405**, and it reaches the queue as a
+/// `Protocol` refusal carrying Gitea's own sentence, never retried (ADR-0004).
+#[tokio::test]
+async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
+    let server = refusing(405, "Please try again later").await;
+    let error = source(&server)
+        .write(WriteOp::MergePullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::MergeStyle::Merge,
+        })
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(405), "{error:?}");
+    assert!(
+        matches!(&error, SourceError::Protocol { message: m, .. } if m.contains("Please try again later")),
+        "{error:?}"
+    );
+}
+
+/// A merge is aimed at a **pull request**: a repository's id is refused before
+/// a request leaves, as an approval's is.
+#[tokio::test]
+async fn a_merge_aimed_at_a_repository_is_refused_before_a_request() {
+    let server = refusing(500, "must not be reached").await;
+    let error = source(&server)
+        .write(WriteOp::MergePullRequest {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            style: knobas_source::MergeStyle::Merge,
+        })
+        .await
+        .expect_err("a repository is not a pull request");
+    assert!(matches!(error, SourceError::Protocol { status: None, .. }), "{error:?}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

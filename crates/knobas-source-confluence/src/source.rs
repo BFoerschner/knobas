@@ -222,7 +222,8 @@ impl Source for ConfluenceSource {
             | WriteOp::LogWork { .. }
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
-            | WriteOp::CreateMonitor { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::CreateMonitor { .. }
+            | WriteOp::MergePullRequest { .. } => Err(SourceError::protocol(format!(
                 "the Confluence adapter does not support {:?}",
                 op.identifier()
             ))),

@@ -140,9 +140,17 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // behind -- a monitor knobas then reports and nobody asked for -- so
         // the battery aims it at a container no source has.
         crate::WriteOp::CreateMonitor {
-            entity: target,
+            entity: target.clone(),
             name: "contract battery probe".into(),
             url: "http://127.0.0.1:1/contract-battery".into(),
+        },
+        // A merge is the probe whose success could not be taken back: a merge
+        // commit on somebody's base branch. The target is no pull request's
+        // address -- it has no `#<number>` -- so an adapter that attempted it
+        // anyway is refused on the id's shape before a request leaves.
+        crate::WriteOp::MergePullRequest {
+            entity: target,
+            style: crate::MergeStyle::Merge,
         },
     ]
     .into_iter()
