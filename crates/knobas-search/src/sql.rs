@@ -213,11 +213,11 @@ pub fn search_sql(
         let (rank, named) = match (text.is_some(), prefix_last) {
             (true, true) => (
                 RANK_WHOLE.replace("{fts}", corpus.fts),
-                NAMED.replace("{fts}", corpus.fts),
+                NAMED.replace("{title}", corpus.title),
             ),
             (true, false) => (
                 format!("ts_rank_cd({}, q.tsq)", corpus.fts),
-                NAMED.replace("{fts}", corpus.fts),
+                NAMED.replace("{title}", corpus.title),
             ),
             (false, _) => ("0::real".to_owned(), "false".to_owned()),
         };
@@ -652,8 +652,8 @@ fn clamp_days(days: u32) -> i32 {
 const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.whole)\n              else ts_rank_cd({fts}, q.tsq) end";
 
 /// Whether a match is *named* exactly what was typed, for a corpus whose
-/// index is `{fts}`: its weight-A lexemes, which every corpus gives its name
-/// and nothing else (`0001`, `0017`, `0018`), are the typed words' lexemes.
+/// title is `{title}`: the title, lexed as the index lexes it, is the typed
+/// words and nothing else.
 ///
 /// Once a compound no longer counts twice, `payout` and `payout-service` tie
 /// for `payout` and recency would decide; story 25 asks for *"the thing
@@ -662,7 +662,12 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// beats a name that is the word (story 26 rules out a title tier). Lexemes
 /// and not text, so `Payouts` is named `payout`, and both sides are sorted
 /// and distinct arrays (`tsvector_to_array`), so word order does not matter.
-const NAMED: &str = "tsvector_to_array(ts_filter({fts}, '{a}')) = q.words";
+///
+/// The title and not the index's weight-A lexemes: the title is short, where
+/// reading a slice of `fts` would detoast a whole body's vector once more per
+/// match, and it is the name a reader sees whatever else a migration adds to
+/// weight A.
+const NAMED: &str = "tsvector_to_array(to_tsvector('english', {title})) = q.words";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
@@ -719,8 +724,6 @@ mod tests {
     const ALLOWED_LITERALS: &[&str] = &[
         "english",
         ":*",
-        // `NAMED`: the weight a corpus gives its name.
-        "{a}",
         "",
         " — ",
         "ancestors",
@@ -1233,17 +1236,10 @@ mod tests {
         // struct (interfaces §1).
         assert!(!built.sql.contains("select * from sync"), "{}", built.sql);
         assert!(!built.sql.contains("select i.*"), "{}", built.sql);
-        // `fts` appears exactly three times, and every occurrence is
-        // accounted for: ranked, read for its name (`NAMED`, a `boolean`)
-        // and matched against. None is a projection, which is what would
-        // panic.
-        assert_eq!(built.sql.matches("i.fts").count(), 3, "{}", built.sql);
-        assert_eq!(
-            built.sql.matches("ts_filter(i.fts, '{a}')").count(),
-            1,
-            "{}",
-            built.sql
-        );
+        // `fts` appears exactly twice, and both occurrences are accounted
+        // for: ranked and matched against. Neither is a projection, which is
+        // what would panic.
+        assert_eq!(built.sql.matches("i.fts").count(), 2, "{}", built.sql);
         assert_eq!(
             built.sql.matches("ts_rank_cd(i.fts, q.tsq)").count(),
             1,
