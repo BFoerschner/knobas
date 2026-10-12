@@ -17,7 +17,8 @@ trap 'rm -rf "$scratch"; trap - TERM; kill -TERM $$' TERM
 
 # The stub. Tokens live in $STUB_STORE as [{id, name, sha1}]; the admin's
 # basic auth is taken on trust. STUB_DOWN=1 answers nothing, as curl does when
-# the port is closed: `000` and exit 7.
+# the port is closed: `000` and exit 7. STUB_PROBE_STATUS answers `/user`
+# alone with that status, while the token API keeps working.
 mkdir -p "$scratch/bin"
 cat >"$scratch/bin/curl" <<'STUB'
 #!/usr/bin/env bash
@@ -45,7 +46,9 @@ path=${url#*/api/v1}
 status=200 resp=''
 case "$method $path" in
   "GET /user")
-    if jq -e --arg t "$token" 'any(.[]; .sha1 == $t)' "$STUB_STORE" >/dev/null; then
+    if [ -n "${STUB_PROBE_STATUS:-}" ]; then
+      status=$STUB_PROBE_STATUS resp='{"message":"probe fault"}'
+    elif jq -e --arg t "$token" 'any(.[]; .sha1 == $t)' "$STUB_STORE" >/dev/null; then
       resp='{"login":"knobas"}'
     else
       status=401 resp='{"message":"user does not exist"}'
@@ -168,6 +171,15 @@ if STUB_DOWN=1 gitea_seed_token "$API" knobas:pw "$tok_a" "$name_a" >"$scratch/o
   fail "a Gitea that does not answer is refused" "printed: $(cat "$scratch/out")"
 fi
 check_eq "and the token it could not check is still there" 200 "$(authenticates "$tok_a")"
+
+# A probe answered with something other than 200 or 401, while the token API
+# works: replacing on that guess would cost a token that may be fine.
+: >"$STUB_LOG"
+checks=$((checks + 1))
+if STUB_PROBE_STATUS=500 gitea_seed_token "$API" knobas:pw "$tok_a" "$name_a" >"$scratch/out" 2>"$scratch/err"; then
+  fail "a probe answered 500 is refused" "printed: $(cat "$scratch/out")"
+fi
+check_eq "and refusing it makes no call past the probe" "GET /user" "$(cat "$STUB_LOG")"
 
 if [ "$failures" -gt 0 ]; then
   echo "gitea-token-test: $failures of $checks checks failed" >&2
