@@ -489,6 +489,7 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
                 url: Some(
                     "https://gitea.example/tidewater/payout-service/pulls/142/commits".into()
                 ),
+                commit: None,
             }),
             "{header:?}"
         );

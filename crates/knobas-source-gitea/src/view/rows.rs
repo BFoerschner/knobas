@@ -224,6 +224,7 @@ pub(super) fn left_out(
         tone: Some(Tone::Muted),
         chip: None,
         url,
+        commit: None,
     })
 }
 

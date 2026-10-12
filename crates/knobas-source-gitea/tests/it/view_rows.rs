@@ -181,6 +181,7 @@ fn cut(text: &str, url: &str) -> ViewRow {
         tone: Some(Tone::Muted),
         chip: None,
         url: Some(url.to_owned()),
+        commit: None,
     }
 }
 
@@ -194,6 +195,7 @@ async fn one_commit_is_one_row_in_every_view_that_lists_it() {
         tone: None,
         chip: Some("c90d11a3f5".into()),
         url: Some(format!("{WEB}/commit/{SHA}")),
+        commit: None,
     };
 
     let in_pr = list(&section(&server, PR, "commits").await, None);
