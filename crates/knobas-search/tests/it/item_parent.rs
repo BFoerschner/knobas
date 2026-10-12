@@ -10,15 +10,18 @@
 //! change the trigger code claims to follow: an insert, a payload update, an
 //! item moved to another source and back, a delete, a change to the stored
 //! declarations, a source configured after its items were written, a source
-//! given another adapter kind, and a source removed.
+//! given another adapter kind, and a source removed -- and an insert and an
+//! update of several rows in one statement, as the sync writer makes them
+//! (#655).
 //!
 //! Its own database (one per test module, #572), so it may write
 //! `sync.parent_declaration` freely; nothing here goes through
 //! `Searcher::declaring`, which writes that table whole and would make this
 //! file's two adapter kinds the only ones.
 //!
-//! The seeds are plain `insert`s, as every search test's are: nothing here
-//! calls a fill function, because the claim is that nothing has to.
+//! The seeds are plain `insert`s (and, for the batch, the writer's
+//! `insert ... on conflict do update`), as every search test's are: nothing
+//! here calls a fill function, because the claim is that nothing has to.
 
 use knobas_core::payload::KindPaths;
 use knobas_search::{KindCatalog, Vocabulary};
@@ -537,8 +540,12 @@ async fn every_row_of_one_statement_is_resolved() {
         ("r1", "tide/payout", "tide/refund", "parent"),
     ] {
         assert!(
-            has(&rows, &id(entity), new, "repo", arm) && !has(&rows, &id(entity), old, "repo", arm),
-            "{entity} was updated in the batch but kept its old parents: {rows:?}"
+            has(&rows, &id(entity), new, "repo", arm),
+            "{entity} was updated in the batch but lacks its new parent: {rows:?}"
+        );
+        assert!(
+            !has(&rows, &id(entity), old, "repo", arm),
+            "{entity} was updated in the batch but kept its old parent: {rows:?}"
         );
     }
 }
