@@ -37,7 +37,12 @@ vi.mock("../ipc/entity", () => ({
 
 const { default: Tile } = await import("./Tile.svelte");
 
-const SPEC = { id: "tickets", label: "Tickets", kinds: ["ticket"] };
+const SPEC = {
+  id: "tickets",
+  label: "Tickets",
+  kinds: ["ticket"],
+  order: "updated_desc" as const,
+};
 
 function card(key: string, priority: string | null = null): MiniBoardCard {
   return {

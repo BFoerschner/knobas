@@ -15,6 +15,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityFilter, EntityPage, EntityRow } from "../ipc/entity";
+import type { TileSpec } from "./kinds";
 
 /**
  * The mock is a plain function, deliberately, and not a `vi.fn`.
@@ -27,7 +28,8 @@ import type { EntityFilter, EntityPage, EntityRow } from "../ipc/entity";
  * these tests exist to catch. Calls are recorded here instead.
  */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
-let answer: () => Promise<EntityPage> = () => Promise.resolve({ rows: [], total: 0 });
+let answer: () => Promise<EntityPage> = () =>
+  Promise.resolve({ rows: [], total: 0, tally: null });
 
 vi.mock("../ipc/entity", () => ({
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
@@ -38,7 +40,7 @@ vi.mock("../ipc/entity", () => ({
 
 const { default: Tile } = await import("./Tile.svelte");
 
-const SPEC = { id: "docs", label: "Docs", kinds: ["page"] };
+const SPEC: TileSpec = { id: "docs", label: "Docs", kinds: ["page"], order: "updated_desc" };
 
 function row(key: string): EntityRow {
   return {
@@ -64,11 +66,11 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function render(sources: string[] = []) {
+function render(sources: string[] = [], spec: TileSpec = SPEC) {
   const target = document.createElement("div");
   document.body.append(target);
   const props = $state({
-    spec: SPEC,
+    spec,
     sources,
     miniBoardLayout: "columns" as const,
     maximised: false,
@@ -95,11 +97,12 @@ function render(sources: string[] = []) {
 
 beforeEach(() => {
   calls.length = 0;
-  answer = () => Promise.resolve({ rows: [], total: 0 });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
 });
 
 test("draws a row per item and the unpaged total in the header", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1"), row("PAY-2"), row("PAY-3")], total: 17 });
+  answer = () =>
+    Promise.resolve({ rows: [row("PAY-1"), row("PAY-2"), row("PAY-3")], total: 17, tally: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(3));
   flushSync();
@@ -133,7 +136,7 @@ test("a rejected read renders its message rather than an empty tile", async () =
 
 /** An empty tile says which kind of nothing it is. */
 test("an empty read gets the tile's own sentence", async () => {
-  answer = () => Promise.resolve({ rows: [], total: 0 });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.text()).toContain("No page in this room yet"));
   screen.done();
@@ -148,7 +151,7 @@ test("an empty read gets the tile's own sentence", async () => {
  * this room at all.
  */
 test("a new room does not leave the old room's rows on screen", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
   const screen = render([]);
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
 
@@ -160,7 +163,7 @@ test("a new room does not leave the old room's rows on screen", async () => {
   expect(screen.rows(), "the previous room's rows are still on screen").toHaveLength(0);
   expect(screen.count()).toBe("");
 
-  pending.resolve({ rows: [row("GT-9")], total: 1 });
+  pending.resolve({ rows: [row("GT-9")], total: 1, tally: null });
   await vi.waitFor(() => expect(screen.text()).toContain("Title of GT-9"));
   expect(calls[1]?.filter).toMatchObject({ sources: ["gitea"] });
 
@@ -185,10 +188,10 @@ test("a slow answer from the previous room is discarded, not rendered", async ()
   screen.props.sources = ["gitea"];
   flushSync();
 
-  second.resolve({ rows: [row("NEW-1")], total: 1 });
+  second.resolve({ rows: [row("NEW-1")], total: 1, tally: null });
   await vi.waitFor(() => expect(screen.text()).toContain("Title of NEW-1"));
 
-  first.resolve({ rows: [row("OLD-1")], total: 99 });
+  first.resolve({ rows: [row("OLD-1")], total: 99, tally: null });
   await first.promise;
   flushSync();
 
@@ -206,7 +209,7 @@ test("a slow rejection from the previous room does not blank the new one", async
   const screen = render([]);
   flushSync();
 
-  answer = () => Promise.resolve({ rows: [row("NEW-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("NEW-1")], total: 1, tally: null });
   screen.props.sources = ["gitea"];
   flushSync();
   await vi.waitFor(() => expect(screen.text()).toContain("Title of NEW-1"));
@@ -245,6 +248,7 @@ test("a key containing a colon is shown whole", async () => {
         },
       ],
       total: 1,
+      tally: null,
     });
 
   const screen = render();
@@ -258,7 +262,7 @@ test("a key containing a colon is shown whole", async () => {
 
 /** Clicking a row hands the row back; the room decides where that goes. */
 test("a row reports which entity was opened", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
 
@@ -275,7 +279,7 @@ test("a row reports which entity was opened", async () => {
  * mini board (#245): a list tile's header offers no layout to choose.
  */
 test("a list tile's header carries no layout control", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
@@ -297,7 +301,7 @@ test("a list tile's header carries no layout control", async () => {
  * label reads are one string, so neither can drift from the other.
  */
 test("the header offers Maximise, asks the room, and reads Restore once maximised", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
@@ -327,7 +331,7 @@ test("the header offers Maximise, asks the room, and reads Restore once maximise
  * every source, so there the column is what tells two rows apart.
  */
 test("a one-source room drops the source column and All work keeps it", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
   const scoped = render(["mock"]);
   await vi.waitFor(() => expect(scoped.rows()).toHaveLength(1));
   flushSync();
@@ -341,4 +345,78 @@ test("a one-source room drops the source column and All work keeps it", async ()
   expect(everything.target.querySelector(".row .src")?.textContent).toBe("mock");
   expect(everything.rows()[0]?.classList.contains("g5w")).toBe(true);
   everything.done();
+});
+
+/** The Code tile as `kinds.ts` builds it (#680). */
+const CODE: TileSpec = { id: "code", label: "Code", kinds: ["pr", "branch"], order: "attention" };
+
+function codeRow(key: string, kind: "pr" | "branch"): EntityRow {
+  return {
+    ...row(key),
+    kind,
+    state: kind === "pr" ? { text: "open", tone: "info" } : null,
+  };
+}
+
+/**
+ * The Code tile reads by attention and says what it counts (#680): open pull
+ * requests and branches, in the words the kind vocabulary has for them, from
+ * the tally the backend counted over the whole set rather than the page.
+ */
+test("the Code tile asks for attention and counts open pull requests and branches", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [codeRow("PR-1", "pr"), codeRow("PR-2", "pr"), codeRow("main", "branch")],
+      total: 8,
+      tally: [
+        { kind: "branch", tone: null, count: 5 },
+        { kind: "pr", tone: "info", count: 3 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(3));
+  flushSync();
+
+  expect(calls[0]?.filter).toMatchObject({ kinds: ["pr", "branch"], order: "attention" });
+  expect(screen.count()).toBe("3 open pull requests · 5 branches");
+
+  screen.done();
+});
+
+/**
+ * Maximised, the tile asks the same read in the same order for more rows,
+ * draws them in the order they came, and keeps the rows it had until the
+ * longer page lands (#680).
+ */
+test("a maximised tile keeps its order and shows more rows", async () => {
+  const first = [codeRow("PR-1", "pr"), codeRow("main", "branch")];
+  const more = [...first, codeRow("dev", "branch"), codeRow("old", "branch")];
+  const tally = [
+    { kind: "pr", tone: "info" as const, count: 1 },
+    { kind: "branch", tone: null, count: 3 },
+  ];
+  const longer = deferred<EntityPage>();
+  answer = () => Promise.resolve({ rows: first, total: 4, tally });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(2));
+  flushSync();
+
+  answer = () => longer.promise;
+  screen.props.maximised = true;
+  flushSync();
+  expect(calls).toHaveLength(2);
+  expect(calls[1]?.filter).toEqual(calls[0]?.filter);
+  expect(calls[1]!.limit).toBeGreaterThan(calls[0]!.limit);
+  expect(screen.rows(), "the rows on screen stay while the longer page loads").toHaveLength(2);
+
+  longer.resolve({ rows: more, total: 4, tally });
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(4));
+  flushSync();
+  const titles = screen.rows().map((r) => r.textContent ?? "");
+  ["PR-1", "main", "dev", "old"].forEach((key, i) =>
+    expect(titles[i]).toContain(`Title of ${key}`),
+  );
+  expect(screen.count()).toBe("1 open pull request · 3 branches");
+
+  screen.done();
 });

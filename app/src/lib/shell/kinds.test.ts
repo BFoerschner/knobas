@@ -14,19 +14,38 @@ import { kindLabel, kindMonogram, kindSingular, tilesFor } from "./kinds";
 test("known kinds land in the mockup's tiles", () => {
   const tiles = tilesFor(["ticket", "pr", "commit", "build", "page"]);
   expect(tiles.map((t) => t.id)).toEqual(["tickets", "code", "builds", "docs"]);
-  expect(tiles.find((t) => t.id === "code")?.kinds).toEqual(["pr", "commit"]);
+  expect(tiles.find((t) => t.id === "code")?.kinds).toEqual(["pr", "branch"]);
 });
 
 /**
- * A bucket carries only the kinds that are actually present.
- *
- * The tile fetches `spec.kinds`, so a bucket that always listed all four code
- * kinds would send `branch` and `repo` to a corpus that has none — harmless
- * here, and exactly the habit that turns into a room querying every kind a
- * future adapter might emit.
+ * The Code tile draws pull requests and branches, and claims commits and
+ * repositories without drawing them (#680): no commit gets an open-kind tile
+ * of its own, and none crowds the tile. It asks for both drawn kinds whichever
+ * code kind the room's scan saw, because the scan is a window of the newest
+ * rows and a busy repo's commits fill it.
  */
-test("a tile lists the kinds present, not the kinds its bucket could hold", () => {
-  expect(tilesFor(["commit"]).find((t) => t.id === "code")?.kinds).toEqual(["commit"]);
+test("the Code tile draws pull requests and branches, never commits", () => {
+  const tiles = tilesFor(["commit", "repo"]);
+  expect(tiles.map((t) => t.id)).toEqual(["code"]);
+  expect(tiles[0]?.kinds).toEqual(["pr", "branch"]);
+});
+
+/**
+ * Each tile reads in its own order (#680): what needs attention first for
+ * Code, each parent's latest for Builds, newest first for the rest, open
+ * kinds included.
+ */
+test("Code reads by attention, Builds by latest per parent, the rest by recency", () => {
+  const orders = Object.fromEntries(
+    tilesFor(["pr", "build", "page", "note", "incident"]).map((t) => [t.id, t.order]),
+  );
+  expect(orders).toEqual({
+    code: "attention",
+    builds: "latest_per_parent",
+    docs: "updated_desc",
+    notes: "updated_desc",
+    incident: "updated_desc",
+  });
 });
 
 /** A tile with nothing in it is not drawn at all. */
@@ -51,7 +70,7 @@ test("the designed rooms keep their order and the open kinds follow", () => {
 /** A kind reported twice is one tile, not two. */
 test("duplicate kinds collapse", () => {
   expect(tilesFor(["incident", "incident"]).map((t) => t.id)).toEqual(["incident"]);
-  expect(tilesFor(["pr", "pr"]).find((t) => t.id === "code")?.kinds).toEqual(["pr"]);
+  expect(tilesFor(["build", "build"]).find((t) => t.id === "builds")?.kinds).toEqual(["build"]);
 });
 
 test("labels and monograms come from the adapter when it declares them", () => {
@@ -174,7 +193,12 @@ test("a monitor is tiled, labelled and chipped from the Kuma descriptor alone", 
       : null;
 
   const [tile] = tilesFor(["monitor"], declared);
-  expect(tile).toEqual({ id: "monitor", label: "Monitors", kinds: ["monitor"] });
+  expect(tile).toEqual({
+    id: "monitor",
+    label: "Monitors",
+    kinds: ["monitor"],
+    order: "updated_desc",
+  });
   expect(kindSingular("monitor", declared("monitor"))).toBe("Monitor");
   expect(kindMonogram("monitor", declared("monitor"))).toBe("MO");
 

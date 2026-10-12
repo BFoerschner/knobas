@@ -18,10 +18,10 @@
  * It maps knobas' own vocabulary — the words in its own migration — and it is
  * consulted only after the adapter has had its say.
  */
-import type { KindInfo } from "../ipc/entity";
+import type { EntityOrder, KindInfo } from "../ipc/entity";
 import { humanise } from "./humanise";
 
-/** One room tile: a heading and the kinds it draws. */
+/** One room tile: a heading, the kinds it draws, and the order it reads in. */
 export interface TileSpec {
   /** Stable id — a bucket name, or the kind itself for an open kind. */
   id: string;
@@ -29,6 +29,14 @@ export interface TileSpec {
   label: string;
   /** The kinds this tile fetches. Never empty. */
   kinds: string[];
+  /**
+   * How the tile reads its kinds (#680, `CONTEXT.md` **Tile**): what needs
+   * attention first for Code, each parent's latest for Builds, newest first
+   * for everything else. The rules themselves are driven by each row's
+   * declared state and parent, never by a kind, so a kind whose source
+   * declares no state reads by recency under any of them.
+   */
+  order: EntityOrder;
 }
 
 /**
@@ -36,13 +44,39 @@ export interface TileSpec {
  *
  * `Time in this context` and `Assets` are M3/M4 and are not here: they are not
  * kinds of synced item at all.
+ *
+ * `draws`, where present, is the part of `kinds` the tile actually fetches
+ * (#680): the Code tile **claims** commits and repositories, so they get no
+ * open-kind tile of their own, and **draws** pull requests and branches. A
+ * commit is reached through its repo's, branch's or pull request's view and
+ * through the launcher; in the tile, fifty of them pushed the open pull
+ * requests out of sight. A bucket that draws a subset fetches that whole
+ * subset as soon as any kind it claims is present: the room's scan is a
+ * window of its newest rows, and a busy repo's commits fill it.
  */
-const BUCKETS: { id: string; label: string; kinds: string[] }[] = [
-  { id: "tickets", label: "Tickets", kinds: ["ticket"] },
-  { id: "code", label: "Code", kinds: ["pr", "commit", "branch", "repo"] },
-  { id: "builds", label: "Builds", kinds: ["build"] },
-  { id: "docs", label: "Docs", kinds: ["page"] },
-  { id: "notes", label: "Notes", kinds: ["note"] },
+const BUCKETS: {
+  id: string;
+  label: string;
+  kinds: string[];
+  draws?: string[];
+  order: EntityOrder;
+}[] = [
+  { id: "tickets", label: "Tickets", kinds: ["ticket"], order: "updated_desc" },
+  {
+    id: "code",
+    label: "Code",
+    kinds: ["pr", "commit", "branch", "repo"],
+    draws: ["pr", "branch"],
+    order: "attention",
+  },
+  {
+    id: "builds",
+    label: "Builds",
+    kinds: ["build"],
+    order: "latest_per_parent",
+  },
+  { id: "docs", label: "Docs", kinds: ["page"], order: "updated_desc" },
+  { id: "notes", label: "Notes", kinds: ["note"], order: "updated_desc" },
 ];
 
 /** knobas' own kind vocabulary — layer 2. See the module docs. */
@@ -73,7 +107,9 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
  * The tiles a room with these kinds in it draws.
  *
  * A bucket carries only the kinds actually present, so a tile never queries a
- * kind the corpus does not have; a bucket nothing fills is not drawn; and
+ * kind the corpus does not have -- except a bucket that declares what it
+ * `draws`, which fetches exactly that (see `BUCKETS`); a bucket nothing fills
+ * is not drawn; and
  * anything no bucket claims gets a tile of its own, in the order the corpus
  * reported it.
  *
@@ -96,12 +132,22 @@ export function tilesFor(
     const mine = bucket.kinds.filter((kind) => present.includes(kind));
     if (mine.length === 0) continue;
     for (const kind of mine) claimed.add(kind);
-    tiles.push({ id: bucket.id, label: bucket.label, kinds: mine });
+    tiles.push({
+      id: bucket.id,
+      label: bucket.label,
+      kinds: bucket.draws ?? mine,
+      order: bucket.order,
+    });
   }
 
   for (const kind of present) {
     if (claimed.has(kind)) continue;
-    tiles.push({ id: kind, label: kindLabel(kind, declared(kind)), kinds: [kind] });
+    tiles.push({
+      id: kind,
+      label: kindLabel(kind, declared(kind)),
+      kinds: [kind],
+      order: "updated_desc",
+    });
   }
 
   return tiles;

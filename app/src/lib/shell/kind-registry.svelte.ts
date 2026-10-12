@@ -68,6 +68,14 @@ export interface KindRegistry {
    * unread registry gets.
    */
   acceptsAccount(adapterKind: string): boolean;
+  /**
+   * The parent kind a room's Builds-style tile groups this kind's rows under
+   * (#680, `EntityOrder` `latest_per_parent`): the first declared parent of
+   * the first adapter that declares both a parent and a state for this kind,
+   * since the backend groups only a kind that declares a state. `null` when
+   * none does — the rows then stand for themselves.
+   */
+  groupedUnder(kind: string): string | null;
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
 }
@@ -99,6 +107,14 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
     acceptsAccount(adapterKind: string) {
       const adapter = state.adapters.find((entry) => entry.adapter_kind === adapterKind);
       return adapter?.accepts_account ?? false;
+    },
+    groupedUnder(kind: string) {
+      for (const adapter of state.adapters) {
+        const paths = adapter.payload_paths.find((entry) => entry.kind === kind);
+        const parent = paths?.parent[0];
+        if (paths && paths.state.length > 0 && parent) return parent.kind;
+      }
+      return null;
     },
     load() {
       if (loaded) return Promise.resolve();
