@@ -17,7 +17,8 @@
 //! credential in *its* secret store), and a count of "waiting" lines taken in
 //! that weather is a count of somebody else's. The scheduler test, and every
 //! other test that calls `flush_all`, has since moved to
-//! `write_queue_flush_all.rs` for the same reason (#609).
+//! `write_queue_flush_all.rs` for the same reason (#609), and
+//! `flush_all_isolation.rs` fails if one comes back (#620).
 
 use std::sync::{Arc, Mutex};
 

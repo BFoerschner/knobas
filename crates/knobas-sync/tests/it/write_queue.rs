@@ -11,7 +11,8 @@
 //! the other tests' sources would re-reason their rows `unauthorized` under
 //! the tests asserting a wait reason (#609). The tests that need it live in
 //! `write_queue_flush_all.rs`, among them story 16's "a held write never
-//! flushes on its own".
+//! flushes on its own". `flush_all_isolation.rs` fails if one comes back
+//! (#620).
 
 use std::sync::{Arc, Mutex};
 
