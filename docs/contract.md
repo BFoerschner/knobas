@@ -484,7 +484,7 @@ pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // 
 | read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=`, `/repos/{o}/{r}/issues/{index}/comments` (fifth read, M2 ruling B1, config-gated; **not a paged listing** — `since`/`before` only, read whole in one request; see the #131 amendment) | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}`; for a build configuration's source view (#664) `GET /app/rest/buildTypes/id:{id}?fields=…` and the configuration's last 20 builds through `/app/rest/builds`; for a build's source view (#665) `GET /app/rest/builds/id:{id}?fields=…`, `GET /app/rest/changes?locator=build:(id:{id})&fields=…`, `GET /app/rest/builds/id:{id}/artifacts?fields=…`, and on its deferred tabs `GET /app/rest/testOccurrences?locator=build:(id:{id}),status:FAILURE,count:100&fields=…` and the log's tail from `GET /downloadBuildLog.html?buildId={id}` (not `/app/rest`: plain text, no `fields=`) — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
 | write endpoints | `POST /rest/api/2/issue/{key}/comment`, `GET`+`POST /rest/api/2/issue/{key}/transitions`, `POST /rest/api/2/issue` (M2, #43); `POST /rest/api/2/issue/{key}/worklog` — `started` in `yyyy-MM-dd'T'HH:mm:ss.SSSZ` (milliseconds and a numeric offset both mandatory), `timeSpentSeconds`, `comment`, **no `adjustEstimate`** so Jira's own `auto` applies (M3.1, #280) | `POST /repos/{o}/{r}/branches`, `POST /repos/{o}/{r}/pulls`, `POST /repos/{o}/{r}/issues/{index}/comments`, `POST /repos/{o}/{r}/pulls/{index}/reviews` (M2, #43) | `POST /app/rest/buildQueue` for both trigger and re-run (M2, #43) |
 | cursor | `{"v":1,"updated_to":"2026-08-24T09:14:00Z"}`; JQL `updated >= "<watermark − 2 min>" ORDER BY updated ASC`. The 2-minute overlap is mandatory: **JQL time resolution is one minute**, so an exact-boundary watermark drops items. Re-delivery is free — upserts are idempotent. **Superseded in part by the #345 amendment below** (2026-09-04): the version is `2` and `seen` recognises a record by fingerprint rather than by its timestamp. The JQL and the overlap are unchanged | `{"v":1,"repos_listed_at":"…","repos":{"owner/repo":{"pulls_updated_to":"…","commits_since":"…","branches_hash":"…"}}}` — per-repo watermarks; a repo added upstream is picked up by the repo-list re-listing each run. ETags/`If-None-Match` are an **optimization to verify against the real container**, not a contract. | `{"v":1,"since_build_id":12345}`; finished builds via `locator=sinceBuild:(id:<n>),state:finished` (ids are monotonic), **plus an unconditional `state:running,state:queued` poll** each run — a running build mutates without a new id. |
-| config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `epic_link_field` (per-instance id — **filled by *Test connection*** since #297, never an example to copy) | `owners[]`/`repos[]` allowlist, `username`, `clone_urls[]` (#683: other addresses CI clones from, read by the app for commit hints; §10.8) | `project_ids[]`, `build_type_ids[]`, `builds_per_config`, `username` (identity — filled by *Test connection*, used for `@me`/My items) |
+| config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `epic_link_field` (per-instance id — **filled by *Test connection*** since #297, never an example to copy) | `owners[]`/`repos[]` allowlist, `username`, `clone_urls[]` (#683: other addresses CI clones from, the SPI's `clone_urls::CONFIG_KEY`, read by the app for commit hints; §10.8) | `project_ids[]`, `build_type_ids[]`, `builds_per_config`, `username` (identity — filled by *Test connection*, used for `@me`/My items) |
 | contract source | `testenv/specs/jira-dc-rest.wadl` + `knobas-mockd` | the **real** pinned Gitea container (roadmap §3) | TeamCity swagger extracted per `testenv/specs/fetch.sh` + `knobas-mockd` |
 | client | hand-rolled reqwest (~5 endpoints) | hand-rolled reqwest; codegen from `/swagger.v1.json` is permitted by roadmap §4 but is stream B's internal call | hand-rolled reqwest |
 
@@ -10439,15 +10439,22 @@ From this commit on, each of the following requires an orchestrator decision **a
   `:` (`git@gitea:`); anything else is refused at save (`a_clone_url_is_a_url_or_an_scp_like_remote`).
   The Gitea adapter itself never reads it.
 
-  **The app reads it by that key, from any source.** `sources::crud::resolve_commit_hints` reads
-  `knobas.source_config.config->'clone_urls'` of every source (one query, only when a view carries
-  a hint) and, where an entry is a prefix of the hint's repository URL -- with or without its
-  `user@`, host compared case-insensitively, a URL prefix only at a `/` boundary -- rewrites it to
-  that source's `base_url` before `commit_page` and `RESOLVE_URL`. Exact otherwise: no owner/repo
-  match across hosts. The app names no adapter: a key, not a per-adapter table. Pinned by
-  `crud::tests::a_clone_url_alias_becomes_its_sources_base_url_and_nothing_else_does` and
-  `entity_view::a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit`. No new
-  command, event, statement shape or migration.
+  **The SPI spells it, the descriptor declares it** (review of PR #700, spec §3a). The key, its
+  entry grammar and the prefix rewrite live once in `knobas_source::clone_urls` (`CONFIG_KEY`,
+  `is_entry`, `canonical_repo_url`), as `monitor_target` does for its address: an adapter opts in
+  by naming the key in its `config_schema` as an array of strings (`clone_urls::declared`; the
+  contract battery refuses any other shape under the key) and validates entries with `is_entry`, so
+  what it accepts at save is what resolves. `sources::crud::resolve_commit_hints` reads
+  `knobas.source_config.config-><CONFIG_KEY>` only from sources whose adapter's template declares
+  it (one query, only when a view carries a hint) and, where an entry is a prefix of the hint's
+  repository URL -- with or without its `user@`, host compared case-insensitively, a URL prefix
+  only at a `/` boundary -- rewrites it to that source's `base_url` before `commit_page` and
+  `RESOLVE_URL`. Exact otherwise: no owner/repo match across hosts. The app names no adapter and
+  no adapter-owned field. Pinned by `clone_urls::tests`,
+  `gitea::config::tests::the_schema_declares_its_clone_urls` and
+  `entity_view::a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit` (which also
+  holds that a mock source listing the key, undeclared, contributes nothing). `SourceDescriptor`
+  is unchanged. No new command, event, statement shape or migration.
 
 - **The IPC schema — issue #680 (2026-10-12): `EntityOrder` gains the two room tile orders, and
   `EntityPage` counts what they drew.** Spec #660's problem statement and story 15: a room's Code

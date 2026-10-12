@@ -383,8 +383,9 @@ async fn the_overview_names_the_revision_it_built_by_repository_and_sha() {
 
 /// More failed tests than one read lists: the tab keeps the build's true
 /// count and ends on a muted row that sends the reader to TeamCity (#683).
-#[tokio::test]
-async fn more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row() {
+/// A server answering one full read of failed tests (100 rows) for a build
+/// whose record counts `failed` of them.
+async fn a_full_page_of_failed_tests(failed: u64) -> MockServer {
     let server = MockServer::start().await;
     let page: Vec<_> = (0..100)
         .map(|i| json!({ "name": format!("t{i}"), "newFailure": false, "muted": false }))
@@ -398,12 +399,34 @@ async fn more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row()
         .mount(&server)
         .await;
     let mut record = build_record();
-    record["testOccurrences"] = json!({ "failed": 142 });
+    record["testOccurrences"] = json!({ "failed": failed });
     Mock::given(method("GET"))
         .and(path(BUILD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(record))
         .mount(&server)
         .await;
+    server
+}
+
+/// Exactly one read's worth of failures is the whole list: the count is that
+/// many and no cut row follows the last test.
+#[tokio::test]
+async fn exactly_one_reads_worth_of_failed_tests_ends_on_no_cut_row() {
+    let server = a_full_page_of_failed_tests(100).await;
+    let view = read(&server, Some("tests")).await;
+    let tests = section(&view, "tests");
+    assert_eq!(tests.count, Some(100));
+    let muted = tests
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, Block::Entities { rows, .. } if rows.iter().any(|r| r.tone == Some(Tone::Muted))))
+        .count();
+    assert_eq!(muted, 0, "a whole list is not cut: {tests:#?}");
+}
+
+#[tokio::test]
+async fn more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row() {
+    let server = a_full_page_of_failed_tests(142).await;
 
     let view = read(&server, Some("tests")).await;
     let tests = section(&view, "tests");
