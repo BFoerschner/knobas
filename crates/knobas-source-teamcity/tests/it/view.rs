@@ -429,6 +429,54 @@ async fn triggers_and_vcs_roots_say_when_and_from_where() {
     );
 }
 
+/// A trigger type this adapter does not know is drawn by its type and its
+/// disabled flag only (#676). A plugin may keep a secret under a name without
+/// the `secure:` prefix, and nothing says which of its properties is one.
+#[tokio::test]
+async fn an_unknown_trigger_type_shows_its_type_and_no_properties() {
+    let mut record = config_record();
+    record["triggers"]["trigger"]
+        .as_array_mut()
+        .expect("the fixture has triggers")
+        .push(json!({ "id": "TRIGGER_3", "type": "acmeWebhookTrigger", "disabled": true,
+          "properties": { "property": [
+              { "name": "webhookToken", "value": "acme-hook-token-never-drawn" },
+              { "name": "endpoint", "value": "https://hooks.example/payout" }
+          ]}}));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(CONFIG_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(record))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(CONFIG, Some("triggers"))
+        .await
+        .expect("the read succeeds")
+        .expect("drawn");
+
+    let triggers = section(&view, "triggers");
+    let plugin = facts(&triggers.blocks[2]);
+    let labels: Vec<_> = plugin.iter().map(|f| f.label.as_str()).collect();
+    assert_eq!(labels, ["Trigger", "Disabled"], "{plugin:#?}");
+    assert_eq!(fact(plugin, "Trigger").value, "acmeWebhookTrigger");
+    let drawn = serde_json::to_string(&view).expect("serializes");
+    assert!(
+        !drawn.contains("acme-hook-token-never-drawn") && !drawn.contains("hooks.example"),
+        "an unknown trigger's properties are not drawn: {drawn}"
+    );
+
+    // The known types beside it still draw what they are named for.
+    assert_eq!(
+        fact(facts(&triggers.blocks[0]), "Branch filter").value,
+        "+:feature/*"
+    );
+    assert_eq!(
+        fact(facts(&triggers.blocks[1]), "When").value,
+        "daily at 03:00"
+    );
+}
+
 /// A section asked for on its own is read on its own: the parameters tab does
 /// not cost a builds read.
 #[tokio::test]

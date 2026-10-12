@@ -463,8 +463,8 @@ fn triggers(record: &ConfigRecord) -> ViewSection {
 }
 
 /// A trigger's type and the properties that say when it fires and for what.
-/// A type this adapter does not know shows every property it has, verbatim,
-/// except a secure one.
+/// A type this adapter does not know shows its type and whether it is
+/// disabled, nothing of its properties, as a VCS root shows none of its own.
 fn trigger_facts(trigger: &Trigger) -> Vec<Fact> {
     let kind = nonblank(trigger.kind.as_deref())
         .or(nonblank(trigger.id.as_deref()))
@@ -500,17 +500,9 @@ fn trigger_facts(trigger: &Trigger) -> Vec<Fact> {
             );
             push("Branch filter", own("branchFilter"));
         }
-        _ => {
-            for property in &p.property {
-                if property.name.starts_with("secure:") {
-                    continue;
-                }
-                push(
-                    &property.name,
-                    nonblank(property.value.as_deref()).map(str::to_owned),
-                );
-            }
-        }
+        // A type this adapter does not know -- a plugin's -- may keep a
+        // secret under any name, so none of its properties is drawn.
+        _ => {}
     }
     facts
 }
