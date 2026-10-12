@@ -626,3 +626,79 @@ testenv/hetzner/env` and `testenv/hetzner/tunnel up` still work for the seeds; t
 would need their Hetzner branches back (`git log -- justfile` for #633's diff) and `testenv/live`'s
 refusal of that shell lifted. After #634 decommissions the servers it means re-provisioning them
 (`testenv/hetzner/provision.sh`).
+
+## #634 — decommission the Hetzner servers
+
+Ruled 2026-10-12 by **Björn himself**, in the loop session, not by the deputy. Recorded in the
+issue body of #634: <https://github.com/BFoerschner/knobas/issues/634>
+
+**The fork:** once #633 runs every live suite against products started on the notebook, the three
+Hetzner servers (`knobas-teamcity`, `knobas-jira`, `knobas-confluence`, about €53 a month) serve no
+live suite. They are still a fixture: `testenv/hetzner/estate.json` was the estate the Import,
+`--demo` and `just estate-live` are tested against (#427: *"the estate knobas models **is** this
+infrastructure"*). Keep them, or decommission them?
+
+**Ruling:** decommission them. The estate file is replaced by the estate that exists afterwards —
+the notebook, its OrbStack Docker engine and the on-demand product containers from #633 — and
+everything under `testenv/hetzner/` that served only the servers is retired with its docs. No agent
+runs `hcloud`, opens ssh to the servers or switches hcloud contexts; the teardown is Björn's, from
+the checklist on the PR that closes #634.
+
+**Reasoning:** the loop works on one source at a time, so a product is needed for one ticket's live
+runs and not between them (#633); the servers' standing cost bought nothing a live suite still
+uses. ADR-0013 is unchanged: the witness is the real system, and the estate it witnesses against is
+now the one on the notebook.
+
+**If you disagree, the cost of reversing this is:** small until the teardown, and a
+re-provisioning after it. Before it, revert the PR that closed #634. After it,
+`testenv/hetzner/provision.sh` from git history stands three new servers up with new
+`hcloud_id`s and addresses, and the estate file, the Kuma monitors and the tunnel follow by hand.
+
+## #634 — the hcloud importer's witness once the servers are gone
+
+Ruled 2026-10-12 by the deputy for Björn, flagged for his review. Comment:
+<https://github.com/BFoerschner/knobas/issues/634#issuecomment-6122037668>
+
+**The fork:** ADR-0015's consequence made the hcloud importer's witness *"a file generated from the
+live hcloud … previews as all-known against `testenv/hetzner/estate.json`"*, and
+`estate_live.rs::the_real_estate_is_already_in_the_tree` was its only real witness;
+`tests/it/assets_ipc.rs` replays a recording, which *"certifies shape and nothing else"*. Once the
+servers are deleted the project holds nothing to compare, while the importer still ships in the
+Import's chooser. (A) retire the hcloud half, a recording being the only cover; (B) keep the project
+and a read-only token and assert an empty answer; (C) keep one smallest server; (D) remove the
+importer.
+
+**Ruling:** **B, extended so that it never stops reading servers.** The hcloud half of `just
+estate-live` reads whatever the real project holds and checks the importer's own round trip on it:
+produce, produce again with a landing at the top of the estate, apply, produce a third time — which
+must come back `Ready`, nothing new, and preview all known with no changes. On an empty project it
+shrinks to an empty `Ready` file and an empty preview. The expected server count is declared and
+required (`ESTATE_LIVE_HCLOUD_SERVERS`); a different count is red, and no variable skips the half.
+A PR that touches the hcloud producer owes a run at `=1`, with a server Björn creates in the knobas
+project and deletes after the run — never an agent, never a recipe. This PR's own run was to be
+taken before the teardown, at `=3`; when the implementer ran it, the project the `.env` token
+reaches already answered zero servers (the count gate went red), so the PR carries the `=0` run
+and leaves the parse witness open for Björn's `=1`. The teardown checklist starts by keeping the project and replacing
+`.env`'s token with a read-only one, and ends with `ESTATE_LIVE_HCLOUD_SERVERS=0 just estate-live`
+posted on #634. ADR-0015 gains a dated strike-through consequence, `CONTEXT.md` **Importer** a dated
+amendment, and #509's §10.8 entry a dated line; no new ADR. Not A, not C, not D.
+
+**Reasoning, in short:** A covers a shipped importer's decode with a recording, which ADR-0013
+forbids for something the real API can produce for a few cents an hour — a new exception to
+ADR-0013 would be Björn's sentence, not the deputy's (#498's ruling). C re-decides what Björn
+decided. D changes spec #491 story 61. B alone is a real floor (the endpoint, the auth, the envelope
+and the pagination) but would make a server's parse unwitnessable for good; the round trip keeps
+that floor and makes the full witness one stood-up server away, which is #633's *"spin one up when
+we have to test"* applied to the one real system that is not a container. It also witnesses spec
+#491 story 64 directly: a re-import previews as already in the tree. The count is declared because
+a suite that skips on an unset variable is one libtest counts as a pass (#351). The parse run is
+Björn's because #634 keeps every agent away from hcloud writes. The amendment is ratified and
+flagged for Björn's review on the #500 precedent: no migration, no IPC, no new ADR.
+
+**If you disagree, the cost of reversing this is:** low until the servers are deleted, moderate
+after. Before the teardown, C keeps one server (count `=1`, the server back in the estate file with
+its `hcloud_id`), and A deletes the hcloud half with an ADR line recording the end of its live
+witness — your sentence, being an ADR-0013 exception. After the teardown, C means creating a server
+with a new `hcloud_id`. Nothing in the producer depends on this: the test and two dated record lines
+are all that change. If the project itself is to go, the token goes with it and the hcloud half
+becomes A by default, with the exception above.

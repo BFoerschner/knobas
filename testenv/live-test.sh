@@ -33,7 +33,6 @@ esac
 STUB
 chmod +x "$scratch/bin/docker"
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
-unset KNOBAS_TESTENV_HETZNER
 
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$here/live-lib.sh"
@@ -98,12 +97,10 @@ STUB_RUNNING="knobas-jira knobas-jira-db" \
 
 check_guard "an unknown product is refused" refused kuma "unknown product"
 
-# --- never the Hetzner servers ----------------------------------------------
+# --- never a remote engine ---------------------------------------------------
 
-KNOBAS_TESTENV_HETZNER=1 \
-  check_guard "a shell that sourced hetzner/env is refused" refused jira hetzner
 STUB_CONTEXT=knobas-jira \
-  check_guard "a docker context aimed at a server is refused" refused jira knobas-jira
+  check_guard "a context left from the Hetzner servers is refused" refused jira knobas-jira
 
 # check_down_refused <what> -- `live_down jira` must refuse before any call.
 check_down_refused() {
@@ -115,8 +112,7 @@ check_down_refused() {
     fail "$1: a refusal touches nothing" "$(cat "$STUB_LOG")"
   fi
 }
-KNOBAS_TESTENV_HETZNER=1 check_down_refused "a hetzner/env shell cannot take a product down either"
-STUB_CONTEXT=knobas-jira check_down_refused "nor can a server's docker context"
+STUB_CONTEXT=knobas-jira check_down_refused "a server's docker context cannot take a product down either"
 
 # --- what a run puts back ---------------------------------------------------
 

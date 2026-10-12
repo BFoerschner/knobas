@@ -16,7 +16,7 @@ the hostname arm would stay wide while the route arm narrowed, and a reader
 could not predict from the reason which behaviour they were looking at.
 
 The cost is real and named in the rule's own docstring. Eight routes in
-`testenv/hetzner/estate.json` carry `127.0.0.1` and land on six different
+`testenv/estate.json` carry `127.0.0.1` and land on six different
 assets. A Kuma running on the notebook rather than in a container would watch
 `http://127.0.0.1:8111/` and be proposed to all six, five of them wrong.
 

@@ -827,8 +827,9 @@ async fn a_monitor_proposes_the_asset_whose_hostname_it_watches_and_nothing_else
 
 /// **A ping check reaches the estate's servers** -- the widening of #479, and
 /// the pair the rule could not see before it: Kuma fills `hostname` and no
-/// `url` for a `ping`, and the three Hetzner servers state their address in an
-/// `ip` property rather than a `hostname` one.
+/// `url` for a `ping`, and the estate states a machine's address in an `ip`
+/// property rather than a `hostname` one (the three Hetzner servers did until
+/// #634; the notebook does since).
 ///
 /// The negative control is one octet off, because the join is equality on the
 /// whole address and a rule that matched on a prefix would answer `10.0.0.8`
@@ -854,13 +855,13 @@ async fn a_ping_monitor_proposes_the_asset_whose_ip_it_watches() {
     .await;
     let server = asset_properties(
         &pool,
-        "hetzner-teamcity",
+        "vm-teamcity",
         serde_json::json!({ "ip": text_property("10.0.0.7") }),
     )
     .await;
     let neighbour = asset_properties(
         &pool,
-        "hetzner-jira",
+        "vm-jira",
         serde_json::json!({ "ip": text_property("10.0.0.8") }),
     )
     .await;
@@ -919,7 +920,7 @@ async fn an_asset_stating_one_address_in_both_properties_is_proposed_once() {
     .await;
     let server = asset_properties(
         &pool,
-        "hetzner-teamcity",
+        "vm-teamcity",
         serde_json::json!({
             "hostname": text_property("10.0.0.7"),
             "ip": text_property("10.0.0.7"),
@@ -952,24 +953,26 @@ async fn an_asset_stating_one_address_in_both_properties_is_proposed_once() {
 /// by a hostname property, and the suggestion goes to the asset the route
 /// **lands on**.
 ///
-/// The fixture is `testenv/hetzner/estate.json`'s own shape, because it is the
-/// shape that decides the rule: `route:tunnel-gitea-reverse` is exposed by
-/// `asset:hetzner-teamcity`, targets `asset:knobas-gitea` and carries
+/// The fixture is `testenv/estate.json`'s own shape, because it is the shape
+/// that decides the rule: `route:compose-gitea` is exposed by
+/// `asset:orbstack-docker`, targets `asset:knobas-gitea` and carries
 /// `http://gitea:3000/`, while the seeded monitor `gitea` watches
 /// `http://gitea:3000/api/healthz`. The thing answering at that host is Gitea,
-/// so the exposing end is the negative here and not the positive.
+/// so the exposing end is the negative here and not the positive. (Until #634
+/// the exposer was a Hetzner server and the route a reverse tunnel; the shape
+/// is the same.)
 #[tokio::test]
 async fn a_monitor_proposes_the_asset_a_route_lands_on_not_the_one_exposing_it() {
     let pool = scratch().await;
     let watching = monitor(&pool, "1", "gitea", Some("http://gitea:3000/api/healthz")).await;
 
-    let teamcity = asset(&pool, "hetzner-teamcity", None).await;
+    let engine = asset(&pool, "orbstack-docker", None).await;
     let gitea = asset(&pool, "knobas-gitea", None).await;
     route(
         &pool,
-        &teamcity,
+        &engine,
         Some(&gitea),
-        "gitea (reverse tunnel)",
+        "gitea (compose network)",
         "http://gitea:3000/",
     )
     .await;
@@ -992,11 +995,11 @@ async fn a_monitor_proposes_the_asset_a_route_lands_on_not_the_one_exposing_it()
         .clone()
         .unwrap();
     assert!(
-        reason.contains("gitea") && reason.contains("route gitea (reverse tunnel)"),
+        reason.contains("gitea") && reason.contains("route gitea (compose network)"),
         "the reason names the host and the route that states it: {reason}"
     );
     assert!(
-        between(&entries, &teamcity, &watching).is_none(),
+        between(&entries, &engine, &watching).is_none(),
         "the asset that merely opens the door is not what the monitor watches"
     );
     assert!(between(&entries, &bystander, &watching).is_none());

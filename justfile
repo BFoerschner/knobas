@@ -1206,12 +1206,7 @@ start-work-live:
 kuma_live_env := "testenv/, which is what the lines above this one do:
   docker compose up -d --wait uptime-kuma
   ./seed-kuma.sh
-  eval \"$(./seed --env-kuma)\"
-
-  `seed-kuma.sh` also needs `testenv/hetzner/hosts.env`, which is gitignored --
-  three of the monitors ping the Hetzner servers by IP. It refuses without it
-  rather than seeding an estate missing half of itself; copy the file into this
-  worktree or run ./hetzner/provision.sh."
+  eval \"$(./seed --env-kuma)\""
 
 # The Uptime Kuma adapter against the REAL pinned container in `testenv/`
 # (issue #442, M4.1), and then **M4.1's exit witness**: the whole alert chain
@@ -1258,10 +1253,11 @@ kuma_live_env := "testenv/, which is what the lines above this one do:
 # estate carries such a check at all is that **every other thing Kuma watches
 # here is shared** (`testenv/README.md`, "The canary").
 #
-# THE TUNNEL DOES NOT HAVE TO BE UP. Three of the seeded monitors check the
-# products through `hetzner/tunnel` and are red without it. The suite asserts
+# NO PRODUCT HAS TO BE UP. Three of the seeded monitors check TeamCity, Jira
+# and Confluence at their published ports, and those products run on demand
+# (#633), so the three are red whenever none is started. The suite asserts
 # that every monitor carries *a* state Kuma published, never that a particular
-# one is up, so a dead tunnel is not a red run here -- it is a red monitor,
+# one is up, so a stopped product is not a red run here -- it is a red monitor,
 # which is what a monitor is for.
 #
 # Serial and unparallelised: the runs share one server, and one test asserts
@@ -1556,17 +1552,18 @@ confluence-live:
 # through the suites: measured 2026-09-03 between 295 s and 392 s in all from
 # empty volumes, of which the wizards and the content seed were ~265 and the
 # suites ~20; both JVMs starting *together* is what died twice under load
-# (#313 -> #314). From 2026-09-06 to 2026-10-12 it ran against Hetzner
-# servers instead (testenv/hetzner/README.md), which live suites no longer
-# use.
+# (#313 -> #314). From 2026-09-06 to 2026-10-12 it ran against three Hetzner
+# servers instead, decommissioned since (#634; `testenv/hetzner/` is in git
+# history).
 atlassian-live:
     just jira-live
     just confluence-live
 
-# **Both importers** against the real systems (issues #509 and #510, v1.5
-# streams 9 and 10). `crates/knobas-app/tests/estate_live.rs` is the suite and
-# it is two tests: the hcloud producer against Hetzner Cloud, and the Docker
-# producer against the four engines `testenv/hetzner/estate.json` names.
+# **Both importers** against the real systems (issues #509, #510 and #634).
+# `crates/knobas-app/tests/estate_live.rs` is the suite and it is two tests:
+# the hcloud producer's round trip over the real Hetzner project, and the
+# Docker producer against the notebook's engine, the one `testenv/estate.json`
+# names.
 #
 # WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. Both producers are
 # run against a fake in `just check` (`tests/it/assets_ipc.rs`: a recorded hcloud
@@ -1576,65 +1573,53 @@ atlassian-live:
 #
 #   1. that Hetzner still answers in that shape, and that the docker CLI still
 #      writes one JSON object per line;
-#   2. that the three `hcloud_id` values in `testenv/hetzner/estate.json` are
-#      the ids of the three real servers (#508 wrote them from `hcloud server
-#      list`; a *missing* id is red on a mutant, a plausible-but-wrong one is a
-#      second copy of a server and silent);
-#   3. that the four `docker_context` values in that file are contexts this
-#      machine has, each reaching the engine the file says it does;
-#   4. that every **running** container on those four engines is written down in
-#      that file, under the name it carries there -- the "diff against the
-#      estate file" the roadmap booked.
+#   2. that the hcloud importer reads back what it wrote: produce, land what is
+#      new at the top of the estate, apply, produce again -- all known, no
+#      changes, every server matched by the `hcloud_id` the API returned;
+#   3. that the `orbstack` context reaches the engine the estate file says;
+#   4. that every **running** container on it is written down in that file.
 #
-# **A RED RUN NAMING A SERVER OR A CONTAINER IS READ FIRST AS A WRONG VALUE IN
-# THAT FILE**, and only then as a bug in a producer: a wrong `hcloud_id` is
-# unknown by id and unmatched by key, so its server previews as *new*; a
-# container running on a server and never written down previews as *new* the
-# same way. That is the orchestrator's reading, posted on #509 under the
-# deputy's ruling of 2026-09-08 on #508, and both suites' headers repeat it
-# where a reader of a stack trace will meet it.
+# THE SERVER COUNT IS DECLARED: `ESTATE_LIVE_HCLOUD_SERVERS=<n> just
+# estate-live`, required, and a different count is red (the deputy's ruling on
+# #634). The knobas Hetzner project is empty once its three servers are
+# decommissioned (#634), so an ordinary run is `=0`: a real authenticated
+# request, its envelope and its pagination, and proof nothing is left billing.
+# The parse of a server needs one to exist: a PR that touches the hcloud
+# producer (`crates/knobas-app/src/assets/hcloud.rs` or the client it uses)
+# owes a run at `=1`, and that run is Björn's -- he creates the smallest server
+# in the knobas project, runs it, and deletes the server. No agent and no recipe
+# creates or deletes a server.
 #
-# NO TUNNEL, NO CONTAINER, NO SEED. hcloud's API is public. The three Hetzner
-# docker contexts are `ssh://knobas-<product>`, which `~/.ssh/config` resolves
-# to each server's own address on port 22, while `testenv/hetzner/tunnel`
-# forwards only the products' HTTP ports (8111, 8080, 8090) -- so no forward is
-# in a docker call's path. That is a reading of what the two carry and not a run
-# with the tunnel down; the run that was made, on 2026-09-08, had it up. Every
-# call either half makes is a
-# read, against a shared fixture (`testenv/README.md`: no shared container is
-# stopped by anything here, and nothing here touches one). The `hcloud` contexts
-# named `terra-*` belong to other projects and are not consulted: this reads the
-# *token*, and the token is the project.
+# **A RED DOCKER RUN NAMING A CONTAINER IS READ FIRST AS `testenv/estate.json`
+# BEING BEHIND THE ENGINE**, and only then as a bug in the producer.
 #
-# WHAT IT DOES NEED, besides the token: the **docker CLI** and the four contexts
-# `testenv/hetzner/provision.sh` writes (`orbstack` is OrbStack's own). A context
-# this machine does not have is `unreachable` and red -- deliberately not a gap
-# in the produced file, because a file that quietly omitted one engine's
-# containers is indistinguishable from an engine holding none.
+# NO SSH, NO TUNNEL, NO `hcloud` CLI. The hcloud half is HTTPS `GET
+# /v1/servers` with the token in the repo-root `.env`; the Docker half spawns
+# `docker --context orbstack ps`, the only context the estate file names. Every
+# call is a read; the imports write into scratch databases of the run's own.
 #
-# The variable is **gated rather than skipped on**, `teamcity-live`'s rule and
-# issue #351's: a suite that skipped by name on an unset variable is one libtest
-# counts as a pass, and a green line certifying nothing is worse than a refusal.
-# The docker CLI is gated the same way and for the same reason.
+# The variables are **gated rather than skipped on**, `teamcity-live`'s rule
+# and issue #351's: a suite that skipped by name on an unset variable is one
+# libtest counts as a pass, and a green line certifying nothing is worse than a
+# refusal. The docker CLI is gated the same way and for the same reason.
 #
-# Serial and unparallelised: two tests, one rate-limiter budget, somebody else's
-# servers.
+# Serial and unparallelised: two tests, one rate-limiter budget.
 estate-live:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f .env ]; then set -a; . ./.env; set +a; fi
-    just _require-live-env 'the repo-root .env, which is gitignored -- the same
-    HETZNER_API_TOKEN testenv/hetzner/provision.sh reads:
-      cp .env.example .env   # then paste the Hetzner Cloud API token in
-    No tunnel and no seed are needed; this reads hcloud and the docker contexts.' \
-      HETZNER_API_TOKEN
+    just _require-live-env 'HETZNER_API_TOKEN is in the repo-root .env, which is gitignored:
+      cp .env.example .env   # then paste the read-only token of the knobas Hetzner project in
+    ESTATE_LIVE_HCLOUD_SERVERS is how many servers that project holds, said on the
+    command line -- 0 once the servers are decommissioned (#634):
+      ESTATE_LIVE_HCLOUD_SERVERS=0 just estate-live' \
+      HETZNER_API_TOKEN ESTATE_LIVE_HCLOUD_SERVERS
     if ! command -v docker >/dev/null 2>&1; then
       echo "error: the docker CLI is not on the PATH." >&2
-      echo "  The Docker half of this recipe spawns it once per container engine" >&2
-      echo "  (\`docker --context <context> ps --format json\`), so without it the" >&2
-      echo "  suite would refuse every engine and report a fault that is this" >&2
-      echo "  machine's rather than the estate's. The four contexts it needs come" >&2
-      echo "  from testenv/hetzner/provision.sh; \`orbstack\` is OrbStack's own." >&2
+      echo "  The Docker half of this recipe spawns it against the notebook's engine" >&2
+      echo "  (\`docker --context orbstack ps --format json\`), so without it the" >&2
+      echo "  suite would refuse the engine and report a fault that is this" >&2
+      echo "  machine's rather than the estate's." >&2
       exit 1
     fi
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test estate_live \

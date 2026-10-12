@@ -1,36 +1,24 @@
 [
   {
-    "name": "knobas-teamcity",
+    "name": "notebook",
     "type": "ping",
-    "hostname": "${KNOBAS_HETZNER_TEAMCITY_IP}",
+    "hostname": "0.250.250.254",
     "interval": 60
   },
   {
-    "name": "knobas-jira",
-    "type": "ping",
-    "hostname": "${KNOBAS_HETZNER_JIRA_IP}",
-    "interval": 60
-  },
-  {
-    "name": "knobas-confluence",
-    "type": "ping",
-    "hostname": "${KNOBAS_HETZNER_CONFLUENCE_IP}",
-    "interval": 60
-  },
-  {
-    "name": "teamcity (tunnel)",
+    "name": "teamcity",
     "type": "http",
     "url": "http://host.docker.internal:8111/login.html",
     "interval": 60
   },
   {
-    "name": "jira (tunnel)",
+    "name": "jira",
     "type": "http",
     "url": "http://host.docker.internal:8080/status",
     "interval": 60
   },
   {
-    "name": "confluence (tunnel)",
+    "name": "confluence",
     "type": "http",
     "url": "http://host.docker.internal:8090/status",
     "interval": 60

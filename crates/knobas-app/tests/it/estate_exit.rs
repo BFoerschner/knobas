@@ -8,21 +8,22 @@
 //! model cannot say whether the model fits an estate. ADR-0013 is the rule
 //! (*the real container is the witness*) and spec #427 restates it for the
 //! assets stream (*nothing Tidewater-shaped is invented for them*), so what
-//! this file drives is `testenv/hetzner/estate.json` -- the machines this
-//! repository is developed, tested and released on, written down where they
-//! are provisioned.
+//! this file drives is `testenv/estate.json` -- the machines this
+//! repository is developed, tested and released on, written down as they run.
+//! (Until #634 that included three Hetzner servers; they were decommissioned
+//! and the file, and this checklist, followed.)
 //!
 //! # One profile, one import, the whole checklist
 //!
 //! The exit criterion is a sentence about *a profile*: the file imports, a
 //! container is found in the launcher with its path, ⌘T times it, adding its
-//! server to a context lists the container in the room's Assets tile, a tunnel
-//! forward draws its wire, and a re-import previews everything as already in
-//! the tree. Six tests over six databases would be six profiles, and the claim
+//! machine to a context lists the container in the room's Assets tile, a route
+//! to it draws its wire, and a re-import previews everything as already in the
+//! tree. Six tests over six databases would be six profiles, and the claim
 //! would be about none of them. So [`estate`] imports the file **once** into
 //! one scratch database, every test here reads that one estate, and what the
 //! file asserts as a whole is that those six things are true of the same
-//! twenty-three assets at the same time.
+//! sixteen assets at the same time.
 //!
 //! They still do not collide: the timer is a singleton and exactly one test
 //! starts one, the context test creates its own room, and every search is for
@@ -46,28 +47,26 @@ use knobas_app::time::{self, TimerTarget};
 use knobas_search::{SearchFilters, SearchQuery};
 use sqlx::PgPool;
 
-/// The estate as provisioned, embedded -- the same bytes `sources::demo` and
+/// The estate as it runs, embedded -- the same bytes `sources::demo` and
 /// `tests/it/assets_ipc.rs` embed.
-const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
-/// The container the checklist follows, and the server that holds it.
+/// The container the checklist follows, and the machine that holds it.
 ///
-/// `knobas-teamcity` **twice**, and that is the point rather than an
-/// oversight: the estate names the Hetzner server and the TeamCity container
-/// on it the same thing, which is why `testenv/hetzner/README.md` documents
-/// the `hetzner-` id convention at all. A launcher hit for that name is
-/// therefore ambiguous by construction, and the only thing that tells the two
-/// apart on screen is the path -- which is what criterion 2's *"with its
-/// path"* is asking for.
+/// The TeamCity server, on OrbStack's VM. Until #634 it ran on a Hetzner
+/// server that shared its name, `knobas-teamcity`, so a launcher hit for the
+/// name was ambiguous by construction; the server is gone, and what criterion
+/// 2's *"with its path"* asks for is now the path saying where the container
+/// runs.
 const CONTAINER: &str = "asset:knobas-teamcity";
-const SERVER: &str = "asset:hetzner-teamcity";
+const MACHINE: &str = "asset:orbstack";
 
 /// Where the container sits, by the names a reader sees.
 const CONTAINER_PATH: &str =
-    "knobas test estate / Hetzner Cloud nbg1 / knobas-teamcity / Docker engine (knobas-teamcity)";
+    "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / Docker engine (OrbStack)";
 
-/// The tunnel forward that reaches it, and the notebook that exposes it.
-const FORWARD: &str = "route:tunnel-teamcity";
+/// The published port that reaches it, and the notebook that exposes it.
+const FORWARD: &str = "route:notebook-teamcity";
 const NOTEBOOK: &str = "asset:notebook";
 
 /// How to reach the one imported profile every test here reads.
@@ -112,10 +111,10 @@ async fn estate() -> PgPool {
                     outcome.monitors_kept,
                     outcome.monitors_linked,
                 ),
-                (23, 9, 0, 0, 7, 0),
+                (16, 9, 0, 0, 5, 0),
                 "the first import of the real estate: every entry is an insert, so \
                  nothing is set on a row that was already there and nothing is kept \
-                 from a hand edit; the seven Uptime Kuma names are kept on the assets \
+                 from a hand edit; the five Uptime Kuma names are kept on the assets \
                  and none of them resolves to a monitor, because no adapter emits the \
                  kind until M4.1"
             );
@@ -160,15 +159,15 @@ fn query(raw: &str) -> SearchQuery {
 /// **The tree in the profile is the tree in the file** (#440, criterion 2).
 ///
 /// Ids, containment and the inheritance, in one read. The path is the whole
-/// five-deep chain the estate actually has -- site › site › VM › engine ›
-/// container -- and it is spelled in names, because that is what the Tree's
-/// held-by line draws and what tells this container from the server above it.
+/// five-deep chain the estate actually has -- site › hypervisor › VM › engine
+/// › container -- and it is spelled in names, because that is what the Tree's
+/// held-by line draws.
 ///
 /// The environment and the owner are the *inheritance* half: the file sets
 /// them on the root and on nothing else (`estate_file.rs` holds it to that),
 /// so a container five levels down reporting `dev` from `asset:knobas-estate`
 /// is `assets::inherited` walking the real path rather than a value copied
-/// twenty-three times.
+/// sixteen times.
 #[tokio::test]
 async fn the_estate_file_imports_into_a_fresh_profile_with_its_own_ids() {
     let pool = &estate().await;
@@ -216,14 +215,14 @@ async fn the_estate_file_imports_into_a_fresh_profile_with_its_own_ids() {
     );
 }
 
-/// **The seven monitor names are kept, and none of them is a link yet**
+/// **The five monitor names are kept, and none of them is a link yet**
 /// (#440, and spec #427's *"a name the mirror does not hold yet is kept on the
 /// asset and resolved by the next import or the M4.1 sync"*).
 ///
 /// The negative is the load-bearing half. Nothing emits the `monitor` kind
-/// until M4.1, so an estate whose seven names had all resolved would mean the
+/// until M4.1, so an estate whose five names had all resolved would mean the
 /// import had invented monitors to link to -- and a reader looking at the
-/// demo's Tree would be looking at seven links to nothing.
+/// demo's Tree would be looking at five links to nothing.
 #[tokio::test]
 async fn the_files_monitor_names_are_kept_on_the_assets_and_resolve_to_nothing_yet() {
     let pool = &estate().await;
@@ -254,8 +253,8 @@ async fn the_files_monitor_names_are_kept_on_the_assets_and_resolve_to_nothing_y
     assert_eq!(named, expected, "the file's names, on the file's assets");
     assert_eq!(
         named.iter().map(|(_, names)| names.len()).sum::<usize>(),
-        7,
-        "seven names in the real estate: three pings, three product checks, one local"
+        5,
+        "five names in the real estate: the notebook's ping, three product checks, Gitea's"
     );
 
     let links: i64 = sqlx::query_scalar(
@@ -275,13 +274,14 @@ async fn the_files_monitor_names_are_kept_on_the_assets_and_resolve_to_nothing_y
 // Criterion 2, clause 2: found in the launcher, with its path
 // ---------------------------------------------------------------------------
 
-/// **A container is found in the launcher, and the path is what tells it from
-/// the server it runs on** (#440, criterion 2; story 34).
+/// **A container is found in the launcher, with the path that says where it
+/// runs** (#440, criterion 2; story 34).
 ///
-/// `knobas-teamcity` names two assets in the real estate, and a reader typing
-/// it gets both. The assertion is therefore on the *pairs* -- name and path --
-/// because a launcher answering with two identical rows has found the
-/// container and told nobody which one it is.
+/// The assertion is on the *pair* -- id and path -- because a launcher
+/// answering with a bare name has found the container and told nobody where it
+/// is. (Until #634 a Hetzner server carried the same name, and the path was the
+/// only thing telling the two hits apart; the filter below still reads every
+/// `knobas-teamcity` asset, so a second one arriving would be red here.)
 ///
 /// Through `search_inner`, which is the command's own body, so this is the
 /// corpus and the ranking rather than a shape composed for the test.
@@ -297,20 +297,14 @@ async fn a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart(
         .groups
         .iter()
         .flat_map(|group| &group.hits)
-        .filter(|hit| hit.row.entity_id == CONTAINER || hit.row.entity_id == SERVER)
+        .filter(|hit| hit.row.entity_id.starts_with("asset:knobas-teamcity"))
         .map(|hit| (hit.row.entity_id.clone(), hit.row.path.clone()))
         .collect();
 
     assert_eq!(
         hits,
-        vec![
-            (CONTAINER.to_owned(), Some(CONTAINER_PATH.to_owned())),
-            (
-                SERVER.to_owned(),
-                Some("knobas test estate / Hetzner Cloud nbg1".to_owned())
-            ),
-        ],
-        "both assets called knobas-teamcity are found, each with the path it sits at"
+        vec![(CONTAINER.to_owned(), Some(CONTAINER_PATH.to_owned()))],
+        "the container is found, with the path it sits at"
     );
 
     // And the group they arrive in is the estate's, so the launcher draws them
@@ -331,11 +325,11 @@ async fn a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart(
 /// (#440, criterion 2; story 46).
 ///
 /// #433 witnessed an asset as a timer target over a two-asset estate. What is
-/// added here is the ambiguity the real estate has: the block's title is
-/// joined out of `knobas.entity`, and *knobas-teamcity* is the name of two
-/// rows, so a join that lost the id would still produce the expected string.
-/// The target is therefore asserted by **id** and the title by name, and the
-/// two together are what say the afternoon went on the container.
+/// added here is the real estate's crowding: the block's title is joined out
+/// of `knobas.entity`, and the container sits beside an agent whose name
+/// starts with its own. The target is therefore asserted by **id** and the
+/// title by name, and the two together are what say the afternoon went on the
+/// container.
 #[tokio::test]
 async fn cmd_t_on_the_container_times_it_and_the_day_review_names_it() {
     let pool = &estate().await;
@@ -384,29 +378,28 @@ async fn cmd_t_on_the_container_times_it_and_the_day_review_names_it() {
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 2, clause 4: the server in a context lists the container
+// Criterion 2, clause 4: the machine in a context lists the container
 // ---------------------------------------------------------------------------
 
-/// **Adding the server to a context lists the container in the room's Assets
+/// **Adding the machine to a context lists the container in the room's Assets
 /// tile** (#440, criterion 2; ADR-0008's ancestor clause, story 41).
 ///
-/// One link is drawn -- the server into the room -- and the container arrives
-/// two levels below it, through the container engine, because membership
-/// counts through ancestors and over nothing else. The negative is the other
-/// half of that sentence and is what a fixture of one branch could not make:
-/// the site **above** the server is not a member, and neither is the Jira
-/// server beside it, so the tile is the subtree and not the estate.
+/// One link is drawn -- OrbStack's VM into the room -- and the container
+/// arrives two levels below it, through the container engine, because
+/// membership counts through ancestors and over nothing else. The negative is
+/// the other half of that sentence: the notebook and the site **above** the VM
+/// are not members, so the tile is the subtree and not the estate.
 #[tokio::test]
-async fn the_server_in_a_context_brings_the_container_into_the_rooms_assets_tile() {
+async fn the_machine_in_a_context_brings_the_container_into_the_rooms_assets_tile() {
     let pool = &estate().await;
 
-    let room = knobas_core::context::create_adhoc(pool, "the teamcity box")
+    let room = knobas_core::context::create_adhoc(pool, "the docker vm")
         .await
         .expect("a room");
     knobas_core::link::create(
         pool,
         &knobas_core::entity::EntityRef::parse(&room.id).expect("a ref"),
-        &knobas_core::entity::EntityRef::parse(SERVER).expect("a ref"),
+        &knobas_core::entity::EntityRef::parse(MACHINE).expect("a ref"),
         "related",
         knobas_core::link::Origin::Manual,
         None,
@@ -424,20 +417,32 @@ async fn the_server_in_a_context_brings_the_container_into_the_rooms_assets_tile
 
     // Worst first and then by name, which is `assets::in_context`'s order.
     // Nothing in the estate carries a status yet, so the whole tile is the
-    // name sort -- and it puts the **two rows called `knobas-teamcity`** next
-    // to each other, the server and the container on it, separated by their id
-    // and distinguishable on screen by nothing but the path.
-    let drawn: Vec<&str> = tile.iter().map(|(id, _, _)| id.as_str()).collect();
+    // name sort.
+    let names: Vec<&str> = tile.iter().map(|(_, name, _)| name.as_str()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "the tile is in name order, byte for byte");
+    let mut drawn: Vec<&str> = tile.iter().map(|(id, _, _)| id.as_str()).collect();
+    drawn.sort_unstable();
     assert_eq!(
         drawn,
         [
-            "asset:hetzner-teamcity-docker",
-            SERVER,
+            "asset:db-confluence",
+            "asset:db-jira",
+            "asset:db-teamcity",
+            "asset:knobas-confluence",
+            "asset:knobas-confluence-db",
+            "asset:knobas-gitea",
+            "asset:knobas-jira",
+            "asset:knobas-jira-db",
+            "asset:knobas-mockd",
             CONTAINER,
             "asset:knobas-teamcity-agent",
-            "asset:db-teamcity",
+            "asset:knobas-uptime-kuma",
+            MACHINE,
+            "asset:orbstack-docker",
         ],
-        "the server and everything it holds, and nothing else"
+        "the VM and everything it holds, and nothing else"
     );
 
     let container = tile
@@ -447,42 +452,38 @@ async fn the_server_in_a_context_brings_the_container_into_the_rooms_assets_tile
     assert_eq!(
         (container.1.as_str(), container.2.as_deref()),
         ("knobas-teamcity", Some(CONTAINER_PATH)),
-        "and it carries the path, which is the only thing telling it from its own server"
+        "and it carries the path"
     );
 
-    for outside in [
-        "asset:hetzner-nbg1",
-        "asset:knobas-estate",
-        "asset:hetzner-jira",
-        "asset:knobas-jira",
-    ] {
+    for outside in ["asset:knobas-estate", NOTEBOOK] {
         assert!(
             !drawn.contains(&outside),
-            "{outside} is not below the server and must not be a member"
+            "{outside} is not below the VM and must not be a member"
         );
     }
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 2, clause 5: a tunnel forward draws its wire
+// Criterion 2, clause 5: a route to the container draws its wire
 // ---------------------------------------------------------------------------
 
-/// **The tunnel's TeamCity forward has both ends, from both panes** (#440,
+/// **TeamCity's published port has both ends, from both panes** (#440,
 /// criterion 2; story 31).
 ///
 /// A wire is drawn from a route's row in the pane to the row of the asset at
 /// its far end, so what the store owes the view is a route that appears on
-/// both panes with a target that resolves. `route:tunnel-teamcity` is the real
-/// forward `testenv/hetzner/tunnel` opens: exposed by the notebook, landing on
-/// a container three machines away, which is the case a same-machine route
+/// both panes with a target that resolves. `route:notebook-teamcity` is the
+/// port `testenv/live up teamcity` publishes: exposed by the notebook, landing
+/// on a container three levels below it, which is the case a same-asset route
 /// could not witness -- the far end is in a different column, and on a narrow
-/// window behind a spine.
+/// window behind a spine. (Until #634 this was the SSH tunnel's forward to a
+/// Hetzner server, on the same port.)
 ///
 /// The geometry itself is `app/src/lib/assets/tree.ts`'s (`wiresFor`), tested
 /// there; the claim here is that the two ends the geometry needs are what the
 /// real estate hands it.
 #[tokio::test]
-async fn the_tunnels_teamcity_forward_has_both_ends_and_the_wire_can_be_drawn() {
+async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
     let pool = &estate().await;
 
     let notebook = assets::get(pool, NOTEBOOK).await.expect("the notebook");
@@ -490,7 +491,7 @@ async fn the_tunnels_teamcity_forward_has_both_ends_and_the_wire_can_be_drawn() 
         .exposes
         .iter()
         .find(|route| route.id == FORWARD)
-        .expect("the notebook exposes the tunnel's TeamCity forward");
+        .expect("the notebook exposes TeamCity's published port");
     assert_eq!(
         (
             exposed.asset_id.as_str(),
@@ -507,45 +508,45 @@ async fn the_tunnels_teamcity_forward_has_both_ends_and_the_wire_can_be_drawn() 
         "the wire's near end is the notebook's row and its far end is the container"
     );
 
-    // The other pane: from the container, the same forward is what reaches it.
+    // The other pane: from the container, the same route is what reaches it.
     let container = assets::get(pool, CONTAINER).await.expect("the container");
     let reaching = container
         .reachable_via
         .iter()
         .find(|route| route.id == FORWARD)
-        .expect("the container is reachable through the forward");
+        .expect("the container is reachable through its published port");
     assert_eq!(
         reaching.asset_id.as_str(),
         NOTEBOOK,
         "and from this end the wire runs back to the asset that exposes it"
     );
 
-    // Every forward the tunnel opens, so the claim is about the tunnel rather
-    // than about one of its lines. `testenv/hetzner/tunnel` opens three `-L`
-    // forwards and one `-R`, and the `-R` is the one that runs the other way:
-    // it is exposed by a Hetzner server and lands back on the notebook's Gitea.
-    let forwards: Vec<(String, Option<String>)> = sqlx::query_as(
-        "select asset_id, target_id from knobas.route
-         where id like 'route:tunnel-%' order by id",
-    )
-    .fetch_all(pool)
-    .await
-    .expect("the tunnel's routes");
+    // Every route in the file, so the claim is about the estate rather than
+    // about one of its lines. One runs from somewhere other than the notebook:
+    // the compose network's name for Gitea, exposed by the engine.
+    let routes: Vec<(String, Option<String>)> =
+        sqlx::query_as("select asset_id, target_id from knobas.route order by id")
+            .fetch_all(pool)
+            .await
+            .expect("the routes");
+    let target = |id: &str| Some(id.to_owned());
     assert_eq!(
-        forwards,
+        routes,
         vec![
             (
-                NOTEBOOK.to_owned(),
-                Some("asset:knobas-confluence".to_owned())
+                "asset:orbstack-docker".to_owned(),
+                target("asset:knobas-gitea")
             ),
-            (
-                "asset:hetzner-teamcity".to_owned(),
-                Some("asset:knobas-gitea".to_owned())
-            ),
-            (NOTEBOOK.to_owned(), Some("asset:knobas-jira".to_owned())),
-            (NOTEBOOK.to_owned(), Some(CONTAINER.to_owned())),
+            (NOTEBOOK.to_owned(), target("asset:knobas-confluence")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-gitea")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-jira")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-uptime-kuma")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
+            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
+            (NOTEBOOK.to_owned(), target(CONTAINER)),
         ],
-        "all four forwards land on an asset, the reverse one included"
+        "all nine routes land on an asset, the compose network's included"
     );
 }
 
@@ -561,8 +562,8 @@ async fn the_tunnels_teamcity_forward_has_both_ends_and_the_wire_can_be_drawn() 
 /// also the property `assets_ipc`'s `a_preview_writes_nothing_at_all` asserts
 /// directly.
 ///
-/// Every entry by **id**, not a count: a preview that reported thirty-two
-/// known entries because it had listed one of them thirty-two times would pass
+/// Every entry by **id**, not a count: a preview that reported twenty-five
+/// known entries because it had listed one of them twenty-five times would pass
 /// a count and would still be a dialog telling a reader nothing.
 #[tokio::test]
 async fn a_re_import_previews_every_entry_as_already_in_the_tree() {

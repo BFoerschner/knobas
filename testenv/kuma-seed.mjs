@@ -65,23 +65,10 @@ const HOST_KEY_AUTHENTICATED = process.env.KNOBAS_KEY_AUTHENTICATED === "1";
 const log = (...a) => console.error("kuma-seed:", ...a);
 const die = (msg) => { log("FAILED:", msg); process.exit(1); };
 
-// The estate's three servers are addressed by IP, and the IPs live in
-// hetzner/hosts.env, which provision.sh writes and .gitignore keeps out of the
-// repo. So monitors.json carries `${VAR}` placeholders and seed-kuma.sh passes
-// the values in. An unresolved placeholder is fatal: a ping monitor on the
-// literal string "${KNOBAS_HETZNER_JIRA_IP}" is a permanent red in the UI that
-// looks like an outage.
-const expand = (s, where) =>
-  s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => {
-    const v = process.env[name];
-    if (!v) die(`${where}: \${${name}} is not set -- run hetzner/provision.sh, or see README.md "Monitors"`);
-    return v;
-  });
-
-const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"))
-  .map((m) => Object.fromEntries(
-    Object.entries(m).map(([k, v]) => [k, typeof v === "string" ? expand(v, `monitors.json: ${m.name}`) : v]),
-  ));
+// monitors.json is read as it is: every value in it is literal. (Until #634 it
+// carried `${VAR}` placeholders for the Hetzner servers' addresses, resolved
+// from a gitignored hosts.env; the servers are gone and so is the expansion.)
+const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"));
 
 // Transports are left to negotiation (polling, then an upgrade) rather than
 // pinned to "websocket". Kuma 2.5.3 refuses a websocket-only client outright

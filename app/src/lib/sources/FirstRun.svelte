@@ -414,7 +414,7 @@
                 <span class="nm">Load the Tidewater dataset</span>
                 <!--
                   Both halves, since #440: the button loads the Tidewater work
-                  *and* imports `testenv/hetzner/estate.json`, so a subtitle
+                  *and* imports `testenv/estate.json`, so a subtitle
                   that enumerates one of them undercounts what the press does.
                   The name keeps naming the work, which is what a person
                   opening a demo build came for.

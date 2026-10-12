@@ -1703,7 +1703,7 @@ async fn both_ends(pool: &PgPool, id: &str) -> (Vec<String>, Vec<(String, String
 ///
 /// The last of those is the reading `assets::ROUTES_REACHABLE` argues for and
 /// this ticket's criterion asks for in as many words. It is what the real
-/// estate needs: every route in `testenv/hetzner/estate.json` lands on a
+/// estate needs: every route in `testenv/estate.json` lands on a
 /// container, so under the narrower reading no server in it would read one.
 ///
 /// The proxy is the **negative control** in the same fixture: it exposes the
@@ -3213,7 +3213,7 @@ async fn a_paused_monitor_keeps_its_open_alert_in_the_list() {
 /// Embedded rather than read at run time, so this suite and the file's own
 /// checker (`knobas-core`'s `tests/it/estate_file.rs`) fail together the day it
 /// stops being true.
-const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
 /// The monitor list `seed-kuma.sh` creates in Uptime Kuma, embedded.
 ///
@@ -3223,6 +3223,27 @@ const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json"
 /// reason -- so a change to either file is a red gate here rather than a
 /// discovery later.
 const MONITORS_FILE: &str = include_str!("../../../../testenv/monitors.json");
+
+/// The three Hetzner servers the hcloud recording was taken from, as the estate
+/// file described them until #634 decommissioned them.
+///
+/// **Not the estate**, and not a made-up one either: it is the recording's
+/// counterpart (`support/hcloud-servers.json` is what `GET /v1/servers` answered
+/// for exactly these three on 2026-09-08), so the origin-key battery below has
+/// servers in the tree to match a produced file against. What it can certify is
+/// the rule and the shape; whether the real API still answers that way is
+/// `just estate-live`'s question (`tests/estate_live.rs`).
+const RECORDED_SERVERS: &str = include_str!("support/hcloud-estate.json");
+
+/// The checked-in estate, and the recorded servers hung off its root.
+async fn with_recorded_servers(pool: &PgPool) {
+    assets::apply_import(pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the checked-in estate");
+    assets::apply_import(pool, RECORDED_SERVERS, ESTATE_FILE_PRODUCER)
+        .await
+        .expect("the recorded servers");
+}
 
 /// One count.
 async fn rows(pool: &PgPool, statement: &'static str) -> i64 {
@@ -3288,10 +3309,7 @@ async fn a_preview_writes_nothing_at_all() {
     assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import");
-    let moved_on = estate_with(
-        "asset:hetzner-teamcity",
-        &[("server_type", serde_json::json!("cx33"))],
-    );
+    let moved_on = estate_with("asset:notebook", &[("os", serde_json::json!("macOS 27.0"))]);
 
     let before = tables(&pool).await;
     let preview = assets::preview_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
@@ -3326,11 +3344,11 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
         .expect("the estate imports");
     let outcome = written.value;
 
-    assert_eq!(outcome.assets_created, 23, "the file's assets");
+    assert_eq!(outcome.assets_created, 16, "the file's assets");
     assert_eq!(outcome.routes_created, 9, "the file's routes");
     assert_eq!(outcome.properties_set, 0, "there was nothing to change");
     assert_eq!(outcome.properties_kept, 0);
-    assert_eq!(outcome.monitors_kept, 7, "the file's monitor names");
+    assert_eq!(outcome.monitors_kept, 5, "the file's monitor names");
     assert_eq!(
         outcome.monitors_linked, 0,
         "no adapter emits a monitor until M4.1, so no name resolves"
@@ -3345,7 +3363,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     );
     assert_eq!(
         written.activity[0].detail["outcome"]["assets_created"],
-        serde_json::json!(23)
+        serde_json::json!(16)
     );
 
     let top = assets::tree(&pool, None).await.expect("the top level");
@@ -3366,9 +3384,9 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
             .collect::<Vec<_>>(),
         [
             "knobas test estate",
-            "Hetzner Cloud nbg1",
-            "knobas-jira",
-            "Docker engine (knobas-jira)",
+            "devs-MacBook-Pro",
+            "OrbStack Linux VM",
+            "Docker engine (OrbStack)",
             "knobas-jira-db",
         ],
         "the containment path is the file's, outermost first"
@@ -3389,19 +3407,19 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     // column; and a key the *type* declares takes the type's kind, which is
     // the negative control for the pair above.
     assert_eq!(
-        property(&pool, "asset:hetzner-teamcity", "vcpu").await,
-        Some(PropertyValue::Number { value: 2.0 })
+        property(&pool, "asset:orbstack", "memory_gb").await,
+        Some(PropertyValue::Number { value: 8.0 })
     );
     assert!(
         matches!(
-            property(&pool, "asset:hetzner-teamcity", "description").await,
-            Some(PropertyValue::Text { value }) if value.contains("SSH")
+            property(&pool, "asset:orbstack", "description").await,
+            Some(PropertyValue::Text { value }) if value.contains("JVM")
         ),
         "the file's description is a property of the asset"
     );
     assert_eq!(
-        property(&pool, "asset:hetzner-teamcity", "os").await,
-        Some(text("ubuntu-24.04"))
+        property(&pool, "asset:notebook", "os").await,
+        Some(text("macOS 26.5.2"))
     );
 
     // Every created asset carries its origin line, and it names the estate.
@@ -3437,22 +3455,23 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     assert_eq!(
         notebook.exposes.len(),
         8,
-        "the notebook exposes every forward but the reverse one"
+        "the notebook exposes every published port; the compose network's \
+         route is the engine's"
     );
-    let tunnel = notebook
+    let published = notebook
         .exposes
         .iter()
-        .find(|route| route.id == "route:tunnel-jira")
-        .expect("Jira's forward");
-    assert_eq!(tunnel.url, "http://127.0.0.1:8080/");
-    assert_eq!(tunnel.target_name.as_deref(), Some("knobas-jira"));
+        .find(|route| route.id == "route:notebook-jira")
+        .expect("Jira's published port");
+    assert_eq!(published.url, "http://127.0.0.1:8080/");
+    assert_eq!(published.target_name.as_deref(), Some("knobas-jira"));
     assert!(
-        tunnel
+        published
             .properties
             .iter()
-            .any(|property| property.key == "forward"),
+            .any(|property| property.key == "opened_by"),
         "the route carries the file's own properties: {:?}",
-        tunnel.properties
+        published.properties
     );
 }
 
@@ -3474,10 +3493,10 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
     // The reader corrects the role by hand. Nobody touches the OS.
     assets::edit(
         &pool,
-        "asset:hetzner-teamcity",
+        "asset:notebook",
         &[AssetEdit::Property {
             key: "role".to_owned(),
-            value: Some(text("teamcity, and the agent")),
+            value: Some(text("development notebook, and the gate's")),
         }],
     )
     .await
@@ -3485,10 +3504,10 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
 
     // The file moves on, and changes both.
     let moved_on = estate_with(
-        "asset:hetzner-teamcity",
+        "asset:notebook",
         &[
-            ("role", serde_json::json!("teamcity-only")),
-            ("os", serde_json::json!("ubuntu-26.04")),
+            ("role", serde_json::json!("notebook")),
+            ("os", serde_json::json!("macOS 27.0")),
         ],
     );
 
@@ -3501,7 +3520,7 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
         "one asset has something to change"
     );
     let change = &preview.changes[0];
-    assert_eq!(change.id, "asset:hetzner-teamcity");
+    assert_eq!(change.id, "asset:notebook");
     assert_eq!(
         change
             .properties
@@ -3515,15 +3534,15 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
         "the preview says, per property, which value wins"
     );
     // And it says what it would be replacing, which is the sentence the dialog
-    // draws: *the file says `teamcity-only` and it stays `teamcity, and the
-    // agent`, because you typed that*.
+    // draws: *the file says `notebook` and it stays `development notebook,
+    // and the gate's`, because you typed that*.
     let role = &change.properties[1];
     assert_eq!(
         role.from,
-        Some(text("teamcity, and the agent")),
+        Some(text("development notebook, and the gate's")),
         "the preview carries the value that is staying"
     );
-    assert_eq!(role.to, text("teamcity-only"));
+    assert_eq!(role.to, text("notebook"));
     assert_eq!(role.label, "role", "a custom key is labelled by itself");
 
     let outcome = assets::apply_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
@@ -3535,19 +3554,19 @@ async fn a_hand_edited_property_survives_the_next_import_and_the_preview_said_it
     assert_eq!(outcome.assets_created, 0);
 
     assert_eq!(
-        property(&pool, "asset:hetzner-teamcity", "role").await,
-        Some(text("teamcity, and the agent")),
+        property(&pool, "asset:notebook", "role").await,
+        Some(text("development notebook, and the gate's")),
         "the file undid a hand edit"
     );
     assert_eq!(
-        property(&pool, "asset:hetzner-teamcity", "os").await,
-        Some(text("ubuntu-26.04")),
+        property(&pool, "asset:notebook", "os").await,
+        Some(text("macOS 27.0")),
         "an untouched property the file changed was not updated"
     );
     // The import's own line is not the reader's, which is what makes the rule
     // above decidable at all: the OS it has just set is still the file's to
     // change next time.
-    let history = history(&pool, "asset:hetzner-teamcity").await;
+    let history = history(&pool, "asset:notebook").await;
     assert!(
         history
             .iter()
@@ -3577,8 +3596,8 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
         .expect("the second preview");
     assert_eq!(
         preview.known.len(),
-        32,
-        "twenty-three assets and nine routes are all already in the tree"
+        25,
+        "sixteen assets and nine routes are all already in the tree"
     );
     assert!(preview.new.is_empty(), "{:?}", preview.new);
     assert!(preview.changes.is_empty(), "{:?}", preview.changes);
@@ -3610,7 +3629,7 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
             .await
             .expect("the TeamCity container")
             .monitors,
-        ["teamcity (tunnel)"]
+        ["teamcity"]
     );
 }
 
@@ -3623,7 +3642,7 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
 /// its reason: the statement is the real one, and a read that answered nothing
 /// whatever the mirror held would pass every other test in this file.
 ///
-/// The negative is the other six names, which resolve to nothing and are still
+/// The negative is the other four names, which resolve to nothing and are still
 /// on their assets afterwards. Without it this would pass against an import
 /// that drew a link and threw the name away.
 #[tokio::test]
@@ -3650,7 +3669,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
         .value;
     assert_eq!(outcome.monitors_linked, 1);
     assert_eq!(
-        outcome.monitors_kept, 7,
+        outcome.monitors_kept, 5,
         "every name is kept, linked or not"
     );
     assert_eq!(
@@ -3667,7 +3686,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
             .await
             .expect("Jira's container")
             .monitors,
-        ["jira (tunnel)"],
+        ["jira"],
         "a name the mirror does not hold is kept, for the next import"
     );
 
@@ -3682,7 +3701,7 @@ async fn a_monitor_the_mirror_holds_becomes_a_link_and_one_it_does_not_stays_a_n
     assert_eq!(links_of(&pool, "asset:knobas-gitea").await.len(), 1);
 }
 
-/// **An estate with no Kuma at all reports all seven names, not none.**
+/// **An estate with no Kuma at all reports all five names, not none.**
 ///
 /// The state every profile is in before the Kuma source is configured, and the
 /// one an empty-mirror short circuit would answer wrongly: a `return` taken
@@ -3703,16 +3722,8 @@ async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() 
             .iter()
             .map(|entry| entry.monitor_name.as_str())
             .collect::<Vec<_>>(),
-        [
-            "knobas-confluence",
-            "knobas-jira",
-            "knobas-teamcity",
-            "confluence (tunnel)",
-            "gitea",
-            "jira (tunnel)",
-            "teamcity (tunnel)",
-        ],
-        "all seven of the file's names, because nothing in the mirror answers \
+        ["confluence", "gitea", "jira", "teamcity", "notebook",],
+        "all five of the file's names, because nothing in the mirror answers \
          to any of them"
     );
 }
@@ -3726,7 +3737,7 @@ async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() 
 /// **reported in the preview***. `changes` cannot be that report -- it lists
 /// what an apply would *write*, so a name already on the asset is absent from
 /// it by construction, and the second preview of an unchanged file has an
-/// empty `changes` and an empty `monitor_links` while six of the file's seven
+/// empty `changes` and an empty `monitor_links` while four of the file's five
 /// names still answer to nothing.
 ///
 /// The positive control is `gitea`: the one name the mirror holds is a link
@@ -3747,12 +3758,10 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
             .map(|entry| (entry.asset_id.as_str(), entry.monitor_name.as_str()))
             .collect::<Vec<_>>(),
         [
-            ("asset:hetzner-confluence", "knobas-confluence"),
-            ("asset:hetzner-jira", "knobas-jira"),
-            ("asset:hetzner-teamcity", "knobas-teamcity"),
-            ("asset:knobas-confluence", "confluence (tunnel)"),
-            ("asset:knobas-jira", "jira (tunnel)"),
-            ("asset:knobas-teamcity", "teamcity (tunnel)"),
+            ("asset:knobas-confluence", "confluence"),
+            ("asset:knobas-jira", "jira"),
+            ("asset:knobas-teamcity", "teamcity"),
+            ("asset:notebook", "notebook"),
         ],
         "every name but the one the mirror holds, by asset and then by name"
     );
@@ -3771,7 +3780,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
     );
     assert_eq!(
         again.unresolved, first.unresolved,
-        "the six names are still kept and still reported"
+        "the four names are still kept and still reported"
     );
     assert_eq!(
         again
@@ -3783,9 +3792,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
             "knobas-confluence",
             "knobas-jira",
             "knobas-teamcity",
-            "knobas-confluence",
-            "knobas-jira",
-            "knobas-teamcity",
+            "devs-MacBook-Pro",
         ],
         "the asset each name is waiting on, named as the tree names it"
     );
@@ -3805,7 +3812,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
 /// and narrowing it to the assets an import is about to write leaves the
 /// re-import that asserts `monitors_linked == 0` passing for the wrong reason
 /// -- nothing was drawn because nothing was looked at. The sibling above
-/// catches that mutant on its *report* (a second preview stops naming the six
+/// catches that mutant on its *report* (a second preview stops naming the four
 /// waiting names); this is the only test that catches it on the link, which is
 /// the half the criterion is about.
 #[tokio::test]
@@ -3827,7 +3834,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
     monitor_reading(
         &pool,
         "kuma",
-        "jira (tunnel)",
+        "jira",
         Some("up"),
         Some("http://127.0.0.1:3001/dashboard/2"),
     )
@@ -3842,7 +3849,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
             .iter()
             .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
             .collect::<Vec<_>>(),
-        [("asset:knobas-jira", "jira (tunnel)")],
+        [("asset:knobas-jira", "jira")],
         "the name that was waiting is the link this import offers, on an asset \
          the file changes in no other way"
     );
@@ -3850,7 +3857,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
         !preview
             .unresolved
             .iter()
-            .any(|waiting| waiting.monitor_name == "jira (tunnel)"),
+            .any(|waiting| waiting.monitor_name == "jira"),
         "the name that found its monitor is off the waiting list: {:?}",
         preview.unresolved
     );
@@ -3864,7 +3871,7 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
         links_of(&pool, "asset:knobas-jira").await,
         [(
             "monitored-by".to_owned(),
-            "kuma:jira (tunnel)".to_owned(),
+            "kuma:jira".to_owned(),
             "monitor".to_owned(),
         )],
         "the kept name is now a monitored-by link"
@@ -3879,12 +3886,12 @@ async fn a_name_kept_by_one_import_becomes_a_link_when_the_monitor_arrives() {
             .iter()
             .map(|watch| (watch.name.as_str(), watch.state.as_deref()))
             .collect::<Vec<_>>(),
-        [("jira (tunnel)", Some("up"))],
+        [("jira", Some("up"))],
         "the monitoring section draws the monitor that arrived"
     );
     assert_eq!(
         pane.monitors,
-        ["jira (tunnel)"],
+        ["jira"],
         "the file still says the name, and a resolved name is not deleted from \
          the column -- the pane is what stops drawing it as still waiting"
     );
@@ -4140,8 +4147,9 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
 /// does, *is* that asset.
 ///
 /// The file is the shape `assets::hcloud` emits (#509) -- hcloud's own id for
-/// the server, which knobas has never seen -- against the checked-in estate,
-/// whose three servers carry their `hcloud_id`. What is asserted is every
+/// the server, which knobas has never seen -- against the checked-in estate
+/// with the recorded servers hung off it ([`RECORDED_SERVERS`]), which carry
+/// their `hcloud_id`. What is asserted is every
 /// consequence the rule has, because the rename it makes is upstream of all of
 /// them:
 ///
@@ -4164,9 +4172,7 @@ fn produced(entry_id: &str, hcloud_id: Option<&str>) -> String {
 #[tokio::test]
 async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second_one() {
     let pool = pool("assets-import-origin-key").await;
-    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
-        .await
-        .expect("the checked-in estate");
+    with_recorded_servers(&pool).await;
     let file = produced("asset:hcloud-164750187", Some("164750187"));
 
     let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
@@ -4309,9 +4315,7 @@ async fn an_entry_whose_origin_key_is_in_the_tree_is_that_asset_and_not_a_second
 #[tokio::test]
 async fn the_same_entry_without_its_origin_key_is_new() {
     let pool = pool("assets-import-origin-key-absent").await;
-    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
-        .await
-        .expect("the checked-in estate");
+    with_recorded_servers(&pool).await;
 
     let preview = assets::preview_import(
         &pool,
@@ -4356,9 +4360,7 @@ async fn the_same_entry_without_its_origin_key_is_new() {
 #[tokio::test]
 async fn a_producer_that_declares_no_origin_key_matches_by_id_and_nothing_else() {
     let pool = pool("assets-import-no-origin-key").await;
-    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
-        .await
-        .expect("the checked-in estate");
+    with_recorded_servers(&pool).await;
     let file = produced("asset:hcloud-164750187", Some("164750187"));
 
     let preview = assets::preview_import(&pool, &file, ESTATE_FILE_PRODUCER)
@@ -4460,9 +4462,7 @@ async fn an_origin_key_two_assets_carry_is_refused_by_name() {
 #[tokio::test]
 async fn a_file_naming_one_asset_by_id_and_by_origin_key_is_refused_by_name() {
     let pool = pool("assets-import-origin-key-collapses").await;
-    assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
-        .await
-        .expect("the checked-in estate");
+    with_recorded_servers(&pool).await;
 
     let twice = r#"{"name":"Hetzner Cloud","assets":[
         {"id":"asset:hetzner-teamcity","type":"vm","name":"knobas-teamcity",
@@ -4514,89 +4514,70 @@ async fn a_producer_this_build_does_not_know_is_refused_by_name() {
 /// silence is the correct answer** (#479, ADR-0013).
 ///
 /// The rule reads a monitor's `hostname` where it has no URL and an asset's
-/// `ip` beside its `hostname`, which is what puts the estate's three ping
-/// checks inside its reach at all. Having widened it, the question a reader
-/// asks is what it now *does* to the estate this milestone is developed
-/// against -- and the answer has to be *nothing*, because every pair it can
-/// find is already a `monitored-by` link the import drew from the name the
-/// asset keeps. A tray holding four proposals about links that already exist
-/// would be the widening's cost and nobody's gain.
+/// `ip` beside its `hostname`, which is what puts the estate's ping check
+/// inside its reach at all. Having widened it, the question a reader asks is
+/// what it now *does* to the estate this milestone is developed against -- and
+/// the answer has to be *nothing*, because every pair it can find is already a
+/// `monitored-by` link the import drew from the name the asset keeps.
 ///
 /// The silence is asserted from **both** directions, because on its own it is
 /// the answer a rule that reached nothing would also give:
 ///
-/// * the three `vm` assets carry an `ip` property, so the day somebody spells
-///   it `ipv4` again this test says so rather than going quietly green on a
-///   rule that can no longer see the servers;
-/// * the seven names the file keeps are seven links after the import, so the
+/// * the notebook carries an `ip` property and the `notebook` ping watches it,
+///   so the day somebody spells it `ipv4` this test says so rather than going
+///   quietly green on a rule that can no longer see a ping;
+/// * the five names the file keeps are five links after the import, so the
 ///   pairs really are suppressed rather than unreachable;
-/// * and with those links deleted the same pass proposes exactly four --
-///   the three servers by their `ip`, and Gitea by the host of the reverse
-///   tunnel's route. That is the control the zero cannot be read without.
+/// * and with those links deleted the same pass proposes exactly two -- the
+///   notebook by its `ip`, and Gitea by the host of the compose network's
+///   route. That is the control the zero cannot be read without.
 ///
 /// The monitors are **read out of `testenv/monitors.json`**, not copied from
 /// it, and mirrored at the keys `knobas_source_kuma::map::payload` writes: a
 /// `ping` carries `hostname` and a null `url`, an `http` check the other way
-/// round. The file's three `${KNOBAS_HETZNER_*_IP}` placeholders are resolved
-/// from the estate's own `ip` properties, which is what `seed-kuma.sh` does
-/// with `hetzner/hosts.env` -- so the two files are compared against each other
-/// rather than against a copy of either, and a ninth monitor added to the seed
-/// list is a monitor this test then has to account for. `canary` is in that
-/// list precisely because no asset names it and nothing states
-/// `host.docker.internal` -- four of the eight monitors watch a host the estate
-/// does not state, and they must still propose nothing.
+/// round. So the two files are compared against each other rather than against
+/// a copy of either, and a seventh monitor added to the seed list is a monitor
+/// this test then has to account for. `canary` and the three product checks
+/// watch `host.docker.internal`, which no asset states -- four of the six
+/// monitors watch a host the estate does not name, and they must still
+/// propose nothing.
+///
+/// Until #634 the pings were three, one per Hetzner server, and their
+/// addresses came from a gitignored `hosts.env`; the servers are gone and the
+/// one ping left is a literal in the seed list.
 #[tokio::test]
 async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
     let pool = pool("assets-import-monitor-host-rule").await;
     let estate: serde_json::Value = serde_json::from_str(ESTATE_FILE).expect("the estate file");
+    let notebook_ip = estate["assets"]
+        .as_array()
+        .expect("the assets")
+        .iter()
+        .find(|asset| asset["id"] == "asset:notebook")
+        .expect("the notebook is in the estate file")["properties"]["ip"]
+        .as_str()
+        .expect("the notebook needs an `ip` property -- the type schema's word, and the one the rule reads")
+        .to_owned();
 
-    // Read out of the file the import is about to load, so the ping monitors
-    // watch the addresses the estate actually states -- and so a file that
-    // stopped stating them fails here.
-    let address = |id: &str| -> String {
-        let asset = estate["assets"]
-            .as_array()
-            .expect("the assets")
-            .iter()
-            .find(|asset| asset["id"] == id)
-            .unwrap_or_else(|| panic!("{id} is in the estate file"));
-        assert_eq!(
-            asset["type"], "vm",
-            "{id} is a cloud server and states its address as a vm does"
-        );
-        asset["properties"]["ip"]
-            .as_str()
-            .unwrap_or_else(|| {
-                panic!("{id} needs an `ip` property -- the type schema's word, and the one the rule reads")
-            })
-            .to_owned()
-    };
-
-    // The monitors the seed creates, read out of the seed's own list. A
-    // `${KNOBAS_HETZNER_<ROLE>_IP}` resolves to the `ip` of `asset:hetzner-<role>`,
-    // which is `seed-kuma.sh` reading `hetzner/hosts.env` -- the file this test
-    // cannot have, and whose three values `estate.json` commits anyway.
+    // The monitors the seed creates, read out of the seed's own list.
     let seeded: Vec<serde_json::Value> =
         serde_json::from_str(MONITORS_FILE).expect("testenv/monitors.json");
     assert_eq!(
         seeded.len(),
-        8,
+        6,
         "the seed list is what this test mirrors; if it grew, so must the counts below"
     );
     let mut pings = 0;
     for monitor in &seeded {
         let name = monitor["name"].as_str().expect("every monitor has a name");
-        let resolved = monitor["hostname"].as_str().map(|hostname| {
-            let role = hostname
-                .strip_prefix("${KNOBAS_HETZNER_")
-                .and_then(|rest| rest.strip_suffix("_IP}"))
-                .unwrap_or_else(|| {
-                    panic!("{name}'s hostname {hostname:?} is not a placeholder this test resolves")
-                })
-                .to_lowercase();
+        if monitor["type"] == "ping" {
             pings += 1;
-            address(&format!("asset:hetzner-{role}"))
-        });
+            assert_eq!(
+                monitor["hostname"].as_str(),
+                Some(notebook_ip.as_str()),
+                "{name} pings an address the estate does not state"
+            );
+        }
         kuma_monitor(
             &pool,
             "kuma",
@@ -4606,7 +4587,7 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
                 "name": name,
                 "type": monitor["type"],
                 "url": monitor["url"],
-                "hostname": resolved,
+                "hostname": monitor["hostname"],
                 "port": serde_json::Value::Null,
                 "state": "up",
             }),
@@ -4615,9 +4596,9 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
         .await;
     }
     assert_eq!(
-        pings, 3,
-        "three of the eight are pings on the servers' addresses, and they are \
-         the reason this rule reads `hostname` and `ip` at all"
+        pings, 1,
+        "one of the six is a ping on the notebook's address, and it is the \
+         reason this rule reads `hostname` and `ip` at all"
     );
 
     let imported = assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
@@ -4625,13 +4606,11 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
         .expect("the import")
         .value;
     assert_eq!(
-        imported.monitors_linked, 7,
-        "the seven names the estate file keeps are seven links"
+        imported.monitors_linked, 5,
+        "the five names the estate file keeps are five links"
     );
     for (asset, monitor) in [
-        ("asset:hetzner-teamcity", "kuma:knobas-teamcity"),
-        ("asset:hetzner-jira", "kuma:knobas-jira"),
-        ("asset:hetzner-confluence", "kuma:knobas-confluence"),
+        ("asset:notebook", "kuma:notebook"),
         ("asset:knobas-gitea", "kuma:gitea"),
     ] {
         assert!(
@@ -4668,7 +4647,7 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
     let written = knobas_core::suggest::detect_rule(&pool, rule)
         .await
         .expect("the second pass");
-    assert_eq!(written, 4, "four pairs, once nothing is suppressing them");
+    assert_eq!(written, 2, "two pairs, once nothing is suppressing them");
     let mut found = knobas_core::suggest::proposals(&pool, &[], None, 200)
         .await
         .expect("the tray")
@@ -4679,21 +4658,10 @@ async fn the_monitor_host_rule_proposes_nothing_over_the_real_estate() {
     assert_eq!(
         found,
         [
-            (
-                "asset:hetzner-confluence".to_owned(),
-                "kuma:knobas-confluence".to_owned()
-            ),
-            (
-                "asset:hetzner-jira".to_owned(),
-                "kuma:knobas-jira".to_owned()
-            ),
-            (
-                "asset:hetzner-teamcity".to_owned(),
-                "kuma:knobas-teamcity".to_owned()
-            ),
             ("asset:knobas-gitea".to_owned(), "kuma:gitea".to_owned()),
+            ("asset:notebook".to_owned(), "kuma:notebook".to_owned()),
         ],
-        "the three servers by their ip, and Gitea by the host of the reverse tunnel's route"
+        "the notebook by its ip, and Gitea by the host of the compose network's route"
     );
 }
 
@@ -6003,7 +5971,7 @@ async fn an_asset_read_without_a_keychain_offers_no_create() {
 /// **The file plus drawn links**, which is the ticket's own witness: the estate
 /// file is a tree and its routes and carries no `knobas.link` row at all, so
 /// every relation these tests read is drawn here by hand. What comes from the
-/// file is the shape the panel walks -- five levels from the estate root down
+/// file is the shape the panel walks -- six levels from the estate root down
 /// to a database inside a container, and nine routes landing on containers --
 /// and that is the half a made-up fixture could not supply (ADR-0013).
 async fn imported(label: &str) -> PgPool {
@@ -6035,10 +6003,11 @@ async fn breaks_with(pool: &PgPool, id: &str) -> Vec<(String, Option<String>)> {
 /// with no relation at all.
 ///
 /// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
-/// it"*. The subject is the Hetzner TeamCity machine, which is the deepest
-/// branch the real file has -- VM, Docker engine, two containers, and a
-/// database inside one of them -- so "nearest first" is a claim with four
-/// levels under it rather than one.
+/// it"*. The subject is OrbStack's VM, which holds the deepest branch the real
+/// file has -- Docker engine, nine containers, and a database inside three of
+/// them -- so "nearest first" is a claim with three levels under it rather than
+/// one, and "by name within a step" is a claim over nine siblings. (Until #634
+/// the subject was the Hetzner TeamCity machine, decommissioned since.)
 ///
 /// The relation is `null` on every line because the tree is a `parent_id`
 /// field and not a link (ADR-0014); the panel reads that null as *inside*.
@@ -6047,16 +6016,25 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
     let pool = imported("depends-on-descendants").await;
 
     assert_eq!(
-        breaks_with(&pool, "asset:hetzner-teamcity").await,
+        breaks_with(&pool, "asset:orbstack").await,
         vec![
-            ("asset:hetzner-teamcity-docker".to_owned(), None),
+            ("asset:orbstack-docker".to_owned(), None),
+            ("asset:knobas-confluence".to_owned(), None),
+            ("asset:knobas-confluence-db".to_owned(), None),
+            ("asset:knobas-gitea".to_owned(), None),
+            ("asset:knobas-jira".to_owned(), None),
+            ("asset:knobas-jira-db".to_owned(), None),
+            ("asset:knobas-mockd".to_owned(), None),
             ("asset:knobas-teamcity".to_owned(), None),
             ("asset:knobas-teamcity-agent".to_owned(), None),
+            ("asset:knobas-uptime-kuma".to_owned(), None),
+            ("asset:db-confluence".to_owned(), None),
+            ("asset:db-jira".to_owned(), None),
             ("asset:db-teamcity".to_owned(), None),
         ]
     );
 
-    let answer = assets::depends_on_this(&pool, "asset:hetzner-teamcity")
+    let answer = assets::depends_on_this(&pool, "asset:orbstack")
         .await
         .expect("the panel");
     // Story 54's other half: where each one sits, so a reader can tell two
@@ -6071,8 +6049,8 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .path
             .as_deref(),
         Some(
-            "knobas test estate / Hetzner Cloud nbg1 / knobas-teamcity / \
-             Docker engine (knobas-teamcity) / knobas-teamcity"
+            "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / \
+             Docker engine (OrbStack) / knobas-teamcity"
         )
     );
     // Nothing in the file lands on the VM itself -- every route it has lands
@@ -6085,22 +6063,22 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
 /// and an asset two ways from the subject is still one line.
 ///
 /// Three drawn facts and one subject. TeamCity's VCS roots are the Gitea
-/// repositories it reaches through `route:tunnel-gitea-reverse` in the file,
-/// and its agent needs the server it registers with -- so *what breaks if
-/// Gitea goes down* is the TeamCity machine, everything inside it, and the
-/// agent, which arrives **twice**: at one hop through the chain of links and
-/// at two through the machine's tree. The panel counts assets, so it is one
-/// line, and its word is the edge that reached it first.
+/// repositories it reaches through `route:compose-gitea` in the file, its
+/// agent checks the same repositories out, and the agent needs the server it
+/// registers with -- so *what breaks if Gitea goes down* is the TeamCity
+/// server, the database inside it, and the agent, which arrives **twice**: at
+/// one hop by its own link and at two through the server's. The panel counts
+/// assets, so it is one line, and its word is the edge that reached it first.
 ///
 /// The routes are the second half of `CONTEXT.md`'s sentence: the two that
-/// land on Gitea are listed and are **not** among the five, *"so that the
+/// land on Gitea are listed and are **not** among the three, *"so that the
 /// number is about assets"* (story 52).
 #[tokio::test]
 async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() {
     let pool = imported("depends-on-chain").await;
     link_as(
         &pool,
-        "asset:hetzner-teamcity",
+        "asset:knobas-teamcity",
         "asset:knobas-gitea",
         "depends-on",
     )
@@ -6108,7 +6086,14 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
     link_as(
         &pool,
         "asset:knobas-teamcity-agent",
-        "asset:hetzner-teamcity",
+        "asset:knobas-gitea",
+        "depends-on",
+    )
+    .await;
+    link_as(
+        &pool,
+        "asset:knobas-teamcity-agent",
+        "asset:knobas-teamcity",
         "depends-on",
     )
     .await;
@@ -6118,15 +6103,13 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
         lines,
         vec![
             (
-                "asset:hetzner-teamcity".to_owned(),
+                "asset:knobas-teamcity".to_owned(),
                 Some("depends-on".to_owned())
             ),
-            ("asset:hetzner-teamcity-docker".to_owned(), None),
             (
                 "asset:knobas-teamcity-agent".to_owned(),
                 Some("depends-on".to_owned())
             ),
-            ("asset:knobas-teamcity".to_owned(), None),
             ("asset:db-teamcity".to_owned(), None),
         ]
     );
@@ -6136,7 +6119,7 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
             .filter(|(id, _)| id == "asset:knobas-teamcity-agent")
             .count(),
         1,
-        "the agent is reached by a link and by the tree, and is one line"
+        "the agent is reached by its own link and through the server's, and is one line"
     );
 
     let answer = assets::depends_on_this(&pool, "asset:knobas-gitea")
@@ -6147,13 +6130,13 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
     assert_eq!(
         landing,
         vec![
+            "route:compose-gitea".to_owned(),
             "route:notebook-gitea".to_owned(),
-            "route:tunnel-gitea-reverse".to_owned(),
         ]
     );
     // Not counted: the number the panel draws is the assets', and the routes
     // sit beneath it.
-    assert_eq!(answer.assets.len(), 5);
+    assert_eq!(answer.assets.len(), 3);
     assert!(
         answer
             .assets
@@ -6166,47 +6149,45 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
 /// A `runs-on` link carries its own word, beside the containment lines it
 /// shares a step with -- and nothing else in the estate joins them.
 ///
-/// The subject is the Docker engine on the laptop's OrbStack VM. Three
-/// containers sit inside it, and the drawn link puts a fourth beside them: a
-/// TeamCity agent held under the *server's* engine and running on this one,
-/// which is the case ADR-0014 names when it says the tree and the relations
-/// are different facts.
+/// The subject is Jira's PostgreSQL container. One database sits inside it,
+/// and the drawn link puts a second asset beside it: Confluence pointed at that
+/// same PostgreSQL rather than its own, held under the engine and running on
+/// this container -- the case ADR-0014 names when it says the tree and the
+/// relations are different facts.
 ///
-/// The negative is the rest of the file: twenty-three assets are in this
-/// estate and four are on this list.
+/// The negative is the rest of the file: sixteen assets are in this estate and
+/// two are on this list.
 #[tokio::test]
 async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
     let pool = imported("depends-on-runs-on").await;
     link_as(
         &pool,
-        "asset:knobas-teamcity-agent",
-        "asset:orbstack-docker",
+        "asset:knobas-confluence",
+        "asset:knobas-jira-db",
         "runs-on",
     )
     .await;
 
-    let lines = breaks_with(&pool, "asset:orbstack-docker").await;
+    let lines = breaks_with(&pool, "asset:knobas-jira-db").await;
     assert_eq!(
         lines,
         vec![
-            ("asset:knobas-gitea".to_owned(), None),
-            ("asset:knobas-mockd".to_owned(), None),
+            ("asset:db-jira".to_owned(), None),
             (
-                "asset:knobas-teamcity-agent".to_owned(),
+                "asset:knobas-confluence".to_owned(),
                 Some("runs-on".to_owned())
             ),
-            ("asset:knobas-uptime-kuma".to_owned(), None),
         ]
     );
     for absent in [
-        "asset:knobas-teamcity",
-        "asset:hetzner-teamcity",
-        "asset:notebook",
-        "asset:orbstack",
+        "asset:knobas-jira",
+        "asset:knobas-confluence-db",
+        "asset:db-confluence",
+        "asset:orbstack-docker",
     ] {
         assert!(
             !lines.iter().any(|(id, _)| id == absent),
-            "{absent} does not break when the engine under it does"
+            "{absent} does not break when the container beside it does"
         );
     }
 }
@@ -6214,31 +6195,34 @@ async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
 /// An asset reached in one step both by the tree and by a link reads as
 /// *inside*.
 ///
-/// The Docker engine is held by the machine and, here, also drawn at it with
+/// The Docker engine is held by OrbStack's VM and, here, also drawn at it with
 /// `runs-on` -- which is a true sentence somebody may well write down. Two
 /// edges, one asset: the panel counts assets, so it is one line, and the
 /// tie-break is containment, because *held by the thing that went down* needs
 /// no link to have been drawn and is the plainer answer to *why is this here*.
 ///
 /// The whole list is asserted, not just that line: a tie-break that dropped
-/// the other three would also satisfy an assertion about this one.
+/// the other twelve would also satisfy an assertion about this one.
 #[tokio::test]
 async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
     let pool = imported("depends-on-tie-break").await;
-    link_as(
-        &pool,
-        "asset:hetzner-teamcity-docker",
-        "asset:hetzner-teamcity",
-        "runs-on",
-    )
-    .await;
+    link_as(&pool, "asset:orbstack-docker", "asset:orbstack", "runs-on").await;
 
     assert_eq!(
-        breaks_with(&pool, "asset:hetzner-teamcity").await,
+        breaks_with(&pool, "asset:orbstack").await,
         vec![
-            ("asset:hetzner-teamcity-docker".to_owned(), None),
+            ("asset:orbstack-docker".to_owned(), None),
+            ("asset:knobas-confluence".to_owned(), None),
+            ("asset:knobas-confluence-db".to_owned(), None),
+            ("asset:knobas-gitea".to_owned(), None),
+            ("asset:knobas-jira".to_owned(), None),
+            ("asset:knobas-jira-db".to_owned(), None),
+            ("asset:knobas-mockd".to_owned(), None),
             ("asset:knobas-teamcity".to_owned(), None),
             ("asset:knobas-teamcity-agent".to_owned(), None),
+            ("asset:knobas-uptime-kuma".to_owned(), None),
+            ("asset:db-confluence".to_owned(), None),
+            ("asset:db-jira".to_owned(), None),
             ("asset:db-teamcity".to_owned(), None),
         ]
     );
@@ -6367,11 +6351,12 @@ async fn the_panel_refuses_an_id_no_asset_carries() {
 // under the chosen asset with its location as a property.
 //
 // It certifies nothing at all about the *live* system: a recording cannot go
-// red when Hetzner changes its JSON, and it cannot tell whether the three
-// `hcloud_id` values in `testenv/hetzner/estate.json` are the ids of the three
-// real servers. `just estate-live` is what witnesses those (ADR-0013;
-// `crates/knobas-app/tests/estate_live.rs`), and this comment says so rather
-// than leaving a green suite to imply otherwise.
+// red when Hetzner changes its JSON. `just estate-live` is what witnesses that
+// (ADR-0013; `crates/knobas-app/tests/estate_live.rs`), with a round trip over
+// whatever the real project holds, and this comment says so rather than
+// leaving a green suite to imply otherwise. The servers these tests match
+// against are the recording's own three ([`RECORDED_SERVERS`]): since #634 the
+// checked-in estate holds no server at all.
 // ---------------------------------------------------------------------------
 
 /// `GET /v1/servers`, as the real API answered on 2026-09-08.
@@ -6429,15 +6414,18 @@ fn hcloud_client(server: &wiremock::MockServer) -> knobas_http::HttpClient {
 ///
 /// *No changes* is the part that pins the property **spellings**: the producer
 /// writes `hcloud_id`, `server_type`, `os`, `location`, `ip` and one property
-/// per label, and every one of them has to be the key `estate.json` carries,
-/// with the value it carries. A producer that wrote `image` where the estate
-/// writes `os`, or a number where it writes text, would land in *Would change*
-/// -- so this is the assertion the two files' vocabularies are held together
-/// by, and it is why the estate carries `location` and `knobas` at all.
+/// per label, and every one of them has to be the key the recorded servers
+/// carry, with the value they carry -- the keys `estate.json` gave them until
+/// #634. A producer that wrote `image` where the estate wrote `os`, or a number
+/// where it wrote text, would land in *Would change* -- so this is the
+/// assertion the two vocabularies are held together by. (Live, the same
+/// question is the round trip in `just estate-live`: the importer has to read
+/// back what it wrote.)
 #[tokio::test]
 async fn every_recorded_server_is_already_in_the_tree_and_nothing_would_change() {
     let hcloud = spawn_mock_hcloud(HCLOUD_SERVERS).await;
-    let pool = imported("hcloud-known").await;
+    let pool = pool("hcloud-known").await;
+    with_recorded_servers(&pool).await;
 
     let produced = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
         .await
@@ -6452,7 +6440,7 @@ async fn every_recorded_server_is_already_in_the_tree_and_nothing_would_change()
     };
     assert!(
         new_servers.is_empty(),
-        "these three are the estate's own servers: {new_servers:?}"
+        "these three are the recorded servers: {new_servers:?}"
     );
     assert!(
         skipped.is_empty(),
@@ -6524,7 +6512,8 @@ async fn a_server_the_estate_does_not_hold_is_asked_about_and_lands_where_it_is_
     });
     recorded["servers"].as_array_mut().unwrap().push(fourth);
     let hcloud = spawn_mock_hcloud(&recorded.to_string()).await;
-    let pool = imported("hcloud-new").await;
+    let pool = pool("hcloud-new").await;
+    with_recorded_servers(&pool).await;
     let client = hcloud_client(&hcloud);
 
     let asked = assets::hcloud::produce(&pool, &client, None)
@@ -6715,7 +6704,8 @@ async fn a_field_this_build_has_never_heard_of_does_not_refuse_the_run() {
     recorded["servers"][0]["quantum_placement_zone"] = serde_json::json!({ "name": "nbg1-q" });
     recorded["meta"]["pagination"]["a_field_from_the_future"] = serde_json::json!(7);
     let hcloud = spawn_mock_hcloud(&recorded.to_string()).await;
-    let pool = imported("hcloud-unknown-field").await;
+    let pool = pool("hcloud-unknown-field").await;
+    with_recorded_servers(&pool).await;
 
     let produced = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
         .await
@@ -6743,7 +6733,8 @@ async fn a_refused_token_is_unauthorized_and_not_an_internal_fault() {
         ))
         .mount(&hcloud)
         .await;
-    let pool = imported("hcloud-refused").await;
+    let pool = pool("hcloud-refused").await;
+    with_recorded_servers(&pool).await;
 
     let refused = assets::hcloud::produce(&pool, &hcloud_client(&hcloud), None)
         .await
@@ -6789,7 +6780,7 @@ fn the_estate_file_producer_is_not_an_importer_and_hcloud_is() {
 //
 // It certifies nothing at all about the four real engines: that they answer in
 // this shape, and that the `docker_context` and `container_name` values in
-// `testenv/hetzner/estate.json` are the ones those engines really hold, is
+// `testenv/estate.json` are the ones those engines really hold, is
 // witnessed by `just estate-live` and by nothing here (ADR-0013;
 // `crates/knobas-app/tests/estate_live.rs`).
 //
@@ -6823,8 +6814,12 @@ const DOCKER_PS_ORBSTACK: &str = concat!(
     "\n",
 );
 
-/// The same for the TeamCity server's context: an image **id** where the local
-/// engine had a reference.
+/// The same for the TeamCity server's context as it was recorded on 2026-09-08,
+/// on the Hetzner server's ssh context: an image **id** where the local engine
+/// had a reference. Since #634 those two containers run on the notebook's
+/// engine and the stub serves these lines under `orbstack`; the producer reads
+/// the name and nothing else, so where a line was recorded changes nothing
+/// it writes.
 const DOCKER_PS_TEAMCITY: &str = concat!(
     r#"{"ID":"e34446c9dbf8","Image":"e34446c9dbf8","Names":"knobas-teamcity-agent","State":"running"}"#,
     "\n",
@@ -6912,7 +6907,7 @@ fn produced_entries(file: &str) -> Vec<(String, Option<String>, serde_json::Valu
 /// change.**
 ///
 /// The recorded half of `just estate-live`'s Docker criterion, and the
-/// strongest thing this suite can say without four real engines: the produced
+/// strongest thing this suite can say without the real engine: the produced
 /// ids are `asset:docker-<context>/<name>` and none of them is in the estate,
 /// so every entry is matched by its **origin key** -- the context and the name,
 /// both properties (#508's mechanism, #510's values) -- and previews under the
@@ -6921,33 +6916,32 @@ fn produced_entries(file: &str) -> Vec<(String, Option<String>, serde_json::Valu
 /// *No changes* is what pins the property **spellings**: this producer writes
 /// `docker_context` and `container_name`, and both have to be the keys
 /// `estate.json` carries with the values it carries. A producer that also wrote
-/// `image` would land four containers in *would change* with an image id, which
-/// is the measurement `assets::docker`'s header records.
+/// `image` would land containers in *would change* with an image id, which is
+/// the measurement `assets::docker`'s header records.
 ///
-/// **The type filter is under test here too, and silently.** The estate's three
-/// Hetzner servers and its OrbStack VM carry `docker_context` as well; a
-/// producer reading every asset with the property would spawn `knobas-teamcity`
-/// twice and emit two entries with one origin key, which the Import refuses as
-/// a file describing one asset twice. The stub answers a context once and this
-/// run is green, so it does not.
+/// **The type filter is under test here too, and silently.** The estate's
+/// OrbStack VM carries `docker_context` as well as its engine; a producer
+/// reading every asset with the property would spawn `orbstack` twice and emit
+/// two entries with one origin key, which the Import refuses as a file
+/// describing one asset twice -- and the argument-vector assertion below would
+/// list two runs. (Until #634 the three Hetzner servers carried it too.)
 #[cfg(unix)]
 #[tokio::test]
 async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_change() {
     let dir = tempfile::tempdir().expect("a directory for the stub");
     let stub = stub_docker(
         dir.path(),
-        &[
-            ("orbstack", DOCKER_PS_ORBSTACK),
-            ("knobas-teamcity", DOCKER_PS_TEAMCITY),
-            (
-                "knobas-jira",
+        &[(
+            "orbstack",
+            [
+                DOCKER_PS_ORBSTACK,
+                DOCKER_PS_TEAMCITY,
                 "{\"Names\":\"knobas-jira\"}\n{\"Names\":\"knobas-jira-db\"}\n",
-            ),
-            (
-                "knobas-confluence",
                 "{\"Names\":\"knobas-confluence\"}\n{\"Names\":\"knobas-confluence-db\"}\n",
-            ),
-        ],
+            ]
+            .concat()
+            .as_str(),
+        )],
     );
     let pool = imported("docker-known").await;
 
@@ -6967,7 +6961,7 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
     };
     assert!(
         new_servers.is_empty(),
-        "these containers are not in `testenv/hetzner/estate.json` under their \
+        "these containers are not in `testenv/estate.json` under their \
          context and name: {new_servers:?}"
     );
     assert!(
@@ -6977,16 +6971,9 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
     );
 
     // One spawn per engine, and the whole argument vector each time.
-    let mut runs = recorded_argv(dir.path());
-    runs.sort();
     assert_eq!(
-        runs,
-        [
-            vec!["--context", "knobas-confluence", "ps", "--format", "json"],
-            vec!["--context", "knobas-jira", "ps", "--format", "json"],
-            vec!["--context", "knobas-teamcity", "ps", "--format", "json"],
-            vec!["--context", "orbstack", "ps", "--format", "json"],
-        ],
+        recorded_argv(dir.path()),
+        [vec!["--context", "orbstack", "ps", "--format", "json"]],
         "one read per engine, each under the context that engine's property \
          names and nothing else substituted (ADR-0016)"
     );
@@ -7005,7 +6992,7 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
     );
     assert!(
         preview.changes.is_empty(),
-        "the stubbed docker and `testenv/hetzner/estate.json` disagree: {:?}",
+        "the stubbed docker and `testenv/estate.json` disagree: {:?}",
         preview
             .changes
             .iter()
@@ -7065,20 +7052,10 @@ async fn a_recreated_container_keeps_its_asset() {
     let mut files = Vec::new();
     for answer in [before, after] {
         let dir = tempfile::tempdir().expect("a directory for the stub");
-        // All four contexts the checked-in estate names answer, because a
+        // The one context the checked-in estate names answers, because a
         // missing one is a refusal for the whole run and this test is about
-        // something else. Only OrbStack's holds containers; the three Hetzner
-        // engines answer empty, which is a legal state of a real engine and not
-        // a fault.
-        let stub = stub_docker(
-            dir.path(),
-            &[
-                ("orbstack", answer),
-                ("knobas-teamcity", ""),
-                ("knobas-jira", ""),
-                ("knobas-confluence", ""),
-            ],
-        );
+        // something else.
+        let stub = stub_docker(dir.path(), &[("orbstack", answer)]);
         let assets::Produced::Ready { file, .. } =
             assets::docker::produce(&pool, &assets::docker::cli(&stub))
                 .await
@@ -7114,7 +7091,7 @@ async fn a_recreated_container_keeps_its_asset() {
 async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is_named() {
     let pool = pool("docker-landing").await;
     // Two engines, one with a context and one without -- the shape
-    // `testenv/hetzner/estate.json` had before this ticket, where
+    // `testenv/estate.json` had before this ticket, where
     // `asset:orbstack-docker` carried the property on the VM above it.
     assets::apply_import(
         &pool,
@@ -7216,22 +7193,21 @@ async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is
 #[tokio::test]
 async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
     let pool = imported("docker-unknown-column").await;
-    let contexts: [&str; 3] = ["knobas-teamcity", "knobas-jira", "knobas-confluence"];
-
     let dir = tempfile::tempdir().expect("a directory for the stub");
-    let mut answers: Vec<(&str, &str)> = contexts.iter().map(|c| (*c, "")).collect();
     // Every column the real CLI wrote on 2026-09-08, plus one it has never
     // written, on a container the estate holds.
-    answers.push((
-        "orbstack",
-        concat!(
-            r#"{"Names":"knobas-gitea","ID":"3cb4f18ace38","Image":"gitea/gitea","#,
-            r#""Platform":null,"Size":"0B","Mounts":"knobas-testenv…","#,
-            r#""SomeColumnDockerHasNotShippedYet":{"nested":true}}"#,
-            "\n"
-        ),
-    ));
-    let stub = stub_docker(dir.path(), &answers);
+    let stub = stub_docker(
+        dir.path(),
+        &[(
+            "orbstack",
+            concat!(
+                r#"{"Names":"knobas-gitea","ID":"3cb4f18ace38","Image":"gitea/gitea","#,
+                r#""Platform":null,"Size":"0B","Mounts":"knobas-testenv…","#,
+                r#""SomeColumnDockerHasNotShippedYet":{"nested":true}}"#,
+                "\n"
+            ),
+        )],
+    );
     let assets::Produced::Ready { file, .. } =
         assets::docker::produce(&pool, &assets::docker::cli(&stub))
             .await
@@ -7249,9 +7225,10 @@ async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
 
     // The other direction: a line that is not a container object.
     let dir = tempfile::tempdir().expect("a directory for the stub");
-    let mut answers: Vec<(&str, &str)> = contexts.iter().map(|c| (*c, "")).collect();
-    answers.push(("orbstack", "docker: 'ps' is not a docker command.\n"));
-    let stub = stub_docker(dir.path(), &answers);
+    let stub = stub_docker(
+        dir.path(),
+        &[("orbstack", "docker: 'ps' is not a docker command.\n")],
+    );
     let refused = assets::docker::produce(&pool, &assets::docker::cli(&stub))
         .await
         .expect_err("a line that is not a container");
@@ -7274,8 +7251,22 @@ async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
 #[tokio::test]
 async fn a_context_this_machine_cannot_read_refuses_the_whole_run() {
     let pool = imported("docker-unreachable").await;
+    // A second engine beside the notebook's, under a context this machine does
+    // not have -- the shape the estate had until #634, when three Hetzner
+    // engines sat beside OrbStack's.
+    assets::apply_import(
+        &pool,
+        r#"{"version":1,"name":"a second engine","assets":[
+             {"id":"asset:elsewhere-docker","type":"container_engine",
+              "name":"Docker engine (elsewhere)","parent":"asset:notebook",
+              "properties":{"docker_context":"knobas-elsewhere"}}],
+           "routes":[]}"#,
+        ESTATE_FILE_PRODUCER,
+    )
+    .await
+    .expect("a second engine");
     let dir = tempfile::tempdir().expect("a directory for the stub");
-    // Only one of the four contexts answers.
+    // Only one of the two contexts answers.
     let stub = stub_docker(dir.path(), &[("orbstack", DOCKER_PS_ORBSTACK)]);
 
     let refused = assets::docker::produce(&pool, &assets::docker::cli(&stub))
@@ -7427,7 +7418,7 @@ fn the_docker_producer_is_an_importer_and_declares_the_two_part_key() {
     assert_eq!(
         assets::docker::ORIGIN_KEY,
         ["docker_context", "container_name"],
-        "the key `testenv/hetzner/estate.json` carries on every container, and \
+        "the key `testenv/estate.json` carries on every container, and \
          the one `assets::docker` writes"
     );
 }

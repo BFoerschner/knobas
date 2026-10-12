@@ -450,7 +450,7 @@ async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
 /// **The demo profile carries the real estate, and a second start changes
 /// nothing** (#440, criterion 1).
 ///
-/// `--demo` loads `testenv/hetzner/estate.json` beside the Tidewater work, and
+/// `--demo` loads `testenv/estate.json` beside the Tidewater work, and
 /// the reason it is *that* file rather than a Tidewater-shaped one is
 /// ADR-0013: a made-up estate would show that the Tree draws a tree, and what
 /// M4.0 has to show is that a real estate fits the model. The counts below are
@@ -470,7 +470,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     knobas_db::migrate::run(&pool).await.unwrap();
 
     let file: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../testenv/hetzner/estate.json"))
+        serde_json::from_str(include_str!("../../../../testenv/estate.json"))
             .expect("the estate file parses");
     let ids = |key: &str| -> Vec<String> {
         file[key]
@@ -513,7 +513,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
     demo::demo_load_inner(&pool).await.unwrap();
     let preview = knobas_app::assets::preview_import(
         &pool,
-        include_str!("../../../../testenv/hetzner/estate.json"),
+        include_str!("../../../../testenv/estate.json"),
         ESTATE_FILE_PRODUCER,
     )
     .await
@@ -551,7 +551,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
             .expect("the kept names");
     assert_eq!(
         monitors.concat().len(),
-        7,
+        5,
         "a second load appended the file's monitor names again"
     );
 

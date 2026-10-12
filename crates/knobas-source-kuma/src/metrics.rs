@@ -16,7 +16,7 @@
 //!
 //! What it does take seriously is **quoting**. A label value is a quoted string
 //! with `\\`, `\"` and `\n` escapes, and a monitor is named by whoever added
-//! it: `jira (tunnel)` is in the seeded estate today, and a monitor called
+//! it: `jira (tunnel)` was in the seeded estate until #634, and a monitor called
 //! `a"b}` is a name a person may type tomorrow. Splitting a label set on `,`
 //! and `}` -- the obvious shortcut -- reads that name as a truncated one and
 //! silently mirrors the wrong monitor, so the label set is scanned rather than
@@ -232,8 +232,8 @@ mod tests {
     }
 
     /// **The reason this is a scanner and not a `split(',')`.** A monitor is
-    /// named by whoever added it, and the estate already holds
-    /// `jira (tunnel)`; a name carrying a quote, a comma or a closing brace is
+    /// named by whoever added it, and the estate held `jira (tunnel)` until
+    /// #634; a name carrying a quote, a comma or a closing brace is
     /// one keystroke away. Split on the punctuation and such a monitor is
     /// mirrored under a truncated name -- silently, because a truncated name
     /// is still a name.

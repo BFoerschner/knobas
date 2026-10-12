@@ -3296,8 +3296,9 @@
     align-items: baseline;
     gap: 4px;
     font-size: 11px;
-    /* A real route property is a command line (`testenv/hetzner/tunnel up`),
-       which wraps at no space there is: without this the pane scrolls
+    /* A real route property can be a command line (until #634 the estate's
+       tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space
+       there is: without this the pane scrolls
        sideways and takes the route rows -- and the wires that leave them --
        with it. Found by pointing a browser at the estate file's own routes. */
     overflow-wrap: anywhere;

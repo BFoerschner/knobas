@@ -1,67 +1,79 @@
-//! **The two importers against the real systems** (issues #509 and #510,
+//! **The two importers against the real systems** (issues #509, #510 and #634,
 //! `just estate-live`).
 //!
-//! One claim per importer, each its ticket's third criterion in as many words:
-//! #509's *"produces the file from the real hcloud and the preview against the
-//! checked-in estate is all-known with no changes"*, and #510's *"`just
-//! estate-live` covers both producers and is green against the real contexts
-//! through the tunnel"*.
+//! One claim per importer:
+//!
+//! * **hcloud** -- the importer's own round trip over whatever the real Hetzner
+//!   project holds: produce, land what is new, apply, produce again, and the
+//!   second file previews *all known, nothing changed*. Spec #491 story 64's
+//!   *"a re-import previews already in the tree"*, against the real API.
+//! * **Docker** -- every running container on the notebook's engine is
+//!   already in the checked-in estate (`testenv/estate.json`), under the id it
+//!   gives it, with nothing changed.
+//!
+//! # Why the hcloud half reads the project and not the estate file (#634)
+//!
+//! Until 2026-10-12 three Hetzner servers held the JVM products, they were in
+//! the estate file under their `hcloud_id`s, and this half asserted that the
+//! produced file previewed all-known against those three. Björn decommissioned
+//! them (#634), so the estate file holds no server and the comparison has
+//! nothing to compare. The deputy's ruling on #634 keeps the witness real
+//! without keeping a server: the half reads **whatever the project holds** and
+//! checks the importer against itself on that data. When servers are present
+//! the third produce has to match each of them **by its origin key**, since the
+//! applied asset carries the `hcloud_id` the API itself returned -- so the
+//! decode, the property spellings and the match are all witnessed against what
+//! Hetzner really sent. On an empty project the round trip shrinks to an empty
+//! `Ready` file and an empty preview: still a real, authenticated request whose
+//! envelope and pagination are read, and no longer a parse of a server.
+//!
+//! **The count is declared, never inferred.** `ESTATE_LIVE_HCLOUD_SERVERS` says
+//! how many servers this run expects, and a different count is red. A run at
+//! `0` therefore also proves that nothing is left billing in the project; a run
+//! at `1` or more is the parse witness, and it is Björn's to make: a PR that
+//! touches `assets::hcloud` owes one, for which he stands up the smallest server
+//! in the knobas project, runs `ESTATE_LIVE_HCLOUD_SERVERS=1 just estate-live`
+//! and deletes it again. No agent and no recipe creates or deletes a server.
 //!
 //! # What only this can say
 //!
-//! `tests/it/assets_ipc.rs` runs this producer against a **recording** of what the
-//! API answered once, which certifies shape and nothing else. Two things it
-//! structurally cannot see, and this suite is the only witness for both:
+//! `tests/it/assets_ipc.rs` runs both producers against a **recording** and a
+//! **stub executable**, which certify shape and nothing else. Two things they
+//! structurally cannot see:
 //!
-//! 1. **That Hetzner still answers in that shape.** A recording is green
-//!    forever; only a real request can go red when a field moves.
-//! 2. **That the three `hcloud_id` values in `testenv/hetzner/estate.json` are
-//!    the ids of the three real servers.** #508 wrote them from `hcloud server
-//!    list` and no gate can check them: a *missing* or *duplicated* id is red
-//!    on a mutant, but a plausible-but-wrong one is a second copy of a server,
-//!    silently. Here a wrong id is unknown by id and unmatched by key, so that
-//!    server previews as **new** and [`the_real_estate_is_already_in_the_tree`]
-//!    goes red.
-//!
-//! So, for whoever meets a red run: **read it first as a wrong value in
-//! `estate.json`, and only then as a bug in the producer.** That reading is
-//! the orchestrator's, posted on #509 under the deputy's ruling of 2026-09-08
-//! on #508, and it is the reason this file exists rather than a `#[ignore]`d
-//! test buried in a sibling suite.
-//!
-//! The Docker half's own version of both gaps is in
-//! [`the_real_containers_are_already_in_the_tree`].
+//! 1. **That Hetzner still answers in that shape, and docker still writes one
+//!    JSON object per line.** A recording is green forever; only a real request
+//!    can go red when a field moves.
+//! 2. **That the estate file is not behind the notebook's engine.** A container
+//!    started there and never written down previews as *new* here. Read a red
+//!    Docker run first as `testenv/estate.json` being behind, and only then as a
+//!    bug in the producer.
 //!
 //! # What it touches
 //!
-//! Nothing. One `GET /v1/servers` and one `docker ps` per engine, all
-//! read-only, against a shared fixture -- `testenv/README.md`'s rule -- and a
-//! scratch database of this run's own that the import writes into.
-//!
-//! **No tunnel is needed, by either half.** hcloud's API is public. The three
-//! Hetzner docker contexts are `ssh://knobas-<product>`, which
-//! `~/.ssh/config`'s block resolves to each server's **own address on port
-//! 22**, while `testenv/hetzner/tunnel`'s three `ssh -N` processes carry only
-//! `-L 127.0.0.1:8111|8080|8090` and TeamCity's one `-R` -- so no forward is in
-//! a docker call's path. The ticket's words are *"through the tunnel"*; that
-//! reading of the two is 2026-09-08's, and it is a reading of what each carries
-//! rather than a run with the tunnel down, which nobody made. What the contexts
-//! do need is the SSH key and the contexts themselves, both of which
-//! `testenv/hetzner/provision.sh` writes.
+//! One `GET /v1/servers` per produce (three at most) over HTTPS with the token
+//! in the repo-root `.env`, and one `docker --context orbstack ps` -- all
+//! read-only -- plus scratch databases of this run's own that the imports write
+//! into. **No ssh, no tunnel, no `hcloud` CLI**: the only docker context the
+//! estate file names is OrbStack's, so nothing here reaches a remote engine.
 //!
 //! # Running it
 //!
 //! `#[ignore]`d, so `just check` runs none of it. `just estate-live` is the
 //! door; it loads the repo-root `.env` and **refuses to start** without
-//! `HETZNER_API_TOKEN`, because a suite that skipped by name on an unset
-//! variable is one libtest counts as a pass (issue #351).
+//! `HETZNER_API_TOKEN` or `ESTATE_LIVE_HCLOUD_SERVERS`, because a suite that
+//! skipped by name on an unset variable is one libtest counts as a pass (issue
+//! #351). No variable skips either half.
 
 use knobas_app::assets::{self, DOCKER_PRODUCER, ESTATE_FILE_PRODUCER, HCLOUD_PRODUCER};
 
-/// The estate as provisioned, embedded -- the same bytes `tests/it/assets_ipc.rs`,
+/// The estate, embedded -- the same bytes `tests/it/assets_ipc.rs`,
 /// `tests/it/estate_exit.rs` and `sources::demo` read. Embedded rather than read
 /// at run time, so this suite and the file move together.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
+
+/// The variable that declares how many servers the project holds.
+const EXPECTED_SERVERS: &str = "ESTATE_LIVE_HCLOUD_SERVERS";
 
 /// The token, gated rather than skipped on.
 fn token() -> String {
@@ -75,39 +87,62 @@ fn token() -> String {
     }
 }
 
+/// How many servers this run says the project holds -- required, and a whole
+/// number.
+fn expected_servers() -> usize {
+    let raw = std::env::var(EXPECTED_SERVERS).unwrap_or_else(|_| {
+        panic!(
+            "{EXPECTED_SERVERS} is unset. Say how many servers the knobas Hetzner \
+             project holds -- `{EXPECTED_SERVERS}=0 just estate-live` after the \
+             teardown (#634) -- so that a count nobody expected is red rather \
+             than read off the answer."
+        )
+    });
+    raw.trim().parse().unwrap_or_else(|_| {
+        panic!("{EXPECTED_SERVERS} is {raw:?}, and it has to be a whole number of servers")
+    })
+}
+
 /// A client onto the real API -- **the command's own**, not one spelled like
 /// it.
 ///
 /// `assets::hcloud::client` is the single constructor and `assets::hcloud::API`
 /// the single base URL, so what this suite drives is what
 /// `produce_estate_file` drives: the same timeouts, the same rate limiter, the
-/// same bearer scheme and the same `User-Agent`. It was two spellings until the
-/// deputy's ruling of 2026-09-08 on #509 (part 4c), and a comment here claiming
-/// otherwise was the whole of what held them together.
+/// same bearer scheme and the same `User-Agent` (#509, part 4c of the deputy's
+/// ruling of 2026-09-08).
 fn client() -> knobas_http::HttpClient {
     assets::hcloud::client(assets::hcloud::API, &token()).expect("a client onto Hetzner Cloud")
 }
 
-/// **The real estate is already in the tree: all known, nothing changed.**
+/// The number of entries in a produced estate file.
+fn entries(file: &str) -> usize {
+    let parsed: serde_json::Value = serde_json::from_str(file).expect("the produced file is JSON");
+    parsed["assets"].as_array().expect("a list of assets").len()
+}
+
+/// **The real project round-trips through the hcloud importer: produced,
+/// applied, produced again -- all known, nothing changed** (#634).
 ///
-/// The estate file is imported into a scratch database, the producer is run
-/// against the real hcloud, and the file it produces is previewed. Every entry
-/// has to land in *already in the tree* -- under the id `estate.json` gives it
-/// and not under the producer's own `asset:hcloud-<id>` -- and no property may
-/// be listed as changing.
+/// Against a scratch database holding the checked-in estate:
 ///
-/// The three assertions are three different failures and each names its own:
+/// 1. produce from the real API. The number of servers it found -- named in
+///    `LandingNeeded`, or the entries of a `Ready` file -- has to be the number
+///    `ESTATE_LIVE_HCLOUD_SERVERS` declares;
+/// 2. when any are new (the estate holds no server, so any server at all is),
+///    produce again with a landing at the top of the estate and **apply** that
+///    file, which is the reader's own import;
+/// 3. produce a third time. It has to come back `Ready` with nothing new, and
+///    its preview has to be all known with no changes: every server matched by
+///    the `hcloud_id` the API returned in step 2, and every property the
+///    producer writes read back with the spelling and the value it wrote.
 ///
-/// * a server in **new** is an `hcloud_id` in `estate.json` that is not the id
-///   of the server it sits on (or a server nobody has recorded yet);
-/// * a property in **changes** is the producer and the estate disagreeing about
-///   a *spelling* or a *value* -- `os` against `image`, text against number, a
-///   server resized in Hetzner and not written down;
-/// * a count that is not three is a server added to or removed from the project
-///   without `estate.json` following.
+/// On an empty project step 2 does not happen and step 3 is an empty `Ready`
+/// file with an empty preview.
 #[tokio::test]
 #[ignore = "talks to the real Hetzner Cloud API; run through `just estate-live`"]
-async fn the_real_estate_is_already_in_the_tree() {
+async fn the_real_project_round_trips_through_the_importer() {
+    let expected = expected_servers();
     let pool = knobas_db::test_util::scratch_database("estate-live")
         .await
         .pool(2)
@@ -116,29 +151,85 @@ async fn the_real_estate_is_already_in_the_tree() {
     assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the checked-in estate imports");
+    let client = client();
 
-    let produced = assets::hcloud::produce(&pool, &client(), None)
+    // 1. The first read, and the count.
+    let first = assets::hcloud::produce(&pool, &client, None)
         .await
         .expect("the hcloud importer runs against the real API");
+    let found = match &first {
+        assets::Produced::LandingNeeded { servers } => servers.len(),
+        assets::Produced::Ready {
+            file, new_servers, ..
+        } => {
+            assert!(
+                new_servers.is_empty(),
+                "a Ready answer to a run with no landing names nothing new: {new_servers:?}"
+            );
+            entries(file)
+        }
+        assets::Produced::TokenNeeded => {
+            panic!("the producer asked for a token, and this suite always sends one")
+        }
+    };
+    assert_eq!(
+        found, expected,
+        "the knobas Hetzner project holds {found} server(s) and \
+         {EXPECTED_SERVERS} says {expected}. A server nobody expected is one \
+         still billing; one missing is a witness server that was never stood \
+         up. The answer was {first:?}"
+    );
+
+    // 2. Land what is new at the top of the estate, and apply it.
+    if let assets::Produced::LandingNeeded { servers } = &first {
+        let landed =
+            assets::hcloud::produce(&pool, &client, Some(&assets::Landing { parent: None }))
+                .await
+                .expect("the second read, with a landing");
+        let assets::Produced::Ready {
+            file, new_servers, ..
+        } = landed
+        else {
+            panic!("a run with a landing owes nothing more: {landed:?}");
+        };
+        assert_eq!(
+            &new_servers, servers,
+            "the landed run names the servers the first run asked about"
+        );
+        let applied = assets::apply_import(&pool, &file, HCLOUD_PRODUCER)
+            .await
+            .expect("the produced file applies");
+        assert_eq!(
+            applied.value.assets_created,
+            i64::try_from(expected).expect("a count of servers"),
+            "each server is created once, at the top of the estate"
+        );
+    }
+
+    // 3. Produce again: nothing new, nothing changed.
+    let again = assets::hcloud::produce(&pool, &client, None)
+        .await
+        .expect("the third read");
     let assets::Produced::Ready {
         file,
         new_servers,
-        skipped: _,
-    } = produced
+        skipped,
+    } = again
     else {
         panic!(
-            "the producer asked for something. A token is owed only when none \
-             is stored, and this suite always sends one; a landing place is \
-             owed only when a server is not in the tree, which is the failure \
-             the next assertion names: {produced:?}"
+            "every server the project holds is in the tree now, so nothing is \
+             owed; a landing asked for again is a server whose origin key did \
+             not match what the import wrote: {again:?}"
         );
     };
     assert!(
-        new_servers.is_empty(),
-        "these servers are not in `testenv/hetzner/estate.json` under their \
-         `hcloud_id`: {new_servers:?}. Read this first as a wrong `hcloud_id` \
-         in that file -- a plausible-but-wrong id is unmatched by key and \
-         previews as new -- and only then as a bug in the producer."
+        new_servers.is_empty() && skipped.is_empty(),
+        "new {new_servers:?}, skipped {skipped:?}"
+    );
+    assert_eq!(
+        entries(&file),
+        expected,
+        "the same servers as the first read"
     );
 
     let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
@@ -146,7 +237,7 @@ async fn the_real_estate_is_already_in_the_tree() {
         .expect("the produced file previews");
     assert!(
         preview.new.is_empty(),
-        "the preview calls these new: {:?}",
+        "the preview calls these new after they were applied: {:?}",
         preview
             .new
             .iter()
@@ -155,7 +246,7 @@ async fn the_real_estate_is_already_in_the_tree() {
     );
     assert!(
         preview.changes.is_empty(),
-        "the real hcloud and `testenv/hetzner/estate.json` disagree: {:?}",
+        "the importer disagrees with what it wrote one read earlier: {:?}",
         preview
             .changes
             .iter()
@@ -169,27 +260,20 @@ async fn the_real_estate_is_already_in_the_tree() {
             ))
             .collect::<Vec<_>>()
     );
-
-    let mut known: Vec<&str> = preview
-        .known
-        .iter()
-        .map(|entry| entry.id.as_str())
-        .collect();
-    known.sort_unstable();
     assert_eq!(
-        known,
-        [
-            "asset:hetzner-confluence",
-            "asset:hetzner-jira",
-            "asset:hetzner-teamcity"
-        ],
-        "the three servers this project holds, each under the id the estate \
-         gives it -- which is what says the origin key matched rather than the \
-         file's own id being lucky"
+        preview.known.len(),
+        expected,
+        "every server previews as already in the tree"
     );
     println!(
-        "estate-live: {} servers produced, all known, no changes",
-        preview.known.len()
+        "estate-live: hcloud read {expected} server(s); produced, applied and \
+         produced again: all known, no changes{}",
+        if expected == 0 {
+            " (an empty project: the request, the envelope and the pagination \
+             are witnessed, a server's parse is not)"
+        } else {
+            ""
+        }
     );
 }
 
@@ -197,44 +281,35 @@ async fn the_real_estate_is_already_in_the_tree() {
 /// (#510).
 ///
 /// The estate file is imported into a scratch database, the Docker importer is
-/// run against the four real engines the file names -- the notebook's OrbStack
-/// and the three Hetzner servers -- and the file it produces is previewed.
-/// Every entry has to land in *already in the tree*, under the id `estate.json`
-/// gives it and not under the producer's own `asset:docker-<context>/<name>`,
-/// and no property may be listed as changing.
+/// run against the one engine the file names -- the notebook's OrbStack -- and
+/// the file it produces is previewed. Every entry has to land in *already in
+/// the tree*, under the id `estate.json` gives it and not under the producer's
+/// own `asset:docker-<context>/<name>`, and no property may be listed as
+/// changing.
 ///
 /// # What only this can say
 ///
 /// `tests/it/assets_ipc.rs` runs this producer against a **stub executable**,
 /// which certifies the parse, the argument rule and the refusals and can never
-/// go red. Three things it structurally cannot see, and this is the only
-/// witness for all three:
+/// go red. Three things it structurally cannot see:
 ///
-/// 1. **That the docker CLI still writes one JSON object per line.** A stub
-///    writes whatever the test wrote into it.
-/// 2. **That the four `docker_context` values in
-///    `testenv/hetzner/estate.json` are contexts this machine has**, and that
-///    each reaches the engine that file says it does.
-/// 3. **That every running container on those engines is in that file**, under
-///    the name it carries there. A container started on a server and never
-///    written down previews as *new* and this goes red -- which is the
-///    "diff against the estate file" the roadmap booked.
-///
-/// So, for whoever meets a red run: **read it first as `estate.json` being
-/// behind the real engines**, and only then as a bug in the producer.
+/// 1. **That the docker CLI still writes one JSON object per line.**
+/// 2. **That the `docker_context` in `testenv/estate.json` is a context this
+///    machine has**, reaching the engine that file says it does.
+/// 3. **That every running container on that engine is in that file**, under
+///    the name it carries there. A container started and never written down
+///    previews as *new* and this goes red.
 ///
 /// # What it does not assert, and why
 ///
 /// **Not an exact list of containers.** `docker ps` reads the *running* ones,
-/// and which of the estate's containers are running is a fact about the shared
-/// fixture rather than about this file: `knobas-mockd` is not running
-/// (ADR-0013), and a product wiped by a sibling `down -v` is a legitimate
-/// state of the estate the README describes. What is asserted instead is that **every
-/// engine answered** -- one context per engine, all four represented in the
-/// produced file -- which is the half a shrinking fixture cannot fake, and that
-/// nothing produced is new or changed.
+/// and which of them are running is a fact about the moment: TeamCity, Jira
+/// and Confluence are started on demand (#633), `knobas-mockd` is not running
+/// (ADR-0013). What is asserted instead is that **the engine answered** -- its
+/// context is in the produced file -- and that nothing produced is new or
+/// changed.
 #[tokio::test]
-#[ignore = "spawns the real docker CLI against four real engines; run through `just estate-live`"]
+#[ignore = "spawns the real docker CLI against the notebook's engine; run through `just estate-live`"]
 async fn the_real_containers_are_already_in_the_tree() {
     let pool = knobas_db::test_util::scratch_database("estate-live-docker")
         .await
@@ -251,7 +326,7 @@ async fn the_real_containers_are_already_in_the_tree() {
     // way -- #509's part 4c, applied to the other importer.
     let produced = assets::docker::produce(&pool, &assets::docker::cli(assets::docker::PROGRAM))
         .await
-        .expect("the docker importer runs against the four real engines");
+        .expect("the docker importer runs against the notebook's engine");
     let assets::Produced::Ready {
         file,
         new_servers,
@@ -266,21 +341,20 @@ async fn the_real_containers_are_already_in_the_tree() {
     };
     assert!(
         skipped.is_empty(),
-        "these container engines in `testenv/hetzner/estate.json` carry no \
+        "these container engines in `testenv/estate.json` carry no \
          `docker_context`, so their containers were not read: {skipped:?}"
     );
     assert!(
         new_servers.is_empty(),
-        "these containers are running and are not in \
-         `testenv/hetzner/estate.json` under their context and name: \
-         {new_servers:?}. Read this first as that file being behind the real \
-         engines, and only then as a bug in the producer."
+        "these containers are running and are not in `testenv/estate.json` \
+         under their context and name: {new_servers:?}. Read this first as that \
+         file being behind the real engine, and only then as a bug in the \
+         producer."
     );
 
-    // Every engine answered. Read off the produced file's own properties,
-    // because *which contexts were read* is what a shrunken fixture would
-    // silently change -- a run against one engine holding every container is
-    // otherwise indistinguishable from a run against four.
+    // The engine answered. Read off the produced file's own properties, because
+    // *which contexts were read* is what a shrunken fixture would silently
+    // change.
     let parsed: serde_json::Value = serde_json::from_str(&file).expect("the produced file is JSON");
     let mut contexts: Vec<String> = parsed["assets"]
         .as_array()
@@ -297,14 +371,9 @@ async fn the_real_containers_are_already_in_the_tree() {
     contexts.dedup();
     assert_eq!(
         contexts,
-        [
-            "knobas-confluence",
-            "knobas-jira",
-            "knobas-teamcity",
-            "orbstack"
-        ],
-        "the four engines `testenv/hetzner/estate.json` names, each of which \
-         answered with at least one running container"
+        ["orbstack"],
+        "the one engine `testenv/estate.json` names, which answered with at \
+         least one running container"
     );
 
     let preview = assets::preview_import(&pool, &file, DOCKER_PRODUCER)
@@ -321,7 +390,7 @@ async fn the_real_containers_are_already_in_the_tree() {
     );
     assert!(
         preview.changes.is_empty(),
-        "the real engines and `testenv/hetzner/estate.json` disagree: {:?}",
+        "the real engine and `testenv/estate.json` disagree: {:?}",
         preview
             .changes
             .iter()
@@ -342,9 +411,8 @@ async fn the_real_containers_are_already_in_the_tree() {
         .collect();
     known.sort_unstable();
     println!(
-        "estate-live: {} containers produced over {} engines, all known, no \
-         changes: {known:?}",
-        preview.known.len(),
-        contexts.len()
+        "estate-live: {} containers produced on the notebook's engine, all \
+         known, no changes: {known:?}",
+        preview.known.len()
     );
 }

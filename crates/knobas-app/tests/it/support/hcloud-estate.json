@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "name": "Hetzner servers, as recorded 2026-09-08",
+  "description": "The three Hetzner servers the hcloud recording (hcloud-servers.json) was taken from on 2026-09-08, as testenv/estate.json described them until they were decommissioned (#634): the recording's counterpart, so the shape battery in assets_ipc.rs has servers to match by origin key. Not the estate -- that is testenv/estate.json -- and not a witness of anything live: `just estate-live` is that.",
+  "assets": [
+    {
+      "id": "asset:hetzner-nbg1",
+      "type": "site",
+      "name": "Hetzner Cloud nbg1",
+      "parent": "asset:knobas-estate",
+      "description": "The three servers that host the opt-in real products, one product per server, provisioned by `provision.sh`.",
+      "properties": {
+        "provider": "Hetzner Cloud",
+        "location": "nbg1",
+        "firewall": "knobas-testenv: inbound 22/tcp and ICMP only"
+      }
+    },
+    {
+      "id": "asset:hetzner-teamcity",
+      "type": "vm",
+      "name": "knobas-teamcity",
+      "parent": "asset:hetzner-nbg1",
+      "description": "The TeamCity server's host. Reached over SSH; nothing but 22 and ICMP is open, which is why its monitor is a ping.",
+      "properties": {
+        "hcloud_id": "164750187",
+        "ip": "46.224.117.158",
+        "location": "nbg1",
+        "server_type": "cx23",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 40,
+        "os": "ubuntu-24.04",
+        "knobas": "testenv",
+        "role": "teamcity",
+        "ssh_host": "knobas-teamcity",
+        "docker_context": "knobas-teamcity",
+        "compose_profile": "real-teamcity"
+      }
+    },
+    {
+      "id": "asset:hetzner-jira",
+      "type": "vm",
+      "name": "knobas-jira",
+      "parent": "asset:hetzner-nbg1",
+      "description": "Jira's host. cpx22 (AMD) rather than a cx type: Jira's start is single-threaded and took 72 s here against 147 s on a cx23.",
+      "properties": {
+        "hcloud_id": "164750202",
+        "ip": "46.224.125.111",
+        "location": "nbg1",
+        "server_type": "cpx22",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 80,
+        "os": "ubuntu-24.04",
+        "knobas": "testenv",
+        "role": "jira",
+        "ssh_host": "knobas-jira",
+        "docker_context": "knobas-jira",
+        "compose_profile": "real-atlassian"
+      }
+    },
+    {
+      "id": "asset:hetzner-confluence",
+      "type": "vm",
+      "name": "knobas-confluence",
+      "parent": "asset:hetzner-nbg1",
+      "description": "Confluence's host.",
+      "properties": {
+        "hcloud_id": "164750224",
+        "ip": "2.28.72.189",
+        "location": "nbg1",
+        "server_type": "cpx22",
+        "vcpu": 2,
+        "memory_gb": 4,
+        "disk_gb": 80,
+        "os": "ubuntu-24.04",
+        "knobas": "testenv",
+        "role": "confluence",
+        "ssh_host": "knobas-confluence",
+        "docker_context": "knobas-confluence",
+        "compose_profile": "real-atlassian"
+      }
+    }
+  ],
+  "routes": []
+}

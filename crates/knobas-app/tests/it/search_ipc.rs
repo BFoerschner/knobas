@@ -677,7 +677,7 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
         "the property key is not indexed; only its value is"
     );
 
-    // The route, at the shape every route in `testenv/hetzner/estate.json`
+    // The route, at the shape every route in `testenv/estate.json`
     // actually has -- a loopback host, no path, and the port that is the only
     // thing telling nine of them apart (ADR-0013).
     let route = knobas_app::assets::create_route(
@@ -813,20 +813,20 @@ async fn moving_an_asset_moves_what_under_returns() {
 // whole file. `knobas_db::test_util::scratch_database` is what the estate tests
 // in `adapter_to_mirror.rs` already reach for, for the same reason.
 //
-// **The estate is the real file**, `testenv/hetzner/estate.json`, imported
+// **The estate is the real file**, `testenv/estate.json`, imported
 // through `knobas_app::assets::apply_import`: the same door `--demo` and
-// `estate_exit.rs` use. Not twenty-three assets typed out here, because a
+// `estate_exit.rs` use. Not sixteen assets typed out here, because a
 // fixture written beside the assertion agrees with it by construction, and
 // because two of these rules run over the *tree* -- an alert routed through an
 // ancestor needs an ancestor somebody drew on purpose.
 
 /// The estate the three lists are read over -- the real file.
-const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
 /// How many assets that file holds. A literal, and deliberately not counted out
 /// of the file: a count derived from the fixture agrees with the fixture
 /// however wrong the import is.
-const ESTATE_ASSETS: i64 = 23;
+const ESTATE_ASSETS: i64 = 16;
 
 /// One mirrored monitor, and what its payload says about a certificate.
 ///
@@ -897,14 +897,15 @@ async fn open_alert(pool: &sqlx::PgPool, monitor: &str) {
 /// The estate, three monitors on it, and the links the import draws.
 ///
 /// The three monitors are the three cases the certificate rule has to tell
-/// apart, and they are attached to three different branches of the tree so no
-/// two lists can be satisfied by the same asset:
+/// apart, and they are attached to three different assets so no two lists
+/// can be satisfied by the same one:
 ///
 /// * `gitea` -- five days left, on `asset:knobas-gitea`, under
 ///   `asset:orbstack-docker`.
-/// * `knobas-jira` -- **31** days left, on `asset:hetzner-jira`. The
-///   certificate negative the criterion asks for by name.
-/// * `jira (tunnel)` -- no certificate at all, on `asset:knobas-jira`. The miss
+/// * `notebook` -- **31** days left, on `asset:notebook`, above the engine
+///   rather than under it. The certificate negative the criterion asks for by
+///   name.
+/// * `jira` -- no certificate at all, on `asset:knobas-jira`. The miss
 ///   direction: a payload with the key absent contributes nothing rather than
 ///   raising.
 ///
@@ -919,8 +920,8 @@ async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
         .expect("a pool on the scratch database");
 
     mirror_monitor(&pool, "gitea", Some(5.0)).await;
-    mirror_monitor(&pool, "knobas-jira", Some(31.0)).await;
-    mirror_monitor(&pool, "jira (tunnel)", None).await;
+    mirror_monitor(&pool, "notebook", Some(31.0)).await;
+    mirror_monitor(&pool, "jira", None).await;
 
     let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
@@ -932,7 +933,7 @@ async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
     );
     assert_eq!(
         outcome.monitors_linked, 3,
-        "the three seeded names resolved; the file's other four are still \
+        "the three seeded names resolved; the file's other two are still \
          waiting on a monitor nobody has mirrored"
     );
     pool
@@ -986,18 +987,14 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
     );
 
     // The negative the criterion asks for: an asset something watches is absent.
-    for watched in [
-        "asset:knobas-gitea",
-        "asset:hetzner-jira",
-        "asset:knobas-jira",
-    ] {
+    for watched in ["asset:knobas-gitea", "asset:notebook", "asset:knobas-jira"] {
         assert!(
             !rows.contains(&watched.to_owned()),
             "{watched} has a confirmed monitored-by link and must not be on the roster"
         );
     }
     assert!(
-        rows.contains(&"asset:notebook".to_owned()),
+        rows.contains(&"asset:orbstack".to_owned()),
         "an asset nothing watches is: {rows:?}"
     );
 
@@ -1030,9 +1027,9 @@ async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
 
     open_alert(&pool, "kuma:gitea").await;
     // ...and one on an asset no context holds. The negative the criterion asks
-    // for by name: `asset:hetzner-jira` is in the estate, has a monitor, and is
-    // nobody's business.
-    open_alert(&pool, "kuma:knobas-jira").await;
+    // for by name: `asset:notebook` is in the estate, has a monitor, sits
+    // *above* the engine the context will hold, and is nobody's business.
+    open_alert(&pool, "kuma:notebook").await;
 
     assert_eq!(
         list_rows(&pool, "alerts-in-context").await,
@@ -1135,7 +1132,7 @@ async fn only_a_certificate_inside_the_window_is_expiring() {
         sqlx::query(
             "update sync.item
                 set payload = jsonb_set(payload, '{cert_days_remaining}', to_jsonb($1::float8))
-              where entity_id = 'kuma:knobas-jira'",
+              where entity_id = 'kuma:notebook'",
         )
         .bind(days)
         .execute(&pool)
@@ -1144,7 +1141,7 @@ async fn only_a_certificate_inside_the_window_is_expiring() {
         assert_eq!(
             list_rows(&pool, "certs-expiring")
                 .await
-                .contains(&"asset:hetzner-jira".to_owned()),
+                .contains(&"asset:notebook".to_owned()),
             on_the_list,
             "a certificate with {days} days left"
         );
