@@ -230,12 +230,14 @@ impl HttpRest {
     /// the seeded 2026.1.3 server, 2026-10-12). The answer -- the value now
     /// held -- is dropped.
     ///
-    /// The name is percent-encoded as one path segment: TeamCity's names are
-    /// the user's, and a `/` or `?` in one must not move the request.
+    /// The name is one path segment ([`crate::ids::parameter_segment`]):
+    /// TeamCity's names are the user's, and a `/` or `?` in one must not move
+    /// the request.
     ///
     /// # Errors
     ///
-    /// The [`SourceError`] the request maps to.
+    /// The [`SourceError`] the request maps to, or a refusal of a name that
+    /// cannot be one segment, before a request.
     pub(crate) async fn put_parameter(
         &self,
         build_type_id: &str,
@@ -244,7 +246,7 @@ impl HttpRest {
     ) -> Result<(), SourceError> {
         let path = format!(
             "app/rest/buildTypes/id:{build_type_id}/parameters/{}/value",
-            crate::view::path_escaped(name)
+            crate::ids::parameter_segment(name)?
         );
         let request = self
             .client

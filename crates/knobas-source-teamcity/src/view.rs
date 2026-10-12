@@ -30,6 +30,7 @@ use knobas_source::view::{
 };
 
 use crate::client::HttpRest;
+use crate::ids::{config_id, path_escaped};
 use crate::map;
 use crate::rest::{
     Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence, Trigger,
@@ -103,17 +104,6 @@ pub(crate) async fn draw(
     Err(SourceError::protocol(format!(
         "teamcity: {entity:?} is neither a build nor a build configuration"
     )))
-}
-
-/// A configuration id as TeamCity issues them -- letters, digits and `_` --
-/// and so nothing that could leave the path segment or the locator it goes in.
-pub(crate) fn config_id<'k>(entity: &str, id: &'k str) -> Result<&'k str, SourceError> {
-    let ok = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    ok.then_some(id).ok_or_else(|| {
-        SourceError::protocol(format!(
-            "teamcity: {entity:?} does not name a build configuration TeamCity could have issued"
-        ))
-    })
 }
 
 /// A build id as TeamCity issues them: a positive integer.
@@ -1083,20 +1073,6 @@ fn size_of(n: u64) -> String {
         unit += 1;
     }
     format!("{size:.1} {}", UNITS[unit])
-}
-
-/// A file or parameter name as a URL path segment: everything but the
-/// unreserved characters percent-encoded.
-pub(crate) fn path_escaped(name: &str) -> String {
-    name.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }
 
 /// The parameters a build ran with, in TeamCity's order, none of them

@@ -194,7 +194,7 @@ impl Source for TeamCitySource {
                 value,
             } => {
                 let config = self.build_config_id(entity)?;
-                let config = crate::view::config_id(entity, &config)?;
+                let config = crate::ids::config_id(entity, &config)?;
                 write::set_parameter(&self.rest, config, name, value).await?;
                 Ok(WriteReceipt::none())
             }

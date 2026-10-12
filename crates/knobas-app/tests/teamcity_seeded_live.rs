@@ -438,3 +438,180 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
     }
     state.scheduler.shutdown().await;
 }
+
+/// Puts one seeded parameter back to its recorded value when dropped,
+/// passing or panicking alike: the fixture is shared with
+/// `live_teamcity_seeded.rs`, whose view test asserts the seed's values.
+struct ParameterBack {
+    url: String,
+    token: String,
+    config: String,
+    name: &'static str,
+    value: String,
+}
+
+impl Drop for ParameterBack {
+    fn drop(&mut self) {
+        let url = format!(
+            "{}/app/rest/buildTypes/id:{}/parameters/{}/value",
+            self.url, self.config, self.name
+        );
+        let (token, value) = (self.token.clone(), self.value.clone());
+        // `Drop` cannot await; a thread with a runtime and a client of its
+        // own, as `live_teamcity_seeded.rs`'s guards do.
+        let restored = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the restore")
+                .block_on(async move {
+                    reqwest::Client::builder()
+                        .timeout(REQUEST_BUDGET)
+                        .build()
+                        .expect("a bounded client")
+                        .put(&url)
+                        .bearer_auth(&token)
+                        .header("Accept", "text/plain")
+                        .header("Content-Type", "text/plain")
+                        .body(value)
+                        .send()
+                        .await
+                        .map(|r| r.status())
+                })
+        })
+        .join();
+        let report = match restored {
+            Ok(Ok(status)) if status.is_success() => return,
+            Ok(Ok(status)) => format!("PUT answered {status}"),
+            Ok(Err(e)) => e.to_string(),
+            Err(_) => "the restore thread panicked".to_owned(),
+        };
+        let report = format!(
+            "{} of {} was not put back to {:?} ({report}); re-run `./seed --teamcity`",
+            self.name, self.config, self.value
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite restore: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// **A seeded parameter changed through the write queue reads back changed in
+/// the next view** (spec #660 story 19, issue #668).
+///
+/// Every step is the shipped path, as `kuma_write_live.rs` has it for a
+/// pause: `write_queue::submit` is what the *Parameters* tab's Enter calls --
+/// it decodes the op, finds the source, checks the instance declares
+/// `set_parameter`, writes the queue row with its whole-record snapshot,
+/// flushes it -- and the view is the app's own read, `crud::view`, which is
+/// what `entity_view` answers the detail with. What this adds to the adapter
+/// suite's three cases is the queue itself: the row settles `sent`.
+///
+/// The configuration is synced first, so the write's target is in the mirror
+/// and its hold snapshot is of a real record, as in the app.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_next_view() {
+    use knobas_app::sources::{crud, write_queue};
+    use knobas_core::write_queue::WriteState;
+    use knobas_source::view::Block;
+
+    const NAME: &str = "env.SEPA_RETRIES";
+    let env = env();
+    let account = env.account().await;
+    let config =
+        live_under::seed_state("KNOBAS_TEAMCITY_SEED_STATE")["teamcity"]["settings"]["build_type"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("seed-state.json has no teamcity.settings -- re-run `./seed --teamcity`")
+            })
+            .to_owned();
+    let entity = format!("{TEAMCITY}:buildType:{config}");
+
+    // The restore point, read from the server before anything is written.
+    let before = env
+        .get(&format!(
+            "app/rest/buildTypes/id:{config}/parameters/{NAME}?fields=name,value"
+        ))
+        .await["value"]
+        .as_str()
+        .expect("the seeded parameter has a value")
+        .to_owned();
+    let back = ParameterBack {
+        url: env.url.clone(),
+        token: env.token.clone(),
+        config: config.clone(),
+        name: NAME,
+        value: before.clone(),
+    };
+
+    let state = app(&env, &account).await;
+    sync(&state, TEAMCITY).await;
+    let value_in_view = async || -> String {
+        let view = crud::view(
+            &state.pool,
+            &state.secrets,
+            state.registry.as_ref(),
+            &entity,
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the view of {entity} reads: {e:?}"))
+        .expect("TeamCity draws a build configuration");
+        let section = view
+            .sections
+            .iter()
+            .find(|s| s.id == "parameters")
+            .unwrap_or_else(|| panic!("no parameters: {view:#?}"));
+        let [Block::Settings { values, .. }] = section.blocks.as_slice() else {
+            panic!("one settings block: {section:#?}");
+        };
+        values
+            .iter()
+            .find(|s| s.name == NAME)
+            .unwrap_or_else(|| panic!("no {NAME}: {values:#?}"))
+            .value
+            .clone()
+    };
+    assert_eq!(value_in_view().await, before);
+
+    let after = "knobas-668 through the queue";
+    let queued = write_queue::submit(
+        &state,
+        json!({ "SetParameter": { "entity": entity, "name": NAME, "value": after } }),
+    )
+    .await
+    .expect("the queue takes a parameter set for a source that declares it");
+    assert_eq!(queued.op, "set_parameter");
+    assert_eq!(queued.entity_id, entity);
+    // Settled, not merely queued: `submit` flushes before it returns.
+    let settled = knobas_core::write_queue::get(&state.pool, queued.id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the queue row exists");
+    assert_eq!(
+        settled.state,
+        WriteState::Sent,
+        "the write did not leave the queue: {:?}",
+        settled.detail
+    );
+    assert_eq!(
+        value_in_view().await,
+        after,
+        "the next view reads the new value"
+    );
+    println!(
+        "SEEDED {entity}: {NAME} {before:?} -> {after:?} through the write queue (row {} sent)",
+        queued.id
+    );
+
+    drop(back);
+    assert_eq!(
+        value_in_view().await,
+        before,
+        "the parameter is back at its recorded value"
+    );
+    println!("SEEDED {entity}: {NAME} restored to {before:?} and read back so");
+}

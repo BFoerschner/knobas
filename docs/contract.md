@@ -10486,7 +10486,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   with 406 and writes nothing (measured on the seeded 2026.1.3 server). A 403 is `Unauthorized`
   as everywhere in the adapter; a 404 a refusal with TeamCity's sentence. A build's id, a foreign
   namespace, a configuration id TeamCity could not have issued and an empty, `.` or `..` name are
-  refused before a request. On an inherited parameter TeamCity creates an own override and leaves
+  refused before a request (`ids::config_id`, `ids::parameter_segment`). On an inherited parameter TeamCity creates an own override and leaves
   the project's value alone; on a password parameter the spec stays `password`. Gitea, Jira,
   Confluence and Kuma refuse it by name. TeamCity's configuration view now marks every parameter
   `editable: true`; a build's parameters stay `editable: false`.
@@ -10528,10 +10528,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   (`parameters_mark_the_inherited_and_never_carry_a_passwords_value`); the frontend's
   `SettingsBlock.test.svelte.ts`, `SourceView.test.svelte.ts` and
   `Detail.settings.test.svelte.ts`. Witnessed against the real server by `just
-  teamcity-live-seeded`'s `a_seeded_parameter_set_through_the_queue_reads_back_in_the_next_view`:
-  an own value, an inherited value and the password, each written through the adapter's `write`
-  (the call the queue's flush makes) and read back in the next view, restored to a recorded point
-  by a `Drop` guard and read back again.
+  teamcity-live-seeded`, twice: the adapter suite's
+  `a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view` (an own value, an
+  inherited value and the password, each read back in the next view), and `knobas-app`'s
+  `teamcity_seeded_live.rs` `a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_next_view`
+  (`write_queue::submit` on a synced configuration, the row settled `sent`, the new value in the
+  app's own `crud::view`). Each restores to a point it recorded, from a `Drop` guard, and reads
+  the restore back.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

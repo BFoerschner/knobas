@@ -2,7 +2,7 @@
 //!
 //! The request's shape and the error classification live here. Whether the
 //! real server takes it is `tests/live_teamcity_seeded.rs`'s to say
-//! (`a_seeded_parameter_set_through_the_queue_reads_back_in_the_next_view`);
+//! (`a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view`);
 //! on disagreement this fake is what is wrong.
 
 use knobas_source::instance::SourceInstance;

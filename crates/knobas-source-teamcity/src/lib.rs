@@ -32,6 +32,7 @@ mod config;
 mod cursor;
 mod descriptor;
 mod http;
+mod ids;
 mod map;
 mod rest;
 mod source;

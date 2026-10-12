@@ -77,19 +77,13 @@ pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<(), SourceEr
 ///
 /// As [`trigger`]: a 403 (the account may not edit the project) is
 /// `Unauthorized`, a 404 for a configuration that is gone a refusal carrying
-/// TeamCity's sentence, and an empty name is refused before a request.
+/// TeamCity's sentence, and an empty, `.` or `..` name is refused before a
+/// request ([`crate::ids::parameter_segment`]).
 pub(crate) async fn set_parameter(
     rest: &HttpRest,
     build_type_id: &str,
     name: &str,
     value: &str,
 ) -> Result<(), SourceError> {
-    // `.` and `..` survive the escaping and are dot-segments to a URL, which
-    // would aim the request at another resource; no parameter is called that.
-    if matches!(name, "" | "." | "..") {
-        return Err(SourceError::protocol(format!(
-            "teamcity: {name:?} is not a parameter name"
-        )));
-    }
     rest.put_parameter(build_type_id, name, value).await
 }

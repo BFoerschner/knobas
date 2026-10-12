@@ -2049,7 +2049,7 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
     );
 }
 
-/// The seeded parameters [`a_seeded_parameter_set_through_the_queue_reads_back_in_the_next_view`]
+/// The seeded parameters [`a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view`]
 /// changes, put back as they were when the guard drops -- passing or
 /// panicking alike, [`Queued`]'s way.
 ///
@@ -2145,8 +2145,9 @@ impl Drop for ParameterRestore {
 }
 
 /// Story 19 (spec #660, issue #668), against the real server: a seeded
-/// parameter changed through `set_parameter` -- the call the write queue's
-/// flush makes -- reads back changed in the next view. Three parameters, the
+/// parameter changed through the adapter's `set_parameter` reads back changed
+/// in the next view. The same write through knobas' write queue is
+/// `knobas-app`'s `teamcity_seeded_live.rs`; this one owns the three cases. Three parameters, the
 /// three cases the edit has:
 ///
 /// 1. **An own value** is changed in place.
@@ -2163,7 +2164,7 @@ impl Drop for ParameterRestore {
 /// afterwards to show the fixture is as the seed left it.
 #[tokio::test]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
-async fn a_seeded_parameter_set_through_the_queue_reads_back_in_the_next_view() {
+async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view() {
     use knobas_source::WriteOp;
     use knobas_source::view::{Block, Setting};
 

@@ -154,7 +154,7 @@ mod tests {
     /// The descriptor is the only thing the UI reads to render this source
     /// (spec §3a), so it is asserted rather than assumed.
     #[test]
-    fn the_template_declares_two_kinds_and_three_write_ops() {
+    fn the_template_declares_two_kinds_and_its_write_ops() {
         let d = descriptor_template();
         assert_eq!(d.id, "teamcity");
         assert_eq!(d.adapter_kind, "teamcity");
