@@ -230,3 +230,39 @@ Ruled 2026-10-12. Comment:
 
 That costs a second pass over the same files and a release in which most Confluence page titles cannot be scoped to. After #601 merges, reversing means removing a tested parser arm and a completion rule, and any saved list that stores `under:"…"` stops resolving and starts reporting an unknown token.
 
+
+## #600 — an asset answers to its name
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/600#issuecomment-6118537306>
+
+**The fork:** PR #608 merged as `5410e0a4`. The merge-manager found that `CONTEXT.md` **Parent** no longer describes what `under:` does in the estate. The entry says `under:<name>` "matches the names the adapter declares for that parent kind exactly, ignoring case, and also returns the parent itself when it is mirrored." Neither half holds for an asset. No adapter declares an asset's names, and **Asset** says an asset is "Never a mirrored [item]", so read literally the entry says `under:hetzner-1` matches nothing and does not return `hetzner-1`. #608 does both, as #600 requires. Does the entry need amending, or do #591 and ADR-0018 already cover the estate so the entry reads correctly as it stands?
+
+**Ruling:** amend the entry. The behaviour is already decided, so this ruling only brings the glossary in line with it.
+
+1. **What was settled.** Spec #591, Implementation Decisions, per-source declarations: "**Assets:** the existing parent field (ADR-0014), and a route's exposing asset. These are already stored as fields, not declared paths. Search reads them directly, and an asset answers to its name." #600: "Search reads those fields directly, not through a declared path, and an asset answers to its **name**", and its first criterion asks for "child and grandchild assets, their routes, and the asset itself." #608 built exactly that. Nothing is re-decided here, and #600's scope is unchanged.
+2. **The amendment.** In **Parent**, right after the sentence ending "…and also returns the parent itself when it is mirrored.", insert this sentence:
+
+   > An asset is the one parent no adapter declares: it answers to its name, read from its own field, and `under:` returns the asset itself, because the estate holds it.
+
+   The rest of the entry stays as it is. "For a synced item, the adapter declares it per kind as a declared path" is already limited to synced items. The opening list already names "the parent asset for an asset, and the exposing asset for a route (the field of ADR-0014…)". Transitive reach is already covered by "everything beneath a parent, transitively".
+3. **Who writes it: #601's PR, not a new ticket.** The implementer in `.worktrees/issue-601` adds the sentence in a separate commit. It goes in the same PR that appends #597's ruling to `docs/decisions/2026-10-unattended-rulings.md`, and that PR also appends this ruling after it as `## #600 — an asset answers to its name`. #601's scope and criteria are unchanged. No follow-up ticket is filed.
+4. **No ADR change, no §10.8 entry.** ADR-0018 says "an asset under an asset" belongs to the one concept. Its consequences are about declared paths and do not contradict fields read directly. #608 touched no frozen surface. `docs/contract.md:9774` ("excludes itself from an `under:` query until then", naming #600) reads correctly as history, as #608's body says.
+
+**Reasoning:**
+
+- **The record settles the behaviour, and only the glossary disagrees.** #591 and #600 both say, in the same words, that an asset answers to its name and is read from its own field. The rulings on #594, #595 and #597 each said "no glossary change" because **Parent** "already says `under:` matches the names the adapter declares." That was true for the synced sources those tickets covered (Gitea, TeamCity, the descriptor), and none of them reached the estate. #600 is the first ticket where the sentence and the code disagree, so this is a new gap and not a reversal of those rulings.
+- **Why amend instead of reading the entry generously.** `CONTEXT.md` is the vocabulary agents brief and review against. "Returns the parent itself when it is mirrored", next to **Asset**'s "Never a mirrored item", is a direct contradiction. A later reviewer of the estate's `under:` arm, or of #601's asset suggestions, would read it as a bug. One sentence costs less than one wrong review.
+- **Why the wording names the field and the estate.** "An asset answers to its name" (the merge-manager's clause, and #591's words) fixes the match half. The match half alone would leave "returns the parent itself when it is mirrored" still excluding the asset, so the sentence also says why the asset comes back: the estate holds it, just as the mirror holds a mirrored parent. "Read from its own field" keeps ADR-0014's distinction (a field, not a declared path) visible, so nobody adds an asset declaration to a descriptor to make the first half true.
+- **Why #601 and not a follow-up ticket.** #601 is the next open #591 PR in progress, and it already touches this subject. Its `crates/knobas-search/src/suggest.rs` (at `d51d0c83`) offers "asset that holds another asset or exposes a route, answering to its name". Its `under:` suggestions draw on "the parents that the mirror and estate declare", so the glossary sentence and the code that offers asset names land together. It already carries a docs commit to `docs/decisions/2026-10-unattended-rulings.md`. It is based on `819182df` and must rebase onto `5410e0a4` before it opens anyway, and that rebase brings in the code this sentence describes. #607 is the wrong home: it waits on Björn's host-key check with no date, and TeamCity has nothing to do with the estate. A separate docs ticket would carry one sentence through a full gate, and two docs PRs would touch the same entry.
+- **Smallest surface.** This is one sentence in an unfrozen document. No code, no descriptor, no §10.8 change.
+
+**If you disagree, the cost of reversing this is:** low. If you would rather keep **Parent** limited to synced items and move the estate's half to **Asset** (for example, "An asset is a [parent](#parent) by its field: `under:<asset name>` returns the asset and its subtree"), say so on this issue. #601's implementer moves the sentence before the PR merges, or a one-commit docs PR moves it afterwards. If #601 stalls or is closed before it lands, the orchestrator files this instead and does not wait:
+
+> **Glossary: an asset answers to its name under `under:`**
+> - [ ] `CONTEXT.md` **Parent** carries the sentence from the ruling of 2026-10-12 on #600, word for word.
+> - [ ] `docs/decisions/2026-10-unattended-rulings.md` gains `## #600 — an asset answers to its name`, in the four-part shape.
+> - [ ] Full local `just check` passes.
+>
+> Blocked by: none (#600 is merged).
+
