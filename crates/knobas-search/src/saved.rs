@@ -134,6 +134,26 @@ const MAX_ID_CHARS: usize = 48;
 ///
 /// Lowering it stays cheap and raising it is not: the budget does not move, so
 /// a larger rail is a cheaper statement's to earn, not a constant's.
+///
+/// # Re-read on 2026-10-12 (#629): not reproduced
+///
+/// `launcher_board` at sixteen was reported at 96 and 108 ms from runs taken
+/// without the #533 re-run standard's four conditions
+/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`). Five runs
+/// that met (b)-(d), with (a) shown by a 5-second process and gate-slot monitor
+/// over each whole run rather than an orchestrator hold (one further run was
+/// discarded on its evidence; ruling on #629, admitted for this not-reproduced
+/// verdict only), on `a4723a7b`, read the gate's asserted figure -- the size
+/// curve's `board, 16 saved` at 100 k -- at **86, 87, 83, 84 and 87 ms**: a
+/// spread of 4 ms against at least 13 ms of clearance, so that ruling's step
+/// to eight does not fire. The rail table is a separate timing of the same
+/// board, and reads 87 at sixteen in all five; lowest and highest per column:
+///
+/// ```text
+/// saved lists       0    1    2    4    8   16
+/// lowest           40   52   55   59   80   87
+/// highest          42   54   57   63   84   87
+/// ```
 pub const MAX_SAVED_LISTS: i64 = 16;
 
 /// One row of `knobas.smart_list`.
