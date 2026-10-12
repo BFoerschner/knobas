@@ -211,3 +211,91 @@ async fn the_bare_name_finds_the_repo_and_not_its_branch_or_commits() {
     assert!(group_ids(&response, "commit").is_empty(), "{response:?}");
     assert!(group_ids(&response, "branch").is_empty(), "{response:?}");
 }
+
+/// A slashed title is also named by its last `/` segment (#621): for
+/// `payout`, `tidewater/payout` and `tidewater/payout-service` both match at
+/// the title's weight and tie on rank, and the repo whose bare name *is*
+/// `payout` comes first though it is the older. Were only the whole title
+/// compared, neither would be named and recency would put the newer first.
+#[tokio::test]
+async fn the_repo_whose_last_segment_is_the_query_comes_first() {
+    let pool = pool("last-segment").await;
+    let named = repo(&pool, "tidewater/payout", "Payouts", days_ago(30)).await;
+    let sibling = repo(
+        &pool,
+        "tidewater/payout-service",
+        "Payout processing",
+        days_ago(1),
+    )
+    .await;
+
+    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    assert_eq!(group_ids(&response, "repo"), [named, sibling]);
+}
+
+/// The full name still names its repo: the query `tidewater/payout` puts
+/// `tidewater/payout` above the newer `tidewater/payout-service`, which its
+/// prefix also matches.
+#[tokio::test]
+async fn the_full_name_still_puts_its_repo_first() {
+    let pool = pool("last-segment-full").await;
+    let named = repo(&pool, "tidewater/payout", "Payouts", days_ago(30)).await;
+    repo(
+        &pool,
+        "tidewater/payout-service",
+        "Payout processing",
+        days_ago(1),
+    )
+    .await;
+
+    let response = searcher(&pool)
+        .search(q("tidewater/payout"))
+        .await
+        .unwrap();
+    assert_eq!(group_ids(&response, "repo").first(), Some(&named));
+}
+
+/// The owner names no repo: only the last segment is a name. `tidewater`
+/// matches `tidewater/ledger` and `tidewater/payout` as it matches the newer
+/// `harbor/tidewater-sync`, whose last segment is not `tidewater` either, so
+/// the three tie and recency orders them as on `main`. Were every `/` segment
+/// a name, the owner's two repos would be named and jump above the newest.
+#[tokio::test]
+async fn the_owner_names_none_of_its_repos() {
+    let pool = pool("last-segment-owner").await;
+    let ledger = repo(&pool, "tidewater/ledger", "Ledger", days_ago(30)).await;
+    let payout = repo(&pool, "tidewater/payout", "Payouts", days_ago(20)).await;
+    let sync = repo(&pool, "harbor/tidewater-sync", "Sync", days_ago(1)).await;
+
+    let response = searcher(&pool).search(q("tidewater")).await.unwrap();
+    assert_eq!(group_ids(&response, "repo"), [sync, payout, ledger]);
+}
+
+/// The rule names no kind: a branch `feature/payout` is named `payout` by
+/// its last segment and comes first in the branch group, above the newer
+/// `feature/payout-jitter`.
+#[tokio::test]
+async fn a_branch_is_named_by_its_last_segment_too() {
+    let pool = pool("last-segment-branch").await;
+    let named = item(
+        &pool,
+        "branch",
+        "tidewater/payout@refs/heads/feature/payout",
+        "feature/payout",
+        "feature/payout\n\nAdd payout batching",
+        days_ago(30),
+    )
+    .await;
+    let sibling = item(
+        &pool,
+        "branch",
+        "tidewater/payout@refs/heads/feature/payout-jitter",
+        "feature/payout-jitter",
+        "feature/payout-jitter\n\nJitter the retry backoff",
+        days_ago(1),
+    )
+    .await;
+
+    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    assert_eq!(group_ids(&response, "branch"), [named, sibling]);
+}
