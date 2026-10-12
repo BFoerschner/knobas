@@ -19,7 +19,7 @@
 //! `fields.parent: {}` stops `under:` and falls through to `epic` here.
 
 use knobas_core::payload::{Declarations, ParentPath, resolve_parents};
-use knobas_source_jira::{ADAPTER_KIND, KIND_TICKET, descriptor_template};
+use knobas_source_jira::{KIND_TICKET, descriptor_template};
 use sqlx::PgPool;
 
 /// The Jira descriptor's `ticket` parent candidates, in declared order.
@@ -105,28 +105,70 @@ fn set_at(payload: &mut serde_json::Value, path: &[String], value: &str) {
         .insert(last.clone(), serde_json::Value::String(value.to_owned()));
 }
 
-/// One Jira ticket record as a row named `i`, the alias every payload macro
-/// reads, with no table behind it. A macro so `concat!` can take it: sqlx runs
-/// only `&'static str` statements.
-macro_rules! row {
-    () => {
-        "(select 'jira'::text as source_id, 'ticket'::text as kind, $1::jsonb as payload) i"
-    };
+/// The source instance the pinned records live in: an instance id, as
+/// `Declarations` keys them, and not the adapter kind.
+const SOURCE: &str = "jira-pin";
+
+/// A migrated, empty database of this test's own.
+async fn scratch() -> PgPool {
+    knobas_db::test_util::scratch_database("parent_key_pin")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database")
 }
 
-/// What `recorded_parent_key!` reads off `payload`, through the database.
-async fn recorded_in_sql(pool: &PgPool, payload: &serde_json::Value) -> Option<String> {
+/// One live mirrored Jira ticket carrying `payload`, as `sync.live_item` --
+/// the view every reader of these macros runs over -- serves it. Returns its
+/// entity id.
+async fn ticket(pool: &PgPool, key: &str, payload: &serde_json::Value) -> String {
+    let id = format!("{SOURCE}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+        .bind(&id)
+        .bind(KIND_TICKET)
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,$3,$4,'',$5)",
+    )
+    .bind(&id)
+    .bind(SOURCE)
+    .bind(KIND_TICKET)
+    .bind(key)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// What `recorded_parent_key!` reads off one item, through the database.
+async fn recorded_in_sql(pool: &PgPool, entity_id: &str) -> Option<String> {
     const RECORDED: &str = concat!(
         "select ",
         knobas_core::recorded_parent_key!(),
-        " from ",
-        row!()
+        " from sync.live_item i where i.entity_id = $1"
     );
     sqlx::query_scalar(RECORDED)
-        .bind(sqlx::types::Json(payload))
+        .bind(entity_id)
         .fetch_one(pool)
         .await
-        .unwrap_or_else(|e| panic!("recorded_parent_key! must run: {e}"))
+        .unwrap_or_else(|e| panic!("recorded_parent_key! must run on {entity_id}: {e}"))
+}
+
+/// One column of a parent table expression over one item, under the Jira
+/// descriptor's declarations.
+async fn under_in_sql(pool: &PgPool, statement: &'static str, entity_id: &str) -> Vec<String> {
+    let declarations = Declarations::empty().with(SOURCE, descriptor_template().payload_paths);
+    sqlx::query_scalar(statement)
+        .bind(declarations.as_param())
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{statement} must run on {entity_id}: {e}"))
 }
 
 /// The arms are the descriptor's candidates, each one's `at` plus its first
@@ -149,7 +191,7 @@ fn the_macros_arms_are_the_ticket_parent_candidates_in_declared_order() {
 /// epic.
 #[tokio::test]
 async fn the_first_candidate_carrying_a_key_wins_in_sql_and_for_under() {
-    let pool = knobas_db::test_util::test_pool().await;
+    let pool = scratch().await;
     let candidates = ticket_candidates();
     assert!(
         candidates.len() >= 2,
@@ -161,9 +203,10 @@ async fn the_first_candidate_carrying_a_key_wins_in_sql_and_for_under() {
             set_at(&mut payload, &key_path(candidate), &format!("PAY-{later}"));
         }
         let expected = format!("PAY-{first}");
+        let id = ticket(&pool, &format!("PIN-{first}"), &payload).await;
 
         assert_eq!(
-            recorded_in_sql(&pool, &payload).await.as_deref(),
+            recorded_in_sql(&pool, &id).await.as_deref(),
             Some(expected.as_str()),
             "recorded_parent_key! on {payload}"
         );
@@ -181,16 +224,17 @@ async fn the_first_candidate_carrying_a_key_wins_in_sql_and_for_under() {
 /// would not find it there.
 #[tokio::test]
 async fn a_keyless_fields_parent_stops_under_and_falls_through_to_epic_for_contexts() {
-    let pool = knobas_db::test_util::test_pool().await;
+    let pool = scratch().await;
     let payload = serde_json::json!({
         "key": "PAY-250",
         "fields": { "parent": {} },
         "epic": { "key": "PAY-200" }
     });
+    let id = ticket(&pool, "PAY-250", &payload).await;
 
     // Contexts: falls through to the epic.
     assert_eq!(
-        recorded_in_sql(&pool, &payload).await.as_deref(),
+        recorded_in_sql(&pool, &id).await.as_deref(),
         Some("PAY-200")
     );
 
@@ -202,32 +246,20 @@ async fn a_keyless_fields_parent_stops_under_and_falls_through_to_epic_for_conte
     assert!(under[0].names.is_empty(), "{under:?}");
 
     // `under:`, in SQL: the same one parent, and no name for it to match.
-    let declarations =
-        Declarations::empty().with(ADAPTER_KIND, descriptor_template().payload_paths);
-    let parents: Vec<String> = sqlx::query_scalar(concat!(
-        "select p.kind from ",
-        row!(),
-        " cross join lateral ",
-        knobas_core::declared_parents!("$2"),
-        " p"
-    ))
-    .bind(sqlx::types::Json(&payload))
-    .bind(declarations.as_param())
-    .fetch_all(&pool)
-    .await
-    .expect("declared_parents! must run");
-    assert_eq!(parents, vec![KIND_TICKET.to_owned()]);
-    let names: Vec<String> = sqlx::query_scalar(concat!(
-        "select n.name from ",
-        row!(),
-        " cross join lateral ",
-        knobas_core::declared_parent_names!("$2"),
-        " n"
-    ))
-    .bind(sqlx::types::Json(&payload))
-    .bind(declarations.as_param())
-    .fetch_all(&pool)
-    .await
-    .expect("declared_parent_names! must run");
+    const PARENTS: &str = concat!(
+        "select p.kind from sync.live_item i cross join lateral ",
+        knobas_core::declared_parents!("$1"),
+        " p where i.entity_id = $2"
+    );
+    const NAMES: &str = concat!(
+        "select n.name from sync.live_item i cross join lateral ",
+        knobas_core::declared_parent_names!("$1"),
+        " n where i.entity_id = $2"
+    );
+    assert_eq!(
+        under_in_sql(&pool, PARENTS, &id).await,
+        vec![KIND_TICKET.to_owned()]
+    );
+    let names = under_in_sql(&pool, NAMES, &id).await;
     assert!(names.is_empty(), "under: matched {names:?}");
 }
