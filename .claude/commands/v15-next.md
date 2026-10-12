@@ -16,7 +16,7 @@ Every implementer and merge-manager is handed a copy of a common rules file. The
 2. In each copy, replace the attribution block (the `Co-Authored-By:` and `Claude-Session:` trailers, and the PR-body footer) with **this session's** attribution from the system reminder. The masters carry a stale session URL.
 3. Append to the implementer copy, verbatim:
    - "There is no Agent Brief comment on these tickets; the issue body is the contract, and the spec named in its `## Parent` section is its context."
-   - "A live recipe against TeamCity, Jira or Confluence needs `source testenv/hetzner/env` and `testenv/hetzner/tunnel up` first; the Hetzner fixture is shared, so leave it as you found it and never stop a shared container."
+   - "A live recipe runs against the real product started on this machine on demand: each `just *-live` recipe brings its product up, seeds it, and stops what it started (`just live-up|live-down <product>`, `just live-status`; testenv/README.md). One JVM product (TeamCity, Jira, Confluence) at a time; the recipe refuses a second. Never use `testenv/hetzner/tunnel`, ssh to the Hetzner servers, or hcloud, and never source `testenv/hetzner/env`."
    - "A desktop witness (`just desktop-witness <driver>`) takes over this Mac's screen and its one signed bundle: run it once, in the foreground, and never while another agent's witness is running — the orchestrator dispatches at most one such ticket at a time."
    - "Every ADR in `docs/adr/` is in force. A PR that contradicts one is wrong by construction."
    - "When the ticket, its parent spec, `CONTEXT.md`, the ADRs and `docs/decisions/` leave a choice open that changes what you build, do not guess and do not pick: stop at the fork, end your turn with a final message whose last section is `**Fork:**` — the question, the options, which one you lean to and why — and you will be resumed with a ruling. A ruling posted on your issue as a comment beginning `Ruling (deputy for Björn` is final: act on it, and append it to `docs/decisions/2026-10-unattended-rulings.md` (create it on first use, in the shape of `docs/decisions/2026-08-29-unattended-batch-rulings.md`) in your PR in the same fork/ruling/reasoning/reversal-cost shape the comment has."
@@ -53,7 +53,7 @@ Three Rust agents at once; a merge-manager counts as one, and a deputy counts fo
 
 Two further caps, because the witnesses are shared machines:
 
-- **At most one tunnel ticket running at a time.** A tunnel ticket is one whose acceptance criteria name a live suite against TeamCity, Jira or Confluence (the Hetzner fixture). Their live suites spend the same fixture.
+- **At most one JVM ticket running at a time.** A JVM ticket is one whose acceptance criteria start a JVM product (TeamCity, Jira, Confluence): this machine's 8 GB Docker VM holds one, and the recipe refuses a second.
 - **At most one desktop-witness ticket running at a time.** A ticket whose criteria name `just desktop-witness`. Each drives the one signed bundle on this Mac's screen.
 
 ## Step 1 — read the state (jq only; never print issue bodies into context)
@@ -69,7 +69,7 @@ gh issue list --state open --label ready-for-agent --limit 100 --json number,tit
   --jq '.[] | select(.title | startswith("Spec:") | not) | "\(.number)\t\((.body|capture("## Blocked by\\n(?<b>[\\s\\S]*)")|.b|[scan("#(\\d+)")[]]|join(",")))\t\(.body|test("live (\\w+ )?(suite|recipe)|_live|-live"; "i"))\t\(.body|test("desktop-witness"))"'
 ```
 
-The last two columns flag tunnel and desktop-witness candidates; confirm a flagged one by its criteria. A candidate is **free** when every number in its blocked-by list is a closed issue (`gh issue view N --json state -q .state` is `CLOSED`); "None" is free. Also count agents still running from a previous iteration (your own background tasks).
+The last two columns flag JVM and desktop-witness candidates; confirm a flagged one by its criteria. A candidate is **free** when every number in its blocked-by list is a closed issue (`gh issue view N --json state -q .state` is `CLOSED`); "None" is free. Also count agents still running from a previous iteration (your own background tasks).
 
 ## Step 2 — merge before dispatching
 
@@ -101,4 +101,4 @@ A ticket that says files it needs are uncommitted in Björn's checkout (e.g. #59
 
 ## Report each iteration, in one short message
 
-Merged (PR, issue, merge commit) · dispatched (issue, worktree) · **ruled** (issue, the ruling in one line, the comment's URL) · forks open and their deputies · still running · blocked and on what (a cap, a tunnel, a fork) · the next wake-up. Never paste agent output.
+Merged (PR, issue, merge commit) · dispatched (issue, worktree) · **ruled** (issue, the ruling in one line, the comment's URL) · forks open and their deputies · still running · blocked and on what (a cap, a JVM product, a fork) · the next wake-up. Never paste agent output.

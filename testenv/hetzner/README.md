@@ -1,5 +1,16 @@
 # The real products on Hetzner
 
+**Live suites no longer use these servers** (Björn, 2026-10-12, issue #633).
+TeamCity, Jira, Confluence and Gitea run on the notebook again, on demand and
+one at a time: every `just *-live` recipe starts its product, seeds it, runs
+its suites and stops it (`testenv/README.md`, *Live products, on demand*). No
+live recipe reads `env` or calls `tunnel` any more, and `testenv/live` refuses
+a shell that has sourced `env`. What still reads this directory: Uptime Kuma's
+seed (`hosts.env`, for the monitors that ping these servers), `estate.json`
+(the estate knobas imports), and `just estate-live`. Decommissioning the
+servers is a separate ticket, #634. The rest of this file describes the
+estate as it was run from 2026-09-06 to 2026-10-12.
+
 Since 2026-09-06 the three opt-in real products -- TeamCity, Jira, Confluence --
 run on three Hetzner servers, one product per server, instead of in the
 notebook's 8 GB Docker VM: a cx23 (2 Intel vCPU, 4 GB, ~EUR 6.50/month) for

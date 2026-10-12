@@ -6,7 +6,12 @@
 # Confluence.
 #
 #   ./seed-atlassian-content.sh            seed both products
-#   ./seed-atlassian-content.sh --verify   read PAY-231, one page and the
+#   ./seed-atlassian-content.sh jira       seed one of them: the on-demand
+#   ./seed-atlassian-content.sh confluence live products run one at a time
+#                                          (testenv/live, issue #633), so a
+#                                          run may find only one of the pair up
+#   ./seed-atlassian-content.sh [jira|confluence] --verify
+#                                          read PAY-231, one page and the
 #                                          nested page's ancestors back, walk
 #                                          one throwaway ticket through the
 #                                          narrowing project's workflow, and
@@ -194,14 +199,32 @@ done
 [ -r "$FIXTURE" ] || die "$FIXTURE not found"
 [ -r "$STATE" ] || die "$STATE not found -- run ./seed-atlassian.sh first"
 
+# Which products, and whether to verify rather than seed: `[jira|confluence]
+# [--verify]`, in either order. Neither product named is both, the shape
+# `./seed --atlassian` and a pair brought up together use.
+PRODUCTS=
+VERIFY=0
+for arg in "$@"; do
+  case "$arg" in
+    jira | confluence) PRODUCTS="${PRODUCTS:+$PRODUCTS }$arg" ;;
+    --verify) VERIFY=1 ;;
+    *) die "unknown argument '$arg'; usage: ./seed-atlassian-content.sh [jira|confluence] [--verify]" ;;
+  esac
+done
+[ -n "$PRODUCTS" ] || PRODUCTS="jira confluence"
+want() { case " $PRODUCTS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
 # The URLs and the admin account come from what seed-atlassian.sh recorded, so
 # this script and the wizard walk cannot disagree about where the products are.
+# Only the products this run touches are required; the admin account is the
+# same pair on both (seed-atlassian.sh), read off the first one named.
 JIRA_URL=$(jq -r '.jira.url // empty' "$STATE")
 CONF_URL=$(jq -r '.confluence.url // empty' "$STATE")
-[ -n "$JIRA_URL" ] || die "$STATE has no jira block -- run ./seed-atlassian.sh first"
-[ -n "$CONF_URL" ] || die "$STATE has no confluence block -- run ./seed-atlassian.sh first"
-ADMIN_USER=$(jq -r '.jira.user' "$STATE")
-ADMIN="$ADMIN_USER:$(jq -r '.jira.password' "$STATE")"
+! want jira || [ -n "$JIRA_URL" ] || die "$STATE has no jira block -- run ./seed-atlassian.sh jira first"
+! want confluence || [ -n "$CONF_URL" ] || die "$STATE has no confluence block -- run ./seed-atlassian.sh confluence first"
+FIRST=${PRODUCTS%% *}
+ADMIN_USER=$(jq -r --arg p "$FIRST" '.[$p].user' "$STATE")
+ADMIN="$ADMIN_USER:$(jq -r --arg p "$FIRST" '.[$p].password' "$STATE")"
 
 # --------------------------------------------------------------------------
 # One HTTP helper for both products, as in seed-gitea.sh: sets API_STATUS and
@@ -271,6 +294,14 @@ record() {  # record <jq filter with $v bound> <json>
 # ==========================================================================
 verify() {
   _fail=0
+  _ok=
+  if want jira; then verify_jira; _ok="PAY-231 with its worklogs, $NARROW_KEY's narrowing workflow"; fi
+  if want confluence; then verify_confluence; _ok="${_ok:+$_ok, }\"$_title\" with its body, and \"$_nested\" under \"$_under\""; fi
+  [ "$_fail" -eq 0 ] || die "verify FAILED"
+  say "verify ok: $_ok"
+}
+
+verify_jira() {
   say "verify: GET $JIRA_URL/rest/api/2/issue/PAY-231"
   jira GET "/rest/api/2/issue/PAY-231?fields=summary,status,assignee,worklog,comment"
   if [ "$API_STATUS" != "200" ]; then
@@ -319,6 +350,28 @@ verify() {
       [ "$API_STATUS" = "204" ] || { echo "  deleting the probe issue $_probe: HTTP $API_STATUS" >&2; _fail=1; }
     fi
   fi
+}
+
+verify_confluence() {
+  # Searchable, and not only stored. The adapter's full sync is a CQL search,
+  # and Confluence indexes a page some seconds after it answers the create --
+  # so a suite run straight after a seed from empty saw two pages of seven
+  # (#633's first `atlassian-live`, where nothing ran between the content seed
+  # and the Confluence suites any more). Every page recorded in seed-state.json
+  # must come back from a search of the space, waited for up to 180 s.
+  _want=$(jq -r '[.confluence.pages[]?.id] | sort | join(" ")' "$STATE")
+  _waited=0
+  while :; do
+    conf GET "/rest/api/content/search?cql=$(urlenc "space = \"$SPACE_KEY\" and type = page")&limit=100"
+    _have=$(printf '%s' "$API_BODY" | jq -r '[.results[]?.id] | sort | join(" ")' 2>/dev/null || echo)
+    _missing=$(jq -rn --arg w "$_want" --arg h "$_have" '($w | split(" ")) - ($h | split(" ")) | join(" ")')
+    [ -n "$_missing" ] || break
+    if [ "$_waited" -ge 180 ]; then
+      echo "  pages not in a CQL search of $SPACE_KEY after ${_waited}s: $_missing" >&2; _fail=1; break
+    fi
+    sleep 5; _waited=$((_waited + 5))
+  done
+  [ -n "$_missing" ] || say "verify: every seeded page is in a CQL search of $SPACE_KEY (after ${_waited}s)"
 
   # The page with a body, and its first `## ` heading -- from the fixture, so
   # a renamed page in work.json is still what this checks for.
@@ -357,8 +410,6 @@ verify() {
       '[.results[0].ancestors[].title] | (length == 2) and (.[-1] == $u)' >/dev/null \
       || { echo "  \"$_nested\" is not two deep under \"$_under\" -- its ancestors are $_path" >&2; _fail=1; }
   fi
-  [ "$_fail" -eq 0 ] || die "verify FAILED"
-  say "verify ok: PAY-231 with its worklogs, $NARROW_KEY's narrowing workflow, \"$_title\" with its body, and \"$_nested\" under \"$_under\""
 }
 
 # The nesting is a claim about the fixture, so it is checked against the
@@ -373,12 +424,14 @@ jq -e --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" --arg u "$NESTED_UNDER" \
   || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" --
   they are the nesting the launcher's ancestor path is witnessed by."
 
-if [ "${1:-}" = "--verify" ]; then verify; exit 0; fi
-[ $# -eq 0 ] || die "unknown argument '$1'; usage: ./seed-atlassian-content.sh [--verify]"
+if [ "$VERIFY" = 1 ]; then verify; exit 0; fi
 
 # ==========================================================================
-# Jira
+# Jira -- the whole section, to the Confluence banner, runs only when wanted.
+# Not indented under the `if`, so that the diff that introduced it stayed one
+# line at each end.
 # ==========================================================================
+if want jira; then
 jira GET /rest/api/2/myself
 expect "GET /rest/api/2/myself as $ADMIN_USER" 200
 
@@ -682,9 +735,12 @@ record '.jira += {
                           '{key: $k, name: $n, template_key: $t, issue_type: $it, statuses: $st}')" \
         '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un, narrowing: $nw}')"
 
+fi  # want jira
+
 # ==========================================================================
-# Confluence
+# Confluence -- likewise, to the end of the seed.
 # ==========================================================================
+if want confluence; then
 conf GET /rest/api/user/current
 expect "GET /rest/api/user/current as $ADMIN_USER" 200
 
@@ -797,6 +853,7 @@ record '.confluence += {
   _comment: "Seeded by testenv/seed-atlassian-content.sh. Confluence assigns content ids; pages are found by title in the space. The fixture names no ancestors, so the seed decides the tree: every page sits under the space home page (`home_page_id`) except `sepa-design`, which is nested under `payments-architecture-overview` so that a launcher hit for it has a two-segment ancestor path. Each page records the content id it sits under as `parent_id` -- read back from the server for a page an earlier run had already created. Comments are authored by `author`."
 }' "$(jq -n --arg k "$SPACE_KEY" --arg h "$HOME_ID" --arg a "$ADMIN_USER" --argjson p "$PAGE_IDS" \
         '{space: $k, home: $h, author: $a, pages: $p}')"
+fi  # want confluence
 
 say "wrote $STATE"
 say "done: created $CREATED, skipped $SKIPPED"
