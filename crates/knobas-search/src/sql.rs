@@ -39,8 +39,8 @@
 //! Four properties are load-bearing:
 //!
 //! * **`m` is deliberately narrow** -- entity id, kind, rank, whether the row
-//!   is named what was typed, updated-at and nothing else. It holds one row per match, which for a common word is
-//!   thousands; carrying titles and bodies through it is what turns a 20 ms
+//!   is named what was typed, updated-at and nothing else. It holds one row
+//!   per match, which for a common word is thousands; carrying titles and bodies through it is what turns a 20 ms
 //!   search into a 200 ms one.
 //! * **Exactly one match scan.** `m` is `materialized` because both `totals`
 //!   and `top` read it, and the alternative is scanning the index twice.
@@ -210,16 +210,15 @@ pub fn search_sql(
         if index > 0 {
             sql.push_str("  union all\n");
         }
-        let (rank, named) = match (text.is_some(), prefix_last) {
-            (true, true) => (
-                RANK_WHOLE.replace("{fts}", corpus.fts),
-                NAMED.replace("{title}", corpus.title),
-            ),
-            (true, false) => (
-                format!("ts_rank_cd({}, q.tsq)", corpus.fts),
-                NAMED.replace("{title}", corpus.title),
-            ),
-            (false, _) => ("0::real".to_owned(), "false".to_owned()),
+        let rank = match (text.is_some(), prefix_last) {
+            (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
+            (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
+            (false, _) => "0::real".to_owned(),
+        };
+        let named = if text.is_some() {
+            NAMED.replace("{title}", corpus.title)
+        } else {
+            "false".to_owned()
         };
         let _ = writeln!(
             sql,
@@ -1010,6 +1009,24 @@ mod tests {
         );
         assert!(!done.sql.contains("':*'"), "{}", done.sql);
         assert!(!done.sql.contains("q.whole"), "{}", done.sql);
+        // Either way, a row named exactly what was typed comes first among
+        // equal ranks (`NAMED`), and only among them.
+        for built in [&typing, &done] {
+            assert!(
+                built
+                    .sql
+                    .contains("tsvector_to_array(to_tsvector('english', i.title)) = q.words"),
+                "{}",
+                built.sql
+            );
+            assert!(
+                built
+                    .sql
+                    .contains("m.rank desc, m.named desc, m.item_updated_at desc"),
+                "{}",
+                built.sql
+            );
+        }
         assert_eq!(done.sql.matches("websearch_to_tsquery").count(), 1);
     }
 
