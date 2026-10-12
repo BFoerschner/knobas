@@ -98,7 +98,7 @@ const MAX_ID_CHARS: usize = 48;
 /// the latency and not the scans). The cap is here so that the board's cost
 /// has a stated ceiling rather than an unbounded one.
 ///
-/// # Sixteen is a measured number (#533)
+/// # Sixteen was a measured number (#533)
 ///
 /// It was **64**, chosen as generous on the reasoning that nobody curates
 /// sixty-four saved lists. `knobas-search`'s perf gate now fills the rail
@@ -157,7 +157,46 @@ const MAX_ID_CHARS: usize = 48;
 ///
 /// # Stepped to eight on 2026-10-12 (#653)
 ///
-/// TABLE_653
+/// Five `just search-perf` runs on `d6673e60`, each under an orchestrator
+/// hold (no other agent, gate or cargo build on the machine for the whole run)
+/// and a 5-second process and gate-slot monitor, each with load1 under 12 at
+/// start and end and a monotonic rail in both columns -- all four of #533's
+/// conditions. The gate's asserted figure, the size curve's `board, 16 saved`
+/// at 100 k, read **87, 89, 95, 92 and 98 ms**: a spread of 11 against 2 ms of
+/// clearance. The rail table's own timing at sixteen read 89, 93, 90, 90 and
+/// **102** for `launcher_board` and 88, **100**, 89, 89 and 91 for
+/// `smart_lists`, so two of the five held runs failed the gate outright. Under
+/// #533's rule -- a quiet run clearing the budget by less than its own spread
+/// steps the constant to eight without a ruling -- it stepped.
+///
+/// It is not a commit's cost. Five held runs of `1f1de04b`, the code #629 read
+/// at 83 to 87, put the rail's `launcher_board` at sixteen at **105**, 87, 87,
+/// 86 and 88: the margin #629 saw was already thinner than this machine's
+/// spread before #630, #645, #647 or #650 landed, so no fix to one of them
+/// could restore it, and the bisect stopped there (a midpoint, `fb3133c7`,
+/// read 87 to 93). The cap comes down; the budget and the summary statement
+/// do not move.
+///
+/// At eight, five held runs on the commit that stepped it read the size
+/// curve's `board, 8 saved` at **85, 85, 85, 85 and 84 ms** (spread 1,
+/// clearance 15), and the rail at 100 k items, lowest and highest per column
+/// over the five:
+///
+/// ```text
+/// saved lists              0    1    2    4    8
+/// smart_lists lowest      40   52   55   61   82
+/// smart_lists highest     41   54   56   64   84
+/// launcher_board lowest   42   53   57   62   84
+/// launcher_board highest  43   55   58   66   90
+/// ```
+///
+/// The rail's `launcher_board` at eight spans 84 to 90, a spread of 6 against
+/// at least 10 ms of clearance, so eight holds under the same rule. The section
+/// above that called eight "not meaningfully cheaper" was right about the
+/// milliseconds -- eight buys 5 to 10 ms at the cap -- and is overtaken by the
+/// rule: the margin is for the clock, and at sixteen the clock's own spread ate
+/// it. A database restored with more than eight saved lists keeps them all;
+/// [`create`] refuses the next one until the count is below eight again.
 pub const MAX_SAVED_LISTS: i64 = 8;
 
 /// One row of `knobas.smart_list`.

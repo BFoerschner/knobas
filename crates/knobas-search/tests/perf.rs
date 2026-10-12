@@ -135,6 +135,10 @@
 //! and the gate then holds the cap's own reading to [`BUDGET_MS`]. A cap this
 //! fixture cannot carry inside the budget is a cap that comes down; the budget
 //! does not move.
+//!
+//! It has come down twice: from 64 to sixteen when this curve was first
+//! taken (#533), and from sixteen to eight when held re-runs read sixteen's
+//! clearance below the measurement's own spread (#653).
 
 use std::time::Instant;
 
@@ -496,7 +500,7 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 /// **An empty board is already 41 ms of the hundred** at 100 k items -- the
 /// rail's own read is 39 of it and the recent items the rest -- so a saved
 /// list is charged against the fifty-nine that are left, at 3 ms each: room
-/// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` comes from.
+/// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` came from.
 ///
 /// **The margin is thin on purpose, and no smaller cap buys much of it.** The
 /// gate passes at 84 to 90 against a budget of 100, because the built-ins own
@@ -519,6 +523,30 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 /// browse over a whole source, and it outweighs several saved searches for a
 /// word. That is why the step from 4 to 8 costs more than the step from 8
 /// to 16.
+///
+/// # The reading, 2026-10-12 (#653): the cap steps to eight
+///
+/// The argument above for sixteen -- "the largest number the budget affords
+/// with the gate still able to notice a regression" -- is overtaken. Held
+/// re-runs of #533's standard on `d6673e60` read `board, 16 saved` at 87 to
+/// 98 ms and failed the gate in two of five (the rail's `launcher_board` at
+/// sixteen at 102, its `smart_lists` at 100), and `1f1de04b` read 105 in one
+/// held run of five: the margin was thinner than this measurement's own
+/// spread, so #533's rule stepped `saved::MAX_SAVED_LISTS` to eight. Five
+/// held runs at eight, p90 at 100 k:
+///
+/// ```text
+/// lists, 8 saved    81 to 85
+/// board, 8 saved    84 to 85
+///
+/// the rail at 100000 items, lowest to highest over the five:
+/// saved lists          0       1       2       4       8
+/// smart_lists      40-41   52-54   55-56   61-64   82-84
+/// launcher_board   42-43   53-55   57-58   62-66   84-90
+/// ```
+///
+/// `saved.rs`'s doc comment on the constant carries every run and the
+/// arithmetic.
 ///
 /// # The harness shape, recorded because it is load-bearing
 ///

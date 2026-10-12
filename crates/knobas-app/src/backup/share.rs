@@ -73,10 +73,12 @@
 //! It became a live case on the day the number changed. Until #533 (PR #540)
 //! nothing in the tree could make the two disagree, because the constant had
 //! never moved: every row in an archive had been written past a `create` that
-//! held the same bound. `MAX_SAVED_LISTS` is **16** now and was 64, so an
-//! archive taken from a database holding more than sixteen saved lists is a
-//! real archive rather than one only a test can build -- and every row in it
-//! still arrives.
+//! held the same bound. `MAX_SAVED_LISTS` is **8** now -- it was 64, then 16
+//! from #533 until #653 stepped it down -- so an archive taken from a
+//! database holding more than eight saved lists is a real archive rather than
+//! one only a test can build, including every archive of a database that
+//! filled the rail while the cap was sixteen -- and every row in it still
+//! arrives.
 //!
 //! **The whole table travels**, and this is the one consequence worth reading
 //! twice: `pg_dump` restricts an archive by table and never by row, so "the

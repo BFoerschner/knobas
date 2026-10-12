@@ -1198,12 +1198,12 @@ async fn a_saved_query_crosses_an_archive_exactly_as_it_was_written() {
 /// time anybody saves a list, which is the second half of this test.
 ///
 /// It stopped being a contrived state on the day somebody lowered the number,
-/// which is #533 (PR #540): the constant was 64 and is **16**, so an archive
-/// taken from a database with more than sixteen saved lists is one a reader
-/// can actually hand over. The fixture still reaches the state with an
+/// which is #533 (PR #540): the constant was 64, became 16, and since #653 is
+/// **8**, so an archive taken from a database with more than eight saved
+/// lists is one a reader can actually hand over. The fixture still reaches the state with an
 /// `insert` past `create`, because that is the only way to reach it *here* --
 /// the assertion is written against `MAX_SAVED_LISTS` rather than against a
-/// number, so it reads the same at 64, at 16, and at whatever the perf gate
+/// number, so it reads the same at 64, at 16, at 8, and at whatever the perf gate
 /// measures next.
 #[tokio::test]
 async fn an_archive_holding_more_saved_lists_than_the_cap_restores_all_of_them() {
