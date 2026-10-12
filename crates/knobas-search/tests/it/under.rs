@@ -513,3 +513,61 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
         Some(format!("{site} / {host} / vm-{t} / pg-{t}").as_str())
     );
 }
+
+/// Coverage does not name the estate as unable to answer `under:`: it answers,
+/// so there is no gap to explain. Coverage lists configured sources, and the
+/// estate is knobas' own and is none of them -- so an `asset:` scope reports
+/// nothing, and a whole-corpus scope names only the source that really cannot
+/// answer (a Kuma, which declares no parent) while the estate's rows come back.
+#[tokio::test]
+async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
+    let pool = pool().await;
+    let t = token();
+    let host = format!("cov-host-{t}");
+    let root = asset(&pool, &host, None, "").await;
+    let vm = asset(&pool, &format!("cov-vm-{t}"), Some(&root), &host).await;
+    item(
+        &pool,
+        "kuma",
+        "monitor",
+        &format!("m-{t}"),
+        "payments-api",
+        "payments-api",
+        serde_json::json!({ "name": "payments-api" }),
+    )
+    .await;
+
+    let estate_only = searcher(&pool)
+        .search(q(&format!("asset: under:{host}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&estate_only), sorted(vec![root.clone(), vm.clone()]));
+    assert!(
+        estate_only.coverage.is_empty(),
+        "nothing in an estate scope is unable to answer: {:?}",
+        estate_only.coverage
+    );
+
+    let everywhere = searcher(&pool)
+        .search(q(&format!("under:{host}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&everywhere), sorted(vec![root, vm]));
+    let under = everywhere
+        .coverage
+        .iter()
+        .find(|c| c.dimension == FilterDimension::Under)
+        .expect("the Kuma is in scope and cannot answer");
+    for source in &under.sources {
+        assert!(
+            !["asset", "route"].contains(&source.source_id.as_str()),
+            "the estate is reported on: {under:?}"
+        );
+    }
+    assert!(
+        under
+            .sources
+            .iter()
+            .any(|s| s.source_id == "kuma" && s.answer == FilterAnswer::NoValues)
+    );
+}
