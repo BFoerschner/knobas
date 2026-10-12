@@ -10482,8 +10482,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   statement is still sent unnamed. Pinned by the tests above, unchanged, and by
   `a_builds_configuration_is_the_parent_its_own_adapter_says_it_names` (a row another adapter
   wrote, or a `parent`-arm row, does not split a configuration). `entity.rs`'s `seeded()` now
-  writes the stored declarations first, as bring-up does. Measured on one connection, five reads
-  each: before 300-312 ms, after about 80 ms, against 23-25 ms for `updated_desc`.
+  writes the stored declarations first, as bring-up does. The tile now depends on that write:
+  bring-up makes it before the first sync and before the pool is handed to any command, and if it
+  fails (logged, not fatal) every build draws ungrouped -- too many rows, never too few. Measured
+  on one connection, five reads each: before 298-318 ms, after about 80 ms, against 23-30 ms for
+  `updated_desc`.
 
 - **`crates/knobas-source/src/**` and the IPC schema — issue #668 (2026-10-12): `WriteOp::
   SetParameter`.** Spec #660 story 19: change a build configuration's parameter from its view. The

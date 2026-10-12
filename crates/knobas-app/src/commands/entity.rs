@@ -454,7 +454,9 @@ drawn as (
 ///
 /// The stored rows are a set: each name and its parent's kind, but not the
 /// chain's order nor which names belong to which parent. So the key is the
-/// sorted `(parent kind, name)` pairs, joined by separators no name holds.
+/// sorted `(parent kind, name)` pairs, joined by control characters
+/// (`\x1c`-`\x1f`) that a synced name is not expected to hold; nothing
+/// enforces it, and a name that did could join two keys.
 /// Two configurations sharing a display name stay two, because each also
 /// names its own id (#680's two configurations called `Build`). What the set
 /// cannot tell apart is two chains with the same pairs arranged differently:
@@ -468,16 +470,19 @@ drawn as (
 /// Whether a kind declares a state is read from `$8`; the parents from the
 /// stored copy of the declarations. Both are this binary's
 /// `Registry::builtin()`, which bring-up writes to the database before its
-/// first sync (`commands::search::searcher`), so they agree.
+/// first sync (`commands::search::searcher`), so they agree. If that write
+/// failed (bring-up logs it and goes on), no row has a key and every build
+/// draws alone: the tile shows too many rows, never too few.
 ///
 /// The statement's shape follows its `explain analyze` on that room. `named`
 /// is materialized and bounded by the room's sources -- `$1` repeated there,
 /// redundant with `grouped` in logic, is what lets the planner use
 /// `item_parent_child_idx` -- rather than probed once per row of the room,
-/// which a nested loop did at about 7 µs a probe. Every key and the group column compare in the `"C"` collation: a
-/// sort of 40,000 names in the database's own collation was most of the
-/// remaining time. The kept rows are fetched by primary key. Measured on the
-/// 20,000-build room: about 80 ms.
+/// which a nested loop did at about 7 µs a probe. Every key and the group
+/// column compare in the `"C"` collation: a sort of 40,000 names in the
+/// database's own collation was most of the remaining time. The kept rows
+/// are fetched by primary key. Measured on the 20,000-build room: about
+/// 80 ms.
 const LIVE_LATEST: &str = concat!(
     tile_ruled!(),
     r#",
