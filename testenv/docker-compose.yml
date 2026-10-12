@@ -238,44 +238,11 @@ services:
     image: ${TEAMCITY_AGENT_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     profiles: ["real-teamcity"]
     container_name: knobas-teamcity-agent
-    #
-    # IN THE SERVER'S NETWORK NAMESPACE (#683), so that 127.0.0.1:3000 means
-    # the same thing to the agent's checkout as to the server's fetch -- see
-    # teamcity-gitea below. `teamcity` still resolves, to the namespace's own
-    # address. Nothing listens on the agent's side that could collide with
-    # 8111: an agent polls its server.
-    network_mode: "service:teamcity"
     environment:
       SERVER_URL: http://teamcity:8111
       AGENT_NAME: knobas-agent
     volumes:
       - tc-agent-conf:/data/teamcity_agent/conf
-    depends_on:
-      - teamcity
-      - teamcity-gitea
-
-  teamcity-gitea:
-    # Gitea at 127.0.0.1:3000 inside TeamCity's network namespace (#683).
-    #
-    # The seeded VCS roots name Gitea by the address Gitea names itself by,
-    # its ROOT_URL `http://127.0.0.1:3000/` -- the prefix of every commit's
-    # `html_url`, and so of every mirrored commit's web URL. A build's change
-    # names its commit by the VCS root's URL and its sha, and knobas finds the
-    # mirrored commit by the page those two compose; a root that said
-    # `http://gitea:3000` would name a page no mirror holds. Inside a
-    # container 127.0.0.1 is the container itself, so this forwards that
-    # address to the compose service: the server fetches through it, and the
-    # agent, which shares the namespace, checks out through it.
-    #
-    # The Gitea image, for its busybox `nc` (`-lk -e`: a persistent server, a
-    # process per connection): already pinned and already pulled, so the
-    # forward costs no image of its own. Started by `up teamcity-agent`,
-    # which depends on it; stopped with the server.
-    image: ${GITEA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
-    profiles: ["real-teamcity"]
-    container_name: knobas-teamcity-gitea
-    network_mode: "service:teamcity"
-    entrypoint: ["nc", "-lk", "-s", "127.0.0.1", "-p", "3000", "-e", "nc", "gitea", "3000"]
     depends_on:
       - teamcity
 

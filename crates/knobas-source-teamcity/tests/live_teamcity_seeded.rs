@@ -1955,8 +1955,7 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
     assert_eq!(value(&root, "Type").0, "Git");
     assert_eq!(
         value(&root, "URL").0,
-        "http://127.0.0.1:3000/tidewater/payout-service.git",
-        "Gitea as it names itself (#683)"
+        "http://gitea:3000/tidewater/payout-service.git"
     );
 
     // The other seeded configuration's build, which passed.

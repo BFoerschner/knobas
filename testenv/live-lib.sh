@@ -324,7 +324,7 @@ live_down() {
   _live_main "$1" >/dev/null || { live_guard "$1"; return 1; }
   case $1 in
     gitea) _live_compose stop gitea ;;
-    teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent teamcity-gitea ;;
+    teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent ;;
     jira | confluence)
       # `rm` and the two named volumes, NOT `down -v`. A `down` with services
       # named still removes the project's network once no RUNNING container

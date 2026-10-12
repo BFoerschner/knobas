@@ -94,6 +94,39 @@ impl Source for Drawing {
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
         let key = entity.split_once(':').map_or("", |(_, key)| key);
+        // #683: hints named by another address of a mirrored host.
+        if let Some(rest) = key.strip_prefix("aliased:") {
+            let (sha, host) = rest.split_once(':').expect("aliased:<sha>:<host>");
+            let hinted = |title: &str, repo_url: String| ViewRow {
+                commit: Some(CommitHint {
+                    repo_url,
+                    sha: sha.to_owned(),
+                }),
+                ..row(None, title)
+            };
+            return Ok(Some(SourceView {
+                sections: vec![ViewSection {
+                    id: "changes".into(),
+                    title: "Changes".into(),
+                    count: Some(3),
+                    deferred: false,
+                    blocks: vec![Block::Entities {
+                        title: None,
+                        rows: vec![
+                            hinted(
+                                "by its CI address",
+                                format!("http://{host}:3000/tidewater/payout-service.git"),
+                            ),
+                            hinted("by ssh", format!("{host}:tidewater/payout-service.git")),
+                            hinted(
+                                "by another host",
+                                "http://other.example/tidewater/payout-service.git".to_owned(),
+                            ),
+                        ],
+                    }],
+                }],
+            }));
+        }
         if let Some(sha) = key.strip_prefix("changes:") {
             let hinted = |title: &str, repo_url: &str| ViewRow {
                 commit: Some(CommitHint {
@@ -340,5 +373,81 @@ async fn a_commit_named_by_repository_and_sha_opens_the_mirrored_commit() {
     assert!(
         !wire.contains("repo_url"),
         "the hint crossed to the shell: {wire}"
+    );
+}
+
+/// #683: a source whose config lists `clone_urls` -- the other addresses CI
+/// clones it from -- has a commit hint named by one of them resolve to its
+/// mirrored commit, by URL or scp-like remote; a hint on any other host with
+/// the same owner/repo stays plain text.
+#[tokio::test]
+async fn a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit() {
+    let f = fixture().await;
+    let sha = format!("{}0000", uuid::Uuid::new_v4().simple());
+    // A host of this test's own: the pool is shared, and an alias is read
+    // from every configured source.
+    let host = format!("ci-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let git = format!("{}-git", f.id);
+    sources::crud::add(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        NewSource {
+            id: git.clone(),
+            adapter_kind: "mock".to_owned(),
+            display_name: "Git".to_owned(),
+            base_url: format!("http://{host}.pages.example/"),
+            auth_kind: AuthMethod::Pat,
+            config: serde_json::json!({}),
+            secret: SecretInput::of("pat"),
+            sync_interval_secs: 300,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("update knobas.source_config set config = $2 where id = $1")
+        .bind(&git)
+        .bind(serde_json::json!({ "clone_urls": [format!("http://{host}:3000"), format!("git@{host}:")] }))
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let mirrored = format!("{git}:tidewater/payout-service@{sha}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'c')")
+        .bind(&mirrored)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload, web_url)
+         values ($1, $2, 'commit', 'c', '{}'::jsonb, $3)",
+    )
+    .bind(&mirrored)
+    .bind(&git)
+    .bind(format!(
+        "http://{host}.pages.example/tidewater/payout-service/commit/{sha}"
+    ))
+    .execute(&f.pool)
+    .await
+    .unwrap();
+
+    let drawn = view(&f, &format!("aliased:{sha}:{host}"), None)
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Entities { rows, .. } = &drawn.sections[0].blocks[0] else {
+        panic!("{drawn:#?}");
+    };
+    let resolved: Vec<_> = rows
+        .iter()
+        .map(|r| (r.title.as_str(), r.entity_id.clone()))
+        .collect();
+    assert_eq!(
+        resolved,
+        [
+            ("by its CI address", Some(mirrored.clone())),
+            ("by ssh", Some(mirrored.clone())),
+            ("by another host", None),
+        ]
     );
 }

@@ -534,18 +534,16 @@ branch name at all; TeamCity shows it as `<default>` while it waits and as
 fixture means. 1187 and 1188 are queued on their feature branch by name.
 
 **The builds are real and VCS-backed.** Each project has one Git VCS root
-(`Payout_PayoutService`, `Ledger_LedgerApi`) pointing at the seeded Gitea as
-Gitea names itself, `http://127.0.0.1:3000/tidewater/<repo>.git` (its
-`ROOT_URL`, authenticated with the seed's Gitea token from
-`seed-state.json`), with a branch specification naming every branch the
-Gitea seed created in that repository, and the change witness's. The address
-is the one every mirrored commit's web URL starts with, so a change or a
-revision in a build view opens the mirrored commit (#683); `http://gitea:3000`
-would name pages no mirror holds. Inside the containers 127.0.0.1 is the
-container itself, so the `teamcity-gitea` service forwards 127.0.0.1:3000 in
-the server's network namespace to Gitea, and the agent shares that namespace
-(docker-compose.yml says how). A root an older seed made is re-pointed, and
-a finished fixture build that ran from the old URL is run again under its
+(`Payout_PayoutService`, `Ledger_LedgerApi`) pointing at the seeded Gitea over
+the compose network (`http://gitea:3000/tidewater/<repo>.git`, authenticated
+with the seed's Gitea token from `seed-state.json`), with a branch
+specification naming every branch the Gitea seed created in that repository,
+and the change witness's. A mirrored commit's page carries Gitea's own
+`ROOT_URL`, `http://127.0.0.1:3000`, so a change named by the root's URL
+opens it only through a Gitea source whose `clone_urls` lists
+`http://gitea:3000` (#683) -- what `teamcity_seeded_live.rs` configures, and
+what a real deployment whose CI clones over an internal hostname would. A
+finished fixture build that ran from any other root URL is run again under its
 number.
 The agent clones the repository and runs a command-line step, and the
 server reports the fixture's branch as the build's `branchName`. Nothing

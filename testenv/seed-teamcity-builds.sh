@@ -89,12 +89,13 @@ cd "$(dirname "$0")"
 TC_URL=http://127.0.0.1:8111
 STATE=seed-state.json
 FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
-# Gitea as it names itself: docker-compose.yml's ROOT_URL, the prefix of
-# every commit's `html_url` and so of every mirrored commit's web URL. The
-# VCS roots name it so, and a build's change then names a page the mirror
-# holds (#683). Inside TeamCity's containers 127.0.0.1:3000 is the
-# `teamcity-gitea` forward to the compose service; from here it is Gitea's
-# published port, which this script also writes branches through.
+# Inside the compose network, where the server fetches and the agent clones;
+# the host-side 127.0.0.1:3000 means nothing to either container. knobas
+# matches a change's commit through the Gitea source's `clone_urls`, which
+# name this address (#683).
+GITEA_INTERNAL_URL=http://gitea:3000
+# Gitea's published port, which this script writes the change witness's
+# branch through.
 GITEA_URL=http://127.0.0.1:3000
 GITEA_ORG=tidewater
 # The default branch of every seeded repository and so of every VCS root.
@@ -299,9 +300,9 @@ ensure_project() {  # ensure_project <id>
   say "created project $1"
 }
 
-# A root an older seed made heals here: its URL named `http://gitea:3000`
-# until #683, and its branch spec lacked the change witness's branch. Each
-# property is put back only when it differs, so a current root costs reads.
+# A root an older seed made heals here: its branch spec lacked the change
+# witness's branch (#683). Put back only when it differs, so a current root
+# costs one read.
 heal_vcs_root() {  # heal_vcs_root <root id> <property> <value>
   rest_text GET "/app/rest/vcs-roots/id:$1/properties/$2"
   expect "read $2 of VCS root $1" 200 404
@@ -315,7 +316,6 @@ ensure_vcs_root() {  # ensure_vcs_root <project id>
   _proj=$1; _id=$(vcs_root_id "$_proj"); _repo=$(repo_for_project "$_proj")
   rest GET "/app/rest/vcs-roots/id:$_id"
   if [ "$REST_STATUS" = "200" ]; then
-    heal_vcs_root "$_id" url "$GITEA_URL/$GITEA_ORG/$_repo.git"
     heal_vcs_root "$_id" teamcity:branchSpec "$(branch_spec "$_repo")"
     return 0
   fi
@@ -324,7 +324,7 @@ ensure_vcs_root() {  # ensure_vcs_root <project id>
   # token there for git-over-HTTP, and it is the credential seed-state.json
   # already holds. `branch` is the default branch, spelled as a ref.
   _body=$(jq -n --arg i "$_id" --arg p "$_proj" --arg r "$_repo" \
-               --arg url "$GITEA_URL/$GITEA_ORG/$_repo.git" \
+               --arg url "$GITEA_INTERNAL_URL/$GITEA_ORG/$_repo.git" \
                --arg spec "$(branch_spec "$_repo")" --arg tok "$GITEA_TOKEN" \
                --arg default "$DEFAULT_BRANCH" \
     '{id:$i, name:($p + " / " + $r), vcsName:"jetbrains.git", project:{id:$p},
@@ -337,7 +337,7 @@ ensure_vcs_root() {  # ensure_vcs_root <project id>
         {name:"secure:password", value:$tok}]}}')
   rest POST /app/rest/vcs-roots "$_body"
   expect "create VCS root $_id" 200
-  say "created VCS root $_id -> $GITEA_URL/$GITEA_ORG/$_repo.git"
+  say "created VCS root $_id -> $GITEA_INTERNAL_URL/$GITEA_ORG/$_repo.git"
 }
 
 add_step() {  # add_step <build type id> <step name> <script>
@@ -422,18 +422,18 @@ ensure_build_type() {  # ensure_build_type <id>
 
 # A finished build that an older seed ran is not this seed's build: the
 # failed one must carry the failed test its step now reports (#665), and
-# every one must have run from the root's current URL (#683) -- a build keeps
-# the VCS root instance it ran from, so a build from the `http://gitea:3000`
-# root names its revision by that URL however the root reads now. Such a
-# build is deleted, so the loop below runs it again under the same number --
+# every one must have run from the root's own URL -- a build keeps the VCS
+# root instance it ran from, and a branch of #683 once pointed the roots at
+# another address, so a build from then names its revision by that one. Such
+# a build is deleted, so the loop below runs it again under the same number --
 # its id changes, and seed-state.json records the new one.
 ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
   rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed),revisions(revision(vcs-root-instance(properties(property(name,value)))))"
   expect "read build id $1" 200
   _why=''
   case "$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')" in
-    "$GITEA_URL"/*) ;;
-    *) _why="it ran from an older VCS root URL" ;;
+    "$GITEA_INTERNAL_URL"/*) ;;
+    *) _why="it ran from another VCS root URL" ;;
   esac
   if [ "$2" = "FAILURE" ] && [ "$(printf '%s' "$REST_BODY" | jq '.testOccurrences.failed // 0')" -lt 1 ]; then
     _why="it reports no failed test"

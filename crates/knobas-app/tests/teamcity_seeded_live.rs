@@ -314,7 +314,13 @@ async fn app_with(env: &Env, account: &str, gitea: Option<&GiteaEnv>) -> Sources
                 display_name: "Tidewater Git (seeded)".to_owned(),
                 base_url: gitea.url.clone(),
                 auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
-                config: json!({ "repos": ["tidewater/payout-service", "tidewater/ledger-api"] }),
+                // The address the seeded VCS roots clone from, inside the
+                // compose network: what lets a change named by it open the
+                // commit this source mirrors under its own URL (#683).
+                config: json!({
+                    "repos": ["tidewater/payout-service", "tidewater/ledger-api"],
+                    "clone_urls": ["http://gitea:3000"]
+                }),
                 sync_interval_secs: 86_400,
                 enabled: true,
             },
@@ -731,8 +737,11 @@ fn rows_of<'v>(
 /// failed fixture build 1187 is its configuration's first and lists none, and
 /// its *Revision* row is what still leads to its code. Both rows are drawn by
 /// the app's own read, `crud::view`, which resolves the adapter's commit hint
-/// against this mirror -- possible because the seeded VCS roots name Gitea by
-/// its ROOT_URL, `127.0.0.1:3000`, the address every commit's page carries.
+/// against this mirror. The seeded VCS roots clone `http://gitea:3000`, the
+/// compose network's name, while every mirrored commit's page carries Gitea's
+/// ROOT_URL, `127.0.0.1:3000`; the Gitea source's `clone_urls` says the two
+/// are one server, as a real deployment whose CI clones over an internal
+/// hostname would.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded TeamCity and Gitea: `just teamcity-live-seeded`"]
 async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {

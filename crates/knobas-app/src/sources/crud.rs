@@ -795,6 +795,15 @@ async fn resolve_commit_hints(
     pool: &PgPool,
     view: &mut knobas_source::view::SourceView,
 ) -> Result<(), SourcesError> {
+    let hinted = view
+        .sections
+        .iter()
+        .flat_map(|s| &s.blocks)
+        .any(|b| matches!(b, knobas_source::view::Block::Entities { rows, .. } if rows.iter().any(|r| r.commit.is_some())));
+    if !hinted {
+        return Ok(());
+    }
+    let aliases = clone_url_aliases(pool).await?;
     for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
         let knobas_source::view::Block::Entities { rows, .. } = block else {
             continue;
@@ -806,7 +815,8 @@ async fn resolve_commit_hints(
             if row.entity_id.is_some() {
                 continue;
             }
-            let Some(page) = commit_page(&hint.repo_url, &hint.sha) else {
+            let repo_url = canonical_repo_url(&hint.repo_url, &aliases);
+            let Some(page) = commit_page(&repo_url, &hint.sha) else {
                 continue;
             };
             let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
@@ -817,6 +827,81 @@ async fn resolve_commit_hints(
         }
     }
     Ok(())
+}
+
+/// Every configured source's other addresses (#683): `(its base URL, a
+/// `clone_urls` entry)`. A git host is often cloned by CI at an address that
+/// is not the one its pages carry -- an internal hostname, an SSH remote --
+/// and a source that says so in its config's `clone_urls` lets a commit
+/// hint named by that address find the mirrored commit. Read by that one
+/// key from any source's config, so the app names no adapter; an adapter
+/// whose config has no such key contributes nothing.
+async fn clone_url_aliases(pool: &PgPool) -> Result<Vec<(String, String)>, SourcesError> {
+    Ok(sqlx::query_as(
+        "select s.base_url, a.alias
+           from knobas.source_config s,
+                jsonb_array_elements_text(s.config->'clone_urls') as a(alias)
+          where jsonb_typeof(s.config->'clone_urls') = 'array'
+          order by s.id",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// `repo_url` with a configured other address of a source replaced by that
+/// source's base URL; unchanged where no alias is its prefix. Exact
+/// otherwise: no owner/repo matching across hosts (#665).
+///
+/// An alias is a URL prefix (`http://gitea:3000`, `ssh://git@gitea:2222`),
+/// which must be followed by `/`, or an scp-like one ending in `:`
+/// (`git@gitea:`), followed by the path directly. Either matches with or
+/// without its user, since the adapter that drew the hint drops credentials
+/// (`git@gitea:` also matches `gitea:owner/repo.git`). The host compares
+/// case-insensitively, as hosts do; the path is kept as written.
+fn canonical_repo_url(repo_url: &str, aliases: &[(String, String)]) -> String {
+    let repo = repo_url.trim();
+    for (base, alias) in aliases {
+        let alias = alias.trim();
+        let scp = alias.ends_with(':') && !alias.contains("://");
+        let alias = if scp {
+            alias
+        } else {
+            alias.trim_end_matches('/')
+        };
+        if alias.is_empty() {
+            continue;
+        }
+        for prefix in [alias.to_owned(), without_user(alias)] {
+            let Some(head) = repo.get(..prefix.len()) else {
+                continue;
+            };
+            if !head.eq_ignore_ascii_case(&prefix) {
+                continue;
+            }
+            let rest = &repo[prefix.len()..];
+            let path = if scp {
+                rest
+            } else if let Some(path) = rest.strip_prefix('/') {
+                path
+            } else {
+                continue;
+            };
+            return format!("{}/{}", base.trim().trim_end_matches('/'), path);
+        }
+    }
+    repo.to_owned()
+}
+
+/// An address without the `user@` before its host.
+fn without_user(address: &str) -> String {
+    let (scheme, rest) = match address.split_once("://") {
+        Some((scheme, rest)) => (format!("{scheme}://"), rest),
+        None => (String::new(), address),
+    };
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(host_end);
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    format!("{scheme}{host}{path}")
 }
 
 /// The web page of commit `sha` in the repository a git remote URL names:
@@ -926,6 +1011,71 @@ async fn summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #683: a configured other address of a source becomes that source's
+    /// base URL -- as a URL prefix or an scp-like remote, with or without
+    /// its user -- and nothing else is rewritten.
+    #[test]
+    fn a_clone_url_alias_becomes_its_sources_base_url_and_nothing_else_does() {
+        let aliases = [
+            (
+                "http://127.0.0.1:3000/".to_owned(),
+                "http://gitea:3000/".to_owned(),
+            ),
+            ("http://127.0.0.1:3000".to_owned(), "git@gitea:".to_owned()),
+            (
+                "https://git.example".to_owned(),
+                "ssh://git@git.internal:2222".to_owned(),
+            ),
+        ];
+        for (hint, want) in [
+            (
+                "http://gitea:3000/tidewater/a.git",
+                "http://127.0.0.1:3000/tidewater/a.git",
+            ),
+            (
+                "HTTP://Gitea:3000/tidewater/a.git",
+                "http://127.0.0.1:3000/tidewater/a.git",
+            ),
+            (
+                "git@gitea:tidewater/a.git",
+                "http://127.0.0.1:3000/tidewater/a.git",
+            ),
+            // The adapter dropped the user; the alias still matches.
+            (
+                "gitea:tidewater/a.git",
+                "http://127.0.0.1:3000/tidewater/a.git",
+            ),
+            (
+                "ssh://git@git.internal:2222/o/r.git",
+                "https://git.example/o/r.git",
+            ),
+            (
+                "ssh://git.internal:2222/o/r.git",
+                "https://git.example/o/r.git",
+            ),
+            // A longer host that merely starts like the alias is not it.
+            (
+                "http://gitea:30000/tidewater/a.git",
+                "http://gitea:30000/tidewater/a.git",
+            ),
+            (
+                "http://gitea.other:3000/tidewater/a.git",
+                "http://gitea.other:3000/tidewater/a.git",
+            ),
+            // Another host with the same owner/repo stays as written.
+            (
+                "http://elsewhere/tidewater/a.git",
+                "http://elsewhere/tidewater/a.git",
+            ),
+        ] {
+            assert_eq!(canonical_repo_url(hint, &aliases), want, "{hint}");
+        }
+        assert_eq!(
+            canonical_repo_url("http://gitea:3000/x/y", &[]),
+            "http://gitea:3000/x/y"
+        );
+    }
 
     /// The one branch in [`add`]'s failure path that a race decides.
     #[test]
