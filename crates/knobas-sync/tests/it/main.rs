@@ -14,6 +14,7 @@ mod backfill;
 mod config;
 mod cursor;
 mod dedicated;
+mod flush_all_isolation;
 mod progress;
 mod run;
 mod run_log;

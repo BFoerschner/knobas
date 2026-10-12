@@ -2466,6 +2466,8 @@ knobas-sync	test/it	cursor::two_overlapping_runs_of_one_source_do_not_both_start
 knobas-sync	test/it	dedicated::a_failed_run_releases_the_source_lock_before_it_returns
 knobas-sync	test/it	dedicated::a_parked_run_holds_no_connection_from_the_application_pool
 knobas-sync	test/it	dedicated::a_refused_run_releases_the_lock_too
+knobas-sync	test/it	flush_all_isolation::no_file_that_asserts_a_wait_reason_flushes_every_source
+knobas-sync	test/it	flush_all_isolation::the_rule_actually_rejects_a_flush_beside_a_wait_reason
 knobas-sync	test/it	progress::a_progress_message_reaches_every_sink_enrolled_after_one_that_panics
 knobas-sync	test/it	progress::a_refused_item_does_not_count_as_progress
 knobas-sync	test/it	progress::a_run_that_pushed_nothing_still_reports_once
