@@ -30,7 +30,8 @@ use crate::query::Parsed;
 /// `sync.live_item`, so a withdrawn item or a disabled source does not vouch
 /// for a name the corpus no longer has -- the same reason the coverage probe
 /// reads it. A deleted asset's row is gone, so `knobas.asset` needs no such
-/// view.
+/// view. The asset arm is the name match `corpus::estate_subtree!` starts its
+/// walk from, spelled the same way: change one and the other must follow.
 const KNOWN_SQL: &str = concat!(
     "select distinct lower(n.name) from sync.live_item i cross join lateral (select pn.name from ",
     knobas_core::declared_parent_names!("$1"),

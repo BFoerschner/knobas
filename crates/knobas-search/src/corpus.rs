@@ -66,6 +66,11 @@
 //! match, so "pve-02" still ranks the hypervisor itself first and its
 //! containers under it.
 //!
+//! (That is about *ranking* by ancestry on every keystroke. `under:` is the
+//! other question -- which rows sit beneath a named asset -- and it does walk
+//! `parent_id` per query, once per statement and only for a query that typed
+//! `under:`: [`estate_subtree!`] says why that is the right trade there.)
+//!
 //! Then M4's whole search change is:
 //!
 //! ```ignore
@@ -190,8 +195,14 @@ pub struct Corpus {
 /// mirror returns a parent it holds. `union`, not `union all`: the store
 /// refuses a move that makes a cycle, and this terminates even if a row ever
 /// got one some other way. It reads `ud.v` and nothing of the outer row, so
-/// it is one walk per statement and not one per asset; the estate is a few
-/// thousand rows at the most (`testing::seed_estate`'s upper bound).
+/// it is one walk per statement and not one per asset. Measured on
+/// `testing::seed_estate`'s upper bound (3,303 assets, 1,500 routes) with a
+/// site named by `under:`: all 1,601 rows of its subtree in 13 ms at p90, and
+/// 18 ms with a word beside the filter (#600).
+///
+/// What an asset answers to is spelled twice, here and in
+/// `crate::under`'s `KNOWN_SQL`, which reports a value no asset is called as
+/// an unknown token. Change one and the other must follow.
 macro_rules! estate_subtree {
     () => {
         concat!(

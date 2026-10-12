@@ -713,9 +713,9 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
 /// Through the store's own `create`, `create_route` and `move_to`, because a
 /// move is the store's write: `under:` reads the `parent_id` it writes, and the
 /// path line reads the `path_text` it rewrites for the whole subtree. A VM with
-/// a container and a route moves from one host to another. The next search
-/// finds all three under the new host and none of them under the old one, and
-/// each row's path line names the new host.
+/// a container and a route moves from one site to another. The next search
+/// finds all three under the new site and none of them under the old one, and
+/// each row's path line names the new site.
 #[tokio::test]
 async fn moving_an_asset_moves_what_under_returns() {
     use knobas_app::assets::Visibility;
@@ -778,7 +778,7 @@ async fn moving_an_asset_moves_what_under_returns() {
     assert_eq!(
         ids(&after_old),
         std::slice::from_ref(&old.id),
-        "nothing stale under the old host"
+        "nothing stale under the old site"
     );
 
     let after_new = search_inner(&pool, query(&format!("under:new-{t}")))
