@@ -150,7 +150,10 @@ pub fn commit(sha: &str, message: &str, created: &str) -> Value {
         "commit": {
             "message": message,
             "author": { "name": "Mara Lindqvist", "email": "mara@tidewater.example", "date": created }
-        }
+        },
+        // What a listing asked with `files=false` carries (1.27.3, measured
+        // 2026-10-12): `null`, which a branch's and a repository's views read.
+        "files": null
     })
 }
 
@@ -603,6 +606,87 @@ impl Fake {
                 .mount(&self.server)
                 .await;
             }
+        }
+
+        // A branch and a repository's source views (#663): each branch on its
+        // own, its compare with `main` both ways and as a diff, and a README
+        // in the top directory. `tests/it/view_branch.rs` and `view_repo.rs`
+        // serve their own records for the edge cases; this is what the
+        // contract battery's clause 9 reads every branch and repository by.
+        for (full_name, branches) in &state.branches {
+            let commits_of = |name: &str| {
+                state
+                    .commits
+                    .get(&format!("{full_name}@{name}"))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            for record in branches {
+                let name = record["name"].as_str().expect("a branch record has a name");
+                let wire = name.replace('/', "%2F");
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/branches/{wire}"))),
+                )
+                .respond_with(ok(record.clone()))
+                .mount(&self.server)
+                .await;
+                if name == "main" {
+                    continue;
+                }
+                let ahead = commits_of(name);
+                authed(Mock::given(method("GET")).and(path(format!(
+                    "/api/v1/repos/{full_name}/compare/main...{wire}"
+                ))))
+                .and(query_param("output", "diff"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    "diff --git a/{name}.txt b/{name}.txt\nnew file mode 100644\n\
+                     index 0000000..2222222\n--- /dev/null\n+++ b/{name}.txt\n@@ -0,0 +1 @@\n+{name}\n"
+                )))
+                .with_priority(4)
+                .mount(&self.server)
+                .await;
+                authed(Mock::given(method("GET")).and(path(format!(
+                    "/api/v1/repos/{full_name}/compare/main...{wire}"
+                ))))
+                .respond_with(ok(
+                    json!({ "total_commits": ahead.len(), "commits": ahead }),
+                ))
+                .mount(&self.server)
+                .await;
+                // Behind, as Gitea counts it: `X-Total-Count` on a
+                // one-commit page of `/commits?sha=main&not={branch}`.
+                let behind = commits_of("main");
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/commits")))
+                        .and(query_param("sha", "main"))
+                        .and(query_param("not", name))
+                        .and(query_param("limit", "1")),
+                )
+                .respond_with(
+                    ok(json!(behind.iter().take(1).collect::<Vec<_>>()))
+                        .insert_header("X-Total-Count", behind.len().to_string().as_str()),
+                )
+                .with_priority(4)
+                .mount(&self.server)
+                .await;
+            }
+            authed(
+                Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/contents"))),
+            )
+            .respond_with(ok(json!([
+                { "name": "README.md", "type": "file", "path": "README.md", "size": 20 }
+            ])))
+            .mount(&self.server)
+            .await;
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/raw/README.md"))),
+            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!("# {full_name}\n")))
+            .mount(&self.server)
+            .await;
         }
 
         // Anything past the last page answers empty, the way Gitea does --

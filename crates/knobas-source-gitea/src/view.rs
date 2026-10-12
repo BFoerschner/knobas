@@ -2,8 +2,8 @@
 //!
 //! A **commit** opens on its overview (who, when, its parents, its whole
 //! message) and has its diff as a second tab. A **pull request** is
-//! [`pr`]'s. The other kinds answer `None` until their own tickets (#660): the
-//! detail then draws the mirror's generic projection, as it always has.
+//! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
+//! [`repo`]'s (#663).
 //!
 //! Every read here is live and nothing is stored (rule 1). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why.
@@ -15,7 +15,10 @@ use crate::keys::{self, GiteaKey};
 use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
+mod branch;
 mod pr;
+mod repo;
+mod rows;
 
 /// The commit view's first tab.
 const OVERVIEW: &str = "overview";
@@ -51,7 +54,16 @@ pub(crate) async fn draw(
         } => pr::draw(source, entity, &owner, &repo, number, section)
             .await
             .map(Some),
-        GiteaKey::Repo { .. } | GiteaKey::Branch { .. } => Ok(None),
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } => branch::draw(source, entity, &owner, &repo, &branch, section)
+            .await
+            .map(Some),
+        GiteaKey::Repo { owner, repo } => repo::draw(source, entity, &owner, &repo, section)
+            .await
+            .map(Some),
     }
 }
 

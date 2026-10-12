@@ -158,7 +158,7 @@
             {#if block.type === "facts"}
               <FactsBlock facts={block.facts} />
             {:else if block.type === "text"}
-              <TextBlock text={block.text} markdown={block.markdown} />
+              <TextBlock text={block.text} markdown={block.markdown} {onopenurl} />
             {:else if block.type === "entities"}
               <EntitiesBlock title={block.title} rows={block.rows} {onnavigate} {onopenurl} />
             {:else if block.type === "diff"}
