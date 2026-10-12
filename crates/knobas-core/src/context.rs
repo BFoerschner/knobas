@@ -322,8 +322,12 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// instance, so the adapter stores it beside the record as `epic: {"key": …}`
 /// when `epic_link_field` is configured (the deputy's ruling of 2026-10-12 on
 /// #598, ADR-0018). The two are read in the order the Jira descriptor declares
-/// its `ticket` parent candidates, `fields.parent` first, so where both
-/// resolve the direct parent wins, as it does for `under:`.
+/// its `ticket` parent candidates, `fields.parent` first, so where both carry
+/// a key the direct parent wins, as it does for `under:`. The two rules are
+/// not the same rule: `declared_parents!` takes the first candidate that is an
+/// object, and `coalesce` the first that yields a key, so a keyless
+/// `fields.parent: {}` stops `under:` and falls through to `epic` here. Jira
+/// sends no such record; the order is what the two are held to.
 ///
 /// **Its failure direction, stated (requirement 3): it misses.** A record
 /// whose payload does not carry this path yields no row, so an epic seeds
