@@ -6,10 +6,10 @@
 //! * *Pull requests* (count = open) -- the open ones, with the rooms' chip.
 //! * *Branches* (count) -- the default branch first, then by last commit,
 //!   newest first.
+//! * *Commits* -- the default branch's latest twenty.
 //!
 //! Both lists stop after twenty pages; one that did keeps its count as what
 //! it read and ends on a muted row naming Gitea's page for the rest (#678).
-//! * *Commits* -- the default branch's latest twenty.
 //!
 //! An empty repository (no commits at all) draws its overview and empty
 //! lists: Gitea answers its contents 404, its branches `null`, its `/pulls`
@@ -223,10 +223,7 @@ async fn pulls(
     let open = if record.repo.can_have_pulls() {
         rows::open_pulls(source, owner, repo).await?
     } else {
-        rows::Paged {
-            items: Vec::new(),
-            cut: false,
-        }
+        rows::Paged::default()
     };
     let rows: Vec<ViewRow> = open
         .items

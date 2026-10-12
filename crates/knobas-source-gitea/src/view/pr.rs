@@ -20,11 +20,6 @@ const FILES: &str = "files";
 const COMMITS: &str = "commits";
 const CONVERSATION: &str = "conversation";
 
-/// How many pages of commits the *Commits* tab reads at most: the shared cap
-/// at Gitea's page of 50. A longer pull request says how many it left out.
-#[allow(clippy::cast_possible_truncation)]
-const COMMIT_PAGES: u32 = (rows::COMMIT_CAP / crate::client::PAGE_SIZE as usize) as u32;
-
 /// The view of pull request `number` in `owner/repo`, or of its one section.
 pub(super) async fn draw(
     source: &GiteaSource,
@@ -139,7 +134,7 @@ impl PullView<'_> {
         let mut records = Vec::new();
         let mut total = None;
         let mut cut = true;
-        for page in 1..=COMMIT_PAGES {
+        for page in 1..=rows::COMMIT_PAGES {
             let (batch, count) = self
                 .source
                 .client
@@ -155,23 +150,26 @@ impl PullView<'_> {
                 break;
             }
         }
-        // Counted before parsing: a record that does not parse was still
-        // read, and is not one the budget left out.
         let read = records.len();
         let mut rows: Vec<ViewRow> = records
             .into_iter()
             .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
             .map(|c| rows::commit_row(&self.source.id, self.owner, self.repo, &c.record))
             .collect();
+        // The count and the note both say what the tab lists; a record that
+        // did not parse is one the list does not hold.
         let listed = rows.len();
-        if let Some(mut note) = rows::left_out("commits", read, total, cut, None) {
+        let total = total.map(|t| t.max(read));
+        if let Some(mut note) = rows::left_out("commits", listed, total, cut, None) {
             // Where the rest is: the pull request's own page, read for the
             // note when this tab was asked for on its own.
+            // A link is not worth failing the tab over: without it the note
+            // still says the list was cut.
             let page = match pull {
                 Some(pull) => pull.html_url.clone(),
-                None => self.pull().await?.html_url,
+                None => self.pull().await.ok().and_then(|p| p.html_url),
             };
-            note.url = page.map(|page| format!("{}/commits", page.trim_end_matches('/')));
+            note.url = page.and_then(|page| rows::under(&page, "/commits"));
             rows.push(note);
         }
         Ok(ViewSection {

@@ -1,5 +1,7 @@
-//! What a branch's and a repository's views share (#663): the partial
-//! records they read, and the entity rows those become.
+//! What the Gitea views share (#663, #678): the partial records they read,
+//! the entity rows those become -- one commit row for a pull request's, a
+//! branch's and a repository's lists -- and the note a list ends on where it
+//! stopped on its budget.
 //!
 //! Every row names the entity id this adapter mints for the thing it shows,
 //! so it opens that thing's detail; the app clears the id where the mirror
@@ -20,9 +22,11 @@ pub(super) const LATEST_COMMITS: u32 = 20;
 /// A repository past that has a different problem than its view.
 const PULL_PAGES: u32 = 20;
 
+/// How many of Gitea's pages of fifty a pull request's *Commits* tab reads.
+pub(super) const COMMIT_PAGES: u32 = 5;
 /// How many commits a *Commits* tab lists at most, a pull request's and a
-/// branch's alike: five of Gitea's pages of fifty.
-pub(super) const COMMIT_CAP: usize = 250;
+/// branch's alike: 250.
+pub(super) const COMMIT_CAP: usize = (COMMIT_PAGES * crate::client::PAGE_SIZE) as usize;
 
 /// The repository fields the two views read: the sync's own projection, and
 /// what only a view shows.
@@ -57,9 +61,14 @@ impl RepoRecord {
     /// The repository's web page with `tail` after it (`/branches`), where
     /// Gitea named the page.
     pub(super) fn web(&self, tail: &str) -> Option<String> {
-        let base = self.repo.html_url.as_deref()?.trim_end_matches('/');
-        (!base.is_empty()).then(|| format!("{base}{tail}"))
+        under(self.repo.html_url.as_deref()?, tail)
     }
+}
+
+/// `page` with `tail` after it, or `None` for a blank page.
+pub(super) fn under(page: &str, tail: &str) -> Option<String> {
+    let base = page.trim_end_matches('/');
+    (!base.is_empty()).then(|| format!("{base}{tail}"))
 }
 
 /// A commit as the compare, `/commits` and `/pulls/{n}/commits` list it.
@@ -159,6 +168,17 @@ pub(super) struct Paged<T> {
     pub cut: bool,
 }
 
+impl<T> Default for Paged<T> {
+    /// Nothing, and nothing left out: what a repository with no pull
+    /// requests to read has.
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            cut: false,
+        }
+    }
+}
+
 /// Every open pull request of a repository, page by page until an empty one
 /// (#81's rule), at most [`PULL_PAGES`] pages.
 pub(super) async fn open_pulls(
@@ -228,7 +248,8 @@ impl<'a> From<&'a Commit> for CommitLine<'a> {
             message: inner.and_then(|i| i.message.as_deref()),
             author: non_blank(git_author)
                 .or_else(|| non_blank(c.author.as_ref().and_then(|u| u.login.as_deref()))),
-            when: c.happened_at(),
+            // Go's zero time is no time (`map::real_time`).
+            when: map::real_time(c.happened_at()),
             url: c.html_url.as_deref(),
         }
     }
@@ -242,7 +263,7 @@ impl<'a> From<&'a TipCommit> for CommitLine<'a> {
             message: tip.message.as_deref(),
             author: non_blank(author.and_then(|a| a.name.as_deref()))
                 .or_else(|| non_blank(author.and_then(|a| a.username.as_deref()))),
-            when: tip.timestamp.as_deref().and_then(utc),
+            when: map::real_time(tip.timestamp.as_deref().and_then(utc)),
             url: tip.url.as_deref(),
         }
     }

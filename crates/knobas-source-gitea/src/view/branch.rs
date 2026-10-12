@@ -102,10 +102,7 @@ async fn whole(
     let open = if record.repo.can_have_pulls() {
         rows::open_pulls(source, owner, repo).await?
     } else {
-        rows::Paged {
-            items: Vec::new(),
-            cut: false,
-        }
+        rows::Paged::default()
     };
     let pulls: Vec<_> = open
         .items
