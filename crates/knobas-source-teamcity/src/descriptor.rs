@@ -167,11 +167,11 @@ mod tests {
 
     /// A build sits in the configuration it ran (ADR-0018, #597), and reads
     /// it off the `buildType` object TeamCity nests in every build record. The
-    /// configuration answers to its title first -- the name a path line shows
-    /// -- and to its id, which is what build parameters and logs name. A
-    /// configuration has no parent.
+    /// configuration answers to its name first -- the title TeamCity gives it,
+    /// and the name a path line shows -- and to its id, which is what build
+    /// parameters and logs name. A configuration has no parent.
     #[test]
-    fn a_build_declares_its_configuration_as_parent_by_title_and_id() {
+    fn a_build_declares_its_configuration_as_parent_by_name_and_id() {
         use knobas_source::{ParentPath, PayloadPath};
         let declared = |kind: &str| {
             descriptor_template()

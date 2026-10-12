@@ -74,9 +74,11 @@ async fn item(
 
 /// One build configuration and two finished builds of it, stored the way the
 /// adapter stores them, titled the way `map` titles them. Answers with the
-/// three entity ids, configuration first.
+/// three entity ids, configuration first. `t` keeps the builds' keys apart
+/// from every other test's.
 async fn configuration(
     pool: &sqlx::PgPool,
+    t: &str,
     project: &str,
     id: &str,
     name: &str,
@@ -100,7 +102,7 @@ async fn configuration(
             item(
                 pool,
                 "build",
-                &format!("build:{build}"),
+                &format!("build:{t}-{build}"),
                 &format!("{project} / {name} #{build}"),
                 serde_json::json!({
                     "id": build, "number": build.to_string(), "buildTypeId": id,
@@ -112,11 +114,6 @@ async fn configuration(
         );
     }
     out
-}
-
-/// A build number no other test in this file uses.
-fn build_number() -> i64 {
-    i64::from(uuid::Uuid::new_v4().as_u128() as u32)
 }
 
 fn ids(response: &SearchResponse) -> Vec<String> {
@@ -134,30 +131,25 @@ fn sorted(mut ids: Vec<String>) -> Vec<String> {
     ids
 }
 
-/// The configuration's title and its id, in any case, both return its builds
+/// The configuration's name -- the title TeamCity gives it -- and its id, in
+/// any case, both return its builds
 /// **and** the configuration itself -- and nothing of the configuration
 /// beside it, though the two share a project.
 #[tokio::test]
-async fn under_a_configuration_by_title_or_id_returns_its_builds_and_itself() {
+async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
     let pool = pool().await;
     let t = token();
     let project = format!("Payments{t}");
     let id = format!("Payments{t}_Deploy");
     let name = format!("Deploy{t}");
-    let ours = configuration(
-        &pool,
-        &project,
-        &id,
-        &name,
-        [build_number(), build_number()],
-    )
-    .await;
+    let ours = configuration(&pool, &t, &project, &id, &name, [41, 42]).await;
     configuration(
         &pool,
+        &t,
         &project,
         &format!("Payments{t}_Build"),
         &format!("Build{t}"),
-        [build_number(), build_number()],
+        [43, 44],
     )
     .await;
 
@@ -188,8 +180,16 @@ async fn a_build_carries_its_configuration_as_path_and_keeps_its_title() {
     let t = token();
     let project = format!("Payments{t}");
     let name = format!("Deploy{t}");
-    let builds = [build_number(), build_number()];
-    let ours = configuration(&pool, &project, &format!("P{t}_Deploy"), &name, builds).await;
+    let builds = [41, 42];
+    let ours = configuration(
+        &pool,
+        &t,
+        &project,
+        &format!("Payments{t}_Deploy"),
+        &name,
+        builds,
+    )
+    .await;
 
     let response = searcher(&pool)
         .search(q(&format!("under:{name}")))

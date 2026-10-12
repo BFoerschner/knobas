@@ -1420,7 +1420,7 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
 /// (`knobas-search`'s `under_teamcity.rs`).
 #[tokio::test]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
-async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_title_and_id() {
+async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_name_and_id() {
     use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
 
     let seeded = seeded();
@@ -1432,7 +1432,8 @@ async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_titl
         .find(|paths| paths.kind == "build")
         .expect("a build declares its parent")
         .parent;
-    // Title, then id: what the seed named each configuration.
+    // Name, then id: what the seed called each configuration. The same pairs
+    // `the_seeded_projects_and_configurations_land_by_id_and_name` asserts.
     let names_of = |id: &str| -> [String; 2] {
         let name = match id {
             "Ledger_Deploy_Staging" => "Deploy Staging",
@@ -1460,7 +1461,7 @@ async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_titl
         assert_eq!(
             parents[0].names,
             names_of(config),
-            "{} answers to its configuration's title first, then its id",
+            "{} answers to its configuration's name first, then its id",
             build.entity
         );
     }
