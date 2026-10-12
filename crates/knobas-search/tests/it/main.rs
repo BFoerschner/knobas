@@ -11,8 +11,10 @@
 mod ancestor_path;
 mod bare_name;
 mod corpus_seam;
+mod declaring;
 mod help_card;
 mod home;
+mod item_parent;
 mod lists;
 mod lists_no_identity;
 mod path_line;

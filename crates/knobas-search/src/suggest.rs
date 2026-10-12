@@ -67,13 +67,12 @@ select s.id from unnest($1::text[]) s(id)
    order by i.item_updated_at desc nulls last
    limit 1) l";
 
-/// Every `(name, kind)` a parent answers to, through the declarations bound
-/// at `$1`: [`crate::under::parent_names!`], the fragment `under:`'s own
-/// lookup reads, so a suggested name is one `under:` knows and every name it
-/// knows is suggested (#615).
+/// Every `(name, kind)` a parent answers to: [`crate::under::parent_names!`],
+/// the fragment `under:`'s own lookup reads, so a suggested name is one
+/// `under:` knows and every name it knows is suggested (#615).
 const PARENTS_SQL: &str = concat!(
     "select distinct p.name, p.kind from ",
-    crate::under::parent_names!("$1"),
+    crate::under::parent_names!(),
     " p where nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
      order by p.name, p.kind"
 );
@@ -88,10 +87,7 @@ pub(crate) async fn read(
     vocab: &Vocabulary,
 ) -> Result<FilterSuggestions, SearchError> {
     let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
-    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
-        .bind(vocab.declarations.as_param())
-        .fetch_all(pool)
-        .await?;
+    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL).fetch_all(pool).await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()

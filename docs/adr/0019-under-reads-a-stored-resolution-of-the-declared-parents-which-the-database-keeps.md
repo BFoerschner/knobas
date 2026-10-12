@@ -1,0 +1,59 @@
+---
+status: accepted
+---
+
+# `under:` reads a stored resolution of the declared parents, which the database keeps
+
+`under:<name>` (ADR-0018) needs to know which items answer to a name as their parent's, or as a parent themselves. The declarations that say where a parent sits are compiled into the binary, so every query bound them as one jsonb parameter and walked every live item through them. At 100,000 items, with Gitea commits carrying their repository, that walk cost 335 ms to report unknown tokens and about as much again to scope the statement. The launcher's budget is 100 ms (spec §14), and no index can serve a walk whose paths are a query parameter.
+
+Decided 2026-10-12 by the deputy's two rulings on #627, and accepted when Björn signed off on #627 the same day ([comment](https://github.com/BFoerschner/knobas/issues/627#issuecomment-6121166771)). **The walk's answer is stored, and the database keeps it.**
+
+- Migration `0028` adds `sync.parent_declaration`, which holds each adapter template's `payload_paths`.
+- It also adds `sync.item_parent`. For each item and each stored adapter whose declarations reach the item's kind, it holds one `(adapter_kind, name, kind)` row per name the item answers to. It is indexed on `lower(name)`.
+- Database code fills `sync.item_parent` by running the existing `declared_parent_names!` and `declared_names_as_parent!` expansions. `$decl` is bound per adapter as `{<the item's source_id>: <that adapter's kinds>}`. The code runs when an item is written and when a declaration changes.
+- Readers ask the index and join `knobas.source_config` on `s.id = i.source_id and s.kind = ip.adapter_kind`. This is `Vocabulary::declaring`'s rule, applied when the rows are read.
+- The app writes `sync.parent_declaration` from the same template list it builds its searcher with, in one function, `Searcher::declaring`. That function reads the table first and writes only when something differs.
+
+**The stored rows depend on the item and on `sync.parent_declaration`, and on nothing else.** The source's adapter is matched at read time because a trigger on `knobas.source_config` would put the sync's lock on `delete_source`'s path. Every source command writes that table, and so does every run's closing cursor update. A source configured after its items were written, a source removed, and a source given another adapter kind all answer correctly on the next query, and nothing is recomputed.
+
+This is the schema's **first trigger**, and its **first stored value that depends on something outside its own row**: the declarations in `sync.parent_declaration`.
+
+## The lock
+
+A write to `sync.item` takes `pg_advisory_xact_lock_shared(627, 0)` before it resolves. A statement on `sync.parent_declaration` that changed a row takes the same key exclusively before it recomputes. A statement that changed nothing returns before taking the key. Both hold the key until commit.
+
+The lock orders the one race the stored rows have. Without it, an item written while a declaration change is uncommitted resolves against the old declarations, and the change's recompute, under its own snapshot, never sees the item. With it, whichever side comes second waits for the first to commit and then reads what it wrote. Item writes share the key, so concurrent syncs never wait on each other.
+
+**Invariant: the exclusive key is taken only by statements on `sync.parent_declaration`, and never by a trigger on a table that a sync run or a user command writes.** The declaration writer holds no lock that a run takes. A run and a declaration change can therefore wait for each other in one direction only, and they never deadlock.
+
+**Residual.** A declaration change waits for every in-flight run to commit, and PostgreSQL queues later item writes behind it while it waits. A run holds its transaction across its HTTP work (§10.6(c)), so the wait can last minutes. It happens only when the stored declarations differ from the binary's: the first bring-up after an upgrade, or a second binary with different declarations on the same database. Bring-up writes the declarations before its first sync, so normally no run is in flight at that moment.
+
+## Considered options
+
+- **Keep the per-row walk and tune it.** Building the declarations once per statement, fencing the walk with `materialized` and `offset 0`, and avoiding set-returning calls per row brought the whole call from about 650 ms to about 180 ms. The coverage probe's 28 ms and the statement's full-mirror scan left no route under 100 ms. The fences also hold only as long as the planner keeps choosing the same plan.
+- **Cache the known names in the searcher.** A newly synced parent would read as unknown until the cache refreshed, which breaks "unknown-token reporting answers exactly as before". It also leaves the scoped statement's walk in place.
+- **A generated column.** A generation expression may read only its own row and may not contain subqueries or set-returning functions. The macros are made of both, and the declarations live outside the row.
+- **The sync writer fills a `text[]` column through the Rust resolvers.** Rejected for three cases.
+  - A declaration that changes in an upgrade would wait for a cursor bump and a full re-sync of every source.
+  - A row written by anything other than the writer would be empty. That includes every search test's seed and a restore.
+  - The Rust side would decide the filter while the SQL macros drew the path line, so only a test would hold the two together.
+
+  A lowercased array would also lose the name's case and the parent's kind, which `under:` suggestions show (#615).
+- **Resolving the source's adapter at write time, with a trigger on `knobas.source_config` that takes the exclusive key.** It deadlocks `delete_source` against a run of the same source (`mm-630-deadlock.sh`):
+  1. The run holds the shared key from its first flush to its commit.
+  2. The delete row-locks the config row and then waits for the key.
+  3. The run's closing cursor update waits for that row lock.
+- **`for key share` on the config rows in the item triggers, with no lock on the config trigger.** No deadlock, but the delete waits for the run's commit. That reverses #127's "same non-blocking timing" for `delete_source`. A `kind` update and a source inserted while its items are being written also remain unordered.
+- **Per-source advisory keys.** Rejected: the same deadlock, one source at a time.
+- **`config::delete` takes the lock in Rust.** Rejected: that puts Rust on the write path, and the delete still waits.
+- **Accepting the deadlock.** PostgreSQL aborts one side after `deadlock_timeout`: either a run's whole transaction or the user's delete.
+
+## Consequences
+
+- **One SQL implementation decides both the filter and the path line.** The trigger runs the same macros the path line runs per result row, so the stored rows are what the walk returned. `resolve_parents` keeps its role from #594 as the Rust twin, held to `declared_parents!` by `crates/knobas-core/tests/it/payload_paths.rs`. A migration is SQL and cannot call a Rust macro, so `0028` carries the expansion as text. `knobas-search`'s `tests/it/item_parent.rs` fails if either macro's expansion changes until a new migration restates the function.
+- **No Rust on the write path.** `knobas-sync`'s writer is unchanged, no adapter's `CURSOR_VERSION` moves, and no source re-syncs to fill the table. An upgrade that changes a declaration recomputes the items of every kind it reaches when the app first writes the new declarations.
+- **Writes to the mirror pay for the resolution.** `sync.item`'s insert and update triggers are statement-level, over the transition tables, so a batch resolves in one pass rather than one function call per row. Only items whose kind some stored adapter reaches are walked.
+  - Measured on the 100k benchmark fixture, the first time, with the source's adapter resolved at write time: `seed_corpus(100_000)` went from 5.1 s to 5.36 s, and the update that gives 6,667 commits a repository went from 190 ms to 460 ms.
+  - Measured again with the adapter matched at read time: 5.75 s and 760 ms. The difference is that every row of a reached kind is now walked, whatever its source, so the fixture's Jira and TeamCity commits and PRs are walked too.
+- **The stored rows are derived and never in a backup.** The `sync` schema is outside every archive (§16.12). A restore lands before any mirror row can exist, and the re-sync's inserts resolve themselves.
+- **A bare searcher answers `under:` from the database.** `Searcher::new` with no templates used to answer `under:` with nothing. The answer is now whatever the database has stored, matched to the configured sources. The app always builds its searcher through `Searcher::declaring`, so its behaviour does not change.

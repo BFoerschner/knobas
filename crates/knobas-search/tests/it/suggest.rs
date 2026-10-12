@@ -49,8 +49,10 @@ async fn pool() -> sqlx::PgPool {
 }
 
 /// The searcher the app builds: the real Gitea adapter's declarations.
-fn searcher(pool: &sqlx::PgPool) -> Searcher {
-    Searcher::new(pool.clone()).with_payload_paths([knobas_source_gitea::descriptor_template()])
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap()
 }
 
 async fn item(
@@ -228,7 +230,7 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     )
     .await;
 
-    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
 
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
     for kind in ["commit", "monitor", "repo"] {
@@ -267,10 +269,10 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
         "no offered parent has a space in its name, so the quoted spelling goes unprobed"
     );
     for p in parents_of(&suggestions, &t) {
-        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
+        leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
     for k in &suggestions.kinds {
-        leads_somewhere(&searcher(&pool), &format!("kind:{}", k.kind)).await;
+        leads_somewhere(&searcher(&pool).await, &format!("kind:{}", k.kind)).await;
     }
 }
 
@@ -285,7 +287,7 @@ async fn a_parent_only_its_children_name_is_still_offered() {
     let name = format!("unmirrored-{t}");
     commit(&pool, "gitea", &owner, &name).await;
 
-    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
 
     assert_eq!(
         parents_of(&suggestions, &t),
@@ -295,7 +297,7 @@ async fn a_parent_only_its_children_name_is_still_offered() {
         ],
     );
     for p in parents_of(&suggestions, &t) {
-        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
+        leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
 }
 
@@ -342,7 +344,7 @@ async fn every_asset_is_offered_by_its_name_and_leads_somewhere() {
     .await
     .unwrap();
 
-    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
 
     assert_eq!(
         parents_of(&suggestions, &t),
@@ -353,7 +355,7 @@ async fn every_asset_is_offered_by_its_name_and_leads_somewhere() {
         ],
     );
     for p in parents_of(&suggestions, &t) {
-        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
+        leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
     assert!(
@@ -417,10 +419,10 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     )
     .await;
 
-    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
     assert_eq!(sources_of(&suggestions, &t), [synced.as_str()]);
     for s in &suggestions.sources {
-        leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
+        leads_somewhere(&searcher(&pool).await, &format!("source:{}", s.id)).await;
     }
 
     item(
@@ -432,13 +434,13 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     )
     .await;
 
-    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
     assert_eq!(
         sources_of(&suggestions, &t),
         [synced.as_str(), unsynced.as_str()]
     );
     for s in &suggestions.sources {
-        leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
+        leads_somewhere(&searcher(&pool).await, &format!("source:{}", s.id)).await;
     }
 }
 
@@ -489,7 +491,7 @@ async fn under_knows_exactly_the_names_the_box_offers() {
     let rack = format!("Rack Four {t}");
     asset(&pool, &format!("asset:rack-{t}"), None, &rack).await;
 
-    let searcher = searcher(&pool);
+    let searcher = searcher(&pool).await;
     let offered: Vec<String> = parents_of(&searcher.filter_suggestions().await.unwrap(), &t)
         .into_iter()
         .map(|p| p.name)

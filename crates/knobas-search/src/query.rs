@@ -107,9 +107,11 @@ pub struct EffectiveFilters {
     /// The `under:` values, lowercased, OR-ed: the item sits beneath a parent
     /// answering to one of them, or is that parent (ADR-0018).
     pub under: Vec<String>,
-    /// The declarations the `under:` predicate and every row's path line
-    /// read the parent through (#595, #596). Carried whether or not
-    /// [`Self::under`] is set, since every hit draws its path.
+    /// The declarations every row's path line reads the parent through
+    /// (#596). Carried whether or not [`Self::under`] is set, since every hit
+    /// draws its path. The `under:` predicate read them too until #627; it
+    /// now reads `sync.item_parent`, which the database keeps from the stored
+    /// copy of the same declarations (migration `0028`).
     pub declarations: Declarations,
     /// The usernames **`mine`** resolved to, and nothing else.
     ///

@@ -406,9 +406,12 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     }
     if let Some((declarations, values)) = &bound.under {
         predicates.push(match corpus.under {
-            // `ud` is the one row the corpus's fragment reads the
-            // declarations and the values from, so the fragment stays a
-            // `&'static str` and the binds stay binds.
+            // `ud` is the one row the corpus's fragment reads the values
+            // (`ud.v`) from, so the fragment stays a `&'static str` and the
+            // binds stay binds. `ud.d`, the declarations, is still bound and
+            // no corpus reads it since #627 moved the mirror's arm onto
+            // `sync.item_parent`; it is kept so a corpus that walks a payload
+            // again needs no change here.
             Some(under) => format!(
                 "exists (select 1 from (select {declarations}::jsonb as d, \
                  {values}::text[] as v) ud where {under})"

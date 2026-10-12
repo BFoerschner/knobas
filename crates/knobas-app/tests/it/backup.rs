@@ -365,6 +365,204 @@ async fn a_restore_refuses_a_database_that_already_holds_knobas_data() {
     );
 }
 
+/// Gitea-shaped items of a source of this test's own: a commit naming a repo
+/// only its children name, a pull request naming a mirrored repo through
+/// `base.repo`, and that repo. Raw inserts, as a sync's rows land.
+async fn parented(pool: &PgPool, source: &str, t: &str, entities: bool) -> Vec<String> {
+    let rows = [
+        (
+            "commit",
+            "c1",
+            serde_json::json!({
+            "repository": { "full_name": format!("own/ghost-{t}"), "name": format!("ghost-{t}") } }),
+        ),
+        (
+            "pr",
+            "p1",
+            serde_json::json!({
+            "base": { "repo": { "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") } } }),
+        ),
+        (
+            "repo",
+            "r1",
+            serde_json::json!({
+            "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") }),
+        ),
+    ];
+    let mut ids = Vec::new();
+    for (kind, key, payload) in rows {
+        let id = format!("{source}:{key}");
+        if entities {
+            sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+                .bind(&id)
+                .bind(kind)
+                .bind(key)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $4, '', $5)",
+        )
+        .bind(&id)
+        .bind(source)
+        .bind(kind)
+        .bind(key)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+    ids
+}
+
+/// What one `under:` query answered.
+#[derive(Debug, PartialEq, Eq)]
+struct UnderAnswer {
+    raw: String,
+    /// The entity ids it found, sorted.
+    found: Vec<String>,
+    unknown_tokens: Vec<String>,
+}
+
+/// What `under:` and its suggestions answer for this test's names.
+#[derive(Debug, PartialEq, Eq)]
+struct UnderAnswers {
+    queries: Vec<UnderAnswer>,
+    /// The suggested parents carrying this test's token, as `(name, kind)`.
+    parents: Vec<(String, String)>,
+}
+
+/// [`UnderAnswers`] for this test's names, through the commands the
+/// launcher calls.
+async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
+    let mut answers = Vec::new();
+    for raw in [
+        format!("under:own/pay-{t}"),
+        format!("under:pay-{t}"),
+        format!("under:ghost-{t}"),
+        format!("under:nothing-{t}"),
+    ] {
+        let response = search_inner(
+            pool,
+            SearchQuery {
+                raw: raw.clone(),
+                limit: 20,
+                filters: SearchFilters::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let mut ids: Vec<String> = response
+            .groups
+            .iter()
+            .flat_map(|group| group.hits.iter())
+            .map(|hit| hit.row.entity_id.clone())
+            .collect();
+        ids.sort();
+        answers.push(UnderAnswer {
+            raw,
+            found: ids,
+            unknown_tokens: response.interpreted.unknown_tokens,
+        });
+    }
+    let parents = knobas_app::commands::search::filter_suggestions_inner(pool)
+        .await
+        .unwrap()
+        .parents
+        .into_iter()
+        .filter(|parent| parent.name.contains(t))
+        .map(|parent| (parent.name, parent.kind))
+        .collect();
+    UnderAnswers {
+        queries: answers,
+        parents,
+    }
+}
+
+/// What the database stored for these items, every row counted.
+async fn stored_parents(pool: &PgPool, ids: &[String]) -> Vec<(String, String, String, i64)> {
+    sqlx::query_as(
+        "select entity_id, name, kind, count(*) from sync.item_parent
+          where entity_id = any($1) group by 1, 2, 3 order by 1, 2, 3",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// `under:` across a backup round trip (#627): the restored machine, once its
+/// mirror re-syncs, answers `under:` and its suggestions exactly as the one the
+/// archive came from, and stores no row twice.
+///
+/// `sync.item_parent` is **rebuilt, never dumped**: it is in the `sync` schema,
+/// which no archive carries (§16.12). The source's configuration comes back
+/// with `--disable-triggers`, before any mirror row exists, and the re-sync's
+/// inserts then resolve themselves through `0028`'s trigger. No fill call is
+/// made here: the seeds are the raw inserts a sync makes.
+#[tokio::test]
+async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
+    let from = source_pool().await;
+    let t = token("under");
+    let source = format!("gitea-{t}");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'gitea', $1, 'http://x', 'Pat')",
+    )
+    .bind(&source)
+    .execute(&from)
+    .await
+    .unwrap();
+    let ids = parented(&from, &source, &t, true).await;
+    let before = under_answers(&from, &t).await;
+    assert!(
+        before.queries[0].found.len() == 2 && !before.parents.is_empty(),
+        "the source database answers `under:` before the backup: {before:?}"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("under.knobas");
+    backup::dump(&knobas_db::test_util::test_connector().await, &archive)
+        .await
+        .expect("take a backup");
+    let target = knobas_db::test_util::scratch_database("under").await;
+    backup::restore(&target, &archive).await.expect("restore");
+    let into = target.pool(2).await.unwrap();
+    // Bring-up, which on a real machine ran before the restore did: the app
+    // stores its adapters' declarations before its first sync. Only then does
+    // the source re-sync, so the stored parents below come from the insert
+    // trigger and not from a declaration write recomputing after the fact.
+    knobas_app::commands::search::searcher(&into).await.unwrap();
+    let declared: i64 = sqlx::query_scalar("select count(*) from sync.item_parent")
+        .fetch_one(&into)
+        .await
+        .unwrap();
+    assert_eq!(
+        declared, 0,
+        "nothing is mirrored yet, so nothing is resolved"
+    );
+    parented(&into, &source, &t, false).await;
+    let resolved = stored_parents(&into, &ids).await;
+    assert!(
+        !resolved.is_empty() && resolved.iter().all(|row| row.3 == 1),
+        "the re-sync's inserts resolve themselves, each row once: {resolved:?}"
+    );
+
+    let after = under_answers(&into, &t).await;
+    assert_eq!(
+        after, before,
+        "the restored machine answers `under:` differently"
+    );
+    assert_eq!(
+        stored_parents(&into, &ids).await,
+        stored_parents(&from, &ids).await,
+        "the restored machine stores the parents differently"
+    );
+}
+
 /// **A day of work survives the machine move** (#283): the running timer, the
 /// blocks it made, the worklog they became, and the settings that govern them.
 ///

@@ -46,8 +46,10 @@ async fn pool(label: &str) -> sqlx::PgPool {
 }
 
 /// The searcher the app builds, with Gitea's declared kinds.
-fn searcher(pool: &sqlx::PgPool) -> Searcher {
-    Searcher::new(pool.clone()).with_payload_paths([knobas_source_gitea::descriptor_template()])
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap()
 }
 
 fn days_ago(n: i64) -> DateTime<Utc> {
@@ -136,7 +138,7 @@ async fn a_repo_is_found_by_its_bare_name_in_any_case() {
         "Payout-Service",
         "tidewater/payout-service",
     ] {
-        let response = searcher(&pool).search(q(raw)).await.unwrap();
+        let response = searcher(&pool).await.search(q(raw)).await.unwrap();
         assert_eq!(
             group_ids(&response, "repo"),
             std::slice::from_ref(&ours),
@@ -167,7 +169,11 @@ async fn the_repo_named_for_the_query_outranks_a_newer_one_that_mentions_it() {
     )
     .await;
 
-    let response = searcher(&pool).search(q("payout-service")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("payout-service"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [named, mentions]);
 }
 
@@ -209,7 +215,11 @@ async fn the_bare_name_finds_the_repo_and_not_its_branch_or_commits() {
         .await;
     }
 
-    let response = searcher(&pool).search(q("payout-service")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("payout-service"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [ours]);
     assert!(group_ids(&response, "commit").is_empty(), "{response:?}");
     assert!(group_ids(&response, "branch").is_empty(), "{response:?}");
@@ -232,7 +242,7 @@ async fn the_repo_whose_last_segment_is_the_query_comes_first() {
     )
     .await;
 
-    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    let response = searcher(&pool).await.search(q("payout")).await.unwrap();
     assert_eq!(group_ids(&response, "repo"), [named, sibling]);
 }
 
@@ -251,7 +261,11 @@ async fn the_full_name_still_puts_its_repo_first() {
     )
     .await;
 
-    let response = searcher(&pool).search(q("tidewater/payout")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("tidewater/payout"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [named, sibling]);
 }
 
@@ -268,7 +282,7 @@ async fn the_owner_names_none_of_its_repos() {
     let payout = repo(&pool, "tidewater/payout", "Payouts", days_ago(20)).await;
     let sync = repo(&pool, "harbor/tidewater-sync", "Sync", days_ago(1)).await;
 
-    let response = searcher(&pool).search(q("tidewater")).await.unwrap();
+    let response = searcher(&pool).await.search(q("tidewater")).await.unwrap();
     assert_eq!(group_ids(&response, "repo"), [sync, payout, ledger]);
 }
 
@@ -298,7 +312,7 @@ async fn a_branch_is_named_by_its_last_segment_too() {
     )
     .await;
 
-    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    let response = searcher(&pool).await.search(q("payout")).await.unwrap();
     assert_eq!(group_ids(&response, "branch"), [named, sibling]);
 }
 
@@ -319,6 +333,6 @@ async fn a_last_segment_name_does_not_beat_a_stronger_match() {
     .await;
     let named = repo(&pool, "tidewater/payout", "Transfers", days_ago(1)).await;
 
-    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    let response = searcher(&pool).await.search(q("payout")).await.unwrap();
     assert_eq!(group_ids(&response, "repo"), [strong, named]);
 }

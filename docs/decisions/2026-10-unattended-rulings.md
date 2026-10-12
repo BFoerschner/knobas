@@ -374,3 +374,141 @@ So, for "not reproduced, the cap stays", a monitored pass cannot be a false gree
 *The wording.* The doc comment is the only durable record this PR leaves, and the next measurer reads it beside the 2026-09-08 table. Left as it is, *"Five runs that met them"* claims a hold that did not happen. The next reader would then take it as a held baseline and cite it as one. The fix is one clause.
 
 **If you disagree, the cost of reversing this is:** small, and it moves nothing in the product. You can reopen #629 or file a follow-up for five runs under a hold. That is about five minutes of exclusive machine time, plus one more doc-comment edit if the held readings differ. If the held runs read the same, nothing changes. If they read a spread wide enough to fire #533's rule, the step to eight goes ahead as the ticket's step 3 describes, and nothing merged here is in the way. That is because this PR changed no code. The one thing a reversal cannot undo is this ruling's point about direction. Even under a stricter (a), a monitored red would still not be a reading.
+
+## #627 — `under:` over the budget: where the stored copy of the parents lives
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/627#issuecomment-6120015673>
+
+**The fork:** the `under:` benchmark (7de819d9) times the whole `Searcher::search` call at 100k items, with parents declared and present in payloads and the estate seeded. On `main` it reads p50 653 ms under load ~16. With the WIP commit (fbbfedc3, which builds the declarations once per statement and fences the walk with `materialized` and `offset 0`) it reads ~180 ms: coverage probe 28, scoped statement 85, `KNOWN_SQL` ~60. The budget is 100 ms at p90. The implementer offers three ways on. (A) A migration adds `parent_names text[]` with a GIN index to `sync.item`. The sync writer fills it through the Rust resolvers (`resolve_parents`, `resolve_names_as_parent`), and both `KNOWN_SQL` and the predicate become `parent_names && $values`. (B) No migration: keep the WIP and add a semi-join, an early stop and an all-unknown skip. The implementer's own estimate is 105–150 ms. (C) Cache the known names in `Searcher`. That breaks "unknown-token reporting answers exactly as before" and leaves the statement's 85 ms. Two more questions were put to me. Does #533's precedent (the budget stays and the scope gives way) make a narrower criterion the right answer? And under A, how do the SQL macros, the Rust resolvers and a stored copy stay in agreement when a declaration changes?
+
+**Ruling:** **A, but the database keeps the stored copy, not the sync writer.** The ticket already answers whether a migration is allowed: *"If the fix needs a migration, it needs a §10.8 entry and Björn's sign-off before it merges."* So this ruling decides the migration's shape. It does not replace that sign-off. The implementer builds it now. The PR merges only after Björn signs off on #627, the way #594's did.
+
+The shape:
+
+1. **One migration, the next free number** (`0028` at `origin/main` `b95436cf`; take the number when the §10.8 entry is written). It creates:
+   - `sync.parent_declaration (adapter_kind text primary key, payload_paths jsonb not null)`: each compiled-in adapter template's `payload_paths`, the same value `Searcher::with_payload_paths` holds today.
+   - `sync.item_parent (entity_id text not null references sync.item on delete cascade, name text not null, kind text not null)`, indexed on `lower(name)` and on `entity_id`. Its rows are exactly the `(name, kind)` pairs that the two payload arms of `under::parent_names!` yield for an item today, in their original case.
+   - The database code that fills `sync.item_parent`. A row trigger on `sync.item` (insert, and update of `source_id`, `kind` or `payload`) replaces that item's rows. A change to `sync.parent_declaration`, or to a `knobas.source_config` row's `kind` (insert, update or delete), recomputes every item of the sources it affects. The computation is the existing `knobas_core::declared_parent_names!` and `declared_names_as_parent!`, with `$decl` passed as an SQL expression that builds today's source-keyed declarations object from `knobas.source_config` joined to `sync.parent_declaration`. That is the same mapping `Vocabulary::declaring` makes in Rust.
+2. **No Rust on the write path.** `knobas-sync`'s writer does not change, no adapter's `CURSOR_VERSION` moves, and no source re-syncs. `resolve_parents` keeps its current job and stays held to `declared_parents!` by `crates/knobas-core/tests/it/payload_paths.rs`. Under #594's ruling, the two-shape `at` branch still lives in only those two places.
+3. **One function writes the declarations and builds the searcher.** At start-up the app writes `sync.parent_declaration` whole, from the same `Registry::builtin().templates()` it hands the searcher (`commands/search.rs`). It does this in one async function that does both jobs, so the stored copy and the in-memory copy can't differ. Tests build their searcher through that function too.
+4. **Readers.** `parent_names!` becomes `sync.item_parent` joined to `sync.live_item`, plus the asset arm unchanged. It is still the one fragment that `KNOWN_SQL` and `PARENTS_SQL` share (#615). `corpus::LIVE_ITEM`'s `under` becomes an `entity_id in (select … from sync.item_parent where lower(name) = any(ud.v))` beside the estate arm. `KNOWN_SQL` and the predicate no longer walk the declarations. The path line keeps reading `declared_parents!` per result row, which is a few rows and unchanged.
+5. **The WIP commit is dropped.** Keep 7de819d9 (the benchmark) and drop fbbfedc3. Its `@from`/`@candidates` arms add a second way into each parent macro in `knobas_core`, and its `materialized` and `offset 0` fences keep the cost down only for as long as the planner keeps behaving the same way. Under this ruling nothing on the query path walks the declarations, and the trigger needs only the existing `$decl` arm.
+
+Criteria added to #627, beside its own:
+- **Agreement, on real PostgreSQL (ADR-0013).** Seed both `at` shapes, a parent that only its children name, a mirrored parent, and an asset. `sync.item_parent` must equal the per-row macro walk (today's two payload arms) after each of: an insert, a payload update, a delete, a change to the stored declarations, and a source configured after its items were written. Mutation proof: removing the trigger's names-as-parent arm fails this test, and so does skipping the recompute on a declarations change.
+- **The seeds stay raw.** `under.rs`, `suggest.rs`, `corpus_seam.rs` and `testing.rs` keep writing `sync.item` with plain `insert`s. The only change is how a test builds its searcher (point 3). If a test needs an extra fill call to stay green, report it as a finding. Don't add the call to make the test pass.
+- **Backup.** A backup round trip answers `under:` and the `under:` suggestions exactly as the source database did, with no duplicate `sync.item_parent` rows. `sync.item_parent` is derived data, so the PR states whether it is dumped or rebuilt.
+- **Write cost.** The PR records `seed_corpus(100_000)` time before and after, as the cost the trigger adds to the sync write path.
+- The ticket's own criteria are unchanged: the benchmark fails on `main` and passes after the fix, with p50/p90 and the load average recorded. The mutation proof restores the per-row walk in `KNOWN_SQL` and in the predicate.
+- **In the same PR:** a §10.8 entry for the migration in `docs/contract.md`, drafted to this ruling and **gated on Björn's sign-off on #627**, as the ticket says. ADR-0019, written by the implementer with status `proposed` until that sign-off. Suggested title: "under: reads a stored resolution of the declared parents, which the database keeps". It records the first trigger in the schema and the first stored value that depends on something outside its own row. This ruling, appended to `docs/decisions/2026-10-unattended-rulings.md`.
+
+No glossary change. **Parent** and **Declared path** stay true: the adapter still declares, and a reader, now the database, still resolves the declaration.
+
+**Reasoning:**
+
+- **The budget can't move, and #533 points the other way.** Spec §14: *"Local search < 100 ms for ~100 k items"*. `tests/perf.rs`: *"The budget does not move"*. #533 kept `BUDGET_MS` fixed and lowered `MAX_SAVED_LISTS`, which its ticket had named as the thing that could move (*"confirmed or lowered by the measurement"*). #627 names nothing that can move. Its first criterion fixes the fixture (100k, parents declared and present, estate seeded) and the measurement (*"p90 under 100 ms for the whole `search` call"*). Narrowing either one moves the budget by another name. What #533 does settle is how much margin a pass needs: *"the cap is the largest count at which the measured board clears the budget on a quiet machine by more than the measurement's own quiet-machine spread"*. B's own estimate of 105–150 ms doesn't clear the budget at all.
+- **C fails a criterion on its own terms.** A newly synced parent would read as unknown until the cache refreshed, and the criterion says *"answers exactly as before"*. It also leaves the 85 ms statement where it is.
+- **A generated column can't do it.** `0027`'s `fts` worked because it depends only on `title`. A parent depends on the declarations, which are compiled into the binary, bound per query as `$1` and mapped to sources through `knobas.source_config`. A PostgreSQL generation expression may read only its own row, and it may not contain subqueries or set-returning functions, which the macros are made of. A row whose answer depends on something outside the row needs code that runs when that other thing changes. That is a trigger.
+- **Why not have the writer fill it, as the implementer leaned.** In three cases it would break "answers exactly as before":
+  1. *A declaration changes with no new sync.* A new adapter declaration or an app upgrade changes what every existing row answers to. Today the next query sees the change, because declarations are bound per query. A writer-filled column changes only when an item is re-emitted. Gitea's `sync.rs` re-emits a repo only *"when its `updated_at` differs from the one in the cursor"*, so the change would wait for a cursor bump and a full sync of every affected source. #612's ruling rejected an adapter-side fix for exactly that tie.
+  2. *A row written by anything other than the writer.* Every search test seeds `sync.item` with a raw `insert` (`tests/it/under.rs:77`, `src/testing.rs:166`), and so does the perf fixture. A writer-filled column would be empty for all of them. The tests would then need a helper that copies what the writer does, and the wire from the writer to the column would never be witnessed (ADR-0013). A trigger fills the column for every path that writes a row, so the tests exercise the same code the sync does.
+  3. *A restore*, for the same reason as case 2.
+- **One implementation, so agreement holds by construction.** If the writer filled the column through the Rust resolvers, the Rust side would decide what `under:` matches while the SQL macros drew the path line. The agreement test would then be the only thing holding the filter and the display together. With the trigger, the same SQL macros decide the filter and draw the path line, and the Rust resolver keeps the role #594 gave it. ADR-0007's *"confined to one named statement"* holds: the payload read stays inside the macros, and the trigger is the one statement that calls them for `under:`.
+- **A side table, not a `text[]` column.** #615 needs one fragment that yields `(name, kind)` in original case, because suggestions show `payout-service · repo` and `under:` must know exactly what the box offers. A lowercased array loses both the case and the kind, so suggestions would need a second read, and #615's single fragment would split. `sync.item_parent` is exactly that fragment's relation. A btree on `lower(name)` answers `= any($2)` directly. `sync.item` doesn't gain a column, and neither `sync.live_item` (whose column list `0012` fixes) nor the `0027` `fts` expression is touched.
+- **Frozen surface.** This adds more than the implementer's single column: two tables, an index and the trigger code. A single column would add less DDL but fail a criterion in each of the three cases above. Ruling for the smallest surface still has to meet the ticket, and #612's ruling chose a migration over a smaller change that failed the spec in the case the spec describes, for the same reason. Transitive reach costs nothing extra: a Confluence chain is the array shape of `at`, which `declared_parents!` already expands into one row per ancestor, and asset subtrees stay with `corpus::estate_subtree!`.
+- **Known change in a corner.** `Searcher::new` with no templates currently answers `under:` with nothing (*"the honest answer for a searcher nobody told about the adapters"*). Once the resolution is stored, it is the database's to give, so a bare searcher on a database whose declarations were stored would answer from them. The app always builds its searcher with templates, so app behaviour is unchanged. If a test pins the old answer, the PR names it and moves the test to "a database with no stored declarations matches nothing".
+- **Ordering.** #629 also edits `tests/perf.rs` and the recipe's `expected` pin, so whichever lands second rebases, as #629 already says.
+
+**If you disagree, the cost of reversing this is:** before merge, nothing beyond the branch's work: the implementer has the benchmark and can take any other route. After merge, it costs one migration that drops the two tables and the trigger code, with a §10.8 entry, plus restoring `parent_names!` and the predicate to the per-row walk (behaviour is identical, since the agreement test proves the two equal). The `under:` benchmark goes red again and #627 reopens. If you would rather have the implementer's writer-filled `text[]` column, the cost is the three cases above: an upgrade that changes a declaration needs a cursor bump and a full sync per source, and the search tests' seeds go through a fill helper rather than the path production uses. If you would rather have a narrower criterion, this ruling's first reasoning point says why that moves the §14 budget, which only you can do.
+
+## #627 — the declaration lock deadlocks `delete_source`: no stored row depends on a config row
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/627#issuecomment-6120675136>
+
+**The fork:** PR #630 builds migration `0028` to this issue's earlier ruling, and adds one thing that ruling did not ask for: an advisory lock on the pair `(627, 0)`. `sync.item`'s insert and update triggers take it shared. The triggers on `sync.parent_declaration` and on `knobas.source_config` take it exclusively. The lock closes a real race. Without it, `knobas-search`'s `it` failed 3 of 3 runs, because an item inserted while a declaration change was still uncommitted resolved against the old declarations, and the change's recompute never saw that item.
+
+The reviewing merge-manager found that, as written, the lock deadlocks `delete_source` against a sync of the same source (`mm-630-deadlock.sh`). The sequence:
+1. The run takes the shared key at its first batch flush and holds it until commit.
+2. `config::delete`'s `DELETE` row-locks the config row, and its trigger then waits for the exclusive key.
+3. The run's closing `update knobas.source_config set cursor` waits for that row lock.
+
+The reviewer also measured `add_source` of an unrelated source waiting 3 s behind an in-flight sync.
+
+The reviewer proposed keeping the exclusive key only for declaration changes. The item triggers would take `for key share` on their sources' `source_config` rows, and the `source_config` trigger would drop the lock. Two gaps would remain under that scheme: an update of `kind`, and a source inserted while its items are being written. The other options offered were per-source advisory keys, having `config::delete` take the lock in Rust, or accepting the deadlock as a residual in ADR-0019.
+
+**Ruling:** none of these. **The stored rows stop depending on `knobas.source_config`.** No trigger goes on that table, so nothing there needs a lock. This amends one clause in point 1 of this issue's earlier ruling: that a change to a config row's `kind` (insert, update or delete) recomputes that source's items. That clause is what brought the lock onto `delete_source`'s path.
+
+1. **`sync.item_parent` gains `adapter_kind text not null`.** For each item, the trigger stores the `(name, kind)` rows that each stored adapter's declarations yield for it, tagged with that adapter kind. It uses the same two macro expansions as now, with `$decl` bound per adapter as `{<the item's source_id>: <that adapter's kinds>}`. An item gets rows only for the adapter kinds whose declarations reach its kind. In practice that is one, because kinds are per adapter. Which adapter kinds to try for each item is the implementer's choice, and the agreement test holds it.
+2. **The source's adapter is matched when the rows are read, not when they are stored.** `parent_names!` and `corpus::LIVE_ITEM.under` join `knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind`. That is the rule `Vocabulary::declaring` applies today, moved to read time. The next query then answers correctly, with nothing recomputed, for a source configured after its items were written, for a source that was removed, and for a source whose `kind` changed.
+3. **No trigger on `knobas.source_config`.** `sync.source_config_changed` and its trigger are removed, and so is `sync.parent_declarations()` if nothing else calls it. `sync.parent_declaration`'s triggers recompute the items whose kind the changed rows' old or new declarations name. A truncate still recomputes everything.
+4. **One lock remains, and only for declarations.** The item triggers keep `pg_advisory_xact_lock_shared(627, 0)`. `sync.parent_declaration`'s triggers keep the exclusive form, and keep the early return for a statement that changed no row. That is the race the lock was added for, and it stays closed. **Invariant, to be written in the migration and in ADR-0019:** the exclusive key is taken only by statements on `sync.parent_declaration`, and never by a trigger on a table that a sync run or a user command writes.
+
+**Witness tests.** Each runs on real PostgreSQL. Each has a mutation proof in the PR: the mutant is applied to a committed baseline, its diff is printed, and the test dies.
+
+- **Delete during a sync, in `knobas-sync`'s `it`, driving the real run.** Use `run_once` or the scheduler with a fake `Source`. ADR-0013 allows the trait-level fake here, and the database is real.
+  - The fake emits at least `BATCH` items, so that one flush has gone through the item trigger. It then signals and pauses. Only after that signal does the test call `config::delete(&pool, id, false)`.
+  - The test asserts that the delete returns while the run is still paused, within a deadline well short of the pause. It then releases the run and asserts that the run ends `Finished` and that neither side errored.
+  - A second case does the same with `purge_items: true`, with a flushed batch made only of items new to the mirror.
+  - The existing `a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted` pauses before the run's first flush. That is why `just check` stayed green over the deadlock.
+  - Mutants, both of which must kill the test: (a) a restored row trigger on `knobas.source_config` that takes `pg_advisory_xact_lock(627, 0)`, as the PR's current `source_config_changed` does; (b) the reviewer's variant, `for key share` on the batch's config rows in the item triggers.
+- **The original race stays closed, in `knobas-search`'s `it` (`item_parent.rs`).** Two connections, ordered by `pg_locks` and not by sleeps. Run both orders:
+  - (i) Connection A changes `sync.parent_declaration` and keeps its transaction open. Connection B inserts a `sync.item` of a declared kind. The test sees B waiting on the advisory lock (`granted = false`), commits A, then commits B.
+  - (ii) B inserts first and keeps its transaction open. A's declaration change waits. The test commits B, then A.
+  - After each order, the stored rows equal the per-row walk as the readers see it.
+  - Mutants: the shared lock removed from the item insert trigger, and the exclusive lock removed from the declaration trigger. Each must kill the test. This test replaces the PR body's *"The lock is not witnessed by a test of its own."*
+- **A search command never waits on a sync.** Open a transaction that holds the shared key, such as a run paused after a flush. While it is open, `Searcher::declaring` with the declarations already stored returns within a deadline. Mutant: `Searcher::declaring` always writes, and the trigger's no-row early return is removed. The test must die.
+- **The existing agreement test keeps all seven steps:** insert, payload update, delete, declaration change, source configured after its items, kind changed, source removed. It compares what the readers return, join included, against the per-row walk bound to `Vocabulary::declaring`.
+- **The benchmark and the write cost.** All four benchmark cases stay under 100 ms p90 with the read-time join. Measure the write cost again (the seed, and the parenting update) and record the new numbers beside the old ones.
+
+**What happens to the remaining gaps:**
+
+- *An update of `source_config.kind`* and *a source inserted while its items are being written* are **covered** by point 2. No stored row depends on the config row, so there is no order to keep.
+- **A residual, recorded in ADR-0019:** a declaration change waits for every in-flight run to commit, and while it waits, PostgreSQL queues later item writes behind it. A run holds its transaction across its HTTP work (§10.6(c)), so the wait can be minutes.
+  - It happens only when the stored declarations differ from the binary's. That is the first bring-up after an upgrade, or a second binary with different declarations on the same database. Bring-up writes the declarations before the first sync, so normally no run is in flight then.
+  - It cannot deadlock, because the declaration writer holds no lock that a run takes (the invariant in point 4).
+- **A finding outside #627, for the PR to report and the loop to triage.** `PURGE_ITEMS` deletes `sync.item` rows, and an in-flight run's `ITEM_UPSERT` has already row-locked the rows it updated. So `delete_source(purge_items: true)` already waits for a run that has re-written existing items to commit. This wait existed before `0028`, and this PR must not add to it. It is also why the second witness case flushes only new items.
+
+**ADR-0019 (still `proposed`) must say:**
+- The stored rows depend on the item and on `sync.parent_declaration`, and on nothing else. The source's adapter is joined at read time, because a trigger on `knobas.source_config` would put the sync's lock on `delete_source`'s path.
+- The lock, what it orders, and the invariant in point 4.
+- Under **Considered options**, the rejected schemes:
+  - the exclusive key on a `source_config` trigger: deadlock, shown by `mm-630-deadlock.sh`;
+  - `for key share` on the config rows: the delete waits for the run's commit, against #127;
+  - per-source advisory keys: the same deadlock, per source;
+  - the lock taken in Rust by `config::delete`: Rust on the write path, and the delete still waits;
+  - accepting the deadlock: PostgreSQL aborts one side, either a run's whole transaction or the user's delete.
+- The residual above, with its reason.
+- The first-trigger paragraph's *"its source's configured adapter kind"* and the summary's *"when a source's adapter kind changes"* are removed, because neither is stored any more.
+
+**The §10.8 entry (still GATED) must:**
+- add `adapter_kind` to `sync.item_parent`'s shape;
+- remove the `knobas.source_config` trigger, and `sync.parent_declarations()` if it goes;
+- say that readers join `knobas.source_config` on `id` and `kind = adapter_kind`;
+- state the lock and its invariant;
+- list the three new tests under **Witness**, each with the mutant that kills it;
+- keep its claim that every `knobas` table is untouched. Today the entry makes that claim while the migration puts a trigger on `knobas.source_config`. With this ruling the claim becomes true.
+
+Append this ruling to `docs/decisions/2026-10-unattended-rulings.md` under #627. No glossary change.
+
+**Reasoning:**
+
+- **`delete_source`'s timing is already settled, and both lock-based fixes change it.**
+  - #127's ruling keeps *"same command name, same parameters (`id`, `purge_items`), same return, same non-blocking timing"*. Among the things that *"sends this back to Björn"*, it lists *"Any shape that changes what `delete_source` promises over IPC: cancelling the run, blocking until it stops"*.
+  - A run takes the shared key at its first 500-item flush (`BATCH`) and holds it until commit. §10.6(c) records that the commit comes after the run's HTTP work.
+  - The PR's scheme makes the delete wait for that commit, and then deadlocks it.
+  - The reviewer's scheme removes the deadlock but keeps the wait. In the reviewer's words, *"a delete or key change of the row now waits on that row lock instead"*. Both scripts committed on both sides because the delete waited out the run's sleep.
+  - Per-source keys deadlock the same way, per source.
+  - A lock in `config::delete` is Rust on the write path, which point 2 of the earlier ruling rules out, and the delete still waits.
+  - Accepting the deadlock means one side is aborted after `deadlock_timeout`.
+  - None of these can be ruled here without reopening #127, and #127 sends that question to Björn.
+- **The dependency that needs the lock is not needed.** The source-to-adapter mapping is one row per source, in a table of a handful of rows. Joining it at read time adds a hash join to the index lookup the benchmark already makes. Storing it puts a trigger on the table that every source command writes. Without the dependency, both of the reviewer's remaining gaps disappear, and `add_source` has nothing to wait on.
+- **Frozen surface.** This adds one column, and removes a trigger on a `knobas` table along with its function. That is smaller than the PR's surface and smaller than the reviewer's variant.
+- **Witness (ADR-0013).** The deadlock got past the gate because the one test that deletes during a run pauses before the run's first write. The two endpoints were tested, but the interaction between them was not. The new test drives the real run's statement order. If that order changes later, for example when §10.6(c) moves the transaction boundary, the lock is tested against the new order, not against a script's copy of the old one. The race test orders its connections by `pg_locks`, because a sleep cannot make a test pass (#154's bar).
+- **Scope unchanged.** The ticket, its criteria, points 2–5 of the earlier ruling, and the reader fragment that #615 shares all stand. The only change is where a stored row is matched to its source's adapter.
+
+**If you disagree, the cost of reversing this is:** before merge, nothing beyond the branch's work.
+- **The reviewer's `for key share` scheme instead:** `delete_source` waits for an in-flight run of its source to commit. That reverses #127's "same non-blocking timing" on a frozen command and needs a §10.8 entry of its own. The `adapter_kind` column and the read-time join come out, and the two `kind` gaps go into ADR-0019 as residuals.
+- **Accepting the deadlock instead:** ADR-0019 records that deleting a source while its sync has written a batch aborts either the run or the delete.
+- **After merge:** one migration that drops `adapter_kind` and restores a `source_config` trigger in the locking shape you choose, with a §10.8 entry. The readers lose the join.

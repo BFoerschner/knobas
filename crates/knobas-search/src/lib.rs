@@ -115,10 +115,12 @@ pub struct Searcher {
     pool: PgPool,
     kinds: KindCatalog,
     /// Each compiled-in adapter kind's declared payload paths, which every
-    /// query's vocabulary hands to its configured sources (`under:` reads the
-    /// parent through them). Empty from [`Self::new`]: then no source declares
-    /// anything and `under:` matches nothing, which is the honest answer for a
-    /// searcher nobody told about the adapters.
+    /// query's vocabulary hands to its configured sources -- the path line and
+    /// `under:`'s coverage read them. Empty from [`Self::new`]: then no source
+    /// declares anything to those two. What `under:` itself matches is the
+    /// database's since #627 (`sync.item_parent`, kept from the declarations
+    /// [`Self::declaring`] stores), so a bare searcher answers it from
+    /// whatever was stored last.
     payload_paths: Vec<(String, Vec<knobas_core::payload::KindPaths>)>,
 }
 
@@ -161,6 +163,85 @@ impl Searcher {
             .map(|template| (template.adapter_kind, template.payload_paths))
             .collect();
         self
+    }
+
+    /// A searcher reading what these adapters declare, **and the database's
+    /// stored copy of the same declarations**, written from the same list in
+    /// the same call so the two cannot differ (#627, ADR-0019).
+    ///
+    /// `under:` no longer walks the declarations per query: migration `0028`
+    /// keeps `sync.item_parent`, the names every item answers to, and
+    /// recomputes it from `sync.parent_declaration` whenever an item or a
+    /// declaration changes; which adapter a source uses is matched when the
+    /// rows are read, so a source command recomputes nothing. This writes that table
+    /// whole -- each template's `payload_paths` under its adapter kind, every
+    /// other adapter kind removed. It reads the table first and writes only
+    /// when it differs, so a call that changes nothing is one read, takes no
+    /// lock and recomputes nothing. The path line and coverage still read the in-memory copy
+    /// [`Self::with_payload_paths`] keeps.
+    ///
+    /// The one way the app builds its searcher, and the one way a test that
+    /// searches `under:` builds one.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the declarations cannot be written.
+    pub async fn declaring(
+        pool: PgPool,
+        templates: impl IntoIterator<Item = knobas_source::SourceDescriptor>,
+    ) -> Result<Self, SearchError> {
+        let searcher = Self::new(pool).with_payload_paths(templates);
+        let kinds: Vec<String> = searcher
+            .payload_paths
+            .iter()
+            .map(|(kind, _)| kind.clone())
+            .collect();
+        let paths: Vec<sqlx::types::Json<&Vec<knobas_core::payload::KindPaths>>> = searcher
+            .payload_paths
+            .iter()
+            .map(|(_, paths)| sqlx::types::Json(paths))
+            .collect();
+        // Read first, and write only on a difference: this runs on every
+        // command, and an `on conflict do update` locks the row it matches
+        // even when its `where` then declines to change it. Equal is the
+        // usual case -- every call after bring-up's first one.
+        let stored: Vec<(String, serde_json::Value)> = sqlx::query_as(
+            "select adapter_kind, payload_paths from sync.parent_declaration order by adapter_kind",
+        )
+        .fetch_all(&searcher.pool)
+        .await?;
+        let mut wanted: Vec<(String, serde_json::Value)> = searcher
+            .payload_paths
+            .iter()
+            .map(|(kind, paths)| {
+                (
+                    kind.clone(),
+                    serde_json::to_value(paths).unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect();
+        wanted.sort_by(|a, b| a.0.cmp(&b.0));
+        if stored == wanted {
+            return Ok(searcher);
+        }
+        let mut tx = searcher.pool.begin().await?;
+        sqlx::query(
+            "insert into sync.parent_declaration (adapter_kind, payload_paths)
+             select * from unnest($1::text[], $2::jsonb[])
+             on conflict (adapter_kind) do update set payload_paths = excluded.payload_paths
+              where sync.parent_declaration.payload_paths
+                    is distinct from excluded.payload_paths",
+        )
+        .bind(&kinds)
+        .bind(&paths)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("delete from sync.parent_declaration where adapter_kind <> all($1)")
+            .bind(&kinds)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(searcher)
     }
 
     /// What this installation is configured with, its sources given their

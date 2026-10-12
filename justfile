@@ -775,12 +775,12 @@ test:
 search-perf:
     #!/usr/bin/env bash
     set -euo pipefail
-    # How many tests the two targets are pinned to run under `--ignored`: five
+    # How many tests the two targets are pinned to run under `--ignored`: six
     # in `tests/perf.rs` and one in `tests/coverage.rs`. It is a pin like the
     # inventory's, and moving it is the price of adding a benchmark --
     # `test-inventory.txt`'s `knobas-search<TAB>test/perf` and
     # `test/coverage` lines are where the names themselves live.
-    expected=6
+    expected=7
     log=
     # shellcheck source=scripts/gate-slot.sh disable=SC1091
     . ./scripts/gate-slot.sh
