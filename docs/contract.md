@@ -9700,6 +9700,11 @@ From this commit on, each of the following requires an orchestrator decision **a
      check), and where none resolved, no record names a key it does not have (misspelling check).
      It has an evidence slot per parent kind of its own, so the children's parent objects resolving a
      name cannot excuse the parent's records lacking it.
+     Like a field's candidates, a parent's names share one evidence slot, on the children's parent
+     objects and on the parent's own records alike. So a name no record carries is accepted whenever
+     another name of the same parent resolves, even though `under:` can never reach the parent by
+     that name. Each adapter's live suite is what witnesses that every declared name resolves
+     (deputy's ruling of 2026-10-12 on #595).
 
   The two #301 tolerances hold for `parent` unchanged, rule 6 included: a kind the corpus never
   populates is asked nothing (a Jira epic outside the JQL), and a field's candidates share one
