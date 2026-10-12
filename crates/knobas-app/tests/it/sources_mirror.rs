@@ -676,6 +676,14 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             value: "7".to_owned(),
             base: Some("5".to_owned()),
         },
+        knobas_source::WriteOp::RunBuild {
+            entity: "teamcity:buildType:Payout_Build".to_owned(),
+            branch: Some("feature/PAY-231-sepa-retry".to_owned()),
+            parameters: vec![knobas_source::BuildParameter {
+                name: "env.SEPA_RETRIES".to_owned(),
+                value: "9".to_owned(),
+            }],
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -695,6 +703,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::CreateMonitor { .. } => "CreateMonitor",
             knobas_source::WriteOp::MergePullRequest { .. } => "MergePullRequest",
             knobas_source::WriteOp::SetParameter { .. } => "SetParameter",
+            knobas_source::WriteOp::RunBuild { .. } => "RunBuild",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

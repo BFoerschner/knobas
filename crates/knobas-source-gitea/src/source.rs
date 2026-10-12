@@ -228,7 +228,8 @@ impl Source for GiteaSource {
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
             | WriteOp::CreateMonitor { .. }
-            | WriteOp::SetParameter { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::SetParameter { .. }
+            | WriteOp::RunBuild { .. } => Err(SourceError::protocol(format!(
                 "gitea: {:?} is not an operation this adapter supports",
                 op.identifier()
             ))),

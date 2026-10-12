@@ -164,7 +164,8 @@ impl Source for TeamCitySource {
     }
 
     /// Perform one of the two writes M2 ratified for TeamCity, or the
-    /// parameter set the source views added (#668), or refuse.
+    /// parameter set (#668) or custom run (#669) the source views added, or
+    /// refuse.
     ///
     /// The match unpacks and hands ids to [`crate::write`], which never names
     /// `WriteOp`: knobas has one outbound write path and
@@ -176,8 +177,9 @@ impl Source for TeamCitySource {
     /// exist precisely so they cannot be confused (`map::build_key` /
     /// `map::build_config_key`), and sending `1187` as a configuration id
     /// would trigger whatever configuration happened to be called that. A
-    /// parameter set is aimed at a configuration too, and its id must also be
-    /// one TeamCity could have issued, since it goes into a path.
+    /// parameter set and a custom run are aimed at a configuration too, and its
+    /// id must also be one TeamCity could have issued, since it goes into a
+    /// path or a locator.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::TriggerBuild { entity } => {
@@ -198,6 +200,22 @@ impl Source for TeamCitySource {
                 let config = crate::ids::config_id(entity, &config)?;
                 write::set_parameter(&self.rest, config, name, value, base.as_deref()).await?;
                 Ok(WriteReceipt::none())
+            }
+            WriteOp::RunBuild {
+                entity,
+                branch,
+                parameters,
+            } => {
+                let config = self.build_config_id(entity)?;
+                let config = crate::ids::config_id(entity, &config)?;
+                let overrides: Vec<(&str, &str)> = parameters
+                    .iter()
+                    .map(|p| (p.name.as_str(), p.value.as_str()))
+                    .collect();
+                let queued = write::run(&self.rest, config, branch.as_deref(), &overrides).await?;
+                Ok(WriteReceipt {
+                    remote_id: queued.map(|id| id.to_string()),
+                })
             }
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
@@ -296,7 +314,7 @@ mod tests {
         assert_eq!(d.name, "Tidewater CI (EU)");
         assert_eq!(
             d.write_ops,
-            vec!["trigger_build", "rerun_build", "set_parameter"]
+            vec!["trigger_build", "rerun_build", "set_parameter", "run_build"]
         );
         assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
         // The claim the engine's tombstone sweep rests on travels with the

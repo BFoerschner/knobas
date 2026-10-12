@@ -181,11 +181,11 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "merge_pull_request",
             ],
         ),
-        // `set_parameter` is the source views' growth (#668), offered on a
-        // build configuration's *Parameters* tab.
+        // `set_parameter` and `run_build` are the source views' growth (#668,
+        // #669): a build configuration's *Parameters* tab and its *Run…*.
         (
             "teamcity",
-            vec!["trigger_build", "rerun_build", "set_parameter"],
+            vec!["trigger_build", "rerun_build", "set_parameter", "run_build"],
         ),
         // Confluence's three (#286): `create_page` and `update_page` are
         // M3.2's ADR-0006 growth, and `comment` is the SPI's existing op

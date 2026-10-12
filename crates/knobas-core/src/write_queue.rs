@@ -351,6 +351,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "create_monitor",
     "merge_pull_request",
     "set_parameter",
+    "run_build",
 ];
 
 /// What `op` counts as its target having changed.
@@ -430,8 +431,9 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   move it on its own, and a false hold is one *Apply anyway* away.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
-/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
-/// `"create_page"`, `"pause_monitor"`, `"resume_monitor"`, `"create_monitor"`.
+/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"run_build"`,
+/// `"log_work"`, `"create_page"`, `"pause_monitor"`, `"resume_monitor"`,
+/// `"create_monitor"`.
 /// These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
@@ -557,6 +559,7 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "create_pull_request"
         | "trigger_build"
         | "rerun_build"
+        | "run_build"
         | "log_work"
         | "create_page"
         | "pause_monitor"
@@ -1230,6 +1233,9 @@ mod tests {
             "create_pull_request",
             "trigger_build",
             "rerun_build",
+            // A custom run is a trigger with a branch and overrides (#669):
+            // a build beside the configuration, overwriting nothing on it.
+            "run_build",
             // A new page goes *beside* whatever else sits under its parent, so
             // a parent that was retitled or replied to is not a parent this
             // write would overwrite -- but a parent that left the mirror is a

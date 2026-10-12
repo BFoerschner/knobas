@@ -1,6 +1,6 @@
 //! The two writes M2 ratified for TeamCity -- trigger a build, and re-run
-//! one -- and setting a build configuration's parameter, which the source
-//! views added (issue #668).
+//! one -- and setting a build configuration's parameter and running one on a
+//! branch with overrides, which the source views added (issues #668, #669).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the other two
 //! adapters' write modules are: knobas has one outbound write path, and
@@ -20,12 +20,11 @@
 //! the same configuration on the queue again -- and inventing one would be an
 //! endpoint no server has.
 //!
-//! `branchName` is deliberately not sent. TeamCity builds the configuration's
-//! default branch without one, and this adapter does not mirror the branch a
-//! build ran on as anything a user can pick -- so a branch here would be a
-//! guess dressed as a choice. Re-running on the failed build's own branch is
-//! the obvious next want and needs a `WriteOp` field, which is an ADR-0006
-//! conversation rather than a drive-by.
+//! `branchName` is deliberately not sent by either. TeamCity builds the
+//! configuration's default branch without one, and a trigger or a re-run has
+//! no branch a reader picked -- so a branch there would be a guess dressed as
+//! a choice. The custom run ([`run`], issue #669) is where a reader picks
+//! one: the same endpoint, with `branchName` and `properties` added.
 
 use knobas_source::SourceError;
 
@@ -125,4 +124,46 @@ pub(crate) async fn set_parameter(
         }
     }
     rest.put_parameter(build_type_id, name, value).await
+}
+
+/// Put one build of `build_type_id` on the queue on `branch`, with
+/// `overrides` for this build only (issue #669), and answer the queued
+/// build's id where TeamCity said it.
+///
+/// The same `POST /app/rest/buildQueue` as [`trigger`], with `branchName`
+/// and `properties` -- the body TeamCity's own *Run custom build* sends.
+/// Neither key is sent empty: no branch is the default branch, and no
+/// override is the configuration's own values, which is exactly the trigger.
+/// An override does not change the configuration (measured on the seeded
+/// 2026.1.3 server, 2026-10-13: the build's resulting parameter carries the
+/// override, the configuration keeps its own value).
+///
+/// The branch is TeamCity's to resolve against the configuration's branch
+/// specification. A branch it does not know is still queued -- TeamCity
+/// builds what its VCS root can fetch, and fails the build when it cannot --
+/// so that answer comes back as the build, not as this write's refusal.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`], before a request, for a branch that is empty
+/// or blank and for an override with no name: the first would be read as
+/// neither a branch nor the default, the second is no parameter. Otherwise
+/// as [`trigger`].
+pub(crate) async fn run(
+    rest: &HttpRest,
+    build_type_id: &str,
+    branch: Option<&str>,
+    overrides: &[(&str, &str)],
+) -> Result<Option<i64>, SourceError> {
+    if let Some(branch) = branch.filter(|b| b.trim().is_empty()) {
+        return Err(SourceError::protocol(format!(
+            "teamcity: {branch:?} is not a branch -- leave the branch out to run the default one"
+        )));
+    }
+    if overrides.iter().any(|(name, _)| name.trim().is_empty()) {
+        return Err(SourceError::protocol(
+            "teamcity: a parameter override has no name".to_owned(),
+        ));
+    }
+    rest.queue_run(build_type_id, branch, overrides).await
 }

@@ -221,6 +221,44 @@ impl HttpRest {
         self.client.send(request).await.map(|_| ())
     }
 
+    /// `POST /app/rest/buildQueue` for a custom run (issue #669): the
+    /// trigger's body with `branchName` when there is a branch and
+    /// `properties` when there are overrides, neither sent empty.
+    ///
+    /// Answers the queued build's id from TeamCity's answer, which is the
+    /// queued build in full. A body without one is still a run TeamCity
+    /// accepted -- `knobas-http` decided that from the status -- so it is
+    /// `None`, not an error.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the request maps to.
+    pub(crate) async fn queue_run(
+        &self,
+        build_type_id: &str,
+        branch: Option<&str>,
+        overrides: &[(&str, &str)],
+    ) -> Result<Option<i64>, SourceError> {
+        let mut body = serde_json::json!({ "buildType": { "id": build_type_id } });
+        if let Some(branch) = branch {
+            body["branchName"] = serde_json::Value::from(branch);
+        }
+        if !overrides.is_empty() {
+            let property: Vec<serde_json::Value> = overrides
+                .iter()
+                .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+                .collect();
+            body["properties"] = serde_json::json!({ "property": property });
+        }
+        let request = self
+            .client
+            .request(knobas_http::Method::POST, "app/rest/buildQueue")
+            .json(&body);
+        let response = self.client.send(request).await?;
+        let answer: Option<serde_json::Value> = response.json().await.ok();
+        Ok(answer.and_then(|a| a.get("id").and_then(serde_json::Value::as_i64)))
+    }
+
     /// `PUT /app/rest/buildTypes/id:{id}/parameters/{name}/value` -- one
     /// parameter's new value, as plain text (issue #668).
     ///

@@ -8,6 +8,7 @@
 //! name (`test-layout-exceptions.txt`).
 
 mod mockd;
+mod run;
 mod view;
 mod view_build;
 mod write;

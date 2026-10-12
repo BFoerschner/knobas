@@ -156,10 +156,21 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // build runs with. The target is no build configuration's address, so
         // an adapter that attempted it anyway is refused on the id's shape.
         crate::WriteOp::SetParameter {
-            entity: target,
+            entity: target.clone(),
             name: "contract.battery.probe".into(),
             value: "contract battery probe".into(),
             base: None,
+        },
+        // A run would be a real build on somebody's agent. The target is no
+        // build configuration's address, so an adapter that attempted it
+        // anyway is refused on the id's shape before a request leaves.
+        crate::WriteOp::RunBuild {
+            entity: target,
+            branch: Some("contract-battery".into()),
+            parameters: vec![crate::BuildParameter {
+                name: "contract.battery.probe".into(),
+                value: "contract battery probe".into(),
+            }],
         },
     ]
     .into_iter()

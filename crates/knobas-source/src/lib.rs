@@ -401,6 +401,7 @@ impl SourceError {
 /// | [`LogWork`](Self::LogWork) | `"log_work"` | M3 (Jira) |
 /// | [`MergePullRequest`](Self::MergePullRequest) | `"merge_pull_request"` | source views (Gitea, #667) |
 /// | [`SetParameter`](Self::SetParameter) | `"set_parameter"` | source views (TeamCity, #668) |
+/// | [`RunBuild`](Self::RunBuild) | `"run_build"` | source views (TeamCity, #669) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -676,6 +677,44 @@ pub enum WriteOp {
         value: String,
         base: Option<String>,
     },
+    /// Identifier `"run_build"`. Put one build of a build configuration on
+    /// the queue, on a branch the reader picked and with parameters the
+    /// reader changed (spec #660 story 21, issue #669). `entity` is the
+    /// **build configuration**.
+    ///
+    /// The custom run beside [`TriggerBuild`](WriteOp::TriggerBuild), which
+    /// stays the one-click run of the default branch with the
+    /// configuration's own values. `branch: None` runs the default branch,
+    /// as a trigger does; a branch is the source's own name for it
+    /// (`feature/PAY-231-sepa-retry`), and an empty one is refused rather
+    /// than read as either.
+    ///
+    /// `parameters` carries **only the overrides**, in the order the reader
+    /// sees them: a value the reader left as drawn is not sent, so a run
+    /// changes exactly what the reader changed and inherits everything else
+    /// from the configuration as it stands at the source when the build
+    /// starts. An override is for this one build; the configuration keeps
+    /// its own values (that is [`SetParameter`](WriteOp::SetParameter)). A
+    /// secret's value is never drawn, so it is here only when the reader
+    /// typed one.
+    ///
+    /// Hold detection takes liveness alone, as for a trigger: a run adds a
+    /// build beside whatever the configuration holds and overwrites nothing.
+    RunBuild {
+        entity: String,
+        branch: Option<String>,
+        parameters: Vec<BuildParameter>,
+    },
+}
+
+/// One parameter of a [`RunBuild`](WriteOp::RunBuild): its full name
+/// (`env.SEPA_RETRIES`) and the value this run takes for it. A struct rather
+/// than a pair so the wire reads `{"name": .., "value": ..}`, the shape a
+/// source's own parameter lists have.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BuildParameter {
+    pub name: String,
+    pub value: String,
 }
 
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
@@ -770,6 +809,7 @@ impl WriteOp {
             WriteOp::CreateMonitor { .. } => "create_monitor",
             WriteOp::MergePullRequest { .. } => "merge_pull_request",
             WriteOp::SetParameter { .. } => "set_parameter",
+            WriteOp::RunBuild { .. } => "run_build",
         }
     }
 }
@@ -1185,6 +1225,14 @@ mod tests {
                 value: "7".into(),
                 base: Some("5".into()),
             },
+            WriteOp::RunBuild {
+                entity: "teamcity:buildType:Payout_Build".into(),
+                branch: Some("feature/PAY-231-sepa-retry".into()),
+                parameters: vec![BuildParameter {
+                    name: "env.SEPA_RETRIES".into(),
+                    value: "9".into(),
+                }],
+            },
         ];
         for op in &probes {
             match op {
@@ -1203,7 +1251,8 @@ mod tests {
                 | WriteOp::ResumeMonitor { .. }
                 | WriteOp::CreateMonitor { .. }
                 | WriteOp::MergePullRequest { .. }
-                | WriteOp::SetParameter { .. } => {}
+                | WriteOp::SetParameter { .. }
+                | WriteOp::RunBuild { .. } => {}
             }
         }
         probes
@@ -1261,6 +1310,50 @@ mod tests {
         assert!(odd.is_err(), "{odd:?}");
     }
 
+    /// A custom run's wire shape (issue #669), pinned: the frontend builds it
+    /// by hand (`app/src/lib/detail/view/actions.ts`), so a renamed field
+    /// here is a run that no longer decodes at `submit_write`. No branch is
+    /// `null`, and the overrides are `{name, value}` objects in order.
+    #[test]
+    fn a_run_crosses_as_its_branch_and_its_overrides_in_order() {
+        let op = WriteOp::RunBuild {
+            entity: "teamcity:buildType:Payout_Build".into(),
+            branch: None,
+            parameters: vec![
+                BuildParameter {
+                    name: "env.SEPA_RETRIES".into(),
+                    value: "9".into(),
+                },
+                BuildParameter {
+                    name: "tidewater.region".into(),
+                    value: "".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&op).unwrap(),
+            serde_json::json!({ "RunBuild": {
+                "entity": "teamcity:buildType:Payout_Build",
+                "branch": null,
+                "parameters": [
+                    { "name": "env.SEPA_RETRIES", "value": "9" },
+                    { "name": "tidewater.region", "value": "" }
+                ]
+            } })
+        );
+        let back: WriteOp = serde_json::from_value(serde_json::json!({ "RunBuild": {
+            "entity": "teamcity:buildType:Payout_Build",
+            "branch": "main",
+            "parameters": []
+        } }))
+        .unwrap();
+        assert!(
+            matches!(&back, WriteOp::RunBuild { branch: Some(b), parameters, .. }
+                if b == "main" && parameters.is_empty()),
+            "{back:?}"
+        );
+    }
+
     /// The identifier is what a descriptor lists, what the queue stores in its
     /// `op` column and what hold detection dispatches on. Two variants sharing
     /// one would make a descriptor's declaration ambiguous and a queued row
@@ -1279,7 +1372,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 16, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 17, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also
