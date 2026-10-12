@@ -4,7 +4,7 @@
 //! **Only values that exist right now** is the rule every test here holds the
 //! read to: a kind with live rows, a source that is configured and enabled, a
 //! parent some live item declares or a mirrored record answers to as one, or
-//! an asset the estate holds something under. A suggestion that led to an
+//! an asset, which answers to its name (#600). A suggestion that led to an
 //! empty result, or to an unknown token, would be a lie the box told.
 //!
 //! One database for the file, a unique token per test, nothing truncated: the
