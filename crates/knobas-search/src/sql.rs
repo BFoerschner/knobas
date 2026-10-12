@@ -95,9 +95,9 @@ pub(crate) enum Bind {
     /// Row counts: `row_number()` yields `bigint`, and so does `limit`.
     I64(i64),
     /// The declarations `under:` reads the parent through, bound as one
-    /// `jsonb` the way every path-driven read binds them
-    /// (`Declarations::as_param`).
-    Json(serde_json::Value),
+    /// `jsonb` through `Declarations::as_param`, the one place that wraps
+    /// them, as every path-driven read does.
+    Json(sqlx::types::Json<serde_json::Value>),
 }
 
 /// A generated statement and the arguments that go with it.
@@ -324,7 +324,7 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             .then(|| builder.param(Bind::Texts(filters.authors()))),
         under: filters.filters_by_under().then(|| {
             (
-                builder.param(Bind::Json(filters.declarations.as_json())),
+                builder.param(Bind::Json(filters.declarations.as_param())),
                 builder.param(Bind::Texts(filters.under.clone())),
             )
         }),
@@ -532,7 +532,7 @@ where
             Bind::Texts(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
-            Bind::Json(value) => query.bind(sqlx::types::Json(value)),
+            Bind::Json(value) => query.bind(value),
         };
     }
     query
@@ -565,7 +565,7 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
             Bind::Texts(value) => query.bind(value),
             Bind::I32(value) => query.bind(value),
             Bind::I64(value) => query.bind(value),
-            Bind::Json(value) => query.bind(sqlx::types::Json(value)),
+            Bind::Json(value) => query.bind(value),
         };
     }
     Ok(query
