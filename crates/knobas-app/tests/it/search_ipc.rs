@@ -987,11 +987,7 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
     );
 
     // The negative the criterion asks for: an asset something watches is absent.
-    for watched in [
-        "asset:knobas-gitea",
-        "asset:notebook",
-        "asset:knobas-jira",
-    ] {
+    for watched in ["asset:knobas-gitea", "asset:notebook", "asset:knobas-jira"] {
         assert!(
             !rows.contains(&watched.to_owned()),
             "{watched} has a confirmed monitored-by link and must not be on the roster"

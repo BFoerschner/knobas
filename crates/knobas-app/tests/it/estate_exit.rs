@@ -533,7 +533,10 @@ async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
     assert_eq!(
         routes,
         vec![
-            ("asset:orbstack-docker".to_owned(), target("asset:knobas-gitea")),
+            (
+                "asset:orbstack-docker".to_owned(),
+                target("asset:knobas-gitea")
+            ),
             (NOTEBOOK.to_owned(), target("asset:knobas-confluence")),
             (NOTEBOOK.to_owned(), target("asset:knobas-gitea")),
             (NOTEBOOK.to_owned(), target("asset:knobas-jira")),

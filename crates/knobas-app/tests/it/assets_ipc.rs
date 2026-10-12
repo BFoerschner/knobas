@@ -3309,10 +3309,7 @@ async fn a_preview_writes_nothing_at_all() {
     assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
         .expect("the first import");
-    let moved_on = estate_with(
-        "asset:notebook",
-        &[("os", serde_json::json!("macOS 27.0"))],
-    );
+    let moved_on = estate_with("asset:notebook", &[("os", serde_json::json!("macOS 27.0"))]);
 
     let before = tables(&pool).await;
     let preview = assets::preview_import(&pool, &moved_on, ESTATE_FILE_PRODUCER)
@@ -3725,13 +3722,7 @@ async fn an_estate_with_no_monitors_anywhere_reports_every_name_as_unresolved() 
             .iter()
             .map(|entry| entry.monitor_name.as_str())
             .collect::<Vec<_>>(),
-        [
-            "confluence",
-            "gitea",
-            "jira",
-            "teamcity",
-            "notebook",
-        ],
+        ["confluence", "gitea", "jira", "teamcity", "notebook",],
         "all five of the file's names, because nothing in the mirror answers \
          to any of them"
     );

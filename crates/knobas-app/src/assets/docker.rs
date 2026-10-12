@@ -603,9 +603,7 @@ mod tests {
                 names: vec!["knobas-jira".to_owned(), "knobas-jira-db".to_owned()],
             },
         ];
-        let new: HashSet<String> = [asset_id("remote", "knobas-jira-db")]
-            .into_iter()
-            .collect();
+        let new: HashSet<String> = [asset_id("remote", "knobas-jira-db")].into_iter().collect();
         let file = parsed(&estate_file(&found, &new).expect("a file"));
         let entries = file["assets"].as_array().expect("a list");
         assert_eq!(entries.len(), 3);

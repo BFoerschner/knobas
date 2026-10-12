@@ -40,7 +40,14 @@ async fn a_full_sync_mirrors_every_monitor_with_its_state() {
         6,
         "the recording holds the six seeded monitors: {names:?}"
     );
-    for expected in ["notebook", "teamcity", "jira", "confluence", "gitea", "canary"] {
+    for expected in [
+        "notebook",
+        "teamcity",
+        "jira",
+        "confluence",
+        "gitea",
+        "canary",
+    ] {
         assert!(
             names.contains(&expected),
             "{expected:?} is missing: {names:?}"

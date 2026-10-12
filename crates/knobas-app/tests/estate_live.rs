@@ -182,9 +182,10 @@ async fn the_real_project_round_trips_through_the_importer() {
 
     // 2. Land what is new at the top of the estate, and apply it.
     if let assets::Produced::LandingNeeded { servers } = &first {
-        let landed = assets::hcloud::produce(&pool, &client, Some(&assets::Landing { parent: None }))
-            .await
-            .expect("the second read, with a landing");
+        let landed =
+            assets::hcloud::produce(&pool, &client, Some(&assets::Landing { parent: None }))
+                .await
+                .expect("the second read, with a landing");
         let assets::Produced::Ready {
             file, new_servers, ..
         } = landed
@@ -225,7 +226,11 @@ async fn the_real_project_round_trips_through_the_importer() {
         new_servers.is_empty() && skipped.is_empty(),
         "new {new_servers:?}, skipped {skipped:?}"
     );
-    assert_eq!(entries(&file), expected, "the same servers as the first read");
+    assert_eq!(
+        entries(&file),
+        expected,
+        "the same servers as the first read"
+    );
 
     let preview = assets::preview_import(&pool, &file, HCLOUD_PRODUCER)
         .await

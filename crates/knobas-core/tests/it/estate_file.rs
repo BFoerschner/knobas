@@ -82,8 +82,7 @@ fn read(relative: &str) -> String {
 }
 
 fn estate() -> Value {
-    serde_json::from_str(&read("testenv/estate.json"))
-        .expect("testenv/estate.json is JSON")
+    serde_json::from_str(&read("testenv/estate.json")).expect("testenv/estate.json is JSON")
 }
 
 /// One of the file's two arrays, which must be there and must not be empty --
@@ -409,7 +408,11 @@ fn the_notebook_states_the_address_its_ping_watches() {
     let [ping] = pings.as_slice() else {
         panic!("the seed creates exactly one ping, the notebook's: {pings:?}");
     };
-    assert_eq!(field(ping, "name"), "notebook", "the one ping the seed creates");
+    assert_eq!(
+        field(ping, "name"),
+        "notebook",
+        "the one ping the seed creates"
+    );
     assert_eq!(
         ping["hostname"].as_str(),
         Some(address),
