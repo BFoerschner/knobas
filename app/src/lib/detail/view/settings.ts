@@ -17,15 +17,35 @@ import type { QueuedWrite, WriteOpPayload, WriteState } from "../../ipc/sources"
 /** What a settings block's edit is aimed by: its entity and the op that changes it. */
 export type SettingsTarget = Pick<Extract<ViewBlock, { type: "settings" }>, "entity" | "write_op">;
 
+/** A settings edit as it sits on the queue. */
+export interface QueuedSetting {
+  entity: string;
+  name: string;
+  value: string;
+}
+
 /**
- * The payload for one op, from the block's entity, the value edited and the
- * value it was edited against (`null` where none was drawn).
+ * Each op a settings block can edit through, both ways: `payload` builds the
+ * write from the block's entity, the value edited and the value it was edited
+ * against (`null` where none was drawn); `readBack` reads a queued write of
+ * that op back into the setting it changes (#692), or `null` for a payload of
+ * another variant. One entry, so the two cannot drift apart.
  */
-const PAYLOADS: Record<
+const OPS: Record<
   string,
-  (entity: string, name: string, value: string, base: string | null) => WriteOpPayload
+  {
+    payload: (entity: string, name: string, value: string, base: string | null) => WriteOpPayload;
+    readBack: (payload: WriteOpPayload) => QueuedSetting | null;
+  }
 > = {
-  set_parameter: (entity, name, value, base) => ({ SetParameter: { entity, name, value, base } }),
+  set_parameter: {
+    payload: (entity, name, value, base) => ({ SetParameter: { entity, name, value, base } }),
+    readBack: (payload) => {
+      if (!("SetParameter" in payload)) return null;
+      const { entity, name, value } = payload.SetParameter;
+      return { entity, name, value };
+    },
+  },
 };
 
 /**
@@ -39,34 +59,17 @@ export function settingPayload(
   value: string,
   base: string | null,
 ): WriteOpPayload | null {
-  return PAYLOADS[writeOp]?.(entity, name, value, base) ?? null;
+  return OPS[writeOp]?.payload(entity, name, value, base) ?? null;
 }
 
 /**
- * What a queued write sets, read back from its payload: the entity, the
- * setting's name and the value it carries. The inverse of {@link PAYLOADS},
- * by op, so a detail opened over a write still on the queue can find the row
- * that write is for (#692).
- */
-const SETS: Record<string, (payload: WriteOpPayload) => QueuedSetting | null> = {
-  set_parameter: (payload) => ("SetParameter" in payload ? payload.SetParameter : null),
-};
-
-/** A settings edit as it sits on the queue. */
-export interface QueuedSetting {
-  entity: string;
-  name: string;
-  value: string;
-}
-
-/**
- * The setting `write` changes, or `null` when it is not an edit of `writeOp`.
+ * The setting `write` changes, or `null` when it is not an edit of `writeOp`,
+ * so a detail opened over a write still on the queue can find its row (#692).
  * The payload's variant is the op (`write.op` names the same thing), so
  * reading the variant is the check.
  */
 export function queuedSetting(writeOp: string, write: QueuedWrite): QueuedSetting | null {
-  const read = SETS[writeOp]?.(write.payload);
-  return read ? { entity: read.entity, name: read.name, value: read.value } : null;
+  return OPS[writeOp]?.readBack(write.payload) ?? null;
 }
 
 /**
@@ -75,7 +78,7 @@ export function queuedSetting(writeOp: string, write: QueuedWrite): QueuedSettin
  * build.
  */
 export function settingsWritable(writeOp: string, declared: string[]): boolean {
-  return declared.includes(writeOp) && Object.hasOwn(PAYLOADS, writeOp);
+  return declared.includes(writeOp) && Object.hasOwn(OPS, writeOp);
 }
 
 /** The queue states a write is still open in. */

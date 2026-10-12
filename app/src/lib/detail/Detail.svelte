@@ -300,11 +300,11 @@
     for (const block of blocks) {
       const names = new Set(block.values.map((v) => v.name));
       for (const write of open) {
-        const set = queuedSetting(block.write_op, write);
+        const edit = queuedSetting(block.write_op, write);
         const state = openState(write);
-        if (set === null || state === null || set.entity !== block.entity || !names.has(set.name)) continue;
-        if ((found[set.name]?.id ?? -1) > write.id) continue;
-        found[set.name] = { id: write.id, mark: { state, detail: write.detail, value: set.value } };
+        if (edit === null || state === null || edit.entity !== block.entity || !names.has(edit.name)) continue;
+        if ((found[edit.name]?.id ?? -1) > write.id) continue;
+        found[edit.name] = { id: write.id, mark: { state, detail: write.detail, value: edit.value } };
       }
     }
     for (const [name, { id, mark }] of Object.entries(found)) {
