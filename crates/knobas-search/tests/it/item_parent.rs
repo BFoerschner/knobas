@@ -10,15 +10,18 @@
 //! change the trigger code claims to follow: an insert, a payload update, an
 //! item moved to another source and back, a delete, a change to the stored
 //! declarations, a source configured after its items were written, a source
-//! given another adapter kind, and a source removed.
+//! given another adapter kind, and a source removed -- and an insert and an
+//! update of several rows in one statement, as the sync writer makes them
+//! (#655).
 //!
 //! Its own database (one per test module, #572), so it may write
 //! `sync.parent_declaration` freely; nothing here goes through
 //! `Searcher::declaring`, which writes that table whole and would make this
 //! file's two adapter kinds the only ones.
 //!
-//! The seeds are plain `insert`s, as every search test's are: nothing here
-//! calls a fill function, because the claim is that nothing has to.
+//! The seeds are plain `insert`s (and, for the batch, the writer's
+//! `insert ... on conflict do update`), as every search test's are: nothing
+//! here calls a fill function, because the claim is that nothing has to.
 
 use knobas_core::payload::KindPaths;
 use knobas_search::{KindCatalog, Vocabulary};
@@ -384,6 +387,167 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
         rows.is_empty(),
         "a source nobody configures declares nothing: {rows:?}"
     );
+}
+
+/// Write `rows` -- `(kind, key, payload)` of `source` -- in the sync writer's
+/// shape (`ITEM_UPSERT`, `knobas-sync`): **one** multi-row
+/// `insert ... select from unnest(...) on conflict (entity_id) do update`.
+/// The item triggers are `for each statement` over transition tables, so the
+/// rows this statement inserts reach `item_parent_on_insert`'s `new_rows`
+/// together, and the rows it updates reach `item_parent_on_update`'s
+/// `old_rows` and `new_rows` together -- which `item()`, one row per
+/// statement, never does. The entities go in first, also in one statement,
+/// left alone when already there.
+async fn upsert_batch(pool: &PgPool, source: &str, rows: &[(&str, &str, serde_json::Value)]) {
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|(_, k, _)| format!("{source}:{k}"))
+        .collect();
+    let kinds: Vec<&str> = rows.iter().map(|(kind, _, _)| *kind).collect();
+    let titles: Vec<&str> = rows.iter().map(|(_, k, _)| *k).collect();
+    let payloads: Vec<&serde_json::Value> = rows.iter().map(|(_, _, p)| p).collect();
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select * from unnest($1::text[], $2::text[], $3::text[])
+             on conflict (id) do nothing",
+    )
+    .bind(&ids)
+    .bind(&kinds)
+    .bind(&titles)
+    .execute(pool)
+    .await
+    .unwrap();
+    let written = sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         select t.id, $5, t.kind, t.title, '', t.payload
+           from unnest($1::text[], $2::text[], $3::text[], $4::jsonb[])
+                as t(id, kind, title, payload)
+             on conflict (entity_id) do update set
+                source_id = excluded.source_id,
+                kind      = excluded.kind,
+                title     = excluded.title,
+                payload   = excluded.payload",
+    )
+    .bind(&ids)
+    .bind(&kinds)
+    .bind(&titles)
+    .bind(&payloads)
+    .bind(source)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        written.rows_affected(),
+        rows.len() as u64,
+        "one statement, every row"
+    );
+}
+
+/// **Every row of a batch is resolved, not only the first** (#655). The
+/// sync writer inserts and updates a whole batch in one statement; the
+/// triggers see it as one transition table. Four items of three kinds and
+/// three different parents are inserted in one statement, then all four
+/// payloads change in one upsert of the writer's shape -- so the insert
+/// trigger's `new_rows` and the update trigger's `new_rows` each hold four
+/// rows, and a trigger that resolves only one of them leaves three that
+/// disagree with the walk.
+#[tokio::test]
+async fn every_row_of_one_statement_is_resolved() {
+    let pool = pool().await;
+    let t = format!("b{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    let gitea = format!("gitea-{t}");
+    let g = format!("g{t}");
+    let prefix = format!("{g}:");
+    store_declaration(&pool, &gitea, &gitea_paths()).await;
+    let templates = vec![(gitea.clone(), gitea_paths())];
+    configure(&pool, &g, &gitea).await;
+
+    let repo = |full: &str, name: &str| serde_json::json!({ "full_name": full, "name": name });
+    upsert_batch(
+        &pool,
+        &g,
+        &[
+            (
+                "commit",
+                "c1",
+                serde_json::json!({ "repository": repo("tide/ghost", "ghost") }),
+            ),
+            (
+                "commit",
+                "c2",
+                serde_json::json!({ "repository": repo("tide/ledger", "ledger") }),
+            ),
+            (
+                "pr",
+                "p1",
+                serde_json::json!({ "base": { "repo": repo("tide/payout", "payout") } }),
+            ),
+            ("repo", "r1", repo("tide/payout", "payout")),
+        ],
+    )
+    .await;
+    let rows = agree(&pool, &prefix, &templates, "one multi-row insert").await;
+    let id = |key: &str| format!("{g}:{key}");
+    for (entity, name, arm) in [
+        ("c1", "tide/ghost", "child"),
+        ("c2", "tide/ledger", "child"),
+        ("p1", "tide/payout", "child"),
+        ("r1", "tide/payout", "parent"),
+    ] {
+        assert!(
+            has(&rows, &id(entity), name, "repo", arm),
+            "{entity} was inserted in the batch but not resolved: {rows:?}"
+        );
+    }
+
+    // Every payload changes, in the writer's own upsert: all four rows
+    // exist, so the insert trigger's `new_rows` is empty and the update
+    // trigger's holds all four.
+    upsert_batch(
+        &pool,
+        &g,
+        &[
+            (
+                "commit",
+                "c1",
+                serde_json::json!({ "repository": repo("tide/spectre", "spectre") }),
+            ),
+            (
+                "commit",
+                "c2",
+                serde_json::json!({ "repository": repo("tide/journal", "journal") }),
+            ),
+            (
+                "pr",
+                "p1",
+                serde_json::json!({ "base": { "repo": repo("tide/refund", "refund") } }),
+            ),
+            ("repo", "r1", repo("tide/refund", "refund")),
+        ],
+    )
+    .await;
+    let rows = agree(
+        &pool,
+        &prefix,
+        &templates,
+        "one multi-row upsert of existing rows",
+    )
+    .await;
+    for (entity, old, new, arm) in [
+        ("c1", "tide/ghost", "tide/spectre", "child"),
+        ("c2", "tide/ledger", "tide/journal", "child"),
+        ("p1", "tide/payout", "tide/refund", "child"),
+        ("r1", "tide/payout", "tide/refund", "parent"),
+    ] {
+        assert!(
+            has(&rows, &id(entity), new, "repo", arm),
+            "{entity} was updated in the batch but lacks its new parent: {rows:?}"
+        );
+        assert!(
+            !has(&rows, &id(entity), old, "repo", arm),
+            "{entity} was updated in the batch but kept its old parent: {rows:?}"
+        );
+    }
 }
 
 /// The trigger function carries the macros' expansion as text, because a

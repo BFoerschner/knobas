@@ -1547,6 +1547,7 @@ knobas-search	test/it	home::the_board_drops_a_source_the_user_turned_off
 knobas-search	test/it	home::the_board_is_smart_lists_and_the_newest_of_every_kind
 knobas-search	test/it	item_parent::a_declaration_change_during_an_item_write_reaches_the_item
 knobas-search	test/it	item_parent::an_item_written_during_a_declaration_change_resolves_against_it
+knobas-search	test/it	item_parent::every_row_of_one_statement_is_resolved
 knobas-search	test/it	item_parent::the_stored_function_is_the_macros_expansion
 knobas-search	test/it	item_parent::the_stored_parents_are_the_walk_after_every_change
 knobas-search	test/it	lists::a_configured_identity_leaves_the_blurb_alone
