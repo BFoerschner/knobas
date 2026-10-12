@@ -1403,6 +1403,85 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
     );
 }
 
+/// A synced build carries its configuration, and `under:` finds it by both
+/// names TeamCity declares for it (#597, ADR-0018).
+///
+/// The build reads its configuration off the nested `buildType` the real
+/// server sends, through the descriptor's own declaration and
+/// `knobas_core::payload`'s resolver -- the Rust half of the rule the SQL
+/// `under:` predicate is the other half of, held together by `knobas-core`'s
+/// agreement test. **Both** declared names are asserted on every build, and on
+/// every configuration's own record, which is how `under:` returns the
+/// configuration itself: clause 6 gives a parent's names one evidence slot, so
+/// a misspelled second name would pass the battery below while `under:<id>`
+/// silently missed (the deputy's ruling of 2026-10-12 on #595). The names are
+/// held to the seed's literal ids and names, not to what the resolver read.
+/// That `under:` matches them ignoring case is the search seam's to witness
+/// (`knobas-search`'s `under_teamcity.rs`).
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_title_and_id() {
+    use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let declarations = knobas_source_teamcity::descriptor_template().payload_paths;
+    let declared = &declarations
+        .iter()
+        .find(|paths| paths.kind == "build")
+        .expect("a build declares its parent")
+        .parent;
+    // Title, then id: what the seed named each configuration.
+    let names_of = |id: &str| -> [String; 2] {
+        let name = match id {
+            "Ledger_Deploy_Staging" => "Deploy Staging",
+            "Payout_Build" => "Build",
+            "Payout_IntegrationTests" => "IntegrationTests",
+            other => panic!("a configuration the seed does not make: {other}"),
+        };
+        [name.to_owned(), id.to_owned()]
+    };
+
+    let builds = of_kind(&items, "build");
+    assert!(!builds.is_empty(), "the seed leaves finished builds");
+    for build in &builds {
+        let config = build.payload["buildTypeId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{} names its configuration", build.entity));
+        let parents = resolve_parents(&build.payload, declared);
+        assert_eq!(
+            parents.len(),
+            1,
+            "{} sits in one configuration: {parents:?}",
+            build.entity
+        );
+        assert_eq!(parents[0].kind, "build_config");
+        assert_eq!(
+            parents[0].names,
+            names_of(config),
+            "{} answers to its configuration's title first, then its id",
+            build.entity
+        );
+    }
+
+    let configs = of_kind(&items, "build_config");
+    assert_eq!(configs.len(), 3, "the seed's three configurations");
+    for config in configs {
+        let id = config
+            .entity
+            .key
+            .strip_prefix("buildType:")
+            .expect("a configuration's key");
+        assert_eq!(
+            resolve_names_as_parent(&config.payload, "build_config", &declarations),
+            names_of(id),
+            "{} answers, as a parent, to the names its builds call it by",
+            config.entity
+        );
+    }
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides, over the configurations nothing in this file queues
 /// on while it runs.
