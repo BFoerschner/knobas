@@ -104,6 +104,7 @@
         title={hit.title}
         syncedAt={hit.synced_at}
         path={hit.path}
+        state={hit.state}
         snippet={hit.snippet}
         {sources}
         {now}

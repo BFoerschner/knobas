@@ -49,6 +49,26 @@ export interface EntityRow {
    * launcher row and the detail panel cannot disagree about what a path is.
    */
   path: string | null;
+  /**
+   * The item's state chip — a pull request's `open` / `merged` / `closed`, a
+   * build's `running` or `FAILURE` (#666) — or `null` for a kind whose adapter
+   * declares no state, and for a value its declaration does not name (the
+   * ADR-0007 **miss**). Resolved in SQL by `knobas_core::declared_state!`
+   * beside the path line. `text` is source text: render it as text.
+   */
+  state: StateChip | null;
+}
+
+/**
+ * How loud a value is drawn — `knobas_core::tone::Tone`. The adapter says
+ * which; the shell owns the colours.
+ */
+export type Tone = "ok" | "warn" | "err" | "info" | "muted";
+
+/** A row's state chip — `knobas_core::payload::StateChip`. */
+export interface StateChip {
+  text: string;
+  tone: Tone;
 }
 
 /** Which ordering a room reads in — `EntityOrder`. */

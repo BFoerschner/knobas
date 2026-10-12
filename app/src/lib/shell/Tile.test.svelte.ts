@@ -49,6 +49,7 @@ function row(key: string): EntityRow {
     updated_at: "2026-08-22T11:48:00Z",
     synced_at: "2026-08-22T14:30:00Z",
     path: null,
+    state: null,
   };
 }
 
@@ -240,6 +241,7 @@ test("a key containing a colon is shown whole", async () => {
           updated_at: "2026-08-22T11:48:00Z",
           synced_at: "2026-08-22T14:30:00Z",
           path: null,
+          state: null,
         },
       ],
       total: 1,
@@ -317,4 +319,26 @@ test("the header offers Maximise, asks the room, and reads Restore once maximise
   expect(screen.rows()).toHaveLength(1);
 
   screen.done();
+});
+
+/**
+ * A room scoped to one source — a source room, a project room — drops the
+ * source column (#666): every row would repeat the same id. *All work* reads
+ * every source, so there the column is what tells two rows apart.
+ */
+test("a one-source room drops the source column and All work keeps it", async () => {
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  const scoped = render(["mock"]);
+  await vi.waitFor(() => expect(scoped.rows()).toHaveLength(1));
+  flushSync();
+  expect(scoped.target.querySelector(".row .src")).toBeNull();
+  expect(scoped.rows()[0]?.classList.contains("g4w")).toBe(true);
+  scoped.done();
+
+  const everything = render([]);
+  await vi.waitFor(() => expect(everything.rows()).toHaveLength(1));
+  flushSync();
+  expect(everything.target.querySelector(".row .src")?.textContent).toBe("mock");
+  expect(everything.rows()[0]?.classList.contains("g5w")).toBe(true);
+  everything.done();
 });

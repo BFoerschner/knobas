@@ -100,3 +100,17 @@ test("a path the title already repeats is still drawn", () => {
   expect(screen.target.querySelector(".pa")?.textContent).toBe("Payments / Deploy");
   screen.done();
 });
+
+/** The state chip (#666): drawn after the title with its tone, absent for the miss. */
+test("a row with a state draws its chip with its tone, and none without", () => {
+  const screen = render({ kind: "pr", state: { text: "merged", tone: "ok" } });
+  const chip = screen.target.querySelector<HTMLElement>(".st");
+  expect(chip?.textContent).toBe("merged");
+  expect(chip?.dataset.tone).toBe("ok");
+  screen.done();
+  for (const props of [{}, { state: null }]) {
+    const none = render(props);
+    expect(none.target.querySelector(".st"), JSON.stringify(props)).toBeNull();
+    none.done();
+  }
+});

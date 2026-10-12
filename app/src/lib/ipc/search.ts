@@ -1,7 +1,7 @@
 /** Search and the launcher — `crates/knobas-app/src/commands/search.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { EntityRow } from "./entity";
+import type { EntityRow, StateChip } from "./entity";
 import type { CredentialHealth } from "./sources";
 
 /** `knobas_search::SearchFilters`. */
@@ -83,6 +83,8 @@ export interface SearchHit {
    * launcher row and the detail panel cannot disagree about what a path is.
    */
   path: string | null;
+  /** The item's state chip, or `null` — `EntityRow.state` in `entity.ts` (#666). */
+  state: StateChip | null;
   rank: number;
   snippet: Segment[];
 }

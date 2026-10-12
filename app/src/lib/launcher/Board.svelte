@@ -267,6 +267,7 @@
       title={item.title}
       syncedAt={item.synced_at}
       path={item.path}
+      state={item.state}
       sources={home.sources}
       {now}
       selected={index === selected}

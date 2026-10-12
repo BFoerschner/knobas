@@ -141,6 +141,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       // A ticket sits nowhere: the ADR-0007 miss, and the default this file's
       // other tests are written against.
       path: null,
+      state: null,
     },
     source: {
       id: "mock",
@@ -366,6 +367,7 @@ test("an undeclared kind is browsable — §3a's promise", async () => {
           updated_at: "2026-08-22T08:05:00Z",
           synced_at: "2026-08-22T14:30:00Z",
           path: null,
+          state: null,
         },
         kind_info: null,
         payload: {
@@ -487,6 +489,7 @@ test("a withdrawn entity opens with a banner that says why it is still here", as
           updated_at: null,
           synced_at: "2026-08-22T14:30:00Z",
           path: null,
+          state: null,
         },
         deleted_at: "2026-08-22T12:00:00Z",
         web_url: null,
@@ -1154,6 +1157,7 @@ test("a page shows its ancestor path and its body as text", async () => {
           // payload below still holds the `ancestors` the statement read it
           // out of, which is what makes this fixture a page and not a stub.
           path: "Engineering › Payments",
+          state: null,
         },
         body_text:
           "SEPA payout retry design\n\nBackoff policy\nbase 30 s, factor 2\n\nuse <retry> here",
@@ -1231,6 +1235,7 @@ test("a Confluence page renders its markup, its macro placeholders and its comme
           updated_at: "2026-08-22T10:40:00Z",
           synced_at: "2026-08-22T14:30:00Z",
           path: "Engineering › Payments",
+          state: null,
         },
         source: {
           id: "confluence",
@@ -1335,6 +1340,7 @@ test("a page from another adapter is not rendered as Confluence markup", async (
           updated_at: null,
           synced_at: "2026-08-22T14:30:00Z",
           path: null,
+          state: null,
         },
         source: {
           id: "gitea",
@@ -1390,6 +1396,7 @@ test("a page detail links to a ticket, with the page as the near end", async () 
           updated_at: null,
           synced_at: "2026-08-22T14:30:00Z",
           path: "Engineering › Payments",
+          state: null,
         },
         source: {
           id: "confluence",

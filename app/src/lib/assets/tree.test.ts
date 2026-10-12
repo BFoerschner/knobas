@@ -509,6 +509,7 @@ function answer(groups: { kind: string; hits: { id: string; title: string; path?
         synced_at: "2026-09-06T10:00:00Z",
         title: hit.title,
         path: hit.path ?? null,
+        state: null,
         rank: 1 - index / 10,
         snippet: [],
       })),

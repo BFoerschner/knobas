@@ -17,7 +17,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 // copy of a frozen shape in the tree, and the barrel's `export *` would refuse
 // to re-export both. Type-only, so nothing is imported at run time and the
 // cycle through `./index` is erased.
-import type { KindInfo } from "./entity";
+import type { KindInfo, Tone } from "./entity";
 import type { IpcErrorCode } from "./index";
 
 /** `knobas_source::AuthMethod` — PascalCase, unchanged since M0. */
@@ -94,6 +94,28 @@ export interface KindPaths {
   blocked_statuses: string[];
   /** Where this item's parent is and what it answers to (ADR-0018). */
   parent: ParentPath[];
+  /** Where a row's state chip is read, and what each value means (#666). */
+  state: StatePath[];
+}
+
+/**
+ * `knobas_core::payload::StatePath` — where a row's state sits, and the values
+ * it draws a chip for (#666). A value its map does not name is a miss, and the
+ * next candidate is tried.
+ */
+export interface StatePath {
+  /** Leads to a string or a boolean. */
+  at: PayloadPath;
+  values: StateValue[];
+}
+
+/** `knobas_core::payload::StateValue` — one value a `StatePath` draws. */
+export interface StateValue {
+  /** The value as the source writes it: a string, or a boolean flag. */
+  value: string | boolean;
+  tone: Tone;
+  /** What the chip says instead of the value (`merged` for `true`), or `null`. */
+  text: string | null;
 }
 
 /**

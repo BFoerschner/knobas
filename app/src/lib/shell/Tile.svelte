@@ -317,7 +317,7 @@
       <MiniBoardBody {board} {layout} {onopen} />
     {:else if page}
       {#each page.rows as row (row.entity_id)}
-        <EntityLine {row} {onopen} />
+        <EntityLine {row} {onopen} showSource={sources.length !== 1} />
       {/each}
     {/if}
   </div>
