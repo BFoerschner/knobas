@@ -350,16 +350,24 @@ pub async fn patch(
 /// The rows skipped are the in-flight run's, and the scheduler re-applies this
 /// statement when that run settles. That is why one statement can serve both
 /// callers with the same locking: after a deleted source's run settles,
-/// nothing holds its rows -- only a run of a source writes that source's
+/// no run holds its rows -- only a run of a source writes that source's
 /// items and locks their entities for update -- so in [`purge_items`]
-/// `skip locked` skips nothing.
+/// `skip locked` skips nothing -- **except during a recompute**
+/// (`delete_source`'s fifth residual). `sync.parent_declaration`'s trigger
+/// inserts `sync.item_parent` rows, whose foreign key takes `KEY
+/// SHARE` on each `sync.item` it reaches, and `for update` conflicts with
+/// that, so either purge skips those items and, with no run in flight, nobody
+/// purges them again. Bring-up's recompute commits before `delete_source` is
+/// ready; a later `searcher()` recompute after bring-up's write failed, or a
+/// second binary with other declarations (ADR-0019), can still overlap one.
+/// Waiting for it instead is the wait #632 removed.
 ///
 /// **Only a run the scheduler started is purged after.** `run_once` called
 /// directly -- *Load demo data* -- is a run nobody re-purges behind, so a
 /// source deleted during one keeps the rows that run rewrote, as it already
 /// kept the rows it inserted. That run reads a fixture compiled into the
 /// binary and is over in milliseconds; waiting for it instead is what this
-/// statement exists not to do.
+/// statement exists not to do. #636 purges behind it.
 const PURGE_ITEMS: &str = r#"with taken as (
      select i.entity_id
        from sync.item i
