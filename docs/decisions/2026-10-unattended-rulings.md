@@ -266,3 +266,22 @@ Ruled 2026-10-12. Comment:
 >
 > Blocked by: none (#600 is merged).
 
+
+
+## #614 — a source is offered only once it has a live row
+
+Ruled 2026-10-12, in the issue body:
+<https://github.com/BFoerschner/knobas/issues/614>
+
+**The fork:** PR #613 (#601) merged as `5f89a610`. Its merge-manager found that `source:` offers every enabled source, and the read checks nothing else. A source that was added but has not synced yet, or that has synced nothing, is offered anyway, and `source:<it>` returns nothing. Coverage does not explain the empty result either, because `coverage.rs` leaves out a source with no rows on purpose. Spec #591 has two stories that pull apart here. Story 28 asks the box to suggest "my configured sources". Story 30 asks it to offer "only values that exist right now, so that a suggestion never leads to an empty result." Which one bounds the source list?
+
+**Ruling:** story 30 bounds every list, so a source is offered only if it has at least one live row. The source list is the enabled sources that have a row in `sync.live_item`, in the same order and with the same labels. A disabled source's rows are already hidden there (migration `0012`), so `enabled` and "has live rows" agree. The read stays once per launcher opening and off the keystroke path. Once a source's first sync lands, it shows up at the next opening.
+
+**Reasoning:**
+
+- **#601 already settled the same tension for kinds.** The spec's "Value suggestions" bullet says values come from "the kind catalog, the configured sources, and the parents". PR #613 still narrowed the kind catalog to kinds that have a live row (`KINDS_SQL`), because "The catalog alone would offer kinds that lead to an empty result, and spec #591 story 30 says a suggestion must never do that." The merge-manager accepted that reading. Sources get the same treatment.
+- **Story 28 still holds.** The list is still made of configured sources. It only leaves out the ones a pick would lead nowhere from.
+- **Smallest surface.** This is the only fix that needs no DTO change and no §10.8 change.
+- **Not chosen:** offering every enabled source with a "not synced yet" hint. That changes `SourceSuggestion` (a §10.8 DTO) and the launcher. If Björn wants it, it is a separate request.
+
+**If you disagree, the cost of reversing this is:** low. The filter is one `exists` probe in `crates/knobas-search/src/suggest.rs` and one test in `crates/knobas-search/tests/it/suggest.rs`. Dropping it brings back the `enabled`-only list. The hint variant is additive: a field on `SourceSuggestion` with its §10.8 entry, plus the launcher's rendering of it.
