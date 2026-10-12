@@ -71,6 +71,33 @@ export function createViewMemory(limit = REMEMBERED): ViewMemory {
 export const viewMemory = createViewMemory();
 
 /**
+ * How long a detail opened from another waits for its row before it is
+ * mounted anyway (#693). Under it, the panel being left stays drawn and the
+ * next one arrives whole; over it, the next one is mounted and says it is
+ * reading, because a frozen panel is worse than an honest one.
+ */
+export const HOLD_MS = 150;
+
+/**
+ * Read an entity's row ahead of mounting its panel, into the memory the
+ * panel recalls from (#693). Settles either way: a failed read is the
+ * panel's own to say, when it reads again.
+ */
+export async function readAhead(
+  entityId: string,
+  read: (entityId: string) => Promise<EntityDetail>,
+  memory: ViewMemory = viewMemory,
+): Promise<void> {
+  if (memory.recall(entityId) !== null) return;
+  try {
+    const detail = await read(entityId);
+    if (memory.recall(entityId) === null) memory.keep(entityId, { detail, view: undefined });
+  } catch {
+    // The panel reads again and says why.
+  }
+}
+
+/**
  * Whether two answers say the same thing. A re-read that answers what is
  * already drawn must not be assigned, or the open tab and scroll would reset
  * for nothing. Both sides are plain IPC data, so their JSON is their content.

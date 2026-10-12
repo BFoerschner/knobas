@@ -15,7 +15,9 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
   import { inbox } from "../inbox/inbox.svelte";
-  import { contextMembers } from "../ipc/entity";
+  import { contextMembers, getEntity } from "../ipc/entity";
+  import { HOLD_MS, readAhead } from "../detail/view-read";
+  import { untrack } from "svelte";
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";
@@ -74,6 +76,47 @@
   const miniBoardOverride = $derived(overrides.overrideFor(context.id));
   /** The entity the address has open over this room, if any. */
   const detail = $derived(router.route.view === "room" ? router.route.detail : null);
+
+  /**
+   * The detail the slide-over draws, which trails the address by at most a
+   * moment (#693).
+   *
+   * Opened from another detail, the next one's row is read first while the
+   * panel being left stays drawn, as a browser keeps a page until the next
+   * one paints; the next panel then mounts with its row in hand, and without
+   * the fade a panel opening over the room has. Opened over the room, closed,
+   * or not read within `HOLD_MS`, it follows the address at once.
+   */
+  // svelte-ignore state_referenced_locally
+  // Seeded with the address it mounts on, so a room opened on a detail draws it in its first frame.
+  let shown = $state<typeof detail>(detail);
+  /** Whether the drawn panel replaced another rather than opening over the room. */
+  let swapped = $state(false);
+
+  $effect(() => {
+    const next = detail;
+    const current = untrack(() => shown);
+    if (next === null || current === null || next.entityId === current.entityId) {
+      shown = next;
+      if (next === null) swapped = false;
+      return;
+    }
+    let settled = false;
+    const commit = () => {
+      if (settled) return;
+      settled = true;
+      shown = next;
+      swapped = true;
+    };
+    // A note reads through its own command; it is not held.
+    if (isNote(next.entityId, next.kind)) commit();
+    else void readAhead(next.entityId, getEntity).then(commit);
+    const cap = setTimeout(commit, HOLD_MS);
+    return () => {
+      settled = true;
+      clearTimeout(cap);
+    };
+  });
 
   let kinds = $state<string[] | null>(null);
   let total = $state<number | null>(null);
@@ -392,34 +435,53 @@
     id so opening a second item from behind the panel rebuilds it rather than
     leaving the previous one's focus capture in place.
   -->
-  {#if detail}
-    {#key detail.entityId}
-      {#if isNote(detail.entityId, detail.kind)}
-        <!--
-          A note is an entity and opens where every entity opens; what it is
-          not is a mirror row, so `Detail`'s source/payload/synced frame has
-          nothing to fill (see `NoteView.svelte`).
+  <!--
+    `display: contents`, so `.detail` still positions against `.main`; the
+    wrapper only says whether the panel replaced another (#693), which
+    turns its fade off: a fade on every step from one item to the next is
+    the whole panel blinking.
+  -->
+  {#if shown}
+    <div class="d-swap" class:swap={swapped}>
+      {#key shown.entityId}
+        {#if isNote(shown.entityId, shown.kind)}
+          <!--
+            A note is an entity and opens where every entity opens; what it is
+            not is a mirror row, so `Detail`'s source/payload/synced frame has
+            nothing to fill (see `NoteView.svelte`).
 
-          Decided on the **id**, not on the address's kind word, so the
-          kind-agnostic `#/entity/<id>` alias lands in the right view too --
-          there the kind is `null` until a read answers, and a note's read is
-          not `get_entity`.
-        -->
-        <NoteView
-          entityId={detail.entityId}
-          contextLabel={context.label}
-          onclose={() => router.back()}
-          onnavigate={(hash) => router.go(hash)}
-        />
-      {:else}
-        <Detail
-          entityId={detail.entityId}
-          kind={detail.kind}
-          contextLabel={context.label}
-          onclose={() => router.back()}
-          onnavigate={(hash) => router.go(hash)}
-        />
-      {/if}
-    {/key}
+            Decided on the **id**, not on the address's kind word, so the
+            kind-agnostic `#/entity/<id>` alias lands in the right view too --
+            there the kind is `null` until a read answers, and a note's read is
+            not `get_entity`.
+          -->
+          <NoteView
+            entityId={shown.entityId}
+            contextLabel={context.label}
+            onclose={() => router.back()}
+            onnavigate={(hash) => router.go(hash)}
+          />
+        {:else}
+          <Detail
+            entityId={shown.entityId}
+            kind={shown.kind}
+            contextLabel={context.label}
+            onclose={() => router.back()}
+            onnavigate={(hash) => router.go(hash)}
+          />
+        {/if}
+      {/key}
+    </div>
   {/if}
 </div>
+
+<style>
+  .d-swap {
+    display: contents;
+  }
+
+  /* A panel that replaced another arrives without the fade (#693). */
+  .swap > :global(.detail) {
+    animation: none;
+  }
+</style>
