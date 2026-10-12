@@ -266,8 +266,6 @@ Ruled 2026-10-12. Comment:
 >
 > Blocked by: none (#600 is merged).
 
-
-
 ## #614 — a source is offered only once it has a live row
 
 Ruled 2026-10-12, in the issue body:

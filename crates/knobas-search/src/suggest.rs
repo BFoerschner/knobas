@@ -99,7 +99,8 @@ pub(crate) async fn read(
         .filter(|source| source.enabled)
         .map(|source| source.id.as_str())
         .collect();
-    let synced: Vec<String> = sqlx::query_scalar(SOURCES_SQL)
+    // Only the enabled ids are probed, so `live` holds enabled sources only.
+    let live: Vec<String> = sqlx::query_scalar(SOURCES_SQL)
         .bind(&enabled)
         .fetch_all(pool)
         .await?;
@@ -114,7 +115,7 @@ pub(crate) async fn read(
         sources: vocab
             .sources
             .iter()
-            .filter(|source| source.enabled && synced.contains(&source.id))
+            .filter(|source| live.contains(&source.id))
             .map(|source| SourceSuggestion {
                 id: source.id.clone(),
                 display_name: source.display_name.clone(),

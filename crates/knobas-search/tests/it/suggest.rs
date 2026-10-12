@@ -18,17 +18,20 @@ fn token() -> String {
     format!("s{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
 }
 
-/// A migrated database with four sources: an enabled Gitea and Uptime Kuma,
+/// The four sources [`pool`] configures: an enabled Gitea and Uptime Kuma,
 /// and a disabled Gitea and TeamCity, whose rows `sync.live_item` hides.
+const POOL_SOURCES: [(&str, &str, &str, bool); 4] = [
+    ("gitea", "gitea", "Gitea", true),
+    ("kuma", "kuma", "Uptime Kuma", true),
+    ("gitea-off", "gitea", "Old Gitea", false),
+    ("teamcity-off", "teamcity", "Old TeamCity", false),
+];
+
+/// A migrated database with the [`POOL_SOURCES`].
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    for (id, kind, name, enabled) in [
-        ("gitea", "gitea", "Gitea", true),
-        ("kuma", "kuma", "Uptime Kuma", true),
-        ("gitea-off", "gitea", "Old Gitea", false),
-        ("teamcity-off", "teamcity", "Old TeamCity", false),
-    ] {
+    for (id, kind, name, enabled) in POOL_SOURCES {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
              values ($1, $2, $3, 'http://x', 'Pat', $4)
@@ -237,11 +240,11 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     );
 
     // Other tests in this file configure sources of their own; this one
-    // answers for the four `pool()` configures.
+    // answers for the ones `pool()` configures.
     let sources: Vec<(&str, &str)> = suggestions
         .sources
         .iter()
-        .filter(|s| ["gitea", "kuma", "gitea-off", "teamcity-off"].contains(&s.id.as_str()))
+        .filter(|s| POOL_SOURCES.iter().any(|(id, ..)| *id == s.id))
         .map(|s| (s.id.as_str(), s.display_name.as_str()))
         .collect();
     assert_eq!(sources, [("gitea", "Gitea"), ("kuma", "Uptime Kuma")]);
