@@ -112,7 +112,7 @@ fn classic(key: &str, epic: Option<&str>) -> serde_json::Value {
 
 async fn under_answers(searcher: &Searcher, raw: &str) -> Vec<(String, FilterAnswer)> {
     let response = searcher.search(q(raw)).await.unwrap();
-    let mut answers: Vec<(String, FilterAnswer)> = response
+    let answers: Vec<(String, FilterAnswer)> = response
         .coverage
         .iter()
         .find(|c| c.dimension == FilterDimension::Under)
@@ -123,8 +123,7 @@ async fn under_answers(searcher: &Searcher, raw: &str) -> Vec<(String, FilterAns
                 .collect()
         })
         .unwrap_or_default();
-    answers.sort_by(|a, b| a.0.cmp(&b.0));
-    answers
+    sorted(answers)
 }
 
 /// The unconfigured classic Jira is the case #642 is about: Jira declares a

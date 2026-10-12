@@ -8,9 +8,9 @@
 //! `declared_parent_names!` and `declared_names_as_parent!`, bound to the
 //! declarations `Vocabulary::declaring` builds in Rust -- after every kind of
 //! change the trigger code claims to follow: an insert, a payload update, an
-//! item moved to another source and back, a delete, a change to the stored declarations, a source configured after
-//! its items were written, a source given another adapter kind, and a source
-//! removed.
+//! item moved to another source and back, a delete, a change to the stored
+//! declarations, a source configured after its items were written, a source
+//! given another adapter kind, and a source removed.
 //!
 //! Its own database (one per test module, #572), so it may write
 //! `sync.parent_declaration` freely; nothing here goes through

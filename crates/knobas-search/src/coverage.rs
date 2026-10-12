@@ -58,7 +58,8 @@
 //! # What it costs, measured
 //!
 //! One statement, and only for a query that actually filtered by author -- an
-//! ordinary keystroke pays nothing.
+//! ordinary keystroke pays nothing. (An `under:` query pays a second, indexed
+//! one for its own verdict, `UNDER_COVERAGE_SQL`, #642.)
 //!
 //! **There is no index that can answer this and the shape was chosen on
 //! measurements, not on taste.** "Does this source have an authored row" has no
@@ -228,7 +229,7 @@ pub(crate) async fn report(
             &scoped,
             &probes,
             FilterDimension::Author,
-            |probe, _| probe.authored,
+            |probe| probe.authored,
         ));
     }
     if by_under {
@@ -240,7 +241,7 @@ pub(crate) async fn report(
             &scoped,
             &probes,
             FilterDimension::Under,
-            |probe, _| naming.contains(&probe.source_id),
+            |probe| naming.contains(&probe.source_id),
         ));
     }
     // A dimension whose sources in scope all contributed nothing to this
@@ -294,7 +295,7 @@ fn coverage_of(
     scoped: &[&SourceVocab],
     probes: &[SourceProbe],
     dimension: FilterDimension,
-    answers: impl Fn(&SourceProbe, &SourceVocab) -> bool,
+    answers: impl Fn(&SourceProbe) -> bool,
 ) -> FilterCoverage {
     FilterCoverage {
         dimension,
@@ -305,7 +306,7 @@ fn coverage_of(
                 Some(SourceAnswer {
                     source_id: source.id.clone(),
                     display_name: source.display_name.clone(),
-                    answer: if answers(probe, source) {
+                    answer: if answers(probe) {
                         FilterAnswer::Answered
                     } else {
                         FilterAnswer::NoValues
@@ -388,7 +389,7 @@ mod tests {
         // deliberately absent: a source with no rows in scope has no group.
         let probes = [probe("teamcity", false), probe("jira", true)];
 
-        let coverage = coverage_of(&scoped, &probes, FilterDimension::Author, |probe, _| {
+        let coverage = coverage_of(&scoped, &probes, FilterDimension::Author, |probe| {
             probe.authored
         });
         assert_eq!(coverage.dimension, FilterDimension::Author);

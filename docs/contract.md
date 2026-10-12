@@ -10120,8 +10120,9 @@ From this commit on, each of the following requires an orchestrator decision **a
     second, empty Gitea source configured so the probe pays the two-sources-on-one-adapter case:
     `under_is_under_the_same_budget_beside_a_hundred_thousand_items` read repo full name p50 65 /
     p90 67 ms, bare name 64 / 65, repo + word 43 / 44, name nothing has 52 / 55: **worst p90
-    67 ms**, against 69 ms on `438be884` without this change. `EXPLAIN ANALYZE` of the probe for the
-    empty source: 154 ms with the arm alone (13,334 child rows looked up through `sync.item`),
+    67 ms**, against 69 ms on `438be884` without this change (and without the second source, so
+    not like for like; the probe's own reading is the one that bears on it). `EXPLAIN ANALYZE` of
+    the probe for the empty source: 154 ms with the arm alone (13,334 child rows looked up through `sync.item`),
     0.037 ms with `source_id`. The same run's `search_is_under_a_hundred_milliseconds…` failed on
     the saved-list rail at its cap (`launcher_board` 106 ms p90), as it did on `438be884` the same
     afternoon (`smart_lists` 138 ms p90); neither statement runs the coverage probe.

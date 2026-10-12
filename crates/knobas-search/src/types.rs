@@ -165,9 +165,9 @@ pub enum FilterDimension {
     /// which names a parent (measured on the corpus since #642); a source whose
     /// corpus names none -- an Uptime Kuma, whose metrics have no grouping, or
     /// a classic Jira with no Epic Link field configured -- has nothing the
-    /// filter can match, and an empty `under:` there is not an empty repo. The second
-    /// dimension #141's list shape was built for: an entry and a variant,
-    /// nothing existing moved.
+    /// filter can match, and an empty `under:` there is not an empty repo. The
+    /// second dimension #141's list shape was built for: an entry and a
+    /// variant, nothing existing moved.
     Under,
 }
 
