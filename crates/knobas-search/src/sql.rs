@@ -275,8 +275,8 @@ pub fn search_sql(
         };
         let _ = writeln!(
             sql,
-            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path,\n         {snippet} as snippet",
-            corpus.source_id, corpus.title, corpus.synced_at, corpus.path
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state,\n         {snippet} as snippet",
+            corpus.source_id, corpus.title, corpus.synced_at, corpus.path, corpus.state
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
         let _ = write!(sql, " on {} = p.entity_id", corpus.entity_id);
@@ -305,7 +305,7 @@ pub fn search_sql(
     // their kind rather than at the front of it.
     let _ = write!(
         sql,
-        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
+        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path, d.state as state,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
         order_by("d.", ranked, true)
     );
 
@@ -755,6 +755,16 @@ mod tests {
         "at",
         "names",
         "[]",
+        // `declared_state!`'s (#666): the declaration keys a state is read
+        // by, the two value types it matches, the chip's two keys, and the
+        // empty path `#>>` reads a jsonb scalar's text through.
+        "state",
+        "values",
+        "value",
+        "boolean",
+        "text",
+        "tone",
+        "{}",
         // `NAMED`'s last-segment half (#621): the separator a slashed title
         // is split on.
         "/",
@@ -1308,6 +1318,7 @@ mod tests {
             updated_at: "o.updated_at",
             synced_at: "o.synced_at",
             path: "null::text",
+            state: "null::jsonb",
             scope: Some("o.archived is false"),
             under: None,
         };

@@ -38,7 +38,13 @@ mod tests {
     fn the_five_tones_travel_lowercase() {
         let wire: Vec<String> = [Tone::Ok, Tone::Warn, Tone::Err, Tone::Info, Tone::Muted]
             .iter()
-            .map(|t| serde_json::to_value(t).unwrap().as_str().unwrap().to_owned())
+            .map(|t| {
+                serde_json::to_value(t)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
             .collect();
         assert_eq!(wire, ["ok", "warn", "err", "info", "muted"]);
     }

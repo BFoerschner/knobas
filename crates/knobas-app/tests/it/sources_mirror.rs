@@ -305,8 +305,29 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "project_key",
             "project_name",
             "reviewers",
+            "state",
             "status_name",
         ],
+    );
+}
+
+/// `StatePath` and `StateValue` ride inside a `KindPaths` (#666), read off
+/// Gitea's pull request, which declares both a flag value and a renamed one.
+#[test]
+fn the_state_path_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_source_gitea::descriptor_template()).unwrap();
+    let state = wire["payload_paths"]
+        .as_array()
+        .expect("payload_paths is an array")
+        .iter()
+        .find_map(|kind| kind["state"].as_array()?.first())
+        .expect("the Gitea adapter declares a pull request's state")
+        .clone();
+    assert_shape("StatePath", &state, &["at", "values"]);
+    assert_shape(
+        "StateValue",
+        &state["values"][0],
+        &["text", "tone", "value"],
     );
 }
 

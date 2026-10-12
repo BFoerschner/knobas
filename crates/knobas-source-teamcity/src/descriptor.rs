@@ -235,7 +235,8 @@ mod tests {
                 .unwrap_or_default()
         };
         let build = state("build");
-        let chip = |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &build);
+        let chip =
+            |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &build);
         let drawn = |text: &str, tone: Tone| {
             Some(StateChip {
                 text: text.to_owned(),

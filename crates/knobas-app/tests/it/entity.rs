@@ -1300,6 +1300,143 @@ async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
     assert_eq!(detail.row.path, expected, "the detail panel");
 }
 
+/// One configured source of `adapter`, under a run-unique id.
+async fn configured(pool: &PgPool, adapter: &str) -> String {
+    let source = format!("{adapter}-{}", unique());
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, $2, $2, 'http://x', 'Pat')",
+    )
+    .bind(&source)
+    .bind(adapter)
+    .execute(pool)
+    .await
+    .unwrap();
+    source
+}
+
+/// One mirrored item of `source`, with the payload its adapter would store.
+async fn mirrored(pool: &PgPool, source: &str, kind: &str, key: &str, payload: serde_json::Value) {
+    let entity = format!("{source}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+        .bind(&entity)
+        .bind(kind)
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, $3, $4, '', $5)",
+    )
+    .bind(&entity)
+    .bind(source)
+    .bind(kind)
+    .bind(key)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A room's line carries its item's state chip (#666), read through the state
+/// the configured source's adapter declares: a merged pull request is `merged`
+/// though Gitea calls it `closed`, an open one `open`, a failed build its
+/// outcome, and a ticket -- whose adapter declares no state -- none. The detail
+/// row is read through the same expression.
+#[tokio::test]
+async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
+    use knobas_core::payload::StateChip;
+    use knobas_core::tone::Tone;
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let teamcity = configured(&pool, "teamcity").await;
+    mirrored(
+        &pool,
+        &gitea,
+        "pr",
+        "tidewater/payout-service#7",
+        serde_json::json!({ "state": "closed", "merged": true }),
+    )
+    .await;
+    mirrored(
+        &pool,
+        &gitea,
+        "pr",
+        "tidewater/payout-service#8",
+        serde_json::json!({ "state": "open", "merged": false }),
+    )
+    .await;
+    mirrored(
+        &pool,
+        &teamcity,
+        "build",
+        "4711",
+        serde_json::json!({ "state": "finished", "status": "FAILURE" }),
+    )
+    .await;
+
+    let declarations = knobas_app::sources::paths::declared_paths(
+        &pool,
+        &knobas_app::sources::Registry::builtin(),
+    )
+    .await
+    .unwrap();
+    let room = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![gitea.clone(), teamcity.clone(), "mock".to_owned()],
+            ..all()
+        },
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap();
+    let state_of = |id: &str| {
+        room.rows
+            .iter()
+            .find(|r| r.entity_id == id)
+            .unwrap_or_else(|| panic!("{id} is in the room"))
+            .state
+            .clone()
+    };
+    let chip = |text: &str, tone: Tone| {
+        Some(StateChip {
+            text: text.to_owned(),
+            tone,
+        })
+    };
+    assert_eq!(
+        state_of(&format!("{gitea}:tidewater/payout-service#7")),
+        chip("merged", Tone::Ok)
+    );
+    assert_eq!(
+        state_of(&format!("{gitea}:tidewater/payout-service#8")),
+        chip("open", Tone::Info)
+    );
+    assert_eq!(
+        state_of(&format!("{teamcity}:4711")),
+        chip("FAILURE", Tone::Err)
+    );
+    let ticket = room
+        .rows
+        .iter()
+        .find(|r| r.kind == "ticket")
+        .expect("the demo corpus has a ticket");
+    assert_eq!(ticket.state, None, "a ticket's adapter declares no state");
+
+    let detail = get_entity_inner(&pool, &format!("{teamcity}:4711"))
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.row.state,
+        chip("FAILURE", Tone::Err),
+        "the detail row"
+    );
+}
+
 // -- the link commands ------------------------------------------------------
 //
 // The seam is the command layer, driven over the migrated test pool: a link is

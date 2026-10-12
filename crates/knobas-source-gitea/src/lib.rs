@@ -303,7 +303,8 @@ mod tests {
             .find(|p| p.kind == KIND_PR)
             .map(|p| p.state)
             .unwrap_or_default();
-        let chip = |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &state);
+        let chip =
+            |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &state);
         let drawn = |text: &str, tone: Tone| {
             Some(StateChip {
                 text: text.to_owned(),

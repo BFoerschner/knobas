@@ -251,6 +251,14 @@ pub struct EntityRow {
     /// thing a miss says.
     #[serde(default)]
     pub path: Option<String>,
+    /// The item's state chip (#666) -- a pull request's `open` / `merged` /
+    /// `closed`, a build's `running` or outcome -- read by
+    /// `knobas_core::declared_state!` beside the path line. `None` for a kind
+    /// that declares no state, a value the declaration does not name, and
+    /// every row of a corpus knobas owns: the ADR-0007 **miss**.
+    /// `#[serde(default)]` for `path`'s reason.
+    #[serde(default)]
+    pub state: Option<knobas_core::payload::StateChip>,
 }
 
 /// One result: a row, its rank, and the excerpt with the match marked.
@@ -344,6 +352,11 @@ mod tests {
                 // reviewer reading the fixture would not see that the launcher
                 // row now carries one.
                 path: Some("Engineering \u{203a} Payments".to_owned()),
+                // #666: a value for `state`'s reason, as for `path`.
+                state: Some(knobas_core::payload::StateChip {
+                    text: "merged".to_owned(),
+                    tone: knobas_core::tone::Tone::Ok,
+                }),
             },
             rank: 0.5,
             snippet: vec![Segment {
@@ -365,6 +378,7 @@ mod tests {
                 "rank",
                 "snippet",
                 "source_id",
+                "state",
                 "synced_at",
                 "title",
                 "updated_at",

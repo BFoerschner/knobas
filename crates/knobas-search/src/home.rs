@@ -49,14 +49,17 @@ macro_rules! recent_sql {
         concat!(
             $prefix,
             "select s.entity_id, s.kind, s.source_id, s.title,\n",
-            "       s.item_updated_at as updated_at, s.synced_at, s.path\n",
+            "       s.item_updated_at as updated_at, s.synced_at, s.path, s.state\n",
             "  from unnest($1::text[]) as k(kind)\n",
             "  cross join lateral (\n",
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
             "             i.item_updated_at, i.synced_at,\n",
             "             ",
             knobas_core::path_line_read!("$3"),
-            " as path\n",
+            " as path,\n",
+            "             ",
+            knobas_core::declared_state!("$3"),
+            " as state\n",
             "        from sync.live_item i\n",
             "       where i.kind = k.kind\n",
             "       order by i.item_updated_at desc nulls last, i.entity_id\n",
@@ -156,6 +159,8 @@ struct RecentRow {
     /// Where the row sits inside its source (#284, #596); null for a record
     /// whose kind declares no parent or whose declared parent misses (#646).
     path: Option<String>,
+    /// The row's state chip (#666); null for a kind that declares none.
+    state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
 }
 
 /// The newest items across every kind the mirror holds.
@@ -185,6 +190,7 @@ pub async fn recent(
             updated_at: row.updated_at,
             synced_at: row.synced_at,
             path: row.path,
+            state: row.state.map(|chip| chip.0),
         })
         .collect())
 }

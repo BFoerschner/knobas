@@ -968,12 +968,48 @@ async fn a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust() {
     let pool = scratch().await;
     let declarations = state_declarations();
     let cases = [
-        ("gitea", "pr", "r/p#1", serde_json::json!({ "merged": true, "state": "closed" }), chip("merged", Tone::Ok)),
-        ("gitea", "pr", "r/p#2", serde_json::json!({ "merged": false, "state": "open" }), chip("open", Tone::Info)),
-        ("gitea", "pr", "r/p#3", serde_json::json!({ "merged": false, "state": "closed" }), chip("closed", Tone::Muted)),
-        ("teamcity", "build", "1", serde_json::json!({ "state": "running", "status": "SUCCESS" }), chip("running", Tone::Info)),
-        ("teamcity", "build", "2", serde_json::json!({ "state": "finished", "status": "FAILURE" }), chip("FAILURE", Tone::Err)),
-        ("teamcity", "build", "3", serde_json::json!({ "state": "finished", "status": " SUCCESS " }), chip("SUCCESS", Tone::Ok)),
+        (
+            "gitea",
+            "pr",
+            "r/p#1",
+            serde_json::json!({ "merged": true, "state": "closed" }),
+            chip("merged", Tone::Ok),
+        ),
+        (
+            "gitea",
+            "pr",
+            "r/p#2",
+            serde_json::json!({ "merged": false, "state": "open" }),
+            chip("open", Tone::Info),
+        ),
+        (
+            "gitea",
+            "pr",
+            "r/p#3",
+            serde_json::json!({ "merged": false, "state": "closed" }),
+            chip("closed", Tone::Muted),
+        ),
+        (
+            "teamcity",
+            "build",
+            "1",
+            serde_json::json!({ "state": "running", "status": "SUCCESS" }),
+            chip("running", Tone::Info),
+        ),
+        (
+            "teamcity",
+            "build",
+            "2",
+            serde_json::json!({ "state": "finished", "status": "FAILURE" }),
+            chip("FAILURE", Tone::Err),
+        ),
+        (
+            "teamcity",
+            "build",
+            "3",
+            serde_json::json!({ "state": "finished", "status": " SUCCESS " }),
+            chip("SUCCESS", Tone::Ok),
+        ),
     ];
     for (source, kind, key, payload, expected) in cases {
         let (sql, rust) = chips(&pool, &declarations, source, kind, key, payload).await;
@@ -990,11 +1026,41 @@ async fn a_state_chip_misses_in_both_and_never_guesses() {
     let pool = scratch().await;
     let declarations = state_declarations();
     let cases = [
-        ("teamcity", "build", "4", serde_json::json!({ "state": "finished", "status": "UNHEARD" }), &declarations),
-        ("teamcity", "build", "5", serde_json::json!({ "state": { "name": "running" }, "status": ["FAILURE"] }), &declarations),
-        ("gitea", "pr", "r/p#4", serde_json::json!({ "merged": "true", "state": "draft" }), &declarations),
-        ("gitea", "pr", "r/p#5", serde_json::json!({ "merged": false, "state": "  " }), &declarations),
-        ("gitea", "commit", "r/p@abc", serde_json::json!({ "merged": true, "state": "open" }), &declarations),
+        (
+            "teamcity",
+            "build",
+            "4",
+            serde_json::json!({ "state": "finished", "status": "UNHEARD" }),
+            &declarations,
+        ),
+        (
+            "teamcity",
+            "build",
+            "5",
+            serde_json::json!({ "state": { "name": "running" }, "status": ["FAILURE"] }),
+            &declarations,
+        ),
+        (
+            "gitea",
+            "pr",
+            "r/p#4",
+            serde_json::json!({ "merged": "true", "state": "draft" }),
+            &declarations,
+        ),
+        (
+            "gitea",
+            "pr",
+            "r/p#5",
+            serde_json::json!({ "merged": false, "state": "  " }),
+            &declarations,
+        ),
+        (
+            "gitea",
+            "commit",
+            "r/p@abc",
+            serde_json::json!({ "merged": true, "state": "open" }),
+            &declarations,
+        ),
     ];
     for (source, kind, key, payload, declared) in cases {
         let (sql, rust) = chips(&pool, declared, source, kind, key, payload).await;
