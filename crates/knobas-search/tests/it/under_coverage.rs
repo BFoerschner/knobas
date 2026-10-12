@@ -197,7 +197,7 @@ async fn a_source_answers_under_only_if_something_it_synced_names_a_parent() {
 /// The verdict reads every kind of the source, not the query's kind scope:
 /// `under:` also returns the parent itself, so `kind:repo under:<repo>` shows
 /// the repo -- and Gitea, whose repos name no parent but whose commits do,
-/// answers it.
+/// answers it -- under the adapter it is configured with.
 #[tokio::test]
 async fn a_kind_scope_does_not_narrow_the_verdict() {
     let (pool, searcher) = searcher().await;
@@ -224,7 +224,18 @@ async fn a_kind_scope_does_not_narrow_the_verdict() {
     .await;
 
     let answers = under_answers(&searcher, &format!("kind:repo under:{full} source:{gitea}")).await;
-    assert_eq!(answers, vec![(gitea, FilterAnswer::Answered)]);
+    assert_eq!(answers, vec![(gitea.clone(), FilterAnswer::Answered)]);
+
+    // A stored row says what one adapter's declarations make of the item, and
+    // counts only while the source is configured with that adapter (ADR-0019):
+    // given an adapter that declares nothing, the commit names no parent.
+    sqlx::query("update knobas.source_config set kind = 'kuma' where id = $1")
+        .bind(&gitea)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
+    assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
 }
 
 fn sorted(mut answers: Vec<(String, FilterAnswer)>) -> Vec<(String, FilterAnswer)> {
