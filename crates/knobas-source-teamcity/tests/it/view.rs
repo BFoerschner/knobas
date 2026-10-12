@@ -438,11 +438,13 @@ async fn an_unknown_trigger_type_shows_its_type_and_no_properties() {
     record["triggers"]["trigger"]
         .as_array_mut()
         .expect("the fixture has triggers")
-        .push(json!({ "id": "TRIGGER_3", "type": "acmeWebhookTrigger", "disabled": true,
-          "properties": { "property": [
-              { "name": "webhookToken", "value": "acme-hook-token-never-drawn" },
-              { "name": "endpoint", "value": "https://hooks.example/payout" }
-          ]}}));
+        .push(
+            json!({ "id": "TRIGGER_3", "type": "acmeWebhookTrigger", "disabled": true,
+            "properties": { "property": [
+                { "name": "webhookToken", "value": "acme-hook-token-never-drawn" },
+                { "name": "endpoint", "value": "https://hooks.example/payout" }
+            ]}}),
+        );
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(CONFIG_PATH))
