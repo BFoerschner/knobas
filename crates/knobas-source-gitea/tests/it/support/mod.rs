@@ -79,6 +79,10 @@ pub struct State {
     /// ADR-0004 carries the status, so the fixture has to be able to say which
     /// it is serving.
     pub revoked: BTreeSet<String>,
+    /// `owner/repo` entries every request under is answered **404** for -- a
+    /// repository the listing offered and that was gone by the time the walk
+    /// reached it.
+    pub missing: BTreeSet<String>,
 }
 
 pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
@@ -88,6 +92,7 @@ pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
         "description": "Payout processing service",
         "html_url": format!("https://gitea.example/{owner}/{name}"),
         "default_branch": "main", "empty": false, "archived": false,
+        "mirror": false, "has_pull_requests": true,
         "language": "Rust", "updated_at": updated, "created_at": "2026-01-04T09:00:00Z"
     })
 }
@@ -230,6 +235,7 @@ impl State {
             ]),
             forbidden: BTreeSet::new(),
             revoked: BTreeSet::new(),
+            missing: BTreeSet::new(),
             discussion_status: BTreeMap::new(),
             discussion_total: BTreeMap::new(),
         }
@@ -379,27 +385,69 @@ impl Fake {
             Reads::Anonymous => m,
         };
 
-        // A repository the token may not read (403), and one a revoked token
-        // is refused outright for (401). Mounted first so they win over the
+        // A repository the token may not read (403), one a revoked token is
+        // refused outright for (401), and one that is gone (404). Mounted first so they win over the
         // records below, which is what lets one `State` describe both -- and
         // kept apart, because the adapter's answer differs: 403 skips that
         // repository, 401 ends the run (ADR-0004).
-        for (full_name, status) in state
+        for (full_name, status, message) in state
             .forbidden
             .iter()
-            .map(|name| (name, 403))
-            .chain(state.revoked.iter().map(|name| (name, 401)))
+            .map(|name| (name, 403, "user does not have permission"))
+            .chain(
+                state
+                    .revoked
+                    .iter()
+                    .map(|name| (name, 401, "user does not have permission")),
+            )
+            .chain(state.missing.iter().map(|name| (name, 404, "not found")))
         {
             authed(
                 Mock::given(method("GET")).and(path_prefix(&format!("/api/v1/repos/{full_name}"))),
             )
             .respond_with(
-                ResponseTemplate::new(status)
-                    .set_body_json(json!({ "message": "user does not have permission" })),
+                ResponseTemplate::new(status).set_body_json(json!({ "message": message })),
             )
             .with_priority(FORBIDDEN_PRIORITY)
             .mount(&self.server)
             .await;
+        }
+
+        // What Gitea 1.27.3 answers a repository that cannot have pull
+        // requests -- the unit switched off, a pull mirror, or no commits yet
+        // (`CanEnablePulls` is `!IsMirror && !IsEmpty`): `/pulls` is a bare
+        // 404, the same body as a repository that is not there. An empty
+        // repository's branch listing is `200 null`, not `[]`. Both measured
+        // against the container, 2026-10-12, and both read from the record
+        // itself so a fixture cannot describe a repository the server would
+        // answer differently.
+        for repo in &state.repos {
+            let full_name = repo["full_name"]
+                .as_str()
+                .expect("a repository record has a full_name");
+            let empty = repo["empty"] == json!(true);
+            if empty || repo["mirror"] == json!(true) || repo["has_pull_requests"] == json!(false) {
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/pulls"))),
+                )
+                .respond_with(
+                    ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })),
+                )
+                .with_priority(FORBIDDEN_PRIORITY)
+                .mount(&self.server)
+                .await;
+            }
+            if empty {
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/branches"))),
+                )
+                .respond_with(ok(Value::Null))
+                .with_priority(FORBIDDEN_PRIORITY)
+                .mount(&self.server)
+                .await;
+            }
         }
 
         identity(Mock::given(method("GET")).and(path("/api/v1/version")))

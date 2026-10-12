@@ -1494,3 +1494,92 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
     assert!(idle.is_empty(), "idle run emitted {idle:?}");
     assert_eq!(same, current);
 }
+
+/// Gitea answers `/pulls` with a bare `404 {"message":"not found"}` for a
+/// repository that cannot have pull requests -- the unit switched off, or a
+/// pull mirror -- and a cursor-less run reads a repository-scoped 404 as a
+/// hole it may not report success over. So asking ended every first sync of an
+/// instance holding one such repository, with `HTTP 404 Not Found: not found`
+/// and no word of which. The record says so before anyone asks.
+#[tokio::test]
+async fn a_repository_that_cannot_have_pull_requests_is_walked_without_asking_for_them() {
+    for (field, value) in [("has_pull_requests", false), ("mirror", true)] {
+        let mut state = State::tidewater().with_elsewhere();
+        state.repos[1][field] = serde_json::json!(value);
+        let fake = Fake::start(&state).await;
+        let source = source(fake.base_url(), serde_json::json!({}));
+
+        let mut sink = VecSink(Vec::new());
+        let outcome = source.sync(None, &mut sink).await;
+        assert!(outcome.is_ok(), "{field}={value}: {outcome:?}");
+        assert_eq!(ids(&sink.0, "repo").len(), 2, "{field}={value}");
+        assert!(
+            ids(&sink.0, "branch")
+                .contains(&"gitea:elsewhere/unrelated@refs/heads/main".to_owned()),
+            "{field}={value}: the rest of the repository is still walked"
+        );
+        // The repository beside it keeps its pull requests: the gate is per
+        // repository, not a pass that switched off.
+        assert_eq!(ids(&sink.0, "pr").len(), 2, "{field}={value}");
+        assert!(
+            !fake
+                .paths()
+                .await
+                .iter()
+                .any(|p| p == "/api/v1/repos/elsewhere/unrelated/pulls"),
+            "{field}={value}: asked for pull requests the record says cannot exist"
+        );
+    }
+}
+
+/// A repository with no commits yet is the third one Gitea refuses `/pulls`
+/// for, and its branch listing is `200 null` rather than `[]`. A first sync of
+/// an instance with one freshly created repository must still succeed and
+/// mirror it.
+#[tokio::test]
+async fn an_empty_repository_is_mirrored_on_a_full_sync() {
+    let mut state = State::tidewater();
+    let mut fresh = support::repo("tidewater", "fresh", "2026-08-23T08:00:00Z");
+    fresh["empty"] = serde_json::json!(true);
+    state.repos.push(fresh);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, cursor) = full(&*source).await;
+    assert!(
+        ids(&items, "repo").contains(&"gitea:tidewater/fresh".to_owned()),
+        "{items:?}"
+    );
+    assert!(
+        !fake
+            .paths()
+            .await
+            .iter()
+            .any(|p| p.starts_with("/api/v1/repos/tidewater/fresh/pulls")),
+        "asked an empty repository for pull requests"
+    );
+    // And it is idle-stable like any other.
+    let (idle, same) = again(&*source, &cursor).await;
+    assert!(idle.is_empty(), "idle run emitted {idle:?}");
+    assert_eq!(same, cursor);
+}
+
+/// A refusal that ends a run has to say where it happened. Gitea's 404 body is
+/// `not found` for a missing repository and for a missing endpoint alike, so
+/// the bare server sentence is a message nobody can act on.
+#[tokio::test]
+async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
+    let mut state = State::tidewater().with_elsewhere();
+    state.missing.insert("elsewhere/unrelated".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    // The status survives the rewording: it is what classifies the failure.
+    assert!(
+        matches!(error, SourceError::Protocol { status: Some(404), message: ref m }
+            if m.contains("elsewhere/unrelated") && m.contains("not found")),
+        "{error:?}"
+    );
+}

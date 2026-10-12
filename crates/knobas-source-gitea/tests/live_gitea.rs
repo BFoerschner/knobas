@@ -1424,3 +1424,112 @@ async fn an_op_gitea_does_not_declare_never_reaches_the_real_server() {
         "{refused:?}"
     );
 }
+
+/// The three repositories Gitea answers `/pulls` with a bare 404 for -- empty,
+/// pull requests switched off, a pull mirror (`CanEnablePulls` is `!IsMirror &&
+/// !IsEmpty`) -- used to end a **first** sync outright: a cursor-less run reads
+/// a repository-scoped 404 as a hole. The empty one also answers its branch
+/// listing with `200 null`, which did not decode at all. This creates the first
+/// two under the token's own account, syncs them with no cursor, and removes
+/// them again before asserting. A mirror needs a migration from a remote and is
+/// held by the wiremock fixture and Gitea's own `CanEnablePulls` alone.
+///
+/// Under the account, not the seeded organisation, so `Env::whole_owner` and
+/// every owner-scoped assertion beside this one never see them.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn repositories_gitea_refuses_pull_requests_for_do_not_end_a_full_sync() {
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me: serde_json::Value = http
+        .get(format!("{api}/user"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET /user")
+        .json()
+        .await
+        .expect("a user record");
+    let me = me["login"].as_str().expect("a login").to_owned();
+    let empty = "knobas-live-empty-repo";
+    let no_pulls = "knobas-live-no-pull-requests";
+    let remove = async |name: &str| {
+        let _ = http
+            .delete(format!("{api}/repos/{me}/{name}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+    };
+    // An earlier run that was killed rather than failed left these behind.
+    remove(empty).await;
+    remove(no_pulls).await;
+
+    for (name, init) in [(empty, false), (no_pulls, true)] {
+        let status = http
+            .post(format!("{api}/user/repos"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": name, "auto_init": init }))
+            .send()
+            .await
+            .expect("POST /user/repos")
+            .status();
+        assert_eq!(status.as_u16(), 201, "create {name}");
+    }
+    let status = http
+        .patch(format!("{api}/repos/{me}/{no_pulls}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "has_pull_requests": false }))
+        .send()
+        .await
+        .expect("PATCH the repository")
+        .status();
+
+    // The premise, measured rather than remembered: both really are refused.
+    let mut refused = Vec::new();
+    for name in [empty, no_pulls] {
+        let pulls = http
+            .get(format!(
+                "{api}/repos/{me}/{name}/pulls?state=all&limit=50&page=1"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("GET pulls")
+            .status()
+            .as_u16();
+        refused.push((name, pulls));
+    }
+
+    let source = env.source(serde_json::json!({
+        "repos": [format!("{me}/{empty}"), format!("{me}/{no_pulls}")]
+    }));
+    let mut sink = VecSink(Vec::new());
+    let outcome = source.sync(None, &mut sink).await;
+
+    remove(empty).await;
+    remove(no_pulls).await;
+
+    assert_eq!(status.as_u16(), 200, "switch pull requests off");
+    assert_eq!(
+        refused,
+        vec![(empty, 404), (no_pulls, 404)],
+        "the premise: Gitea refuses /pulls on both"
+    );
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let repos: Vec<String> = of_kind(&sink.0, "repo")
+        .iter()
+        .map(|item| item.entity.to_string())
+        .collect();
+    assert_eq!(repos.len(), 2, "both repositories are mirrored: {repos:?}");
+    assert!(
+        of_kind(&sink.0, "branch")
+            .iter()
+            .any(|item| item.entity.to_string() == format!("gitea:{me}/{no_pulls}@refs/heads/main")),
+        "the rest of the repository is still walked"
+    );
+}
