@@ -586,127 +586,50 @@ macro_rules! declared_string {
     };
 }
 
-/// What separates two segments of an [`ancestor_path_read!`] path.
+/// What separates two segments of a row's path line ([`path_line_read!`]).
 ///
 /// A single-glyph guillemet with a space either side.
 ///
 /// The separator is chosen **once, in SQL**: the launcher row and the detail
-/// panel each render whatever string [`ancestor_path_read!`] joined, so
+/// panel each render whatever string [`declared_parent_path!`] joined, so
 /// neither of them holds a copy of it and neither can disagree about it. What
 /// this constant is for is that the macro cannot use it -- `concat!` folds
 /// literals and not `const` items, so the glyph has to be written a second
-/// time inside the statement. `the_ancestor_path_joins_on_the_one_separator`
-/// is what keeps that second spelling honest: it asserts the SQL joins on
-/// exactly this value, so the two cannot drift apart unnoticed.
+/// time inside the statement. `the_path_line_joins_on_the_one_separator`
+/// (`crates/knobas-core/tests/it/ancestor_path.rs`) is what keeps that second
+/// spelling honest: it asserts the SQL joins on exactly this value, so the two
+/// cannot drift apart unnoticed. [`parent_path`], the Rust side, joins on the
+/// constant itself.
+///
+/// #284's `ancestor_path_read!` drew Confluence's `ancestors` on this
+/// separator until #646 retired it: since #599 Confluence declares that array
+/// as its page parent, so the declared chain draws the same line.
 pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
-
-/// SQL for "where this record sits inside its source, as one line" -- the
-/// titles of an item's `ancestors`, outermost first, joined by
-/// [`ANCESTOR_SEPARATOR`].
-///
-/// # Why this is not a declared read
-///
-/// #277 moved every payload read a `KindPaths` field can express onto the
-/// adapter's own declaration, and when this was written it was the one that
-/// could not be: an ancestor path is a **list of strings joined in order**,
-/// and `KindPaths` had no slot shaped like that. #594 added one --
-/// [`KindPaths::parent`], whose `at` may lead to the chain -- and #596 put
-/// every row's path on it through [`path_line_read!`], which expands this
-/// only as its **fallback** for a kind that declares no parent. Since #599
-/// Confluence declares its page parent on `ancestors`, so for a page the
-/// declared chain draws the same line from the same array and this is not
-/// reached. It stays because #599 keeps the ancestor path line unchanged for
-/// a read bound to no declarations -- a bare `Searcher::new`, which
-/// `knobas-search`'s `tests/it/ancestor_path.rs` searches with -- and its
-/// retirement is a change of its own. Until then it stays under ADR-0007's
-/// *interim* discipline, and meets all three of its requirements:
-///
-/// 1. **It misses, never guesses.** A payload with no `ancestors`, an
-///    `ancestors` that is not an array, elements that are not objects,
-///    elements whose `title` is absent, not a string, or blank -- every one of
-///    them contributes nothing, and a record with no usable segment at all
-///    yields `null` rather than an empty string. `string_agg` over no rows is
-///    `null`, which is what makes that true by construction rather than by a
-///    guard someone has to remember.
-/// 2. **One named statement**, this one, expanded inside [`path_line_read!`]
-///    and nowhere else; that is what the reads that draw a row
-///    (`knobas_search`'s launcher corpora, board and lists, and `knobas_app`'s
-///    room and entity statements) expand.
-/// 3. **The failure direction is absence**, pinned by
-///    `knobas-core/tests/it/ancestor_path.rs` across all six unusable shapes.
-///
-/// `$payload` is the payload expression, as a literal (`"i.payload"`), because
-/// that is what `concat!` folds: every statement built with this is a
-/// `&'static str`, so nothing here can concatenate a value into SQL.
-///
-/// The `jsonb_typeof(... ) = 'array'` guard is not decoration:
-/// `jsonb_array_elements` **raises** on a non-array, so without it a single
-/// Jira ticket whose payload happened to carry an `ancestors` object would
-/// abort the whole launcher query rather than miss.
-///
-/// # Do not "simplify" the `order by a.ordinality` away
-///
-/// A mutation check found that removing it changes no observable behaviour:
-/// PostgreSQL happens to aggregate in scan order, and for
-/// `jsonb_array_elements ... with ordinality` that is array order, so every
-/// test here stays green without it. That is a true result with a
-/// precondition attached, and the precondition is not a guarantee:
-/// `string_agg` **without** an `ORDER BY` has no defined order at all, and
-/// the plan that produces scan order today is free to change under a parallel
-/// or reordered scan tomorrow.
-///
-/// Order is the entire meaning of a path -- two ancestors joined the other way
-/// round name a different place -- and one half of that is now witnessed.
-/// Since #396 nested one seeded Confluence page two deep, that page's path has
-/// two segments, so the live test
-/// `the_launcher_finds_the_seeded_page_with_its_ancestor_path` in
-/// `crates/knobas-app/tests/atlassian_live.rs` reads both ancestors off the
-/// real server and asserts the outermost-first join: turning the clause into
-/// `order by a.ordinality desc` fails it (measured in #399, one failure in an
-/// otherwise green `atlassian_live` binary). That witness is contingent
-/// rather than structural: it holds because the two seeded ancestors carry
-/// different titles, and the test guards only that they are different *pages*
-/// (`assert_ne!` on their ids).
-///
-/// *Removing* the clause is still invisible, and removal is the simplification
-/// the heading warns against: a path that comes out in order because the
-/// planner scanned in order reads exactly like one the statement ordered. So
-/// the clause stays on the argument above rather than on a test that can see
-/// it go. The same treatment `crates/knobas-source-jira/src/time.rs` gives
-/// `jql_floor`, and for the same reason: "unobservable today" is a fact about
-/// this planner, not about this statement.
-#[macro_export]
-macro_rules! ancestor_path_read {
-    ($payload:literal) => {
-        concat!(
-            "(case when jsonb_typeof(",
-            $payload,
-            "->'ancestors') = 'array' then (select string_agg(btrim(a.value->>'title'), ",
-            "' \u{203a} ' order by a.ordinality) from jsonb_array_elements(",
-            $payload,
-            "->'ancestors') with ordinality a where jsonb_typeof(a.value) = 'object' \
-              and jsonb_typeof(a.value->'title') = 'string' \
-              and btrim(a.value->>'title') <> '') end)"
-        )
-    };
-}
 
 /// SQL for "the parent chain this record declares, as one line": each parent's
 /// **first** declared name, outermost first, joined by
 /// [`ANCESTOR_SEPARATOR`] (#596, ADR-0018). `null` for a record whose kind
 /// declares no parent, whose declared `at` misses, or whose parents carry no
 /// usable name -- `string_agg` over no rows is `null`, so a miss is absence by
-/// construction, as in [`ancestor_path_read!`].
+/// construction rather than by a guard anybody has to remember.
 ///
 /// Built on [`declared_parent_names!`] and nothing else, so the branch on
 /// `at`'s two shapes stays in [`declared_parents!`] (the deputy's ruling of
 /// 2026-10-11 on #594). [`parent_path`] is the same rule over
 /// [`resolve_parents`], and `crates/knobas-core/tests/it/payload_paths.rs`
 /// holds the two to one answer. A parent that answers to no name is left out
-/// of the line rather than drawn as an empty segment, the refusal
-/// [`ancestor_path_read!`] makes for an ancestor with no title.
+/// of the line rather than drawn as an empty segment: a path reading
+/// `Engineering ›  › SEPA` is worse than the segment simply not being there.
 ///
 /// Rows read the line through [`path_line_read!`], never through this alone.
+///
+/// **Do not "simplify" the `order by f.pos` away.** The reasoning #284 wrote
+/// for `ancestor_path_read!`'s `order by a.ordinality` carries over: a
+/// *reversed* order fails the path-line tests (`Engineering › Payments ›
+/// SEPA` in `knobas-core/tests/it/ancestor_path.rs`), but a *removed* one may
+/// not, because PostgreSQL happens to aggregate in scan order today, and
+/// `string_agg` without an `ORDER BY` has no defined order at all. Order is
+/// the whole meaning of a path.
 #[macro_export]
 macro_rules! declared_parent_path {
     ($decl:literal) => {
@@ -720,10 +643,9 @@ macro_rules! declared_parent_path {
 }
 
 /// SQL for "where this record sits", as the one line a row draws: the parent
-/// chain the record's kind declares ([`declared_parent_path!`]), or, where that
-/// yields nothing (no parent declared, or a declared one that misses), the
-/// Confluence ancestor path [`ancestor_path_read!`] has read since #284. Only a
-/// payload with readable `ancestors` reaches the fallback with a value.
+/// chain the record's kind declares ([`declared_parent_path!`]), and nothing
+/// else. A kind that declares no parent, or a declared one that misses, draws
+/// no line.
 ///
 /// **The one expression every row's `path` is.** The launcher's search, its
 /// board and its lists, a room's lines and the detail panel all expand this
@@ -731,20 +653,16 @@ macro_rules! declared_parent_path {
 /// `$decl` is where the declarations are bound, as for [`declared_string!`];
 /// the row's alias must be `i`.
 ///
-/// Confluence declares its page parent on `ancestors` since #599, so for a
-/// page the two read the same array and draw the same line, the declared one
-/// first. The ancestor read stays as the fallback for a read bound to no
-/// declarations; see [`ancestor_path_read!`] for why it has not expired.
+/// Until #646 this fell back to #284's `ancestor_path_read!`, the Confluence
+/// ancestor titles read off the payload with no declaration. Since #599
+/// Confluence declares its page parent on that same `ancestors` array, so the
+/// declared chain draws a page's line, and every production read binds the
+/// declarations; the fallback served only a read bound to none, and it is
+/// gone with the macro.
 #[macro_export]
 macro_rules! path_line_read {
     ($decl:literal) => {
-        concat!(
-            "coalesce(",
-            $crate::declared_parent_path!($decl),
-            ", ",
-            $crate::ancestor_path_read!("i.payload"),
-            ")"
-        )
+        $crate::declared_parent_path!($decl)
     };
 }
 

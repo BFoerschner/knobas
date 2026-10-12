@@ -7,17 +7,23 @@
 //! over a bound payload, `map.rs` asserts the adapter keeps `ancestors` in the
 //! payload, and the launcher row draws whatever path it is handed. What none
 //! of them asserts is that a **search** hands the row one -- that the corpus
-//! in `corpus.rs` actually wires `ancestor_path_read!` over `i.payload` into
-//! the statement the [`Searcher`] runs, and that the value comes out of the
-//! same `FromRow` as the title. This is that assertion.
+//! in `corpus.rs` actually wires `path_line_read!` into the statement the
+//! [`Searcher`] runs, and that the value comes out of the same `FromRow` as
+//! the title. This is that assertion.
+//!
+//! The searcher is the one the app builds, [`Searcher::declaring`] with
+//! Confluence's own descriptor, because since #646 a page's line is its
+//! declared parent chain and nothing else: Confluence declares its page parent
+//! on `ancestors` (#599), and #284's declaration-free ancestor read, which a
+//! bare [`Searcher::new`] used to reach, is retired.
 //!
 //! The payload is the shape the Confluence adapter writes -- `map.rs`'s golden
 //! page, `ancestors` outermost first, each an object with `id`, `title` and
 //! `type` -- and not a minimal `{"ancestors": [...]}`, because the read has to
 //! find the key on a real record with everything else around it.
 //!
-//! Same database discipline as `search.rs`: one shared database for the file,
-//! a token unique to this test, and nothing truncated.
+//! Same database discipline as `search.rs`: one database for the file (one
+//! per test module, #572), a token unique to this test, and nothing truncated.
 //!
 //! [`SearchHit`]: knobas_search::SearchHit
 
@@ -40,7 +46,27 @@ fn token(tag: &str) -> String {
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('confluence', 'confluence', 'Confluence', 'http://x', 'Pat')
+         on conflict (id) do update set kind = excluded.kind, enabled = true",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     pool
+}
+
+/// The searcher the app builds, with Confluence's declared payload paths --
+/// the adapter's own descriptor, not a copy of it, so the page's parent is
+/// read where the adapter says it is.
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(
+        pool.clone(),
+        [knobas_source_confluence::descriptor_template()],
+    )
+    .await
+    .unwrap()
 }
 
 /// One mirrored item, with the payload the adapter would have written.
@@ -128,10 +154,10 @@ fn confluence_page(title: &str) -> serde_json::Value {
 
 /// **The chain, end to end**: a page whose payload carries `ancestors` is
 /// searched by its title, and the hit's `path` is the joined ancestor path --
-/// outermost first, on the one separator. A ticket found by the same search
-/// carries **no** path, which is the ADR-0007 miss the corpus promises for
-/// every kind whose record has no `ancestors`; both directions from one
-/// statement, so a corpus that answered every row alike could not pass.
+/// outermost first, on the one separator -- drawn from Confluence's declared
+/// parent. A ticket found by the same search carries **no** path, the miss
+/// for a kind that declares no parent; both directions from one statement, so
+/// a corpus that answered every row alike could not pass.
 #[tokio::test]
 async fn a_search_returns_a_page_with_its_ancestor_path_and_a_ticket_with_none() {
     let pool = pool().await;
@@ -158,7 +184,7 @@ async fn a_search_returns_a_page_with_its_ancestor_path_and_a_ticket_with_none()
     )
     .await;
 
-    let r = Searcher::new(pool.clone()).search(q(&t)).await.unwrap();
+    let r = searcher(&pool).await.search(q(&t)).await.unwrap();
     let hits: Vec<_> = r.groups.iter().flat_map(|g| g.hits.iter()).collect();
 
     let page = hits

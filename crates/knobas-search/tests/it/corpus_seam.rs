@@ -315,9 +315,9 @@ async fn a_second_corpus_adds_no_binds_and_still_executes() {
 /// names"*, and until now the claim rested on [`corpus::NOTE`] standing in for
 /// them. Now they are here, and each carries something no corpus above it has:
 ///
-/// * [`corpus::ASSET`]'s `path` is a **column** rather than
-///   `ancestor_path_read!` over a payload -- the first corpus for which
-///   "where is this" is knobas' own answer;
+/// * [`corpus::ASSET`]'s `path` is a **column** rather than a read over a
+///   payload (#284's ancestor read then, `path_line_read!` since) -- the
+///   first corpus for which "where is this" is knobas' own answer;
 /// * [`corpus::ROUTE`]'s `relation` is a **join**, so its `path` is read off a
 ///   *second* table's row, and its own `fts` deliberately does not carry it.
 ///

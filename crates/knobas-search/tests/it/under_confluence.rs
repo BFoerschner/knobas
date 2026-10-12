@@ -245,9 +245,9 @@ async fn an_ancestor_that_is_not_mirrored_still_scopes_its_descendants() {
 
 /// The path line a page draws is unchanged: its ancestor titles, outermost
 /// first, on the one separator, at every depth; a top-level page carries
-/// none. The declared chain and #284's ancestor read now draw the same line
-/// from the same array, so this pins the line rather than which of the two
-/// drew it (`path_line_read!` takes the declared one first).
+/// none. Since #646 the declared chain is the only thing that draws it:
+/// #284's undeclared ancestor read, which drew the same line from the same
+/// array, is retired.
 #[tokio::test]
 async fn a_page_still_carries_its_ancestors_as_its_path() {
     let pool = pool().await;

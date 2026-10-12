@@ -1,36 +1,37 @@
-//! Where a record sits inside its source, joined by SQL, against a real
-//! PostgreSQL (#284).
+//! A Confluence page's path line, joined by SQL, against a real PostgreSQL
+//! (#284, read through the declaration since #646).
 //!
-//! `ancestor_path_read!` is a **payload read outside an adapter** and therefore
-//! bound by ADR-0007's three interim requirements. Two of them are properties
-//! of the source: it is one named statement, and it misses rather than
-//! guessing. The third -- *its failure direction is stated and pinned by a
-//! test* -- is this file, and it is the requirement that turns "the author
-//! thought about it" into an obligation.
+//! #284 drew a page's ancestors with `ancestor_path_read!`, a payload read
+//! outside an adapter under ADR-0007's interim discipline, and this file
+//! pinned its failure direction. #599 had Confluence declare its page parent
+//! on that same `ancestors` array, and #646 retired the read: a page's line is
+//! now [`path_line_read!`](knobas_core::path_line_read) over the declaration,
+//! like every other row's. What this file still pins is what a person reads
+//! under a page, through the one expression every row expands, bound to a
+//! declaration shaped like Confluence's (`ancestors`, each answering to its
+//! `title`). `payload_paths.rs` holds the SQL to its Rust twin; this file
+//! holds the line to the shapes a page's `ancestors` can arrive in.
 //!
-//! **The direction is absence.** Every unusable shape below yields SQL `null`,
-//! not an empty string and not a partial guess, so a row shows no path rather
-//! than a wrong one. That matters twice over: the launcher draws a row per
-//! result with no idea what kind it holds, and `string_agg` over no rows is
-//! `null` by construction, which is what makes the property true without a
-//! guard anybody has to remember to keep.
-//!
-//! Run against the database rather than against a Rust reimplementation on
-//! purpose. The rule has exactly one implementation -- this SQL -- and a Rust
-//! twin written to check it would be a second rule to keep in step, which is
-//! the drift #277 spent `payload_paths.rs` pinning against.
+//! **The direction is still absence.** Every unusable shape below yields SQL
+//! `null`, not an empty string and not a partial guess, so a row shows no path
+//! rather than a wrong one. `string_agg` over no rows is `null` by
+//! construction, which is what makes that true without a guard anybody has to
+//! remember to keep.
 
+use knobas_core::payload::{Declarations, KindPaths, ParentPath, PayloadPath};
 use sqlx::{PgPool, Row};
 
-/// The statement under test, over a payload bound as a parameter.
+/// The statement under test: the line a row reads, over a page payload bound
+/// as `$1` and the declarations bound as `$2`.
 ///
-/// The macro takes its payload expression as a literal, so this is the same
-/// `&'static str` the launcher and the room statements expand -- not a
+/// The macro takes its declaration expression as a literal, so this is the
+/// same `&'static str` the launcher and the room statements expand -- not a
 /// paraphrase of it.
 const READ: &str = concat!(
     "select ",
-    knobas_core::ancestor_path_read!("i.payload"),
-    " as path from (select $1::jsonb as payload) i"
+    knobas_core::path_line_read!("$2"),
+    " as path from (select $1::jsonb as payload, 'confluence'::text as source_id, \
+      'page'::text as kind) i"
 );
 
 async fn scratch() -> PgPool {
@@ -41,13 +42,31 @@ async fn scratch() -> PgPool {
         .expect("a pool onto this test's own database")
 }
 
-/// What the read answers for one payload.
+/// A page declared as Confluence declares it: its parent is every ancestor,
+/// outermost first, each answering to its `title`.
+fn confluence() -> Declarations {
+    Declarations::empty().with(
+        "confluence",
+        vec![KindPaths {
+            kind: "page".to_owned(),
+            parent: vec![ParentPath {
+                kind: "page".to_owned(),
+                at: PayloadPath::of(["ancestors"]),
+                names: vec![PayloadPath::of(["title"])],
+            }],
+            ..KindPaths::default()
+        }],
+    )
+}
+
+/// What the line answers for one page payload.
 async fn path_of(pool: &PgPool, payload: serde_json::Value) -> Option<String> {
     sqlx::query(READ)
         .bind(payload)
+        .bind(confluence().as_param())
         .fetch_one(pool)
         .await
-        .expect("the ancestor path read is valid SQL")
+        .expect("the path line is valid SQL")
         .get::<Option<String>, _>("path")
 }
 
@@ -55,9 +74,7 @@ async fn path_of(pool: &PgPool, payload: serde_json::Value) -> Option<String> {
 /// **outermost first**, each an object with a `title`.
 ///
 /// Order is the whole meaning of a path, so it is asserted rather than
-/// assumed: `jsonb_array_elements ... with ordinality` is what preserves it,
-/// and a `string_agg` without the `order by` would join in whatever order the
-/// executor happened to produce.
+/// assumed.
 #[tokio::test]
 async fn a_pages_ancestors_join_outermost_first() {
     let pool = scratch().await;
@@ -86,23 +103,18 @@ async fn a_pages_ancestors_join_outermost_first() {
 
 /// **The failure direction, in every shape that can produce it.**
 ///
-/// Absence, six ways, and never an empty string: an empty string would draw an
-/// empty path line under every ticket in the launcher, which is a wrong answer
-/// wearing a right one's clothes.
-///
-/// The second case is the one that would take the whole query down rather than
-/// miss: `jsonb_array_elements` **raises** on a non-array, so the
-/// `jsonb_typeof(...) = 'array'` guard is what stands between one oddly-shaped
-/// payload and a launcher that returns an error for every search.
+/// Absence, five ways, and never an empty string: an empty string would draw
+/// an empty path line under the row, which is a wrong answer wearing a right
+/// one's clothes. A non-array `ancestors` is among them: the declared read
+/// only walks an array or an object, so a string cannot take the query down.
 #[tokio::test]
 async fn every_unusable_shape_misses_rather_than_guessing() {
     let pool = scratch().await;
     for payload in [
-        // A Jira ticket: no `ancestors` at all, which is most of the mirror.
-        serde_json::json!({ "fields": { "summary": "Retry failed SEPA payouts" } }),
-        // `ancestors` that is not an array -- the shape that raises.
+        // No `ancestors` at all.
+        serde_json::json!({ "title": "Retry failed SEPA payouts" }),
+        // `ancestors` that is neither an array nor an object.
         serde_json::json!({ "ancestors": "Engineering" }),
-        serde_json::json!({ "ancestors": { "title": "Engineering" } }),
         // An empty array: a page at the top of its space.
         serde_json::json!({ "ancestors": [] }),
         // Elements that are not objects, and objects with no usable title.
@@ -115,6 +127,23 @@ async fn every_unusable_shape_misses_rather_than_guessing() {
             "{payload} must contribute no path at all"
         );
     }
+}
+
+/// One shape reads differently from #284's: an `ancestors` that is a single
+/// object. The ancestor read missed on it; a declared parent's `at` may lead
+/// to one object or to an array of them (the deputy's ruling of 2026-10-11 on
+/// #594), so it is one parent. Confluence never sends this shape -- its
+/// `ancestors` is always an array -- so no page's line changes, and this pins
+/// the one rule every declared parent follows rather than a Confluence quirk.
+#[tokio::test]
+async fn an_ancestors_object_is_one_parent_as_every_declared_parent_is() {
+    let pool = scratch().await;
+    let path = path_of(
+        &pool,
+        serde_json::json!({ "ancestors": { "title": "Engineering" } }),
+    )
+    .await;
+    assert_eq!(path.as_deref(), Some("Engineering"));
 }
 
 /// A title that is present but blank is not a segment.
@@ -169,7 +198,7 @@ async fn a_blank_title_is_not_a_segment_and_the_rest_still_form_a_path() {
 /// on where you look at it. The SQL cannot expand a `const`, so the literal is
 /// written into the macro -- and this is what holds the two together.
 #[tokio::test]
-async fn the_ancestor_path_joins_on_the_one_separator() {
+async fn the_path_line_joins_on_the_one_separator() {
     let pool = scratch().await;
     let path = path_of(
         &pool,

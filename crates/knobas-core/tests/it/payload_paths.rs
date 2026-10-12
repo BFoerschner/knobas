@@ -740,8 +740,8 @@ async fn a_mirrored_parent_answers_to_its_declared_names_in_both() {
 // name, outermost first, joined by the one separator. `declared_parent_path!`
 // is that rule in SQL and `parent_path` over `resolve_parents` in Rust; both
 // stand on the pair above, so the shape branch is still in one place.
-// `path_line_read!`, the expression every row reads, falls back to the
-// Confluence ancestor read where a kind declares no parent.
+// `path_line_read!`, the expression every row reads, is that chain and nothing
+// else since #646 retired the Confluence ancestor read it fell back to.
 
 /// What one item's path line is, through each implementation: the declared
 /// chain in SQL, the same in Rust, and the whole line a row reads.
@@ -812,11 +812,12 @@ async fn a_path_line_is_each_parents_first_name_in_sql_and_in_rust() {
 }
 
 /// The misses: a kind that declares no parent, an `at` that leads to neither
-/// shape, and a parent that answers to no name all draw no line -- unless the
-/// record carries Confluence's `ancestors`, which the row's line still reads
-/// where nothing is declared (#284, unchanged).
+/// shape, and a parent that answers to no name all draw no line. A record
+/// that carries Confluence's `ancestors` is no exception where nothing is
+/// declared: #284's ancestor read was the row's fallback until #646 retired
+/// it, so the line is the declaration's and nothing else's.
 #[tokio::test]
-async fn a_path_line_misses_in_both_and_the_row_falls_back_to_ancestors() {
+async fn a_path_line_misses_in_both_and_reads_nothing_undeclared() {
     let pool = scratch().await;
     let declarations = parent_declarations();
 
@@ -856,7 +857,7 @@ async fn a_path_line_misses_in_both_and_the_row_falls_back_to_ancestors() {
     .await;
     assert_eq!(
         undeclared,
-        (None, None, Some("Engineering".to_owned())),
-        "a page whose kind declares nothing keeps its #284 ancestor line"
+        (None, None, None),
+        "a page whose kind declares nothing draws no line, ancestors or not"
     );
 }

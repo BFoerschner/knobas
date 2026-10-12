@@ -154,7 +154,7 @@ struct RecentRow {
     updated_at: Option<DateTime<Utc>>,
     synced_at: DateTime<Utc>,
     /// Where the row sits inside its source (#284, #596); null for a record
-    /// whose kind declares no parent and that carries no readable `ancestors`.
+    /// whose kind declares no parent or whose declared parent misses (#646).
     path: Option<String>,
 }
 

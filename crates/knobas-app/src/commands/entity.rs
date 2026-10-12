@@ -63,11 +63,12 @@ pub struct EntityRow {
     /// as a contract §10.8 exception under that ticket's criterion 5).
     ///
     /// Since #596 it is the **parent chain** the row's kind declares
-    /// (ADR-0018) -- `owner/repo` for a Gitea branch, pull request or commit --
-    /// and the ancestor path where the declared chain yields nothing.
+    /// (ADR-0018) -- `owner/repo` for a Gitea branch, pull request or commit,
+    /// a page's ancestors since Confluence declared them (#599) -- and nothing
+    /// else since #646 retired the undeclared ancestor read.
     ///
-    /// `None` for every row whose kind declares no parent and whose record
-    /// carries no readable `ancestors`: the ADR-0007 **miss**. Joined by
+    /// `None` for every row whose kind declares no parent or whose declared
+    /// parent misses: the ADR-0007 **miss**. Joined by
     /// `knobas_core::path_line_read!`, the one expression that spells it, so
     /// this row and the launcher's cannot disagree about what a path is.
     ///

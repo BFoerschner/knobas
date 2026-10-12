@@ -2661,6 +2661,8 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   It is **not** a #277 declared read, and that is the one thing here a reader should not mistake: `KindPaths` has no slot shaped like "a list of strings joined in order" — `reviewers` is an unordered set of accounts — so expressing it as a declaration would itself be a `crates/knobas-source/src/**` change and a §10.8 conversation of its own. When such a slot is ratified, this read expires into it, which is what ADR-0007 says every interim read does.
 
+  *Expired, issue #646 (2026-10-12): the slot was ratified as `KindPaths::parent` (#594), the path line moved onto it (#596), Confluence declared its page parent on `ancestors` (#599), and `ancestor_path_read!` is gone. `EntityRow.path`'s shape is unchanged; its value is `knobas_core::path_line_read!`, the declared parent chain and nothing else, expanded at the same eight places (#596's entry below). `sql::tests::user_text_never_enters_the_sql_string`'s closed list loses `'ancestors'` and `'title'`, which only this read emitted. `crates/knobas-core/tests/it/ancestor_path.rs` now pins the line through `path_line_read!` bound to a Confluence-shaped declaration: five of the six shapes above still miss to `null`, and an `ancestors` that is a single object now reads as one parent, the rule every declared parent follows (the deputy's ruling of 2026-10-11 on #594). Confluence never sends that shape. The sentences above are left as history.*
+
   **The detail panel reads the row, not the payload**, although it holds the payload: one rule with two implementations is the drift #277 spent a whole test file pinning against, and the launcher has no payload to read. So `Detail.svelte` renders `detail.row.path` and the frontend has no path rule of its own.
 
   Pinned by: `knobas_app::commands::search`'s `the_two_entity_rows_are_one_wire_shape` (extended to carry a value, since two `None`s would compare equal while one struct had the field spelled differently); `knobas_search`'s `the_hit_shape_matches_its_typescript_mirror` (the TS side); `sql::tests::user_text_never_enters_the_sql_string`, whose closed literal list gains this statement's six fixed literals and nothing else; and `Row.test.svelte.ts` for the two rendering directions.
@@ -9660,6 +9662,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   #596 and #599 move the path line onto it, and its doc changes with them. *Superseded in part by
   the note on #596's entry below (2026-10-12): after #599 the read is still the path line's
   fallback, and its retirement is a ticket of its own.*
+  *Expired, issue #646 (2026-10-12): that ticket retired the read. `ancestor_path_read!` and
+  its doc are gone, and the path line is the declared parent chain alone (see #596's entry).*
 
   **The IPC touch.** No command, no event, no module. `payload_paths` already rides inside the
   `SourceDescriptor` that `list_adapters` returns, so `app/src/lib/ipc/sources.ts` gains the
@@ -9812,6 +9816,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   is reached only by a declaration-free read. Retiring it is a ticket of its own: that test moves
   onto `Searcher::declaring`, the fallback leaves `path_line_read!`, and `ancestor_path_read!`'s
   doc and this sentence change with it.*
+  *Expired, issue #646 (2026-10-12).* `path_line_read!` is now `declared_parent_path!` alone, and
+  `ancestor_path_read!` is deleted: with the fallback gone it had no reader but its own test.
+  `knobas-search`'s `tests/it/ancestor_path.rs` searches with `Searcher::declaring` and
+  Confluence's own descriptor, and its page keeps the path line `Engineering › Payments`. A read
+  bound to no declarations now draws no path for a page, as for every other kind
+  (`a_path_line_misses_in_both_and_reads_nothing_undeclared` in
+  `crates/knobas-core/tests/it/payload_paths.rs`). No production read is one of those. Still no
+  command, event, DTO, module, barrel or migration moves.
 - **One IPC command and four DTOs on the search module — issue #601 (2026-10-12): the query box
   suggests values for `kind:`, `source:` and `under:`.** Spec #591 stories 27-30. Ratified by the
   ticket's own criterion (*"No new IPC module. If a command is added, it gets its §10.8 entry"*)
