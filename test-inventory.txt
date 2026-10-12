@@ -412,6 +412,7 @@ knobas-app	test/it	assets_ipc::the_type_table_answers_with_no_pool_and_carries_t
 knobas-app	test/it	assets_ipc::what_breaks_below_an_asset_is_everything_it_holds_nearest_first
 knobas-app	test/it	backup::a_restore_brings_back_no_mirror_rows_of_its_own
 knobas-app	test/it	backup::a_restore_refuses_a_database_that_already_holds_knobas_data
+knobas-app	test/it	backup::a_restored_backup_answers_under_as_the_machine_it_came_from
 knobas-app	test/it	backup::a_restored_backup_brings_back_the_timer_its_blocks_and_its_worklogs
 knobas-app	test/it	backup::a_restored_backup_still_links_the_entities_a_later_sync_rebuilt
 knobas-app	test/it	backup_ipc::a_database_with_no_stored_schedule_is_nightly_by_default
@@ -1532,6 +1533,8 @@ knobas-search	test/it	home::a_tombstoned_item_is_not_recent
 knobas-search	test/it	home::recency_reads_are_index_backed_per_kind
 knobas-search	test/it	home::the_board_drops_a_source_the_user_turned_off
 knobas-search	test/it	home::the_board_is_smart_lists_and_the_newest_of_every_kind
+knobas-search	test/it	item_parent::the_stored_function_is_the_macros_expansion
+knobas-search	test/it	item_parent::the_stored_parents_are_the_walk_after_every_change
 knobas-search	test/it	lists::a_configured_identity_leaves_the_blurb_alone
 knobas-search	test/it	lists::a_list_page_is_bounded_however_much_the_caller_asks_for
 knobas-search	test/it	lists::changed_today_starts_at_midnight_and_is_not_a_rolling_day
@@ -1604,6 +1607,7 @@ knobas-search	test/perf	the_artifact_this_harness_is_built_to_avoid
 knobas-search	test/perf	the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items
 knobas-search	test/perf	the_match_set_is_not_joined_row_by_row
 knobas-search	test/perf	the_plan_does_not_decay_after_the_fifth_execution
+knobas-search	test/perf	under_is_under_the_same_budget_beside_a_hundred_thousand_items
 knobas-secrets	lib/knobas_secrets	keyring_store::tests::a_platform_failure_is_classified_by_what_the_store_said
 knobas-secrets	lib/knobas_secrets	keyring_store::tests::the_backend_message_forwards_the_cause_without_debug_formatting
 knobas-secrets	lib/knobas_secrets	tests::a_keyring_store_keeps_the_service_name_it_was_given
