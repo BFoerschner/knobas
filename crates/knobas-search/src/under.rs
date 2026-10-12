@@ -23,22 +23,45 @@ use sqlx::PgPool;
 use crate::SearchError;
 use crate::query::Parsed;
 
-/// The distinct lowercased names among `$2` that any live item answers to as
-/// a parent or names as one, read through the declarations bound at `$1` --
-/// or that an asset is called.
+/// Every `(name, kind)` a parent answers to, through the declarations bound
+/// at `$decl`, as a table expression -- the one place the parent arms are
+/// put together, read by [`KNOWN_SQL`] here and by `crate::suggest`'s
+/// `PARENTS_SQL`, so what `under:` knows and what the box offers for it
+/// cannot drift apart (#615).
+///
+/// Three arms. A parent the live children declare -- mirrored or not, which
+/// is why the kind is the declaration's (#594). A live item answering to its
+/// sibling kinds' declared names, as its own kind. And the estate: every
+/// asset, answering to its name as `asset`.
 ///
 /// `sync.live_item`, so a withdrawn item or a disabled source does not vouch
 /// for a name the corpus no longer has -- the same reason the coverage probe
 /// reads it. A deleted asset's row is gone, so `knobas.asset` needs no such
-/// view. The asset arm is the name match `corpus::estate_subtree!` starts its
-/// walk from, spelled the same way: change one and the other must follow.
+/// view. The asset arm is the name `corpus::estate_subtree!` starts its walk
+/// from, and a reader's `lower(name)` filter reaches it as `lower(a.name)`,
+/// the same spelling: change one and the other must follow.
+///
+/// The two payload arms share one scan of `sync.live_item`, through one
+/// lateral: the query path pays for one pass over the mirror, not two.
+macro_rules! parent_names {
+    ($decl:literal) => {
+        concat!(
+            "(select n.name, n.kind from sync.live_item i cross join lateral (select pn.name, pn.kind from ",
+            knobas_core::declared_parent_names!($decl),
+            " pn union all select sn.name, i.kind from ",
+            knobas_core::declared_names_as_parent!($decl),
+            " sn) n union all select a.name, 'asset' from knobas.asset a)"
+        )
+    };
+}
+pub(crate) use parent_names;
+
+/// The distinct lowercased names among `$2` that a parent answers to, through
+/// the declarations bound at `$1`: [`parent_names!`] without the kind.
 const KNOWN_SQL: &str = concat!(
-    "select distinct lower(n.name) from sync.live_item i cross join lateral (select pn.name from ",
-    knobas_core::declared_parent_names!("$1"),
-    " pn union all select sn.name from ",
-    knobas_core::declared_names_as_parent!("$1"),
-    " sn) n where lower(n.name) = any($2)",
-    " union select lower(a.name) from knobas.asset a where lower(a.name) = any($2)"
+    "select distinct lower(p.name) from ",
+    parent_names!("$1"),
+    " p where lower(p.name) = any($2)"
 );
 
 /// Report every `under:` value no parent answers to as an unknown token, in
