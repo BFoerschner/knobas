@@ -171,6 +171,18 @@ check_not "a stale lock is not waited on" "$out" "waiting"
 checks=$((checks + 1))
 [ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "the heir released the lock" "$(readlink "$KNOBAS_LIVE_LOCK")"
 
+# The same, the way it happens: a run SIGKILLed while it holds the lock, so no
+# trap gives it back. The lock must name the run's own process -- here a
+# subshell -- for its death to be seen.
+holder killed
+kill -9 "${pids[${#pids[@]}-1]}"
+sleep 0.2
+taker afterkill
+rc=$(wait_rc afterkill)
+out=$(cat "$scratch/afterkill.out")
+check "a SIGKILLed run's lock is taken over" "$rc" "0"
+check "the takeover names the killed run" "$out" "'killed' in $scratch/killed"
+
 # --- the wait has an end ------------------------------------------------------
 
 holder blocker
