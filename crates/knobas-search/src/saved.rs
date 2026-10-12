@@ -98,7 +98,7 @@ const MAX_ID_CHARS: usize = 48;
 /// the latency and not the scans). The cap is here so that the board's cost
 /// has a stated ceiling rather than an unbounded one.
 ///
-/// # Sixteen is a measured number (#533)
+/// # Sixteen was a measured number (#533)
 ///
 /// It was **64**, chosen as generous on the reasoning that nobody curates
 /// sixty-four saved lists. `knobas-search`'s perf gate now fills the rail
@@ -116,7 +116,7 @@ const MAX_ID_CHARS: usize = 48;
 /// **Two runs and not one**, because no run can reach past the cap it is taken
 /// at -- [`create`] refuses the row. The first was taken with this constant
 /// still at 64, on a quiet machine, and is what condemned it; the second at
-/// the value below, with another agent's suite on the same Mac. They agree to
+/// sixteen, with another agent's suite on the same Mac. They agree to
 /// within 7 ms, and the gate passed in both.
 ///
 /// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
@@ -154,7 +154,56 @@ const MAX_ID_CHARS: usize = 48;
 /// lowest           40   52   55   59   80   87
 /// highest          42   54   57   63   84   87
 /// ```
-pub const MAX_SAVED_LISTS: i64 = 16;
+///
+/// # Stepped to eight on 2026-10-12 (#653)
+///
+/// Five `just search-perf` runs on `d6673e60`, each under an orchestrator
+/// hold (no other agent, gate or cargo build on the machine for the whole run)
+/// and a 5-second process and gate-slot monitor, each with load1 under 12 at
+/// start and end, a monotonic rail in both columns, and its whole transcript
+/// quoted on PR #656 -- all four of #533's conditions. The gate asserts four
+/// figures at the cap. The size curve's `board, 16 saved` at 100 k -- the
+/// one #629 tabled -- read **87, 89, 95, 92 and 98 ms**: a spread of 11
+/// against 2 ms of clearance; its `lists, 16 saved` read 87, 87, 94, 90 and
+/// 90. The rail table's last row, a separate timing of the same board, read
+/// 89, 93, 90, 90 and **102** for `launcher_board` and 88, **100**, 89, 89
+/// and 91 for `smart_lists`, so two of the five held runs failed the gate
+/// outright. Under
+/// #533's rule -- a quiet run clearing the budget by less than its own spread
+/// steps the constant to eight without a ruling -- it stepped.
+///
+/// No fix to one commit could have kept sixteen. Five held runs of
+/// `1f1de04b`, the code #629 read at 83 to 87, put the size curve's figure at
+/// 86 to 89 -- so something since may have added a few milliseconds there --
+/// but put the rail's `launcher_board` at sixteen at **105**, 87, 87, 86 and
+/// 88: a held red before #630, #645, #647 or #650 landed. Undoing their cost
+/// would leave code the same rule already steps to eight, so the bisect
+/// stopped at a midpoint (`fb3133c7`, size curve 88 to 90, rail 87 to 93) and
+/// the small drift was left unlocated. The cap comes down; the budget and the
+/// summary statement do not move.
+///
+/// At eight, five held runs on the commit that stepped it read the size
+/// curve's `board, 8 saved` at **85, 85, 85, 85 and 84 ms** (spread 1,
+/// clearance 15), and the rail at 100 k items, lowest and highest per column
+/// over the five:
+///
+/// ```text
+/// saved lists              0    1    2    4    8
+/// smart_lists lowest      40   52   55   61   82
+/// smart_lists highest     41   54   56   64   84
+/// launcher_board lowest   42   53   57   62   84
+/// launcher_board highest  43   55   58   66   90
+/// ```
+///
+/// The rail's `launcher_board` at eight spans 84 to 90, a spread of 6 against
+/// at least 10 ms of clearance, so eight holds under the same rule. The section
+/// above that called eight "not meaningfully cheaper" was right about the
+/// milliseconds -- in the same run's rail, `launcher_board` at eight read 2 to
+/// 16 ms below sixteen -- and is overtaken by the rule: the margin is for the
+/// clock, and at sixteen the clock's own spread ate it. A database restored
+/// with more than eight saved lists keeps them all; [`create`] refuses the
+/// next one until the count is below eight again.
+pub const MAX_SAVED_LISTS: i64 = 8;
 
 /// One row of `knobas.smart_list`.
 #[derive(Debug, Clone, sqlx::FromRow)]
