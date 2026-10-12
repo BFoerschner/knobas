@@ -83,3 +83,20 @@ test("a path that looks like markup is drawn as text", () => {
   expect(path?.querySelector("img")).toBeNull();
   screen.done();
 });
+
+/**
+ * A row draws its path even when its title already repeats it (#596): a
+ * TeamCity build's title names its configuration, and the path line names it
+ * again, because every row with a parent draws the parent the same way.
+ */
+test("a path the title already repeats is still drawn", () => {
+  const screen = render({
+    entityId: "teamcity:1187",
+    kind: "build",
+    sourceId: "teamcity",
+    title: "Payments / Deploy #42",
+    path: "Payments / Deploy",
+  });
+  expect(screen.target.querySelector(".pa")?.textContent).toBe("Payments / Deploy");
+  screen.done();
+});

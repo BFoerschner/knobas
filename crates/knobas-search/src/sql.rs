@@ -661,11 +661,11 @@ mod tests {
     /// contains a quoted string not named here is either a new static fragment
     /// nobody reviewed, or -- the case that matters -- user text that reached
     /// the SQL instead of the bind list.
-    /// The six after the first four are `ancestor_path_read!`'s (#284): the payload keys it
-    /// walks, the three `jsonb_typeof` comparands it guards on, and the
-    /// separator it joins a path with. They are `concat!`ed `&'static str`s inside that macro, so
-    /// no value can reach them -- and naming them here is what keeps this list
-    /// closed rather than widened.
+    /// The six after the first four are `ancestor_path_read!`'s (#284): the
+    /// payload keys it walks, the three `jsonb_typeof` comparands it guards
+    /// on, and the separator it joins a path with. They are `concat!`ed
+    /// `&'static str`s inside that macro, so no value can reach them -- and
+    /// naming them here is what keeps this list closed rather than widened.
     const ALLOWED_LITERALS: &[&str] = &[
         "english",
         ":*",
