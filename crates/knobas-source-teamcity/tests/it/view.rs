@@ -86,7 +86,7 @@ fn config_record() -> serde_json::Value {
                                 { "name": "authMethod", "value": "PASSWORD" },
                                 { "name": "branch", "value": "refs/heads/main" },
                                 { "name": "secure:password" },
-                                { "name": "url", "value": "http://gitea:3000/tidewater/payout-service.git" }
+                                { "name": "url", "value": "http://knobas:root-token-never-drawn@gitea:3000/tidewater/payout-service.git" }
                             ]}}}
         ]}
     })
@@ -412,6 +412,12 @@ async fn triggers_and_vcs_roots_say_when_and_from_where() {
     assert_eq!(
         fact(root, "URL").value,
         "http://gitea:3000/tidewater/payout-service.git"
+    );
+    assert!(
+        !serde_json::to_string(&view)
+            .expect("serializes")
+            .contains("root-token-never-drawn"),
+        "a credential in a root's URL is not drawn"
     );
     assert_eq!(fact(root, "Default branch").value, "refs/heads/main");
     assert_eq!(fact(root, "Checkout rules").value, "+:src => src");
