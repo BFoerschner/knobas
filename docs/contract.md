@@ -481,7 +481,7 @@ pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // 
 | key form | issue key: `jira:PAY-231` | `gitea:owner/repo`, `gitea:owner/repo#142`, `gitea:owner/repo@<sha40>`, `gitea:owner/repo@refs/heads/<name>` | `teamcity:build:<buildId>`, `teamcity:buildType:<buildTypeId>` |
 | auth | Bearer PAT (DC ≥ 8.14) or Basic user+password | `Authorization: token <pat>` | Bearer token or Basic |
 | test_connection | `GET /rest/api/2/myself`, version from `/rest/api/2/serverInfo`, **`GET /rest/api/2/field`** for the Epic Link custom field id (#297 — reported as `ConnectionInfo.discovered["epic_link_field"]`; a 404 — and a 501, which is what mockd answers for a path it declares and does not serve — reads as "no field table" and does not fail the connection, while a 401 there is still a refused credential) | `GET /api/v1/user`, version `/api/v1/version` | `GET /app/rest/server` |
-| read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=`, `/repos/{o}/{r}/issues/{index}/comments` (fifth read, M2 ruling B1, config-gated; **not a paged listing** — `since`/`before` only, read whole in one request; see the #131 amendment) | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}`; for a build configuration's source view (#664) `GET /app/rest/buildTypes/id:{id}?fields=…` and the configuration's last 20 builds through `/app/rest/builds` — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
+| read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=`, `/repos/{o}/{r}/issues/{index}/comments` (fifth read, M2 ruling B1, config-gated; **not a paged listing** — `since`/`before` only, read whole in one request; see the #131 amendment) | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}`; for a build configuration's source view (#664) `GET /app/rest/buildTypes/id:{id}?fields=…` and the configuration's last 20 builds through `/app/rest/builds`; for a build's source view (#665) `GET /app/rest/builds/id:{id}?fields=…`, `GET /app/rest/changes?locator=build:(id:{id})&fields=…`, `GET /app/rest/builds/id:{id}/artifacts?fields=…`, and on its deferred tabs `GET /app/rest/testOccurrences?locator=build:(id:{id}),status:FAILURE,count:100&fields=…` and the log's tail from `GET /downloadBuildLog.html?buildId={id}` (not `/app/rest`: plain text, no `fields=`) — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
 | write endpoints | `POST /rest/api/2/issue/{key}/comment`, `GET`+`POST /rest/api/2/issue/{key}/transitions`, `POST /rest/api/2/issue` (M2, #43); `POST /rest/api/2/issue/{key}/worklog` — `started` in `yyyy-MM-dd'T'HH:mm:ss.SSSZ` (milliseconds and a numeric offset both mandatory), `timeSpentSeconds`, `comment`, **no `adjustEstimate`** so Jira's own `auto` applies (M3.1, #280) | `POST /repos/{o}/{r}/branches`, `POST /repos/{o}/{r}/pulls`, `POST /repos/{o}/{r}/issues/{index}/comments`, `POST /repos/{o}/{r}/pulls/{index}/reviews` (M2, #43) | `POST /app/rest/buildQueue` for both trigger and re-run (M2, #43) |
 | cursor | `{"v":1,"updated_to":"2026-08-24T09:14:00Z"}`; JQL `updated >= "<watermark − 2 min>" ORDER BY updated ASC`. The 2-minute overlap is mandatory: **JQL time resolution is one minute**, so an exact-boundary watermark drops items. Re-delivery is free — upserts are idempotent. **Superseded in part by the #345 amendment below** (2026-09-04): the version is `2` and `seen` recognises a record by fingerprint rather than by its timestamp. The JQL and the overlap are unchanged | `{"v":1,"repos_listed_at":"…","repos":{"owner/repo":{"pulls_updated_to":"…","commits_since":"…","branches_hash":"…"}}}` — per-repo watermarks; a repo added upstream is picked up by the repo-list re-listing each run. ETags/`If-None-Match` are an **optimization to verify against the real container**, not a contract. | `{"v":1,"since_build_id":12345}`; finished builds via `locator=sinceBuild:(id:<n>),state:finished` (ids are monotonic), **plus an unconditional `state:running,state:queued` poll** each run — a running build mutates without a new id. |
 | config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `epic_link_field` (per-instance id — **filled by *Test connection*** since #297, never an example to copy) | `owners[]`/`repos[]` allowlist, `username` | `project_ids[]`, `build_type_ids[]`, `builds_per_config`, `username` (identity — filled by *Test connection*, used for `@me`/My items) |
@@ -10371,6 +10371,50 @@ From this commit on, each of the following requires an orchestrator decision **a
   `Detail.action.test.svelte.ts`; and, the witness ADR-0013 asks for, `live_gitea.rs`'s
   `a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_reads_it_merged` against
   the real Gitea.
+
+- **`crates/knobas-source/src/**` — issue #665 (2026-10-12): `ViewRow` gains an optional commit
+  hint, resolved by the app.** Spec #660 story 23: a build's *Changes* lists the commits it
+  built, each opening the mirrored commit when knobas has it. TeamCity knows a change's sha and
+  its VCS root's URL and cannot see a Gitea mirror, so the ticket puts the resolution in the
+  app, and names this field as its §10.8 entry (signed off by Björn's 2026-10-12 delegation on
+  #660, as the vocabulary itself was).
+
+  ```rust
+  pub struct ViewRow {
+      /* #661's six fields, unchanged */
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub commit: Option<CommitHint>,
+  }
+  pub struct CommitHint { pub repo_url: String, pub sha: String }   // in knobas_source::view
+  ```
+
+  **Additive and invisible to the shell.** `#[serde(default)]`, so a row sent without it
+  decodes; skipped when `None`, so a row without one serializes exactly as #661 froze it
+  (`view::tests::the_wire_shape_is_a_union_on_type` pins both). `sources::crud::view` resolves
+  every hint before the rule-7 check and clears it either way, so the field never reaches the
+  shell; the TypeScript `ViewRow` is unchanged and its doc comment says why.
+
+  **The resolution.** `crud::commit_page` composes `<repo_url minus .git and trailing
+  slash>/commit/<sha>` -- Gitea's (and GitHub's) commit page -- and runs the paste resolver's own
+  statement, `commands::entity::RESOLVE_URL`, on it; `commands::entity::is_web_url` becomes
+  `pub(crate)` so the composition refuses what the resolver refuses. A hit sets `entity_id`; an
+  `ssh://` or scp-like remote, a non-hex sha, or a page the mirror does not hold leaves the row
+  plain text (rule 7's failure direction). No new statement, command, event or migration.
+  Pinned by `knobas-app`'s `entity_view::a_commit_named_by_repository_and_sha_opens_the_mirrored_commit`.
+
+  **What does not move.** This entry adds no block, tone or `Block` field. TeamCity's build view
+  uses the vocabulary as it stands: its *Tests* tab is an entity row per failure followed by a text block
+  of its details; its *Log* tab is one log block; its *Parameters* is a settings block whose
+  `write_op` is empty, because nothing changes a build's parameters. The shell's `LogBlock` now
+  opens scrolled to its end; that is drawing, not vocabulary.
+
+  **Witness gap, said once.** The seeded failed build is its configuration's first, and TeamCity
+  lists no change for a first build, so `just teamcity-live-seeded` witnesses *Changes* as an
+  empty list only; the change shape (`vcsRootInstance(properties(...))`) was read off the same
+  server's `/app/rest/changes` on 2026-10-12. The seeded VCS roots point at `http://gitea:3000`
+  (the compose network's name for Gitea) while a knobas Gitea source points at `127.0.0.1:3000`,
+  so in that environment a change would stay plain text: the resolver matches the URL as
+  written and does not guess that two hosts are one.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
