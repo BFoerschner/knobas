@@ -206,13 +206,34 @@ export function parseMarkdown(source: string): MdBlock[] {
 }
 
 /**
- * Code first, so nothing inside backticks is read as anything else; then
- * images before links (an image is a link with a `!`); then strong before
- * emphasis. Underscore emphasis needs a non-word character on both sides, so
- * `snake_case_name` stays text.
+ * A link's or an image's `(target "title")`. The target may hold one level of
+ * balanced parentheses (`Foo_(bar)`); the title runs to the closing paren.
+ * No piece can contain a bracket or a paren it is not looking for, so a scan
+ * that fails stops at the next one instead of at the end of the text: with
+ * `[^\]]*` and `[^)]*` a 100,000-character README of unclosed `![` or `[a](`
+ * took seconds to minutes to read (#663 review).
  */
-const INLINE =
-  /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|!\[([^\]]*)\]\(([^)\s]*)[^)]*\)|\[([^\]]+)\]\(([^)\s]*)[^)]*\)|\*\*([^*]+?)\*\*|__([^_]+?)__|\*([^*\s][^*]*?)\*|(?<![\p{L}\p{N}_])_([^_\s][^_]*?)_(?![\p{L}\p{N}_])/gu;
+const TARGET = String.raw`\(((?:[^()\s]|\([^()\s]*\))*)(?:\s[^()]*)?\)`;
+const SKIP_TARGET = String.raw`\((?:[^()\s]|\([^()\s]*\))*(?:\s[^()]*)?\)`;
+
+/**
+ * Code first, so nothing inside backticks is read as anything else; then an
+ * image inside a link (a README's badge, `[![alt](svg)](href)`, which is a
+ * link labelled with the alt text); then images before links (an image is a
+ * link with a `!`); then strong before emphasis. Underscore emphasis needs a
+ * non-word character on both sides, so `snake_case_name` stays text.
+ */
+const INLINE = new RegExp(
+  [
+    "(`+)([^`]|[^`][\\s\\S]*?[^`])\\1(?!`)",
+    String.raw`\[!\[([^\[\]]*)\]${SKIP_TARGET}\]${TARGET}`,
+    String.raw`!\[([^\[\]]*)\]${SKIP_TARGET}`,
+    String.raw`\[([^\[\]]+)\]${TARGET}`,
+    String.raw`\*\*([^*]+?)\*\*|__([^_]+?)__`,
+    String.raw`\*([^*\s][^*]*?)\*|(?<![\p{L}\p{N}_])_([^_\s][^_]*?)_(?![\p{L}\p{N}_])`,
+  ].join("|"),
+  "gu",
+);
 
 /** Read one block's text into runs. */
 export function inline(text: string): Inline[] {
@@ -226,8 +247,9 @@ export function inline(text: string): Inline[] {
   for (const match of text.matchAll(INLINE)) {
     const index = match.index;
     if (index > at) push({ kind: "text", text: text.slice(at, index) });
-    const [, ticks, code, alt, , label, href, strong1, strong2, em1, em2] = match;
+    const [, ticks, code, badge, badgeHref, alt, label, href, strong1, strong2, em1, em2] = match;
     if (ticks !== undefined) push({ kind: "code", text: code!.trim() === "" ? code! : code!.trim() });
+    else if (badge !== undefined) push({ kind: "link", text: badge || "image", href: badgeHref ?? "" });
     else if (alt !== undefined) push({ kind: "image", text: alt });
     else if (label !== undefined) push({ kind: "link", text: label, href: href ?? "" });
     else if (strong1 !== undefined || strong2 !== undefined)

@@ -100,3 +100,24 @@ test("HTML in a README is text, never markup", () => {
     },
   ]);
 });
+
+test("a badge is a link named by its alt text; a target keeps its balanced parentheses", () => {
+  expect(
+    inline("[![CI](https://ci.example/b.svg)](https://ci.example/run) see [Foo](https://w.example/Foo_(bar) \"t\")"),
+  ).toEqual([
+    { kind: "link", text: "CI", href: "https://ci.example/run" },
+    { kind: "text", text: " see " },
+    { kind: "link", text: "Foo", href: "https://w.example/Foo_(bar)" },
+  ]);
+});
+
+test("unclosed brackets and parens read in linear time, as text", () => {
+  // Each of these took seconds (or did not finish) when a failed scan ran to
+  // the end of the text from every opening bracket.
+  for (const hostile of ["![".repeat(50_000), "[a](".repeat(25_000), "[a](b".repeat(20_000)]) {
+    const started = performance.now();
+    const blocks = parseMarkdown(hostile);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(blocks).toEqual([{ kind: "paragraph", inline: [{ kind: "text", text: hostile }] }]);
+  }
+});
