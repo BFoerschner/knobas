@@ -7,7 +7,19 @@ use chrono::{DateTime, Utc};
 
 /// Bump when the meaning of a field changes; an older knobas then reads the
 /// cursor as unrecognised and syncs in full, which is the safe direction.
-pub(crate) const CURSOR_VERSION: u32 = 1;
+///
+/// **2** since issue #595 changed what a branch and a commit store: the payload
+/// gained a `repository: { full_name, name }` object, which `under:` reads, and
+/// `body_text` lost the repository's name. No field of this envelope changed
+/// meaning, but an incremental run re-emits only branches whose head moved and
+/// commits past the watermark, so an install upgraded in place would keep the
+/// old payload on every row it had already mirrored (issue #610). Bumping is
+/// the whole upgrade plan, as it was for Jira's #345: a stored version-1 cursor
+/// stops parsing, each Gitea source does one full sync, which re-emits every
+/// branch and the commits inside `commits_per_repo` in the new shape, and comes
+/// back with a version-2 cursor. Commits older than the budget keep the old
+/// payload; ADR-0003 accepts that staleness for budgeted kinds.
+pub(crate) const CURSOR_VERSION: u32 = 2;
 
 /// Where the next run resumes, per repository.
 ///
@@ -184,7 +196,7 @@ mod tests {
     fn serialisation_is_stable() {
         assert_eq!(sample().to_json(), sample().to_json());
         let json = sample().to_json();
-        assert!(json.starts_with(r#"{"v":1"#), "{json}");
+        assert!(json.starts_with(r#"{"v":2"#), "{json}");
     }
 
     /// Every watermark field has to survive the trip: a field dropped in
@@ -233,7 +245,7 @@ mod tests {
     #[test]
     fn an_unusable_cursor_means_full_sync() {
         for raw in [
-            r#"{"v":2,"repos":{}}"#,
+            r#"{"v":3,"repos":{}}"#,
             "not json",
             "",
             "[]",
@@ -248,6 +260,19 @@ mod tests {
             GiteaCursor::parse(Some(&sample().to_json())),
             Some(sample())
         );
+    }
+
+    /// Issue #610: a cursor stored by a knobas from before #595's payload
+    /// change -- a real position, every field readable -- is still no position
+    /// at all, so the run after an upgrade is a full sync and re-emits every
+    /// branch and the budgeted commits in the new shape.
+    #[test]
+    fn a_version_one_cursor_from_before_the_payload_change_means_full_sync() {
+        let mut stored = sample();
+        stored.v = 1;
+        let raw = stored.to_json();
+        assert!(raw.starts_with(r#"{"v":1,"#), "{raw}");
+        assert_eq!(GiteaCursor::parse(Some(&raw)), None);
     }
 
     /// `entry_like` exists so a **refused `repos[]` entry keeps its position**

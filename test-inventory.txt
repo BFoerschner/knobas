@@ -1812,6 +1812,7 @@ knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_defaults_a
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_cursor_round_trips
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_fresh_cursor_records_when_the_repository_set_was_seen
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_refused_allowlist_entry_is_found_whatever_case_the_user_typed
+knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_version_one_cursor_from_before_the_payload_change_means_full_sync
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::an_unknown_repository_starts_from_nothing
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::an_unusable_cursor_means_full_sync
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::empty_fields_are_omitted
@@ -1867,6 +1868,7 @@ knobas-source-gitea	test/it	sync::a_budget_that_stops_short_keeps_the_boundary_i
 knobas-source-gitea	test/it	sync::a_cap_fires_at_exactly_the_boundary_it_names
 knobas-source-gitea	test/it	sync::a_commit_on_two_branches_is_emitted_once
 knobas-source-gitea	test/it	sync::a_credential_revoked_after_the_first_repository_raises
+knobas-source-gitea	test/it	sync::a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits
 knobas-source-gitea	test/it	sync::a_dead_token_against_a_publicly_readable_instance_still_fails
 knobas-source-gitea	test/it	sync::a_discussion_refused_by_a_dead_credential_fails_the_run
 knobas-source-gitea	test/it	sync::a_discussion_the_server_did_not_send_whole_ends_the_run
