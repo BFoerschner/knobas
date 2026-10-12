@@ -68,10 +68,12 @@
 -- for the first to commit and then reads it. Item writes share the lock, so
 -- concurrent syncs never wait on each other.
 --
--- A data-only restore runs with triggers disabled, so
--- `knobas_db::backup::restore` calls `sync.resolve_all_item_parents()` after
--- it. The `sync` schema is not in a backup (§16.12); this is derived data and
--- is rebuilt, never dumped.
+-- **A backup rebuilds it, never carries it.** The `sync` schema is not in an
+-- archive (§16.12). A restore needs a `knobas` with no rows, so it lands
+-- before any mirror row can exist (`sync.item` references `knobas.entity`),
+-- and the re-sync's inserts resolve themselves through the trigger above.
+-- That the restore loads `knobas.source_config` with `--disable-triggers`
+-- therefore costs nothing: there is no item yet for the trigger to reach.
 
 create table sync.parent_declaration (
   adapter_kind  text primary key,
@@ -130,7 +132,8 @@ language sql as $fn$
     array(select i.entity_id from sync.item i where i.source_id = any(sources)))
 $fn$;
 
--- Every item. What a restore, which loads with triggers off, calls after.
+-- Every item: what a truncate of the declarations recomputes, and this
+-- migration's last statement.
 create function sync.resolve_all_item_parents() returns void
 language sql as $fn$
   select sync.resolve_item_parents(array(select i.entity_id from sync.item i))
