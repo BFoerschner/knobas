@@ -1286,8 +1286,9 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
     assert!(parented > 0, "no Gitea commit in the corpus: the fixture moved");
 
-    let searcher = Searcher::new(pool.clone())
-        .with_payload_paths([knobas_source_gitea::descriptor_template()]);
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
     for _ in 0..3 {
         searcher.search(q("under:bench/repo-7")).await.unwrap();
     }

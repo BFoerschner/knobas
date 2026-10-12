@@ -495,6 +495,17 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
         ],
     )
     .await?;
+    // `--disable-triggers` held off migration `0028`'s too, so the
+    // `knobas.source_config` rows just loaded did not recompute
+    // `sync.item_parent` (#627). It is derived data -- the `sync` schema is
+    // never in an archive -- so it is rebuilt here from what is now stored.
+    // On the path §14 describes there is no mirror yet and this resolves
+    // nothing; the re-sync's inserts resolve themselves.
+    let mut conn = connector.connect().await?;
+    sqlx::query("select sync.resolve_all_item_parents()")
+        .execute(&mut conn)
+        .await?;
+    let _ = conn.close().await;
     Ok(())
 }
 

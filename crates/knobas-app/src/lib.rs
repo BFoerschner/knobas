@@ -476,6 +476,14 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             if let Err(error) = time::close_stranded(db.pool()).await {
                 tracing::error!(%error, "the stranded-timer sweep failed");
             }
+            // The adapters' declarations, into the database before the first
+            // sync writes an item (#627): the item trigger resolves each row's
+            // parents from them, so a sync that ran first would resolve against
+            // nothing and be recomputed a moment later. Failure is logged, not
+            // fatal -- every search command writes them again on its way in.
+            if let Err(error) = commands::search::searcher(db.pool()).await {
+                tracing::error!(?error, "the adapters' declarations could not be stored");
+            }
             // Before `Ready`, and before `AppState` is installed: the sync
             // engine is part of "the database is up" as far as the frontend is
             // concerned, and a window that reacted to `ready` by calling

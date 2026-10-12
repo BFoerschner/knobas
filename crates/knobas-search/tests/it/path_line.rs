@@ -51,8 +51,10 @@ async fn pool() -> sqlx::PgPool {
 /// Kuma's template is not passed, as in `under.rs`: a source whose adapter
 /// declares nothing declares no parent, which is what Kuma's real descriptor
 /// says too.
-fn searcher(pool: &sqlx::PgPool) -> Searcher {
-    Searcher::new(pool.clone()).with_payload_paths([knobas_source_gitea::descriptor_template()])
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -180,7 +182,7 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
     let ours = repo(&pool, "tidewater", &format!("payout-{t}"), &t, now).await;
     let theirs = repo(&pool, "elsewhere", &format!("ledger-{t}"), &t, now).await;
 
-    let response = searcher(&pool).search(q(&t)).await.unwrap();
+    let response = searcher(&pool).await.search(q(&t)).await.unwrap();
 
     let ours_path = Some(format!("tidewater/payout-{t}"));
     let theirs_path = Some(format!("elsewhere/ledger-{t}"));
@@ -200,7 +202,7 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
     // An `under:` query binds the declarations for its predicate, and the
     // path line reads that same placeholder rather than a second bind: its
     // rows draw the line too.
-    let scoped = searcher(&pool)
+    let scoped = searcher(&pool).await
         .search(q(&format!("under:tidewater/payout-{t} {t}")))
         .await
         .unwrap();
@@ -240,7 +242,7 @@ async fn a_kind_that_declares_no_parent_carries_no_path() {
     )
     .await;
 
-    let response = searcher(&pool)
+    let response = searcher(&pool).await
         .search(q(&format!("health {t}")))
         .await
         .unwrap();
@@ -264,7 +266,7 @@ async fn the_boards_and_a_lists_rows_carry_the_same_path() {
     let ahead = Utc.with_ymd_and_hms(2999, 1, 1, 0, 0, 0).unwrap();
     let ids = repo(&pool, "tidewater", &format!("board-{t}"), &t, ahead).await;
 
-    let board = searcher(&pool).launcher_board().await.unwrap();
+    let board = searcher(&pool).await.launcher_board().await.unwrap();
     let commit = board
         .recent
         .iter()
@@ -273,7 +275,7 @@ async fn the_boards_and_a_lists_rows_carry_the_same_path() {
     assert_eq!(commit.path, Some(format!("tidewater/board-{t}")));
 
     // Just synced: everything the mirror saw in the last hour, newest first.
-    let listed = searcher(&pool).search(q("list:just-synced")).await.unwrap();
+    let listed = searcher(&pool).await.search(q("list:just-synced")).await.unwrap();
     let in_list: Vec<(String, Option<String>)> = paths(&listed)
         .into_iter()
         .filter(|(id, _)| ids.contains(id))

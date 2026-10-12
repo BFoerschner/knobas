@@ -9,7 +9,10 @@
 //! **Through the two `knobas_core::payload` reads and nothing else**, the ones
 //! the statement's predicate uses (the deputy's ruling of 2026-10-11 on #594):
 //! a value is known if some live item declares a parent answering to it, or is
-//! a mirrored parent answering to it. Every source's rows are asked, whatever
+//! a mirrored parent answering to it. Since #627 the database runs those reads
+//! when an item or a declaration changes and keeps their answer in
+//! `sync.item_parent` (migration `0028`, ADR-0019), so a query reads an index
+//! instead of walking the mirror. Every source's rows are asked, whatever
 //! the query's `source:` or kind scope: a name that exists outside the scope is
 //! not a typo, and the empty result such a query gets is a true one.
 //!
@@ -23,45 +26,45 @@ use sqlx::PgPool;
 use crate::SearchError;
 use crate::query::Parsed;
 
-/// Every `(name, kind)` a parent answers to, through the declarations bound
-/// at `$decl`, as a table expression -- the one place the parent arms are
-/// put together, read by [`KNOWN_SQL`] here and by `crate::suggest`'s
-/// `PARENTS_SQL`, so what `under:` knows and what the box offers for it
-/// cannot drift apart (#615).
+/// Every `(name, kind)` a parent answers to, as a table expression -- the one
+/// place the parent arms are put together, read by [`KNOWN_SQL`] here and by
+/// `crate::suggest`'s `PARENTS_SQL`, so what `under:` knows and what the box
+/// offers for it cannot drift apart (#615).
 ///
-/// Three arms. A parent the live children declare -- mirrored or not, which
-/// is why the kind is the declaration's (#594). A live item answering to its
-/// sibling kinds' declared names, as its own kind. And the estate: every
-/// asset, answering to its name as `asset`.
+/// Two arms. **What the mirror's items answer to**, read off
+/// `sync.item_parent` (migration `0028`, #627): the parents a live item
+/// declares -- mirrored or not, which is why the kind is the declaration's
+/// (#594) -- and the names a live item answers to as a parent of its own
+/// kind. The database keeps that table to what the declarations say, through
+/// `knobas_core`'s `declared_parent_names!` and `declared_names_as_parent!`,
+/// so these rows are exactly what those two macros yielded per item when this
+/// fragment walked them itself -- which it did on every keystroke, at 335 ms
+/// for 100,000 items. And **the estate**: every asset, answering to its name
+/// as `asset`.
 ///
-/// `sync.live_item`, so a withdrawn item or a disabled source does not vouch
-/// for a name the corpus no longer has -- the same reason the coverage probe
-/// reads it. A deleted asset's row is gone, so `knobas.asset` needs no such
-/// view. The asset arm is the name `corpus::estate_subtree!` starts its walk
-/// from, and a reader's `lower(name)` filter reaches it as `lower(a.name)`,
-/// the same spelling: change one and the other must follow.
-///
-/// The two payload arms share one scan of `sync.live_item`, through one
-/// lateral: the query path pays for one pass over the mirror, not two.
+/// Joined to `sync.live_item`, so a withdrawn item or a disabled source does
+/// not vouch for a name the corpus no longer has -- the same reason the
+/// coverage probe reads it; the table holds every item, live or not. A
+/// deleted asset's row is gone, so `knobas.asset` needs no such view. The
+/// asset arm is the name `corpus::estate_subtree!` starts its walk from, and a
+/// reader's `lower(name)` filter reaches it as `lower(a.name)`, the same
+/// spelling: change one and the other must follow.
 macro_rules! parent_names {
-    ($decl:literal) => {
-        concat!(
-            "(select n.name, n.kind from sync.live_item i cross join lateral (select pn.name, pn.kind from ",
-            knobas_core::declared_parent_names!($decl),
-            " pn union all select sn.name, i.kind from ",
-            knobas_core::declared_names_as_parent!($decl),
-            " sn) n union all select a.name, 'asset' from knobas.asset a)"
-        )
+    () => {
+        "(select ip.name, ip.kind from sync.item_parent ip \
+           join sync.live_item i on i.entity_id = ip.entity_id \
+         union all select a.name, 'asset' from knobas.asset a)"
     };
 }
 pub(crate) use parent_names;
 
-/// The distinct lowercased names among `$2` that a parent answers to, through
-/// the declarations bound at `$1`: [`parent_names!`] without the kind.
+/// The distinct lowercased names among `$1` that a parent answers to:
+/// [`parent_names!`] without the kind. `lower(ip.name)` is
+/// `item_parent_name_idx`'s expression, so the mirror's arm is an index read.
 const KNOWN_SQL: &str = concat!(
     "select distinct lower(p.name) from ",
-    parent_names!("$1"),
-    " p where lower(p.name) = any($2)"
+    parent_names!(),
+    " p where lower(p.name) = any($1)"
 );
 
 /// Report every `under:` value no parent answers to as an unknown token, in
@@ -84,7 +87,6 @@ pub(crate) async fn report_unknown(pool: &PgPool, parsed: &mut Parsed) -> Result
         .map(|(_, value)| value.clone())
         .collect();
     let known: Vec<String> = sqlx::query_scalar(KNOWN_SQL)
-        .bind(parsed.declarations.as_param())
         .bind(&values)
         .fetch_all(pool)
         .await?;

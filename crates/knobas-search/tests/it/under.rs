@@ -52,8 +52,10 @@ async fn pool() -> sqlx::PgPool {
 /// The searcher the app builds: the adapters' declared payload paths, Gitea's
 /// among them. Uptime Kuma's template is not passed, and that is the point of
 /// it here -- a source whose adapter declares nothing declares no parent.
-fn searcher(pool: &sqlx::PgPool) -> Searcher {
-    Searcher::new(pool.clone()).with_payload_paths([knobas_source_gitea::descriptor_template()])
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap()
 }
 
 async fn item(
@@ -183,7 +185,7 @@ async fn under_a_repo_returns_its_branches_prs_and_commits_and_the_repo() {
         format!("under:{}", name.to_uppercase()),
         format!("UNDER:{}/{}", owner.to_lowercase(), name.to_uppercase()),
     ] {
-        let response = searcher(&pool).search(q(&raw)).await.unwrap();
+        let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
         assert_eq!(ids(&response), sorted(ours.clone()), "{raw}");
         assert!(
             response.interpreted.unknown_tokens.is_empty(),
@@ -203,13 +205,13 @@ async fn a_bare_name_two_owners_share_scopes_to_both() {
     let first = repo(&pool, &format!("alpha{t}"), &name, "one").await;
     let second = repo(&pool, &format!("beta{t}"), &name, "two").await;
 
-    let both = searcher(&pool)
+    let both = searcher(&pool).await
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
     assert_eq!(ids(&both), sorted([first.clone(), second].concat()));
 
-    let one = searcher(&pool)
+    let one = searcher(&pool).await
         .search(q(&format!("under:alpha{t}/{name}")))
         .await
         .unwrap();
@@ -227,7 +229,7 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
     let b = repo(&pool, &format!("o{t}"), &format!("b-{t}"), "second").await;
     repo(&pool, &format!("o{t}"), &format!("c-{t}"), "third").await;
 
-    let union = searcher(&pool)
+    let union = searcher(&pool).await
         .search(q(&format!("under:a-{t} under:b-{t}")))
         .await
         .unwrap();
@@ -235,7 +237,7 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
     assert!(union.interpreted.unknown_tokens.is_empty());
 
     let nope = format!("under:nope-{t}");
-    let unknown = searcher(&pool).search(q(&nope)).await.unwrap();
+    let unknown = searcher(&pool).await.search(q(&nope)).await.unwrap();
     assert_eq!(
         unknown.interpreted.unknown_tokens,
         std::slice::from_ref(&nope)
@@ -244,7 +246,7 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
 
     // One known and one unknown: the known one still scopes, the unknown one
     // is still reported.
-    let mixed = searcher(&pool)
+    let mixed = searcher(&pool).await
         .search(q(&format!("under:a-{t} {nope}")))
         .await
         .unwrap();
@@ -276,7 +278,7 @@ async fn under_a_repo_with_words_finds_the_commit_that_mentions_them() {
     )
     .await;
 
-    let response = searcher(&pool)
+    let response = searcher(&pool).await
         .search(q(&format!("under:{name} jitter{t}")))
         .await
         .unwrap();
@@ -306,7 +308,7 @@ async fn a_plain_repo_name_finds_the_repo_and_not_its_contents() {
     )
     .await;
 
-    let response = searcher(&pool).search(q(&full)).await.unwrap();
+    let response = searcher(&pool).await.search(q(&full)).await.unwrap();
     assert_eq!(ids(&response), vec![ours[0].clone()]);
 }
 
@@ -330,7 +332,7 @@ async fn coverage_names_a_source_that_declares_no_parent() {
     )
     .await;
 
-    let response = searcher(&pool)
+    let response = searcher(&pool).await
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
@@ -357,7 +359,7 @@ async fn coverage_names_a_source_that_declares_no_parent() {
     );
 
     // And a query that asked no under: question reports nothing about it.
-    let plain = searcher(&pool).search(q(&name)).await.unwrap();
+    let plain = searcher(&pool).await.search(q(&name)).await.unwrap();
     assert!(plain.coverage.is_empty());
 }
 
@@ -371,7 +373,7 @@ async fn a_saved_list_holding_under_runs_it() {
     let ours = repo(&pool, &format!("o{t}"), &name, "first").await;
     repo(&pool, &format!("o{t}"), &format!("other-{t}"), "second").await;
 
-    let saved = searcher(&pool)
+    let saved = searcher(&pool).await
         .save_list(&format!("Everything in {name}"), &format!("under:{name}"))
         .await
         .unwrap();
@@ -380,7 +382,7 @@ async fn a_saved_list_holding_under_runs_it() {
         "the rail counts the repo and its three children"
     );
 
-    let opened = searcher(&pool)
+    let opened = searcher(&pool).await
         .smart_list_items(&saved.id, 30)
         .await
         .unwrap();
@@ -494,7 +496,7 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
         format!("under:{}", host.to_lowercase()),
         format!("UNDER:{}", host.to_uppercase()),
     ] {
-        let response = searcher(&pool).search(q(&raw)).await.unwrap();
+        let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
         assert_eq!(ids(&response), ours, "{raw}");
         assert!(
             response.interpreted.unknown_tokens.is_empty(),
@@ -505,7 +507,7 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
 
     // Each row carries its ancestor chain; a route carries its asset's chain
     // and the asset itself, which is where it sits.
-    let response = searcher(&pool)
+    let response = searcher(&pool).await
         .search(q(&format!("under:{host}")))
         .await
         .unwrap();
@@ -552,7 +554,7 @@ async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
     )
     .await;
 
-    let estate_only = searcher(&pool)
+    let estate_only = searcher(&pool).await
         .search(q(&format!("asset: under:{host}")))
         .await
         .unwrap();
@@ -563,7 +565,7 @@ async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
         estate_only.coverage
     );
 
-    let everywhere = searcher(&pool)
+    let everywhere = searcher(&pool).await
         .search(q(&format!("under:{host}")))
         .await
         .unwrap();
@@ -599,7 +601,7 @@ async fn a_quoted_name_with_a_space_scopes_like_any_other() {
     let ours = repo(&pool, &format!("o{t}"), &name, "first").await;
 
     let raw = format!("under:\"{name}\"");
-    let response = searcher(&pool).search(q(&raw)).await.unwrap();
+    let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
     assert_eq!(ids(&response), sorted(ours));
     assert!(
         response.interpreted.unknown_tokens.is_empty(),
