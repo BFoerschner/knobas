@@ -1284,7 +1284,10 @@ async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_th
 /// So against this server the `epic_link_field` option is not a fallback for
 /// old instances -- it is the only path to epic membership, and a source
 /// configured without it mirrors none. That is the claim, and mockd's
-/// two-spellings convenience is what hid it.
+/// two-spellings convenience is what hid it. The adapter now also stores the
+/// relation as `epic: {"key": …}` beside the record, which is what `under:`
+/// reads on this server -- `fields.parent` stays absent, as asserted here (the
+/// deputy's ruling of 2026-10-12 on #598).
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn epic_membership_lives_in_the_epic_link_field_and_parent_is_absent() {
@@ -1538,6 +1541,82 @@ async fn the_search_that_reads_as_an_empty_corpus_is_never_the_first_call() {
     );
 }
 
+/// **`under:PAY-200` returns the epic's five children and the epic itself,
+/// and nothing else** (#598, ADR-0018).
+///
+/// On this classic project epic membership is only in the Epic Link field, so
+/// the children reach PAY-200 through the `epic` object `map` stores when that
+/// field is configured -- the descriptor's second parent candidate -- and
+/// PAY-200 answers to its own key through `resolve_names_as_parent`. The set is
+/// computed with `knobas_core::payload`'s resolvers over the descriptor's own
+/// declaration, the Rust half of the rule the SQL `under:` predicate is the
+/// other half of, held together by `knobas-core`'s agreement test; matched
+/// ignoring case, as `under:` matches. The expected keys are the fixture's,
+/// not what the resolver read. The search seam over these shapes is
+/// `knobas-search`'s `under_jira.rs`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
+    use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(
+        &*seeded.source(serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field })),
+    )
+    .await;
+    let declarations = knobas_source_jira::descriptor_template().payload_paths;
+    let declared = &declarations
+        .iter()
+        .find(|paths| paths.kind == "ticket")
+        .expect("a ticket declares its parent")
+        .parent;
+
+    let under = |value: &str| -> Vec<String> {
+        let mut found: Vec<String> = items
+            .iter()
+            .filter(|it| {
+                let names = resolve_parents(&it.payload, declared)
+                    .into_iter()
+                    .flat_map(|p| p.names)
+                    .chain(resolve_names_as_parent(
+                        &it.payload,
+                        &it.kind,
+                        &declarations,
+                    ));
+                names.into_iter().any(|n| n.eq_ignore_ascii_case(value))
+            })
+            .map(|it| it.entity.key.clone())
+            .collect();
+        found.sort();
+        found
+    };
+    let expected = [
+        "PAY-200", "PAY-219", "PAY-228", "PAY-231", "PAY-236", "PAY-240",
+    ];
+    assert_eq!(under("PAY-200"), expected);
+    assert_eq!(under("pay-200"), expected, "under: matches ignoring case");
+
+    for key in &expected[1..] {
+        let child = item(&items, key);
+        assert_eq!(
+            child.payload["epic"],
+            serde_json::json!({ "key": "PAY-200" }),
+            "{key} carries the epic the adapter stored from {}",
+            seeded.seed.epic_link_field
+        );
+        let parents = resolve_parents(&child.payload, declared);
+        assert_eq!(parents.len(), 1, "{key} sits in one epic: {parents:?}");
+        assert_eq!(parents[0].kind, "ticket");
+        assert_eq!(parents[0].names, vec!["PAY-200".to_owned()]);
+    }
+    assert!(
+        item(&items, "PAY-200").payload.get("epic").is_none(),
+        "the epic belongs to no epic, so nothing is stored for it"
+    );
+    println!("SEEDED under:PAY-200 -> {:?}", under("PAY-200"));
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides.
 ///
@@ -1551,8 +1630,15 @@ async fn the_search_that_reads_as_an_empty_corpus_is_never_the_first_call() {
 async fn passes_the_contract_battery_against_the_seeded_server() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
+    // Configured the way the Add-source dialog leaves a source: with the Epic
+    // Link field *Test connection* discovered, which is "what every source
+    // created through the Add-source dialog ends up in" (#381). An
+    // unconfigured classic source fails clause 6, and correctly: it stores no
+    // `epic`, serves no `fields.parent`, and so every `under:` read on it
+    // misses (the deputy's ruling of 2026-10-12 on #598).
+    let configured = serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field });
     battery(move |fault| match fault {
-        Fault::None => seeded.source(serde_json::json!({})),
+        Fault::None => seeded.source(configured.clone()),
         // A bearer token, not a wrong password: the battery builds a faulted
         // adapter twice and then calls the healthy one again (clauses 5 and 6),
         // and a wrong password would have locked the account out by then.

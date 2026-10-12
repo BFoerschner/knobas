@@ -90,8 +90,25 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// instance whose workflow spells it otherwise contributes no blocker by
 /// status -- absence, never a wrong one -- and a per-instance list is a
 /// configuration key the day one is asked for, not a guess made here.
+///
+/// **A ticket's parent is its epic or parent issue** (ADR-0018, #598), read
+/// off the `fields.parent` object Jira nests in an issue record: a sub-task's
+/// parent issue, and the epic on a next-gen or recent company-managed project.
+/// It answers to its `key` -- `PAY-200` -- which is also on every issue
+/// record's root, so the names declared for it resolve on a ticket's own
+/// record too, and `under:PAY-200` returns the epic itself when it is
+/// mirrored. An epic outside the synced JQL is still the parent its children
+/// name. Not the summary: two epics may share one, and nobody types it.
+///
+/// **Two candidates, first that resolves wins.** A classic Data Center project
+/// serves no `fields.parent` for epic children: it keeps the epic in the Epic
+/// Link custom field, whose id is the instance's own, so `map` stores it as
+/// `epic: {"key": …}` when `epic_link_field` is configured, and that is the
+/// second candidate (the deputy's ruling of 2026-10-12 on #598). A sub-task's
+/// direct parent comes first. On any one instance one of the two is unused,
+/// which is what clause 6's shared evidence slot tolerates (#301).
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, PayloadPath};
+    use knobas_source::{KindPaths, ParentPath, PayloadPath};
     vec![KindPaths {
         kind: crate::KIND_TICKET.to_owned(),
         status_name: vec![PayloadPath::of(["fields", "status", "name"])],
@@ -106,6 +123,18 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             "Blocked".to_owned(),
             "On Hold".to_owned(),
             "Impediment".to_owned(),
+        ],
+        parent: vec![
+            ParentPath {
+                kind: crate::KIND_TICKET.to_owned(),
+                at: PayloadPath::of(["fields", "parent"]),
+                names: vec![PayloadPath::of(["key"])],
+            },
+            ParentPath {
+                kind: crate::KIND_TICKET.to_owned(),
+                at: PayloadPath::of(["epic"]),
+                names: vec![PayloadPath::of(["key"])],
+            },
         ],
         ..KindPaths::default()
     }]
@@ -298,6 +327,79 @@ mod tests {
             );
         }
         crate::JiraConfig::from_json(&serde_json::Value::Object(object)).unwrap();
+    }
+
+    /// A ticket sits in its epic or parent issue (ADR-0018, #598), read off
+    /// the `fields.parent` object Jira nests in an issue record, or else off the
+    /// `epic` object `map` stores from a classic project's Epic Link field (the
+    /// deputy's ruling of 2026-10-12 on #598), and that parent
+    /// answers to its **key** -- the name `under:PAY-100` types and a path line
+    /// shows. The golden epic is the parent's own record shape, so its root
+    /// carries the same key: that is how `under:` returns the epic itself.
+    #[test]
+    fn a_ticket_declares_fields_parent_as_its_parent_answered_to_by_key() {
+        use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
+        use knobas_source::{ParentPath, PayloadPath};
+        let declarations = descriptor_template().payload_paths;
+        let declared = &declarations
+            .iter()
+            .find(|paths| paths.kind == crate::KIND_TICKET)
+            .expect("a ticket declares its paths")
+            .parent;
+        assert_eq!(
+            declared,
+            &vec![
+                ParentPath {
+                    kind: "ticket".to_owned(),
+                    at: PayloadPath::of(["fields", "parent"]),
+                    names: vec![PayloadPath::of(["key"])],
+                },
+                ParentPath {
+                    kind: "ticket".to_owned(),
+                    at: PayloadPath::of(["epic"]),
+                    names: vec![PayloadPath::of(["key"])],
+                },
+            ]
+        );
+
+        // Against the golden records: a child naming PAY-200 resolves to one
+        // ticket parent called PAY-200, and the golden epic (no parent of its
+        // own) answers to PAY-200 as a parent.
+        let child = serde_json::json!({
+            "key": "PAY-231",
+            "fields": { "parent": { "id": "10200", "key": "PAY-200",
+                                    "fields": { "summary": "SEPA payout reliability" } } }
+        });
+        let parents = resolve_parents(&child, declared);
+        assert_eq!(parents.len(), 1, "{parents:?}");
+        assert_eq!(parents[0].kind, "ticket");
+        assert_eq!(parents[0].names, vec!["PAY-200".to_owned()]);
+
+        // A classic project's epic, stored by `map` as `epic` (#598), is the
+        // second candidate; a sub-task's direct parent, the first, wins.
+        let classic = serde_json::json!({
+            "key": "PAY-219", "epic": { "key": "PAY-200" },
+            "fields": { "customfield_10108": "PAY-200" }
+        });
+        let parents = resolve_parents(&classic, declared);
+        assert_eq!(parents.len(), 1, "{parents:?}");
+        assert_eq!(parents[0].names, vec!["PAY-200".to_owned()]);
+        let sub_task = serde_json::json!({
+            "key": "PAY-250", "epic": { "key": "PAY-200" },
+            "fields": { "parent": { "key": "PAY-219" } }
+        });
+        assert_eq!(
+            resolve_parents(&sub_task, declared)[0].names,
+            vec!["PAY-219".to_owned()]
+        );
+
+        let epic: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/golden/issue-epic.json")).unwrap();
+        assert!(resolve_parents(&epic, declared).is_empty());
+        assert_eq!(
+            resolve_names_as_parent(&epic, "ticket", &declarations),
+            vec!["PAY-200".to_owned()]
+        );
     }
 
     /// The descriptor crosses the IPC bridge as plain data (spec §3a).

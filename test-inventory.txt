@@ -1605,6 +1605,10 @@ knobas-search	test/it	under::repeated_values_are_a_union_and_an_unmatched_one_is
 knobas-search	test/it	under::under_a_repo_returns_its_branches_prs_and_commits_and_the_repo
 knobas-search	test/it	under::under_a_repo_with_words_finds_the_commit_that_mentions_them
 knobas-search	test/it	under::under_an_asset_returns_its_whole_subtree_and_the_asset
+knobas-search	test/it	under_jira::a_ticket_carries_its_epic_as_path
+knobas-search	test/it	under_jira::under_an_epic_key_returns_classic_children_through_the_stored_epic
+knobas-search	test/it	under_jira::under_an_epic_key_returns_its_tickets_and_the_epic
+knobas-search	test/it	under_jira::under_an_epic_that_is_not_mirrored_still_returns_its_tickets
 knobas-search	test/it	under_teamcity::a_build_carries_its_configuration_as_path_and_keeps_its_title
 knobas-search	test/it	under_teamcity::under_a_configuration_by_name_or_id_returns_its_builds_and_itself
 knobas-search	test/it	vocab::a_blank_username_is_nobody
@@ -1984,6 +1988,7 @@ knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_covers_the
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_is_capped_at_the_newest_entries
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_is_ordered_newest_first_however_it_arrived
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::a_full_sync_is_the_whole_corpus
+knobas-source-jira	lib/knobas_source_jira	descriptor::tests::a_ticket_declares_fields_parent_as_its_parent_answered_to_by_key
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_epic_link_help_text_offers_no_example_id
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_full_sync_claim_rests_on_a_query_with_no_time_bound
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_and_the_config_struct_agree
@@ -2022,12 +2027,15 @@ knobas-source-jira	lib/knobas_source_jira	jql::tests::a_full_sync_is_scoped_and_
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_incremental_query_carries_the_watermark_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_unscoped_full_sync_is_still_valid_jql
 knobas-source-jira	lib/knobas_source_jira	jql::tests::project_keys_are_quoted
+knobas-source-jira	lib/knobas_source_jira	map::tests::a_configured_epic_link_is_stored_as_epic_beside_the_record
 knobas-source-jira	lib/knobas_source_jira	map::tests::a_trailing_slash_on_the_base_url_does_not_double
 knobas-source-jira	lib/knobas_source_jira	map::tests::a_truncated_comment_container_is_visible
 knobas-source-jira	lib/knobas_source_jira	map::tests::an_epic_is_a_ticket_whose_payload_still_says_epic
+knobas-source-jira	lib/knobas_source_jira	map::tests::an_epic_key_the_record_already_has_is_kept
 knobas-source-jira	lib/knobas_source_jira	map::tests::an_unassigned_issue_has_no_author
 knobas-source-jira	lib/knobas_source_jira	map::tests::body_text_is_what_search_will_match_on
 knobas-source-jira	lib/knobas_source_jira	map::tests::maps_an_issue_the_way_the_conventions_say
+knobas-source-jira	lib/knobas_source_jira	map::tests::no_epic_is_stored_without_an_epic_link_value
 knobas-source-jira	lib/knobas_source_jira	map::tests::payload_keeps_the_record_verbatim
 knobas-source-jira	lib/knobas_source_jira	map::tests::reads_the_pagination_envelope_the_wadl_documents
 knobas-source-jira	lib/knobas_source_jira	map::tests::setting_comments_rewrites_the_payload_too
@@ -2125,6 +2133,7 @@ knobas-source-jira	test/live_jira_seeded	the_cleanup_reports_a_server_it_cannot_
 knobas-source-jira	test/live_jira_seeded	the_project_key_and_name_are_where_adr_0010_reads_them
 knobas-source-jira	test/live_jira_seeded	the_search_that_reads_as_an_empty_corpus_is_never_the_first_call
 knobas-source-jira	test/live_jira_seeded	two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink
+knobas-source-jira	test/live_jira_seeded	under_the_seeded_epic_returns_its_five_children_and_the_epic
 knobas-source-kuma	lib/knobas_source_kuma	config::tests::a_key_the_schema_does_not_describe_is_refused
 knobas-source-kuma	lib/knobas_source_kuma	config::tests::an_empty_blob_is_the_defaults
 knobas-source-kuma	lib/knobas_source_kuma	config::tests::the_degenerate_values_are_refused_by_name
