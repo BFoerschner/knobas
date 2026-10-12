@@ -6,7 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { SourceView as View, ViewSection } from "../../ipc/entity";
+import type { SourceView as View, ViewAction, ViewSection } from "../../ipc/entity";
 
 /** Every deferred read, as `[entity, section]`. */
 const reads: [string, string | null][] = [];
@@ -80,7 +80,12 @@ const VIEW: View = {
   ],
 };
 
-function render(view: View = VIEW) {
+/** Every action the view asked to queue, as `[write_op, option]`. */
+const queued: [string, string | null][] = [];
+/** What the next `onaction` answers: whether the write was queued. */
+let queues: () => Promise<boolean> = () => Promise.resolve(true);
+
+function render(view: View = VIEW, writeOps: string[] = []) {
   const target = document.createElement("div");
   document.body.append(target);
   const navigated: string[] = [];
@@ -91,8 +96,13 @@ function render(view: View = VIEW) {
       view,
       webUrl: null,
       sourceName: "Tidewater Git",
+      writeOps,
       onnavigate: (hash: string) => navigated.push(hash),
       onopenurl: () => {},
+      onaction: (action: ViewAction, option: string | null) => {
+        queued.push([action.write_op, option]);
+        return queues();
+      },
     },
   });
   flushSync();
@@ -111,6 +121,9 @@ function render(view: View = VIEW) {
 
 beforeEach(() => {
   reads.length = 0;
+  queued.length = 0;
+  queues = () => Promise.resolve(true);
+  document.body.replaceChildren();
   answer = (section) => Promise.resolve({ sections: [log(section ?? "log", false)] });
 });
 
@@ -212,4 +225,125 @@ test("arrow keys move between tabs", () => {
   expect(screen.tabs()[1]!.getAttribute("aria-selected")).toBe("true");
   expect(document.activeElement).toBe(screen.tabs()[1]);
   screen.done();
+});
+
+const MERGE: ViewAction = {
+  write_op: "merge_pull_request",
+  label: "Merge…",
+  options: ["merge", "rebase", "squash"],
+  confirm: "Merge <b>feature/x</b> into main?",
+};
+
+function withActions(...actions: ViewAction[]): View {
+  return {
+    sections: [
+      {
+        id: "overview",
+        title: "Overview",
+        count: null,
+        deferred: false,
+        blocks: [
+          { type: "facts", facts: [{ label: "State", value: "open", tone: "info" }] },
+          { type: "actions", actions },
+        ],
+      },
+    ],
+  };
+}
+
+function buttons(root: ParentNode): HTMLButtonElement[] {
+  return [...root.querySelectorAll<HTMLButtonElement>("button")];
+}
+
+function button(root: ParentNode, text: string): HTMLButtonElement | undefined {
+  return buttons(root).find((b) => b.textContent!.replace(/\s+/g, " ").trim() === text);
+}
+
+test("an action is drawn only where the source declares its op", () => {
+  const undeclared = render(withActions(MERGE), ["comment", "approve"]);
+  expect(button(undeclared.panel(), "Merge…")).toBeUndefined();
+  expect(undeclared.panel().querySelector(".ab"), "no empty strip either").toBeNull();
+  undeclared.done();
+
+  const declared = render(withActions(MERGE), ["comment", "merge_pull_request"]);
+  expect(button(declared.panel(), "Merge…")).toBeDefined();
+  declared.done();
+});
+
+test("an action opens its dialog, the first option picked, and queues the one chosen", async () => {
+  const screen = render(withActions(MERGE), ["merge_pull_request"]);
+  button(screen.panel(), "Merge…")!.click();
+  flushSync();
+
+  const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
+  expect(dialog).not.toBeNull();
+  // The sentence is source text: drawn, never rendered.
+  expect(dialog.textContent).toContain("Merge <b>feature/x</b> into main?");
+  expect(dialog.querySelector("b")).toBeNull();
+  const radios = [...dialog.querySelectorAll<HTMLButtonElement>("[role=radio]")];
+  expect(radios.map((r) => r.textContent!.trim())).toEqual(["merge", "rebase", "squash"]);
+  expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+  expect(queued, "nothing is queued by opening the dialog").toEqual([]);
+
+  radios[2]!.click();
+  flushSync();
+  expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+  button(dialog, "Merge")!.click();
+  flushSync();
+  expect(queued).toEqual([["merge_pull_request", "squash"]]);
+  await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
+  screen.done();
+});
+
+test("a write that could not be queued keeps the dialog open; cancelling queues nothing", async () => {
+  queues = () => Promise.resolve(false);
+  const screen = render(withActions(MERGE), ["merge_pull_request"]);
+  button(screen.panel(), "Merge…")!.click();
+  flushSync();
+  button(document.querySelector("[role=dialog]")!, "Merge")!.click();
+  await new Promise((settle) => setTimeout(settle, 0));
+  flushSync();
+  expect(queued).toEqual([["merge_pull_request", "merge"]]);
+  expect(document.querySelector("[role=dialog]"), "still open to try again").not.toBeNull();
+
+  button(document.querySelector("[role=dialog]")!, "Cancel")!.click();
+  flushSync();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(queued).toHaveLength(1);
+  screen.done();
+});
+
+test("an action with no options and no sentence queues on the button", () => {
+  const run: ViewAction = { write_op: "merge_pull_request", label: "Merge", options: [], confirm: null };
+  const screen = render(withActions(run), ["merge_pull_request"]);
+  button(screen.panel(), "Merge")!.click();
+  flushSync();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(queued).toEqual([["merge_pull_request", null]]);
+  screen.done();
+});
+
+test("a view read again drops the deferred tabs it had read, and reads the open one afresh", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const props = $state({
+    entityId: "gitea:tidewater/payout-service#142",
+    view: { sections: [log("log", true)] } as View,
+    webUrl: null,
+    sourceName: "Tidewater Git",
+    writeOps: [] as string[],
+    onnavigate: () => {},
+    onopenurl: () => {},
+    onaction: () => Promise.resolve(true),
+  });
+  const app = mount(SourceView, { target, props });
+  flushSync();
+  await vi.waitFor(() => expect(target.textContent).toContain("step 3 failed"));
+  expect(reads).toHaveLength(1);
+
+  props.view = { sections: [log("log", true)] };
+  flushSync();
+  await vi.waitFor(() => expect(reads).toHaveLength(2));
+  unmount(app);
+  target.remove();
 });

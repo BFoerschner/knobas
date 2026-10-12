@@ -21,6 +21,7 @@
     type EntityDetail,
     type LinkEntry,
     type SourceView as SourceViewData,
+    type ViewAction,
   } from "../ipc/entity";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
@@ -39,6 +40,7 @@
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
+  import { actionName, actionPayload } from "./view/actions";
   import {
     pageSections,
     replaceSectionBody,
@@ -122,7 +124,8 @@
    * generation of the `get_entity` it follows: an answer for an address the
    * panel has left is dropped exactly as a stale entity read is. Not re-read
    * by `refresh()`: a link drawn or withdrawn changes the mirror's row, not
-   * what the source draws.
+   * what the source draws. A write queued from the view is what re-reads it
+   * (`rereadView`).
    */
   function readView(id: string, mine: number) {
     rawOpen = false;
@@ -133,6 +136,53 @@
       .catch((rejection: unknown) => {
         if (mine === token) viewFailure = ipcErrorMessage(rejection);
       });
+  }
+
+  /**
+   * Read the source's view again without blanking the panel (#667).
+   *
+   * What a write from the view needs: `submit_write` flushes before it answers,
+   * so a merge that went is already at the source, and a view that still
+   * offered *Merge…* would be offering what has happened. Kept on `token` like
+   * `refresh()`; a failed re-read keeps the view that was drawn and says so.
+   */
+  async function rereadView() {
+    const mine = token;
+    try {
+      const answer = await entityView(entityId);
+      if (mine !== token) return;
+      sourceView = answer;
+      viewFailure = null;
+    } catch (rejection) {
+      if (mine !== token) return;
+      push({ text: `Could not re-read this item's view: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    }
+  }
+
+  /**
+   * Queue a view's action against this entity (#667, ADR-0020 rule 4).
+   *
+   * The payload is `actions.ts`'s to build; this panel only queues it, says
+   * so, and reads the mirror and the view again. Answers whether the write was
+   * queued, so the action's dialog stays up on a refusal.
+   */
+  async function queueAction(action: ViewAction, option: string | null): Promise<boolean> {
+    const name = actionName(action.label);
+    const payload = actionPayload(action, entityId, option);
+    if (payload === null) {
+      push({ text: `Could not queue the ${name.toLowerCase()}: knobas cannot send it`, tone: "err" });
+      return false;
+    }
+    try {
+      await submitWrite(payload);
+    } catch (rejection) {
+      push({ text: `Could not queue the ${name.toLowerCase()}: ${ipcErrorMessage(rejection)}`, tone: "err" });
+      return false;
+    }
+    push({ text: `${name} queued for ${key}` });
+    await refresh();
+    await rereadView();
+    return true;
   }
 
   /**
@@ -971,8 +1021,10 @@
           view={sourceView}
           webUrl={webUrl}
           sourceName={detail.source.display_name}
+          writeOps={kindRegistry.writeOps(detail.source.adapter_kind)}
           {onnavigate}
           onopenurl={(url) => void open(url)}
+          onaction={queueAction}
         />
       {/if}
 

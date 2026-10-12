@@ -758,6 +758,24 @@ export interface ViewRow {
   url: string | null;
 }
 
+/**
+ * One write a view offers from here (#667) — `knobas_source::view::ViewAction`.
+ *
+ * The adapter draws it only while the source offers the write right now; the
+ * shell draws it only where the source's descriptor declares `write_op`, and
+ * queues it against the entity the view is of.
+ */
+export interface ViewAction {
+  /** The `WriteOp` identifier it queues. */
+  write_op: string;
+  /** The button's words (`Merge…`). */
+  label: string;
+  /** The dialog's choices, in the op's own words; the first is the default. */
+  options: string[];
+  /** The dialog's sentence. `null` queues on the button, with no dialog. */
+  confirm: string | null;
+}
+
 export interface Setting {
   name: string;
   /** Empty for a `secret` value: the adapter never sends one. */
@@ -815,7 +833,8 @@ export type ViewBlock =
       entity: string;
       write_op: string;
       values: Setting[];
-    };
+    }
+  | { type: "actions"; actions: ViewAction[] };
 
 /** One tab. A `deferred` one carries no blocks until its own read. */
 export interface ViewSection {

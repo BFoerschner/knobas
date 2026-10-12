@@ -3,7 +3,8 @@
   for one of its kinds, as tabs over the detail.
 
   The shell draws the vocabulary and never learns which adapter drew it -- so
-  nothing here names a source, a kind or a field. One component per block, in
+  nothing here names a source, a kind or a field. An actions block draws only
+  the actions whose op the source declares (#667). One component per block, in
   this folder; a block this file does not know is not drawn (the vocabulary is
   frozen, and a new block arrives with its component in the same change).
 
@@ -14,8 +15,16 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import { entityView, type ViewBlock, type SourceView, type ViewSection } from "../../ipc/entity";
+  import {
+    entityView,
+    type ViewAction,
+    type ViewBlock,
+    type SourceView,
+    type ViewSection,
+  } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
+  import ActionsBlock from "./ActionsBlock.svelte";
+  import { offeredActions } from "./actions";
   import DiffBlock from "./DiffBlock.svelte";
   import EntitiesBlock from "./EntitiesBlock.svelte";
   import FactsBlock from "./FactsBlock.svelte";
@@ -28,16 +37,25 @@
     view,
     webUrl,
     sourceName,
+    writeOps,
     onnavigate,
     onopenurl,
+    onaction,
   }: {
     entityId: string;
     view: SourceView;
     /** The entity's page at its source, for a block that was cut. */
     webUrl: string | null;
     sourceName: string;
+    /**
+     * The write ops the entity's source declares. An action is drawn only
+     * where its op is among them (#667): `submit_write` refuses any other.
+     */
+    writeOps: string[];
     onnavigate: (hash: string) => void;
     onopenurl: (url: string) => void;
+    /** Queue an action's write; answers whether it was queued. */
+    onaction: (action: ViewAction, option: string | null) => Promise<boolean>;
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */
@@ -49,6 +67,20 @@
   /** A deferred section's own read, by id: in flight, failed, or answered. */
   type Read = { state: "reading" } | { state: "failed"; message: string } | { state: "read"; blocks: ViewBlock[] };
   let reads = $state<Record<string, Read>>({});
+
+  /**
+   * A view read again (after a write, #667) drops the deferred tabs it read
+   * before: their blocks were of the view that was. `seenView` is a plain
+   * `let`, so writing it does not re-run this; the first run only records it.
+   */
+  let seenView: SourceView | null = null;
+  $effect(() => {
+    const now = view;
+    const before = seenView;
+    seenView = now;
+    if (before === null || before === now) return;
+    untrack(() => (reads = {}));
+  });
 
   /** Unique per instance, so tab and panel ids cannot collide. */
   const uid = Math.random().toString(36).slice(2, 9);
@@ -107,9 +139,25 @@
 
   const shown = $derived.by((): Read | null => {
     if (!current) return null;
-    if (!current.deferred) return { state: "read", blocks: current.blocks };
-    return reads[current.id] ?? { state: "reading" };
+    const read: Read = current.deferred
+      ? (reads[current.id] ?? { state: "reading" })
+      : { state: "read", blocks: current.blocks };
+    if (read.state !== "read") return read;
+    return { state: "read", blocks: offered(read.blocks) };
   });
+
+  /**
+   * The blocks as drawn: an actions block keeps only the actions the source
+   * declares, and goes when none is left -- an action is absent, not
+   * disabled, where it cannot be taken.
+   */
+  function offered(blocks: ViewBlock[]): ViewBlock[] {
+    return blocks.flatMap((block): ViewBlock[] => {
+      if (block.type !== "actions") return [block];
+      const actions = offeredActions(block.actions, writeOps);
+      return actions.length === 0 ? [] : [{ type: "actions", actions }];
+    });
+  }
 </script>
 
 {#if current}
@@ -167,6 +215,8 @@
               <LogBlock text={block.text} truncated={block.truncated} />
             {:else if block.type === "settings"}
               <SettingsBlock title={block.title} values={block.values} />
+            {:else if block.type === "actions"}
+              <ActionsBlock actions={block.actions} {onaction} />
             {/if}
           </div>
         {/each}
