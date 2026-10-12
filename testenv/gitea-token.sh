@@ -26,7 +26,7 @@ gitea_seed_token_name() {
 # gitea_seed_token <api url> <admin user:pass> <recorded token or ""> <name>
 # Prints the token to use. A recorded token is kept while Gitea accepts it --
 # one call to /user -- whatever its name, so a tree still holding a working
-# pre-#684 `knobas-seed` token keeps it. One Gitea refuses (401) is replaced:
+# pre-#684 `knobas-seed` token keeps it. A token Gitea refuses (401) is replaced:
 # tokens named <name> are deleted and one is minted under it. Any other answer
 # to the probe, or none, is a refusal that changes nothing: replacing a token
 # on a guess would cost a working one.
@@ -58,13 +58,17 @@ gitea_seed_token() {
 }
 
 # _gt_req <user:pass> <METHOD> <url> [<json body>] -- sets _GT_STATUS, _GT_BODY.
+# Fails, saying so, when curl got no answer at all; an HTTP error is an answer
+# and the caller judges it.
 _gt_req() {
   if [ "$#" -gt 3 ]; then
     _gt_raw=$(curl -sS -u "$1" -X "$2" -H 'Content-Type: application/json' \
-                -H 'Accept: application/json' -w '\n%{http_code}' -d "$4" "$3") || true
+                -H 'Accept: application/json' -w '\n%{http_code}' -d "$4" "$3") \
+      || { echo "seed-gitea: $2 $3: no answer" >&2; return 1; }
   else
     _gt_raw=$(curl -sS -u "$1" -X "$2" -H 'Accept: application/json' \
-                -w '\n%{http_code}' "$3") || true
+                -w '\n%{http_code}' "$3") \
+      || { echo "seed-gitea: $2 $3: no answer" >&2; return 1; }
   fi
   _GT_STATUS=$(printf '%s' "$_gt_raw" | tail -n 1)
   _GT_BODY=$(printf '%s' "$_gt_raw" | sed '$d')

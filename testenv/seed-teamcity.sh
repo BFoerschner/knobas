@@ -434,7 +434,8 @@ if [ -z "$TOKEN" ]; then
   # 3. One access token. TeamCity shows a token's value exactly once, at
   #    creation, and refuses a second token with the same name, so a stale
   #    knobas-seed (a previous run whose seed-state.json is gone) is deleted
-  #    before minting -- the Gitea seed's rule.
+  #    before minting. This is still one shared name, as the Gitea seed's was
+  #    before #684 made that one per worktree (gitea-token.sh).
   rest GET /app/rest/users/current/tokens
   [ "$REST_STATUS" = "200" ] || die "listing access tokens answered $REST_STATUS"
   if [ "$(printf '%s' "$REST_BODY" | jq --arg n "$TOKEN_NAME" '[.token[]? | select(.name==$n)] | length')" != "0" ]; then

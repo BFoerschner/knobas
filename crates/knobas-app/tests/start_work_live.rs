@@ -41,8 +41,9 @@
 //!     -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! **One environment, one owner at a time** -- `testenv/README.md`. Seeding
-//! re-mints the token, which 401s anyone else mid-run.
+//! **One environment, one owner at a time** -- `testenv/README.md`. The seed's
+//! token is per worktree since #684, so seeding no longer 401s anyone; the
+//! branches and pull requests below are still shared with every other run.
 //!
 //! # Litter, and the budget it is spending
 //!

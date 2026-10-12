@@ -1190,8 +1190,9 @@ gitea-live-capped:
 # `gitea-live` names.
 #
 # Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
-# that writes to it. ONE ENVIRONMENT, ONE OWNER -- this seeds, so it re-mints
-# the Gitea token and 401s anyone else mid-run. Claim it first.
+# that writes to it. ONE ENVIRONMENT, ONE OWNER -- it writes branches and
+# pull requests a concurrent run's sweep can take (the token is per worktree
+# since #684, so seeding no longer 401s anyone). Claim it first.
 # testenv/README.md, "One environment, one owner at a time".
 start-work-live:
     #!/usr/bin/env bash
@@ -1204,9 +1205,9 @@ start-work-live:
 
 # Where the Uptime Kuma live recipe gets its gate variables. Kuma's own two,
 # not the whole seed's: `./seed --env` refuses without `seed-state.json`, which
-# is Gitea's, and seeding Gitea to run a Kuma suite would re-mint the Gitea
-# token under whatever agent is mid-run against it (testenv/README.md, "One
-# environment, one owner at a time"). `--env-kuma` is that half.
+# is Gitea's, and a Kuma suite has no business starting and seeding Gitea
+# (testenv/README.md, "One environment, one owner at a time"). `--env-kuma` is
+# that half.
 kuma_live_env := "testenv/, which is what the lines above this one do:
   docker compose up -d --wait uptime-kuma
   ./seed-kuma.sh

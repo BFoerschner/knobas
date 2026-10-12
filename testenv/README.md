@@ -103,8 +103,8 @@ back to `knobas`/`knobas-dev` would run against a Kuma whose admin is something
 else and report the login failure as a broken adapter.
 
 `eval "$(./seed --env-kuma)"` prints **only** those four, and needs no
-`seed-state.json` — which is Gitea's, and re-minting it is how one worktree's
-seed 401s another's live run. `just kuma-live` uses that form for exactly that
+`seed-state.json` — which is Gitea's, and a Kuma suite has no business
+starting and seeding Gitea. `just kuma-live` uses that form for exactly that
 reason. Once `./seed
 --teamcity` has run it also prints `KNOBAS_TEAMCITY_URL` and
 `KNOBAS_TEAMCITY_TOKEN`; the seeded TeamCity suite additionally reads
@@ -241,7 +241,8 @@ directory, in either direction. That is `teamcity-live-seeded`.
 The repo's standing rule is that a worktree has exactly one owner. **This
 Docker environment is not covered by it**: there is one of it, shared by every
 worktree on the machine, and two agents seeding or running live suites against
-it at the same time will break each other. Four ways:
+it at the same time will break each other. The first entry below was one of
+the ways until #684 and is the rule that ended it; the four after it still are:
 
 - **The Gitea token is per worktree** (since #684; before it, the seed
   re-minted one shared token and was the first of these collisions).

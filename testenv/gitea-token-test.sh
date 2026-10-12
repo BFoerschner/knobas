@@ -73,7 +73,7 @@ case "$method $path" in
     status=204 ;;
   *) status=404 resp='{"message":"not found"}' ;;
 esac
-if [ -n "$out" ]; then :; else printf '%s' "$resp"; fi
+[ -n "$out" ] || printf '%s' "$resp"
 [ -n "$fmt" ] && printf '%b' "${fmt//%\{http_code\}/$status}"
 exit 0
 STUB
@@ -158,6 +158,7 @@ fresh
 jq '. + [{id: 99, name: "knobas-seed", sha1: "legacy-shared-token"}]' "$STUB_STORE" >"$STUB_STORE.tmp"
 mv "$STUB_STORE.tmp" "$STUB_STORE"
 tok_b=$(seed_token "$API" knobas:pw "" "$name_b")
+check_eq "B mints its own beside it" 200 "$(authenticates "$tok_b")"
 check_eq "a tree still on knobas-seed keeps it" 200 "$(authenticates legacy-shared-token)"
 check_eq "a recorded knobas-seed token that works is kept" legacy-shared-token \
   "$(seed_token "$API" knobas:pw legacy-shared-token "$name_a")"
