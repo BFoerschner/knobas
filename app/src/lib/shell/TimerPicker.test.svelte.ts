@@ -26,6 +26,7 @@ function row(entity_id: string, kind: string, title: string): EntityRow {
     updated_at: "2026-09-03T09:00:00Z",
     synced_at: "2026-09-03T09:01:00Z",
     path: null,
+    state: null,
   };
 }
 
@@ -46,6 +47,7 @@ function asset(entityId: string, title: string, path: string | null): SearchHit 
     synced_at: "2026-09-06T09:00:00Z",
     title,
     path,
+    state: null,
     rank: 0,
     snippet: [],
   };

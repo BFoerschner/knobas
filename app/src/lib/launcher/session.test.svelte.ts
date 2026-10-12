@@ -39,6 +39,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
           updated_at: null,
           synced_at: "2026-08-25T12:00:00Z",
           path: null,
+          state: null,
           title,
           rank: 1,
           snippet: [],

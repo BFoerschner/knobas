@@ -75,6 +75,30 @@ pub struct EntityRow {
     /// This struct and `knobas_search::EntityRow` are pinned to **one wire
     /// shape** by `commands::search`'s own test; the field is on both.
     pub path: Option<String>,
+    /// The item's state chip -- a pull request's `open` / `merged` /
+    /// `closed`, a build's `running` or outcome (#666) -- resolved by
+    /// `knobas_core::declared_state!` from the state the row's kind declares,
+    /// beside the path line and wherever it is read. `None` for a kind that
+    /// declares none and for a value the declaration does not name: the
+    /// ADR-0007 **miss**, so a row shows no chip rather than a wrong one.
+    ///
+    /// On both `EntityRow`s, pinned to one wire shape like `path`.
+    pub state: Option<knobas_core::payload::StateChip>,
+}
+
+/// The `state` column every row statement selects, decoded.
+///
+/// # Errors
+///
+/// The decode error, for a `jsonb` that is not a chip. `declared_state!`
+/// builds it from a declaration whose tones are typed, so that is a bug, and
+/// it fails the read rather than reading as a row with no state.
+fn state_of(
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<knobas_core::payload::StateChip>, sqlx::Error> {
+    Ok(row
+        .try_get::<Option<sqlx::types::Json<knobas_core::payload::StateChip>>, _>("state")?
+        .map(|chip| chip.0))
 }
 
 /// Which slice of the corpus a room wants.
@@ -169,6 +193,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
        "#,
     knobas_core::path_line_read!("$8"),
     r#" as path,
+       "#,
+    knobas_core::declared_state!("$8"),
+    r#" as state,
        count(*) over () as total
   from sync.live_item i
  where ($1::text[] is null or i.source_id = any($1))
@@ -191,6 +218,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
        "#,
     knobas_core::path_line_read!("$8"),
     r#" as path,
+       "#,
+    knobas_core::declared_state!("$8"),
+    r#" as state,
        count(*) over () as total
   from sync.live_item i
  where ($1::text[] is null or i.source_id = any($1))
@@ -217,6 +247,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
        "#,
     knobas_core::path_line_read!("$8"),
     r#" as path,
+       "#,
+    knobas_core::declared_state!("$8"),
+    r#" as state,
        count(*) over () as total
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
@@ -239,6 +272,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
        "#,
     knobas_core::path_line_read!("$8"),
     r#" as path,
+       "#,
+    knobas_core::declared_state!("$8"),
+    r#" as state,
        count(*) over () as total
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
@@ -327,16 +363,19 @@ pub async fn list_entities_inner(
     Ok(EntityPage {
         rows: rows
             .iter()
-            .map(|row| EntityRow {
-                entity_id: row.get("entity_id"),
-                kind: row.get("kind"),
-                source_id: row.get("source_id"),
-                title: row.get("title"),
-                updated_at: row.get("item_updated_at"),
-                synced_at: row.get("synced_at"),
-                path: row.get("path"),
+            .map(|row| -> Result<EntityRow, sqlx::Error> {
+                Ok(EntityRow {
+                    entity_id: row.get("entity_id"),
+                    kind: row.get("kind"),
+                    source_id: row.get("source_id"),
+                    title: row.get("title"),
+                    updated_at: row.get("item_updated_at"),
+                    synced_at: row.get("synced_at"),
+                    path: row.get("path"),
+                    state: state_of(row)?,
+                })
             })
-            .collect(),
+            .collect::<Result<_, _>>()?,
         total,
     })
 }
@@ -469,6 +508,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        "#,
     knobas_core::path_line_read!("$2"),
     r#" as path,
+       "#,
+    knobas_core::declared_state!("$2"),
+    r#" as state,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -524,6 +566,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
             // reading it here would be a second spelling of "where is this",
             // and ADR-0007 requirement 2 exists to stop exactly that.
             path: row.get("path"),
+            state: state_of(&row)?,
         },
         source: SourceRef {
             display_name: display_name.unwrap_or_else(|| source_id.clone()),

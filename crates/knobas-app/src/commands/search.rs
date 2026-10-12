@@ -564,6 +564,11 @@ mod tests {
     fn the_two_entity_rows_are_one_wire_shape() {
         let at = chrono::Utc::now();
         let path = Some("Engineering \u{203a} Payments".to_owned());
+        // #666: a value, for `path`'s reason below.
+        let state = Some(knobas_core::payload::StateChip {
+            text: "FAILURE".to_owned(),
+            tone: knobas_core::tone::Tone::Err,
+        });
         let search = serde_json::to_value(knobas_search::EntityRow {
             entity_id: "jira:PAY-231".to_owned(),
             kind: "ticket".to_owned(),
@@ -572,6 +577,7 @@ mod tests {
             updated_at: Some(at),
             synced_at: at,
             path: path.clone(),
+            state: state.clone(),
         })
         .expect("serializes");
         let room = serde_json::to_value(crate::commands::entity::EntityRow {
@@ -582,6 +588,7 @@ mod tests {
             updated_at: Some(at),
             synced_at: at,
             path,
+            state,
         })
         .expect("serializes");
 
@@ -593,6 +600,11 @@ mod tests {
         assert_eq!(
             search["path"], "Engineering \u{203a} Payments",
             "the ratified §10.8 field is on the wire under its own name"
+        );
+        assert_eq!(
+            search["state"],
+            serde_json::json!({ "text": "FAILURE", "tone": "err" }),
+            "#666's field is on the wire under its own name, its tone lowercase"
         );
     }
 

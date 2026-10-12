@@ -147,6 +147,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
       path: null,
+      state: null,
     },
     source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     kind_info: null,
@@ -441,6 +442,7 @@ test("opening another ticket never leaves the previous one's status on screen", 
         updated_at: null,
         synced_at: "2026-08-22T14:30:00Z",
         path: null,
+        state: null,
       },
     });
   screen.reopen("mock:PAY-240");
@@ -483,6 +485,7 @@ test("a slow board answer from the previous ticket is discarded, not shown", asy
         updated_at: null,
         synced_at: "2026-08-22T14:30:00Z",
         path: null,
+        state: null,
       },
     });
   screen.reopen("mock:PAY-240");
@@ -569,6 +572,7 @@ test.each([
         updated_at: null,
         synced_at: "2026-08-22T14:30:00Z",
         path: null,
+        state: null,
       },
     });
   const screen = render(entityId, kind);

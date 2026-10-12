@@ -115,6 +115,7 @@ function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown>
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
       path: null,
+      state: null,
     },
     source: {
       id: "confluence",

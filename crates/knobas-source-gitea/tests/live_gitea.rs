@@ -575,6 +575,44 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
          the difference between the start-work flow linking it and refusing to: {read:?}"
     );
 
+    // The state chip (#666), through the descriptor's own declaration, on the
+    // real server's records: the merged pull request is `merged` though Gitea
+    // calls it `closed`, the open one `open`, and every pull request draws one.
+    {
+        use knobas_core::payload::{StateChip, resolve_state};
+        use knobas_core::tone::Tone;
+        let declared = knobas_source_gitea::descriptor_template()
+            .payload_paths
+            .into_iter()
+            .find(|paths| paths.kind == "pr")
+            .expect("a pull request declares its paths")
+            .state;
+        let chips: Vec<(&str, Option<StateChip>)> = prs
+            .iter()
+            .map(|i| (i.title.as_str(), resolve_state(&i.payload, &declared)))
+            .collect();
+        println!("LIVE pull request state chips: {chips:?}");
+        let chip = |title: &str| {
+            chips
+                .iter()
+                .find(|(t, _)| t.contains(title))
+                .and_then(|(_, c)| c.clone())
+        };
+        let drawn = |text: &str, tone: Tone| {
+            Some(StateChip {
+                text: text.to_owned(),
+                tone,
+            })
+        };
+        assert_eq!(
+            chip("Fix ledger drift"),
+            drawn("merged", Tone::Ok),
+            "{chips:?}"
+        );
+        assert_eq!(chip("SEPA retry"), drawn("open", Tone::Info), "{chips:?}");
+        assert!(chips.iter().all(|(_, c)| c.is_some()), "{chips:?}");
+    }
+
     // The author is the source's word for who did it, not knobas's.
     assert!(
         prs.iter().all(|i| i.author.is_some()),

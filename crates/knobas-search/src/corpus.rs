@@ -162,6 +162,12 @@ pub struct Corpus {
     ///    one answer to "where is this" -- is protected instead by the column
     ///    having one writer.
     pub(crate) path: &'static str,
+    /// The row's state chip as `jsonb`, or `null::jsonb` for a corpus whose
+    /// rows have none (#666). For the mirror it is
+    /// [`declared_state!`](knobas_core::declared_state) over `pd.d`, the
+    /// relation `path` reads, and nothing else: one answer to "what state is
+    /// this in", as `path_line_read!` is one to "where is this".
+    pub(crate) state: &'static str,
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].
     pub(crate) scope: Option<&'static str>,
@@ -242,6 +248,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
     path: knobas_core::path_line_read!("pd.d"),
+    state: knobas_core::declared_state!("pd.d"),
     scope: None,
     under: Some(
         "i.entity_id in (select ip.entity_id from sync.item_parent ip \
@@ -293,6 +300,7 @@ pub const NOTE: Corpus = Corpus {
     // and not an empty string -- absence is the ADR-0007 miss, and an empty
     // string would draw an empty path line on every note in the launcher.
     path: "null::text",
+    state: "null::jsonb",
     scope: None,
     // A note is knobas' own and sits inside nothing (see `path`), so it is
     // beneath no parent `under:` could name.
@@ -347,6 +355,7 @@ pub const ASSET: Corpus = Corpus {
     // A local table is never behind itself: what knobas holds *is* the source.
     synced_at: "a.updated_at",
     path: "nullif(a.path_text, '')",
+    state: "null::jsonb",
     scope: None,
     // Knobas' own rows declare no parent through a payload: an asset's parent
     // is its `parent_id` column (ADR-0014), read directly (#600).
@@ -426,6 +435,7 @@ pub const ROUTE: Corpus = Corpus {
     // A local table is never behind itself: what knobas holds *is* the source.
     synced_at: "r.updated_at",
     path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
+    state: "null::jsonb",
     scope: None,
     // A route's parent is the asset exposing it (ADR-0014): it is beneath
     // whatever that asset is beneath, and beneath the asset itself (#600).

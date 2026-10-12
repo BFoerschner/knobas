@@ -442,6 +442,16 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 /// outside the JQL) is asked nothing, and the names share their slot as a
 /// candidate list does. Ratified by the deputy's ruling of 2026-10-11 on #595.
 ///
+/// **The state declaration (#666) is held to the same four, and to one
+/// more.** Clause 2 reads "a string or a boolean" for each candidate's `at`,
+/// clause 3 weighs the candidates in one slot, and clause 4 is a kind that
+/// declares no state drawing no chip. The one more: a kind that declares a
+/// state, and that the corpus populates, must draw a chip on at least one of
+/// its items. A value map that names nothing the source writes (`FAILED` for
+/// a TeamCity that says `FAILURE`) resolves its path on every record and
+/// still shows no chip on any row, which clause 3 cannot see. Recorded in
+/// §10.8's #666 entry.
+///
 /// # What this cannot see, and why neither is fixable here
 ///
 /// A corpus-shaped question is answered by the corpus, so two declarations
@@ -474,7 +484,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
     use knobas_core::payload::{
         KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
-        resolve_parents, resolve_string,
+        resolve_parents, resolve_state, resolve_string,
     };
 
     let kinds: std::collections::HashSet<&str> =
@@ -570,6 +580,10 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             }
         }
     }
+
+    // Kinds declaring a state -> whether some item of that kind drew a chip
+    // (#666). Only kinds the corpus populates are judged, as clause 3 judges.
+    let mut chips: std::collections::BTreeMap<&str, bool> = std::collections::BTreeMap::new();
 
     let nothing = KindPaths::default();
     // (kind, field) -> what the corpus showed. Ordered, so a failure names the
@@ -717,6 +731,46 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 }
             }
         }
+        // The state declaration (#666): each candidate's `at` leads to a
+        // string or a boolean or nothing, and is weighed for clause 3 like
+        // any path; and the kind, if it declares a state, must draw a chip on
+        // some item of the corpus -- a value map naming nothing the source
+        // writes is a chip no row shows.
+        for candidate in &paths.state {
+            let seen = evidence.entry((&item.kind, field::STATE)).or_default();
+            if let Some(value) = at(&item.payload, &candidate.at) {
+                assert!(
+                    value.is_string() || value.is_boolean(),
+                    "descriptor.payload_paths declares state of kind {:?} at {:?}, which leads \
+                     to {} on this adapter's own item {} -- a state must be a string or a \
+                     boolean, or nothing at all. Payload: {}",
+                    item.kind,
+                    candidate.at.segments(),
+                    match value {
+                        serde_json::Value::Object(_) => "an object",
+                        serde_json::Value::Array(_) => "an array",
+                        _ => "a number",
+                    },
+                    item.entity,
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+        }
+        if !paths.state.is_empty() {
+            *chips.entry(item.kind.as_str()).or_default() |=
+                resolve_state(&item.payload, &paths.state).is_some();
+        } else {
+            assert_eq!(
+                resolve_state(&item.payload, &paths.state),
+                None,
+                "kind {:?} declares no state, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
+        }
+
         // The parent's own record (the deputy's ruling of 2026-10-11 on
         // #595): `under:` returns a mirrored parent by reading the children's
         // declared names off its root, so on this kind's records -- if it is
@@ -778,6 +832,15 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 item.entity
             );
         }
+    }
+
+    for (kind, drew) in chips {
+        assert!(
+            drew,
+            "descriptor.payload_paths declares state of kind {kind:?}, and no item of that kind \
+             draws a chip -- the value map names nothing this adapter's own records carry, so \
+             every row of the kind shows no state while looking like a source that has none"
+        );
     }
 
     for ((kind, name), seen) in evidence {
@@ -928,6 +991,12 @@ mod tests {
         /// the names share their slot, so the battery accepts. Tolerance, not
         /// a bug: see `accepts_a_parent_name_an_earlier_name_resolves_for`.
         ASecondParentNameNoRecordCarries,
+        /// Declares a state whose value map names no value its records carry
+        /// (`Done`, on tickets that are all `In Progress`): no row of the
+        /// kind would ever draw a chip (#666).
+        StateNoItemResolves,
+        /// Declares a state `at` the status object rather than its name.
+        StateOntoAnObject,
     }
 
     struct TestSource {
@@ -1016,7 +1085,7 @@ mod tests {
                 // instance whose issues are unassigned.
                 payload_paths: {
                     use crate::ParentPath;
-                    use crate::{KindPaths, ListPath, PayloadPath};
+                    use crate::{KindPaths, ListPath, PayloadPath, StatePath, StateValue, Tone};
                     let parent = |kind: &str, at: &[&str], name: &str| ParentPath {
                         kind: kind.to_owned(),
                         at: PayloadPath::of(at.iter().copied()),
@@ -1024,11 +1093,18 @@ mod tests {
                     };
                     // The conforming adapter's tickets sit under an epic, a
                     // ticket itself -- so its parent kind is one it emits.
+                    let state = |at: &[&str], value: &str| {
+                        vec![StatePath {
+                            at: PayloadPath::of(at.iter().copied()),
+                            values: vec![StateValue::of(value, Tone::Info)],
+                        }]
+                    };
                     let ticket = |status: PayloadPath| KindPaths {
                         kind: "ticket".to_owned(),
                         status_name: vec![status],
                         assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
                         parent: vec![parent("ticket", &["fields", "epic"], "key")],
+                        state: state(&["fields", "status", "name"], "In Progress"),
                         ..KindPaths::default()
                     };
                     let good = ticket(PayloadPath::of(["fields", "status", "name"]));
@@ -1105,6 +1181,14 @@ mod tests {
                                 names: vec![PayloadPath::of(["key"]), PayloadPath::of(["kee"])],
                                 ..parent("ticket", &["fields", "epic"], "key")
                             }],
+                            ..good
+                        }],
+                        Behavior::StateNoItemResolves => vec![KindPaths {
+                            state: state(&["fields", "status", "name"], "Done"),
+                            ..good
+                        }],
+                        Behavior::StateOntoAnObject => vec![KindPaths {
+                            state: state(&["fields", "status"], "In Progress"),
                             ..good
                         }],
                         _ => vec![good],
@@ -1587,6 +1671,32 @@ mod tests {
         rejects(
             Behavior::MisspelledParentName,
             "declares parent names of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    // -- clause 6 on the state declaration (#666) ----------------------------
+    //
+    // A state's `at` leads to a string or a boolean, and a kind that declares
+    // one must draw a chip on some record of the adapter's own corpus: a value
+    // map that names nothing the source writes is a chip no row ever shows,
+    // which looks exactly like a source with no state.
+
+    #[tokio::test]
+    async fn rejects_a_state_no_item_draws_a_chip_for() {
+        rejects(
+            Behavior::StateNoItemResolves,
+            "declares state of kind \"ticket\", and no item of that kind draws a chip",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_state_at_that_leads_to_an_object() {
+        rejects(
+            Behavior::StateOntoAnObject,
+            "declares state of kind \"ticket\" at [\"fields\", \"status\"], which leads to an \
+             object",
         )
         .await;
     }

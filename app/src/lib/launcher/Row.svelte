@@ -14,8 +14,10 @@
 -->
 <script lang="ts">
   import type { Segment } from "../ipc";
+  import type { StateChip as Chip } from "../ipc/entity";
   import type { CredentialHealth } from "../ipc/sources";
   import Monogram from "../shell/Monogram.svelte";
+  import StateChip from "../shell/StateChip.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { provenance } from "./format";
 
@@ -26,6 +28,7 @@
     title,
     syncedAt,
     path = null,
+    state = null,
     snippet = [],
     sources,
     selected,
@@ -54,6 +57,12 @@
      * unbounded length and the key column is 56 px.
      */
     path?: string | null;
+    /**
+     * The item's state chip (#666) — a pull request's `merged`, a build's
+     * `FAILURE` — drawn after the title, or `null` for a kind that declares
+     * none. The same `StateChip` a room row draws.
+     */
+    state?: Chip | null;
     /** The matched excerpt, already split. Empty for a list or board row. */
     snippet?: Segment[];
     sources: CredentialHealth[];
@@ -83,6 +92,9 @@
   <span class="ty">{kind}</span>
   <span class="t">
     <span class="k">{key}</span>{title}
+    {#if state}
+      <StateChip {state} />
+    {/if}
     {#if path}
       <span class="pa">{path}</span>
     {/if}

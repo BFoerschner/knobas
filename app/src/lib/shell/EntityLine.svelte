@@ -6,12 +6,18 @@
   per-row provenance — *where it came from and when it was last seen* — which
   is the one thing a mirror owes its reader on every single line.
 
+  Four in a room scoped to one source (#666): a source room or a project room
+  would print the same source id on every line, so the column goes and the
+  provenance tooltip still names it. The title cell carries the item's state
+  chip after the title, where the adapter declares one.
+
   Everything here is **text**. `title` is whatever somebody typed into a
   ticket (gotcha 7).
 -->
 <script lang="ts">
   import type { EntityRow } from "../ipc/entity";
   import Monogram from "./Monogram.svelte";
+  import StateChip from "./StateChip.svelte";
   import { kindRegistry } from "./kind-registry.svelte";
   import { kindMonogram, kindSingular } from "./kinds";
   import { ago } from "./time";
@@ -20,9 +26,15 @@
     row,
     onopen,
     now,
+    showSource = true,
   }: {
     row: EntityRow;
     onopen: (row: EntityRow) => void;
+    /**
+     * Whether to draw the source column. `false` in a room scoped to one
+     * source, where every line would repeat it (#666).
+     */
+    showSource?: boolean;
     /** Injectable clock, so the age column is testable. */
     now?: Date;
   } = $props();
@@ -49,14 +61,34 @@
 
   const updated = $derived(row.updated_at ? ago(row.updated_at, now) : "—");
   const provenance = $derived(
-    `${kindSingular(row.kind, declared)} · ${row.updated_at ? `updated ${updated}` : "never dated by its source"} · synced ${ago(row.synced_at, now)}`,
+    `${kindSingular(row.kind, declared)} from ${row.source_id} · ${row.updated_at ? `updated ${updated}` : "never dated by its source"} · synced ${ago(row.synced_at, now)}`,
   );
 </script>
 
-<button class="row g5w" title={provenance} onclick={() => onopen(row)}>
+<button class="row" class:g5w={showSource} class:g4w={!showSource} title={provenance} onclick={() => onopen(row)}>
   <Monogram text={kindMonogram(row.kind, declared)} label={kindSingular(row.kind, declared)} />
   <span class="k link">{key}</span>
-  <span class="t">{row.title}</span>
-  <span class="r">{row.source_id}</span>
+  <span class="t"
+    ><span class="tt">{row.title}</span>{#if row.state}<StateChip state={row.state} />{/if}</span
+  >
+  {#if showSource}
+    <span class="r src">{row.source_id}</span>
+  {/if}
   <span class="r">{updated}</span>
 </button>
+
+<style>
+  /* The title gives way to the chip: a long title ellipsises, and the state
+     after it stays whole, because the state is the reading a reader is
+     scanning the room for. */
+  .t {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tt {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>

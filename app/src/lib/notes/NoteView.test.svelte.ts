@@ -161,6 +161,7 @@ const ANSWER: SearchResponse = {
           updated_at: "2026-08-22T11:48:00Z",
           synced_at: "2026-08-22T14:30:00Z",
           path: null,
+          state: null,
           rank: 1,
           snippet: [],
         },

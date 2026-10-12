@@ -497,6 +497,7 @@ function matchesFor(query: SearchQuery, estate: AssetRow[]): SearchResponse {
       synced_at: NOW.toISOString(),
       title: asset.name,
       path: pathTextOf(asset, estate),
+      state: null,
       rank: 1 - index / 10,
       snippet: [],
     }));

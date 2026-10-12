@@ -65,6 +65,9 @@ pub struct RawHit {
     /// declares no parent or whose declared parent misses -- two absences that
     /// mean the same thing to a reader.
     path: Option<String>,
+    /// The row's state chip (#666), `declared_state!`'s `jsonb`. Null for a
+    /// group header, a kind that declares no state, and a corpus knobas owns.
+    state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
     rank: Option<f32>,
     snippet: Option<String>,
 }
@@ -119,6 +122,7 @@ fn hit(row: RawHit) -> Option<SearchHit> {
             updated_at: row.updated_at,
             synced_at,
             path: row.path,
+            state: row.state.map(|chip| chip.0),
         },
         rank: row.rank.unwrap_or_default(),
         snippet: row
@@ -151,6 +155,7 @@ mod tests {
             updated_at: None,
             synced_at: None,
             path: None,
+            state: None,
             rank: None,
             snippet: None,
         }
@@ -166,6 +171,7 @@ mod tests {
             updated_at: None,
             synced_at: Some(Utc::now()),
             path: None,
+            state: None,
             rank: Some(rank),
             snippet: Some(format!(
                 "{}sepa{} batch",

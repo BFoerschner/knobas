@@ -23,6 +23,7 @@ mod ranking;
 mod search;
 mod sql_containment;
 mod sql_shape;
+mod state_chip;
 mod suggest;
 mod under;
 mod under_confluence;

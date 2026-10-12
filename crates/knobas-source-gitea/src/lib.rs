@@ -82,7 +82,7 @@ pub use source::{GiteaSource, build};
 
 use knobas_source::{
     AuthMethod, Capability, KindInfo, KindPaths, ListPath, ParentPath, PayloadPath,
-    SourceDescriptor,
+    SourceDescriptor, StatePath, StateValue, Tone,
 };
 
 /// The adapter kind, and the default instance id (interfaces §4.2).
@@ -253,6 +253,7 @@ fn payload_paths() -> Vec<KindPaths> {
             }],
             merged: vec![PayloadPath::of(["merged"])],
             parent: repo(&["base", "repo"]),
+            state: pr_state(),
             ..KindPaths::default()
         },
         KindPaths {
@@ -263,9 +264,61 @@ fn payload_paths() -> Vec<KindPaths> {
     ]
 }
 
+/// A pull request's state chip (#666): `merged` when Gitea's merged flag is
+/// true, else its `state` word, `open` or `closed`. The flag comes first
+/// because Gitea says `closed` of a merged pull request too.
+fn pr_state() -> Vec<StatePath> {
+    vec![
+        StatePath {
+            at: PayloadPath::of(["merged"]),
+            values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
+        },
+        StatePath {
+            at: PayloadPath::of(["state"]),
+            values: vec![
+                StateValue::of("open", Tone::Info),
+                StateValue::of("closed", Tone::Muted),
+            ],
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pull request's chip (#666): Gitea says `closed` of a merged pull
+    /// request too, so the flag is what tells the two apart.
+    #[test]
+    fn a_pull_request_draws_merged_open_or_closed() {
+        use knobas_source::StateChip;
+        let state = descriptor_template()
+            .payload_paths
+            .into_iter()
+            .find(|p| p.kind == KIND_PR)
+            .map(|p| p.state)
+            .unwrap_or_default();
+        let chip =
+            |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &state);
+        let drawn = |text: &str, tone: Tone| {
+            Some(StateChip {
+                text: text.to_owned(),
+                tone,
+            })
+        };
+        assert_eq!(
+            chip(serde_json::json!({ "state": "closed", "merged": true })),
+            drawn("merged", Tone::Ok)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "open", "merged": false })),
+            drawn("open", Tone::Info)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "closed", "merged": false })),
+            drawn("closed", Tone::Muted)
+        );
+    }
 
     /// The Add-source form, the launcher's chips and the action bar all read
     /// this one value.

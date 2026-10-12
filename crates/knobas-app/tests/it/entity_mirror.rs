@@ -75,6 +75,8 @@ fn row(updated_at: Option<DateTime<Utc>>) -> EntityRow {
         // A ticket sits nowhere: the ADR-0007 miss `path` reports for every
         // record with no readable `ancestors` (#284).
         path: None,
+        // A ticket's adapter declares no state (#666): the miss, as `null`.
+        state: None,
     }
 }
 
@@ -159,6 +161,8 @@ const ENTITY_ROW_FIELDS: &[&str] = &[
     // what lets one TypeScript declaration serve both Rust structs.
     "path",
     "source_id",
+    // The row's state chip (#666), on the wire as `null` for a miss.
+    "state",
     "synced_at",
     "title",
     "updated_at",
@@ -260,6 +264,34 @@ fn the_project_shape_matches_its_typescript_mirror() {
 
     assert_shape("Project", &wire, &["key", "name", "source_id"]);
     assert_eq!(wire["name"], serde_json::Value::Null);
+}
+
+/// A row's state chip (#666) and its five tones, in the spelling the
+/// mirror's `Tone` union declares: a tone the frontend does not name is a
+/// chip drawn with no colour.
+#[test]
+fn the_state_chip_and_its_tones_match_their_typescript_mirror() {
+    use knobas_core::payload::StateChip;
+    use knobas_core::tone::Tone;
+    let chip = StateChip {
+        text: "merged".to_owned(),
+        tone: Tone::Ok,
+    };
+    assert_shape(
+        "StateChip",
+        &serde_json::to_value(&chip).unwrap(),
+        &["text", "tone"],
+    );
+    let tones: Vec<serde_json::Value> = [Tone::Ok, Tone::Warn, Tone::Err, Tone::Info, Tone::Muted]
+        .into_iter()
+        .map(|tone| serde_json::to_value(tone).unwrap())
+        .collect();
+    let tones: Vec<&str> = tones.iter().filter_map(serde_json::Value::as_str).collect();
+    assert_same_members(
+        &tones,
+        declared_union(MIRROR, "Tone"),
+        "a tone declared on one side only is a chip the shell cannot colour",
+    );
 }
 
 /// Both orderings, in the spelling the mirror's union declares.
