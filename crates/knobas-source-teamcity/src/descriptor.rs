@@ -102,6 +102,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
     vec![
         KindPaths {
             kind: KIND_BUILD.to_owned(),
+            state: build_state(),
             project_key: vec![PayloadPath::of(["buildType", "projectId"])],
             project_name: vec![PayloadPath::of(["buildType", "projectName"])],
             parent: vec![ParentPath {
@@ -116,6 +117,34 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             project_key: vec![PayloadPath::of(["projectId"])],
             project_name: vec![PayloadPath::of(["projectName"])],
             ..KindPaths::default()
+        },
+    ]
+}
+
+/// A build's state chip (#666): `running` or `queued` while it is in
+/// flight, else its outcome in TeamCity's own spelling -- `SUCCESS`,
+/// `FAILURE`, or `UNKNOWN` for a cancelled one. A finished build's `state` is
+/// `finished`, which the first candidate does not map, so it falls through to
+/// `status`. Not a `status_name` (see above): a chip is drawn, not a column.
+fn build_state() -> Vec<knobas_source::StatePath> {
+    use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
+    let value = |value: &str, tone: Tone| StateValue {
+        value: serde_json::json!(value),
+        tone,
+        text: None,
+    };
+    vec![
+        StatePath {
+            at: PayloadPath::of(["state"]),
+            values: vec![value("running", Tone::Info), value("queued", Tone::Info)],
+        },
+        StatePath {
+            at: PayloadPath::of(["status"]),
+            values: vec![
+                value("SUCCESS", Tone::Ok),
+                value("FAILURE", Tone::Err),
+                value("UNKNOWN", Tone::Muted),
+            ],
         },
     ]
 }
@@ -190,6 +219,50 @@ mod tests {
             }]
         );
         assert!(declared("build_config").is_empty());
+    }
+
+    /// A build's chip (#666): in flight it says so, finished it says its
+    /// outcome in TeamCity's spelling. A configuration draws none.
+    #[test]
+    fn a_build_draws_running_or_its_outcome() {
+        use knobas_source::{StateChip, Tone};
+        let state = |kind: &str| {
+            descriptor_template()
+                .payload_paths
+                .into_iter()
+                .find(|p| p.kind == kind)
+                .map(|p| p.state)
+                .unwrap_or_default()
+        };
+        let build = state("build");
+        let chip = |payload: serde_json::Value| knobas_core::payload::resolve_state(&payload, &build);
+        let drawn = |text: &str, tone: Tone| {
+            Some(StateChip {
+                text: text.to_owned(),
+                tone,
+            })
+        };
+        assert_eq!(
+            chip(serde_json::json!({ "state": "running", "status": "SUCCESS" })),
+            drawn("running", Tone::Info)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "queued" })),
+            drawn("queued", Tone::Info)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "finished", "status": "SUCCESS" })),
+            drawn("SUCCESS", Tone::Ok)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "finished", "status": "FAILURE" })),
+            drawn("FAILURE", Tone::Err)
+        );
+        assert_eq!(
+            chip(serde_json::json!({ "state": "finished", "status": "UNKNOWN" })),
+            drawn("UNKNOWN", Tone::Muted)
+        );
+        assert!(state("build_config").is_empty());
     }
 
     /// The descriptor crosses IPC to the UI (§3a), so it has to survive as
