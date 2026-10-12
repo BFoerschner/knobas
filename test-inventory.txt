@@ -1936,6 +1936,8 @@ knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
 knobas-source-gitea	lib/knobas_source_gitea	view::pr::tests::an_age_reads_as_the_shells_does
+knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::a_long_text_is_cut_at_a_line_within_the_cap
+knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::sizes_read_in_the_unit_that_fits
 knobas-source-gitea	test/it	client::a_bad_token_is_unauthorized
 knobas-source-gitea	test/it	client::a_base_url_with_a_path_prefix_is_preserved
 knobas-source-gitea	test/it	client::a_closed_port_is_unreachable
@@ -1992,8 +1994,13 @@ knobas-source-gitea	test/it	sync::the_pull_request_budget_keeps_the_newest
 knobas-source-gitea	test/it	sync::two_pull_requests_on_the_same_second_are_delivered_once_each
 knobas-source-gitea	test/it	view::a_commit_view_is_its_overview_and_its_diff
 knobas-source-gitea	test/it	view::a_diff_gitea_refuses_is_an_error_and_not_an_empty_diff
+knobas-source-gitea	test/it	view::a_foreign_id_is_refused
 knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
-knobas-source-gitea	test/it	view::other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused
+knobas-source-gitea	test/it	view_branch::a_branch_gitea_does_not_have_is_an_error
+knobas-source-gitea	test/it	view_branch::a_branch_with_no_pull_request_says_so
+knobas-source-gitea	test/it	view_branch::a_feature_branch_reads_ahead_and_behind_its_default_branch
+knobas-source-gitea	test/it	view_branch::the_default_branch_shows_no_compare
+knobas-source-gitea	test/it	view_branch::the_diff_tab_reads_the_compares_diff
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
 knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
 knobas-source-gitea	test/it	view_pr::a_pull_request_past_the_commit_budget_says_what_it_left_out
@@ -2001,6 +2008,11 @@ knobas-source-gitea	test/it	view_pr::a_pull_request_view_is_overview_files_commi
 knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_verdicts
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
 knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
+knobas-source-gitea	test/it	view_repo::a_plain_readme_is_text_and_not_markdown
+knobas-source-gitea	test/it	view_repo::a_repo_view_is_its_overview_pull_requests_branches_and_commits
+knobas-source-gitea	test/it	view_repo::a_repo_without_a_readme_draws_no_readme_block
+knobas-source-gitea	test/it	view_repo::an_empty_repo_draws_an_overview_and_no_failure
+knobas-source-gitea	test/it	view_repo::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	write::a_branch_is_created_from_the_ref_that_was_named
 knobas-source-gitea	test/it	write::a_comment_goes_on_the_issue_the_pull_request_shares_an_index_with
 knobas-source-gitea	test/it	write::a_pull_request_carries_its_title_body_head_and_base

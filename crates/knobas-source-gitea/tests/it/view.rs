@@ -220,20 +220,12 @@ async fn one_section_is_read_on_its_own() {
     );
 }
 
-/// The kinds whose views are later tickets' answer `None` and make no call,
-/// and an id that is not this source's is refused rather than read.
+/// An id that is not this source's is refused rather than read. (Every Gitea
+/// kind draws a view since #663, so none is left to answer `None`.)
 #[tokio::test]
-async fn other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused() {
+async fn a_foreign_id_is_refused() {
     let server = gitea(200).await;
     let source = source(&server);
-    for id in [
-        "gitea:tidewater/payout-service",
-        "gitea:tidewater/payout-service@refs/heads/main",
-    ] {
-        assert_eq!(source.view(id, None).await.unwrap(), None, "{id}");
-    }
-    assert!(server.received_requests().await.unwrap().is_empty());
-
     let foreign = source
         .view("gitea-eu:tidewater/payout-service@abc", None)
         .await;
@@ -241,4 +233,5 @@ async fn other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused() {
         matches!(foreign, Err(SourceError::Protocol { ref message, .. }) if message.contains("gitea-eu")),
         "{foreign:?}"
     );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
