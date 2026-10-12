@@ -410,7 +410,7 @@ the adapter's tests and the project census already expect:
 | Fixture `cfg` | Project (id = name) | Build configuration name | Build | Outcome |
 |---|---|---|---|---|
 | `Ledger_Deploy_Staging` | `Ledger` | `Deploy Staging` | `412` on `main` | SUCCESS |
-| `Payout_IntegrationTests` | `Payout` | `IntegrationTests` | `1187` on `feature/PAY-231-sepa-retry` | FAILURE, the fixture's `log` in the build log |
+| `Payout_IntegrationTests` | `Payout` | `IntegrationTests` | `1187` on `feature/PAY-231-sepa-retry` | FAILURE, the fixture's `log` in the build log, its failed test reported as one, the log again as the artifact `sepa-report.txt` |
 | `Payout_Build` | `Payout` | `Build` | `1188` on `feature/PAY-231-sepa-retry`, `--running` only | running, held at step 3/5 `cargo test` |
 
 No configuration has a description: the fixture gives none, and the seed
@@ -425,6 +425,18 @@ parameter `env.SEPA_SANDBOX_KEY`, and one VCS trigger on `+:feature/*` that is
 suite makes. `seed-state.json`'s `teamcity.settings` records the configuration
 and the password's made-up value, which `live_teamcity_seeded.rs` proves never
 reaches a view (and which TeamCity itself never serves back).
+
+**A failed test and an artifact, for the build view (#665).** The step of
+`Payout_IntegrationTests` prints the fixture's `log`, then reports the test
+its `test <name> ... FAILED` line names as a failed test (TeamCity service
+messages; the failure message is the log's next line), publishes the log as
+`sepa-report.txt`, and exits 1. TeamCity then composes 1187's `statusText`
+from the test counts, `Tests failed: 1 (1 new), passed: 0`, not from the exit
+code. A server seeded before #665 is brought up to date by the next `./seed
+--teamcity`: the step's script is rewritten in place, and a finished 1187
+that reports no failed test is deleted and run again under the same number
+(its id changes; `seed-state.json` records the new one). TeamCity lists no
+change for 1187, because it is its configuration's first build.
 
 **The default branch is queued as `<default>`.** The VCS root's branch
 specification names `main` along with the feature branches, and a build

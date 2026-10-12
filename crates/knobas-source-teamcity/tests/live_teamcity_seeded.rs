@@ -84,9 +84,10 @@
 //! Every seeded build was queued through the seed's token, so its triggerer
 //! is `knobas` rather than the fixture's `mara` or a VCS trigger; the
 //! `author` assertion says so. The build **log** is not on the REST record
-//! and the adapter does not read it: what a failed build mirrors is its
-//! `statusText`, which a real server composes from the failing step
-//! (`Exit code 1 (Step: …)`) rather than from the log's first line as mockd's
+//! and the sync does not read it (the build's source view reads its tail
+//! live, #665): what a failed build mirrors is its `statusText`, which a real
+//! server composes from the failed test the step reports (`Tests failed: 1
+//! (1 new), passed: 0`) rather than from the log's first line as mockd's
 //! fixture transcription does. Personal builds cannot be seeded, so the
 //! personal facet stays certified on the public instance only.
 
@@ -915,10 +916,10 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
     let status_text = failed.payload["statusText"]
         .as_str()
         .expect("a finished build has a statusText");
-    assert!(
-        status_text.starts_with("Exit code 1 (Step: IntegrationTests"),
-        "the seed reproduces the failure with a command-line step exiting 1, and the server \
-         composes statusText from it: {status_text:?}"
+    assert_eq!(
+        status_text, "Tests failed: 1 (1 new), passed: 0",
+        "the seed's step reports the fixture's failed test (#665) and exits 1, and the server \
+         composes statusText from the test counts, which outrank the exit code"
     );
     assert!(
         failed.body_text.contains(status_text),
@@ -1819,7 +1820,7 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
         "{row:#?}"
     );
     assert!(
-        row.title.starts_with("Exit code 1"),
+        row.title.starts_with("Tests failed: 1"),
         "the real statusText: {row:#?}"
     );
 
@@ -1911,5 +1912,135 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
             if rows.iter().any(|r| r.entity_id == Some(format!("teamcity:build:{passed}"))
                 && r.tone == Some(Tone::Ok)))),
         "{ledger_overview:#?}"
+    );
+}
+
+/// The failed build's source view against the real server (#665, ADR-0013):
+/// it opens on its outcome, lists the test the seed's step reported as failed
+/// with its details, shows a log tail holding a line the step printed, lists
+/// the artifact the step published, and draws the parameters it ran with
+/// without the password's value. The first read asks for no log.
+///
+/// Read-only. Run the battery beside it for clause 9 over every emitted
+/// entity, builds included.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
+    use knobas_source::view::{Block, SourceView, Tone};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let settings = seeded.seed.settings.clone().unwrap_or_else(|| {
+        panic!("seed-state.json has no teamcity.settings -- re-run `./seed --teamcity` (#664)")
+    });
+    let failed = seeded.fixture_build(1187).real_id;
+    let entity = format!("teamcity:build:{failed}");
+    let source = seeded.source(serde_json::json!({}));
+    let read = async |section: Option<&str>| -> SourceView {
+        source
+            .view(&entity, section)
+            .await
+            .unwrap_or_else(|e| panic!("the view of {entity} ({section:?}) reads: {e:?}"))
+            .unwrap_or_else(|| panic!("TeamCity draws a build ({entity})"))
+    };
+
+    let view = read(None).await;
+    println!(
+        "SEEDED BUILD VIEW {entity}:\n{}",
+        serde_json::to_string_pretty(&view).expect("serializes")
+    );
+    let tabs: Vec<_> = view
+        .sections
+        .iter()
+        .map(|s| (s.id.as_str(), s.count, s.deferred))
+        .collect();
+    assert_eq!(
+        tabs,
+        [
+            ("overview", None, false),
+            // The configuration's first build: TeamCity lists no change for it.
+            ("changes", Some(0), false),
+            ("tests", Some(1), true),
+            ("log", None, true),
+            ("artifacts", Some(1), false),
+            ("parameters", Some(3), false),
+        ]
+    );
+    let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+        panic!("{view:#?}");
+    };
+    let fact = |label: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| (f.value.clone(), f.tone))
+            .unwrap_or_else(|| panic!("no fact {label}: {facts:#?}"))
+    };
+    assert_eq!(fact("Outcome"), ("failed".to_owned(), Some(Tone::Err)));
+    assert_eq!(fact("Number").0, "#1187");
+    assert_eq!(fact("Branch").0, "feature/PAY-231-sepa-retry");
+    assert_eq!(fact("Triggered by").0, "knobas");
+    assert_eq!(fact("Agent").0, "knobas-agent");
+    assert!(
+        matches!(&view.sections[0].blocks[1], Block::Entities { rows, .. }
+            if rows[0].entity_id.as_deref() == Some("teamcity:buildType:Payout_IntegrationTests")),
+        "the configuration is an address: {view:#?}"
+    );
+
+    let tests = read(Some("tests")).await;
+    let blocks = &tests.sections[0].blocks;
+    println!("SEEDED BUILD TESTS: {}", serde_json::to_string(blocks).expect("serializes"));
+    assert!(
+        matches!(&blocks[0], Block::Entities { rows, .. }
+            if rows.len() == 1
+                && rows[0].title == "sepa::retry::gives_up_after_max_attempts"
+                && rows[0].tone == Some(Tone::Err)),
+        "{blocks:#?}"
+    );
+    assert!(
+        matches!(&blocks[1], Block::Text { text, .. }
+            if text == "assertion failed: attempts == 5 (left: 6, right: 5)"),
+        "{blocks:#?}"
+    );
+
+    let log = read(Some("log")).await;
+    let [Block::Log { text, truncated }] = log.sections[0].blocks.as_slice() else {
+        panic!("{log:#?}");
+    };
+    println!(
+        "SEEDED BUILD LOG TAIL ({} lines, truncated: {truncated}):\n{text}",
+        text.lines().count()
+    );
+    assert!(
+        text.lines().any(|l| l.ends_with("test sepa::retry::gives_up_after_max_attempts ... FAILED")),
+        "the tail holds a line the seed's step printed"
+    );
+    assert!(text.lines().count() <= 400);
+
+    let artifacts = &view.sections[4].blocks;
+    assert!(
+        matches!(&artifacts[0], Block::Entities { rows, .. }
+            if rows.len() == 1 && rows[0].title == "sepa-report.txt"),
+        "{artifacts:#?}"
+    );
+    let Block::Entities { rows, .. } = &artifacts[0] else {
+        unreachable!()
+    };
+    let download = rows[0].url.clone().expect("a download URL");
+    assert_eq!(seeded.status_of(&download).await, 200, "{download}");
+
+    let parameters = &view.sections[5].blocks;
+    let [Block::Settings { values, .. }] = parameters.as_slice() else {
+        panic!("{parameters:#?}");
+    };
+    let secret = values
+        .iter()
+        .find(|v| v.name == settings.secret_parameter)
+        .expect("the password parameter is listed");
+    assert!(secret.secret && secret.value.is_empty(), "{secret:#?}");
+    let wire = serde_json::to_string(&view).expect("serializes");
+    assert!(
+        !wire.contains(&settings.secret_value),
+        "the password's value is in the view"
     );
 }

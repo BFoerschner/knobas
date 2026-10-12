@@ -211,6 +211,27 @@ branch_spec() {  # branch_spec <repo>
 }
 
 # --------------------------------------------------------------------------
+# What the failed build reports beyond its log (#665), derived from the
+# fixture's `log` rather than invented: the test is the one its
+# `test <name> ... FAILED` line names, and its failure message is the line
+# after it. The artifact is the log again, as a file, under a name this script
+# decides.
+SEEDED_ARTIFACT=sepa-report.txt
+fixture_log() {  # fixture_log <build type id> -> the fixture's log, blank lines dropped
+  jqf ".builds[] | select(.cfg==\"$1\") | .log" | sed '/^$/d'
+}
+failed_test_name() {  # failed_test_name <build type id>
+  jqf ".builds[] | select(.cfg==\"$1\") | .log | capture(\"test (?<t>[^ ]+) [.][.][.] FAILED\").t"
+}
+failed_test_details() {  # failed_test_details <build type id>
+  jqf ".builds[] | select(.cfg==\"$1\") | .log | capture(\"FAILED\\n(?<d>[^\\n]+)\").d"
+}
+# A value inside a TeamCity service message: `|`, `'`, `[`, `]` escaped by
+# `|`, the grammar JetBrains documents for service messages.
+tc_escape() {
+  printf '%s' "$1" | sed -e 's/|/||/g' -e "s/'/|'/g" -e 's/\[/|[/g' -e 's/\]/|]/g'
+}
+
 # The step scripts. Each is the whole `script.content` of one command-line
 # step, so a heredoc below is the build's shell script, not this script's.
 step_script() {  # step_script <build type id> -> script on stdout
@@ -223,12 +244,25 @@ echo "Ledger_Deploy_Staging: the fixture records a successful build here, and th
 EOF
       ;;
     Payout_IntegrationTests)
-      # The fixture's `log`, verbatim, then the failure. The quoted heredoc
-      # inside the build script means nothing in the log is interpreted.
-      printf '%s\n' "# Seeded by testenv/seed-teamcity-builds.sh: the fixture's log, then the fixture's outcome." \
+      # The fixture's `log`, verbatim, then what a build view reads beyond
+      # the log (#665): the failing test the log names, reported to TeamCity
+      # as a failed test, and the log kept as an artifact -- then the failure.
+      # The quoted heredocs inside the build script mean nothing in the log or
+      # the service messages is interpreted.
+      printf '%s\n' "# Seeded by testenv/seed-teamcity-builds.sh: the fixture's log, its failed test, an artifact, then the fixture's outcome." \
                     "cat <<'KNOBAS_FIXTURE_LOG'"
-      jqf '.builds[] | select(.cfg=="Payout_IntegrationTests") | .log' | sed '/^$/d'
-      printf '%s\n' "KNOBAS_FIXTURE_LOG" "exit 1"
+      fixture_log Payout_IntegrationTests
+      printf '%s\n' "KNOBAS_FIXTURE_LOG" \
+                    "cat > $SEEDED_ARTIFACT <<'KNOBAS_FIXTURE_LOG'"
+      fixture_log Payout_IntegrationTests
+      printf '%s\n' "KNOBAS_FIXTURE_LOG" "cat <<'KNOBAS_SERVICE_MESSAGES'"
+      _test=$(tc_escape "$(failed_test_name Payout_IntegrationTests)")
+      _why=$(tc_escape "$(failed_test_details Payout_IntegrationTests)")
+      printf '%s\n' "##teamcity[publishArtifacts '$SEEDED_ARTIFACT']" \
+                    "##teamcity[testStarted name='$_test']" \
+                    "##teamcity[testFailed name='$_test' message='$_why']" \
+                    "##teamcity[testFinished name='$_test']" \
+                    "KNOBAS_SERVICE_MESSAGES" "exit 1"
       ;;
     *) die "no step script for $1" ;;
   esac
@@ -328,7 +362,41 @@ ensure_build_type() {  # ensure_build_type <id>
       add_step "$_id" "$_name" "$(step_script "$_id")"
       say "added the step to $_id"
     fi
+  elif [ "$_id" != "Payout_Build" ]; then
+    # A server seeded by an older version of this script keeps its older step
+    # (#665 added the failed test and the artifact to Payout_IntegrationTests).
+    # The one step's script is brought up to date in place; the build it
+    # already ran is re-run by ensure_current_build.
+    _step=$(printf '%s' "$REST_BODY" | jq -r '.step[0].id')
+    _have=$(printf '%s' "$REST_BODY" | jq -r '.step[0].properties.property[]? | select(.name=="script.content") | .value')
+    _want=$(step_script "$_id")
+    if [ "$_have" != "$_want" ]; then
+      _raw=$(curl -sS --max-time 60 -X PUT -H "Authorization: Bearer $TOKEN" \
+                  -H 'Content-Type: text/plain' -H 'Accept: text/plain' -w '\n%{http_code}' \
+                  --data-binary "$_want" \
+                  "$TC_URL/app/rest/buildTypes/id:$_id/steps/$_step/parameters/script.content") || _raw='
+000'
+      REST_STATUS=$(printf '%s' "$_raw" | tail -n 1)
+      REST_BODY=$(printf '%s' "$_raw" | sed '$d')
+      expect "update the step script of $_id" 200
+      say "updated the step script of $_id to this seed's"
+    fi
   fi
+}
+
+# A finished build that an older seed ran is not this seed's build: the
+# failed one must carry the failed test its step now reports (#665). Such a
+# build is deleted, so the loop below runs it again under the same number --
+# its id changes, and seed-state.json records the new one.
+ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
+  [ "$2" = "FAILURE" ] || return 0
+  rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed)"
+  expect "read the tests of build id $1" 200
+  [ "$(printf '%s' "$REST_BODY" | jq '.testOccurrences.failed // 0')" -ge 1 ] && return 0
+  rest DELETE "/app/rest/builds/id:$1"
+  expect "delete build id $1, which an older seed ran" 200 204
+  say "deleted build id $1: an older seed ran it and it reports no failed test; running it again"
+  FOUND_ID=''
 }
 
 # --------------------------------------------------------------------------
@@ -484,6 +552,19 @@ assert_log() {  # assert_log <build id> <build type id>
   done || die "build id $1 does not carry the fixture's log"
 }
 
+# ... and reports the fixture's failed test, and the artifact (#665).
+assert_reports() {  # assert_reports <build id> <build type id>
+  _want=$(failed_test_name "$2")
+  rest GET "/app/rest/testOccurrences?locator=build:(id:$1),status:FAILURE&fields=testOccurrence(name)"
+  expect "read the failed tests of build id $1" 200
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.testOccurrence[]?.name] | join(",")')" = "$_want" ] \
+    || die "build id $1 reports failed tests $(printf '%s' "$REST_BODY" | jq -c '[.testOccurrence[]?.name]'), wanted [\"$_want\"]"
+  rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
+  expect "list the artifacts of build id $1" 200
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | join(",")')" = "$SEEDED_ARTIFACT" ] \
+    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted [\"$SEEDED_ARTIFACT\"]"
+}
+
 # --------------------------------------------------------------------------
 rest GET /app/rest/server
 expect "GET /app/rest/server as the recorded token" 200
@@ -519,6 +600,9 @@ for num in $(jqf '.builds[] | select(.status != "running") | .num'); do
   status=$(jqf ".builds[] | select(.num==$num) | if .status == \"failed\" then \"FAILURE\" else \"SUCCESS\" end")
   find_build "$cfg" "$num"
   if [ -n "$FOUND_ID" ] && [ "$FOUND_STATE" = "finished" ]; then
+    ensure_current_build "$FOUND_ID" "$status"
+  fi
+  if [ -n "$FOUND_ID" ] && [ "$FOUND_STATE" = "finished" ]; then
     say "build $num of $cfg already exists as id $FOUND_ID ($FOUND_STATUS)"
     BUILD_MAP="$BUILD_MAP$num $cfg $FOUND_ID
 "
@@ -546,7 +630,7 @@ for line in $QUEUED; do
   status=${line%%|*}; bid=${line#*|}
   wait_for_state "$bid" finished
   assert_finished "$cfg" "$num" "$branch" "$status"
-  if [ "$status" = "FAILURE" ]; then assert_log "$bid" "$cfg"; fi
+  if [ "$status" = "FAILURE" ]; then assert_log "$bid" "$cfg"; assert_reports "$bid" "$cfg"; fi
   say "build $num of $cfg finished $status on $branch (id $bid)"
   BUILD_MAP="$BUILD_MAP$num $cfg $bid
 "
