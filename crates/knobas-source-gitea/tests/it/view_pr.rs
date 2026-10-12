@@ -242,7 +242,13 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
         "the first read asked for the diff: {asked:?}"
     );
 
-    let Block::Entities { title, rows } = &section(&view, "commits").blocks[0] else {
+    let commits = &section(&view, "commits").blocks;
+    assert_eq!(
+        commits.len(),
+        1,
+        "a whole listing says nothing more: {commits:#?}"
+    );
+    let Block::Entities { title, rows } = &commits[0] else {
         panic!("commits are an entity list: {view:#?}");
     };
     assert_eq!(title, &None);
