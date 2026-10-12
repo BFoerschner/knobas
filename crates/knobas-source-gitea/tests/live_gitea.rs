@@ -901,6 +901,14 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
             file.change, file.path, file.additions, file.deletions
         );
     }
+    // The tab's count is read from the compare's commits, not the diff
+    // (`Compare::files`); on the seeded branch, which restores nothing, the
+    // two agree, and this is what says 1.27.3's compare carries the files.
+    assert_eq!(
+        stub.count,
+        Some(files.len() as u64),
+        "the Diff tab counts the diff's files"
+    );
     let lines: Vec<&str> = files
         .iter()
         .flat_map(|f| &f.hunks)
