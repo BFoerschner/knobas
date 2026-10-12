@@ -13,10 +13,11 @@
 import type { ViewAction } from "../../ipc/entity";
 import type { MergeStyle, WriteOpPayload } from "../../ipc/sources";
 
-const MERGE_STYLES: readonly string[] = ["merge", "rebase", "squash"] satisfies MergeStyle[];
+/** Keyed by the union, so a style added to `MergeStyle` and missed here fails to compile. */
+const MERGE_STYLES: Record<MergeStyle, true> = { merge: true, rebase: true, squash: true };
 
 function isMergeStyle(option: string | null): option is MergeStyle {
-  return option !== null && MERGE_STYLES.includes(option);
+  return option !== null && Object.hasOwn(MERGE_STYLES, option);
 }
 
 /** The payload for one op, from the entity the view is of and the option picked. */
