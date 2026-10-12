@@ -371,3 +371,185 @@ async fn the_stored_function_is_the_macros_expansion() {
         );
     }
 }
+
+/// The backend pid a transaction runs on, so a lock in `pg_locks` can be told
+/// apart from another test's.
+async fn pid_of(tx: &mut sqlx::Transaction<'static, sqlx::Postgres>) -> i32 {
+    sqlx::query_scalar("select pg_backend_pid()")
+        .fetch_one(&mut **tx)
+        .await
+        .unwrap()
+}
+
+/// Whether backend `pid` is waiting -- not holding -- the `(627, 0)` key.
+/// `pg_advisory_xact_lock(int4, int4)` shows as `classid` = the first key,
+/// `objid` = the second, `objsubid` = 2.
+async fn waiting_on_the_key(pool: &PgPool, pid: i32) -> bool {
+    sqlx::query_scalar(
+        "select exists (select 1 from pg_locks
+                         where locktype = 'advisory' and classid = 627 and objid = 0
+                           and objsubid = 2 and pid = $1 and not granted)",
+    )
+    .bind(pid)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Poll until `pid` waits on the key, up to five seconds. A deadline, not a
+/// sleep that orders anything: the order comes from the lock itself, and this
+/// only says when the waiting side has got there.
+async fn until_waiting(pool: &PgPool, pid: i32) -> bool {
+    for _ in 0..500 {
+        if waiting_on_the_key(pool, pid).await {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    false
+}
+
+/// One race fixture: a Gitea-declared source with a repo of its own, and the
+/// pieces a racing item and a racing declaration change need.
+struct Race {
+    pool: PgPool,
+    gitea: String,
+    source: String,
+}
+
+async fn race() -> Race {
+    let pool = pool().await;
+    let t = format!("r{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    let gitea = format!("gitea-{t}");
+    let source = format!("g{t}");
+    store_declaration(&pool, &gitea, &gitea_paths()).await;
+    configure(&pool, &source, &gitea).await;
+    Race {
+        pool,
+        gitea,
+        source,
+    }
+}
+
+/// Gitea's declarations with every parent answering to its full name only.
+fn full_names_only() -> Vec<KindPaths> {
+    let mut paths = gitea_paths();
+    for kind in &mut paths {
+        for parent in &mut kind.parent {
+            parent.names.truncate(1);
+        }
+    }
+    paths
+}
+
+/// Insert one commit naming `own/race` -- full name and bare name -- inside
+/// the open transaction.
+async fn insert_commit(tx: &mut sqlx::Transaction<'static, sqlx::Postgres>, source: &str) {
+    let id = format!("{source}:race");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'race')")
+        .bind(&id)
+        .execute(&mut **tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, 'commit', 'race', '', $3)",
+    )
+    .bind(&id)
+    .bind(source)
+    .bind(serde_json::json!({ "repository": { "full_name": "own/race", "name": "race" } }))
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+}
+
+/// Narrow the stored declaration inside the open transaction.
+async fn narrow(tx: &mut sqlx::Transaction<'static, sqlx::Postgres>, gitea: &str) {
+    sqlx::query("update sync.parent_declaration set payload_paths = $2 where adapter_kind = $1")
+        .bind(gitea)
+        .bind(sqlx::types::Json(full_names_only()))
+        .execute(&mut **tx)
+        .await
+        .unwrap();
+}
+
+/// **An item written while a declaration change is uncommitted resolves
+/// against the change** (#627, the deputy's second ruling): the declaration
+/// change goes first and holds its transaction open; the item insert then
+/// waits on the `(627, 0)` key, seen in `pg_locks`; the change commits, and
+/// the insert resolves against what it committed.
+///
+/// Without the item trigger's shared lock the insert does not wait, resolves
+/// under a snapshot that cannot see the change, and keeps the bare name the
+/// change removed -- the stored row disagrees with the walk.
+#[tokio::test]
+async fn an_item_written_during_a_declaration_change_resolves_against_it() {
+    let r = race().await;
+    let mut a = r.pool.begin().await.unwrap();
+    narrow(&mut a, &r.gitea).await;
+
+    let mut b = r.pool.begin().await.unwrap();
+    let b_pid = pid_of(&mut b).await;
+    let source = r.source.clone();
+    let inserting = tokio::spawn(async move {
+        insert_commit(&mut b, &source).await;
+        b
+    });
+    let waited = until_waiting(&r.pool, b_pid).await;
+    a.commit().await.unwrap();
+    inserting.await.unwrap().commit().await.unwrap();
+
+    let templates = vec![(r.gitea.clone(), full_names_only())];
+    let rows = agree(
+        &r.pool,
+        &format!("{}:", r.source),
+        &templates,
+        "the declaration change, then the item",
+    )
+    .await;
+    assert!(!rows.iter().any(|(_, name, _)| name == "race"), "{rows:?}");
+    assert!(
+        waited,
+        "the item insert never waited on the declaration change's key"
+    );
+}
+
+/// **A declaration change made while an item write is uncommitted reaches
+/// that item** -- the other order. The insert goes first and holds its
+/// transaction open; the declaration change then waits on the key; the
+/// insert commits, and the change's recompute sees the item.
+///
+/// Without the declaration trigger's exclusive lock the change does not wait,
+/// recomputes under a snapshot that cannot see the item, and the item keeps
+/// the resolution it made against the old declarations.
+#[tokio::test]
+async fn a_declaration_change_during_an_item_write_reaches_the_item() {
+    let r = race().await;
+    let mut b = r.pool.begin().await.unwrap();
+    insert_commit(&mut b, &r.source).await;
+
+    let mut a = r.pool.begin().await.unwrap();
+    let a_pid = pid_of(&mut a).await;
+    let gitea = r.gitea.clone();
+    let changing = tokio::spawn(async move {
+        narrow(&mut a, &gitea).await;
+        a
+    });
+    let waited = until_waiting(&r.pool, a_pid).await;
+    b.commit().await.unwrap();
+    changing.await.unwrap().commit().await.unwrap();
+
+    let templates = vec![(r.gitea.clone(), full_names_only())];
+    let rows = agree(
+        &r.pool,
+        &format!("{}:", r.source),
+        &templates,
+        "the item, then the declaration change",
+    )
+    .await;
+    assert!(!rows.iter().any(|(_, name, _)| name == "race"), "{rows:?}");
+    assert!(
+        waited,
+        "the declaration change never waited on the item write's key"
+    );
+}

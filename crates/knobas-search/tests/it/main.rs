@@ -11,6 +11,7 @@
 mod ancestor_path;
 mod bare_name;
 mod corpus_seam;
+mod declaring;
 mod help_card;
 mod home;
 mod item_parent;
