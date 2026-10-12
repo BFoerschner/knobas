@@ -503,12 +503,13 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 /// for about twenty, which is where `saved::MAX_SAVED_LISTS = 16` came from.
 ///
 /// **The margin is thin on purpose, and no smaller cap buys much of it.** The
-/// gate passed at 84 to 90 against a budget of 100 at sixteen, because the built-ins own
-/// most of the budget before a saved list exists. Eight lists read 81 to 88
-/// across three runs against sixteen's 84 to 90 -- never six milliseconds
-/// apart -- so halving the allowance would buy almost nothing, and the first
-/// cap with real slack is **four**, at 66. Sixteen is the largest number the
-/// budget affords with the gate still able to notice a regression.
+/// gate passed at 84 to 90 against a budget of 100 at sixteen, because the
+/// built-ins own most of the budget before a saved list exists. Eight lists
+/// read 81 to 88 across three runs against sixteen's 84 to 90 -- never six
+/// milliseconds apart -- so halving the allowance would buy almost nothing,
+/// and the first cap with real slack is **four**, at 66. Sixteen was the
+/// largest number the budget afforded with the gate still able to notice a
+/// regression.
 ///
 /// **A second run**, earlier the same morning and with the cap still at its
 /// original 64 -- the only way to reach a step past the cap, since
@@ -526,7 +527,7 @@ async fn rail_at(pool: &sqlx::PgPool, searcher: &Searcher, lists: i64) -> RailPo
 ///
 /// # The reading, 2026-10-12 (#653): the cap steps to eight
 ///
-/// The argument above for sixteen -- "the largest number the budget affords
+/// The argument above for sixteen -- "the largest number the budget afforded
 /// with the gate still able to notice a regression" -- is overtaken. Held
 /// re-runs of #533's standard on `d6673e60` read `board, 16 saved` at 87 to
 /// 98 ms and failed the gate in two of five (the rail's `launcher_board` at

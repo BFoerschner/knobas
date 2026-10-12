@@ -160,13 +160,15 @@ const MAX_ID_CHARS: usize = 48;
 /// Five `just search-perf` runs on `d6673e60`, each under an orchestrator
 /// hold (no other agent, gate or cargo build on the machine for the whole run)
 /// and a 5-second process and gate-slot monitor, each with load1 under 12 at
-/// start and end and a monotonic rail in both columns -- all four of #533's
-/// conditions. The gate asserts three figures at the cap. The size curve's
-/// `board, 16 saved` at 100 k -- the one #629 tabled -- read **87, 89, 95, 92
-/// and 98 ms**: a spread of 11 against 2 ms of clearance. The rail table's
-/// last row, a separate timing of the same board, read 89, 93, 90, 90 and
-/// **102** for `launcher_board` and 88, **100**, 89, 89 and 91 for
-/// `smart_lists`, so two of the five held runs failed the gate outright. Under
+/// start and end, a monotonic rail in both columns, and its whole transcript
+/// quoted on PR #656 -- all four of #533's conditions. The gate asserts four
+/// figures at the cap. The size curve's `board, 16 saved` at 100 k -- the
+/// one #629 tabled -- read **87, 89, 95, 92 and 98 ms**: a spread of 11
+/// against 2 ms of clearance; its `lists, 16 saved` read 87, 87, 94, 90 and
+/// 90. The rail table's last row, a separate timing of the same board, read
+/// 89, 93, 90, 90 and **102** for `launcher_board` and 88, **100**, 89, 89
+/// and 91 for `smart_lists`, so two of the five held runs failed the gate
+/// outright. Under
 /// #533's rule -- a quiet run clearing the budget by less than its own spread
 /// steps the constant to eight without a ruling -- it stepped.
 ///
@@ -196,10 +198,11 @@ const MAX_ID_CHARS: usize = 48;
 /// The rail's `launcher_board` at eight spans 84 to 90, a spread of 6 against
 /// at least 10 ms of clearance, so eight holds under the same rule. The section
 /// above that called eight "not meaningfully cheaper" was right about the
-/// milliseconds -- in the same run's rail, eight read 2 to 16 ms below sixteen
-/// -- and is overtaken by the rule: the margin is for the clock, and at
-/// sixteen the clock's own spread ate it. A database restored with more than eight saved lists keeps them all;
-/// [`create`] refuses the next one until the count is below eight again.
+/// milliseconds -- in the same run's rail, `launcher_board` at eight read 2 to
+/// 16 ms below sixteen -- and is overtaken by the rule: the margin is for the
+/// clock, and at sixteen the clock's own spread ate it. A database restored
+/// with more than eight saved lists keeps them all; [`create`] refuses the
+/// next one until the count is below eight again.
 pub const MAX_SAVED_LISTS: i64 = 8;
 
 /// One row of `knobas.smart_list`.
