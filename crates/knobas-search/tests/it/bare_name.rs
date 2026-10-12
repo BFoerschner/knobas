@@ -134,7 +134,11 @@ async fn a_repo_is_found_by_its_bare_name_in_any_case() {
         "tidewater/payout-service",
     ] {
         let response = searcher(&pool).search(q(raw)).await.unwrap();
-        assert_eq!(group_ids(&response, "repo"), [ours.clone()], "{raw}");
+        assert_eq!(
+            group_ids(&response, "repo"),
+            std::slice::from_ref(&ours),
+            "{raw}"
+        );
     }
 }
 
