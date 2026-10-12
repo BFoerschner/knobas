@@ -9833,8 +9833,10 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   Pinned by: `knobas-search`'s `tests/it/suggest.rs` over a real PostgreSQL —
   `the_read_offers_the_kinds_the_sources_and_the_parents_that_exist` (a disabled source's kind and
-  parent are not offered, and every offered parent and kind is run as `under:` / `kind:` and
-  must be understood and find something), `a_parent_only_its_children_name_is_still_offered` and
+  parent are not offered, and every offered parent and kind is run as `under:` / `kind:`, a
+  parent's name spelled as the box completes it, quoted when it has a space, and must be
+  understood and find something; the deputy's ruling of 2026-10-12 on #597),
+  `a_parent_only_its_children_name_is_still_offered` and
   `an_asset_that_holds_something_is_offered_and_a_leaf_is_not`; `suggest::tests::
   every_kind_knobas_owns_is_probed`; `tests/it/under.rs`'s
   `a_quoted_name_with_a_space_scopes_like_any_other`; `knobas-app`'s `tests/it/search_ipc.rs`
