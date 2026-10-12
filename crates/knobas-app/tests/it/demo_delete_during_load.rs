@@ -24,12 +24,13 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// An adapter that emits `before`, says so, waits to be let go, then emits
-/// `after` and returns. With neither channel it is an ordinary run of
-/// `before ++ after`, which is how a mirror is seeded.
+/// `after` and returns -- or fails, if `fail` is set. With neither channel it
+/// is an ordinary run of `before ++ after`, which is how a mirror is seeded.
 struct PausingSource {
     id: String,
     before: Vec<String>,
     after: Vec<String>,
+    fail: bool,
     reached: Mutex<Option<oneshot::Sender<()>>>,
     release: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
 }
@@ -46,6 +47,7 @@ impl PausingSource {
             id: id.to_owned(),
             before,
             after,
+            fail: false,
             reached: Mutex::new(reached),
             release: tokio::sync::Mutex::new(release),
         }
@@ -117,6 +119,9 @@ impl Source for PausingSource {
         for key in &self.after {
             sink.item(item(&self.id, key)).await?;
         }
+        if self.fail {
+            return Err(SourceError::protocol("failed after the pause".to_owned()));
+        }
         Ok("paused".to_owned())
     }
 
@@ -160,10 +165,11 @@ async fn live_entities(pool: &PgPool, id: &str, keys: &[String]) -> Vec<String> 
 /// A demo load of a fresh source whose mirror already holds `OLD` items, paused
 /// after it has rewritten `BATCH` of them and written `BATCH` new ones -- two
 /// flushes, both inside its open transaction. Then the source is deleted with
-/// its mirror, and `between` runs before the load is released.
+/// its mirror, and `between` runs before the load is released. With `fail`,
+/// the load's run fails after its release and rolls back.
 ///
 /// Returns the database, the source id, and the keys by who wrote them.
-async fn delete_during_a_paused_load<F, Fut>(between: F) -> (PgPool, String, Named)
+async fn delete_during_a_paused_load<F, Fut>(fail: bool, between: F) -> (PgPool, String, Named)
 where
     F: FnOnce(PgPool, String) -> Fut,
     Fut: std::future::Future<Output = ()>,
@@ -196,13 +202,14 @@ where
     let late = keys("LATE", 0..3);
     let (reached_tx, reached_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let source = PausingSource::new(
+    let mut source = PausingSource::new(
         &id,
         rewritten.iter().chain(&fresh).cloned().collect(),
         late.clone(),
         Some(reached_tx),
         Some(release_rx),
     );
+    source.fail = fail;
     let load_pool = pool.clone();
     let load = tokio::spawn(async move { demo::load_mirror_of(&load_pool, &source).await });
     tokio::time::timeout(Duration::from_secs(10), reached_rx)
@@ -243,20 +250,28 @@ where
     between(pool.clone(), id.clone()).await;
     let _ = release_tx.send(());
 
-    let report = tokio::time::timeout(Duration::from_secs(10), load)
+    let loaded = tokio::time::timeout(Duration::from_secs(10), load)
         .await
         .expect("the load never returned after its release")
-        .unwrap()
-        .expect("the load ends without an error");
-    assert_eq!(
-        report.upserted,
-        (rewritten.len() + fresh.len() + late.len()) as u64,
-        "the load's run committed everything it emitted"
-    );
+        .unwrap();
+    if fail {
+        assert!(
+            matches!(loaded, Err(demo::DemoError::Sync { .. })),
+            "the load answers with its run's failure: {loaded:?}"
+        );
+    } else {
+        let report = loaded.expect("the load ends without an error");
+        assert_eq!(
+            report.upserted,
+            (rewritten.len() + fresh.len() + late.len()) as u64,
+            "the load's run committed everything it emitted"
+        );
+    }
 
     let named = Named {
         untouched,
-        run: rewritten.into_iter().chain(fresh).chain(late).collect(),
+        rewritten,
+        new: fresh.into_iter().chain(late).collect(),
     };
     (pool, id, named)
 }
@@ -265,14 +280,28 @@ where
 struct Named {
     /// The old mirror's rows the paused load never reached.
     untouched: Vec<String>,
-    /// Every key the paused load emitted: rewrites, new items before the pause,
-    /// and new items after it.
-    run: Vec<String>,
+    /// The old mirror's rows the paused load wrote again.
+    rewritten: Vec<String>,
+    /// The keys new to the mirror that the load emitted, before its pause and
+    /// after.
+    new: Vec<String>,
 }
 
 impl Named {
+    /// Every key the old mirror held.
+    fn old(&self) -> Vec<String> {
+        self.untouched
+            .iter()
+            .chain(&self.rewritten)
+            .cloned()
+            .collect()
+    }
+    /// Every key the load emitted.
+    fn run(&self) -> Vec<String> {
+        self.rewritten.iter().chain(&self.new).cloned().collect()
+    }
     fn all(&self) -> Vec<String> {
-        self.untouched.iter().chain(&self.run).cloned().collect()
+        self.untouched.iter().chain(&self.run()).cloned().collect()
     }
 }
 
@@ -281,7 +310,7 @@ impl Named {
 /// the load rewrote or inserted is gone, and each entity is tombstoned.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_source_deleted_during_a_demo_load_has_no_mirror_once_the_load_returns() {
-    let (pool, id, named) = delete_during_a_paused_load(|_, _| async {}).await;
+    let (pool, id, named) = delete_during_a_paused_load(false, |_, _| async {}).await;
 
     assert_eq!(
         mirrored_items(&pool, &id).await,
@@ -297,7 +326,7 @@ async fn a_source_deleted_during_a_demo_load_has_no_mirror_once_the_load_returns
 /// load purges nothing behind itself and its mirror stays live.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_demo_load_purges_nothing_when_a_source_holds_the_id_again() {
-    let (pool, id, named) = delete_during_a_paused_load(|pool, id| async move {
+    let (pool, id, named) = delete_during_a_paused_load(false, |pool, id| async move {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
              values ($1, 'fake', 'Fake again', 'http://localhost', 'none')",
@@ -313,9 +342,28 @@ async fn a_demo_load_purges_nothing_when_a_source_holds_the_id_again() {
     // purge, before the source came back.
     assert_eq!(
         mirrored_items(&pool, &id).await,
-        named.run.len() as i64,
+        named.run().len() as i64,
         "the load purged the mirror of a source the user had added back under the id"
     );
-    let live = live_entities(&pool, &id, &named.run).await;
-    assert_eq!(live.len(), named.run.len(), "the run's entities stay live");
+    let run = named.run();
+    let live = live_entities(&pool, &id, &run).await;
+    assert_eq!(live.len(), run.len(), "the run's entities stay live");
+}
+
+/// **A load whose run fails is purged behind too.** The run's rollback puts
+/// back the rows it rewrote, and those are the rows the inline purge skipped
+/// because the run held them: live again, for a source that no longer exists.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_source_deleted_during_a_demo_load_that_fails_has_no_mirror_once_it_returns() {
+    let (pool, id, named) = delete_during_a_paused_load(true, |_, _| async {}).await;
+
+    assert_eq!(
+        mirrored_items(&pool, &id).await,
+        0,
+        "the failed load's rollback put back rows of a source that no longer exists"
+    );
+    // The new keys were never committed, so only the old mirror's entities
+    // exist to be tombstoned.
+    let live = live_entities(&pool, &id, &named.old()).await;
+    assert!(live.is_empty(), "entities left untombstoned: {live:?}");
 }

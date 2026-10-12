@@ -414,6 +414,14 @@ pub async fn purge_items(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
 /// the purge are two statements, so an add committing between them is purged
 /// behind anyway. That is a residual, recorded on `delete_source`.
 ///
+/// **A failed read purges nothing**, the opposite of the scheduler's guard,
+/// which warns and purges as the delete asked. The scheduler asks only after a
+/// delete has happened, so a blip there costs at most a purge of a source the
+/// user deleted. This runs after *every* demo load, deleted or not, so purging
+/// on a blip would take the mirror of a source that exists. The error is the
+/// caller's to report, and a deleted source's rows then stay until the next
+/// purge -- the re-applied purge's own failure mode.
+///
 /// # Errors
 /// [`sqlx::Error`] if the read or the purge fails.
 pub async fn purge_if_gone(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
