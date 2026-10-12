@@ -1,4 +1,6 @@
-//! A repo is found by its bare name (#612, spec #591 story 1).
+//! A repo is found by its bare name (#612, spec #591 story 1), and a slashed
+//! title is also *named* by its last `/` segment (#621), so the repo whose
+//! bare name is the query comes first among equal ranks.
 //!
 //! A Gitea repo's title is its `full_name`, and PostgreSQL's parser reads
 //! `tidewater/payout-service` as one file-path lexeme, so before `0027` the
@@ -9,10 +11,11 @@
 //! Through the public [`Searcher`] against a real PostgreSQL (ADR-0013), with
 //! each repo stored the way `knobas-source-gitea`'s `repo_item` stores it:
 //! the full name as the title, and the full name and the description as the
-//! body. The names are the ticket's own, literally, so every test takes a
-//! database of its own (`scratch_database`) rather than a token in the file's
-//! shared one: a token inside the name would change how the name lexes,
-//! which is the thing under test.
+//! body. #621's branches are stored the way `branch_item` stores them. The
+//! names are the tickets' own, literally, so every test takes a database of
+//! its own (`scratch_database`) rather than a token in the file's shared one:
+//! a token inside the name would change how the name lexes, which is the
+//! thing under test.
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
@@ -240,7 +243,7 @@ async fn the_repo_whose_last_segment_is_the_query_comes_first() {
 async fn the_full_name_still_puts_its_repo_first() {
     let pool = pool("last-segment-full").await;
     let named = repo(&pool, "tidewater/payout", "Payouts", days_ago(30)).await;
-    repo(
+    let sibling = repo(
         &pool,
         "tidewater/payout-service",
         "Payout processing",
@@ -248,17 +251,14 @@ async fn the_full_name_still_puts_its_repo_first() {
     )
     .await;
 
-    let response = searcher(&pool)
-        .search(q("tidewater/payout"))
-        .await
-        .unwrap();
-    assert_eq!(group_ids(&response, "repo").first(), Some(&named));
+    let response = searcher(&pool).search(q("tidewater/payout")).await.unwrap();
+    assert_eq!(group_ids(&response, "repo"), [named, sibling]);
 }
 
 /// The owner names no repo: only the last segment is a name. `tidewater`
 /// matches `tidewater/ledger` and `tidewater/payout` as it matches the newer
 /// `harbor/tidewater-sync`, whose last segment is not `tidewater` either, so
-/// the three tie and recency orders them as on `main`. Were every `/` segment
+/// the three tie and recency orders them as it did before #621. Were every `/` segment
 /// a name, the owner's two repos would be named and jump above the newest.
 #[tokio::test]
 async fn the_owner_names_none_of_its_repos() {

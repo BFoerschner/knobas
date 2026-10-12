@@ -325,7 +325,6 @@ The ticket's "Blocked by" stays **None**. The fix doesn't rely on #610's re-emit
 
 Ruled 2026-10-12. Comment:
 <https://github.com/BFoerschner/knobas/issues/611#issuecomment-6118983310>
-Acted on by #621.
 
 **The fork:** PR #618's `NAMED` key is true when the title, lexed with `english`, gives exactly the typed words' lexemes. It is a second ordering key, read only between equal ranks. Once #612's migration lands, repos `tidewater/payout` and `tidewater/payout-service` both score 1 for `payout`, as #618's composition table measured. Neither is *named* `payout`, because a slashed title lexes as one file-path lexeme, so recency decides between them. Story 1 is not guaranteed for two repos whose names share a first word, and neither #611's nor #612's criteria cover that case. There are three questions. Does story 1 require closing this? If it does, should it be closed by extending `NAMED` (for example, to also compare the title's last `/` segment), by folding it into #612, or by a follow-up ticket?
 

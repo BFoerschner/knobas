@@ -677,8 +677,9 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// leave `tidewater/payout` and `tidewater/payout-service` to recency. The
 /// last segment and not every segment, so `tidewater` names none of the
 /// owner's repos; and no kind is named, so a branch `feature/payout` is named
-/// `payout` by the same rule. The guard spares a title with no `/` a second
-/// lexing that could only repeat the first.
+/// `payout` by the same rule. The guard is for cost, not meaning: with no `/`,
+/// `split_part` returns the whole title and the second half can only repeat
+/// the first, so a planner that skips the guard changes no answer.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
