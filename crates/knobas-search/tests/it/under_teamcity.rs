@@ -37,9 +37,17 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
-/// The searcher the app builds, with TeamCity's declared payload paths.
-fn searcher(pool: &sqlx::PgPool) -> Searcher {
-    Searcher::new(pool.clone()).with_payload_paths([knobas_source_teamcity::descriptor_template()])
+/// The searcher the app builds, with TeamCity's declared payload paths --
+/// written to `sync.parent_declaration` too, which `under:` reads through
+/// `sync.item_parent` since #627. This file has its own database (#572), so
+/// declaring TeamCity alone removes nobody else's adapter kind.
+async fn searcher(pool: &sqlx::PgPool) -> Searcher {
+    Searcher::declaring(
+        pool.clone(),
+        [knobas_source_teamcity::descriptor_template()],
+    )
+    .await
+    .unwrap()
 }
 
 async fn item(
@@ -159,7 +167,7 @@ async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
         format!("under:{id}"),
         format!("under:{}", id.to_lowercase()),
     ] {
-        let response = searcher(&pool).search(q(&raw)).await.unwrap();
+        let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
         assert_eq!(ids(&response), sorted(ours.clone()), "{raw}");
         assert!(
             response.interpreted.unknown_tokens.is_empty(),
@@ -192,6 +200,7 @@ async fn a_build_carries_its_configuration_as_path_and_keeps_its_title() {
     .await;
 
     let response = searcher(&pool)
+        .await
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
