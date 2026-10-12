@@ -25,7 +25,9 @@
 //! against themselves in their own test suite.
 
 pub mod contract;
+pub mod diff;
 pub mod instance;
+pub mod view;
 
 /// Everything knobas needs to know about a configured adapter instance.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -810,6 +812,37 @@ pub trait Source: Send + Sync {
     ///
     /// [`EntityRef`]: knobas_core::entity::EntityRef
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
+    /// The **source view** this adapter draws for one of its own entities
+    /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
+    /// the fixed vocabulary in [`view`], read live when a detail opens and
+    /// never stored.
+    ///
+    /// `entity` is an [`EntityRef`] in string form, the address
+    /// [`reachable_transitions`](Source::reachable_transitions) takes.
+    ///
+    /// * `section: None` asks for the whole view. A **deferred** section comes
+    ///   with its id, title and count and no blocks.
+    /// * `section: Some(id)` asks for that one section's blocks: the answer is
+    ///   a view holding exactly that section, not deferred. An id this kind's
+    ///   view does not have is refused with [`SourceError::Protocol`].
+    ///
+    /// `Ok(None)` is **this adapter draws no view for this kind**, and the
+    /// detail draws the generic payload projection with no comment. A failed
+    /// read is an error, and the detail draws the same projection under a
+    /// line naming it (ADR-0020 rule 2) -- so an adapter must never answer
+    /// `None` for a read that failed, or the reader is told nothing.
+    ///
+    /// **No default implementation** (ADR-0006's forcing function, as for
+    /// `reachable_transitions`): an adapter with nothing to draw says so by
+    /// answering `Ok(None)` for every kind. [`contract::battery`] clause 9
+    /// asks every adapter for the view of every entity it emitted.
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<view::SourceView>, SourceError>;
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;

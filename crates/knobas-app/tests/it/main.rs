@@ -23,6 +23,7 @@ mod demo;
 mod demo_delete_during_load;
 mod entity;
 mod entity_mirror;
+mod entity_view;
 mod estate_exit;
 mod inbox_ipc;
 mod ipc;

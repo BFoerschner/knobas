@@ -350,6 +350,17 @@ impl Source for JiraSource {
         let offered = write::offered_transitions(&self.http, &self.issue_key(entity)?).await?;
         Ok(offered.into_iter().map(|t| t.status).collect())
     }
+
+    /// No source view yet (ADR-0020): a Jira ticket's detail is the mirror's
+    /// generic projection, as it was before views existed (spec #660 keeps
+    /// Jira's details unchanged).
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

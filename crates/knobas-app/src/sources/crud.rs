@@ -710,6 +710,84 @@ pub async fn reachable_transitions(
     registry: &dyn AdapterRegistry,
     entity_id: &str,
 ) -> Result<Vec<String>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    Ok(source.reachable_transitions(entity_id).await?)
+}
+
+/// The source view of `entity_id` (#661, ADR-0020): the entity's own adapter
+/// asked live, the way [`reachable_transitions`] asks it, and nothing stored.
+///
+/// **One thing is the app's to do to the answer**, and it is rule 7: an
+/// entity-list row keeps its `entity_id` only where the mirror holds that
+/// entity. The adapter names what a row *would* be -- a commit's parent, by
+/// the id Gitea would give it -- and cannot know what this mirror synced; a
+/// row whose address opened *Not in the mirror* would be a link to nowhere.
+/// A withdrawn entity is still held (`sync.item` keeps it, and its detail
+/// opens), so the check reads `sync.item` and not `sync.live_item`.
+///
+/// # Errors
+///
+/// As [`reachable_transitions`]: the build's failures, and whatever the
+/// adapter's read maps to -- which the shell draws as *Showing the mirror*
+/// under the generic projection (rule 2). `Ok(None)` is an adapter that draws
+/// nothing for this kind, and is not an error.
+pub async fn view(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    section: Option<&str>,
+) -> Result<Option<knobas_source::view::SourceView>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let Some(mut view) = source.view(entity_id, section).await? else {
+        return Ok(None);
+    };
+    let named: Vec<String> = view
+        .sections
+        .iter()
+        .flat_map(|s| &s.blocks)
+        .filter_map(|block| match block {
+            knobas_source::view::Block::Entities { rows, .. } => Some(rows),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|row| row.entity_id.clone())
+        .collect();
+    if named.is_empty() {
+        return Ok(Some(view));
+    }
+    let held: std::collections::HashSet<String> =
+        sqlx::query_scalar("select entity_id from sync.item where entity_id = any($1)")
+            .bind(&named)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+    for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
+        if let knobas_source::view::Block::Entities { rows, .. } = block {
+            for row in rows {
+                if row.entity_id.as_ref().is_some_and(|id| !held.contains(id)) {
+                    row.entity_id = None;
+                }
+            }
+        }
+    }
+    Ok(Some(view))
+}
+
+/// The adapter that owns `entity_id`, built the way a scheduled run builds it.
+///
+/// The **source is the entity's namespace** (interfaces §4.1), so nothing
+/// else is asked for. The keychain is asked only where the configuration says
+/// a credential is needed at all, which is `build_source`'s rule: a source
+/// that authenticates nothing -- the mock, `--demo` against an empty keychain
+/// -- must not be turned into a keychain prompt by a detail opening.
+async fn adapter_for(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
     let parsed = knobas_core::entity::EntityRef::parse(entity_id)
         .map_err(|error| SourcesError::Invalid(error.to_string()))?;
     let cfg = config::get(pool, &parsed.namespace)
@@ -739,7 +817,7 @@ pub async fn reachable_transitions(
         Credential::keeping(&SecretInput::default(), stored),
         cfg.config.clone(),
     ))?;
-    Ok(source.reachable_transitions(entity_id).await?)
+    Ok(source)
 }
 
 /// The credential health of every source -- the cheap poll the top strip's

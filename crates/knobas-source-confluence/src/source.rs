@@ -248,6 +248,16 @@ impl Source for ConfluenceSource {
              read for {entity:?}"
         )))
     }
+
+    /// No source view yet (ADR-0020): a page draws its own storage body from
+    /// the mirror, and spec #660 keeps Confluence's details unchanged.
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

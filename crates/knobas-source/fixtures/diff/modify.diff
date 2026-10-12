@@ -1,0 +1,14 @@
+diff --git a/lib.rs b/lib.rs
+index 84734ad..6112a3c 100644
+--- a/lib.rs
++++ b/lib.rs
+@@ -3,6 +3,7 @@ fn main() {
+ }
+ 
+ fn retry(attempts: u32) -> u32 {
+-    let base = 30;
+-    base * attempts
++    let base = 45;
++    let jitter = 3;
++    base * attempts + jitter
+ }

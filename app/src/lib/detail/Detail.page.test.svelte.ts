@@ -35,6 +35,8 @@ vi.mock("../ipc/entity", () => ({
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),

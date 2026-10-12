@@ -185,6 +185,8 @@ vi.mock("../ipc/entity", () => ({
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
   // unmounted mid-flight by the test that checks it leaves nothing behind.
   miniBoard: () => deferred({ columns: [], sources: [] }),
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: () => deferred(DETAIL),
   recentActivity: () => deferred([LINE]),
   getNote: () => deferred(NOTE),

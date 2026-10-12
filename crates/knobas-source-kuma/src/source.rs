@@ -334,6 +334,16 @@ impl Source for KumaSource {
              read for {entity:?}"
         )))
     }
+
+    /// No source view yet (ADR-0020): spec #660 keeps Uptime Kuma's details
+    /// unchanged.
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

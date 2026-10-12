@@ -217,6 +217,8 @@ vi.mock("./lib/ipc/entity", () => ({
         : entityRows.filter((candidate) => filter.kinds.includes(candidate.kind));
     return Promise.resolve({ rows, total: rows.length });
   },
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: () => Promise.resolve(null),
   recentActivity: () => Promise.resolve([]),
   // The detail slide-over reads the board for its status select (#179); an

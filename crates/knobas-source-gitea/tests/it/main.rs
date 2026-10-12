@@ -13,4 +13,5 @@ mod support;
 mod client;
 mod contract;
 mod sync;
+mod view;
 mod write;

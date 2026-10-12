@@ -110,6 +110,8 @@ vi.mock("../ipc/entity", () => ({
     }),
   saveNote: () => Promise.reject(new Error("no note save in this test")),
   listEntities: () => Promise.resolve(PAGE),
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),
   // The clones root (#499): the settings view imports it at module level, and

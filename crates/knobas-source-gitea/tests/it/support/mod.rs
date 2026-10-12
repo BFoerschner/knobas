@@ -575,6 +575,36 @@ impl Fake {
             }
         }
 
+        // Each commit on its own, and its diff, for the source view (#661).
+        // The record is the listing's, which carries everything the view
+        // reads but `parents` -- absent here, so the view draws no parent
+        // rows; `tests/it/view.rs` serves its own record for the rest.
+        for (key, commits) in &state.commits {
+            let (full_name, _) = key
+                .split_once('@')
+                .expect("commit key is owner/repo@branch");
+            for record in commits {
+                let sha = record["sha"].as_str().expect("a commit record has a sha");
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/git/commits/{sha}"))),
+                )
+                .respond_with(ok(record.clone()))
+                .mount(&self.server)
+                .await;
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/git/commits/{sha}.diff"))),
+                )
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    "diff --git a/CHANGELOG.md b/CHANGELOG.md\nindex 1111111..2222222 100644\n\
+                     --- a/CHANGELOG.md\n+++ b/CHANGELOG.md\n@@ -1 +1,2 @@\n # Changelog\n+- {sha}\n"
+                )))
+                .mount(&self.server)
+                .await;
+            }
+        }
+
         // Anything past the last page answers empty, the way Gitea does --
         // never a 401, which would read as a credential fault. `/user` and
         // `/version` are excluded: they are not lists, and a `[]` there would

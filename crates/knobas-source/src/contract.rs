@@ -332,6 +332,68 @@ where
     //    refuses it **by name**, the way clause 5's undeclared write is
     //    refused.
     check_reachable_transitions(&*s, &d).await;
+    // 9. The source view (#661, ADR-0020): every entity this adapter emitted
+    //    answers the read without failing -- with a view, or with `None`.
+    check_views(&*s, &sink.0).await;
+}
+
+/// Clause 9: the source view of every entity the adapter emitted is an answer,
+/// never a failure.
+///
+/// **Every emitted entity, not a probe**, and that is the difference from
+/// clauses 5 and 8: a view is a read of something that exists, so the battery
+/// asks about things that do -- the items the full sync just handed over. A
+/// view that fails for one of them is a detail that opens on *Showing the
+/// mirror* for an entity the adapter itself named, which is the line ADR-0020
+/// keeps for a source that could not be reached. `None` passes: it is an
+/// adapter drawing nothing for that kind (rule 2).
+///
+/// Run against a live backend this makes real reads -- one per entity, which
+/// is what a reader opening each detail would make -- and no write.
+///
+/// A drawn view is held to the two things the shell depends on: its section
+/// ids are unique (a deferred read names one), and each **deferred** section
+/// answers its own read with exactly that section, not deferred -- the read a
+/// tab makes when it is first opened.
+async fn check_views(s: &dyn crate::Source, items: &[crate::SyncItem]) {
+    for item in items {
+        let id = item.entity.to_string();
+        let view = match s.view(&id, None).await {
+            Ok(view) => view,
+            Err(error) => panic!(
+                "the source view of {id} (kind {:?}), an entity this adapter emitted, must be \
+                 answered with a view or with None, got {error:?}",
+                item.kind
+            ),
+        };
+        let Some(view) = view else { continue };
+        let mut seen = std::collections::HashSet::new();
+        for section in &view.sections {
+            assert!(
+                !section.id.trim().is_empty() && seen.insert(section.id.as_str()),
+                "the source view of {id} has a blank or repeated section id {:?} -- a deferred \
+                 read names its section by id, so ids must be unique",
+                section.id
+            );
+        }
+        for section in view.sections.iter().filter(|s| s.deferred) {
+            let read = s.view(&id, Some(&section.id)).await;
+            let answered = match &read {
+                Ok(Some(one)) => {
+                    one.sections.len() == 1
+                        && one.sections[0].id == section.id
+                        && !one.sections[0].deferred
+                }
+                _ => false,
+            };
+            assert!(
+                answered,
+                "the deferred section {:?} of {id}'s source view must answer its own read with \
+                 exactly that section, not deferred, got {read:?}",
+                section.id
+            );
+        }
+    }
 }
 
 /// Clause 8: an adapter without a workflow refuses the reachable-transition
@@ -932,6 +994,15 @@ mod tests {
         RefusesTheReadAnonymously,
         /// Swallows the sink's error and reports a successful sync.
         SwallowsSinkError,
+        /// Draws nothing for its one kind: `None` is an answer, not a failure.
+        DrawsNoView,
+        /// Fails the source view of an entity it emitted itself.
+        FailsTheView,
+        /// Draws a view whose two sections share one id, so a deferred read
+        /// could not say which it wants.
+        RepeatsASectionId,
+        /// Draws a deferred section whose own read answers a different one.
+        DefersASectionItCannotRead,
         /// Declares payload paths for a kind absent from `entity_kinds`.
         PayloadPathsForAKindItDoesNotEmit,
         /// Declares the same kind's payload paths twice, so the second entry
@@ -1317,6 +1388,57 @@ mod tests {
                 return Ok(crate::WriteReceipt::none());
             }
             Err(SourceError::protocol(format!("unsupported op: {op:?}")))
+        }
+
+        /// The conforming adapter draws an overview and a deferred log, so the
+        /// happy path walks both halves of clause 9.
+        async fn view(
+            &self,
+            _entity: &str,
+            section: Option<&str>,
+        ) -> Result<Option<crate::view::SourceView>, SourceError> {
+            use crate::view::{Block, SourceView, ViewSection};
+            let overview = |id: &str| ViewSection {
+                id: id.into(),
+                title: "Overview".into(),
+                count: None,
+                deferred: false,
+                blocks: vec![Block::Text {
+                    text: "the first item".into(),
+                    markdown: false,
+                }],
+            };
+            let log = |deferred: bool| ViewSection {
+                id: "log".into(),
+                title: "Log".into(),
+                count: None,
+                deferred,
+                blocks: if deferred {
+                    vec![]
+                } else {
+                    vec![Block::Log {
+                        text: "ok".into(),
+                        truncated: false,
+                    }]
+                },
+            };
+            match (self.behavior, section) {
+                (Behavior::DrawsNoView, _) => Ok(None),
+                (Behavior::FailsTheView, _) => Err(SourceError::protocol("no view today")),
+                (Behavior::RepeatsASectionId, _) => Ok(Some(SourceView {
+                    sections: vec![overview("overview"), overview("overview")],
+                })),
+                (Behavior::DefersASectionItCannotRead, Some(_)) => Ok(Some(SourceView {
+                    sections: vec![overview("overview")],
+                })),
+                (_, None) => Ok(Some(SourceView {
+                    sections: vec![overview("overview"), log(true)],
+                })),
+                (_, Some("log")) => Ok(Some(SourceView {
+                    sections: vec![log(false)],
+                })),
+                (_, Some(other)) => Err(SourceError::protocol(format!("no section {other:?}"))),
+            }
         }
 
         async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
@@ -1852,6 +1974,38 @@ mod tests {
         rejects(
             Behavior::RefusesTheReadAnonymously,
             "must name the adapter that has no workflow",
+        )
+        .await;
+    }
+
+    // -- clause 9: the source view (#661) ------------------------------------
+
+    #[tokio::test]
+    async fn accepts_an_adapter_that_draws_no_view() {
+        run(Behavior::DrawsNoView)
+            .await
+            .expect("None is an answer: the adapter draws nothing for this kind");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_whose_view_of_its_own_entity_fails() {
+        rejects(
+            Behavior::FailsTheView,
+            "must be answered with a view or with None",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_view_whose_section_ids_repeat() {
+        rejects(Behavior::RepeatsASectionId, "blank or repeated section id").await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_deferred_section_that_does_not_answer_its_own_read() {
+        rejects(
+            Behavior::DefersASectionItCannotRead,
+            "must answer its own read with exactly that section",
         )
         .await;
     }

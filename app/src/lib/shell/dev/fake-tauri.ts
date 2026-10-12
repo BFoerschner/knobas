@@ -192,6 +192,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
     get_entity: (args) => getEntity(args),
+    entity_view: (args) => entityView(args),
     resolve_url: (args) => resolveUrl(args),
     create_note: (args) => createNote(args),
     get_note: (args) => getNote(args),
@@ -2382,6 +2383,94 @@ function getEntity(args: Record<string, unknown>) {
     links: [],
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
   };
+}
+
+/**
+ * `entity_view` (#661): the demo commit draws an overview and a diff, so the
+ * view's tabs and the diff viewer can be looked at in a browser; every other
+ * entity draws nothing, which is the real mock adapter's answer for all of
+ * them. A deliberate divergence, for the same reason `kind_info` above is one:
+ * the shell under test is the same either way.
+ */
+function entityView(args: Record<string, unknown>) {
+  const id = String(args["entityId"] ?? "");
+  if (id !== "mock:9f2c1ab") return null;
+  const section = (args["section"] as string | null | undefined) ?? null;
+  const overview = {
+    id: "overview",
+    title: "Overview",
+    count: null,
+    deferred: false,
+    blocks: [
+      {
+        type: "facts",
+        facts: [
+          { label: "Commit", value: "9f2c1ab0d4", tone: null },
+          { label: "SHA", value: "9f2c1ab0d47e3c5a8b1f6e2d9c0a7b4e3f5d6c1a", tone: null },
+          { label: "Author", value: "Mara Lindqvist <mara@tidewater.example>", tone: null },
+          { label: "Authored", value: "2026-08-22 09:40 +02:00", tone: null },
+        ],
+      },
+      {
+        type: "entities",
+        title: "Parent",
+        rows: [{ entity_id: null, title: "41d0e7c2aa", meta: null, tone: null, chip: null, url: null }],
+      },
+      {
+        type: "text",
+        text: "payout: key the retry on the mandate id\n\nPAY-231. Two SEPA banks answer 409 on a retried payout\nbecause the idempotency key was the batch id.",
+        markdown: false,
+      },
+    ],
+  };
+  const line = (kind: string, old: number | null, nu: number | null, text: string) => ({ kind, old, new: nu, text });
+  const diff = {
+    id: "diff",
+    title: "Diff",
+    count: 2,
+    deferred: false,
+    blocks: [
+      {
+        type: "diff",
+        truncated: false,
+        files: [
+          {
+            path: "src/payout/retry.rs",
+            old_path: null,
+            change: "modified",
+            additions: 3,
+            deletions: 1,
+            truncated: false,
+            hunks: [
+              {
+                header: "@@ -41,7 +41,9 @@ impl Retry {",
+                lines: [
+                  line("context", 41, 41, "    fn key(&self, payout: &Payout) -> IdempotencyKey {"),
+                  line("del", 42, null, "        IdempotencyKey::from(payout.batch_id)"),
+                  line("add", null, 42, "        // One key per mandate: a retried batch is the same payout."),
+                  line("add", null, 43, "        IdempotencyKey::from(payout.mandate_id)"),
+                  line("context", 43, 44, "    }"),
+                  line("context", 44, 45, ""),
+                  line("add", null, 46, "    const MAX_ATTEMPTS: u32 = 5;"),
+                ],
+              },
+            ],
+          },
+          {
+            path: "docs/retry.md",
+            old_path: "docs/backoff.md",
+            change: "renamed",
+            additions: 0,
+            deletions: 0,
+            truncated: false,
+            hunks: [],
+          },
+        ],
+      },
+    ],
+  };
+  const sections = section === null ? [overview, diff] : [overview, diff].filter((s) => s.id === section);
+  return { sections };
 }
 
 /**

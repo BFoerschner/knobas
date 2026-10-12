@@ -100,6 +100,15 @@ fn keys(prefix: &str, range: std::ops::Range<usize>) -> Vec<String> {
 
 #[async_trait::async_trait]
 impl Source for PausingSource {
+    /// Draws nothing: this fake has no source view (#661).
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, knobas_source::SourceError> {
+        Ok(None)
+    }
+
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {
             id: self.id.clone(),

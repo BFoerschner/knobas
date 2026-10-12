@@ -1,0 +1,59 @@
+diff --git a/added.txt b/added.txt
+new file mode 100644
+index 0000000..5786b13
+--- /dev/null
++++ b/added.txt
+@@ -0,0 +1,2 @@
++brand
++new
+diff --git a/lib.rs b/lib.rs
+index 84734ad..6112a3c 100644
+--- a/lib.rs
++++ b/lib.rs
+@@ -3,6 +3,7 @@ fn main() {
+ }
+ 
+ fn retry(attempts: u32) -> u32 {
+-    let base = 30;
+-    base * attempts
++    let base = 45;
++    let jitter = 3;
++    base * attempts + jitter
+ }
+diff --git a/logo.png b/logo.png
+index 0f49c4a..01adddf 100644
+Binary files a/logo.png and b/logo.png differ
+diff --git a/notes.txt b/notes.txt
+index 4c00b39..e5c5c55 100644
+--- a/notes.txt
++++ b/notes.txt
+@@ -1,2 +1,2 @@
+ line one
+-line two
+\ No newline at end of file
++line two
+diff --git a/old.txt b/old.txt
+deleted file mode 100644
+index b8962c3..0000000
+--- a/old.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-gone
+-away
+diff --git a/pure.txt b/pure-renamed.txt
+similarity index 100%
+rename from pure.txt
+rename to pure-renamed.txt
+diff --git a/moved.txt b/renamed.txt
+similarity index 74%
+rename from moved.txt
+rename to renamed.txt
+index 1e395f2..43dacec 100644
+--- a/moved.txt
++++ b/renamed.txt
+@@ -5,4 +5,4 @@ delta
+ epsilon
+ zeta
+ eta
+-theta
++theta changed

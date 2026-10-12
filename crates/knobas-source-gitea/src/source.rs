@@ -71,7 +71,7 @@ impl GiteaSource {
     ///
     /// [`SourceError::Protocol`] -- a refusal, which the queue does not retry,
     /// because nothing about waiting makes a wrong id right.
-    fn key_of(&self, entity: &str) -> Result<crate::keys::GiteaKey, SourceError> {
+    pub(crate) fn key_of(&self, entity: &str) -> Result<crate::keys::GiteaKey, SourceError> {
         let parsed = knobas_core::entity::EntityRef::parse(entity)
             .map_err(|error| SourceError::protocol(format!("gitea: {error}")))?;
         if parsed.namespace != self.id {
@@ -253,6 +253,16 @@ impl Source for GiteaSource {
             "gitea: this adapter has no workflow, so there are no reachable transitions to read \
              for {entity:?}"
         )))
+    }
+
+    /// A commit's overview and diff; `None` for the kinds whose views are
+    /// later tickets' (ADR-0020, #661). See [`crate::view`].
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        crate::view::draw(self, entity, section).await
     }
 }
 

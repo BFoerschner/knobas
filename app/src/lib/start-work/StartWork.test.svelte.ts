@@ -39,6 +39,8 @@ vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: () =>
     record("get_entity", null, {
       row: {
