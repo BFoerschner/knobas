@@ -119,47 +119,30 @@ struct Tree {
     sepa: String,
     ledger: String,
     handbook: String,
-    t: String,
+    /// The token every id and title in this tree carries.
+    token: String,
 }
 
 async fn tree(pool: &sqlx::PgPool) -> Tree {
     let t = token();
-    let home = ancestor(&format!("{t}1"), &format!("Engineering {t}"));
-    let runbooks = ancestor(&format!("{t}2"), &format!("Runbooks {t}"));
-    let payouts = ancestor(&format!("{t}3"), &format!("Payout runbooks {t}"));
-    let mut ids = Vec::new();
-    for (n, title, chain) in [
-        (1, format!("Engineering {t}"), vec![]),
-        (2, format!("Runbooks {t}"), vec![home.clone()]),
-        (
-            3,
-            format!("Payout runbooks {t}"),
-            vec![home.clone(), runbooks.clone()],
-        ),
-        (
-            4,
-            format!("SEPA payout retry {t}"),
-            vec![home.clone(), runbooks.clone(), payouts.clone()],
-        ),
-        (
-            5,
-            format!("Ledger reconciliation {t}"),
-            vec![home.clone(), runbooks.clone()],
-        ),
-        (6, format!("On-call handbook {t}"), vec![home.clone()]),
-    ] {
-        ids.push(page(pool, &format!("{t}{n}"), &title, "ENG", &chain).await);
-    }
-    let mut ids = ids.into_iter();
-    let mut next = || ids.next().unwrap();
+    // Each page once: stored, and kept as the ancestor its descendants name.
+    let node = |n: u8, title: &str| (format!("{t}{n}"), format!("{title} {t}"));
+    let store = |(id, title): &(String, String), chain: &[&(String, String)]| {
+        let chain: Vec<serde_json::Value> = chain.iter().map(|(i, t)| ancestor(i, t)).collect();
+        let (id, title) = (id.clone(), title.clone());
+        async move { page(pool, &id, &title, "ENG", &chain).await }
+    };
+    let home = node(1, "Engineering");
+    let runbooks = node(2, "Runbooks");
+    let payouts = node(3, "Payout runbooks");
     Tree {
-        home: next(),
-        runbooks: next(),
-        payouts: next(),
-        sepa: next(),
-        ledger: next(),
-        handbook: next(),
-        t,
+        home: store(&home, &[]).await,
+        runbooks: store(&runbooks, &[&home]).await,
+        payouts: store(&payouts, &[&home, &runbooks]).await,
+        sepa: store(&node(4, "SEPA payout retry"), &[&home, &runbooks, &payouts]).await,
+        ledger: store(&node(5, "Ledger reconciliation"), &[&home, &runbooks]).await,
+        handbook: store(&node(6, "On-call handbook"), &[&home]).await,
+        token: t,
     }
 }
 
@@ -170,7 +153,7 @@ async fn tree(pool: &sqlx::PgPool) -> Tree {
 async fn under_an_ancestor_title_returns_children_grandchildren_and_itself() {
     let pool = pool().await;
     let tree = tree(&pool).await;
-    let t = &tree.t;
+    let t = &tree.token;
     let ours = sorted(vec![
         tree.runbooks.clone(),
         tree.payouts.clone(),
@@ -269,7 +252,7 @@ async fn an_ancestor_that_is_not_mirrored_still_scopes_its_descendants() {
 async fn a_page_still_carries_its_ancestors_as_its_path() {
     let pool = pool().await;
     let tree = tree(&pool).await;
-    let t = &tree.t;
+    let t = &tree.token;
 
     let response = searcher(&pool)
         .await

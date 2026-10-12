@@ -47,10 +47,10 @@ knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 # And TeamCity's, whose build declares its configuration as parent (#597).
 knobas-source-teamcity = { path = "../knobas-source-teamcity" }
-# And Confluence's, whose page declares its ancestors as its parent chain (#599).
-knobas-source-confluence = { path = "../knobas-source-confluence" }
 # And Jira's, whose ticket declares its epic or parent issue as parent (#598).
 knobas-source-jira = { path = "../knobas-source-jira" }
+# And Confluence's, whose page declares its ancestors as its parent chain (#599).
+knobas-source-confluence = { path = "../knobas-source-confluence" }
 # This crate's own `test-util` items -- `corpus::NOTE`, `Vocabulary::fixture`,
 # `Searcher::explain_recent` -- reached from `tests/`, where `cfg(test)` is not
 # set. The same self-dev-dependency `knobas-db` uses, and the reason
