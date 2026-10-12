@@ -1845,9 +1845,9 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
     assert_eq!(
         drawn,
         [
-            ("env.SEPA_RETRIES", "5", false, false, false),
-            (settings.secret_parameter.as_str(), "", false, true, false),
-            ("tidewater.region", "eu-central-1", true, false, false),
+            ("env.SEPA_RETRIES", "5", false, false, true),
+            (settings.secret_parameter.as_str(), "", false, true, true),
+            ("tidewater.region", "eu-central-1", true, false, true),
         ]
     );
     let serialized = serde_json::to_string(&view).expect("serializes");
@@ -2047,4 +2047,316 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
         !wire.contains(&settings.secret_value),
         "the password's value is in the view"
     );
+}
+
+/// The seeded parameters [`a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view`]
+/// changes, put back as they were when the guard drops -- passing or
+/// panicking alike, [`Queued`]'s way.
+///
+/// The restore point is **recorded**, not assumed: the own parameter's value
+/// is read from the server before anything is written. The inherited one is
+/// restored by deleting the own override the test created, which TeamCity
+/// answers 204 whether or not there was one, and which brings the project's
+/// value back. The password is written only with the seed's own value, so
+/// its restore is the same write again.
+struct ParameterRestore {
+    url: String,
+    token: String,
+    config: String,
+    own: (String, String),
+    inherited: String,
+    secret: (String, String),
+}
+
+impl ParameterRestore {
+    fn put(&self) -> Vec<(reqwest::Method, String, Option<String>)> {
+        let at = |name: &str| {
+            format!(
+                "{}/app/rest/buildTypes/id:{}/parameters/{name}",
+                self.url, self.config
+            )
+        };
+        vec![
+            (
+                reqwest::Method::PUT,
+                format!("{}/value", at(&self.own.0)),
+                Some(self.own.1.clone()),
+            ),
+            (reqwest::Method::DELETE, at(&self.inherited), None),
+            (
+                reqwest::Method::PUT,
+                format!("{}/value", at(&self.secret.0)),
+                Some(self.secret.1.clone()),
+            ),
+        ]
+    }
+}
+
+impl Drop for ParameterRestore {
+    fn drop(&mut self) {
+        let requests = self.put();
+        let token = self.token.clone();
+        let (done, waiting) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let failures = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the restore")
+                .block_on(async move {
+                    let http = client();
+                    let mut failures = Vec::new();
+                    for (verb, url, body) in requests {
+                        let mut request = http
+                            .request(verb.clone(), &url)
+                            .bearer_auth(&token)
+                            .header("Accept", "text/plain");
+                        if let Some(body) = body {
+                            request = request.header("Content-Type", "text/plain").body(body);
+                        }
+                        match request.send().await {
+                            Ok(r) if r.status().is_success() => {}
+                            Ok(r) => failures.push(format!("{verb} {url} -> {}", r.status())),
+                            Err(e) => failures.push(format!("{verb} {url}: {e}")),
+                        }
+                    }
+                    failures
+                });
+            let _ = done.send(failures);
+        });
+        let failures = match waiting.recv_timeout(CLEANUP_BUDGET) {
+            Ok(failures) => failures,
+            Err(e) => vec![format!("the restore did not finish: {e}")],
+        };
+        if failures.is_empty() {
+            return;
+        }
+        let report = format!(
+            "the live suite did not restore the seeded parameters of {}, so the server is no \
+             longer in the plain-seed state (re-run `./seed --teamcity` to put them back): {}",
+            self.config,
+            failures.join("; ")
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite restore: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// Story 19 (spec #660, issue #668), against the real server: a seeded
+/// parameter changed through the adapter's `set_parameter` reads back changed
+/// in the next view. The same write through knobas' write queue is
+/// `knobas-app`'s `teamcity_seeded_live.rs`; this one owns the three cases. Three parameters, the
+/// three cases the edit has:
+///
+/// 1. **An own value** is changed in place.
+/// 2. **An inherited value** gets an own override on the configuration: the
+///    view now reads it as the configuration's own, and the project's value
+///    is untouched.
+/// 3. **A password** is written blind and stays a password: its spec is
+///    still `password` afterwards, and the view still carries no value.
+///
+/// # What it changes, and who puts it back
+///
+/// [`ParameterRestore`], from `Drop`, restores all three to the restore
+/// point recorded before the first write, and the test reads them back
+/// afterwards to show the fixture is as the seed left it.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view() {
+    use knobas_source::WriteOp;
+    use knobas_source::view::{Block, Setting};
+
+    const OWN: &str = "env.SEPA_RETRIES";
+    const INHERITED: &str = "tidewater.region";
+
+    let seeded = seeded();
+    let settings = seeded.seed.settings.clone().unwrap_or_else(|| {
+        panic!("seed-state.json has no teamcity.settings -- re-run `./seed --teamcity` (#664)")
+    });
+    let config = settings.build_type.clone();
+    let entity = format!("teamcity:buildType:{config}");
+    let param = async |name: &str| -> serde_json::Value {
+        let (status, body) = seeded
+            .get(&format!(
+                "app/rest/buildTypes/id:{config}/parameters/{name}?fields=name,value,inherited,type(rawValue)"
+            ))
+            .await;
+        assert_eq!(status, 200, "{name}: {body}");
+        body
+    };
+
+    // The restore point, read before anything is written.
+    let own_before = param(OWN).await["value"]
+        .as_str()
+        .expect("the own parameter has a value")
+        .to_owned();
+    let inherited_before = param(INHERITED).await;
+    assert_eq!(
+        inherited_before["inherited"], true,
+        "the seed's {INHERITED} is the project's, seen on the configuration: {inherited_before}"
+    );
+    let project_id = seeded.build_type(&config).await["projectId"]
+        .as_str()
+        .expect("a configuration names its project")
+        .to_owned();
+    let restore = ParameterRestore {
+        url: seeded.url.clone(),
+        token: seeded.token.clone(),
+        config: config.clone(),
+        own: (OWN.to_owned(), own_before.clone()),
+        inherited: INHERITED.to_owned(),
+        secret: (
+            settings.secret_parameter.clone(),
+            settings.secret_value.clone(),
+        ),
+    };
+
+    let source = seeded.source(serde_json::json!({}));
+    let parameters = async || -> Vec<Setting> {
+        let view = source
+            .view(&entity, None)
+            .await
+            .expect("the view reads")
+            .expect("TeamCity draws a build configuration");
+        let section = view
+            .sections
+            .iter()
+            .find(|s| s.id == "parameters")
+            .unwrap_or_else(|| panic!("no parameters: {view:#?}"));
+        let [Block::Settings { values, .. }] = section.blocks.as_slice() else {
+            panic!("one settings block: {section:#?}");
+        };
+        values.clone()
+    };
+    let named = |values: &[Setting], name: &str| -> Setting {
+        values
+            .iter()
+            .find(|s| s.name == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no parameter {name}: {values:#?}"))
+    };
+    // Each write is edited against the value the view drew, as the shell's
+    // is: `None` for a secret, whose value it never drew.
+    let set_from = async |name: &str, base: Option<String>, value: &str| {
+        source
+            .write(WriteOp::SetParameter {
+                entity: entity.clone(),
+                name: name.to_owned(),
+                value: value.to_owned(),
+                base,
+            })
+            .await
+    };
+    let set = async |name: &str, value: &str| {
+        let drawn = named(&parameters().await, name);
+        let base = (!drawn.secret).then_some(drawn.value);
+        set_from(name, base, value)
+            .await
+            .unwrap_or_else(|e| panic!("TeamCity takes {name} = {value:?}: {e:?}"));
+    };
+
+    let before = parameters().await;
+    assert_eq!(named(&before, OWN).value, own_before);
+    assert!(before.iter().all(|s| s.editable), "{before:#?}");
+
+    // 1. An own value, changed in place.
+    let own_after = "knobas-668 own value";
+    set(OWN, own_after).await;
+    let after = parameters().await;
+    let own = named(&after, OWN);
+    assert_eq!(
+        (own.value.as_str(), own.inherited),
+        (own_after, false),
+        "{own:#?}"
+    );
+
+    // 1b. The same value edited against what it held before step 1 -- a
+    // colleague's change the reader never saw -- is refused, naming the value
+    // it holds now, and nothing is written.
+    let stale = set_from(OWN, Some(own_before.clone()), "knobas-668 stale edit")
+        .await
+        .expect_err("an edit against a value that has changed since is refused");
+    assert!(
+        matches!(&stale, knobas_source::SourceError::Protocol { message, .. }
+            if message.contains(&format!("now {own_after:?}"))),
+        "{stale:?}"
+    );
+    assert_eq!(named(&parameters().await, OWN).value, own_after);
+
+    // 2. An inherited value: an own override on the configuration, and the
+    // project's value where it was.
+    let region_after = "knobas-668-override";
+    set(INHERITED, region_after).await;
+    let after = parameters().await;
+    let region = named(&after, INHERITED);
+    assert_eq!(
+        (region.value.as_str(), region.inherited),
+        (region_after, false),
+        "an edit of an inherited value is the configuration's own now: {region:#?}"
+    );
+    let (status, project_value) = seeded
+        .get(&format!(
+            "app/rest/projects/id:{project_id}/parameters/{INHERITED}?fields=name,value"
+        ))
+        .await;
+    assert_eq!(status, 200, "{project_value}");
+    assert_eq!(
+        project_value["value"], inherited_before["value"],
+        "the project's own value moved: {project_value}"
+    );
+
+    // 3. A password, written blind with the seed's own value, stays a
+    // password and is never drawn.
+    set(&settings.secret_parameter, &settings.secret_value).await;
+    let spec = param(&settings.secret_parameter).await;
+    assert!(
+        spec["type"]["rawValue"]
+            .as_str()
+            .is_some_and(|raw| raw.starts_with("password")),
+        "a value written to a password parameter left it a password: {spec}"
+    );
+    let after = parameters().await;
+    let secret = named(&after, &settings.secret_parameter);
+    assert_eq!(
+        (secret.value.as_str(), secret.secret),
+        ("", true),
+        "{secret:#?}"
+    );
+    assert!(
+        !format!("{after:?}").contains(&settings.secret_value),
+        "the password's value is in the view"
+    );
+    println!(
+        "SEEDED {config}: {OWN} {own_before:?} -> {own_after:?} (a stale edit refused: {stale:?}), {INHERITED} inherited {:?} -> own \
+         {region_after:?} (project still {:?}), {} written and still a password",
+        inherited_before["value"], project_value["value"], settings.secret_parameter
+    );
+
+    // The restore, and the proof it happened.
+    drop(restore);
+    assert_eq!(
+        param(OWN).await["value"].as_str(),
+        Some(own_before.as_str())
+    );
+    let region = param(INHERITED).await;
+    assert_eq!(
+        (&region["value"], &region["inherited"]),
+        (&inherited_before["value"], &serde_json::json!(true)),
+        "{INHERITED} is the project's again: {region}"
+    );
+    let restored = parameters().await;
+    assert_eq!(
+        restored
+            .iter()
+            .map(|s| (s.name.as_str(), s.value.as_str(), s.inherited, s.secret))
+            .collect::<Vec<_>>(),
+        before
+            .iter()
+            .map(|s| (s.name.as_str(), s.value.as_str(), s.inherited, s.secret))
+            .collect::<Vec<_>>(),
+        "the view after the restore is the view before the first write"
+    );
+    println!("SEEDED {config}: restored to the recorded point, and read back so");
 }

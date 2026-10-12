@@ -30,6 +30,7 @@ use knobas_source::view::{
 };
 
 use crate::client::HttpRest;
+use crate::ids::{config_id, path_escaped};
 use crate::map;
 use crate::rest::{
     Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence, Trigger,
@@ -70,12 +71,6 @@ impl Tab {
 /// How many builds *Recent builds* lists, and the success rate is over.
 const RECENT_BUILDS: u32 = 20;
 
-/// The [`WriteOp`](knobas_source::WriteOp) identifier a parameter's edit will
-/// go through (spec #660). Named on the settings block now so the block's
-/// shape does not change when #668 makes values editable; every value is
-/// `editable: false` until then, so nothing can dispatch it.
-const WRITE_OP_SET_PARAMETER: &str = "set_parameter";
-
 /// What the view needs from the source: its namespace, the base URL a build's
 /// page is composed from, and the client.
 pub(crate) struct Viewer<'a> {
@@ -109,17 +104,6 @@ pub(crate) async fn draw(
     Err(SourceError::protocol(format!(
         "teamcity: {entity:?} is neither a build nor a build configuration"
     )))
-}
-
-/// A configuration id as TeamCity issues them -- letters, digits and `_` --
-/// and so nothing that could leave the path segment or the locator it goes in.
-fn config_id<'k>(entity: &str, id: &'k str) -> Result<&'k str, SourceError> {
-    let ok = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    ok.then_some(id).ok_or_else(|| {
-        SourceError::protocol(format!(
-            "teamcity: {entity:?} does not name a build configuration TeamCity could have issued"
-        ))
-    })
 }
 
 /// A build id as TeamCity issues them: a positive integer.
@@ -374,8 +358,12 @@ fn age(d: chrono::TimeDelta) -> String {
 
 // --- Parameters ---------------------------------------------------------
 
-/// Own and inherited, in TeamCity's order (by name), every one read-only
-/// until #668. Drawn by [`drawn_value`], the rule the build view uses too.
+/// Own and inherited, in TeamCity's order (by name), editable through
+/// `set_parameter` (#668), which this adapter declares: an own value is
+/// changed, an inherited one gets an own override, and a password is written
+/// without its old value ever being drawn. A value drawn other than it is
+/// held is not editable. Drawn by [`drawn_value`],
+/// the rule the build view uses too.
 fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
     let values: Vec<Setting> = record
         .parameters
@@ -383,12 +371,16 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         .iter()
         .map(|p| {
             let (value, secret) = drawn_value(&p.name, p.value.as_deref(), is_password(p));
+            // A value drawn other than it is held -- a URL whose credential
+            // was cut out -- is not offered: an edit of what was drawn would
+            // write the credential away.
+            let editable = secret || p.value.as_deref().unwrap_or_default() == value;
             Setting {
                 name: p.name.clone(),
                 value,
                 inherited: p.inherited,
                 secret,
-                editable: false,
+                editable,
                 description: None,
             }
         })
@@ -401,7 +393,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         vec![Block::Settings {
             title: None,
             entity: entity.to_owned(),
-            write_op: WRITE_OP_SET_PARAMETER.to_owned(),
+            write_op: crate::WRITE_OP_SET_PARAMETER.to_owned(),
             values,
         }],
     )
@@ -1088,20 +1080,6 @@ fn size_of(n: u64) -> String {
     format!("{size:.1} {}", UNITS[unit])
 }
 
-/// A file name as a URL path segment: everything but the unreserved
-/// characters percent-encoded.
-fn path_escaped(name: &str) -> String {
-    name.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
-}
-
 /// The parameters a build ran with, in TeamCity's order, none of them
 /// editable. Secret where the configuration's spec says `password`, where
 /// TeamCity masked the value, or where a URL's credential cannot be cut out;
@@ -1141,7 +1119,7 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
 /// spec is a password, where the name is one TeamCity stores securely, where
 /// TeamCity masked the value, or where a URL's credential cannot be cut out;
 /// any other URL is drawn without its credential.
-fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) {
+pub(crate) fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) {
     let raw = raw.unwrap_or_default();
     let masked = raw.len() >= 3 && raw.bytes().all(|b| b == b'*');
     let shown = if raw.contains("://") {
@@ -1156,7 +1134,7 @@ fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) 
 }
 
 /// A parameter whose spec says `password`: its value is never drawn.
-fn is_password(p: &crate::rest::Property) -> bool {
+pub(crate) fn is_password(p: &crate::rest::Property) -> bool {
     p.spec
         .as_ref()
         .and_then(|t| t.raw_value.as_deref())

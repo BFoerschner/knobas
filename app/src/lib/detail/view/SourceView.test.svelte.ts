@@ -7,6 +7,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceView as View, ViewAction, ViewSection } from "../../ipc/entity";
+import type { SettingMark } from "./settings";
 
 /** Every deferred read, as `[entity, section]`. */
 const reads: [string, string | null][] = [];
@@ -84,15 +85,22 @@ const VIEW: View = {
 const queued: [string, string | null][] = [];
 /** What the next `onaction` answers: whether the write was queued. */
 let queues: () => Promise<boolean> = () => Promise.resolve(true);
+/** Every setting the view asked to save, as `[entity, write_op, name, value]`. */
+const saved: [string, string, string, string][] = [];
 
-function render(view: View = VIEW, writeOps: string[] = []) {
+function render(
+  view: View = VIEW,
+  writeOps: string[] = [],
+  marks: Record<string, SettingMark> = {},
+  entityId = "gitea:tidewater/payout-service@c90d11",
+) {
   const target = document.createElement("div");
   document.body.append(target);
   const navigated: string[] = [];
   const app = mount(SourceView, {
     target,
     props: {
-      entityId: "gitea:tidewater/payout-service@c90d11",
+      entityId,
       view,
       webUrl: null,
       sourceName: "Tidewater Git",
@@ -102,6 +110,11 @@ function render(view: View = VIEW, writeOps: string[] = []) {
       onaction: (action: ViewAction, option: string | null) => {
         queued.push([action.write_op, option]);
         return queues();
+      },
+      settingMarks: marks,
+      onsetting: (block: { entity: string; write_op: string }, name: string, value: string) => {
+        saved.push([block.entity, block.write_op, name, value]);
+        return Promise.resolve(true);
       },
     },
   });
@@ -122,6 +135,7 @@ function render(view: View = VIEW, writeOps: string[] = []) {
 beforeEach(() => {
   reads.length = 0;
   queued.length = 0;
+  saved.length = 0;
   queues = () => Promise.resolve(true);
   document.body.replaceChildren();
   answer = (section) => Promise.resolve({ sections: [log(section ?? "log", false)] });
@@ -346,4 +360,44 @@ test("a view read again drops the deferred tabs it had read, and reads the open 
   await vi.waitFor(() => expect(reads).toHaveLength(2));
   unmount(app);
   target.remove();
+});
+
+// --- Settings (#668) ------------------------------------------------------
+
+function settingsCell(target: HTMLElement, name: string): HTMLElement {
+  const row = [...target.querySelectorAll<HTMLElement>(".sb-row")].find(
+    (r) => r.querySelector(".sb-name")!.textContent!.trim() === name,
+  )!;
+  return row.querySelector<HTMLElement>(".sb-val")!;
+}
+
+test("a settings value is editable only where the source declares the block's op", () => {
+  const undeclared = render(VIEW, ["trigger_build"]);
+  expect(settingsCell(undeclared.target, "env.RETRIES").tagName).toBe("SPAN");
+  undeclared.done();
+
+  const declared = render(VIEW, ["trigger_build", "set_parameter"]);
+  expect(settingsCell(declared.target, "env.RETRIES").tagName).toBe("BUTTON");
+  // The adapter said no for this one, and the declaration does not override it.
+  expect(settingsCell(declared.target, "secure.token").tagName).toBe("SPAN");
+  declared.done();
+});
+
+test("an edit is handed up with the block's entity and op, and a mark comes back down", async () => {
+  const marks = { "env.RETRIES": { state: "pending" as const, detail: null, value: "9" } };
+  // A mark is this entity's: a settings block of another entity does not draw it.
+  const other = render(VIEW, ["set_parameter"], marks);
+  expect(other.text()).not.toContain("pending");
+  other.done();
+  const screen = render(VIEW, ["set_parameter"], marks, "teamcity:buildType:X");
+  expect(screen.text()).toContain("pending");
+  settingsCell(screen.target, "env.RETRIES").click();
+  flushSync();
+  const input = screen.target.querySelector<HTMLInputElement>("input.sb-input")!;
+  input.value = "7";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await Promise.resolve();
+  expect(saved).toEqual([["teamcity:buildType:X", "set_parameter", "env.RETRIES", "7"]]);
+  screen.done();
 });

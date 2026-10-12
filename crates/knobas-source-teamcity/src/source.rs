@@ -163,7 +163,8 @@ impl Source for TeamCitySource {
         .await
     }
 
-    /// Perform one of the two writes M2 ratified for TeamCity, or refuse.
+    /// Perform one of the two writes M2 ratified for TeamCity, or the
+    /// parameter set the source views added (#668), or refuse.
     ///
     /// The match unpacks and hands ids to [`crate::write`], which never names
     /// `WriteOp`: knobas has one outbound write path and
@@ -174,7 +175,9 @@ impl Source for TeamCitySource {
     /// and a re-run at a *build* (`teamcity:build:1187`); the two key forms
     /// exist precisely so they cannot be confused (`map::build_key` /
     /// `map::build_config_key`), and sending `1187` as a configuration id
-    /// would trigger whatever configuration happened to be called that.
+    /// would trigger whatever configuration happened to be called that. A
+    /// parameter set is aimed at a configuration too, and its id must also be
+    /// one TeamCity could have issued, since it goes into a path.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::TriggerBuild { entity } => {
@@ -183,6 +186,17 @@ impl Source for TeamCitySource {
             }
             WriteOp::RerunBuild { entity } => {
                 write::rerun(&self.rest, self.build_id(entity)?).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::SetParameter {
+                entity,
+                name,
+                value,
+                base,
+            } => {
+                let config = self.build_config_id(entity)?;
+                let config = crate::ids::config_id(entity, &config)?;
+                write::set_parameter(&self.rest, config, name, value, base.as_deref()).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Comment { .. }
@@ -280,7 +294,10 @@ mod tests {
         assert_eq!(d.id, "teamcity-eu");
         assert_eq!(d.adapter_kind, "teamcity");
         assert_eq!(d.name, "Tidewater CI (EU)");
-        assert_eq!(d.write_ops, vec!["trigger_build", "rerun_build"]);
+        assert_eq!(
+            d.write_ops,
+            vec!["trigger_build", "rerun_build", "set_parameter"]
+        );
         assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.

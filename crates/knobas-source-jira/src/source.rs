@@ -325,7 +325,8 @@ impl Source for JiraSource {
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
             | WriteOp::CreateMonitor { .. }
-            | WriteOp::MergePullRequest { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::MergePullRequest { .. }
+            | WriteOp::SetParameter { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),

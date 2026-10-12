@@ -9,7 +9,8 @@
   own label and monogram when it declares them, the title-cased kind otherwise.
 -->
 <script lang="ts">
-  import { ipcErrorMessage, isIpcError } from "../ipc";
+  import { listen } from "@tauri-apps/api/event";
+  import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
     entityView,
     getEntity,
@@ -23,6 +24,7 @@
     type SourceView as SourceViewData,
     type ViewAction,
   } from "../ipc/entity";
+  import { pendingWrites } from "../ipc/sources";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
@@ -41,6 +43,7 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { actionName, actionPayload } from "./view/actions";
+  import { openState, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
     replaceSectionBody,
@@ -87,6 +90,9 @@
     error = null;
     sourceView = null;
     viewFailure = null;
+    settingMarks = {};
+    settingWrites = {};
+    watchQueue(false);
     void getEntity(id)
       .then((answer) => {
         if (mine !== token) return;
@@ -183,6 +189,135 @@
     await refresh();
     await rereadView();
     return true;
+  }
+
+  // -- a setting edited from the view (#668, ADR-0020 rule 4) ----------------
+  //
+  // A settings block's edit is a write like an action's, with one more
+  // promise: the row says where its write is until the queue settles it. A
+  // write that went on the spot is read back at once. One that waits (the
+  // source unreachable), is held or refused keeps the queue's own state as
+  // its mark, and the queue is watched -- `activity:new` follows every queue
+  // transition -- until the write is no longer open, when the view is read
+  // again and shows what the source now holds.
+
+  /** The edits on their way, by setting name. */
+  let settingMarks = $state<Record<string, SettingMark>>({});
+  /** The queued write behind each mark, by name; a plain map, read on events. */
+  let settingWrites: Record<string, number> = {};
+  /** Whether the queue is being watched, and how to stop. */
+  let watching = false;
+  let unwatch: (() => void) | null = null;
+
+  /** Start or stop watching the queue for this panel's open setting writes. */
+  function watchQueue(on: boolean) {
+    if (on === watching) return;
+    watching = on;
+    if (!on) {
+      unwatch?.();
+      unwatch = null;
+      return;
+    }
+    listen(EVENTS.activityNew, () => void settleSettings(token))
+      .then((stop) => {
+        if (watching && unwatch === null) unwatch = stop;
+        else stop();
+      })
+      .catch(() => {
+        // No event channel: the marks stay until the panel is opened again.
+        watching = false;
+      });
+  }
+
+  $effect(() => () => watchQueue(false));
+
+  /**
+   * Queue `name = value` on the block's entity, edited against `base` (#668).
+   * Answers whether the write was queued, so the editor stays open on a
+   * refusal.
+   */
+  async function saveSetting(
+    block: SettingsTarget,
+    name: string,
+    value: string,
+    base: string | null,
+  ): Promise<boolean> {
+    const payload = settingPayload(block.write_op, block.entity, name, value, base);
+    if (payload === null) {
+      push({ text: `Could not save ${name}: knobas cannot send this change`, tone: "err" });
+      return false;
+    }
+    const mine = token;
+    settingMarks[name] = { state: "saving", detail: null, value };
+    let write;
+    try {
+      write = await submitWrite(payload);
+    } catch (rejection) {
+      // Another item opened meanwhile: its row of this name is not this one.
+      if (mine !== token) return false;
+      delete settingMarks[name];
+      push({ text: `Could not save ${name}: ${ipcErrorMessage(rejection)}`, tone: "err" });
+      return false;
+    }
+    if (mine !== token) return true;
+    settingWrites[name] = write.id;
+    // Watched from here, not from the first answer: if that read fails, a
+    // queue movement is what asks again, and nothing would hear one.
+    watchQueue(true);
+    await settleSettings(mine);
+    if (mine !== token) return true;
+    // Settled by this read or by a queue movement that raced it: either way
+    // the write is no longer open, which is what "set" says.
+    if (settingWrites[name] !== write.id && settingMarks[name] === undefined) push({ text: `${name} set` });
+    else if (settingMarks[name]?.state === "pending") push({ text: `${name} queued` });
+    return true;
+  }
+
+  /** Settles run one after another, so two never re-read the view for one write. */
+  let settling: Promise<void> = Promise.resolve();
+  function settleSettings(mine: number): Promise<void> {
+    settling = settling.then(() => settleOnce(mine));
+    return settling;
+  }
+
+  /**
+   * Ask the queue where this panel's setting writes are. Each still open
+   * takes its state as its mark; each gone (sent, or withdrawn in the queue)
+   * loses its mark once the view has been read again -- unless the reader
+   * saved that row again meanwhile, whose newer write keeps its own mark.
+   */
+  async function settleOnce(mine: number): Promise<void> {
+    if (mine !== token || Object.keys(settingWrites).length === 0) return;
+    let open;
+    try {
+      open = await pendingWrites();
+    } catch {
+      // The marks stay; the next queue movement asks again.
+      return;
+    }
+    if (mine !== token) return;
+    // Each landed name with the mark it had: a save of that row made while
+    // the view is re-read replaces the mark, and the newer one stays.
+    const landed: [string, SettingMark | undefined][] = [];
+    for (const [name, id] of Object.entries(settingWrites)) {
+      const row = open.find((w) => w.id === id);
+      const state = openState(row);
+      if (state !== null) {
+        settingMarks[name] = { state, detail: row?.detail ?? null, value: settingMarks[name]?.value ?? "" };
+      } else {
+        landed.push([name, settingMarks[name]]);
+        delete settingWrites[name];
+      }
+    }
+    watchQueue(Object.keys(settingWrites).length > 0);
+    if (landed.length === 0) return;
+    await refresh();
+    if (mine !== token) return;
+    await rereadView();
+    if (mine !== token) return;
+    for (const [name, mark] of landed) {
+      if (settingMarks[name] === mark) delete settingMarks[name];
+    }
   }
 
   /**
@@ -1025,6 +1160,8 @@
           {onnavigate}
           onopenurl={(url) => void open(url)}
           onaction={queueAction}
+          {settingMarks}
+          onsetting={saveSetting}
         />
       {/if}
 

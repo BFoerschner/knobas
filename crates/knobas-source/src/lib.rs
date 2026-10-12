@@ -400,6 +400,7 @@ impl SourceError {
 /// | [`RerunBuild`](Self::RerunBuild) | `"rerun_build"` | M2 (TeamCity) |
 /// | [`LogWork`](Self::LogWork) | `"log_work"` | M3 (Jira) |
 /// | [`MergePullRequest`](Self::MergePullRequest) | `"merge_pull_request"` | source views (Gitea, #667) |
+/// | [`SetParameter`](Self::SetParameter) | `"set_parameter"` | source views (TeamCity, #668) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -642,6 +643,39 @@ pub enum WriteOp {
     /// the pull request, and a push after it was queued is a reason to look
     /// again.
     MergePullRequest { entity: String, style: MergeStyle },
+    /// Identifier `"set_parameter"`. Set one parameter of a build
+    /// configuration to `value` (spec #660 story 19, issue #668). `entity` is
+    /// the **build configuration**; `name` is the parameter's full name
+    /// (`env.SEPA_RETRIES`).
+    ///
+    /// Setting a parameter the configuration inherits gives it an own value
+    /// that overrides the inherited one, which is what the source itself does;
+    /// the view says so before the reader saves. A password parameter is
+    /// writable, and its value travels here and nowhere else: no view sends
+    /// it back.
+    ///
+    /// `base` is the value the edit was made **against** -- the value the
+    /// view drew when the reader started typing. Before it writes, the
+    /// adapter reads the parameter again and refuses when the source holds
+    /// anything else, naming what it holds now: the configuration's mirrored
+    /// record does not carry its parameters, so the write queue's hold
+    /// cannot see a colleague changing this one, and this read is what keeps
+    /// that from being a silent last-write-wins (`update_page`'s
+    /// `base_version` answers the same window). `None` skips the read, for a
+    /// value the reader never saw: a parameter that did not exist, or a
+    /// secret, whose value is never drawn. A secret's write is therefore
+    /// knowingly last-write-wins.
+    ///
+    /// Hold detection takes the whole mirrored record, as for
+    /// [`MergePullRequest`](WriteOp::MergePullRequest): see
+    /// `knobas_core::write_queue::project` for what that record can and
+    /// cannot witness for a parameter.
+    SetParameter {
+        entity: String,
+        name: String,
+        value: String,
+        base: Option<String>,
+    },
 }
 
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
@@ -735,6 +769,7 @@ impl WriteOp {
             WriteOp::ResumeMonitor { .. } => "resume_monitor",
             WriteOp::CreateMonitor { .. } => "create_monitor",
             WriteOp::MergePullRequest { .. } => "merge_pull_request",
+            WriteOp::SetParameter { .. } => "set_parameter",
         }
     }
 }
@@ -1144,6 +1179,12 @@ mod tests {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 style: MergeStyle::Squash,
             },
+            WriteOp::SetParameter {
+                entity: "teamcity:buildType:Payout_Build".into(),
+                name: "env.SEPA_RETRIES".into(),
+                value: "7".into(),
+                base: Some("5".into()),
+            },
         ];
         for op in &probes {
             match op {
@@ -1161,7 +1202,8 @@ mod tests {
                 | WriteOp::PauseMonitor { .. }
                 | WriteOp::ResumeMonitor { .. }
                 | WriteOp::CreateMonitor { .. }
-                | WriteOp::MergePullRequest { .. } => {}
+                | WriteOp::MergePullRequest { .. }
+                | WriteOp::SetParameter { .. } => {}
             }
         }
         probes
@@ -1237,7 +1279,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 15, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 16, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

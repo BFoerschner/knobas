@@ -149,8 +149,17 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // address -- it has no `#<number>` -- so an adapter that attempted it
         // anyway is refused on the id's shape before a request leaves.
         crate::WriteOp::MergePullRequest {
-            entity: target,
+            entity: target.clone(),
             style: crate::MergeStyle::Merge,
+        },
+        // A parameter set on a real configuration would change what its next
+        // build runs with. The target is no build configuration's address, so
+        // an adapter that attempted it anyway is refused on the id's shape.
+        crate::WriteOp::SetParameter {
+            entity: target,
+            name: "contract.battery.probe".into(),
+            value: "contract battery probe".into(),
+            base: None,
         },
     ]
     .into_iter()

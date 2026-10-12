@@ -13,8 +13,8 @@ use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, RECENT_BUILD_FIELDS,
-    SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
+    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS, Property,
+    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -219,6 +219,69 @@ impl HttpRest {
             .request(knobas_http::Method::POST, "app/rest/buildQueue")
             .json(&serde_json::json!({ "buildType": { "id": build_type_id } }));
         self.client.send(request).await.map(|_| ())
+    }
+
+    /// `PUT /app/rest/buildTypes/id:{id}/parameters/{name}/value` -- one
+    /// parameter's new value, as plain text (issue #668).
+    ///
+    /// **`Accept: text/plain`, replacing the client's default.** The value
+    /// resource produces text only, and TeamCity answers a request that
+    /// accepts nothing but JSON with **406, before it writes** (measured on
+    /// the seeded 2026.1.3 server, 2026-10-12). The answer -- the value now
+    /// held -- is dropped.
+    ///
+    /// The name is one path segment ([`crate::ids::parameter_segment`]):
+    /// TeamCity's names are the user's, and a `/` or `?` in one must not move
+    /// the request.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the request maps to, or a refusal of a name that
+    /// cannot be one segment, before a request.
+    pub(crate) async fn put_parameter(
+        &self,
+        build_type_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), SourceError> {
+        let path = format!(
+            "app/rest/buildTypes/id:{build_type_id}/parameters/{}/value",
+            crate::ids::parameter_segment(name)?
+        );
+        let request = self
+            .client
+            .request(knobas_http::Method::PUT, &path)
+            .header(
+                knobas_http::header::ACCEPT,
+                knobas_http::header::HeaderValue::from_static("text/plain"),
+            )
+            .text(value.to_owned());
+        self.client.send(request).await.map(|_| ())
+    }
+
+    /// `GET /app/rest/buildTypes/id:{id}/parameters/{name}` -- one parameter
+    /// as the configuration holds it now, own or inherited, with the fields
+    /// the view draws it from (issue #668: `set_parameter`'s check against
+    /// the value the reader edited).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, a 404 for a configuration or parameter
+    /// that is gone included, or a refusal of a name that cannot be one
+    /// segment, before a request.
+    pub(crate) async fn parameter(
+        &self,
+        build_type_id: &str,
+        name: &str,
+    ) -> Result<Property, SourceError> {
+        self.one(
+            &format!(
+                "app/rest/buildTypes/id:{build_type_id}/parameters/{}",
+                crate::ids::parameter_segment(name)?
+            ),
+            &[("fields", PARAMETER_FIELDS)],
+        )
+        .await
     }
 
     /// Which build configuration a build belonged to.

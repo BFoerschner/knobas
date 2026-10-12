@@ -6,7 +6,7 @@ use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 use crate::config::config_schema;
 use crate::{
     ADAPTER_KIND, ADAPTER_VERSION, KIND_BUILD, KIND_BUILD_CONFIG, WRITE_OP_RERUN_BUILD,
-    WRITE_OP_TRIGGER_BUILD,
+    WRITE_OP_SET_PARAMETER, WRITE_OP_TRIGGER_BUILD,
 };
 
 /// One descriptor per compiled-in adapter kind: the Add-source form is
@@ -29,12 +29,13 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
-        // M2's ratified TeamCity set (issue #43, ADR-0006), and the whole of
-        // what the action bar offers. The battery holds this and
-        // `Capability::Write` to each other in both directions.
+        // M2's ratified TeamCity set (issue #43, ADR-0006) and the parameter
+        // set the source views added (issue #668, §10.8). The battery holds
+        // this and `Capability::Write` to each other in both directions.
         write_ops: vec![
             WRITE_OP_TRIGGER_BUILD.to_owned(),
             WRITE_OP_RERUN_BUILD.to_owned(),
+            WRITE_OP_SET_PARAMETER.to_owned(),
         ],
         entity_kinds: vec![
             KindInfo {
@@ -153,7 +154,7 @@ mod tests {
     /// The descriptor is the only thing the UI reads to render this source
     /// (spec §3a), so it is asserted rather than assumed.
     #[test]
-    fn the_template_declares_two_kinds_and_two_write_ops() {
+    fn the_template_declares_two_kinds_and_its_write_ops() {
         let d = descriptor_template();
         assert_eq!(d.id, "teamcity");
         assert_eq!(d.adapter_kind, "teamcity");
@@ -161,7 +162,10 @@ mod tests {
         // The sources view renders its action bar from `write_ops` alone, so
         // this list is exactly what the user is offered (issue #43).
         assert_eq!(d.capabilities, vec![Capability::Write]);
-        assert_eq!(d.write_ops, vec!["trigger_build", "rerun_build"]);
+        assert_eq!(
+            d.write_ops,
+            vec!["trigger_build", "rerun_build", "set_parameter"]
+        );
         assert_eq!(d.auth_methods, [AuthMethod::Pat, AuthMethod::UserPassword]);
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
         assert_eq!(kinds, ["build", "build_config"]);
@@ -278,7 +282,7 @@ mod tests {
         );
         assert_eq!(
             json["write_ops"],
-            serde_json::json!(["trigger_build", "rerun_build"])
+            serde_json::json!(["trigger_build", "rerun_build", "set_parameter"])
         );
     }
 }
