@@ -345,7 +345,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 
 /// The live corpus a tile order starts from: the same five filters as
 /// [`LIVE_UPDATED`], as the CTE `ruled`, with the four columns every tile
-/// order reads and `$rule`, the one more column its rule needs.
+/// order reads and `$rule`, the one more column its rule needs, led by its
+/// comma. [`EntityOrder::LatestPerParent`] needs none: it reads its parent
+/// key from `sync.item_parent` (#688).
 ///
 /// **Only what the rule needs is computed here, per row of the room.** A
 /// declared read is a walk of the declarations per row: on a room of 20,000
@@ -358,16 +360,18 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 ///
 /// `materialized`, so the rule's column is computed once a row. Inlined, the
 /// CTE's column is an expression, and PostgreSQL evaluated it once for each
-/// place the statement names it: the parent key twice (in `distinct on` and
-/// in its `case`), 450 ms where 300 ms will do; the state twice under
-/// `attention`, 56 ms where 25 ms will do.
+/// place the statement names it: the state twice under `attention`, 56 ms
+/// where 25 ms will do (and the parent key twice, 450 ms where 300 ms would
+/// do, while it was still walked per row).
 macro_rules! tile_ruled {
+    () => {
+        tile_ruled!("")
+    };
     ($rule:expr) => {
         concat!(
             r#"
 with ruled as materialized (
-  select i.entity_id, i.source_id, i.kind, i.item_updated_at,
-         "#,
+  select i.entity_id, i.source_id, i.kind, i.item_updated_at"#,
             $rule,
             r#"
     from sync.live_item i
@@ -421,7 +425,11 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 
 /// [`EntityOrder::Attention`]: the live corpus without its settled rows.
 const LIVE_ATTENTION: &str = concat!(
-    tile_ruled!(concat!(knobas_core::declared_state!("$8"), " as state")),
+    tile_ruled!(concat!(
+        ",\n         ",
+        knobas_core::declared_state!("$8"),
+        " as state"
+    )),
     r#",
 drawn as (
   select r.entity_id, r.kind, r.item_updated_at, r.state, r.state->>'tone' as tone
@@ -432,28 +440,72 @@ drawn as (
 );
 
 /// [`EntityOrder::LatestPerParent`]: the newest row of each parent, for kinds
-/// that declare a state. `parent_key` is every name of every parent in the
-/// declared chain, in order; `null` -- no grouping -- for a kind that
-/// declares no state and for a record whose parent misses, which then
-/// stands alone under its own id. The state chip is read for the kept rows
-/// only.
+/// that declare a state. The state chip is read for the kept rows only.
+///
+/// **The parent key is the stored resolution, not a walk** (#688). The
+/// parents a row names are kept in `sync.item_parent` by the database
+/// (migration `0028`, ADR-0019), from the same `declared_parent_names!`
+/// expansion this statement used to run per row: on a room of 20,000 builds
+/// that walk was about 300 ms of a 310 ms read, against 25 ms for
+/// `updated_desc`. The key reads a row's **child-arm** rows (the parents it
+/// names, not the names it answers to as a parent) under its **own source's
+/// adapter**, matched at read time on `knobas.source_config` as every reader
+/// of the table matches it.
+///
+/// The stored rows are a set: each name and its parent's kind, but not the
+/// chain's order nor which names belong to which parent. So the key is the
+/// sorted `(parent kind, name)` pairs, joined by separators no name holds.
+/// Two configurations sharing a display name stay two, because each also
+/// names its own id (#680's two configurations called `Build`). What the set
+/// cannot tell apart is two chains with the same pairs arranged differently:
+/// a configuration named `A` with id `B` beside one named `B` with id `A`.
+///
+/// No key -- no grouping -- for a kind that declares no state (asked once per
+/// source and kind, in `grouped`, not per row) and for a record that names no
+/// parent; such a row stands alone under its own id.
+///
+/// The shape is the plan's. `named` is materialized and bounded by the
+/// room's sources, so it is read from `item_parent_child_idx` rather than
+/// probed once per row of the room, which a nested loop did at about 7 µs a
+/// probe. Every key and the group column compare in the `"C"` collation: a
+/// sort of 40,000 names in the database's own collation was most of the
+/// remaining time. The kept rows are fetched by primary key. Measured on the
+/// 20,000-build room: about 80 ms.
 const LIVE_LATEST: &str = concat!(
-    tile_ruled!(concat!(
-        r#"case when "#,
-        knobas_core::declares_field!("$8", "state"),
-        r#" then (select array_agg(pn.name order by pn.pos, pn.name_ord) from "#,
-        knobas_core::declared_parent_names!("$8"),
-        r#" pn) end as parent_key"#
-    )),
+    tile_ruled!(),
     r#",
+grouped as (
+  select i.source_id, i.kind
+    from (select distinct r.source_id, r.kind from ruled r) i
+   where "#,
+    knobas_core::declares_field!("$8", "state"),
+    r#"
+),
+named as materialized (
+  select ip.entity_id, ip.kind, ip.name
+    from sync.item_parent ip
+    join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind
+   where ip.arm = 'child'
+     and ($1::text[] is null or ip.source_id = any($1))
+     and ip.source_id in (select g.source_id from grouped g)
+),
+keyed as (
+  select n.entity_id collate "C" as entity_id,
+         string_agg(n.kind || E'\x1f' || n.name, E'\x1e'
+                    order by n.kind collate "C", n.name collate "C") as parent_key
+    from named n
+    join ruled r on r.entity_id = n.entity_id
+    join grouped g on g.source_id = r.source_id and g.kind = r.kind
+   group by n.entity_id collate "C"
+),
 latest as (
-  select distinct on (r.source_id, r.kind, r.parent_key,
-                      case when r.parent_key is null then r.entity_id end)
-         r.entity_id
-    from ruled r
-   order by r.source_id, r.kind, r.parent_key,
-            case when r.parent_key is null then r.entity_id end,
-            r.item_updated_at desc nulls last, r.entity_id
+  select distinct on (g.grp) g.entity_id
+    from (select r.entity_id, r.item_updated_at,
+                 coalesce(r.source_id || E'\x1d' || r.kind || E'\x1d' || k.parent_key,
+                          E'\x1c' || r.entity_id) collate "C" as grp
+            from ruled r
+            left join keyed k on k.entity_id = r.entity_id) g
+   order by g.grp, g.item_updated_at desc nulls last, g.entity_id
 ),
 drawn as (
   select k.entity_id, k.kind, k.item_updated_at, k.state, k.state->>'tone' as tone
@@ -461,8 +513,8 @@ drawn as (
                  "#,
     knobas_core::declared_state!("$8"),
     r#" as state
-            from latest l
-            join sync.item i on i.entity_id = l.entity_id) k
+            from sync.item i
+           where i.entity_id = any(array(select l.entity_id from latest l))) k
 )"#,
     tile_page!(),
 );

@@ -508,6 +508,7 @@ knobas-app	test/it	demo_delete_during_load::a_source_deleted_during_a_demo_load_
 knobas-app	test/it	entity::a_birth_line_is_written_even_when_no_born_link_could_be_drawn
 knobas-app	test/it	entity::a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one
 knobas-app	test/it	entity::a_born_link_survives_the_notes_first_autosave
+knobas-app	test/it	entity::a_builds_configuration_is_the_parent_its_own_adapter_says_it_names
 knobas-app	test/it	entity::a_commits_room_line_and_detail_carry_its_repo_as_the_path
 knobas-app	test/it	entity::a_confluence_space_is_a_project_room_and_a_jira_project_is_another
 knobas-app	test/it	entity::a_disabled_sources_entity_opens_with_the_marker_until_reenabled

@@ -67,6 +67,10 @@ async fn seeded() -> PgPool {
     let mut done = SEEDED.lock().await;
     if !*done {
         knobas_db::migrate::run(&pool).await.unwrap();
+        // The declarations' stored copy, written as bring-up writes it before
+        // its first sync (ADR-0019): `sync.item_parent`, which the Builds
+        // tile groups by (#688), is filled from it as items are written.
+        knobas_app::commands::search::searcher(&pool).await.unwrap();
         knobas_app::sources::demo::demo_load_inner(&pool)
             .await
             .unwrap();
@@ -1642,6 +1646,72 @@ async fn the_builds_tile_draws_each_configurations_latest_build_failing_first() 
         (count(Tone::Err), count(Tone::Info), count(Tone::Ok)),
         (1, 1, 1)
     );
+}
+
+/// A build's configuration is the parent its **own source's adapter** says it
+/// **names** (#688, ADR-0019): the Builds tile groups by the stored
+/// resolution, and only by the rows of it that say so. Two kinds of row in
+/// `sync.item_parent` are about the build and are not its configuration:
+///
+/// * a row another adapter's declarations wrote, because they reach the
+///   kind `build` too -- which adapter a source uses is matched when the rows
+///   are read, never when they are written;
+/// * a row of the `parent` arm, the name the build answers to as somebody's
+///   parent (a kind declared under a build).
+///
+/// Neither may split a configuration: its older failure stays behind its
+/// newer success. Both rows are written here by hand, as no built-in adapter
+/// writes them for a TeamCity build today.
+#[tokio::test]
+async fn a_builds_configuration_is_the_parent_its_own_adapter_says_it_names() {
+    let pool = seeded().await;
+    let teamcity = configured(&pool, "teamcity").await;
+    let build = |status: &str| serde_json::json!({ "state": "finished", "status": status, "buildType": { "id": "Docs_Build", "name": "Docs", "projectId": "P" } });
+    for (key, status, minutes) in [("2", "SUCCESS", 5), ("1", "FAILURE", 50)] {
+        mirrored(&pool, &teamcity, "build", key, build(status)).await;
+        dated(&pool, &format!("{teamcity}:{key}"), minutes).await;
+    }
+    for (adapter, arm, name, kind) in [
+        ("gitea", "child", "Elsewhere", "build_config"),
+        ("teamcity", "parent", "1", "build"),
+    ] {
+        sqlx::query(
+            "insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id)
+             values ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(format!("{teamcity}:1"))
+        .bind(adapter)
+        .bind(name)
+        .bind(kind)
+        .bind(arm)
+        .bind(&teamcity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![teamcity.clone()],
+            kinds: vec!["build".to_owned()],
+            order: EntityOrder::LatestPerParent,
+            ..all()
+        },
+        50,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<&str> = page.rows.iter().map(|r| r.entity_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [format!("{teamcity}:2")],
+        "one configuration, its latest build; the older failure is not a second parent"
+    );
+    assert_eq!(page.total, 1);
 }
 
 /// §3a's fallback (#680): a kind whose source declares no state -- the mock

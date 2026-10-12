@@ -10468,6 +10468,23 @@ From this commit on, each of the following requires an orchestrator decision **a
   TeamCity declarations; and the frontend's `kinds.test.ts`, `tile-count.test.ts` and
   `Tile.test.svelte.ts`.
 
+  *Amended 2026-10-12 (#688): `latest_per_parent`'s parent key is read from `sync.item_parent`,
+  not walked per row.* The walk through `declared_parent_names!` was about 300 ms of a 310 ms
+  Builds tile on a 20,000-build room. The key is now the row's child-arm rows in
+  `sync.item_parent` (migrations `0028`/`0029`, ADR-0019) under its own source's adapter, matched
+  on `knobas.source_config` as every reader of that table matches it. Those rows are a set, so the
+  key is the **sorted `(parent kind, name)` pairs**, not the chain's names in order. Two
+  configurations that share a display name stay two because each also names its own id. What a
+  set cannot tell apart is the same pairs arranged differently (one configuration named `A` with
+  id `B`, another named `B` with id `A`). Whether a kind declares a state is asked once per
+  source and kind. A row that names no parent stands alone, as one whose parent missed did.
+  Nothing on the wire moves: no `EntityOrder` member, no field, no command, no migration. The
+  statement is still sent unnamed. Pinned by the tests above, unchanged, and by
+  `a_builds_configuration_is_the_parent_its_own_adapter_says_it_names` (a row another adapter
+  wrote, or a `parent`-arm row, does not split a configuration). `entity.rs`'s `seeded()` now
+  writes the stored declarations first, as bring-up does. Measured on one connection, five reads
+  each: before 300-312 ms, after about 80 ms, against 23-25 ms for `updated_desc`.
+
 - **`crates/knobas-source/src/**` and the IPC schema — issue #668 (2026-10-12): `WriteOp::
   SetParameter`.** Spec #660 story 19: change a build configuration's parameter from its view. The
   spec names `set_parameter { entity, name, value }` among the frozen-surface changes Björn's
