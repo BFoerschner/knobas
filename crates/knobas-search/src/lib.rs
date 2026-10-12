@@ -171,8 +171,9 @@ impl Searcher {
     ///
     /// `under:` no longer walks the declarations per query: migration `0028`
     /// keeps `sync.item_parent`, the names every item answers to, and
-    /// recomputes it from `sync.parent_declaration` whenever an item, a
-    /// declaration or a source's adapter kind changes. This writes that table
+    /// recomputes it from `sync.parent_declaration` whenever an item or a
+    /// declaration changes; which adapter a source uses is matched when the
+    /// rows are read, so a source command recomputes nothing. This writes that table
     /// whole -- each template's `payload_paths` under its adapter kind, every
     /// other adapter kind removed. It reads the table first and writes only
     /// when it differs, so a call that changes nothing is one read, takes no
