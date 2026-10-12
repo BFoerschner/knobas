@@ -115,7 +115,11 @@ taker() {
     . "$here/live-lib.sh"
     LIVE_TESTENV=$fake
     trap 'live_lock_release' EXIT
-    if live_lock_hold "$name"; then echo "held by $name"; rc=0; else rc=$?; fi
+    if live_lock_hold "$name"; then
+      echo "held by $name"
+      echo "target: $(readlink "$KNOBAS_LIVE_LOCK")"
+      rc=0
+    else rc=$?; fi
     echo "$rc" >"$scratch/$name.rc"
   ) >>"$scratch/$name.out" 2>&1 &
   pids+=($!)
@@ -146,9 +150,18 @@ sleep 0.5
 lines2=$(grep -c 'is held by' "$scratch/second.out" || true)
 checks=$((checks + 1))
 [ "$lines" = 1 ] && [ "$lines2" = 1 ] || fail "the holder is printed once" "$(cat "$scratch/second.out")"
+# A second past the waiter's start, so a lock stamped when it began waiting
+# rather than when it took the lock reads earlier than the release.
+sleep 1
+released_at=$(date +%s)
 touch "$scratch/first.release"
 rc=$(wait_rc second)
 out=$(cat "$scratch/second.out")
+taken_at=$(sed -n 's/^target: [0-9]* \([0-9]*\) .*/\1/p' "$scratch/second.out")
+checks=$((checks + 1))
+[ -n "$taken_at" ] && [ "$taken_at" -ge "$released_at" ] ||
+  fail "the lock says when it was taken, not when the wait began" \
+    "released at $released_at, lock stamped ${taken_at:-?}"
 check "the second run goes on once the first lets go" "$rc" "0"
 check "the second run held the lock" "$out" "held by second"
 check "the second run says how long it waited" "$out" "after"
@@ -207,6 +220,26 @@ check "a child of the holder goes on at once" "$rc" "0"
 checks=$((checks + 1))
 [ "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" = "$holder_target" ] ||
   fail "the child leaves its parent's lock in place" "now: $(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || echo none)"
+
+# --- something at the lock's path that is not a link -----------------------------
+
+# Neither waited on (there is no holder, and `ln -s` would fail on a file
+# forever, past any timeout) nor taken (`ln -s` onto a directory makes its link
+# inside it and succeeds): refused, naming the path.
+# The blocker still holds the lock; its link is put back after.
+saved=$(readlink "$KNOBAS_LIVE_LOCK")
+for kind in file directory; do
+  rm -f "$KNOBAS_LIVE_LOCK"
+  if [ "$kind" = file ]; then : >"$KNOBAS_LIVE_LOCK"; else mkdir "$KNOBAS_LIVE_LOCK"; fi
+  taker "not-a-link-$kind" KNOBAS_LIVE_LOCK_WAIT=30
+  rc=$(wait_rc "not-a-link-$kind")
+  out=$(cat "$scratch/not-a-link-$kind.out")
+  check_not "a $kind at the lock's path is refused" "$rc" "0"
+  check_not "a $kind at the lock's path is refused at once, not timed out" "$rc" "timeout"
+  check "the refusal names the path" "$out" "$KNOBAS_LIVE_LOCK is not the JVM lock's symlink"
+  rm -rf "$KNOBAS_LIVE_LOCK"
+done
+ln -s "$saved" "$KNOBAS_LIVE_LOCK"
 
 # --- live_session takes the lock before its guard, and gives it up last -------
 

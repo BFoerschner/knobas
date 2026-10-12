@@ -93,7 +93,7 @@ live_guard() {
     return 1
   }
   _live_guard_shell || return 1
-  [ "$product" != gitea ] || return 0
+  live_is_jvm "$product" || return 0
   for other in teamcity jira confluence; do
     [ "$other" != "$product" ] || continue
     if live_is_up "$other"; then
@@ -175,9 +175,19 @@ live_lock_hold() {
     echo "live: $recipe runs under the JVM lock its caller holds"
     return 0
   fi
-  # One word for the recipe field, so the worktree path after it may hold spaces.
-  LIVE_LOCK_MINE="$me $(date +%s) ${recipe// /_} ${LIVE_TESTENV%/testenv}"
   while :; do
+    # Something at the path that is not a link is no holder: `ln -s` would
+    # fail on a file forever, with no target to wait on or time out against,
+    # and would create its link INSIDE a directory and report success.
+    if [ -e "$LIVE_LOCK" ] && [ ! -L "$LIVE_LOCK" ]; then
+      LIVE_LOCK_MINE=""
+      echo "live: $recipe: $LIVE_LOCK is not the JVM lock's symlink; remove it" >&2
+      return 1
+    fi
+    # Stamped at each try, so the epoch says when the lock was TAKEN -- a run
+    # that waited does not claim to have held it since it started waiting.
+    # One word for the recipe field, so the worktree path after it may hold spaces.
+    LIVE_LOCK_MINE="$me $(date +%s) ${recipe// /_} ${LIVE_TESTENV%/testenv}"
     if ln -s "$LIVE_LOCK_MINE" "$LIVE_LOCK" 2>/dev/null; then
       export KNOBAS_LIVE_LOCK_HOLDER=$LIVE_LOCK_MINE
       waited=$((SECONDS - from))
