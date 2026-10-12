@@ -4,7 +4,8 @@
 
   The shell draws the vocabulary and never learns which adapter drew it -- so
   nothing here names a source, a kind or a field. An actions block draws only
-  the actions whose op the source declares (#667). One component per block, in
+  the actions whose op the source declares (#667), and a settings block is
+  editable only where it does (#668). One component per block, in
   this folder; a block this file does not know is not drawn (the vocabulary is
   frozen, and a new block arrives with its component in the same change).
 
@@ -25,6 +26,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import ActionsBlock from "./ActionsBlock.svelte";
   import { offeredActions } from "./actions";
+  import { settingsWritable, type SettingMark } from "./settings";
   import DiffBlock from "./DiffBlock.svelte";
   import EntitiesBlock from "./EntitiesBlock.svelte";
   import FactsBlock from "./FactsBlock.svelte";
@@ -41,6 +43,8 @@
     onnavigate,
     onopenurl,
     onaction,
+    settingMarks = {},
+    onsetting = () => Promise.resolve(false),
   }: {
     entityId: string;
     view: SourceView;
@@ -56,6 +60,13 @@
     onopenurl: (url: string) => void;
     /** Queue an action's write; answers whether it was queued. */
     onaction: (action: ViewAction, option: string | null) => Promise<boolean>;
+    /**
+     * The edits of this entity's settings on their way through the queue, by
+     * name (#668). Drawn only on a settings block that is of this entity.
+     */
+    settingMarks?: Record<string, SettingMark>;
+    /** Queue one setting's new value; answers whether it was queued. */
+    onsetting?: (block: { entity: string; write_op: string }, name: string, value: string) => Promise<boolean>;
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */
@@ -214,7 +225,13 @@
             {:else if block.type === "log"}
               <LogBlock text={block.text} truncated={block.truncated} />
             {:else if block.type === "settings"}
-              <SettingsBlock title={block.title} values={block.values} />
+              <SettingsBlock
+                title={block.title}
+                values={block.values}
+                writable={settingsWritable(block.write_op, writeOps)}
+                marks={block.entity === entityId ? settingMarks : {}}
+                onsave={(name, value) => onsetting(block, name, value)}
+              />
             {:else if block.type === "actions"}
               <ActionsBlock actions={block.actions} {onaction} />
             {/if}
