@@ -374,7 +374,6 @@ So, for "not reproduced, the cap stays", a monitored pass cannot be a false gree
 *The wording.* The doc comment is the only durable record this PR leaves, and the next measurer reads it beside the 2026-09-08 table. Left as it is, *"Five runs that met them"* claims a hold that did not happen. The next reader would then take it as a held baseline and cite it as one. The fix is one clause.
 
 **If you disagree, the cost of reversing this is:** small, and it moves nothing in the product. You can reopen #629 or file a follow-up for five runs under a hold. That is about five minutes of exclusive machine time, plus one more doc-comment edit if the held readings differ. If the held runs read the same, nothing changes. If they read a spread wide enough to fire #533's rule, the step to eight goes ahead as the ticket's step 3 describes, and nothing merged here is in the way. That is because this PR changed no code. The one thing a reversal cannot undo is this ruling's point about direction. Even under a stricter (a), a monitored red would still not be a reading.
-||||||| parent of 7eedec6d (Record 0028: the §10.8 entry (gated on #627's sign-off), ADR-0019 proposed, and the ruling (#627))
 
 ## #627 — `under:` over the budget: where the stored copy of the parents lives
 
