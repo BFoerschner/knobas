@@ -552,6 +552,7 @@ knobas-app	test/it	entity::the_code_tile_draws_open_pull_requests_first_and_no_s
 knobas-app	test/it	entity::the_detail_carries_the_entitys_own_activity
 knobas-app	test/it	entity::the_recency_window_is_bound_as_a_parameter
 knobas-app	test/it	entity::the_source_filter_selects_a_room
+knobas-app	test/it	entity::the_tile_orders_are_never_named_prepared_statements
 knobas-app	test/it	entity::the_tile_orders_refuse_the_withdrawn
 knobas-app	test/it	entity::the_web_url_the_adapter_reported_survives_the_mirror
 knobas-app	test/it	entity::title_order_is_a_second_statement_not_string_interpolation

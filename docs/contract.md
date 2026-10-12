@@ -10441,7 +10441,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   which is §3a's fallback, and the ADR-0007 miss fails toward drawing a row, never hiding one.
   Both read `sync.live_item` only: with `include_deleted: true` they are refused as `invalid`.
   The statements are two more `&'static str` constants in `commands/entity.rs`, chosen by the
-  same `match`, with the same five nullable filters and the declarations at `$8`.
+  same `match`, with the same five nullable filters and the declarations at `$8`. Unlike the plain
+  orders they are sent as the unnamed statement (`persistent(false)`), so PostgreSQL plans each
+  read with its values: a named one went generic at its sixth read of a connection and took the
+  Builds tile of a 20,000-build room from 0.45 s to 11-12 s (#685's review).
 
   **`EntityPage.tally: KindTally[] | null`**, with `KindTally { kind: string, tone: Tone | null,
   count: number }`: under a tile order, the whole ordered set counted by kind and tone (not the
@@ -10459,8 +10462,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   Pinned by `crates/knobas-app/tests/it/entity.rs`:
   `the_code_tile_draws_open_pull_requests_first_and_no_settled_one`,
   `the_builds_tile_draws_each_configurations_latest_build_failing_first`,
-  `a_kind_with_no_declared_state_falls_back_to_recency` and
-  `the_tile_orders_refuse_the_withdrawn`, over real PostgreSQL with the built-in Gitea and
+  `a_kind_with_no_declared_state_falls_back_to_recency`,
+  `the_tile_orders_refuse_the_withdrawn` and
+  `the_tile_orders_are_never_named_prepared_statements`, over real PostgreSQL with the built-in Gitea and
   TeamCity declarations; and the frontend's `kinds.test.ts`, `tile-count.test.ts` and
   `Tile.test.svelte.ts`.
 

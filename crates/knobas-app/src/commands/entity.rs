@@ -355,11 +355,17 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// line is drawn for the page alone ([`tile_page!`]), and
 /// [`EntityOrder::LatestPerParent`] reads the state of each group's newest
 /// row only.
+///
+/// `materialized`, so the rule's column is computed once a row. Inlined, the
+/// CTE's column is an expression, and PostgreSQL evaluated it once for each
+/// place the statement names it: the parent key twice (in `distinct on` and
+/// in its `case`), 450 ms where 300 ms will do; the state twice under
+/// `attention`, 56 ms where 25 ms will do.
 macro_rules! tile_ruled {
     ($rule:expr) => {
         concat!(
             r#"
-with ruled as (
+with ruled as materialized (
   select i.entity_id, i.source_id, i.kind, i.item_updated_at,
          "#,
             $rule,
