@@ -52,12 +52,20 @@ select k.kind from (
 
 /// The source ids bound at `$1` that have at least one row in the mirror.
 ///
-/// One `exists` per id rather than a `distinct` over the corpus:
-/// `item_source_updated_idx` leads with `source_id`, so each probe stops at
-/// the source's first live row instead of reading every row there is.
+/// One probe per id, each **ordered as `item_source_updated_idx` is**
+/// (`source_id, item_updated_at desc nulls last`), so the planner walks that
+/// index and stops at the source's first live row. A plain `exists` does
+/// not: measured on the 100k fixture (#622's review), the planner hashed every
+/// row of each source and took 30 ms at p50, the same as a `distinct` over the
+/// corpus, against 0.3 ms for this shape. An unordered `limit 1` seq-scanned
+/// to the same 30 ms once an enabled source with no rows was in the list.
 const SOURCES_SQL: &str = "\
 select s.id from unnest($1::text[]) s(id)
- where exists (select 1 from sync.live_item i where i.source_id = s.id)";
+ cross join lateral (
+  select 1 from sync.live_item i
+   where i.source_id = s.id
+   order by i.item_updated_at desc nulls last
+   limit 1) l";
 
 /// Every `(name, kind)` a parent answers to, through the declarations bound
 /// at `$1`.

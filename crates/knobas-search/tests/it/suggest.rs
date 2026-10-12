@@ -169,9 +169,9 @@ fn parents_of(suggestions: &FilterSuggestions, t: &str) -> Vec<ParentSuggestion>
     out
 }
 
-/// The tracer bullet: the kinds that have live rows, the enabled sources, and
-/// the parents the mirror declares, each with its kind -- and nothing a
-/// disabled source holds.
+/// The tracer bullet: the kinds that have live rows, the enabled sources that
+/// have them, and the parents the mirror declares, each with its kind -- and
+/// nothing a disabled source holds.
 #[tokio::test]
 async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     let pool = pool().await;
