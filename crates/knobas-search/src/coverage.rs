@@ -58,7 +58,8 @@
 //! # What it costs, measured
 //!
 //! One statement, and only for a query that actually filtered by author -- an
-//! ordinary keystroke pays nothing.
+//! ordinary keystroke pays nothing. (An `under:` query pays a second, indexed
+//! one for its own verdict, `UNDER_COVERAGE_SQL`, #642.)
 //!
 //! **There is no index that can answer this and the shape was chosen on
 //! measurements, not on taste.** "Does this source have an authored row" has no
@@ -137,6 +138,44 @@ select i.source_id                            as source_id,
  group by i.source_id
 ";
 
+/// The sources among `$1` that have synced something naming a parent: a live
+/// item with a **child-arm** row in `sync.item_parent` (migration `0029`) under
+/// the adapter the source is configured with (Björn's ruling on #642).
+///
+/// * **The child arm, never both.** A row from the names-as-parent arm says an
+///   item answers to a name, and every Jira ticket answers to its own key: an
+///   unconfigured classic Jira, whose tickets carry neither `epic` nor
+///   `fields.parent`, has those rows and can match no epic's children.
+/// * **Every kind of the source, not the query's kind scope.** `under:` also
+///   returns the parent itself, so `kind:repo under:payout` shows the repo,
+///   and Gitea answers it because its commits name repos -- a kind-scoped test
+///   would call it unable to while it showed the repo. The kind scope still
+///   decides *who is listed*, through [`AUTHOR_COVERAGE_SQL`]'s rows.
+/// * **Existence**, as for `author:` (the module docs): one row answers. So a
+///   source whose adapter declares a parent but whose corpus names none -- a
+///   Jira project where no ticket is in an epic -- gets
+///   [`FilterAnswer::NoValues`], which is true of that corpus; a source with no
+///   declaring kind has no child row and gets it too.
+///
+/// `exists` per source, served by `item_parent_child_idx` on
+/// `(source_id, adapter_kind) where arm = 'child'`: a source with no child
+/// rows answers from an empty range, whatever another source of the same
+/// adapter has, and one that has them answers on its first live one. The
+/// copied `source_id` is what bounds it (Björn's sign-off on #642): through
+/// `sync.item`, a second source on one adapter read every child row of the
+/// first to prove its absence, about 150 ms at the 100k benchmark.
+const UNDER_COVERAGE_SQL: &str = r"
+select s.id
+  from knobas.source_config s
+ where s.id = any($1)
+   and exists (select 1
+                 from sync.item_parent ip
+                 join sync.live_item i on i.entity_id = ip.entity_id
+                where ip.arm = 'child'
+                  and ip.source_id = s.id
+                  and ip.adapter_kind = s.kind)
+";
+
 /// What the probe answered about one source that put rows in scope.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 struct SourceProbe {
@@ -152,12 +191,12 @@ struct SourceProbe {
 /// author or by parent. `mine` counts: `@me` runs through the same
 /// `author = any(...)` predicate and hits the same gap.
 ///
-/// **`under:` (#595) shares the probe and not the verdict.** Which sources
-/// put rows in this query's corpus is the same question for both dimensions,
-/// so it is asked once. What a source can do with `under:` is not measured on
-/// its rows but read off its declaration: a source declaring a parent for none
-/// of its kinds has nothing the filter can match, whatever it has synced --
-/// spec #591's "a source with no kind declaring a parent".
+/// **`under:` (#595) shares the probe and has a verdict of its own.** Which
+/// sources put rows in this query's corpus is the same question for both
+/// dimensions, so it is asked once. Whether a source can answer `under:` is
+/// measured on what it synced (Björn's ruling on #642, replacing #595's "read
+/// off the declaration"): [`UNDER_COVERAGE_SQL`], asked only for a query that
+/// filtered by parent.
 ///
 /// # Errors
 ///
@@ -190,15 +229,19 @@ pub(crate) async fn report(
             &scoped,
             &probes,
             FilterDimension::Author,
-            |probe, _| probe.authored,
+            |probe| probe.authored,
         ));
     }
     if by_under {
+        let naming: Vec<String> = sqlx::query_scalar(UNDER_COVERAGE_SQL)
+            .bind(&ids)
+            .fetch_all(pool)
+            .await?;
         report.push(coverage_of(
             &scoped,
             &probes,
             FilterDimension::Under,
-            |_, source| vocab.declarations.declares_a_parent(&source.id),
+            |probe| naming.contains(&probe.source_id),
         ));
     }
     // A dimension whose sources in scope all contributed nothing to this
@@ -252,7 +295,7 @@ fn coverage_of(
     scoped: &[&SourceVocab],
     probes: &[SourceProbe],
     dimension: FilterDimension,
-    answers: impl Fn(&SourceProbe, &SourceVocab) -> bool,
+    answers: impl Fn(&SourceProbe) -> bool,
 ) -> FilterCoverage {
     FilterCoverage {
         dimension,
@@ -263,7 +306,7 @@ fn coverage_of(
                 Some(SourceAnswer {
                     source_id: source.id.clone(),
                     display_name: source.display_name.clone(),
-                    answer: if answers(probe, source) {
+                    answer: if answers(probe) {
                         FilterAnswer::Answered
                     } else {
                         FilterAnswer::NoValues
@@ -346,7 +389,7 @@ mod tests {
         // deliberately absent: a source with no rows in scope has no group.
         let probes = [probe("teamcity", false), probe("jira", true)];
 
-        let coverage = coverage_of(&scoped, &probes, FilterDimension::Author, |probe, _| {
+        let coverage = coverage_of(&scoped, &probes, FilterDimension::Author, |probe| {
             probe.authored
         });
         assert_eq!(coverage.dimension, FilterDimension::Author);

@@ -37,9 +37,13 @@ const REASON: Record<Exclude<FilterAnswer, "answered">, string> = {
   no_values: "nothing it has synced names a person",
 };
 
-/** The same, for `under:` (#595): what `no_values` means for a parent. */
+/**
+ * The same, for `under:` (#595): what `no_values` means for a parent. A fact
+ * about the source's corpus, like the author reason, since #642 measures it
+ * there rather than reading it off the adapter's declaration.
+ */
 const UNDER_REASON: Record<Exclude<FilterAnswer, "answered">, string> = {
-  no_values: "it declares no parent to look under",
+  no_values: "nothing it has synced names a parent",
 };
 
 /**

@@ -25,6 +25,7 @@ mod sql_shape;
 mod suggest;
 mod under;
 mod under_confluence;
+mod under_coverage;
 mod under_jira;
 mod under_teamcity;
 mod vocab;

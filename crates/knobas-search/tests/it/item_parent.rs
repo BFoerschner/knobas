@@ -1,5 +1,5 @@
 //! `sync.item_parent` against the walk it stores, on a real PostgreSQL
-//! (migration `0028`, #627, ADR-0019).
+//! (migrations `0028` and `0029`, #627, #642, ADR-0019).
 //!
 //! `under:` used to walk every live item through the declarations on every
 //! keystroke. Since #627 the database runs that walk when something it
@@ -7,10 +7,10 @@
 //! file holds the stored answer to the walk -- `knobas_core`'s
 //! `declared_parent_names!` and `declared_names_as_parent!`, bound to the
 //! declarations `Vocabulary::declaring` builds in Rust -- after every kind of
-//! change the trigger code claims to follow: an insert, a payload update, a
-//! delete, a change to the stored declarations, a source configured after
-//! its items were written, a source given another adapter kind, and a source
-//! removed.
+//! change the trigger code claims to follow: an insert, a payload update, an
+//! item moved to another source and back, a delete, a change to the stored
+//! declarations, a source configured after its items were written, a source
+//! given another adapter kind, and a source removed.
 //!
 //! Its own database (one per test module, #572), so it may write
 //! `sync.parent_declaration` freely; nothing here goes through
@@ -92,7 +92,9 @@ async fn item(pool: &PgPool, source: &str, kind: &str, key: &str, payload: serde
     .unwrap();
 }
 
-type Rows = Vec<(String, String, String)>;
+/// `(entity_id, name, kind, arm)`: the arm is `'child'` for a parent the item
+/// names and `'parent'` for a name it answers to (migration `0029`, #642).
+type Rows = Vec<(String, String, String, String)>;
 
 /// What the readers see of the database's stored rows for this test's items:
 /// `sync.item_parent` matched to each item's configured adapter on
@@ -100,10 +102,10 @@ type Rows = Vec<(String, String, String)>;
 /// make (the deputy's second ruling on #627).
 async fn stored(pool: &PgPool, prefix: &str) -> Rows {
     sqlx::query_as(
-        "select ip.entity_id, ip.name, ip.kind from sync.item_parent ip
+        "select ip.entity_id, ip.name, ip.kind, ip.arm from sync.item_parent ip
            join sync.item x on x.entity_id = ip.entity_id
            join knobas.source_config s on s.id = x.source_id and s.kind = ip.adapter_kind
-          where ip.entity_id like $1 || '%' order by 1, 2, 3",
+          where ip.entity_id like $1 || '%' order by 1, 2, 3, 4",
     )
     .bind(prefix)
     .fetch_all(pool)
@@ -117,12 +119,12 @@ async fn stored(pool: &PgPool, prefix: &str) -> Rows {
 /// sources and the adapters' paths, never by the database's own mapping.
 async fn walked(pool: &PgPool, prefix: &str, templates: &[(String, Vec<KindPaths>)]) -> Rows {
     const WALK: &str = concat!(
-        "select i.entity_id, n.name, n.kind from sync.item i cross join lateral (",
-        "select pn.name, pn.kind from ",
+        "select i.entity_id, n.name, n.kind, n.arm from sync.item i cross join lateral (",
+        "select pn.name, pn.kind, 'child' as arm from ",
         knobas_core::declared_parent_names!("$1"),
-        " pn union all select sn.name, i.kind from ",
+        " pn union all select sn.name, i.kind, 'parent' from ",
         knobas_core::declared_names_as_parent!("$1"),
-        " sn) n where i.entity_id like $2 || '%' order by 1, 2, 3"
+        " sn) n where i.entity_id like $2 || '%' order by 1, 2, 3, 4"
     );
     let vocab = Vocabulary::load(pool, KindCatalog::default())
         .await
@@ -148,12 +150,27 @@ async fn agree(
         stored, walked,
         "after {step}: sync.item_parent is not the walk"
     );
+    // `source_id` is the item's, copied (migration `0029`, #642): the
+    // coverage probe reads it in place of joining `sync.item`.
+    let stale: Vec<(String, String, String)> = sqlx::query_as(
+        "select ip.entity_id, ip.source_id, x.source_id from sync.item_parent ip
+           join sync.item x on x.entity_id = ip.entity_id
+          where ip.entity_id like $1 || '%' and ip.source_id is distinct from x.source_id",
+    )
+    .bind(prefix)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        stale.is_empty(),
+        "after {step}: rows whose source_id is not their item's: {stale:?}"
+    );
     stored
 }
 
-fn has(rows: &Rows, entity: &str, name: &str, kind: &str) -> bool {
+fn has(rows: &Rows, entity: &str, name: &str, kind: &str, arm: &str) -> bool {
     rows.iter()
-        .any(|(e, n, k)| e == entity && n == name && k == kind)
+        .any(|(e, n, k, a)| e == entity && n == name && k == kind && a == arm)
 }
 
 /// Every change the trigger code follows, in turn, each followed by the
@@ -243,15 +260,15 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
     let rows = agree(&pool, &prefix(&g), &templates, "the inserts").await;
     let (c1, p1, r1) = (format!("{g}:c1"), format!("{g}:p1"), format!("{g}:r1"));
     assert!(
-        has(&rows, &c1, "tide/ghost", "repo"),
+        has(&rows, &c1, "tide/ghost", "repo", "child"),
         "an unmirrored parent: {rows:?}"
     );
     assert!(
-        has(&rows, &p1, "payout", "repo"),
+        has(&rows, &p1, "payout", "repo", "child"),
         "the PR's parent: {rows:?}"
     );
     assert!(
-        has(&rows, &r1, "tide/payout", "repo"),
+        has(&rows, &r1, "tide/payout", "repo", "parent"),
         "a mirrored parent's own name: {rows:?}"
     );
     assert!(
@@ -268,7 +285,28 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
     .await
     .unwrap();
     let rows = agree(&pool, &prefix(&g), &templates, "a payload update").await;
-    assert!(has(&rows, &c1, "tide/renamed", "repo") && !has(&rows, &c1, "tide/ghost", "repo"));
+    assert!(
+        has(&rows, &c1, "tide/renamed", "repo", "child")
+            && !has(&rows, &c1, "tide/ghost", "repo", "child")
+    );
+
+    // The commit moves to another Gitea source and back: its rows follow
+    // the item's `source_id` each time.
+    let g2 = format!("g2{t}");
+    configure(&pool, &g2, &gitea).await;
+    for (to, step) in [
+        (&g2, "moving an item to another source"),
+        (&g, "moving it back"),
+    ] {
+        sqlx::query("update sync.item set source_id = $2 where entity_id = $1")
+            .bind(&c1)
+            .bind(to)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = agree(&pool, &prefix(&g), &templates, step).await;
+        assert!(has(&rows, &c1, "tide/renamed", "repo", "child"), "{rows:?}");
+    }
 
     sqlx::query("delete from knobas.entity where id = $1")
         .bind(&p1)
@@ -277,7 +315,7 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
         .unwrap();
     let rows = agree(&pool, &prefix(&g), &templates, "a delete").await;
     assert!(
-        !rows.iter().any(|(e, _, _)| *e == p1),
+        !rows.iter().any(|(e, _, _, _)| *e == p1),
         "the deleted PR's rows go with it"
     );
 
@@ -293,17 +331,26 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
     templates[0].1 = narrower;
     let rows = agree(&pool, &prefix(&g), &templates, "a declaration change").await;
     assert!(
-        !has(&rows, &r1, "payout", "repo"),
+        !has(&rows, &r1, "payout", "repo", "parent"),
         "the bare name went with its path: {rows:?}"
     );
-    assert!(has(&rows, &r1, "tide/payout", "repo"));
+    assert!(has(&rows, &r1, "tide/payout", "repo", "parent"));
 
     configure(&pool, &c, &chain).await;
     let rows = agree(&pool, &prefix(&c), &templates, "configuring the source").await;
     let leaf = format!("{c}:leaf");
-    assert!(has(&rows, &leaf, "Handbook", "page") && has(&rows, &leaf, "Payments", "page"));
     assert!(
-        has(&rows, &format!("{c}:payments"), "Payments", "page"),
+        has(&rows, &leaf, "Handbook", "page", "child")
+            && has(&rows, &leaf, "Payments", "page", "child")
+    );
+    assert!(
+        has(
+            &rows,
+            &format!("{c}:payments"),
+            "Payments",
+            "page",
+            "parent"
+        ),
         "{rows:?}"
     );
 
@@ -507,7 +554,10 @@ async fn an_item_written_during_a_declaration_change_resolves_against_it() {
         "the declaration change, then the item",
     )
     .await;
-    assert!(!rows.iter().any(|(_, name, _)| name == "race"), "{rows:?}");
+    assert!(
+        !rows.iter().any(|(_, name, _, _)| name == "race"),
+        "{rows:?}"
+    );
     assert!(
         waited,
         "the item insert never waited on the declaration change's key"
@@ -547,7 +597,10 @@ async fn a_declaration_change_during_an_item_write_reaches_the_item() {
         "the item, then the declaration change",
     )
     .await;
-    assert!(!rows.iter().any(|(_, name, _)| name == "race"), "{rows:?}");
+    assert!(
+        !rows.iter().any(|(_, name, _, _)| name == "race"),
+        "{rows:?}"
+    );
     assert!(
         waited,
         "the declaration change never waited on the item write's key"
