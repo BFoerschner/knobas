@@ -2916,6 +2916,7 @@ dependencies = [
  "knobas-db",
  "knobas-search",
  "knobas-source",
+ "knobas-source-confluence",
  "knobas-source-gitea",
  "knobas-source-jira",
  "knobas-source-mock",
