@@ -196,6 +196,20 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
     ];
     expected.sort();
     assert_eq!(paths(&response), expected);
+
+    // An `under:` query binds the declarations for its predicate, and the
+    // path line reads that same placeholder rather than a second bind: its
+    // rows draw the line too.
+    let scoped = searcher(&pool)
+        .search(q(&format!("under:tidewater/payout-{t} {t}")))
+        .await
+        .unwrap();
+    let mut ours_only: Vec<(String, Option<String>)> = expected
+        .into_iter()
+        .filter(|(id, _)| ours.contains(id))
+        .collect();
+    ours_only.sort();
+    assert_eq!(paths(&scoped), ours_only);
 }
 
 /// A kind no adapter declares a parent for carries no path: a Kuma monitor,
