@@ -592,8 +592,8 @@ fn root_facts(entry: &VcsRootEntry) -> Vec<Fact> {
         ));
     }
     if let Some(root) = root {
-        if let Some(url) = root.properties.get("url") {
-            facts.push(fact("URL", without_userinfo(url), None));
+        if let Some(url) = root.properties.get("url").and_then(without_userinfo) {
+            facts.push(fact("URL", url, None));
         }
         if let Some(branch) = root.properties.get("branch") {
             facts.push(fact("Default branch", branch, None));
@@ -612,20 +612,30 @@ fn disabled() -> Fact {
 
 /// A URL with any `user:password@` taken out: a git URL may carry the
 /// credential it fetches with, and a view says where, never with what.
-fn without_userinfo(url: &str) -> String {
+///
+/// `None` -- draw no URL -- where the credential's end cannot be told. An
+/// unescaped `/` in a password or token ends the authority early and leaves
+/// the rest of the credential, `@` and all, in what reads as the path
+/// (`https://u:pa/ss@host/p.git`). TeamCity stores a root's URL verbatim, so
+/// that form can arrive; an `@` after the authority is therefore never drawn,
+/// though a path could in principle hold one.
+fn without_userinfo(url: &str) -> Option<String> {
     let (scheme, rest) = match url.split_once("://") {
         Some((scheme, rest)) => (Some(scheme), rest),
         None => (None, url),
     };
     let authority_end = rest.find('/').unwrap_or(rest.len());
     let (authority, path) = rest.split_at(authority_end);
+    if path.contains('@') {
+        return None;
+    }
     let host = authority
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
-    match scheme {
+    Some(match scheme {
         Some(scheme) => format!("{scheme}://{host}{path}"),
         None => format!("{host}{path}"),
-    }
+    })
 }
 
 fn nonblank(value: Option<&str>) -> Option<&str> {
@@ -657,28 +667,35 @@ mod tests {
     /// view draws where a root fetches from, never with what.
     #[test]
     fn a_roots_url_is_drawn_without_its_credential() {
+        let drawn = |url: &str| without_userinfo(url);
         assert_eq!(
-            without_userinfo("https://knobas:s3cret@gitea.example/tidewater/p.git"),
-            "https://gitea.example/tidewater/p.git"
+            drawn("https://knobas:s3cret@gitea.example/tidewater/p.git").as_deref(),
+            Some("https://gitea.example/tidewater/p.git")
         );
         assert_eq!(
-            without_userinfo("ssh://git@gitea.example:2222/tidewater/p.git"),
-            "ssh://gitea.example:2222/tidewater/p.git"
+            drawn("ssh://git@gitea.example:2222/tidewater/p.git").as_deref(),
+            Some("ssh://gitea.example:2222/tidewater/p.git")
         );
         assert_eq!(
-            without_userinfo("http://gitea:3000/tidewater/p.git"),
-            "http://gitea:3000/tidewater/p.git"
+            drawn("http://gitea:3000/tidewater/p.git").as_deref(),
+            Some("http://gitea:3000/tidewater/p.git")
         );
         // scp-like and odd forms keep the host and drop what is before `@`.
         assert_eq!(
-            without_userinfo("git@gitea.example:t/p.git"),
-            "gitea.example:t/p.git"
+            drawn("git@gitea.example:t/p.git").as_deref(),
+            Some("gitea.example:t/p.git")
         );
-        assert_eq!(
-            without_userinfo("https://gitea.example/a@b/p.git"),
+        // An unescaped `/` in the credential ends the authority early; the
+        // rest of it, and its `@`, land in what reads as the path. Where an
+        // `@` follows the authority no URL is drawn -- not even one whose `@`
+        // really is in the path, since the two cannot be told apart.
+        for ambiguous in [
+            "https://knobas:pa/ss@gitea.example/tidewater/p.git",
+            "https://tok/en@gitea.example/tidewater/p.git",
             "https://gitea.example/a@b/p.git",
-            "an `@` in the path is not userinfo"
-        );
+        ] {
+            assert_eq!(drawn(ambiguous), None, "{ambiguous}");
+        }
     }
 
     #[test]
