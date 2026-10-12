@@ -1267,6 +1267,12 @@ const REPOS: i64 = 41;
 async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     let pool = pool().await;
     testing::seed_sources(&pool).await.unwrap();
+    // Declared before anything is written, as the app declares at bring-up
+    // before its first sync: so the seed below pays the trigger's walk for
+    // every Gitea row, which is what a sync pays.
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
     // Timed because `0028`'s item trigger runs inside it: the cost the
     // stored resolution adds to every write of the mirror (#627). Only a
     // reading when this test runs alone -- after the tests above it in this
@@ -1292,9 +1298,6 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
     assert!(parented > 0, "no Gitea commit in the corpus: the fixture moved");
 
-    let searcher = Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
-        .await
-        .unwrap();
     for _ in 0..3 {
         searcher.search(q("under:bench/repo-7")).await.unwrap();
     }
