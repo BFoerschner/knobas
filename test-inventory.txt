@@ -1996,6 +1996,7 @@ knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view::other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
 knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
+knobas-source-gitea	test/it	view_pr::a_pull_request_past_the_commit_budget_says_what_it_left_out
 knobas-source-gitea	test/it	view_pr::a_pull_request_view_is_overview_files_commits_and_conversation
 knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_verdicts
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors

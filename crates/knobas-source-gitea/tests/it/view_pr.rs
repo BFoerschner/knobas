@@ -420,3 +420,56 @@ async fn an_unknown_tab_and_a_refused_read_are_errors() {
         "{missing:?}"
     );
 }
+
+/// A pull request longer than the tab's budget of five pages says so: with
+/// the server's count, how many it left out; without one, that there may be
+/// more. A page budget that ran out is never drawn as the whole history.
+#[tokio::test]
+async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
+    for (header, said) in [
+        (
+            Some("300"),
+            "The first 250 of 300 commits; the rest are on Gitea.",
+        ),
+        (None, "The first 250 commits; there may be more on Gitea."),
+    ] {
+        let server = MockServer::start().await;
+        let page: Vec<Value> = (0..50)
+            .map(
+                |i| json!({ "sha": format!("{i:040x}"), "commit": { "message": format!("c{i}") } }),
+            )
+            .collect();
+        let mut answer = ResponseTemplate::new(200).set_body_json(Value::Array(page));
+        if let Some(total) = header {
+            answer = answer.insert_header("X-Total-Count", total);
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/pulls/142/commits")))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+        let view = source(&server)
+            .view(PR, Some("commits"))
+            .await
+            .unwrap()
+            .unwrap();
+        let commits = &view.sections[0];
+        let Block::Entities { rows, .. } = &commits.blocks[0] else {
+            panic!("{commits:#?}");
+        };
+        assert_eq!(rows.len(), 250, "five pages of fifty");
+        assert_eq!(
+            commits.blocks.get(1),
+            Some(&Block::Text {
+                text: said.into(),
+                markdown: false
+            }),
+            "{header:?}"
+        );
+        assert_eq!(
+            commits.count,
+            Some(header.map_or(250, |t| t.parse().unwrap()))
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 5);
+    }
+}

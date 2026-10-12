@@ -11,8 +11,9 @@ use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
-use super::{fact, short, when_of};
+use super::{fact, login, short, when_of};
 use crate::keys;
+use crate::model::{Commit, UserRef};
 use crate::source::GiteaSource;
 
 const OVERVIEW: &str = "overview";
@@ -33,7 +34,7 @@ pub(super) async fn draw(
     number: u64,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
-    let at = At {
+    let at = PullView {
         source,
         owner,
         repo,
@@ -63,14 +64,14 @@ pub(super) async fn draw(
 }
 
 /// The pull request one view is about.
-struct At<'a> {
+struct PullView<'a> {
     source: &'a GiteaSource,
     owner: &'a str,
     repo: &'a str,
     number: u64,
 }
 
-impl At<'_> {
+impl PullView<'_> {
     async fn pull(&self) -> Result<Pull, SourceError> {
         let raw = self
             .source
@@ -134,6 +135,7 @@ impl At<'_> {
     async fn commits(&self) -> Result<ViewSection, SourceError> {
         let mut records = Vec::new();
         let mut total = None;
+        let mut capped = true;
         for page in 1..=COMMIT_PAGES {
             let (batch, count) = self
                 .source
@@ -146,21 +148,33 @@ impl At<'_> {
             let done = batch.is_empty();
             records.extend(batch);
             if done || total.is_some_and(|t| records.len() >= t) {
+                capped = false;
                 break;
             }
         }
         let now = Utc::now();
         let rows: Vec<ViewRow> = records
             .into_iter()
-            .filter_map(|r| serde_json::from_value::<crate::model::Commit>(r).ok())
+            .filter_map(|r| serde_json::from_value::<Commit>(r).ok())
             .map(|c| self.commit_row(&c, now))
             .collect();
-        let total = total.unwrap_or(rows.len()).max(rows.len());
-        let left_out = (total > rows.len()).then(|| Block::Text {
-            text: format!(
-                "The first {} of {total} commits; the rest are on Gitea.",
-                rows.len()
-            ),
+        let read = rows.len();
+        let total = total.unwrap_or(read).max(read);
+        // Said whenever the walk stopped on its budget: with the server's
+        // count, how many it left out; without one, that there may be more.
+        let left_out = if total > read {
+            Some(format!(
+                "The first {read} of {total} commits; the rest are on Gitea."
+            ))
+        } else if capped {
+            Some(format!(
+                "The first {read} commits; there may be more on Gitea."
+            ))
+        } else {
+            None
+        }
+        .map(|text| Block::Text {
+            text,
             markdown: false,
         });
         let mut blocks = vec![Block::Entities { title: None, rows }];
@@ -174,7 +188,7 @@ impl At<'_> {
         })
     }
 
-    fn commit_row(&self, commit: &crate::model::Commit, now: DateTime<Utc>) -> ViewRow {
+    fn commit_row(&self, commit: &Commit, now: DateTime<Utc>) -> ViewRow {
         let inner = commit.commit.as_ref();
         let title = inner
             .and_then(|c| c.message.as_deref())
@@ -185,7 +199,7 @@ impl At<'_> {
         let author = inner
             .and_then(|c| c.author.as_ref())
             .and_then(|a| a.name.clone())
-            .or_else(|| commit.author.as_ref().and_then(|u| u.login.clone()))
+            .or_else(|| login(commit.author.as_ref()))
             .filter(|a| !a.trim().is_empty());
         let when = commit.happened_at().map(|t| ago(t, now));
         let meta = match (author, when) {
@@ -223,11 +237,7 @@ impl At<'_> {
             .collect();
         let mut blocks = Vec::with_capacity(comments.len() * 2);
         for comment in &comments {
-            let who = comment
-                .user
-                .as_ref()
-                .and_then(|u| u.login.clone())
-                .unwrap_or_else(|| "someone".to_owned());
+            let who = login(comment.user.as_ref()).unwrap_or_else(|| "someone".to_owned());
             let when = comment
                 .created_at
                 .as_deref()
@@ -377,11 +387,6 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
         .collect()
 }
 
-fn login(user: Option<&crate::model::UserRef>) -> Option<String> {
-    user.and_then(|u| u.login.clone())
-        .filter(|l| !l.trim().is_empty())
-}
-
 /// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
 /// it, so a commit's age reads the same here as on a room's row: minutes,
 /// then hours, then the UTC date. A time in the future is *just now*.
@@ -415,13 +420,13 @@ struct Pull {
     #[serde(default)]
     mergeable: Option<bool>,
     #[serde(default)]
-    user: Option<crate::model::UserRef>,
+    user: Option<UserRef>,
     #[serde(default)]
-    merged_by: Option<crate::model::UserRef>,
+    merged_by: Option<UserRef>,
     #[serde(default)]
-    head: Option<PrBranch>,
+    head: Option<PullBranch>,
     #[serde(default)]
-    base: Option<PrBranch>,
+    base: Option<PullBranch>,
     /// Gitea types the times as `date-time`; kept as text for [`when_of`],
     /// which shows the offset the server sent.
     #[serde(default)]
@@ -435,15 +440,15 @@ struct Pull {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct PrBranch {
+struct PullBranch {
     #[serde(default)]
     r#ref: Option<String>,
     #[serde(default)]
-    repo: Option<PrRepo>,
+    repo: Option<PullRepo>,
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct PrRepo {
+struct PullRepo {
     #[serde(default)]
     full_name: Option<String>,
 }
@@ -451,7 +456,7 @@ struct PrRepo {
 #[derive(Debug, serde::Deserialize)]
 struct Review {
     #[serde(default)]
-    user: Option<crate::model::UserRef>,
+    user: Option<UserRef>,
     #[serde(default)]
     state: Option<String>,
     #[serde(default)]
@@ -461,7 +466,7 @@ struct Review {
 #[derive(Debug, serde::Deserialize)]
 struct PullComment {
     #[serde(default)]
-    user: Option<crate::model::UserRef>,
+    user: Option<UserRef>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]

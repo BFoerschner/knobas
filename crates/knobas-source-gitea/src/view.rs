@@ -12,7 +12,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, ViewRow, ViewSection};
 
 use crate::keys::{self, GiteaKey};
-use crate::model::{CommitDetail, Signature};
+use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
 mod pr;
@@ -129,13 +129,9 @@ fn overview_blocks(source_id: &str, owner: &str, repo: &str, record: &CommitDeta
         fact("Commit", short(&record.sha)),
         fact("SHA", record.sha.clone()),
     ];
-    let author_name = author.and_then(person).or_else(|| {
-        record
-            .author
-            .as_ref()
-            .and_then(|u| u.login.clone())
-            .filter(|l| !l.trim().is_empty())
-    });
+    let author_name = author
+        .and_then(person)
+        .or_else(|| login(record.author.as_ref()));
     if let Some(name) = author_name {
         facts.push(fact("Author", name));
     }
@@ -203,6 +199,12 @@ fn fact(label: &str, value: String) -> Fact {
 
 fn short(sha: &str) -> String {
     sha.chars().take(SHORT_SHA).collect()
+}
+
+/// A Gitea account's login, where it has a non-blank one.
+fn login(user: Option<&UserRef>) -> Option<String> {
+    user.and_then(|u| u.login.clone())
+        .filter(|l| !l.trim().is_empty())
 }
 
 /// `Name <email>`, or whichever half git recorded.
