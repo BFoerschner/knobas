@@ -227,8 +227,8 @@ impl Source for TeamCitySource {
     }
 
     /// A build configuration's overview, parameters, steps, triggers and VCS
-    /// roots (#664); `None` for a build, whose view is #665's (ADR-0020). See
-    /// [`crate::view`].
+    /// roots (#664), and a build's overview, changes, failed tests, log tail,
+    /// artifacts and parameters (#665) (ADR-0020). See [`crate::view`].
     async fn view(
         &self,
         entity: &str,

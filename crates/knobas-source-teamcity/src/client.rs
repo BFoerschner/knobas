@@ -11,9 +11,10 @@ use knobas_source::{ConnectionInfo, SourceError};
 use crate::TeamCityConfig;
 use crate::http;
 use crate::rest::{
-    BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS, BUILD_TYPE_FIELDS, Build, BuildType,
-    ConfigRecord, CurrentUser, ListEnvelope, Locator, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server,
-    USER_FIELDS,
+    ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
+    BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
+    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, RECENT_BUILD_FIELDS,
+    SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -309,7 +310,135 @@ impl HttpRest {
     }
 }
 
-/// What a by-id fetch's answer means: present, absent, or neither.
+impl HttpRest {
+    /// `GET /app/rest/builds/id:{id}` -- one build for its source view
+    /// (#665). Not on [`Rest`], for [`Self::build_config`]'s reason.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, a 404 for a build that is gone included.
+    pub(crate) async fn build_record(&self, id: i64) -> Result<BuildRecord, SourceError> {
+        self.one(
+            &format!("app/rest/builds/id:{id}"),
+            &[("fields", BUILD_VIEW_FIELDS)],
+        )
+        .await
+    }
+
+    /// `GET /app/rest/changes?locator=build:(id:{id})` -- the commits a build
+    /// built (#665).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn build_changes(&self, id: i64) -> Result<Changes, SourceError> {
+        let locator = format!("build:(id:{id})");
+        self.one(
+            "app/rest/changes",
+            &[
+                ("locator", locator.as_str()),
+                ("fields", BUILD_CHANGE_FIELDS),
+            ],
+        )
+        .await
+    }
+
+    /// `GET /app/rest/testOccurrences?locator=build:(id:{id}),status:FAILURE,count:100`
+    /// -- a build's failed tests, the first hundred (#665).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn failed_tests(&self, id: i64) -> Result<TestOccurrences, SourceError> {
+        let locator = format!("build:(id:{id}),status:FAILURE,count:{FAILED_TESTS}");
+        self.one(
+            "app/rest/testOccurrences",
+            &[("locator", locator.as_str()), ("fields", FAILED_TEST_FIELDS)],
+        )
+        .await
+    }
+
+    /// `GET /app/rest/builds/id:{id}/artifacts` -- a build's top-level
+    /// artifacts (#665); TeamCity's own `.teamcity` directory is hidden.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn artifacts(&self, id: i64) -> Result<Files, SourceError> {
+        self.one(
+            &format!("app/rest/builds/id:{id}/artifacts"),
+            &[("fields", ARTIFACT_FIELDS)],
+        )
+        .await
+    }
+
+    /// The last `lines` lines of a build's log, and whether the log was
+    /// longer (#665).
+    ///
+    /// `GET /downloadBuildLog.html?buildId={id}` -- not `/app/rest` at all:
+    /// the REST log resource is POST-only (it *adds* a message), and this is
+    /// the URL behind the build log page's *Download* link, which answers a
+    /// bearer token like the REST paths do (testenv/seed-teamcity-builds.sh).
+    ///
+    /// **Read as a stream and never held whole.** A log can run to hundreds
+    /// of megabytes; only the last [`LOG_TAIL_BYTES`] are kept while it
+    /// arrives, and the tail is cut from those.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to; a body that breaks off mid-way is
+    /// [`SourceError::Unreachable`].
+    pub(crate) async fn log_tail(
+        &self,
+        id: i64,
+        lines: usize,
+    ) -> Result<(String, bool), SourceError> {
+        let request = self
+            .client
+            .request(knobas_http::Method::GET, "downloadBuildLog.html")
+            .query(&[("buildId", id)]);
+        let mut response = self.client.send(request).await?;
+        let mut kept: Vec<u8> = Vec::new();
+        let mut cut = false;
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            SourceError::Unreachable(format!(
+                "teamcity: the log of build {id} broke off: {error}"
+            ))
+        })? {
+            kept.extend_from_slice(&chunk);
+            if kept.len() > 2 * LOG_TAIL_BYTES {
+                kept.drain(..kept.len() - LOG_TAIL_BYTES);
+                cut = true;
+            }
+        }
+        Ok(tail(&kept, cut, lines))
+    }
+}
+
+/// How many failed tests *Tests* lists (the ticket's `count:100`).
+pub(crate) const FAILED_TESTS: u32 = 100;
+
+/// How much of a log's end is kept while it streams: room for the tail's
+/// lines at any sane width, and a ceiling on what one tab can cost.
+pub(crate) const LOG_TAIL_BYTES: usize = 512 * 1024;
+
+/// The last `lines` lines of `bytes`, and whether anything came before them.
+///
+/// `cut` says `bytes` is already the end of something longer: its first line
+/// is then a fragment, and it is dropped. Invalid UTF-8 is replaced, never an
+/// error -- a build log is whatever the build printed.
+pub(crate) fn tail(bytes: &[u8], cut: bool, lines: usize) -> (String, bool) {
+    let text = String::from_utf8_lossy(bytes);
+    let mut all: Vec<&str> = text.lines().collect();
+    if cut && !all.is_empty() {
+        all.remove(0);
+    }
+    let truncated = cut || all.len() > lines;
+    let kept = &all[all.len().saturating_sub(lines)..];
+    (kept.join("\n"), truncated)
+}
+
+/// What a by-id fetch's answer means: present, absent, or neither./// What a by-id fetch's answer means: present, absent, or neither.
 ///
 /// A free function rather than a `match` inside [`Rest::build_exists`] so it
 /// can be asserted per status without an HTTP server. That is not a stylistic
@@ -483,6 +612,30 @@ mod tests {
                  rather than become an answer: {raised:?}"
             );
         }
+    }
+
+    /// The log tail is the last lines, says when there was more, and drops
+    /// the broken first line of a stream it already cut.
+    #[test]
+    fn a_log_tail_is_the_last_lines_and_says_when_it_was_cut() {
+        let log: String = (1..=10).map(|n| format!("line {n}\n")).collect();
+        assert_eq!(
+            tail(log.as_bytes(), false, 3),
+            ("line 8\nline 9\nline 10".to_owned(), true)
+        );
+        assert_eq!(
+            tail(log.as_bytes(), false, 10).1,
+            false,
+            "exactly the cap is the whole log"
+        );
+        assert_eq!(tail(log.as_bytes(), false, 11).0.lines().count(), 10);
+        // A stream already cut mid-line: the fragment is not a line.
+        assert_eq!(
+            tail(b"ne 4\nline 5\nline 6\n", true, 400),
+            ("line 5\nline 6".to_owned(), true)
+        );
+        assert_eq!(tail(b"", false, 400), (String::new(), false));
+        assert_eq!(tail(b"ok \xff\n", false, 400).0, "ok \u{fffd}");
     }
 
     fn server() -> Server {

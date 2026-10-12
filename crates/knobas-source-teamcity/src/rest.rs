@@ -118,6 +118,151 @@ pub(crate) const RECENT_BUILD_FIELDS: &str = concat!(
     "queuedDate,startDate,finishDate)"
 );
 
+/// What `GET /app/rest/builds/id:{id}` is asked for when a build's source
+/// view is drawn (#665), read by [`BuildRecord`]: the overview's facts, the
+/// failed-test count *Tests* shows before it is read, and the parameters the
+/// build ran with -- beside its configuration's parameter specs, which is
+/// where TeamCity says `password` (a build's own parameter carries no spec).
+/// Measured on the seeded 2026.1.3 server, 2026-10-12.
+pub(crate) const BUILD_VIEW_FIELDS: &str = concat!(
+    "number,buildTypeId,state,status,statusText,branchName,",
+    "queuedDate,startDate,finishDate,",
+    "buildType(id,name,projectName,parameters(property(name,type(rawValue)))),",
+    "triggered(type,user(username)),agent(name),running-info(currentStageText),",
+    "testOccurrences(failed),properties(property(name,value))"
+);
+
+/// What `/app/rest/changes?locator=build:(id:N)` is asked for (#665): a
+/// change's sha, author, time and message, and its VCS root instance's
+/// properties -- for `url`, the repository the commit is in. The list
+/// includes `secure:password`, which TeamCity answers by name with no value;
+/// the view reads `url` and nothing else from it.
+pub(crate) const BUILD_CHANGE_FIELDS: &str = concat!(
+    "count,change(id,version,username,date,comment,",
+    "vcsRootInstance(properties(property(name,value))))"
+);
+
+/// What `/app/rest/testOccurrences` is asked for when a build's *Tests* tab
+/// is read (#665).
+pub(crate) const FAILED_TEST_FIELDS: &str =
+    "count,testOccurrence(name,details,newFailure,muted)";
+
+/// What `/app/rest/builds/id:N/artifacts` is asked for (#665): a top-level
+/// file's name and size; a directory answers `children` and no size.
+pub(crate) const ARTIFACT_FIELDS: &str = "file(name,size,children(count))";
+
+/// One build as [`BUILD_VIEW_FIELDS`] answers it.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BuildRecord {
+    pub number: Option<String>,
+    pub build_type_id: Option<String>,
+    pub state: Option<String>,
+    pub status: Option<String>,
+    pub status_text: Option<String>,
+    pub branch_name: Option<String>,
+    pub queued_date: Option<String>,
+    pub start_date: Option<String>,
+    pub finish_date: Option<String>,
+    pub build_type: Option<BuildRecordType>,
+    pub triggered: Option<TriggeredBy>,
+    pub agent: Option<Named>,
+    #[serde(rename = "running-info")]
+    pub running_info: Option<RunningInfo>,
+    pub test_occurrences: Option<TestCounts>,
+    #[serde(default)]
+    pub properties: Properties,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BuildRecordType {
+    pub id: String,
+    pub name: Option<String>,
+    pub project_name: Option<String>,
+    /// The configuration's parameters, for their specs only.
+    #[serde(default)]
+    pub parameters: Properties,
+}
+
+/// `triggered`: `user`, `vcs`, `schedule`, `buildType`, ... and the user
+/// where a person did it.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct TriggeredBy {
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    pub user: Option<User>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Named {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct TestCounts {
+    pub failed: Option<u64>,
+}
+
+/// `/app/rest/changes`'s answer.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Changes {
+    #[serde(default)]
+    pub change: Vec<Change>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Change {
+    pub id: i64,
+    /// The commit's sha.
+    pub version: Option<String>,
+    pub username: Option<String>,
+    pub date: Option<String>,
+    pub comment: Option<String>,
+    pub vcs_root_instance: Option<RootInstance>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct RootInstance {
+    #[serde(default)]
+    pub properties: Properties,
+}
+
+/// `/app/rest/testOccurrences`'s answer.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TestOccurrences {
+    #[serde(default)]
+    pub test_occurrence: Vec<TestOccurrence>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TestOccurrence {
+    pub name: Option<String>,
+    pub details: Option<String>,
+    #[serde(default)]
+    pub new_failure: bool,
+    #[serde(default)]
+    pub muted: bool,
+}
+
+/// `/app/rest/builds/id:N/artifacts`'s answer.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Files {
+    #[serde(default)]
+    pub file: Vec<FileEntry>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct FileEntry {
+    pub name: String,
+    pub size: Option<u64>,
+    /// Present on a directory.
+    pub children: Option<serde_json::Value>,
+}
+
 /// One build configuration as [`BUILD_CONFIG_VIEW_FIELDS`] answers it.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -960,6 +1105,47 @@ mod tests {
                 "RECENT_BUILD_FIELDS misses {needed}"
             );
         }
+        // The build view (#665): what `view::build_overview`,
+        // `view::build_parameters` and the *Tests* stub read.
+        for needed in [
+            "number",
+            "buildTypeId",
+            "statusText",
+            "branchName",
+            "queuedDate",
+            "startDate",
+            "finishDate",
+            "projectName",
+            "parameters(property(name,type(rawValue)))",
+            "triggered(type,user(username))",
+            "agent(name)",
+            "running-info(currentStageText)",
+            "testOccurrences(failed)",
+            "properties(property(name,value))",
+        ] {
+            assert!(
+                BUILD_VIEW_FIELDS.contains(needed),
+                "BUILD_VIEW_FIELDS misses {needed}"
+            );
+        }
+        for needed in ["version", "username", "date", "comment", "vcsRootInstance"] {
+            assert!(
+                BUILD_CHANGE_FIELDS.contains(needed),
+                "BUILD_CHANGE_FIELDS misses {needed}"
+            );
+        }
+        for needed in ["name", "details", "newFailure", "muted"] {
+            assert!(
+                FAILED_TEST_FIELDS.contains(needed),
+                "FAILED_TEST_FIELDS misses {needed}"
+            );
+        }
+        for needed in ["name", "size", "children(count)"] {
+            assert!(
+                ARTIFACT_FIELDS.contains(needed),
+                "ARTIFACT_FIELDS misses {needed}"
+            );
+        }
         // No whitespace: these go into a query string verbatim.
         for f in [
             BUILD_FIELDS,
@@ -968,6 +1154,10 @@ mod tests {
             USER_FIELDS,
             BUILD_CONFIG_VIEW_FIELDS,
             RECENT_BUILD_FIELDS,
+            BUILD_VIEW_FIELDS,
+            BUILD_CHANGE_FIELDS,
+            FAILED_TEST_FIELDS,
+            ARTIFACT_FIELDS,
         ] {
             assert!(!f.contains(' '), "{f:?} must not contain spaces");
             assert_eq!(

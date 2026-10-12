@@ -1,28 +1,40 @@
 //! The source views this adapter draws (ADR-0020, spec #660).
 //!
-//! One kind so far: a **build configuration** (#664) opens on its overview --
+//! Two kinds. A **build configuration** (#664) opens on its overview --
 //! where it lives, whether it is paused, how its recent builds went, and the
 //! builds themselves -- with *Parameters*, *Steps*, *Triggers* and *VCS roots*
-//! beside it. A build answers `None` until its own ticket (#665), and its
-//! detail draws the mirror's generic projection as it always has.
+//! beside it. A **build** (#665) opens on what happened -- outcome, status
+//! text, branch, who started it, when and for how long, on which agent, and
+//! its configuration as an address -- with *Changes*, *Tests*, *Log*,
+//! *Artifacts* and *Parameters* beside it; *Tests* and *Log* are deferred
+//! and read when their tab opens.
 //!
-//! Two requests draw the whole view: the configuration, with one explicit
-//! `fields=` that answers every tab but the builds, and its recent builds.
-//! A tab asked for on its own reads only what it needs. Every read is live and
-//! nothing is stored (rule 1); a refusal is the error it maps to, so the
-//! detail says *Showing the mirror* and why (rule 2).
+//! A configuration's whole view is two requests: the configuration, with one
+//! explicit `fields=` that answers every tab but the builds, and its recent
+//! builds. A build's is three: the build (overview, parameters and the failed
+//! count), its changes and its artifacts. A tab asked for on its own reads
+//! only what it needs. Every read is live and nothing is stored (rule 1); a
+//! refusal is the error it maps to, so the detail says *Showing the mirror*
+//! and why (rule 2).
 //!
-//! **A password parameter's value never enters a view.** TeamCity masks it on
-//! every read, and the view does not rely on that: a parameter whose spec says
-//! `password` is drawn with an empty value whatever the server sent.
+//! **No secret enters a view.** A parameter whose spec says `password` is
+//! drawn with an empty value whatever the server sent; a value TeamCity
+//! masked (`*******`) is drawn as a secret too; a URL is drawn without the
+//! `user:password@` it may carry, or not at all where that cannot be told.
+//! A build's change names its commit's repository the same way.
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, Setting, SourceView, Tone, ViewRow, ViewSection};
 
+use knobas_source::view::CommitHint;
+
 use crate::client::HttpRest;
 use crate::map;
-use crate::rest::{Build, ConfigRecord, Properties, Step, Trigger, VcsRootEntry, parse_ts};
+use crate::rest::{
+    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence,
+    Trigger, VcsRootEntry, parse_ts,
+};
 
 /// A build configuration's tabs, in the order they are drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,8 +102,9 @@ pub(crate) async fn draw(
         let id = config_id(entity, id)?;
         return build_config(viewer, entity, id, section).await.map(Some);
     }
-    if key.starts_with("build:") {
-        return Ok(None);
+    if let Some(id) = key.strip_prefix("build:") {
+        let id = build_id(entity, id)?;
+        return build(viewer, entity, id, section).await.map(Some);
     }
     Err(SourceError::protocol(format!(
         "teamcity: {entity:?} is neither a build nor a build configuration"
@@ -107,6 +120,18 @@ fn config_id<'k>(entity: &str, id: &'k str) -> Result<&'k str, SourceError> {
             "teamcity: {entity:?} does not name a build configuration TeamCity could have issued"
         ))
     })
+}
+
+/// A build id as TeamCity issues them: a positive integer.
+fn build_id(entity: &str, id: &str) -> Result<i64, SourceError> {
+    id.parse::<i64>()
+        .ok()
+        .filter(|n| *n > 0 && id.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or_else(|| {
+            SourceError::protocol(format!(
+                "teamcity: {entity:?} does not name a build TeamCity could have issued"
+            ))
+        })
 }
 
 async fn build_config(
@@ -244,7 +269,11 @@ impl Outcome {
     /// #105). That function renders a line for the search index; this one
     /// picks a word and a tone, so the rule is restated rather than shared.
     fn of(build: &Build) -> Outcome {
-        match (build.state.as_deref(), build.status.as_deref()) {
+        Outcome::from(build.state.as_deref(), build.status.as_deref())
+    }
+
+    fn from(state: Option<&str>, status: Option<&str>) -> Outcome {
+        match (state, status) {
             (Some("running"), _) => Outcome::Running,
             (Some("queued"), _) => Outcome::Queued,
             (_, Some("SUCCESS")) => Outcome::Success,
@@ -629,6 +658,495 @@ fn without_userinfo(url: &str) -> Option<String> {
         Some(scheme) => format!("{scheme}://{host}{path}"),
         None => format!("{host}{path}"),
     })
+}
+
+// --- A build (#665) ------------------------------------------------------
+
+/// A build's tabs, in the order they are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildTab {
+    Overview,
+    Changes,
+    Tests,
+    Log,
+    Artifacts,
+    Parameters,
+}
+
+impl BuildTab {
+    const ALL: [BuildTab; 6] = [
+        BuildTab::Overview,
+        BuildTab::Changes,
+        BuildTab::Tests,
+        BuildTab::Log,
+        BuildTab::Artifacts,
+        BuildTab::Parameters,
+    ];
+
+    /// The section id a deferred read names; stable.
+    fn id(self) -> &'static str {
+        match self {
+            BuildTab::Overview => "overview",
+            BuildTab::Changes => "changes",
+            BuildTab::Tests => "tests",
+            BuildTab::Log => "log",
+            BuildTab::Artifacts => "artifacts",
+            BuildTab::Parameters => "parameters",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            BuildTab::Overview => "Overview",
+            BuildTab::Changes => "Changes",
+            BuildTab::Tests => "Tests",
+            BuildTab::Log => "Log",
+            BuildTab::Artifacts => "Artifacts",
+            BuildTab::Parameters => "Parameters",
+        }
+    }
+
+    /// Read on first open rather than with the view: the failed tests and
+    /// the log are the expensive reads.
+    fn deferred(self) -> bool {
+        matches!(self, BuildTab::Tests | BuildTab::Log)
+    }
+}
+
+/// How many lines of a build's log *Log* shows: its end.
+pub(crate) const LOG_TAIL_LINES: usize = 400;
+
+/// The view of build `id`: every tab, or the one `section` names.
+///
+/// The build record is read for every tab but *Tests* and *Log*, which read
+/// only their own resource; *Changes* and *Artifacts* are read only when the
+/// whole view or that tab is asked for.
+async fn build(
+    viewer: &Viewer<'_>,
+    entity: &str,
+    id: i64,
+    section: Option<&str>,
+) -> Result<SourceView, SourceError> {
+    let wanted = match section {
+        None => None,
+        Some(asked) => Some(
+            BuildTab::ALL
+                .into_iter()
+                .find(|t| t.id() == asked)
+                .ok_or_else(|| {
+                    SourceError::protocol(format!(
+                        "teamcity: a build's view has no section {asked:?} (asked for {entity:?})"
+                    ))
+                })?,
+        ),
+    };
+    let rest = viewer.rest;
+    let wants = |tab: BuildTab| wanted.is_none_or(|w| w == tab);
+    let record = if matches!(wanted, Some(BuildTab::Tests | BuildTab::Log)) {
+        None
+    } else {
+        Some(rest.build_record(id).await?)
+    };
+    let changes = if wants(BuildTab::Changes) {
+        rest.build_changes(id).await?.change
+    } else {
+        Vec::new()
+    };
+    let artifacts = if wants(BuildTab::Artifacts) {
+        rest.artifacts(id).await?.file
+    } else {
+        Vec::new()
+    };
+    let now = Utc::now();
+
+    let mut sections = Vec::new();
+    for tab in BuildTab::ALL.into_iter().filter(|t| wants(*t)) {
+        // A deferred tab in the whole view is its stub: title and count.
+        let stub = wanted.is_none() && tab.deferred();
+        let (count, blocks) = match tab {
+            BuildTab::Overview => (
+                None,
+                record
+                    .as_ref()
+                    .map(|r| build_overview(viewer, r, now))
+                    .unwrap_or_default(),
+            ),
+            BuildTab::Changes => (
+                Some(changes.len()),
+                vec![Block::Entities {
+                    title: None,
+                    rows: changes.iter().map(|c| change_row(viewer, c)).collect(),
+                }],
+            ),
+            BuildTab::Tests if stub => (
+                Some(
+                    record
+                        .as_ref()
+                        .and_then(|r| r.test_occurrences.as_ref())
+                        .and_then(|t| t.failed)
+                        .unwrap_or(0) as usize,
+                ),
+                Vec::new(),
+            ),
+            BuildTab::Tests => {
+                let failed = rest.failed_tests(id).await?.test_occurrence;
+                (Some(failed.len()), failed_test_blocks(&failed))
+            }
+            BuildTab::Log if stub => (None, Vec::new()),
+            BuildTab::Log => {
+                let (text, truncated) = rest.log_tail(id, LOG_TAIL_LINES).await?;
+                (None, vec![Block::Log { text, truncated }])
+            }
+            BuildTab::Artifacts => {
+                let config = record.as_ref().and_then(build_type_id);
+                (
+                    Some(artifacts.len()),
+                    vec![Block::Entities {
+                        title: None,
+                        rows: artifacts
+                            .iter()
+                            .map(|f| artifact_row(viewer, config, id, f))
+                            .collect(),
+                    }],
+                )
+            }
+            BuildTab::Parameters => {
+                let values = record.as_ref().map(build_parameters).unwrap_or_default();
+                (
+                    Some(values.len()),
+                    vec![Block::Settings {
+                        title: None,
+                        entity: entity.to_owned(),
+                        // Nothing changes a build's parameters: it ran with them.
+                        write_op: String::new(),
+                        values,
+                    }],
+                )
+            }
+        };
+        sections.push(ViewSection {
+            id: tab.id().to_owned(),
+            title: tab.title().to_owned(),
+            count: count.map(|n| n as u64),
+            deferred: stub,
+            blocks,
+        });
+    }
+    Ok(SourceView { sections })
+}
+
+fn build_type_id(record: &BuildRecord) -> Option<&str> {
+    nonblank(record.build_type_id.as_deref())
+        .or_else(|| record.build_type.as_ref().map(|t| t.id.as_str()))
+}
+
+/// What happened, where, and for how long; then the configuration, as an
+/// address.
+fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>) -> Vec<Block> {
+    let o = Outcome::from(record.state.as_deref(), record.status.as_deref());
+    let mut facts = vec![fact("Outcome", o.word(), Some(o.tone()))];
+    let mut push = |label: &str, value: Option<String>| {
+        if let Some(value) = value {
+            facts.push(fact(label, value, None));
+        }
+    };
+    push(
+        "Status",
+        nonblank(record.status_text.as_deref()).map(str::to_owned),
+    );
+    if o == Outcome::Running {
+        push(
+            "Now",
+            record
+                .running_info
+                .as_ref()
+                .and_then(|r| nonblank(r.current_stage_text.as_deref()))
+                .map(str::to_owned),
+        );
+    }
+    push(
+        "Number",
+        nonblank(record.number.as_deref()).map(|n| format!("#{n}")),
+    );
+    push(
+        "Branch",
+        nonblank(record.branch_name.as_deref()).map(str::to_owned),
+    );
+    push("Triggered by", record.triggered.as_ref().and_then(|t| {
+        t.user
+            .as_ref()
+            .and_then(|u| nonblank(u.username.as_deref()))
+            .or_else(|| nonblank(t.kind.as_deref()).map(trigger_kind))
+            .map(str::to_owned)
+    }));
+    push("Queued", record.queued_date.as_deref().map(stamp));
+    push("Started", record.start_date.as_deref().map(stamp));
+    push("Finished", record.finish_date.as_deref().map(stamp));
+    let started = record.start_date.as_deref().and_then(parse_ts);
+    let finished = record.finish_date.as_deref().and_then(parse_ts);
+    push(
+        "Duration",
+        match (started, finished) {
+            (Some(s), Some(f)) => Some(span(f - s)),
+            (Some(s), None) if o == Outcome::Running => Some(span(now - s)),
+            _ => None,
+        },
+    );
+    push(
+        "Agent",
+        record
+            .agent
+            .as_ref()
+            .and_then(|a| nonblank(a.name.as_deref()))
+            .map(str::to_owned),
+    );
+
+    let mut blocks = vec![Block::Facts { facts }];
+    if let Some(config) = build_type_id(record) {
+        let nested = record.build_type.as_ref();
+        let name = nested
+            .and_then(|t| nonblank(t.name.as_deref()))
+            .unwrap_or(config);
+        let title = match nested.and_then(|t| nonblank(t.project_name.as_deref())) {
+            Some(project) => format!("{project} / {name}"),
+            None => name.to_owned(),
+        };
+        blocks.push(Block::Entities {
+            title: Some("Configuration".to_owned()),
+            rows: vec![ViewRow {
+                entity_id: Some(format!(
+                    "{}:{}",
+                    viewer.source_id,
+                    map::build_config_key(config)
+                )),
+                title,
+                meta: None,
+                tone: None,
+                chip: None,
+                url: Some(map::build_config_web_url(viewer.base_url, config)),
+                commit: None,
+            }],
+        });
+    }
+    blocks
+}
+
+/// Who or what started a build, where no person did.
+fn trigger_kind(kind: &str) -> &str {
+    match kind {
+        "vcs" => "VCS trigger",
+        "schedule" => "schedule",
+        "buildType" => "finish-build trigger",
+        "restApi" => "REST API",
+        other => other,
+    }
+}
+
+/// A TeamCity stamp as `2026-10-12 19:51 +00:00`, in the offset the server
+/// wrote; the raw text where it does not parse.
+fn stamp(raw: &str) -> String {
+    DateTime::parse_from_str(raw, "%Y%m%dT%H%M%S%z")
+        .map(|t| t.format("%Y-%m-%d %H:%M %:z").to_string())
+        .unwrap_or_else(|_| raw.to_owned())
+}
+
+/// One commit a build built: its subject line, its short sha as the chip,
+/// `author · time` as the quiet line, TeamCity's change page -- and the
+/// repository and sha, which the app resolves against the mirror (#665).
+fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
+    let sha = nonblank(change.version.as_deref());
+    let short = sha.map(|s| s.chars().take(12).collect::<String>());
+    let subject = change
+        .comment
+        .as_deref()
+        .and_then(|c| c.lines().map(str::trim).find(|l| !l.is_empty()))
+        .map(str::to_owned);
+    let meta: Vec<String> = [
+        nonblank(change.username.as_deref()).map(str::to_owned),
+        change.date.as_deref().map(stamp),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let repo_url = change
+        .vcs_root_instance
+        .as_ref()
+        .and_then(|r| r.properties.get("url"))
+        .and_then(without_userinfo);
+    ViewRow {
+        entity_id: None,
+        title: subject
+            .or_else(|| short.clone())
+            .unwrap_or_else(|| format!("change {}", change.id)),
+        meta: (!meta.is_empty()).then(|| meta.join(" · ")),
+        tone: None,
+        chip: short,
+        url: Some(format!("{}/change/{}", map::root(viewer.base_url), change.id)),
+        commit: match (repo_url, sha) {
+            (Some(repo_url), Some(sha)) => Some(CommitHint {
+                repo_url,
+                sha: sha.to_owned(),
+            }),
+            _ => None,
+        },
+    }
+}
+
+/// Per failed test: its name as a row, chipped `new`, `failed` or `muted`,
+/// then its details as text where it has any. None at all is an empty list,
+/// which the shell draws as *None.*
+fn failed_test_blocks(failed: &[TestOccurrence]) -> Vec<Block> {
+    if failed.is_empty() {
+        return vec![Block::Entities {
+            title: None,
+            rows: Vec::new(),
+        }];
+    }
+    let mut blocks = Vec::new();
+    for test in failed {
+        let (chip, tone) = if test.muted {
+            ("muted", Tone::Muted)
+        } else if test.new_failure {
+            ("new", Tone::Err)
+        } else {
+            ("failed", Tone::Err)
+        };
+        blocks.push(Block::Entities {
+            title: None,
+            rows: vec![ViewRow {
+                entity_id: None,
+                title: nonblank(test.name.as_deref())
+                    .unwrap_or("unnamed test")
+                    .to_owned(),
+                meta: None,
+                tone: Some(tone),
+                chip: Some(chip.to_owned()),
+                url: None,
+                commit: None,
+            }],
+        });
+        if let Some(details) = nonblank(test.details.as_deref()) {
+            blocks.push(Block::Text {
+                text: details.trim_end().to_owned(),
+                markdown: false,
+            });
+        }
+    }
+    blocks
+}
+
+/// One top-level artifact: a file with its size and its download, or a
+/// directory with how much it holds.
+fn artifact_row(viewer: &Viewer<'_>, config: Option<&str>, id: i64, file: &FileEntry) -> ViewRow {
+    let (title, meta, url) = match &file.children {
+        Some(children) => (
+            format!("{}/", file.name),
+            children
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+                .map(|n| format!("{n} files")),
+            None,
+        ),
+        None => (
+            file.name.clone(),
+            file.size.map(bytes),
+            config.map(|config| {
+                format!(
+                    "{}/repository/download/{config}/{id}:id/{}",
+                    map::root(viewer.base_url),
+                    path_escaped(&file.name)
+                )
+            }),
+        ),
+    };
+    ViewRow {
+        entity_id: None,
+        title,
+        meta,
+        tone: None,
+        chip: None,
+        url,
+        commit: None,
+    }
+}
+
+/// A size as `150 B`, `1.5 KB`, `5.1 MB`, `2.0 GB`.
+fn bytes(n: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    #[allow(clippy::cast_precision_loss)] // a size to one decimal
+    let mut size = n as f64 / 1024.0;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    format!("{size:.1} {}", UNITS[unit])
+}
+
+/// A file name as a URL path segment: everything but the unreserved
+/// characters percent-encoded.
+fn path_escaped(name: &str) -> String {
+    name.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+/// The parameters a build ran with, in TeamCity's order, none of them
+/// editable. Secret where the configuration's spec says `password`, where
+/// TeamCity masked the value, or where a URL's credential cannot be cut out;
+/// a URL is drawn without its credential.
+fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
+    let passwords: Vec<&str> = record
+        .build_type
+        .iter()
+        .flat_map(|t| &t.parameters.property)
+        .filter(|p| {
+            p.spec
+                .as_ref()
+                .and_then(|t| t.raw_value.as_deref())
+                .is_some_and(|raw| raw.trim_start().starts_with("password"))
+        })
+        .map(|p| p.name.as_str())
+        .collect();
+    record
+        .properties
+        .property
+        .iter()
+        .map(|p| {
+            let raw = p.value.as_deref().unwrap_or_default();
+            let masked = raw.len() >= 3 && raw.bytes().all(|b| b == b'*');
+            let shown = if raw.contains("://") {
+                without_userinfo(raw)
+            } else {
+                Some(raw.to_owned())
+            };
+            let secret = passwords.contains(&p.name.as_str())
+                || p.name.contains("secure:")
+                || masked
+                || shown.is_none();
+            Setting {
+                name: p.name.clone(),
+                value: if secret {
+                    String::new()
+                } else {
+                    shown.unwrap_or_default()
+                },
+                inherited: false,
+                secret,
+                editable: false,
+                description: None,
+            }
+        })
+        .collect()
 }
 
 fn nonblank(value: Option<&str>) -> Option<&str> {

@@ -504,25 +504,6 @@ async fn one_section_is_read_without_the_others() {
     );
 }
 
-/// A build has no view in this ticket (#665 draws it), and answers `None`
-/// without a request, so its detail draws the mirror as before.
-#[tokio::test]
-async fn a_build_draws_no_view_yet() {
-    let server = teamcity().await;
-    let answer = source(&server)
-        .view("teamcity:build:1187", None)
-        .await
-        .expect("no error");
-    assert!(answer.is_none(), "{answer:?}");
-    assert!(
-        server
-            .received_requests()
-            .await
-            .expect("recorded")
-            .is_empty()
-    );
-}
-
 /// A refusal is the error it maps to, status and all, so the detail can say
 /// *Showing the mirror* and why (ADR-0020 rule 2).
 #[tokio::test]

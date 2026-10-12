@@ -587,6 +587,7 @@ knobas-app	test/it	entity_mirror::the_start_work_vocabularies_match_their_typesc
 knobas-app	test/it	entity_mirror::the_state_chip_and_its_tones_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_suggestion_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_url_match_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_view::a_commit_named_by_repository_and_sha_opens_the_mirrored_commit
 knobas-app	test/it	entity_view::a_row_keeps_its_address_only_where_the_mirror_holds_the_entity
 knobas-app	test/it	entity_view::the_read_routes_to_the_entitys_source_and_keeps_none_and_failure_apart
 knobas-app	test/it	estate_exit::a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart
@@ -2323,6 +2324,7 @@ knobas-source-mock	test/it	contract::the_first_run_subtitle_names_the_size_of_th
 knobas-source-mock	test/it	contract::the_opt_in_tombstone_reports_one_deterministic_deletion
 knobas-source-mock	test/it	contract::the_tombstoning_mock_passes_the_contract_battery
 knobas-source-mock	test/it	contract::write_records_the_comment
+knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::a_log_tail_is_the_last_lines_and_says_when_it_was_cut
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::a_server_that_names_nobody_still_reports_a_connection
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::only_a_404_is_read_as_absence
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_next_href_a_server_sends_reaches_page_more
@@ -2467,7 +2469,6 @@ knobas-source-teamcity	test/it	mockd::the_watermark_advances_on_a_finished_build
 knobas-source-teamcity	test/it	mockd::triggering_a_configuration_that_is_gone_is_refused
 knobas-source-teamcity	test/it	mockd::user_password_authentication_reaches_the_server
 knobas-source-teamcity	test/it	view::a_build_configuration_opens_on_its_overview_with_one_tab_per_part
-knobas-source-teamcity	test/it	view::a_build_draws_no_view_yet
 knobas-source-teamcity	test/it	view::a_configuration_id_that_is_not_one_is_refused_unsent
 knobas-source-teamcity	test/it	view::a_configuration_the_server_does_not_know_is_its_404
 knobas-source-teamcity	test/it	view::an_unknown_trigger_type_shows_its_type_and_no_properties
@@ -2476,6 +2477,17 @@ knobas-source-teamcity	test/it	view::parameters_mark_the_inherited_and_never_car
 knobas-source-teamcity	test/it	view::steps_show_their_runner_and_their_script
 knobas-source-teamcity	test/it	view::the_overview_says_where_it_lives_whether_it_is_paused_and_how_it_has_been_doing
 knobas-source-teamcity	test/it	view::triggers_and_vcs_roots_say_when_and_from_where
+knobas-source-teamcity	test/it	view_build::a_build_id_that_is_not_one_or_a_section_it_lacks_is_refused_unsent
+knobas-source-teamcity	test/it	view_build::a_build_opens_on_its_overview_and_reads_neither_its_log_nor_its_tests_until_asked
+knobas-source-teamcity	test/it	view_build::a_build_the_server_does_not_know_is_its_404
+knobas-source-teamcity	test/it	view_build::a_change_names_its_commit_by_repository_and_sha
+knobas-source-teamcity	test/it	view_build::a_huge_log_is_streamed_and_only_its_end_is_kept
+knobas-source-teamcity	test/it	view_build::a_value_teamcity_masked_is_drawn_as_a_secret
+knobas-source-teamcity	test/it	view_build::artifacts_are_listed_with_their_sizes_and_their_download
+knobas-source-teamcity	test/it	view_build::parameters_are_what_the_build_ran_with_and_never_carry_a_secret
+knobas-source-teamcity	test/it	view_build::the_log_tab_is_the_last_four_hundred_lines_and_says_it_was_cut
+knobas-source-teamcity	test/it	view_build::the_overview_says_what_happened_where_and_for_how_long
+knobas-source-teamcity	test/it	view_build::the_tests_tab_reads_the_failed_tests_with_their_details
 knobas-source-teamcity	test/live_teamcity	a_build_answers_by_id_and_an_id_no_build_has_is_a_404
 knobas-source-teamcity	test/live_teamcity	a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it
 knobas-source-teamcity	test/live_teamcity	a_page_says_for_itself_whether_the_collection_ran_out

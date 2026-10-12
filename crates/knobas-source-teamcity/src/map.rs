@@ -109,7 +109,7 @@ pub(crate) fn build_web_url(
 /// that `web_url` cannot mean one thing for a build and another for its
 /// configuration: the two are separate functions because the **shapes** differ,
 /// and nothing else about them should.
-fn root(base_url: &str) -> &str {
+pub(crate) fn root(base_url: &str) -> &str {
     base_url.trim().trim_end_matches('/')
 }
 
@@ -131,7 +131,7 @@ fn root(base_url: &str) -> &str {
 /// No *no URL* branch, unlike a build's: the id **is** the key (see
 /// [`build_config_key`]), so a configuration with a blank one is not an item
 /// this mapping can produce at all.
-fn build_config_web_url(base_url: &str, id: &str) -> String {
+pub(crate) fn build_config_web_url(base_url: &str, id: &str) -> String {
     format!("{}/buildConfiguration/{id}?mode=builds", root(base_url))
 }
 
