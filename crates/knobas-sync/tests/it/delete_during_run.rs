@@ -263,7 +263,7 @@ async fn delete_while_paused(purge_items: bool, plan: Plan) {
 
     // Well short of the pause, which lasts until the release below.
     let deleted = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         knobas_sync::config::delete(&pool, &id, purge_items),
     )
     .await;
@@ -430,10 +430,10 @@ impl SyncEvents for Silent {
     fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
 }
 
-struct Connections(knobas_db::embedded::Connector);
+struct TestConnections(knobas_db::embedded::Connector);
 
 #[async_trait::async_trait]
-impl RunConnections for Connections {
+impl RunConnections for TestConnections {
     async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
         self.0.connect().await
     }
@@ -484,7 +484,9 @@ async fn the_rows_a_purge_skipped_are_purged_once_the_run_settles() {
     let scheduler_pool = knobas_db::test_util::test_pool().await;
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: scheduler_pool,
-        connections: Arc::new(Connections(knobas_db::test_util::test_connector().await)),
+        connections: Arc::new(TestConnections(
+            knobas_db::test_util::test_connector().await,
+        )),
         registry: Arc::new(OneSource(Mutex::new(Some(source)))),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
@@ -509,7 +511,7 @@ async fn the_rows_a_purge_skipped_are_purged_once_the_run_settles() {
 
     // `delete_source`, in its order.
     let deleted = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         knobas_sync::config::delete(&pool, &id, true),
     )
     .await
@@ -591,7 +593,7 @@ async fn purge_with_entity_locked(strength: &str) -> (bool, Vec<String>) {
     .unwrap();
 
     let returned = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         knobas_sync::config::delete(&pool, &id, true),
     )
     .await

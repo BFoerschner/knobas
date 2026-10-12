@@ -351,8 +351,14 @@ pub async fn patch(
 /// statement when that run settles. That is why one statement can serve both
 /// callers with the same locking: after a deleted source's run settles,
 /// nothing holds its rows -- only a run of a source writes that source's
-/// `sync.item` rows, and only it or this statement locks their entities for
 /// update -- so in [`purge_items`] `skip locked` skips nothing.
+///
+/// **Only a run the scheduler started is purged after.** `run_once` called
+/// directly -- *Load demo data* -- is a run nobody re-purges behind, so a
+/// source deleted during one keeps the rows that run rewrote, as it already
+/// kept the rows it inserted. That run reads a fixture compiled into the
+/// binary and is over in milliseconds; waiting for it instead is what this
+/// statement exists not to do.
 const PURGE_ITEMS: &str = r#"with taken as (
      select i.entity_id
        from sync.item i
