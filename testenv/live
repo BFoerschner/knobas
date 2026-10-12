@@ -25,9 +25,7 @@ case "${1:-}" in
     # hand `live-up teamcity` queues behind a live run instead of starting
     # under it; it is released when the product is up, which then stays up.
     if live_is_jvm "$2"; then
-      trap 'live_lock_release' EXIT
-      trap 'trap - EXIT INT; live_lock_release; kill -INT $$' INT
-      trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
+      live_lock_traps
       live_lock_hold "live-up-$2"
     fi
     live_up "$2" ;;

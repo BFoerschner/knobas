@@ -1378,9 +1378,7 @@ teamcity-live:
     # The JVM lock (issue #690) although the default URL is not ours: a `.env`
     # pointed at the seeded container makes this a TeamCity run like any other.
     . testenv/live-lib.sh
-    trap 'live_lock_release' EXIT
-    trap 'trap - EXIT INT; live_lock_release; kill -INT $$' INT
-    trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
+    live_lock_traps
     live_lock_hold teamcity-live
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
@@ -1579,9 +1577,7 @@ atlassian-live:
     # run under it (`KNOBAS_LIVE_LOCK_HOLDER`), so no other JVM run slips in
     # between Jira's removal and Confluence's start.
     . testenv/live-lib.sh
-    trap 'live_lock_release' EXIT
-    trap 'trap - EXIT INT; live_lock_release; kill -INT $$' INT
-    trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
+    live_lock_traps
     live_lock_hold atlassian-live
     just jira-live
     just confluence-live

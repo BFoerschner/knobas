@@ -137,6 +137,9 @@ live_is_jvm() {
 # without taking or releasing anything.
 LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
 LIVE_LOCK_MINE=""
+# Set while this shell is inside a reclaim, so an interrupt there removes the
+# reclaim lock itself instead of leaving it to the minute-old sweep.
+LIVE_LOCK_RECLAIMING=""
 
 # _live_lock_describe <target> -- the holder, in words.
 _live_lock_describe() {
@@ -163,6 +166,9 @@ live_lock_hold() {
   case $wait_s in '' | *[!0-9]*)
     echo "live: KNOBAS_LIVE_LOCK_WAIT must be a whole number of seconds, not '$wait_s'" >&2; return 1 ;;
   esac
+  case $poll in '' | . | *[!0-9.]* | *.*.*)
+    echo "live: KNOBAS_LIVE_LOCK_POLL must be a number of seconds, not '$poll'" >&2; return 1 ;;
+  esac
   target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
   if [ -n "${KNOBAS_LIVE_LOCK_HOLDER:-}" ] && [ "$target" = "$KNOBAS_LIVE_LOCK_HOLDER" ] &&
     _live_lock_pid_alive "$target"; then
@@ -179,13 +185,17 @@ live_lock_hold() {
       return 0
     fi
     target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
-    if [ -n "$target" ] && ! _live_lock_pid_alive "$target"; then
+    # Released between the `ln -s` and the `readlink`: free, so try again now.
+    [ -n "$target" ] || continue
+    if ! _live_lock_pid_alive "$target"; then
       if mkdir "$LIVE_LOCK.reclaim" 2>/dev/null; then
+        LIVE_LOCK_RECLAIMING=1
         if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ]; then
           rm -f "$LIVE_LOCK"
           echo "live: $recipe: the JVM lock was stale -- its holder $(_live_lock_describe "$target") is gone; taking it over"
         fi
         rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
+        LIVE_LOCK_RECLAIMING=""
         continue
       elif [ -n "$(find "$LIVE_LOCK.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
         # A reclaimer that died inside its few milliseconds.
@@ -193,7 +203,7 @@ live_lock_hold() {
       fi
     fi
     waited=$((SECONDS - from))
-    if [ -n "$target" ] && [ "$target" != "$announced" ]; then
+    if [ "$target" != "$announced" ]; then
       announced=$target
       echo "live: $recipe: the JVM lock is held by $(_live_lock_describe "$target"); waiting up to ${wait_s}s"
     elif [ $((waited - last_report)) -ge 300 ]; then
@@ -202,7 +212,7 @@ live_lock_hold() {
     fi
     if [ "$waited" -ge "$wait_s" ]; then
       LIVE_LOCK_MINE=""
-      echo "live: $recipe: the JVM lock is still held by $(_live_lock_describe "${target:-? ? ? ?}") after ${waited}s; giving up" >&2
+      echo "live: $recipe: the JVM lock is still held by $(_live_lock_describe "$target") after ${waited}s; giving up" >&2
       return 1
     fi
     sleep "$poll"
@@ -211,9 +221,20 @@ live_lock_hold() {
 
 # live_lock_release -- give the lock back, if this shell holds it.
 live_lock_release() {
+  [ -z "$LIVE_LOCK_RECLAIMING" ] || rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
+  LIVE_LOCK_RECLAIMING=""
   [ -n "$LIVE_LOCK_MINE" ] || return 0
   [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" != "$LIVE_LOCK_MINE" ] || rm -f "$LIVE_LOCK"
   LIVE_LOCK_MINE=""
+}
+
+# live_lock_traps -- arm EXIT, INT and TERM to give the lock back, for a
+# recipe that holds it around something other than `live_session` (which arms
+# its own, the put-back first). Call it before `live_lock_hold`.
+live_lock_traps() {
+  trap 'live_lock_release' EXIT
+  trap 'trap - EXIT INT; live_lock_release; kill -INT $$' INT
+  trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
 }
 
 # live_to_put_back <product> -- the products a run of this one starts and must
