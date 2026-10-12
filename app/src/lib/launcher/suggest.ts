@@ -96,15 +96,17 @@ function candidates(key: SuggestKey, lists: FilterSuggestions): Suggestion[] {
 
 /**
  * The values the token being typed can still become: those containing what
- * was typed, ignoring case, the ones that start with it first. A value typed
- * out in full is not offered back, so a finished token closes the list.
+ * was typed, ignoring case, the ones that start with it first.
+ *
+ * A value typed out in full closes the list, even when longer values still
+ * contain it: the open list owns `Enter`, so `under:vm-1` with a `vm-10`
+ * beside it would otherwise complete to `vm-10` on the key that runs the row.
  */
 export function suggest(token: ActiveToken, lists: FilterSuggestions): Suggestion[] {
   const typed = token.partial.toLowerCase();
-  const all = candidates(token.key, lists).filter((s) => {
-    const value = s.value.toLowerCase();
-    return value !== typed && value.includes(typed);
-  });
+  const values = candidates(token.key, lists);
+  if (values.some((s) => s.value.toLowerCase() === typed)) return [];
+  const all = values.filter((s) => s.value.toLowerCase().includes(typed));
   const starts = all.filter((s) => s.value.toLowerCase().startsWith(typed));
   const rest = all.filter((s) => !s.value.toLowerCase().startsWith(typed));
   return [...starts, ...rest].slice(0, SUGGESTION_LIMIT);

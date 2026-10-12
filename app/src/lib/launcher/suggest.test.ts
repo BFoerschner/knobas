@@ -41,3 +41,18 @@ test("completing keeps the key as typed, quotes a name with a space, and ends th
   const kind = activeToken("type:re")!;
   expect(complete("type:re", kind, "repo")).toBe("type:repo ");
 });
+
+test("a value typed out in full closes the list, even when a longer value contains it", () => {
+  const lists = {
+    ...LISTS,
+    parents: [
+      { name: "vm-1", kind: "asset" },
+      { name: "vm-10", kind: "asset" },
+    ],
+  };
+  expect(suggest(activeToken("under:vm-")!, lists).map((s) => s.value)).toEqual([
+    "vm-1",
+    "vm-10",
+  ]);
+  expect(suggest(activeToken("under:VM-1")!, lists)).toEqual([]);
+});
