@@ -929,8 +929,8 @@ desktop-witness driver="":
 # nothing in it.
 gitea_live_env := "testenv/live-lib.sh, which is what the line above this one does:
   live_session gitea   # docker compose up -d --wait gitea, ./seed-gitea.sh,
-                       # eval \"$(./seed --env)\", and Gitea stopped again at
-                       # the end if this run started it (issue #633)"
+                       # eval \"$(./seed --env)\"; Gitea stays up after the
+                       # run -- only 'just live-down gitea' stops it (#633, #698)"
 
 # THE ALL-SKIPPED RUN. Every live recipe below calls this before it invokes
 # cargo, and it refuses the run in which nothing would have run (issue #351).
@@ -1024,8 +1024,9 @@ _require-live-env SOURCE +NAMES:
 #
 # GITEA IS STARTED ON DEMAND (issue #633). `live_session gitea`
 # (testenv/live-lib.sh) starts it if it is down, seeds it, exports what
-# `./seed --env` prints, and stops it again when the recipe ends if -- and only
-# if -- it was this run that started it. A Gitea that was already up stays up.
+# `./seed --env` prints, and leaves it up when the recipe ends, whoever started
+# it: no run stops Gitea, only `just live-down gitea` does (#698) -- another
+# worktree's run may be using it by then.
 #
 # WHAT IT CREATES AND WHAT IT REMOVES. The suite is not read-only: three of its
 # tests open a branch through Gitea's own API, two of those a pull request on
@@ -1086,8 +1087,8 @@ gitea-live:
 # puts the uncapped container back afterwards, so a later `just gitea-live` is
 # not silently running against a capped server.
 #
-# The uncap runs from `live_session`'s traps (`live_on_exit`), ahead of the
-# session stopping a Gitea it started, and those traps are `INT` and `TERM` as
+# The uncap runs from `live_session`'s traps (`live_on_exit`), which put the
+# product back (Gitea itself stays up, #698), and those traps are `INT` and `TERM` as
 # well as `EXIT`, the rule `inventory` above states and `check-ports.sh`
 # follows: bash need not run an `EXIT` trap when a signal it has no handler for
 # terminates the shell, and this recipe's slow live run is
@@ -1114,8 +1115,8 @@ gitea-live-capped:
     # not be one that left the shared container capped on its way out.
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     # Registered with the session, which runs it from its own EXIT, INT and
-    # TERM traps before it stops a Gitea it started -- so the container is
-    # uncapped first and stopped (or left up) second, whichever way this ends.
+    # TERM traps -- so the container is uncapped whichever way this ends, and
+    # left up after (no run stops Gitea, #698).
     uncap() { (cd "$LIVE_TESTENV" && docker compose up -d --wait gitea >/dev/null); }
     live_on_exit uncap
     (cd "$LIVE_TESTENV" && docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea)
@@ -1395,8 +1396,9 @@ teamcity-live:
 # THE PRODUCT IS STARTED HERE, ON THIS MACHINE (issue #633). `live_session
 # teamcity` (testenv/live-lib.sh) starts Gitea -- the VCS roots clone it --
 # and then the server and its agent, seeds all three, exports what `./seed
-# --env` prints, and stops again whatever it started when the recipe ends,
-# however it ends. A TeamCity already up (`just live-up teamcity`) is left
+# --env` prints, and stops the server and agent again if it started them
+# when the recipe ends, however it ends; Gitea stays up (no run stops it,
+# only `just live-down gitea`, #698). A TeamCity already up (`just live-up teamcity`) is left
 # up, which is the fast loop: the second run is the suites. It refuses to
 # start while Jira or Confluence is up, naming it. *Stop*, never `down -v`:
 # the TeamCity volumes hold the seeded builds, and the next run finds them.
