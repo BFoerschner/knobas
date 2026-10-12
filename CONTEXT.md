@@ -61,6 +61,14 @@ Where an adapter says one of those things lives in its own payloads — a status
 The entity you can open that an item sits directly inside: a repo for a branch, PR or commit; a build configuration for a build; the parent page for a page; the epic or parent issue for a ticket; the parent asset for an asset, and the exposing asset for a route (the field of ADR-0014, the same concept under the same word). For a synced item, the adapter declares it per kind as a [declared path](#declared-path), and it comes from the source. It is never drawn, so it is **not a [link](#link)**. It is something you can open, so it is **not a [project](#project)**. A parent need not be in the [mirror](#mirror): an epic outside the synced JQL is still the parent its children name. `under:<name>` scopes a search to everything beneath a parent, transitively. It matches the names the adapter declares for that parent kind exactly, ignoring case, and also returns the parent itself when it is mirrored. An asset is the one parent no adapter declares: it answers to its name, read from its own field, and `under:` returns the asset itself, because the estate holds it. A child's searchable text never contains its parent's name, because being inside something is a filter and not a word. The launcher row's path line shows the parent chain instead. A title may still name its parent where it means nothing without it (a TeamCity build, `Deploy #42`). (ADR-0018; ruled 2026-10-11, git-usability grilling)
 _Avoid_: container, scope, holder, repository (as the name of this fact)
 
+**State chip**:
+What a row shows of where its item stands, for a kind whose adapter declares one: a pull request's `open`, `merged` or `closed`, a build's `running`, `queued` or outcome (`SUCCESS`, `FAILURE`). The adapter declares it as a [declared path](#declared-path) with a value map. Each value the source writes is drawn with a [tone](#tone), and a value the map does not name is a [miss](#miss), so the row shows no chip. It is drawn after the title in room and launcher rows. Not a ticket's status: a status is a workflow column you can move a ticket to, and a chip is only read. (#666)
+_Avoid_: badge, status (that is a ticket's workflow word), state (alone; a monitor's state is its own thing)
+
+**Tone**:
+How loud a value is drawn, in five words the shell owns the colours of: `ok`, `warn`, `err`, `info`, `muted`. An adapter says which tone a value has and never which colour. Shared by the [state chip](#state-chip) and a [source view](#source-view)'s blocks. (#666, #661)
+_Avoid_: colour, severity, level
+
 **Miss**:
 A payload read finding no recognizable shape and contributing nothing — the one failure a payload read is allowed. Guessing is the forbidden alternative.
 

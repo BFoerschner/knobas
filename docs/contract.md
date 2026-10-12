@@ -10207,7 +10207,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The shell.** `StateChip.svelte` draws the chip after the title in a room row
   (`EntityLine`) and a launcher row (`Row`, which the board and results both draw). A room whose
   `sources` filter names exactly one source (a source room, a project room) drops the source
-  column (`.row.g4w`); *All work* and context rooms keep it. The mini board draws tickets, which
+  column (`.row.g4w`); *All work* and context rooms, whose filters name no source, keep it. The mini board draws tickets, which
   declare no state, and is unchanged.
 
   **Witness.** Real PostgreSQL: `knobas-app`'s

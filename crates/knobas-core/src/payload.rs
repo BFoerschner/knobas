@@ -25,9 +25,10 @@
 //! These reads are SQL -- the project census is a pass over the whole live
 //! corpus and the mini board narrows inside its statement -- so a declaration
 //! is bound as **one jsonb parameter** and resolved by
-//! [`declared_string!`](crate::declared_string), [`declared_flag!`] and
-//! [`declared_list!`] rather than by pulling every payload into Rust. The Rust
-//! resolvers below ([`resolve_string`], [`resolve_flag`], [`resolve_list`]) are
+//! [`declared_string!`](crate::declared_string), [`declared_flag!`],
+//! [`declared_list!`] and [`declared_state!`] rather than by pulling every
+//! payload into Rust. The Rust resolvers below ([`resolve_string`],
+//! [`resolve_flag`], [`resolve_list`], [`resolve_state`]) are
 //! the same rule for callers that already hold the payload -- the contract
 //! battery is the one that matters, since it checks an adapter's declarations
 //! against its own corpus with no database in sight.
@@ -46,6 +47,11 @@
 //! spellings of its own field (Jira Data Center names an assignee at
 //! `fields.assignee.name` on one instance and `fields.assignee.key` on
 //! another), never knobas' guesses about a source it has not met.
+//!
+//! The one field that asks more of a candidate is [`KindPaths::state`]
+//! (#666): a value of the right type is not enough, it must also be one the
+//! candidate's own value map names, or the next candidate is tried. That is
+//! what lets a merged flag that is `false` hand over to the state word.
 //!
 //! A value that is not a string where a string is declared, a blank or
 //! whitespace-only string, an absent key: all three are a miss, and the next
@@ -250,6 +256,25 @@ pub struct StateValue {
     /// value.
     #[serde(default)]
     pub text: Option<String>,
+}
+
+impl StateValue {
+    /// A value drawn as itself: `StateValue::of("FAILURE", Tone::Err)`, or
+    /// `StateValue::of(true, Tone::Ok)` for a flag.
+    pub fn of(value: impl Into<serde_json::Value>, tone: crate::tone::Tone) -> Self {
+        StateValue {
+            value: value.into(),
+            tone,
+            text: None,
+        }
+    }
+
+    /// The same value drawn as `text`: `StateValue::of(true, Tone::Ok).shown_as("merged")`.
+    #[must_use]
+    pub fn shown_as(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
 }
 
 /// The chip a row draws: the resolved [`KindPaths::state`].

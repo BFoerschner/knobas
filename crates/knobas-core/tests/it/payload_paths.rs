@@ -875,11 +875,6 @@ async fn a_path_line_misses_in_both_and_reads_nothing_undeclared() {
 /// the merged flag before the state word, and a build's in-flight `state`
 /// before its finished `status`.
 fn state_declarations() -> Declarations {
-    let value = |value: serde_json::Value, tone: Tone, text: Option<&str>| StateValue {
-        value,
-        tone,
-        text: text.map(str::to_owned),
-    };
     Declarations::empty()
         .with(
             "gitea",
@@ -888,13 +883,13 @@ fn state_declarations() -> Declarations {
                 state: vec![
                     StatePath {
                         at: PayloadPath::of(["merged"]),
-                        values: vec![value(serde_json::json!(true), Tone::Ok, Some("merged"))],
+                        values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
                     },
                     StatePath {
                         at: PayloadPath::of(["state"]),
                         values: vec![
-                            value(serde_json::json!("open"), Tone::Info, None),
-                            value(serde_json::json!("closed"), Tone::Muted, None),
+                            StateValue::of("open", Tone::Info),
+                            StateValue::of("closed", Tone::Muted),
                         ],
                     },
                 ],
@@ -909,15 +904,15 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["state"]),
                         values: vec![
-                            value(serde_json::json!("running"), Tone::Info, None),
-                            value(serde_json::json!("queued"), Tone::Info, None),
+                            StateValue::of("running", Tone::Info),
+                            StateValue::of("queued", Tone::Info),
                         ],
                     },
                     StatePath {
                         at: PayloadPath::of(["status"]),
                         values: vec![
-                            value(serde_json::json!("SUCCESS"), Tone::Ok, None),
-                            value(serde_json::json!("FAILURE"), Tone::Err, None),
+                            StateValue::of("SUCCESS", Tone::Ok),
+                            StateValue::of("FAILURE", Tone::Err),
                         ],
                     },
                 ],

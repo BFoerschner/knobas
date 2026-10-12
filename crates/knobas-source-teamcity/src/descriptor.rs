@@ -128,11 +128,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
 /// `status`. Not a `status_name` (see above): a chip is drawn, not a column.
 fn build_state() -> Vec<knobas_source::StatePath> {
     use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
-    let value = |value: &str, tone: Tone| StateValue {
-        value: serde_json::json!(value),
-        tone,
-        text: None,
-    };
+    let value = |value: &str, tone: Tone| StateValue::of(value, tone);
     vec![
         StatePath {
             at: PayloadPath::of(["state"]),

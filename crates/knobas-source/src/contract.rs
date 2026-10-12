@@ -1096,11 +1096,7 @@ mod tests {
                     let state = |at: &[&str], value: &str| {
                         vec![StatePath {
                             at: PayloadPath::of(at.iter().copied()),
-                            values: vec![StateValue {
-                                value: serde_json::json!(value),
-                                tone: Tone::Info,
-                                text: None,
-                            }],
+                            values: vec![StateValue::of(value, Tone::Info)],
                         }]
                     };
                     let ticket = |status: PayloadPath| KindPaths {

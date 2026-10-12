@@ -268,21 +268,16 @@ fn payload_paths() -> Vec<KindPaths> {
 /// true, else its `state` word, `open` or `closed`. The flag comes first
 /// because Gitea says `closed` of a merged pull request too.
 fn pr_state() -> Vec<StatePath> {
-    let value = |value: serde_json::Value, tone: Tone, text: Option<&str>| StateValue {
-        value,
-        tone,
-        text: text.map(str::to_owned),
-    };
     vec![
         StatePath {
             at: PayloadPath::of(["merged"]),
-            values: vec![value(serde_json::json!(true), Tone::Ok, Some("merged"))],
+            values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
         },
         StatePath {
             at: PayloadPath::of(["state"]),
             values: vec![
-                value(serde_json::json!("open"), Tone::Info, None),
-                value(serde_json::json!("closed"), Tone::Muted, None),
+                StateValue::of("open", Tone::Info),
+                StateValue::of("closed", Tone::Muted),
             ],
         },
     ]
