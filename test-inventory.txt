@@ -990,6 +990,7 @@ knobas-core	test/it	checkout_scan::a_worktree_is_not_found_by_the_scan
 knobas-core	test/it	checkout_scan::both_spellings_of_the_remote_carry_the_same_key
 knobas-core	test/it	checkout_scan::the_scan_reaches_two_levels_and_no_further
 knobas-core	test/it	checkout_scan::the_shallower_of_two_clones_wins_and_the_answer_is_stable
+knobas-core	test/it	contexts::a_classic_epics_children_are_members_through_the_stored_epic
 knobas-core	test/it	contexts::a_container_linked_to_a_member_ticket_is_a_member_and_so_is_what_it_holds
 knobas-core	test/it	contexts::a_foreign_or_misshapen_parent_contributes_nothing
 knobas-core	test/it	contexts::a_hand_written_ctx_anchor_never_roots_the_walk
