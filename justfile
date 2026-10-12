@@ -389,12 +389,16 @@ shell:
 # So do the on-demand live products' (issue #633): the one-JVM-product rule
 # and what a run puts back, against a stub `docker`. And the Gitea seed
 # token's (issue #684): one worktree's seed never revokes another's token,
-# against a stub `curl` playing Gitea's token API.
+# against a stub `curl` playing Gitea's token API. And the JVM lock's (issue
+# #690): a second live run waits for the first and goes on when it lets go, a
+# dead holder's lock is taken over, the wait ends in a refusal naming the
+# holder -- against a stub `docker` and a scratch lock path.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
+    testenv/live-lock-test.sh
 
 # The integration-test layout guard of ADR-0017 (issue #573): a top-level
 # `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its
@@ -1371,6 +1375,11 @@ teamcity-live:
       cp .env.example .env
     Its default URL is the public JetBrains guest instance and needs no token.' \
       KNOBAS_TEAMCITY_URL
+    # The JVM lock (issue #690) although the default URL is not ours: a `.env`
+    # pointed at the seeded container makes this a TeamCity run like any other.
+    . testenv/live-lib.sh
+    live_lock_traps
+    live_lock_hold teamcity-live
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
 
@@ -1408,7 +1417,7 @@ teamcity-live-seeded:
     #!/usr/bin/env bash
     set -euo pipefail
     . testenv/live-lib.sh
-    live_session teamcity
+    live_session teamcity teamcity-live-seeded
     just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
     seed-teamcity.sh has run -- which live_session teamcity, the line above
     this one, does.' \
@@ -1501,7 +1510,7 @@ jira-live:
     just _atlassian-live-names
     . testenv/live-lib.sh
     t0=$(date +%s)
-    live_session jira
+    live_session jira jira-live
     just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
     seed-atlassian.sh and seed-atlassian-content.sh have run for jira -- which
     live_session jira, the line above this one, does.' \
@@ -1536,7 +1545,7 @@ confluence-live:
     just _atlassian-live-names
     . testenv/live-lib.sh
     t0=$(date +%s)
-    live_session confluence
+    live_session confluence confluence-live
     just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
     seed-atlassian.sh and seed-atlassian-content.sh have run for confluence --
     which live_session confluence, the line above this one, does.' \
@@ -1562,6 +1571,14 @@ confluence-live:
 # servers instead, decommissioned since (#634; `testenv/hetzner/` is in git
 # history).
 atlassian-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # One hold of the JVM lock (issue #690) for both: the two recipes below
+    # run under it (`KNOBAS_LIVE_LOCK_HOLDER`), so no other JVM run slips in
+    # between Jira's removal and Confluence's start.
+    . testenv/live-lib.sh
+    live_lock_traps
+    live_lock_hold atlassian-live
     just jira-live
     just confluence-live
 
