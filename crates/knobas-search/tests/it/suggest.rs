@@ -171,6 +171,17 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     )
     .await;
     commit(&pool, "gitea", &owner, &name).await;
+    // A mirrored repo nothing sits in yet: no child declares it, and it is
+    // still a parent `under:` reaches -- it answers to its own names.
+    let lonely = format!("lonely-{t}");
+    item(
+        &pool,
+        "gitea",
+        "repo",
+        &format!("{owner}/{lonely}"),
+        serde_json::json!({ "full_name": format!("{owner}/{lonely}"), "name": lonely }),
+    )
+    .await;
     item(
         &pool,
         "kuma",
@@ -218,7 +229,9 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     assert_eq!(
         parents_of(&suggestions, &t),
         [
+            parent(&format!("{owner}/{lonely}"), "repo"),
             parent(&format!("{owner}/{name}"), "repo"),
+            parent(&lonely, "repo"),
             parent(&name, "repo"),
         ],
     );
