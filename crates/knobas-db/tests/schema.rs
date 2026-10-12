@@ -1807,3 +1807,145 @@ async fn the_assets_property_text_is_the_same_expression_the_index_matches() {
         "the property text must be weighted C, below the name and the path: {weighted}"
     );
 }
+
+/// `0001`'s expression for `sync.item.fts`, verbatim: what every row was
+/// lexed by before `0027`, and what a title without a `/` must still give.
+const FTS_0001: &str = "setweight(to_tsvector('english', coalesce(title, '')), 'A') || \
+                        setweight(to_tsvector('english', coalesce(body_text, '')), 'B')";
+
+/// One mirrored row with this title and body, under a fresh entity.
+async fn mirror_row(pool: &sqlx::PgPool, id: &str, title: &str, body: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo',$2)")
+        .bind(id)
+        .bind(title)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at, synced_at)
+         values ($1,'gitea','repo',$2,$3,'{}'::jsonb,
+                 '2026-01-02T03:04:05Z','2026-01-02T03:04:05Z')",
+    )
+    .bind(id)
+    .bind(title)
+    .bind(body)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Only a slashed title changes under `0027` (#612): every other title gives
+/// the `tsvector` `0001` gave, byte for byte, and so does every body. The
+/// slashed control is there so the comparison is seen to be able to differ.
+#[tokio::test]
+async fn zero_twenty_seven_changes_only_a_title_that_holds_a_slash() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let unchanged = [
+        ("Fix typo in payout", ""),
+        (
+            "payout-service",
+            "tidewater/payout-service\n\nPayout processing",
+        ),
+        (
+            "SEPA retry with exponential backoff",
+            "https://git.example/tidewater/payout-service/pulls/7 a/b c/d",
+        ),
+        ("", ""),
+    ];
+    for (n, (title, body)) in unchanged.iter().enumerate() {
+        let id = format!("gitea:fts27-{run}-{n}");
+        mirror_row(pool, &id, title, body).await;
+        let (stored, before): (String, String) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "select fts::text, ({FTS_0001})::text from sync.item where entity_id = $1"
+        )))
+        .bind(&id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(stored, before, "title {title:?}, body {body:?}");
+    }
+
+    // A known-good literal, measured on 18.6 under `0001`.
+    let (typo,): (String,) = sqlx::query_as("select fts::text from sync.item where entity_id = $1")
+        .bind(format!("gitea:fts27-{run}-0"))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(typo, "'fix':1A 'payout':4A 'typo':2A");
+
+    // The control: a slashed title gains its parts at A and keeps the whole.
+    let id = format!("gitea:fts27-{run}-slash");
+    mirror_row(pool, &id, "tidewater/payout-service", "").await;
+    let (stored,): (String,) =
+        sqlx::query_as("select fts::text from sync.item where entity_id = $1")
+            .bind(&id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored,
+        "'payout':4A 'payout-servic':3A 'servic':5A 'tidewat':2A 'tidewater/payout-service':1A"
+    );
+}
+
+/// An existing install (#612's criterion 4): a row mirrored under `0001`'s
+/// expression is found by its bare name once `0027` runs, without a sync
+/// writing it again -- the generated column is recomputed by the migration's
+/// rewrite. Its own database, because the wind-back rewrites `sync.item`.
+#[tokio::test]
+async fn zero_twenty_seven_reaches_a_row_mirrored_before_it() {
+    let pool = knobas_db::test_util::scratch_database("fts27-existing")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    // Wind back to an install that predates 0027: `0001`'s expression, and
+    // the runner's record of 0027 gone.
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "alter table sync.item alter column fts set expression as ({FTS_0001})"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("delete from public._sqlx_migrations where version = 27")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    mirror_row(
+        &pool,
+        "gitea:tidewater/payout-service",
+        "tidewater/payout-service",
+        "tidewater/payout-service\n\nPayout processing",
+    )
+    .await;
+    let found = async |pool: &sqlx::PgPool| -> (bool, String) {
+        sqlx::query_as(
+            "select fts @@ websearch_to_tsquery('english', 'payout-service'),
+                    synced_at::text
+               from sync.live_item where entity_id = 'gitea:tidewater/payout-service'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    let (before, synced_before) = found(&pool).await;
+    assert!(
+        !before,
+        "under 0001 the bare name matches nothing of the repo"
+    );
+
+    migrate::run(&pool).await.unwrap();
+
+    let (after, synced_after) = found(&pool).await;
+    assert!(
+        after,
+        "after 0027 the row already mirrored is found by its bare name"
+    );
+    assert_eq!(synced_after, synced_before, "and nothing wrote it again");
+}
