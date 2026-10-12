@@ -129,13 +129,14 @@ language sql immutable as $fn$
 $fn$;
 
 -- Every stored adapter: its declarations keyed by kind -- the shape one
--- source's entry has in `knobas_core::payload::Declarations` -- and the kinds
--- they reach.
+-- source's entry has in `knobas_core::payload::Declarations`, cut to the
+-- `parent` field, the only one the two macros read -- and the kinds they
+-- reach. The cut keeps the object each row's `$decl` is built from small.
 create function sync.declared_adapters()
 returns table (adapter_kind text, kinds jsonb, reached text[])
 language sql stable as $fn$
   select d.adapter_kind,
-         (select coalesce(jsonb_object_agg(kp.p->>'kind', kp.p order by kp.ord), '{}'::jsonb)
+         (select coalesce(jsonb_object_agg(kp.p->>'kind', jsonb_build_object('parent', kp.p->'parent') order by kp.ord), '{}'::jsonb)
             from jsonb_array_elements(case when jsonb_typeof(d.payload_paths) = 'array'
                                            then d.payload_paths else '[]'::jsonb end)
                  with ordinality as kp(p, ord)
