@@ -286,6 +286,7 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
             url: Some(format!(
                 "https://gitea.example/tidewater/payout-service/commit/{TIP}"
             )),
+            commit: None,
         }]
     );
     assert_eq!(
@@ -297,6 +298,7 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
             tone: Some(Tone::Info),
             chip: Some("open".into()),
             url: Some("https://gitea.example/tidewater/payout-service/pulls/142".into()),
+            commit: None,
         }],
         "the open pull request whose head is this branch, and no other"
     );

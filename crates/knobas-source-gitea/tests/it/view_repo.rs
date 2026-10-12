@@ -291,6 +291,7 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
             tone: Some(Tone::Info),
             chip: Some("open".into()),
             url: Some("https://gitea.example/tidewater/payout-service/pulls/142".into()),
+            commit: None,
         }
     );
 

@@ -283,6 +283,7 @@ async fn branches(
                 tone: is_default.then_some(Tone::Muted),
                 chip: is_default.then(|| "default".to_owned()),
                 url: None,
+                commit: None,
             }
         })
         .collect();

@@ -239,6 +239,7 @@ pub(super) fn commit_row(source_id: &str, owner: &str, repo: &str, c: &ListedCom
         tone: None,
         chip: None,
         url: c.html_url.clone(),
+        commit: None,
     }
 }
 
@@ -263,6 +264,7 @@ pub(super) fn tip_row(source_id: &str, owner: &str, repo: &str, tip: &TipCommit)
         tone: None,
         chip: None,
         url: tip.url.clone(),
+        commit: None,
     }
 }
 
@@ -296,5 +298,6 @@ pub(super) fn pull_row(source_id: &str, owner: &str, repo: &str, pull: &OpenPull
         tone: Some(Tone::Info),
         chip: Some("open".to_owned()),
         url: pull.html_url.clone(),
+        commit: None,
     }
 }
