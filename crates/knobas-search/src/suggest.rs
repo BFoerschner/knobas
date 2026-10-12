@@ -9,7 +9,9 @@
 //! * **kinds** -- every kind with a row in one of the launcher's corpora
 //!   ([`crate::corpus::ALL`]), labelled from the [`KindCatalog`];
 //! * **sources** -- the vocabulary's enabled sources, the ones `source:`
-//!   resolves (a disabled one is nameable by nothing, #200);
+//!   resolves (a disabled one is nameable by nothing, #200), that have at
+//!   least one live row: one configured but not synced yet would lead to an
+//!   empty result (the deputy's ruling of 2026-10-12 on #614);
 //! * **parents** -- every name a parent answers to, with its kind: the names
 //!   live items declare for their parents and the names mirrored records
 //!   answer to as one, read through the **same two `knobas_core::payload`
@@ -48,6 +50,23 @@ select k.kind from (
 ) k
  order by k.kind";
 
+/// The source ids bound at `$1` that have at least one row in the mirror.
+///
+/// One probe per id, each **ordered as `item_source_updated_idx` is**
+/// (`source_id, item_updated_at desc nulls last`), so the planner walks that
+/// index and stops at the source's first live row. A plain `exists` does
+/// not: measured on the 100k fixture (#622's review), the planner hashed every
+/// row of each source and took 30 ms at p50, the same as a `distinct` over the
+/// corpus, against 0.3 ms for this shape. An unordered `limit 1` seq-scanned
+/// to the same 30 ms once an enabled source with no rows was in the list.
+const SOURCES_SQL: &str = "\
+select s.id from unnest($1::text[]) s(id)
+ cross join lateral (
+  select 1 from sync.live_item i
+   where i.source_id = s.id
+   order by i.item_updated_at desc nulls last
+   limit 1) l";
+
 /// Every `(name, kind)` a parent answers to, through the declarations bound
 /// at `$1`.
 ///
@@ -72,7 +91,7 @@ const PARENTS_SQL: &str = concat!(
 ///
 /// # Errors
 ///
-/// [`SearchError::Db`] if either read fails.
+/// [`SearchError::Db`] if any read fails.
 pub(crate) async fn read(
     pool: &PgPool,
     vocab: &Vocabulary,
@@ -80,6 +99,17 @@ pub(crate) async fn read(
     let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
     let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
         .bind(vocab.declarations.as_param())
+        .fetch_all(pool)
+        .await?;
+    let enabled: Vec<&str> = vocab
+        .sources
+        .iter()
+        .filter(|source| source.enabled)
+        .map(|source| source.id.as_str())
+        .collect();
+    // Only the enabled ids are probed, so `live` holds enabled sources only.
+    let live: Vec<String> = sqlx::query_scalar(SOURCES_SQL)
+        .bind(&enabled)
         .fetch_all(pool)
         .await?;
     Ok(FilterSuggestions {
@@ -93,7 +123,7 @@ pub(crate) async fn read(
         sources: vocab
             .sources
             .iter()
-            .filter(|source| source.enabled)
+            .filter(|source| live.contains(&source.id))
             .map(|source| SourceSuggestion {
                 id: source.id.clone(),
                 display_name: source.display_name.clone(),

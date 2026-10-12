@@ -515,7 +515,7 @@ mod tests {
 ///
 /// **Only values that exist right now**, so a picked suggestion never leads
 /// to an empty result or an unknown token: the kinds the corpus has live rows
-/// of, the sources that are configured and enabled, and the parents the
+/// of, the enabled sources that have a live row, and the parents the
 /// mirror and the estate declare. Read once per launcher opening and narrowed
 /// by the box as the reader types, so the keystroke path pays nothing for it.
 /// Free-text keys (`author:`, `updated:`) get no suggestions and have no list
@@ -524,7 +524,8 @@ mod tests {
 pub struct FilterSuggestions {
     /// Every kind with at least one row in the launcher's corpora, by id.
     pub kinds: Vec<KindSuggestion>,
-    /// Every enabled source, ordered by id -- the sources `source:` resolves.
+    /// Every enabled source with at least one live row, ordered by id -- the
+    /// sources `source:` resolves that lead somewhere (#614).
     pub sources: Vec<SourceSuggestion>,
     /// Every name a parent answers to, with the parent's kind, ordered by
     /// name and kind. A parent with two names (a Gitea repo's `owner/name`

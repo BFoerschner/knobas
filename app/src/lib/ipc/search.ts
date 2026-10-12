@@ -296,7 +296,7 @@ export function smartListItems(id: string, limit: number): Promise<SearchRespons
 export interface FilterSuggestions {
   /** Every kind with a row in the launcher's corpora. */
   kinds: KindSuggestion[];
-  /** Every enabled source, ordered by id. */
+  /** Every enabled source with at least one live row, ordered by id. */
   sources: SourceSuggestion[];
   /** Every name a parent answers to, with its kind; a repo is listed under `owner/name` and `name`. */
   parents: ParentSuggestion[];

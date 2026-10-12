@@ -2,7 +2,7 @@
 //! (#601, spec #591 stories 27-30), end to end against a real PostgreSQL.
 //!
 //! **Only values that exist right now** is the rule every test here holds the
-//! read to: a kind with live rows, a source that is configured and enabled, a
+//! read to: a kind with live rows, an enabled source with live rows (#614), a
 //! parent some live item declares or a mirrored record answers to as one, or
 //! an asset, which answers to its name (#600). A suggestion that led to an
 //! empty result, or to an unknown token, would be a lie the box told.
@@ -18,17 +18,20 @@ fn token() -> String {
     format!("s{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
 }
 
-/// A migrated database with four sources: an enabled Gitea and Uptime Kuma,
+/// The four sources [`pool`] configures: an enabled Gitea and Uptime Kuma,
 /// and a disabled Gitea and TeamCity, whose rows `sync.live_item` hides.
+const POOL_SOURCES: [(&str, &str, &str, bool); 4] = [
+    ("gitea", "gitea", "Gitea", true),
+    ("kuma", "kuma", "Uptime Kuma", true),
+    ("gitea-off", "gitea", "Old Gitea", false),
+    ("teamcity-off", "teamcity", "Old TeamCity", false),
+];
+
+/// A migrated database with the [`POOL_SOURCES`].
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    for (id, kind, name, enabled) in [
-        ("gitea", "gitea", "Gitea", true),
-        ("kuma", "kuma", "Uptime Kuma", true),
-        ("gitea-off", "gitea", "Old Gitea", false),
-        ("teamcity-off", "teamcity", "Old TeamCity", false),
-    ] {
+    for (id, kind, name, enabled) in POOL_SOURCES {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
              values ($1, $2, $3, 'http://x', 'Pat', $4)
@@ -166,9 +169,9 @@ fn parents_of(suggestions: &FilterSuggestions, t: &str) -> Vec<ParentSuggestion>
     out
 }
 
-/// The tracer bullet: the kinds that have live rows, the enabled sources, and
-/// the parents the mirror declares, each with its kind -- and nothing a
-/// disabled source holds.
+/// The tracer bullet: the kinds that have live rows, the enabled sources that
+/// have them, and the parents the mirror declares, each with its kind -- and
+/// nothing a disabled source holds.
 #[tokio::test]
 async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     let pool = pool().await;
@@ -236,9 +239,12 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
         "only a disabled source holds a build: {kinds:?}"
     );
 
+    // Other tests in this file configure sources of their own; this one
+    // answers for the ones `pool()` configures.
     let sources: Vec<(&str, &str)> = suggestions
         .sources
         .iter()
+        .filter(|s| POOL_SOURCES.iter().any(|(id, ..)| *id == s.id))
         .map(|s| (s.id.as_str(), s.display_name.as_str()))
         .collect();
     assert_eq!(sources, [("gitea", "Gitea"), ("kuma", "Uptime Kuma")]);
@@ -354,4 +360,84 @@ async fn every_asset_is_offered_by_its_name_and_leads_somewhere() {
         kinds.contains(&"asset") && kinds.contains(&"route"),
         "{kinds:?}"
     );
+}
+
+/// Configure a Gitea source `id`, enabled or not.
+async fn source(pool: &sqlx::PgPool, id: &str, enabled: bool) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+         values ($1, 'gitea', $1, 'http://x', 'Pat', $2)",
+    )
+    .bind(id)
+    .bind(enabled)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The offered source ids that carry this test's token, in the order offered.
+fn sources_of<'a>(suggestions: &'a FilterSuggestions, t: &str) -> Vec<&'a str> {
+    suggestions
+        .sources
+        .iter()
+        .filter(|s| s.id.contains(t))
+        .map(|s| s.id.as_str())
+        .collect()
+}
+
+/// A source is offered only once it has a live row (the deputy's ruling of
+/// 2026-10-12 on #614): one configured but never synced would lead to an
+/// empty result, which story 30 rules out. Every offered source is probed the
+/// way the kinds and parents are, and the unsynced one is offered at the next
+/// read once its first row lands.
+#[tokio::test]
+async fn a_source_is_offered_only_once_it_has_a_live_row() {
+    let pool = pool().await;
+    let t = token();
+    let synced = format!("a-synced-{t}");
+    let unsynced = format!("b-unsynced-{t}");
+    let disabled = format!("c-disabled-{t}");
+    source(&pool, &synced, true).await;
+    source(&pool, &unsynced, true).await;
+    source(&pool, &disabled, false).await;
+    item(
+        &pool,
+        &synced,
+        "repo",
+        &format!("r-{t}"),
+        serde_json::json!({}),
+    )
+    .await;
+    item(
+        &pool,
+        &disabled,
+        "repo",
+        &format!("d-{t}"),
+        serde_json::json!({}),
+    )
+    .await;
+
+    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    assert_eq!(sources_of(&suggestions, &t), [synced.as_str()]);
+    for s in &suggestions.sources {
+        leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
+    }
+
+    item(
+        &pool,
+        &unsynced,
+        "repo",
+        &format!("u-{t}"),
+        serde_json::json!({}),
+    )
+    .await;
+
+    let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
+    assert_eq!(
+        sources_of(&suggestions, &t),
+        [synced.as_str(), unsynced.as_str()]
+    );
+    for s in &suggestions.sources {
+        leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
+    }
 }
