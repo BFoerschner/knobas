@@ -115,10 +115,12 @@ pub struct Searcher {
     pool: PgPool,
     kinds: KindCatalog,
     /// Each compiled-in adapter kind's declared payload paths, which every
-    /// query's vocabulary hands to its configured sources (`under:` reads the
-    /// parent through them). Empty from [`Self::new`]: then no source declares
-    /// anything and `under:` matches nothing, which is the honest answer for a
-    /// searcher nobody told about the adapters.
+    /// query's vocabulary hands to its configured sources -- the path line and
+    /// `under:`'s coverage read them. Empty from [`Self::new`]: then no source
+    /// declares anything to those two. What `under:` itself matches is the
+    /// database's since #627 (`sync.item_parent`, kept from the declarations
+    /// [`Self::declaring`] stores), so a bare searcher answers it from
+    /// whatever was stored last.
     payload_paths: Vec<(String, Vec<knobas_core::payload::KindPaths>)>,
 }
 
