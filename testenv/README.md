@@ -2,8 +2,8 @@
 
 A small fake company on a laptop: the Tidewater Freight fixture served by real
 software (Uptime Kuma always; Gitea, TeamCity, Jira and Confluence started on
-demand by the live recipes, one JVM product at a time — see *Live products, on
-demand*) and, until the live suites replace it, by our own deprecated mock.
+demand by the live recipes, one JVM product at a time, the runs queued on a
+lock — see *Live products, on demand*) and, until the live suites replace it, by our own deprecated mock.
 
 ```sh
 cd testenv
@@ -164,6 +164,34 @@ live: knobas-teamcity is running; one JVM product at a time on the 8 GB Docker V
 It never stops the other product itself — that is somebody's session going
 away under them. Gitea is not a JVM and is never refused.
 
+**Several JVM tickets at once; their live runs take turns (#690).** The
+refusal above is the backstop, not the queue. Every recipe that starts or
+uses a JVM product — `teamcity-live`, `teamcity-live-seeded` (which runs the
+app's TeamCity suite too), `jira-live`, `confluence-live`, `atlassian-live`,
+and `live-up teamcity|jira|confluence` — first takes one machine-wide lock,
+`$TMPDIR/knobas-live-jvm.lock`, and holds it for the whole run: start, seed,
+suites, and the closing `live-down`. A run that finds it held **waits**,
+saying once who holds it and since when:
+
+```text
+live: teamcity-live-seeded: the JVM lock is held by 'teamcity-live-seeded' in /Users/dev/Projects/knobas/.worktrees/issue-683 (pid 51234, since 14:02:11); waiting up to 2700s
+live: teamcity-live-seeded: took the JVM lock after 312s
+```
+
+and goes on when it is released, so it never meets the refusal the first
+run's product would cause. After 45 minutes (`KNOBAS_LIVE_LOCK_WAIT`, in
+seconds) it gives up and refuses, naming the holder. A lock whose holder is
+dead — a SIGKILLed run — is taken over by the next taker, which says so;
+anything else is waited for. So several JVM tickets may be implemented at
+once, and only the few minutes each spends in TeamCity are serialised. The
+lock is a symlink whose target names the holder (`<pid> <epoch> <recipe>
+<worktree>`), taken with `ln -s` as the gate slots are (macOS has no
+`flock`); `readlink` it to see who holds it. `atlassian-live` holds it once
+for both of its halves, which run under it. `live-up` holds it only while it
+starts and seeds — the product then stays up, and the next run of another
+JVM product meets the refusal, as before. A product started by hand with
+`docker compose` takes no lock; that is what the refusal is still for.
+
 **Why `down` differs by product.** TeamCity and Gitea are *stopped*: their
 volumes hold the seeded builds and corpus, and the next start finds them
 seeded in seconds. Jira and Confluence run on 3-hour timebomb licences that a
@@ -192,7 +220,11 @@ demand, for the one run — except that Björn creates and deletes it himself: n
 agent and no recipe does (the deputy's ruling on #634).
 
 `testenv/live-test.sh` holds the refusals and the put-back rule to account
-against a stub `docker`, in `just witness-unit` and so in `just check`.
+against a stub `docker`, and `testenv/live-lock-test.sh` the lock — a second
+run waits and goes on, a dead holder's lock is taken over, the wait ends in
+a refusal naming the holder, `live_session` takes the lock before the guard
+and lets it go after the put-back — both in `just witness-unit` and so in
+`just check`.
 
 ## The live recipes
 
@@ -308,8 +340,9 @@ when you release it.** `start-work-live` seeds too, and its branches carry the s
 prefix `live_gitea.rs` sweeps, so a concurrent `just gitea-live` deletes the
 branch out from under it. The failure mode is a
 mid-run 401 or a vanished branch, neither of which reads as "somebody else is
-in here". Nothing in the tooling enforces this, and closing it properly would
-mean a lock the tooling does not have.
+in here". Nothing in the tooling enforces this for Gitea and Kuma, and closing it
+properly would mean a lock like the one the JVM runs have had since #690
+(*Live products, on demand*), which these recipes do not take.
 
 ## What the seed **cannot** reproduce — read this before writing assertions
 
@@ -568,7 +601,9 @@ builds again.
 **One owner at a time**, exactly as for the Gitea suites (see *One
 environment, one owner at a time*): the leftover clearing cannot tell a sibling's build
 from a corpse, and the battery's clause 2 needs a server where nothing is
-running. `./seed --teamcity --running` and this suite are therefore mutually
+running. Since #690 the recipe enforces it: two worktrees starting `just
+teamcity-live-seeded` together run one after the other, on the JVM lock
+(*Live products, on demand*). `./seed --teamcity --running` and this suite are therefore mutually
 exclusive on one environment: the suite refuses to start while a seeded build
 is in flight and says how to release it, and a build somebody else queues
 mid-run is the one case no check can catch.
@@ -1760,6 +1795,7 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until every seeded page is in a CQL search. `just jira-live` / `just confluence-live` run the whole window. |
 | `./live` | `up` / `down <gitea\|teamcity\|jira\|confluence>` and `status`: the on-demand products (`live-lib.sh`), one JVM product at a time. `just live-up` / `live-down` / `live-status`. See *Live products, on demand*. |
 | `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back. `just witness-unit`, and part of `just check`. |
+| `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
