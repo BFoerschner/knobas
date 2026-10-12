@@ -191,6 +191,7 @@ knobas-app	lib/knobas_app	protocol::tests::inline_markdown_is_left_as_the_charac
 knobas-app	lib/knobas_app	protocol::tests::prose_is_paragraphs_and_a_run_of_bullets_is_one_list
 knobas-app	lib/knobas_app	protocol::tests::the_action_items_heading_is_matched_case_insensitively
 knobas-app	lib/knobas_app	protocol::tests::the_template_carries_the_three_sections_and_a_readable_action_item
+knobas-app	lib/knobas_app	sources::crud::tests::a_clone_url_alias_becomes_its_sources_base_url_and_nothing_else_does
 knobas-app	lib/knobas_app	sources::crud::tests::a_failed_test_only_blames_the_credential_when_the_source_did
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_unique_violation_reads_as_a_duplicate_id
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releases_the_backoff
@@ -593,6 +594,7 @@ knobas-app	test/it	entity_mirror::the_start_work_vocabularies_match_their_typesc
 knobas-app	test/it	entity_mirror::the_state_chip_and_its_tones_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_suggestion_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_url_match_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_view::a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit
 knobas-app	test/it	entity_view::a_commit_named_by_repository_and_sha_opens_the_mirrored_commit
 knobas-app	test/it	entity_view::a_row_keeps_its_address_only_where_the_mirror_holds_the_entity
 knobas-app	test/it	entity_view::the_read_routes_to_the_entitys_source_and_keeps_none_and_failure_apart
@@ -1894,6 +1896,7 @@ knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::an_empty_reposit
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::pull_request_discussion_is_read_from_the_issue_with_the_same_index
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::the_repository_search_envelope_is_unwrapped
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::the_servers_own_count_of_a_discussion_reaches_the_caller
+knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_clone_url_is_a_url_or_an_scp_like_remote
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_full_configuration_parses
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_repository_entry_must_be_owner_slash_name
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_zero_rate_limit_is_refused
