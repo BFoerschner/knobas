@@ -3,9 +3,15 @@
 //! The fake is told to succeed, to fail as unreachable, or to refuse -- the
 //! same idiom `scheduler_run.rs` uses to drive the sync side. What is asserted
 //! here is what a caller can observe: a write is kept when the source cannot
-//! take it, a changed target produces a held write, a held write never flushes
-//! on its own, and one entity's order is preserved while another entity's
-//! queue keeps moving.
+//! take it, a changed target produces a held write, and one entity's order is
+//! preserved while another entity's queue keeps moving.
+//!
+//! No test here calls `flush_all`, by hand or through the real scheduler:
+//! it flushes every source in the file's database, and its failed builds of
+//! the other tests' sources would re-reason their rows `unauthorized` under
+//! the tests asserting a wait reason (#609). The tests that need it live in
+//! `write_queue_flush_all.rs`, among them story 16's "a held write never
+//! flushes on its own".
 
 use std::sync::{Arc, Mutex};
 
@@ -696,38 +702,6 @@ async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() 
     assert!(h.verbs().contains(&"held".to_owned()));
 }
 
-/// Story 16, stated as the thing that can actually be tested: there is no
-/// timeout to wait out. However many times the flush loop runs, and however
-/// willing the source is, a held write does not move.
-#[tokio::test]
-async fn a_held_write_never_flushes_on_its_own() {
-    let h = harness().await;
-    let ticket = h.mirror("PAY-6", "a payout fails").await;
-
-    h.answer(Answer::Unreachable);
-    let write = h.comment(&ticket, "mine").await;
-    h.mirror("PAY-6", "a payout fails\n\nsomebody else").await;
-    h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
-    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
-
-    for _ in 0..10 {
-        flusher::flush_source(&h.deps, &h.source).await.unwrap();
-        flusher::flush_all(&h.deps).await;
-    }
-    assert!(
-        h.delivered().is_empty(),
-        "nothing may decide on the user's behalf by timing out"
-    );
-    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
-
-    // And the user's choice is what moves it -- with the version they were
-    // shown as the one they consented to overwrite.
-    flusher::apply_anyway(&h.deps, write.id).await.unwrap();
-    assert_eq!(h.delivered(), vec!["mine".to_owned()]);
-    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
-}
-
 /// Story 22, at the flush loop rather than at the store: a stalled write
 /// blocks its own successors and nothing else. The second comment on one
 /// ticket may not overtake the first, and a second ticket's write must not
@@ -782,27 +756,6 @@ async fn one_entitys_writes_keep_their_order_without_blocking_another() {
         ],
         "and the order the user wrote them in is what landed"
     );
-}
-
-/// Story 21: one source being down does not stop another. `flush_all` is what
-/// the schedule calls, so the isolation has to hold there and not only in a
-/// per-source flush.
-#[tokio::test]
-async fn a_source_that_cannot_write_does_not_stop_another_source() {
-    let down = harness().await;
-    let up = harness().await;
-    let stuck = down.mirror("PAY-9", "a payout fails").await;
-    let fine = up.mirror("PAY-10", "a payout fails").await;
-
-    down.answer(Answer::Unreachable);
-    let held_back = down.comment(&stuck, "queued").await;
-    let goes = up.comment(&fine, "delivered").await;
-
-    flusher::flush_all(&down.deps).await;
-
-    assert_eq!(down.reload(held_back.id).await.state, WriteState::Pending);
-    assert_eq!(up.reload(goes.id).await.state, WriteState::Sent);
-    assert_eq!(up.delivered(), vec!["delivered".to_owned()]);
 }
 
 /// Stories 7, 14 and 20: withdrawing a write is one action, it is terminal,
@@ -997,49 +950,6 @@ fn every_write_op_has_a_stated_projection() {
         store::PROJECTED_OPS.len(),
         "PROJECTED_OPS lists an op `WriteOp` does not define"
     );
-}
-
-/// Story 9: recovery needs no ceremony. A write queued while the source was
-/// down goes on the scheduler's own tick, with nobody asking for it.
-///
-/// The scheduler is the real one, started and shut down, because the claim is
-/// about the loop being *wired* -- calling `flush_all` by hand would prove
-/// only what the tests above already prove.
-#[tokio::test]
-async fn the_scheduler_drains_the_queue_on_its_own() {
-    let h = harness().await;
-    let ticket = h.mirror("PAY-14", "a payout fails").await;
-
-    h.answer(Answer::Unreachable);
-    let write = h.comment(&ticket, "sent by nobody").await;
-    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
-
-    // The source can take it now -- and nothing tells the queue so.
-    h.answer(Answer::Accept);
-    let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
-        pool: knobas_db::test_util::test_pool().await,
-        connections: Arc::clone(&h.deps.connections),
-        registry: Arc::clone(&h.deps.registry),
-        secrets: Arc::clone(&h.deps.secrets),
-        events: Arc::clone(&h.deps.events),
-        timing: knobas_sync::scheduler::SchedulerTiming::default(),
-    })
-    .await
-    .unwrap();
-
-    let settled = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        loop {
-            if h.reload(write.id).await.state == WriteState::Sent {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await;
-    scheduler.shutdown().await;
-
-    settled.expect("the scheduler's own tick must flush the queue");
-    assert_eq!(h.delivered(), vec!["sent by nobody".to_owned()]);
 }
 
 /// Two flushers, one write, one delivery.
