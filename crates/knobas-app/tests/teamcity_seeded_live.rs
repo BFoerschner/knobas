@@ -63,7 +63,9 @@
 //! **One environment, one owner at a time** -- `testenv/README.md`.
 
 mod live_digest;
+mod live_under;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -343,4 +345,106 @@ async fn a_seeded_build_the_mirror_attributes_to_the_reader_is_on_that_days_dige
     );
 
     state.scheduler.shutdown().await;
+}
+
+/// **`under:` a configuration, by its id and by its name, finds it and its
+/// builds through the search the app runs** (#644).
+///
+/// The configurations are the fixture's: `work.json`'s build `cfg`s, each named
+/// by `seed-teamcity-builds.sh`'s rule -- the id is the `cfg` byte for byte, the
+/// name is what follows its first `_`, with `_` as a space. A name with a space
+/// is typed quoted, as the query box writes it (#601).
+///
+/// Which builds sit in a configuration is read off `buildTypeId`, the field the
+/// server sends at the build's root -- not the `buildType` object the
+/// descriptor declares the parent at -- so a declaration that missed would
+/// leave this set full and the search's empty. The set is every mirrored build
+/// of that configuration, plus the configuration itself, which answers to its
+/// own name and id as a parent. Each fixture build the seed recorded in
+/// `seed-state.json` is checked to be in its configuration's set, so an empty
+/// mirror cannot pass. Read-only, like the digest test above.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name() {
+    let env = env();
+    let account = env.account().await;
+    let state = app(&env, &account).await;
+    sync(&state, TEAMCITY).await;
+
+    let fixture = live_under::fixture();
+    let mut configurations: Vec<String> = live_under::rows(&fixture, "builds")
+        .iter()
+        .map(|b| b["cfg"].as_str().expect("a build's cfg").to_owned())
+        .collect();
+    configurations.sort();
+    configurations.dedup();
+    assert_eq!(configurations.len(), 3, "the fixture's three configurations");
+
+    let builds: Vec<(String, String)> = sqlx::query_as(
+        "select entity_id, payload->>'buildTypeId'
+           from sync.live_item where source_id = $1 and kind = 'build'",
+    )
+    .bind(TEAMCITY)
+    .fetch_all(&state.pool)
+    .await
+    .expect("the mirror is readable");
+    let seeded = seeded_builds();
+
+    for id in &configurations {
+        let name = id
+            .split_once('_')
+            .map(|(_, rest)| rest.replace('_', " "))
+            .unwrap_or_else(|| panic!("{id} has a project prefix"));
+        let of_config: BTreeSet<String> = builds
+            .iter()
+            .filter(|(_, config)| config == id)
+            .map(|(entity, _)| entity.clone())
+            .collect();
+        for (number, _, real_id) in seeded.iter().filter(|(_, cfg, _)| cfg == id) {
+            let build = format!("{TEAMCITY}:build:{real_id}");
+            assert!(
+                of_config.contains(&build),
+                "fixture build {number} ({build}) of {id} is mirrored: {of_config:?}"
+            );
+        }
+        let mut expected = BTreeMap::from([(
+            "build_config".to_owned(),
+            BTreeSet::from([format!("{TEAMCITY}:buildType:{id}")]),
+        )]);
+        if !of_config.is_empty() {
+            expected.insert("build".to_owned(), of_config);
+        }
+
+        for typed in [id.clone(), name.clone()] {
+            let raw = live_under::under(&typed);
+            let found = live_under::search(&state.pool, TEAMCITY, &raw).await;
+            live_under::exactly(&raw, &found, &expected);
+            println!("SEEDED {raw} -> {:?}", found.ids());
+        }
+    }
+    state.scheduler.shutdown().await;
+}
+
+/// Every build the seed recorded: its fixture number, configuration and real id.
+fn seeded_builds() -> Vec<(i64, String, i64)> {
+    let path = std::env::var("KNOBAS_TEAMCITY_SEED_STATE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
+        });
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e} -- run `./seed --teamcity`", path.display()));
+    let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
+    whole["teamcity"]["builds"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{}: no `teamcity.builds`", path.display()))
+        .iter()
+        .map(|b| {
+            (
+                b["fixture_number"].as_i64().expect("a fixture number"),
+                b["build_type"].as_str().expect("a build type").to_owned(),
+                b["real_id"].as_i64().expect("a real id"),
+            )
+        })
+        .collect()
 }

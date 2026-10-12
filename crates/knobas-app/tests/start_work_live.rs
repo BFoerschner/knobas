@@ -80,7 +80,9 @@
 //! listing does it grow, and who takes it back?
 
 mod live_digest;
+mod live_under;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use knobas_app::sources::{Registry, SourcesState};
@@ -1064,4 +1066,160 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 
     state.scheduler.shutdown().await;
     jira.assert_no_violations();
+}
+
+/// **`under:` a repository, by its full name and by its bare name, finds it
+/// and everything mirrored in it, through the search the app runs** (#644).
+///
+/// The source is configured with every repository `work.json` names, so the
+/// three scopes have to be told apart. Which repository a mirrored item sits
+/// in is read off its entity key, which the adapter builds from the repository
+/// it was asked to walk -- not off `repository` or `base.repo`, where the
+/// descriptor declares the parent -- so a declaration that missed would leave
+/// this set full and the search's empty. Each fixture branch, pull request
+/// and commit of the repository is checked to be in its set (the last two by
+/// the index and sha `seed-state.json` says Gitea and git assigned), so an
+/// empty mirror cannot pass. Read-only at Gitea: it syncs into a database of its own, and its own
+/// source, configured here; the round trip above owns the litter.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commits() {
+    use knobas_source_gitea::keys::{GiteaKey, parse_key};
+
+    let env = env();
+    let fixture = live_under::fixture();
+    let seeded = live_under::seed_state();
+    let repos: Vec<String> = live_under::rows(&fixture, "repos")
+        .iter()
+        .map(|r| r["name"].as_str().expect("a repo name").to_owned())
+        .collect();
+    assert_eq!(repos.len(), 3, "the fixture's three repositories");
+    let full = |name: &str| format!("{}/{name}", env.owner);
+    let state = gitea_app(&env, &repos.iter().map(|r| full(r)).collect::<Vec<_>>()).await;
+    sync(&state, GITEA).await;
+
+    let mirrored: Vec<(String, String)> = sqlx::query_as(
+        "select kind, entity_id from sync.live_item where source_id = $1",
+    )
+    .bind(GITEA)
+    .fetch_all(&state.pool)
+    .await
+    .expect("the mirror is readable");
+    let in_repo = |entity: &str| -> String {
+        let key = entity
+            .strip_prefix(&format!("{GITEA}:"))
+            .unwrap_or_else(|| panic!("{entity} is this source's"));
+        let (owner, repo) = match parse_key(key)
+            .unwrap_or_else(|| panic!("{entity} is a Gitea key"))
+        {
+            GiteaKey::Repo { owner, repo }
+            | GiteaKey::Pr { owner, repo, .. }
+            | GiteaKey::Branch { owner, repo, .. }
+            | GiteaKey::Commit { owner, repo, .. } => (owner, repo),
+        };
+        format!("{owner}/{repo}")
+    };
+
+    for name in &repos {
+        let full_name = full(name);
+        let mut by_kind: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (kind, entity) in mirrored.iter().filter(|(_, entity)| in_repo(entity) == full_name) {
+            by_kind.entry(kind.clone()).or_default().insert(entity.clone());
+        }
+        let expected: BTreeSet<String> = by_kind.values().flatten().cloned().collect();
+        assert!(
+            expected.contains(&format!("{GITEA}:{full_name}")),
+            "{full_name} itself is mirrored: {expected:?}"
+        );
+        for branch in live_under::rows(&fixture, "branches")
+            .iter()
+            .filter(|b| b["repo"] == name.as_str())
+        {
+            let id = format!(
+                "{GITEA}:{full_name}@refs/heads/{}",
+                branch["name"].as_str().expect("a branch name")
+            );
+            assert!(expected.contains(&id), "fixture branch {id} is mirrored: {expected:?}");
+        }
+        for pr in live_under::rows(&fixture, "prs")
+            .iter()
+            .filter(|p| p["repo"] == name.as_str())
+        {
+            let index = &live_under::rows(&seeded, "pull_requests")
+                .into_iter()
+                .find(|s| s["fixture_number"] == pr["num"])
+                .unwrap_or_else(|| panic!("the seed recorded fixture pull request {}", pr["num"]))
+                ["real_index"];
+            let id = format!("{GITEA}:{full_name}#{index}");
+            assert!(expected.contains(&id), "fixture pull request {} ({id}) is mirrored: {expected:?}", pr["num"]);
+        }
+        for commit in live_under::rows(&seeded, "commits")
+            .iter()
+            .filter(|c| c["repo"] == name.as_str())
+        {
+            let id = format!(
+                "{GITEA}:{full_name}@{}",
+                commit["real_sha"].as_str().expect("a real sha")
+            );
+            assert!(expected.contains(&id), "fixture commit {} ({id}) is mirrored: {expected:?}", commit["fixture_sha"]);
+        }
+
+        for typed in [full_name.clone(), name.clone()] {
+            let raw = live_under::under(&typed);
+            let found = live_under::search(&state.pool, GITEA, &raw).await;
+            live_under::exactly(&raw, &found, &by_kind);
+            println!(
+                "SEEDED {raw} -> {:?}",
+                found.kinds.iter().map(|(k, g)| (k, g.total)).collect::<Vec<_>>()
+            );
+        }
+    }
+    state.scheduler.shutdown().await;
+}
+
+/// A `SourcesState` with only the Gitea source, over the given repositories.
+async fn gitea_app(env: &Env, repos: &[String]) -> SourcesState {
+    let connector = knobas_db::test_util::scratch_database("start_work_live_under").await;
+    let pool = connector
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch database");
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(GITEA),
+            &Secret::just(AuthMethod::Pat, env.token.clone()),
+        )
+        .expect("the Gitea token is stored");
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: GITEA.to_owned(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: GITEA.to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: json!({ "repos": repos }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: pool.clone(),
+        connections: Arc::new(Connections(connector)),
+        registry: Arc::new(Registry::builtin()),
+        secrets: secrets.clone(),
+        events: Arc::new(Quiet),
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
+    })
+    .await
+    .expect("a scheduler over the scratch database");
+    SourcesState {
+        pool,
+        scheduler,
+        secrets,
+        registry: Arc::new(Registry::builtin()),
+    }
 }
