@@ -1999,6 +1999,8 @@ knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view_branch::a_branch_gitea_does_not_have_is_an_error
 knobas-source-gitea	test/it	view_branch::a_branch_with_no_pull_request_says_so
 knobas-source-gitea	test/it	view_branch::a_feature_branch_reads_ahead_and_behind_its_default_branch
+knobas-source-gitea	test/it	view_branch::behind_falls_back_to_the_reverse_compare_without_a_count
+knobas-source-gitea	test/it	view_branch::behind_is_read_as_a_count_not_as_the_reverse_compare
 knobas-source-gitea	test/it	view_branch::the_default_branch_shows_no_compare
 knobas-source-gitea	test/it	view_branch::the_diff_tab_reads_the_compares_diff
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged

@@ -165,8 +165,13 @@ async fn gitea(served: Served) -> MockServer {
         .and(query_param("not", "feature/PAY-231-sepa-retry"))
         .and(query_param("limit", "1"))
         .respond_with(
-            ok(json!([listed(MAIN_TIP, "PAY-228 partial refund drift", "2026-08-21T16:00:00Z", &[])]))
-                .insert_header("X-Total-Count", "1"),
+            ok(json!([listed(
+                MAIN_TIP,
+                "PAY-228 partial refund drift",
+                "2026-08-21T16:00:00Z",
+                &[]
+            )]))
+            .insert_header("X-Total-Count", "1"),
         )
         .with_priority(2)
         .mount(&server)
