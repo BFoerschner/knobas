@@ -223,6 +223,11 @@ struct Env {
     /// `jira.narrowing` from `seed-state.json`: the second project, whose
     /// workflow does not reach every status from every status.
     narrowing: Narrowing,
+    /// `jira.epic_link_field` from `seed-state.json`: this instance's Epic
+    /// Link custom field id, which differs on every seed. The Add-source dialog
+    /// configures it off `test_connection`'s discovery (#381); a source left
+    /// without it stores no `epic` and mirrors no epic membership at all.
+    epic_link_field: String,
 }
 
 /// The seed's narrowing-workflow project, as `seed-state.json` records it.
@@ -304,6 +309,15 @@ fn env() -> Env {
             .to_owned(),
         statuses: strings(&narrowing["statuses"]),
     };
+    let epic_link_field = whole["jira"]["epic_link_field"]
+        .as_str()
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: no jira.epic_link_field -- run `./seed-atlassian-content.sh`",
+                state.display()
+            )
+        })
+        .to_owned();
     Env {
         url: need("KNOBAS_JIRA_URL").trim_end_matches('/').to_owned(),
         user: need("KNOBAS_JIRA_USER"),
@@ -311,6 +325,7 @@ fn env() -> Env {
         http: client(),
         statuses,
         narrowing,
+        epic_link_field,
     }
 }
 
@@ -973,6 +988,20 @@ impl Events {
 /// A `SourcesState` over a database of this test's own, with the Jira source
 /// configured and its credential in the (in-memory) keychain.
 async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesState, Arc<Events>) {
+    // The username is half of a Basic pair and, for a PAT source, what `@me`
+    // filters match against; the Add-source dialog fills it in from
+    // `test_connection`.
+    app_with(name, env, auth, secret, json!({ "username": env.user })).await
+}
+
+/// As [`app`], with the source's `config` as given.
+async fn app_with(
+    name: &str,
+    env: &Env,
+    auth: AuthMethod,
+    secret: &str,
+    config: serde_json::Value,
+) -> (SourcesState, Arc<Events>) {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector
         .pool(4)
@@ -994,10 +1023,7 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
             display_name: "Tidewater Jira (seeded)".to_owned(),
             base_url: env.url.clone(),
             auth_kind: knobas_sync::config::AuthKind::Method(auth),
-            // The username is half of a Basic pair and, for a PAT source, what
-            // `@me` filters match against; the Add-source dialog fills it in
-            // from `test_connection`.
-            config: json!({ "username": env.user }),
+            config,
             sync_interval_secs: 86_400,
             enabled: true,
         },
@@ -2333,6 +2359,71 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
 
     state.scheduler.shutdown().await;
     drop(litter);
+}
+
+/// **Promoting the seeded epic seeds its five children into the context**
+/// (#641), on the classic Data Center project where `fields.parent` is absent
+/// from every issue.
+///
+/// The source is configured the way the Add-source dialog leaves it, with the
+/// seed's `epic_link_field` (#381), so the adapter stores each child's Epic
+/// Link as `epic: {"key": "PAY-200"}` (the ruling of 2026-10-12 on #598), and
+/// `recorded_parent_key!` reads that as its second spelling. Asked of both
+/// seeds: `member_ids`, which the context's own views read, and the merged walk
+/// the inbox reads. The keys are the fixture's (`testenv`'s Tidewater corpus,
+/// as `live_jira_seeded.rs`'s `under:PAY-200` test names them), not what the
+/// walk returned. Read-only at Jira: it syncs and promotes in its own database.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
+    let env = env();
+    let (state, _events) = app_with(
+        "atlassian_live_epic_context",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+        json!({ "username": env.user, "epic_link_field": env.epic_link_field }),
+    )
+    .await;
+    sync(&state, JIRA).await;
+
+    let promoted = knobas_app::commands::entity::promote_context_inner(
+        &state.pool,
+        &format!("{JIRA}:PAY-200"),
+    )
+    .await
+    .expect("PAY-200 is in the mirror and promotes");
+    assert_eq!(
+        promoted.context.kind,
+        knobas_core::context::ContextKind::Epic,
+        "PAY-200 is the fixture's epic"
+    );
+    let members: std::collections::BTreeSet<String> =
+        knobas_core::context::member_ids(&state.pool, &promoted.context.id)
+            .await
+            .expect("the members are readable")
+            .into_iter()
+            .collect();
+    let merged: std::collections::BTreeSet<String> =
+        knobas_core::context::held_by_any_context(&state.pool)
+            .await
+            .expect("the merged walk is readable")
+            .into_iter()
+            .collect();
+    println!("SEEDED epic context PAY-200 -> {members:?}");
+    for key in [
+        "PAY-200", "PAY-219", "PAY-228", "PAY-231", "PAY-236", "PAY-240",
+    ] {
+        let id = format!("{JIRA}:{key}");
+        assert!(
+            members.contains(&id),
+            "{id} is the fixture's epic PAY-200 or one of its five children, so it is a member of its context: {members:?}"
+        );
+        assert!(
+            merged.contains(&id),
+            "{id} is held by the PAY-200 context, so the merged walk reaches it: {merged:?}"
+        );
+    }
 }
 
 /// **A day's real work, listed under *yesterday* with its refs** (issue #288,

@@ -316,6 +316,19 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// source's spelling has to be one more `coalesce` *here* rather than an edit
 /// in each. `fields.parent.key` is Jira's, widened by #32.
 ///
+/// `epic.key` is the second spelling (#641), and it is Jira's too. A classic
+/// Data Center project serves no `fields.parent` on an epic's children; it
+/// keeps the relation in an Epic Link custom field whose id differs per
+/// instance, so the adapter stores it beside the record as `epic: {"key": …}`
+/// when `epic_link_field` is configured (the deputy's ruling of 2026-10-12 on
+/// #598, ADR-0018). The two are read in the order the Jira descriptor declares
+/// its `ticket` parent candidates, `fields.parent` first, so where both carry
+/// a key the direct parent wins, as it does for `under:`. The two rules are
+/// not the same rule: `declared_parents!` takes the first candidate that is an
+/// object, and `coalesce` the first that yields a key, so a keyless
+/// `fields.parent: {}` stops `under:` and falls through to `epic` here. Jira
+/// sends no such record; the order is what the two are held to.
+///
 /// **Its failure direction, stated (requirement 3): it misses.** A record
 /// whose payload does not carry this path yields no row, so an epic seeds
 /// fewer children rather than the wrong ones, and the walk is short rather
@@ -330,7 +343,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 #[macro_export]
 macro_rules! recorded_parent_key {
     () => {
-        "i.payload->'fields'->'parent'->>'key'"
+        "coalesce(i.payload->'fields'->'parent'->>'key', i.payload->'epic'->>'key')"
     };
 }
 
@@ -395,7 +408,8 @@ macro_rules! context_expansion {
 ///
 /// * **`seed`** -- the explicit adds (every confirmed link touching the
 ///   context's own entity), the anchor, and the epic's children: mirrored
-///   items whose source-recorded parent (`fields.parent.key`, widened by #32)
+///   items whose source-recorded parent (`fields.parent.key`, widened by #32,
+///   or the classic `epic.key`, #641; see [`recorded_parent_key!`])
 ///   is the anchor, in the anchor's own source -- two Jiras are two
 ///   namespaces, and matching bare keys across them would seed `jira:PAY-1`'s
 ///   epic with `jira-eu:PAY-1`.

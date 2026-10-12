@@ -11,7 +11,7 @@
 //! # Why every test gets a database of its own
 //!
 //! `context::list` reads every unarchived context, and the epic-children seed
-//! scans the whole mirror for a matching `fields.parent` -- both are passes
+//! scans the whole mirror for a matching `fields.parent` or `epic` -- both are passes
 //! over shared state, so test A's context would appear in test B's switcher
 //! and every list assertion would be decided by scheduling. `scratch_database`
 //! costs one `create database` per test and buys fixtures that read as
@@ -368,14 +368,80 @@ async fn epic_children_seed_the_walk_through_the_recorded_parent() {
     );
 }
 
+/// A **classic** Data Center Jira records no `fields.parent` on an epic's
+/// children; the adapter stores the Epic Link as `epic: {"key": …}` instead
+/// (the ruling of 2026-10-12 on #598), and `recorded_parent_key!` reads it as
+/// its second spelling (#641). The children carry only that shape here, and
+/// they are members through both seeds: `member_ids`, and the merged walk the
+/// inbox reads.
+#[tokio::test]
+async fn a_classic_epics_children_are_members_through_the_stored_epic() {
+    let pool = scratch().await;
+    let epic = with_payload(
+        &pool,
+        "ticket",
+        "EPIC-1",
+        serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
+    )
+    .await;
+    let story = with_payload(
+        &pool,
+        "ticket",
+        "PAY-2",
+        serde_json::json!({"fields": {"customfield_10108": "EPIC-1"}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+    let bug = with_payload(
+        &pool,
+        "ticket",
+        "PAY-3",
+        serde_json::json!({"fields": {}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
+
+    assert_eq!(members(&pool, &ctx.id).await, set(&[&epic, &story, &bug]));
+    let merged: BTreeSet<String> = context::held_by_any_context(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(merged, set(&[&epic, &story, &bug]));
+}
+
 /// ADR-0007's pinned failure direction for the parent read: it misses, never
 /// guesses. A parent in another source's namespace is not this epic's child,
 /// and a `fields.parent` the path does not fit contributes nothing -- the
 /// failure is an absent member, never a wrong one.
+///
+/// The epic is a real `Epic` and a well-formed child must come in: a ticket
+/// context seeds no children at all, so against one every "contributes
+/// nothing" below would hold whatever the parent read did. The classic arm
+/// (`epic`, #641) gets the same two misses -- a bare string, and a key in
+/// another source -- and one more: where `fields.parent` resolves it wins, so
+/// a sub-task whose `epic` names this epic is still its own parent's child.
 #[tokio::test]
 async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     let pool = scratch().await;
-    let epic = with_payload(&pool, "ticket", "EPIC-1", serde_json::json!({})).await;
+    let epic = with_payload(
+        &pool,
+        "ticket",
+        "EPIC-1",
+        serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
+    )
+    .await;
+    let child = with_payload(
+        &pool,
+        "ticket",
+        "PAY-1",
+        serde_json::json!({"fields": {}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
     // Same key, different source: two Jiras are two namespaces.
     let foreign = mirrored(
         &pool,
@@ -394,6 +460,31 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     )
     .await;
 
+    // The classic spelling, the same two misses.
+    let foreign_classic = mirrored(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "PAY-4",
+        serde_json::json!({"fields": {}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+    let misshapen_classic = with_payload(
+        &pool,
+        "ticket",
+        "PAY-5",
+        serde_json::json!({"fields": {}, "epic": "EPIC-1"}),
+    )
+    .await;
+    // `fields.parent` is the first candidate: its parent is PAY-9, not EPIC-1.
+    let subtask = with_payload(
+        &pool,
+        "ticket",
+        "PAY-6",
+        serde_json::json!({"fields": {"parent": {"key": "PAY-9"}}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+
     let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
         .await
         .unwrap()
@@ -402,14 +493,22 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
 
     let got = members(&pool, &ctx.id).await;
     assert!(
-        !got.contains(&foreign),
-        "{foreign} is another source's ticket"
+        got.contains(&child),
+        "the well-formed child is not a member, so this test asserts nothing: {got:?}"
     );
-    assert!(
-        !got.contains(&misshapen),
-        "{misshapen}'s parent is not the recorded shape"
-    );
-    assert_eq!(got, set(&[&epic]));
+    for (other, why) in [
+        (&foreign, "is another source's ticket"),
+        (&misshapen, "has a parent that is not the recorded shape"),
+        (&foreign_classic, "is another source's ticket"),
+        (
+            &misshapen_classic,
+            "has an epic that is not the recorded shape",
+        ),
+        (&subtask, "has a direct parent, which wins over its epic"),
+    ] {
+        assert!(!got.contains(other), "{other} {why}");
+    }
+    assert_eq!(got, set(&[&epic, &child]));
 }
 
 /// A shared member must not union two contexts: the walk never traverses a
@@ -873,6 +972,29 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         serde_json::json!({"fields": {"parent": "EPIC-1"}}),
     )
     .await;
+    // The classic spelling (#641): one that fits, and the same two misses.
+    let classic = with_payload(
+        &pool,
+        "ticket",
+        "PAY-5",
+        serde_json::json!({"fields": {}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+    let foreign_classic = mirrored(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "PAY-6",
+        serde_json::json!({"fields": {}, "epic": {"key": "EPIC-1"}}),
+    )
+    .await;
+    let misshapen_classic = with_payload(
+        &pool,
+        "ticket",
+        "PAY-7",
+        serde_json::json!({"fields": {}, "epic": "EPIC-1"}),
+    )
+    .await;
     context::promote(&pool, &EntityRef::parse(&epic).unwrap())
         .await
         .unwrap()
@@ -883,16 +1005,21 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         .unwrap()
         .into_iter()
         .collect();
-    assert!(
-        got.contains(&child),
-        "the well-formed child is not in the walk, so this test asserts nothing: {got:?}"
-    );
-    assert!(
-        !got.contains(&foreign),
-        "{foreign} is another source's ticket"
-    );
-    assert!(
-        !got.contains(&misshapen),
-        "{misshapen}'s parent is not the recorded shape"
-    );
+    for fits in [&child, &classic] {
+        assert!(
+            got.contains(fits),
+            "the well-formed child {fits} is not in the walk, so this test asserts nothing: {got:?}"
+        );
+    }
+    for (other, why) in [
+        (&foreign, "is another source's ticket"),
+        (&misshapen, "has a parent that is not the recorded shape"),
+        (&foreign_classic, "is another source's ticket"),
+        (
+            &misshapen_classic,
+            "has an epic that is not the recorded shape",
+        ),
+    ] {
+        assert!(!got.contains(other), "{other} {why}");
+    }
 }
