@@ -9,6 +9,7 @@
   own label and monogram when it declares them, the title-cased kind otherwise.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
@@ -42,6 +43,7 @@
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
+  import { sameAnswer, VIEW_PATIENCE_MS, viewMemory } from "./view-read";
   import { actionName, actionPayload } from "./view/actions";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
@@ -86,18 +88,29 @@
   $effect(() => {
     const id = entityId;
     const mine = ++token;
-    detail = null;
+    // An entity seen moments ago (back, forward) is drawn as it was, at once,
+    // and both reads below replace it in place only where they differ (#693).
+    const held = viewMemory.recall(id);
+    detail = held?.detail ?? null;
     error = null;
-    sourceView = null;
+    sourceView = held?.view ?? null;
     viewFailure = null;
+    viewAnswered = held !== null && held.view !== undefined;
     settingMarks = {};
     settingWrites = {};
     watchQueue(false);
-    void getEntity(id)
+    // Untracked: the effect reads back what it just wrote, and tracking that
+    // would re-open the panel every time a view landed.
+    const recalledView = untrack(() => sourceView);
+    if (recalledView) void adoptQueuedSettings(recalledView, mine);
+    // Both reads at once: the view does not need the row, and starting it a
+    // round trip later is a round trip more of placeholder.
+    const getting = getEntity(id);
+    const patience = readView(id, mine);
+    void getting
       .then((answer) => {
         if (mine !== token) return;
-        detail = answer;
-        readView(id, mine);
+        if (!sameAnswer(detail, answer)) detail = answer;
       })
       .catch((rejection) => {
         if (mine !== token) return;
@@ -106,6 +119,7 @@
           message: ipcErrorMessage(rejection),
         };
       });
+    return () => clearTimeout(patience);
   });
 
   // -- the source view (#661, ADR-0020) ---------------------------------------
@@ -124,6 +138,37 @@
   let viewFailure = $state<string | null>(null);
   /** Whether the reader opened *Raw*; its projection is drawn only then. */
   let rawOpen = $state(false);
+  /** Whether the source has answered the view read (a view, `None` or a failure). */
+  let viewAnswered = $state(false);
+  /** Whether the read has outlasted {@link VIEW_PATIENCE_MS}. */
+  let viewOverdue = $state(false);
+
+  /**
+   * Whether the body waits for the view rather than drawing the mirror's
+   * (#693). A body drawn and then swapped for tabs is the jump this ends: the
+   * description vanished and the panel moved under the reader. So while the
+   * read is in flight the body is one placeholder line -- except for a source
+   * that answered `None` for this kind already this session, which draws its
+   * generic body at once, and except past the patience, when the mirror is
+   * drawn under its line and a late view still replaces it.
+   */
+  const viewWaiting = $derived(
+    detail !== null &&
+      !viewAnswered &&
+      !viewOverdue &&
+      !viewMemory.drawsNothing(detail.source.id, detail.row.kind),
+  );
+
+  /**
+   * What the panel draws, remembered for the next opening (#693): a view or
+   * `None` once answered; the row alone while the read is in flight or after
+   * it failed, so a return draws the row and reads the view again.
+   */
+  $effect(() => {
+    if (detail === null || detail.row.entity_id !== entityId) return;
+    const answered = viewAnswered && viewFailure === null;
+    viewMemory.keep(entityId, { detail, view: answered ? sourceView : undefined });
+  });
 
   /**
    * Ask the entity's source for its view. Keyed on `token`, the read
@@ -133,17 +178,32 @@
    * what the source draws. A write queued from the view is what re-reads it
    * (`rereadView`).
    */
-  function readView(id: string, mine: number) {
+  function readView(id: string, mine: number): ReturnType<typeof setTimeout> {
     rawOpen = false;
+    viewOverdue = false;
+    const patience = setTimeout(() => {
+      if (mine === token) viewOverdue = true;
+    }, VIEW_PATIENCE_MS);
     void entityView(id)
       .then((answer) => {
         if (mine !== token) return;
+        viewAnswered = true;
+        // The same answer as the one drawn from memory is not redrawn: the
+        // open tab stays where the reader left it.
+        if (sameAnswer(sourceView, answer)) return;
         sourceView = answer;
         if (answer) void adoptQueuedSettings(answer, mine);
       })
       .catch((rejection: unknown) => {
-        if (mine === token) viewFailure = ipcErrorMessage(rejection);
-      });
+        if (mine !== token) return;
+        viewAnswered = true;
+        // Rule 2: a failed read draws the mirror under its line, even where
+        // memory had drawn a view a moment ago.
+        sourceView = null;
+        viewFailure = ipcErrorMessage(rejection);
+      })
+      .finally(() => clearTimeout(patience));
+    return patience;
   }
 
   /**
@@ -1195,6 +1255,12 @@
           <span class="pulse"></span>
           Showing the mirror: {viewFailure}
         </p>
+      {:else if !viewAnswered && viewOverdue}
+        <!-- Past the patience (#693): the mirror now, and the view when it lands. -->
+        <p class="mirror-line">
+          <span class="pulse"></span>
+          Showing the mirror: {detail.source.display_name} has not answered yet
+        </p>
       {/if}
 
       {#if sourceView}
@@ -1218,7 +1284,17 @@
         two sections, because it is one thing — what this item says — and a
         panel that could show both would show a page twice.
       -->
-      {#if pageParts}
+      {#if viewWaiting}
+        <!--
+          The body's place while the view is read (#693): one quiet line, and
+          the height a view takes reserved, so nothing below moves when it
+          lands. The header, path and links above and below are the mirror's
+          and are already drawn.
+        -->
+        <div class="sec view-wait" aria-busy="true">
+          <p class="muted">Reading from {detail.source.display_name}…</p>
+        </div>
+      {:else if pageParts}
         <div class="sec">
           <div class="sec-h"><span class="lab">Description</span></div>
           {#if pageParts.preamble.length > 0}
@@ -1329,7 +1405,7 @@
         none: a *Comments* heading over nothing is a section that says only
         that the reader has been counted.
       -->
-      {#if pageComments.length > 0 || canCommentOnPage}
+      {#if !viewWaiting && (pageComments.length > 0 || canCommentOnPage)}
         <div class="sec">
           <div class="sec-h">
             <span class="lab">Comments</span>
@@ -1399,7 +1475,7 @@
             <PayloadView {fields} />
           {/if}
         </details>
-      {:else}
+      {:else if !viewWaiting}
         <div class="sec">
           <div class="sec-h">
             <span class="lab">Details</span>
@@ -1479,6 +1555,18 @@
     flex: none;
     border-radius: 50%;
     background: var(--amber);
+  }
+
+  /*
+    The placeholder holds roughly the height a view's tab bar and first
+    section take, so the links under it stay put when the tabs arrive.
+  */
+  .view-wait {
+    min-height: 320px;
+  }
+
+  .view-wait p {
+    font: 400 12px var(--mono);
   }
 
   /* *Raw*: a disclosure in the section's own heading, quiet until opened. */
