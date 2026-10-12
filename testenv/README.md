@@ -416,6 +416,16 @@ the adapter's tests and the project census already expect:
 No configuration has a description: the fixture gives none, and the seed
 invents none, exactly as mockd does.
 
+**Parameters and a trigger, for the source view (#664).** The fixture says
+nothing about either, so the seed decides, all on `Payout_IntegrationTests`:
+`tidewater.region = eu-central-1` on project `Payout` (so the configuration
+shows it as *inherited*), `env.SEPA_RETRIES = 5` of its own, the password
+parameter `env.SEPA_SANDBOX_KEY`, and one VCS trigger on `+:feature/*` that is
+**disabled** -- enabled, it would queue a build on every push the Gitea live
+suite makes. `seed-state.json`'s `teamcity.settings` records the configuration
+and the password's made-up value, which `live_teamcity_seeded.rs` proves never
+reaches a view (and which TeamCity itself never serves back).
+
 **The default branch is queued as `<default>`.** The VCS root's branch
 specification names `main` along with the feature branches, and a build
 queued with an explicit `branchName: main` resolves against that
