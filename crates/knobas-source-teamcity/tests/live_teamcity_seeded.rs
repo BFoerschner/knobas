@@ -2279,7 +2279,8 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
         .await
         .expect_err("an edit against a value that has changed since is refused");
     assert!(
-        format!("{stale:?}").contains(&format!("now {own_after:?}")),
+        matches!(&stale, knobas_source::SourceError::Protocol { message, .. }
+            if message.contains(&format!("now {own_after:?}"))),
         "{stale:?}"
     );
     assert_eq!(named(&parameters().await, OWN).value, own_after);
@@ -2328,7 +2329,7 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
         "the password's value is in the view"
     );
     println!(
-        "SEEDED {config}: {OWN} {own_before:?} -> {own_after:?} (a stale edit refused: {stale}), {INHERITED} inherited {:?} -> own \
+        "SEEDED {config}: {OWN} {own_before:?} -> {own_after:?} (a stale edit refused: {stale:?}), {INHERITED} inherited {:?} -> own \
          {region_after:?} (project still {:?}), {} written and still a password",
         inherited_before["value"], project_value["value"], settings.secret_parameter
     );
