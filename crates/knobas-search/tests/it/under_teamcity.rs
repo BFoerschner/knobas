@@ -6,8 +6,8 @@
 //! its `id`. These items are shaped the way the real adapter stores them -- a
 //! build's raw record with its nested `buildType`, a configuration's raw
 //! `buildType` record -- and the declaration is that adapter's own
-//! descriptor, not a copy of it. One database for the file, a unique token per
-//! test, nothing truncated: the house rule of `under.rs`.
+//! descriptor, not a copy of it. One database for the file (one per test
+//! module, #572), a unique token per test, nothing truncated, as in `under.rs`.
 
 use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
 
@@ -139,10 +139,9 @@ fn sorted(mut ids: Vec<String>) -> Vec<String> {
     ids
 }
 
-/// The configuration's name -- the title TeamCity gives it -- and its id, in
-/// any case, both return its builds
-/// **and** the configuration itself -- and nothing of the configuration
-/// beside it, though the two share a project.
+/// The configuration's name (the title TeamCity gives it) and its id, matched
+/// ignoring case, both return its builds **and** the configuration itself,
+/// and nothing of the configuration beside it, though the two share a project.
 #[tokio::test]
 async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
     let pool = pool().await;
