@@ -422,3 +422,94 @@ No glossary change. **Parent** and **Declared path** stay true: the adapter stil
 - **Ordering.** #629 also edits `tests/perf.rs` and the recipe's `expected` pin, so whichever lands second rebases, as #629 already says.
 
 **If you disagree, the cost of reversing this is:** before merge, nothing beyond the branch's work: the implementer has the benchmark and can take any other route. After merge, it costs one migration that drops the two tables and the trigger code, with a §10.8 entry, plus restoring `parent_names!` and the predicate to the per-row walk (behaviour is identical, since the agreement test proves the two equal). The `under:` benchmark goes red again and #627 reopens. If you would rather have the implementer's writer-filled `text[]` column, the cost is the three cases above: an upgrade that changes a declaration needs a cursor bump and a full sync per source, and the search tests' seeds go through a fill helper rather than the path production uses. If you would rather have a narrower criterion, this ruling's first reasoning point says why that moves the §14 budget, which only you can do.
+
+## #627 — the declaration lock deadlocks `delete_source`: no stored row depends on a config row
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/627#issuecomment-6120675136>
+
+**The fork:** PR #630 builds migration `0028` to this issue's earlier ruling, and adds one thing that ruling did not ask for: an advisory lock on the pair `(627, 0)`. `sync.item`'s insert and update triggers take it shared. The triggers on `sync.parent_declaration` and on `knobas.source_config` take it exclusively. The lock closes a real race. Without it, `knobas-search`'s `it` failed 3 of 3 runs, because an item inserted while a declaration change was still uncommitted resolved against the old declarations, and the change's recompute never saw that item.
+
+The reviewing merge-manager found that, as written, the lock deadlocks `delete_source` against a sync of the same source (`mm-630-deadlock.sh`). The sequence:
+1. The run takes the shared key at its first batch flush and holds it until commit.
+2. `config::delete`'s `DELETE` row-locks the config row, and its trigger then waits for the exclusive key.
+3. The run's closing `update knobas.source_config set cursor` waits for that row lock.
+
+The reviewer also measured `add_source` of an unrelated source waiting 3 s behind an in-flight sync.
+
+The reviewer proposed keeping the exclusive key only for declaration changes. The item triggers would take `for key share` on their sources' `source_config` rows, and the `source_config` trigger would drop the lock. Two gaps would remain under that scheme: an update of `kind`, and a source inserted while its items are being written. The other options offered were per-source advisory keys, having `config::delete` take the lock in Rust, or accepting the deadlock as a residual in ADR-0019.
+
+**Ruling:** none of these. **The stored rows stop depending on `knobas.source_config`.** No trigger goes on that table, so nothing there needs a lock. This amends one clause in point 1 of this issue's earlier ruling: that a change to a config row's `kind` (insert, update or delete) recomputes that source's items. That clause is what brought the lock onto `delete_source`'s path.
+
+1. **`sync.item_parent` gains `adapter_kind text not null`.** For each item, the trigger stores the `(name, kind)` rows that each stored adapter's declarations yield for it, tagged with that adapter kind. It uses the same two macro expansions as now, with `$decl` bound per adapter as `{<the item's source_id>: <that adapter's kinds>}`. An item gets rows only for the adapter kinds whose declarations reach its kind. In practice that is one, because kinds are per adapter. Which adapter kinds to try for each item is the implementer's choice, and the agreement test holds it.
+2. **The source's adapter is matched when the rows are read, not when they are stored.** `parent_names!` and `corpus::LIVE_ITEM.under` join `knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind`. That is the rule `Vocabulary::declaring` applies today, moved to read time. The next query then answers correctly, with nothing recomputed, for a source configured after its items were written, for a source that was removed, and for a source whose `kind` changed.
+3. **No trigger on `knobas.source_config`.** `sync.source_config_changed` and its trigger are removed, and so is `sync.parent_declarations()` if nothing else calls it. `sync.parent_declaration`'s triggers recompute the items whose kind the changed rows' old or new declarations name. A truncate still recomputes everything.
+4. **One lock remains, and only for declarations.** The item triggers keep `pg_advisory_xact_lock_shared(627, 0)`. `sync.parent_declaration`'s triggers keep the exclusive form, and keep the early return for a statement that changed no row. That is the race the lock was added for, and it stays closed. **Invariant, to be written in the migration and in ADR-0019:** the exclusive key is taken only by statements on `sync.parent_declaration`, and never by a trigger on a table that a sync run or a user command writes.
+
+**Witness tests.** Each runs on real PostgreSQL. Each has a mutation proof in the PR: the mutant is applied to a committed baseline, its diff is printed, and the test dies.
+
+- **Delete during a sync, in `knobas-sync`'s `it`, driving the real run.** Use `run_once` or the scheduler with a fake `Source`. ADR-0013 allows the trait-level fake here, and the database is real.
+  - The fake emits at least `BATCH` items, so that one flush has gone through the item trigger. It then signals and pauses. Only after that signal does the test call `config::delete(&pool, id, false)`.
+  - The test asserts that the delete returns while the run is still paused, within a deadline well short of the pause. It then releases the run and asserts that the run ends `Finished` and that neither side errored.
+  - A second case does the same with `purge_items: true`, with a flushed batch made only of items new to the mirror.
+  - The existing `a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted` pauses before the run's first flush. That is why `just check` stayed green over the deadlock.
+  - Mutants, both of which must kill the test: (a) a restored row trigger on `knobas.source_config` that takes `pg_advisory_xact_lock(627, 0)`, as the PR's current `source_config_changed` does; (b) the reviewer's variant, `for key share` on the batch's config rows in the item triggers.
+- **The original race stays closed, in `knobas-search`'s `it` (`item_parent.rs`).** Two connections, ordered by `pg_locks` and not by sleeps. Run both orders:
+  - (i) Connection A changes `sync.parent_declaration` and keeps its transaction open. Connection B inserts a `sync.item` of a declared kind. The test sees B waiting on the advisory lock (`granted = false`), commits A, then commits B.
+  - (ii) B inserts first and keeps its transaction open. A's declaration change waits. The test commits B, then A.
+  - After each order, the stored rows equal the per-row walk as the readers see it.
+  - Mutants: the shared lock removed from the item insert trigger, and the exclusive lock removed from the declaration trigger. Each must kill the test. This test replaces the PR body's *"The lock is not witnessed by a test of its own."*
+- **A search command never waits on a sync.** Open a transaction that holds the shared key, such as a run paused after a flush. While it is open, `Searcher::declaring` with the declarations already stored returns within a deadline. Mutant: `Searcher::declaring` always writes, and the trigger's no-row early return is removed. The test must die.
+- **The existing agreement test keeps all seven steps:** insert, payload update, delete, declaration change, source configured after its items, kind changed, source removed. It compares what the readers return, join included, against the per-row walk bound to `Vocabulary::declaring`.
+- **The benchmark and the write cost.** All four benchmark cases stay under 100 ms p90 with the read-time join. Measure the write cost again (the seed, and the parenting update) and record the new numbers beside the old ones.
+
+**What happens to the remaining gaps:**
+
+- *An update of `source_config.kind`* and *a source inserted while its items are being written* are **covered** by point 2. No stored row depends on the config row, so there is no order to keep.
+- **A residual, recorded in ADR-0019:** a declaration change waits for every in-flight run to commit, and while it waits, PostgreSQL queues later item writes behind it. A run holds its transaction across its HTTP work (§10.6(c)), so the wait can be minutes.
+  - It happens only when the stored declarations differ from the binary's. That is the first bring-up after an upgrade, or a second binary with different declarations on the same database. Bring-up writes the declarations before the first sync, so normally no run is in flight then.
+  - It cannot deadlock, because the declaration writer holds no lock that a run takes (the invariant in point 4).
+- **A finding outside #627, for the PR to report and the loop to triage.** `PURGE_ITEMS` deletes `sync.item` rows, and an in-flight run's `ITEM_UPSERT` has already row-locked the rows it updated. So `delete_source(purge_items: true)` already waits for a run that has re-written existing items to commit. This wait existed before `0028`, and this PR must not add to it. It is also why the second witness case flushes only new items.
+
+**ADR-0019 (still `proposed`) must say:**
+- The stored rows depend on the item and on `sync.parent_declaration`, and on nothing else. The source's adapter is joined at read time, because a trigger on `knobas.source_config` would put the sync's lock on `delete_source`'s path.
+- The lock, what it orders, and the invariant in point 4.
+- Under **Considered options**, the rejected schemes:
+  - the exclusive key on a `source_config` trigger: deadlock, shown by `mm-630-deadlock.sh`;
+  - `for key share` on the config rows: the delete waits for the run's commit, against #127;
+  - per-source advisory keys: the same deadlock, per source;
+  - the lock taken in Rust by `config::delete`: Rust on the write path, and the delete still waits;
+  - accepting the deadlock: PostgreSQL aborts one side, either a run's whole transaction or the user's delete.
+- The residual above, with its reason.
+- The first-trigger paragraph's *"its source's configured adapter kind"* and the summary's *"when a source's adapter kind changes"* are removed, because neither is stored any more.
+
+**The §10.8 entry (still GATED) must:**
+- add `adapter_kind` to `sync.item_parent`'s shape;
+- remove the `knobas.source_config` trigger, and `sync.parent_declarations()` if it goes;
+- say that readers join `knobas.source_config` on `id` and `kind = adapter_kind`;
+- state the lock and its invariant;
+- list the three new tests under **Witness**, each with the mutant that kills it;
+- keep its claim that every `knobas` table is untouched. Today the entry makes that claim while the migration puts a trigger on `knobas.source_config`. With this ruling the claim becomes true.
+
+Append this ruling to `docs/decisions/2026-10-unattended-rulings.md` under #627. No glossary change.
+
+**Reasoning:**
+
+- **`delete_source`'s timing is already settled, and both lock-based fixes change it.**
+  - #127's ruling keeps *"same command name, same parameters (`id`, `purge_items`), same return, same non-blocking timing"*. Among the things that *"sends this back to Björn"*, it lists *"Any shape that changes what `delete_source` promises over IPC: cancelling the run, blocking until it stops"*.
+  - A run takes the shared key at its first 500-item flush (`BATCH`) and holds it until commit. §10.6(c) records that the commit comes after the run's HTTP work.
+  - The PR's scheme makes the delete wait for that commit, and then deadlocks it.
+  - The reviewer's scheme removes the deadlock but keeps the wait. In the reviewer's words, *"a delete or key change of the row now waits on that row lock instead"*. Both scripts committed on both sides because the delete waited out the run's sleep.
+  - Per-source keys deadlock the same way, per source.
+  - A lock in `config::delete` is Rust on the write path, which point 2 of the earlier ruling rules out, and the delete still waits.
+  - Accepting the deadlock means one side is aborted after `deadlock_timeout`.
+  - None of these can be ruled here without reopening #127, and #127 sends that question to Björn.
+- **The dependency that needs the lock is not needed.** The source-to-adapter mapping is one row per source, in a table of a handful of rows. Joining it at read time adds a hash join to the index lookup the benchmark already makes. Storing it puts a trigger on the table that every source command writes. Without the dependency, both of the reviewer's remaining gaps disappear, and `add_source` has nothing to wait on.
+- **Frozen surface.** This adds one column, and removes a trigger on a `knobas` table along with its function. That is smaller than the PR's surface and smaller than the reviewer's variant.
+- **Witness (ADR-0013).** The deadlock got past the gate because the one test that deletes during a run pauses before the run's first write. The two endpoints were tested, but the interaction between them was not. The new test drives the real run's statement order. If that order changes later, for example when §10.6(c) moves the transaction boundary, the lock is tested against the new order, not against a script's copy of the old one. The race test orders its connections by `pg_locks`, because a sleep cannot make a test pass (#154's bar).
+- **Scope unchanged.** The ticket, its criteria, points 2–5 of the earlier ruling, and the reader fragment that #615 shares all stand. The only change is where a stored row is matched to its source's adapter.
+
+**If you disagree, the cost of reversing this is:** before merge, nothing beyond the branch's work.
+- **The reviewer's `for key share` scheme instead:** `delete_source` waits for an in-flight run of its source to commit. That reverses #127's "same non-blocking timing" on a frozen command and needs a §10.8 entry of its own. The `adapter_kind` column and the read-time join come out, and the two `kind` gaps go into ADR-0019 as residuals.
+- **Accepting the deadlock instead:** ADR-0019 records that deleting a source while its sync has written a batch aborts either the run or the delete.
+- **After merge:** one migration that drops `adapter_kind` and restores a `source_config` trigger in the locking shape you choose, with a §10.8 entry. The readers lose the join.
