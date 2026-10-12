@@ -484,3 +484,73 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
         assert_eq!(server.received_requests().await.unwrap().len(), 5);
     }
 }
+
+/// The overview's actions block, when it has one.
+fn actions_of(section: &ViewSection) -> Option<&[knobas_source::view::ViewAction]> {
+    section.blocks.iter().find_map(|b| match b {
+        Block::Actions { actions } => Some(actions.as_slice()),
+        _ => None,
+    })
+}
+
+/// Story 10 (issue #667): an open pull request Gitea says it can merge offers
+/// *Merge…*, right under its facts, with the three styles and `merge` first;
+/// its dialog names what goes where.
+#[tokio::test]
+async fn an_open_mergeable_pull_request_offers_a_merge() {
+    let mut pull = open_pull();
+    pull["mergeable"] = json!(true);
+    let server = gitea(pull, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    assert_eq!(
+        overview.blocks[1],
+        Block::Actions {
+            actions: vec![knobas_source::view::ViewAction {
+                write_op: "merge_pull_request".into(),
+                label: "Merge…".into(),
+                options: vec!["merge".into(), "rebase".into(), "squash".into()],
+                confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
+            }],
+        },
+        "{overview:#?}"
+    );
+    // The description still follows.
+    assert!(matches!(overview.blocks[2], Block::Text { .. }));
+    // Every style offered is one the SPI can carry.
+    let Block::Actions { actions } = &overview.blocks[1] else {
+        unreachable!()
+    };
+    for option in &actions[0].options {
+        serde_json::from_value::<knobas_source::MergeStyle>(json!(option))
+            .unwrap_or_else(|e| panic!("{option:?} is not a MergeStyle: {e}"));
+    }
+}
+
+/// Nothing to offer where Gitea would refuse: an open pull request it says it
+/// cannot merge (a conflict, a work-in-progress title, a check still running),
+/// one it has not answered for, a closed one and a merged one.
+#[tokio::test]
+async fn a_pull_request_gitea_would_not_merge_offers_nothing() {
+    let not_mergeable = open_pull();
+    let mut unknown = open_pull();
+    unknown.as_object_mut().unwrap().remove("mergeable");
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    closed["mergeable"] = json!(true);
+    let mut merged = open_pull();
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    merged["mergeable"] = json!(true);
+    for (name, pull) in [
+        ("not mergeable", not_mergeable),
+        ("unanswered", unknown),
+        ("closed", closed),
+        ("merged", merged),
+    ] {
+        let server = gitea(pull, json!([])).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        let overview = section(&view, "overview");
+        assert!(actions_of(overview).is_none(), "{name}: {overview:#?}");
+    }
+}

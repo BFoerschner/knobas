@@ -919,6 +919,10 @@ fn write_op_probes() -> Vec<WriteOp> {
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
         },
+        WriteOp::MergePullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::MergeStyle::Merge,
+        },
     ]
 }
 
@@ -947,7 +951,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::UpdatePage { .. }
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
-            | WriteOp::CreateMonitor { .. } => op.identifier(),
+            | WriteOp::CreateMonitor { .. }
+            | WriteOp::MergePullRequest { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1146,6 +1151,9 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             | WriteOp::Transition { .. }
             | WriteOp::Approve { .. }
             | WriteOp::UpdatePage { .. }
+            // A merge changes a pull request the mirror holds: what is left
+            // is that pull request, merged, which the next sync reads back.
+            | WriteOp::MergePullRequest { .. }
             // A build is not an artefact, and knobas never claimed one.
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }

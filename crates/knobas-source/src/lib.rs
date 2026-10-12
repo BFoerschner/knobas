@@ -399,6 +399,7 @@ impl SourceError {
 /// | [`TriggerBuild`](Self::TriggerBuild) | `"trigger_build"` | M2 (TeamCity) |
 /// | [`RerunBuild`](Self::RerunBuild) | `"rerun_build"` | M2 (TeamCity) |
 /// | [`LogWork`](Self::LogWork) | `"log_work"` | M3 (Jira) |
+/// | [`MergePullRequest`](Self::MergePullRequest) | `"merge_pull_request"` | source views (Gitea, #667) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -623,6 +624,54 @@ pub enum WriteOp {
         name: String,
         url: String,
     },
+    /// Identifier `"merge_pull_request"`. Merge a pull request into its base
+    /// (spec #660 story 10, issue #667). `entity` is the **pull request**.
+    ///
+    /// `style` is how, in knobas' words rather than one server's: Gitea calls
+    /// the field `Do` and spells the same three values, and a GitLab adapter
+    /// would map them onto its own merge-method switches. A closed set, so a
+    /// payload naming a style no adapter can perform fails to decode at
+    /// `submit_write` rather than reaching a source.
+    ///
+    /// Whether the pull request can be merged *right now* is the source's
+    /// answer and not the op's: the view offers the action only where the
+    /// source said mergeable, and a merge that became impossible between the
+    /// offer and the flush comes back refused with the source's own sentence
+    /// (ADR-0004). Hold detection takes the whole mirrored record, as for
+    /// [`Approve`](WriteOp::Approve): a merge is a judgement on one state of
+    /// the pull request, and a push after it was queued is a reason to look
+    /// again.
+    MergePullRequest { entity: String, style: MergeStyle },
+}
+
+/// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
+/// the base branch. Serialized as the lowercase word (`"squash"`), which is
+/// also what a source view's merge action offers as its options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeStyle {
+    /// A merge commit joining head into base.
+    Merge,
+    /// The head's commits replayed onto base, no merge commit.
+    Rebase,
+    /// The head's commits folded into one commit on base.
+    Squash,
+}
+
+impl MergeStyle {
+    /// Every style, in the order a view offers them: `merge` first, the
+    /// default a source's own *Merge* button takes.
+    pub const ALL: [MergeStyle; 3] = [MergeStyle::Merge, MergeStyle::Rebase, MergeStyle::Squash];
+
+    /// The word on the wire, which is also the option a view offers.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MergeStyle::Merge => "merge",
+            MergeStyle::Rebase => "rebase",
+            MergeStyle::Squash => "squash",
+        }
+    }
 }
 
 /// The key half of what a [`CreateMonitor`](WriteOp::CreateMonitor) targets.
@@ -685,6 +734,7 @@ impl WriteOp {
             WriteOp::PauseMonitor { .. } => "pause_monitor",
             WriteOp::ResumeMonitor { .. } => "resume_monitor",
             WriteOp::CreateMonitor { .. } => "create_monitor",
+            WriteOp::MergePullRequest { .. } => "merge_pull_request",
         }
     }
 }
@@ -1090,6 +1140,10 @@ mod tests {
                 name: "gitea".into(),
                 url: "http://gitea:3000/api/healthz".into(),
             },
+            WriteOp::MergePullRequest {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                style: MergeStyle::Squash,
+            },
         ];
         for op in &probes {
             match op {
@@ -1106,7 +1160,8 @@ mod tests {
                 | WriteOp::UpdatePage { .. }
                 | WriteOp::PauseMonitor { .. }
                 | WriteOp::ResumeMonitor { .. }
-                | WriteOp::CreateMonitor { .. } => {}
+                | WriteOp::CreateMonitor { .. }
+                | WriteOp::MergePullRequest { .. } => {}
             }
         }
         probes
@@ -1138,6 +1193,32 @@ mod tests {
         );
     }
 
+    /// A merge's style crosses as the lowercase word a view's merge action
+    /// offers as its option, and a word outside the three does not decode --
+    /// so `submit_write` refuses it rather than a source (issue #667).
+    #[test]
+    fn a_merge_style_is_its_lowercase_word_and_nothing_else_decodes() {
+        for (style, word) in [
+            (MergeStyle::Merge, "merge"),
+            (MergeStyle::Rebase, "rebase"),
+            (MergeStyle::Squash, "squash"),
+        ] {
+            assert_eq!(style.as_str(), word);
+            let op = WriteOp::MergePullRequest {
+                entity: "gitea:o/r#1".into(),
+                style,
+            };
+            assert_eq!(
+                serde_json::to_value(&op).unwrap(),
+                serde_json::json!({ "MergePullRequest": { "entity": "gitea:o/r#1", "style": word } })
+            );
+        }
+        let odd = serde_json::from_value::<WriteOp>(serde_json::json!({
+            "MergePullRequest": { "entity": "gitea:o/r#1", "style": "fast-forward-only" }
+        }));
+        assert!(odd.is_err(), "{odd:?}");
+    }
+
     /// The identifier is what a descriptor lists, what the queue stores in its
     /// `op` column and what hold detection dispatches on. Two variants sharing
     /// one would make a descriptor's declaration ambiguous and a queued row
@@ -1156,7 +1237,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 14, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 15, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

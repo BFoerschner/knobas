@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
+use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewRow, ViewSection};
 
 use super::{fact, login, short, when_of};
 use crate::model::{Commit, UserRef};
@@ -99,6 +99,7 @@ impl PullView<'_> {
         let mut facts = overview_facts(pull);
         facts.extend(verdicts(&reviews));
         let mut blocks = vec![Block::Facts { facts }];
+        blocks.extend(merge_action(pull));
         let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
         if !body.trim().is_empty() {
             blocks.push(Block::Text {
@@ -279,6 +280,39 @@ fn files_stub(pull: &Pull) -> ViewSection {
         deferred: true,
         blocks: Vec::new(),
     }
+}
+
+/// *Merge…*, when Gitea would merge this pull request now (issue #667): it is
+/// open, not merged, and Gitea answered `mergeable: true`.
+///
+/// Gitea's flag already says *no* for a conflict, a work-in-progress title and
+/// a mergeability check still running, which are the 405s a merge would get;
+/// an absent flag is not a yes. The styles are the SPI's
+/// [`MergeStyle`](knobas_source::MergeStyle) words, `merge` first because it
+/// is Gitea's own default. Whether the account may merge is not asked: that is
+/// a refusal the write queue shows with Gitea's sentence (ADR-0004).
+fn merge_action(pull: &Pull) -> Option<Block> {
+    let open = !pull.merged && pull.state.as_deref() == Some("open");
+    if !(open && pull.mergeable == Some(true)) {
+        return None;
+    }
+    let head = pull.head.as_ref().and_then(|b| b.r#ref.as_deref());
+    let base = pull.base.as_ref().and_then(|b| b.r#ref.as_deref());
+    let confirm = match (head, base) {
+        (Some(head), Some(base)) => format!("Merge {head} into {base}?"),
+        _ => "Merge this pull request?".to_owned(),
+    };
+    Some(Block::Actions {
+        actions: vec![ViewAction {
+            write_op: crate::WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
+            label: "Merge…".to_owned(),
+            options: knobas_source::MergeStyle::ALL
+                .iter()
+                .map(|style| style.as_str().to_owned())
+                .collect(),
+            confirm: Some(confirm),
+        }],
+    })
 }
 
 /// State, author, `head → base`, whether it can be merged, its times.

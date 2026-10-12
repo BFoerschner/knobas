@@ -602,6 +602,9 @@ export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";
  */
 export type WaitReason = "unreachable" | "unauthorized";
 
+/** How a merge lands its commits — `knobas_source::MergeStyle`. */
+export type MergeStyle = "merge" | "rebase" | "squash";
+
 /**
  * The serialized `knobas_source::WriteOp` a queued write carries.
  *
@@ -634,6 +637,11 @@ export type WriteOpPayload =
       };
     }
   | { Approve: { entity: string; body: string } }
+  /**
+   * Merge a pull request (#667). `entity` is the **pull request**; `style` is
+   * `knobas_source::MergeStyle`, and a word outside the three does not decode.
+   */
+  | { MergePullRequest: { entity: string; style: MergeStyle } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

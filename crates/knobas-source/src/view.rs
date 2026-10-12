@@ -3,7 +3,7 @@
 //!
 //! A view is a list of [`ViewSection`]s, each a list of typed [`Block`]s from
 //! one fixed vocabulary -- facts, text, an entity list, a diff, a log,
-//! settings. The shell draws the vocabulary and never learns which adapter
+//! settings, actions. The shell draws the vocabulary and never learns which adapter
 //! drew a block, which is what keeps spec §3a's promise: a GitLab adapter that
 //! answers with a diff block gets the diff viewer on day one.
 //!
@@ -86,6 +86,33 @@ pub enum Block {
         write_op: String,
         values: Vec<Setting>,
     },
+    /// Writes a reader can start from here, one button each (issue #667,
+    /// ADR-0020 rule 4): *Merge…* on an open pull request the source says can
+    /// be merged.
+    ///
+    /// **Drawn only when each action is offered right now.** Whether a pull
+    /// request is mergeable is the source's answer, read in the adapter; the
+    /// shell never decides it by reading a fact's label or the payload
+    /// (ADR-0007). The shell additionally draws an action only where the
+    /// source's descriptor declares its `write_op`, and queues it through the
+    /// write queue against the entity the view is of. A view never writes.
+    Actions { actions: Vec<ViewAction> },
+}
+
+/// One write a [`Block::Actions`] offers.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ViewAction {
+    /// The [`WriteOp`](crate::WriteOp) identifier the action queues.
+    pub write_op: String,
+    /// The button's words, in the reader's language (`"Merge…"`).
+    pub label: String,
+    /// The choices the action's dialog offers, in the op's own words (a
+    /// merge's styles: `"merge"`, `"rebase"`, `"squash"`). The first is the
+    /// default. Empty when the op takes no choice.
+    pub options: Vec<String>,
+    /// The dialog's sentence, asking the reader to confirm. `None` queues on
+    /// the button with no dialog -- which only an op with no options may do.
+    pub confirm: Option<String>,
 }
 
 /// One label and its value.
@@ -202,6 +229,22 @@ mod tests {
                     description: Some("how often".into()),
                 }],
             },
+            Block::Actions {
+                actions: vec![
+                    ViewAction {
+                        write_op: "merge_pull_request".into(),
+                        label: "Merge…".into(),
+                        options: vec!["merge".into(), "rebase".into(), "squash".into()],
+                        confirm: Some("Merge feature/x into main?".into()),
+                    },
+                    ViewAction {
+                        write_op: "trigger_build".into(),
+                        label: "Run".into(),
+                        options: vec![],
+                        confirm: None,
+                    },
+                ],
+            },
         ];
         for block in &probes {
             match block {
@@ -210,7 +253,8 @@ mod tests {
                 | Block::Entities { .. }
                 | Block::Diff { .. }
                 | Block::Log { .. }
-                | Block::Settings { .. } => {}
+                | Block::Settings { .. }
+                | Block::Actions { .. } => {}
             }
         }
         probes
@@ -241,7 +285,7 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
         let back: SourceView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);
-        assert_eq!(view.sections[0].blocks.len(), 6, "a block lost its probe");
+        assert_eq!(view.sections[0].blocks.len(), 7, "a block lost its probe");
     }
 
     /// The wire shape the TypeScript mirror is written against: blocks are a
@@ -299,6 +343,26 @@ mod tests {
             })
             .unwrap()["type"],
             "settings"
+        );
+        assert_eq!(
+            serde_json::to_value(Block::Actions {
+                actions: vec![ViewAction {
+                    write_op: "merge_pull_request".into(),
+                    label: "Merge…".into(),
+                    options: vec!["merge".into(), "squash".into()],
+                    confirm: Some("Merge?".into()),
+                }],
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "actions",
+                "actions": [{
+                    "write_op": "merge_pull_request",
+                    "label": "Merge…",
+                    "options": ["merge", "squash"],
+                    "confirm": "Merge?"
+                }]
+            })
         );
     }
 }

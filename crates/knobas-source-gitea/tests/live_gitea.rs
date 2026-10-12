@@ -2315,3 +2315,180 @@ async fn repositories_gitea_refuses_pull_requests_for_do_not_end_a_full_sync() {
         "the rest of the repository is still walked"
     );
 }
+
+/// Story 10 (spec #660, issue #667), against the real server: a pull request
+/// Gitea can merge offers *Merge…* in its view, the adapter's
+/// `merge_pull_request` -- the call the write queue's flush makes -- merges it,
+/// and the next incremental sync reads it merged. The view then offers
+/// nothing.
+///
+/// # What it spends, and who takes it back
+///
+/// A merge is the one write here whose residue `DELETE` cannot reach on the
+/// default branch: a merge commit on `main` stays until a force-push or
+/// `testenv/reset`, and `main` is a branch `live_gitea_capped.rs` budgets
+/// (`start_work_live.rs` paid for that until #373). So this merges **into a
+/// scratch base branch of its own**, never `main`: both branches carry the
+/// `knobas-` prefix and [`Litter`] deletes the pull request (merged ones too,
+/// `DELETE issues/{n}`) and both branches whether the test passes or panics.
+/// The fixture needs no restore point, and the test asserts `main` did not
+/// move. No seeded pull request is consumed: each run opens a fresh one.
+///
+/// # Why the view is polled
+///
+/// Gitea computes `mergeable` in the background and answers `false` (and a
+/// merge *"Please try again later"*) until it has. The adapter offers the
+/// action only on `true`, so the test waits for the offer rather than for a
+/// clock -- which is also the assertion that the offer appears.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_reads_it_merged() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let main_head = || async {
+        let branch: serde_json::Value = http
+            .get(format!("{api}/branches/main"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read main")
+            .json()
+            .await
+            .expect("main is a branch record");
+        branch["commit"]["id"]
+            .as_str()
+            .expect("main has a head commit")
+            .to_owned()
+    };
+    let main_before = main_head().await;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let base = format!("knobas-merge-{stamp}-base");
+    let head = format!("knobas-merge-{stamp}");
+    litter.branch_off_main(&base).await;
+    litter.branch_off_main(&head).await;
+    // A pull request with no diff is not one Gitea will merge.
+    push_file(
+        &http,
+        &env,
+        &head,
+        &format!("{head}.txt"),
+        &format!("{head}: the work"),
+    )
+    .await;
+
+    let opened = http
+        .post(format!("{api}/pulls"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "head": head, "base": base,
+            "title": format!("knobas merge check {stamp}"),
+            "body": "Opened by the knobas Gitea adapter's live suite, to be merged from its view."
+        }))
+        .send()
+        .await
+        .expect("open the pull request");
+    assert!(
+        opened.status().is_success(),
+        "pull: {}",
+        opened.text().await.unwrap_or_default()
+    );
+    let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+        .as_u64()
+        .expect("Gitea answers with the new pull request's number");
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let (_, cursor) = full(&*source).await;
+
+    // 1. The view offers *Merge…*, once Gitea has computed that it can.
+    let actions_of = |view: &knobas_source::view::SourceView| {
+        view.sections[0].blocks.iter().find_map(|b| match b {
+            Block::Actions { actions } => Some(actions.clone()),
+            _ => None,
+        })
+    };
+    let mut offered = None;
+    for _ in 0..40 {
+        let view = source
+            .view(&id, None)
+            .await
+            .expect("the view reads")
+            .expect("Gitea draws a pull request");
+        offered = actions_of(&view);
+        if offered.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    let offered = offered.expect("Gitea never said the fresh pull request was mergeable");
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(offered[0].write_op, "merge_pull_request");
+    assert_eq!(offered[0].options, ["merge", "rebase", "squash"]);
+    assert_eq!(
+        offered[0].confirm.as_deref(),
+        Some(format!("Merge {head} into {base}?").as_str())
+    );
+
+    // 2. The merge, through the op the queue flushes.
+    source
+        .write(knobas_source::WriteOp::MergePullRequest {
+            entity: id.clone(),
+            style: knobas_source::MergeStyle::Merge,
+        })
+        .await
+        .expect("Gitea merges a pull request it said it could");
+    let record: serde_json::Value = http
+        .get(format!("{api}/pulls/{number}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the pull request back")
+        .json()
+        .await
+        .expect("a pull request record");
+    assert_eq!(
+        record["merged"], true,
+        "the server says it is not merged: {record}"
+    );
+
+    // 3. The next incremental sync reads it merged.
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("incremental sync");
+    let pr = sink
+        .0
+        .iter()
+        .find(|i| i.entity.to_string() == id)
+        .unwrap_or_else(|| panic!("the merged pull request did not come back with the next sync"));
+    assert_eq!(pr.payload["merged"], true, "{}", pr.payload);
+
+    // 4. And the view stops offering what has happened.
+    let view = source.view(&id, None).await.unwrap().unwrap();
+    assert!(actions_of(&view).is_none(), "{view:#?}");
+    let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+        panic!("the overview opens on facts: {view:#?}");
+    };
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.label == "State" && f.value == "merged"),
+        "{facts:?}"
+    );
+
+    assert_eq!(
+        main_head().await,
+        main_before,
+        "the merge reached the default branch, which no cleanup takes back"
+    );
+    println!("merged #{number} ({head} into {base}) from its view; the next sync read it merged");
+}

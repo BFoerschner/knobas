@@ -666,6 +666,10 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
         },
+        knobas_source::WriteOp::MergePullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::MergeStyle::Squash,
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -683,6 +687,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::PauseMonitor { .. } => "PauseMonitor",
             knobas_source::WriteOp::ResumeMonitor { .. } => "ResumeMonitor",
             knobas_source::WriteOp::CreateMonitor { .. } => "CreateMonitor",
+            knobas_source::WriteOp::MergePullRequest { .. } => "MergePullRequest",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

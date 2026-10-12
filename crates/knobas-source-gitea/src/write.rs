@@ -1,5 +1,5 @@
-//! The four writes M2 ratified for Gitea: branch, pull request, comment,
-//! approval.
+//! The four writes M2 ratified for Gitea -- branch, pull request, comment,
+//! approval -- and the merge the source views added (issue #667).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the Jira adapter's is:
 //! knobas has one outbound write path, and
@@ -17,6 +17,7 @@
 //! | pull request | `POST /repos/{o}/{r}/pulls` | `{"title":…,"body":…,"head":…,"base":…}` |
 //! | comment | `POST /repos/{o}/{r}/issues/{index}/comments` | `{"body":…}` |
 //! | approval | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":"APPROVED","body":…}` |
+//! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…}` |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -25,7 +26,7 @@
 
 use serde_json::json;
 
-use knobas_source::SourceError;
+use knobas_source::{MergeStyle, SourceError};
 
 use crate::client::GiteaClient;
 
@@ -139,6 +140,41 @@ pub(crate) async fn approve(
     );
     client
         .post(&path, &json!({ "event": "APPROVED", "body": body }))
+        .await
+        .map(|_| ())
+}
+
+/// Merge a pull request, the way `style` names (`merge`, `rebase`, `squash`).
+///
+/// `Do` is the field Gitea's `MergePullRequestOption` requires, and it takes
+/// the SPI's three words as they are. Nothing else is sent: the merge commit's
+/// title and message are Gitea's defaults, which is what its own *Merge*
+/// button does without the reader typing anything.
+///
+/// Gitea answers **405** for every pull request it will not merge -- a
+/// conflict, a work-in-progress title, one already merged, and *"Please try
+/// again later"* while it is still computing mergeability -- and that arrives
+/// as a `Protocol` refusal carrying its sentence, never retried (ADR-0004).
+/// The view offers the action only where Gitea said mergeable, which is what
+/// keeps the last of those rare.
+///
+/// # Errors
+///
+/// As [`create_branch`].
+pub(crate) async fn merge(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    style: MergeStyle,
+) -> Result<(), SourceError> {
+    let path = format!(
+        "/repos/{}/{}/pulls/{index}/merge",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?
+    );
+    client
+        .post(&path, &json!({ "Do": style.as_str() }))
         .await
         .map(|_| ())
 }
