@@ -1232,3 +1232,98 @@ async fn the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     }
     println!("worst p90 over the estate: {worst} ms");
 }
+
+/// How many repositories [`under_is_under_the_same_budget_beside_a_hundred_thousand_items`]
+/// spreads the Gitea commits across.
+///
+/// Prime, and so coprime to the fifteen `seed_corpus` cycles source and kind
+/// over: every repo gets commits. Forty would leave `repo-7` empty, since a
+/// Gitea commit's number is 4 mod 5 and so never 7 mod 40.
+const REPOS: i64 = 41;
+
+/// `under:` over the 100 k mirror with parents declared and present (#627).
+///
+/// # Why it is its own test, and why it sorts last
+///
+/// `under:` pays twice on every keystroke: `under::report_unknown` asks the
+/// mirror which values name a parent at all, and the scoped statement then
+/// filters by the parent each row declares. Neither was measured until #627,
+/// and the gate above could not have measured them: `seed_corpus` writes no
+/// parent into a payload, so a declared-parent read over it has nothing to
+/// walk, and nothing above binds a declaration.
+///
+/// So this gives the corpus's Gitea commits -- 6,667 of the 100,000 -- the
+/// `repository` object the Gitea adapter's `map` writes, spread over
+/// [`REPOS`] repositories, binds the real Gitea descriptor, and seeds the
+/// estate beside them, because `under:` also answers to an asset's name. It
+/// **rewrites payloads**, which every test that runs after it would inherit,
+/// so its name sorts after every other test in this file (the module docs'
+/// "one database" paragraph).
+///
+/// The timing is the **whole** `search` call: the unknown-token lookup and
+/// the scoped statement together, which is what the launcher waits for.
+#[tokio::test]
+#[ignore = "seeds a 100k corpus with declared parents and asserts on wall-clock time; run it deliberately"]
+async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
+    let pool = pool().await;
+    testing::seed_sources(&pool).await.unwrap();
+    testing::seed_corpus(&pool, 100_000).await.unwrap();
+    testing::seed_estate(&pool, "bench").await.unwrap();
+    let parented = sqlx::query(
+        "update sync.item
+            set payload = payload || jsonb_build_object('repository', jsonb_build_object(
+                  'id', (payload->>'n')::int % $1,
+                  'name', 'repo-' || (payload->>'n')::int % $1,
+                  'full_name', 'bench/repo-' || (payload->>'n')::int % $1))
+          where source_id = 'gitea' and kind = 'commit'",
+    )
+    .bind(REPOS)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .rows_affected();
+    testing::prepare(&pool).await.unwrap();
+    println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
+    assert!(parented > 0, "no Gitea commit in the corpus: the fixture moved");
+
+    let searcher = Searcher::new(pool.clone())
+        .with_payload_paths([knobas_source_gitea::descriptor_template()]);
+    for _ in 0..3 {
+        searcher.search(q("under:bench/repo-7")).await.unwrap();
+    }
+
+    // (name, raw, whether it should draw rows)
+    let cases: &[(&str, &str, bool)] = &[
+        ("repo, full name", "under:bench/repo-7", true),
+        ("repo, bare name", "under:repo-7", true),
+        ("repo + word", "under:bench/repo-7 payout", true),
+        ("name nothing has", "under:zzzznothing", false),
+    ];
+
+    let mut worst = 0_u128;
+    for (name, raw, draws) in cases {
+        let timing = timings(&searcher, raw, 10).await;
+        let response = searcher.search(q(raw)).await.unwrap();
+        let hits: usize = response.groups.iter().map(|group| group.hits.len()).sum();
+        println!(
+            "{name:<20} {hits:>4} drawn  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+            timing.p50, timing.p90, timing.max
+        );
+        // A repo case that draws nothing, or an unknown one that draws
+        // something, is a fixture that stopped being the one this measures.
+        assert_eq!(hits > 0, *draws, "{name} ({raw}) drew {hits}: the fixture moved");
+        assert_eq!(
+            response.interpreted.unknown_tokens.is_empty(),
+            *draws,
+            "{name} ({raw}) unknown tokens: {:?}",
+            response.interpreted.unknown_tokens
+        );
+        assert!(
+            timing.p90 < BUDGET_MS,
+            "{name} took {} ms at p90 (budget {BUDGET_MS} ms)",
+            timing.p90
+        );
+        worst = worst.max(timing.p90);
+    }
+    println!("worst p90 under under: {worst} ms");
+}
