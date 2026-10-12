@@ -1845,9 +1845,9 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
     assert_eq!(
         drawn,
         [
-            ("env.SEPA_RETRIES", "5", false, false, false),
-            (settings.secret_parameter.as_str(), "", false, true, false),
-            ("tidewater.region", "eu-central-1", true, false, false),
+            ("env.SEPA_RETRIES", "5", false, false, true),
+            (settings.secret_parameter.as_str(), "", false, true, true),
+            ("tidewater.region", "eu-central-1", true, false, true),
         ]
     );
     let serialized = serde_json::to_string(&view).expect("serializes");

@@ -350,6 +350,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "resume_monitor",
     "create_monitor",
     "merge_pull_request",
+    "set_parameter",
 ];
 
 /// What `op` counts as its target having changed.
@@ -379,8 +380,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// **The whole mirrored record** -- `"transition"`, `"approve"` and
 /// `"merge_pull_request"`, the ops that put a *judgement* onto a target whose
-/// current state is the whole reason for the judgement. Any change to the
-/// target at all holds the write.
+/// current state is the whole reason for the judgement, and `"set_parameter"`,
+/// which overwrites a value. Any change to the target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -411,6 +412,19 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   the base unread. Somebody else merging or closing it first changes the
 ///   record too, and holds the write rather than sending a merge Gitea would
 ///   refuse.
+/// * `"set_parameter"` by analogy with `"merge_pull_request"`, and with a
+///   limit worth stating (issue #668). The op **overwrites** a build
+///   configuration's parameter, so it belongs with the ops that replace
+///   something rather than with the creates that add beside it. But the
+///   configuration's mirrored record is its id, name, project and description
+///   (TeamCity's `BUILD_TYPE_FIELDS`), **not its parameters**, so this shape
+///   cannot see a colleague changing the same parameter between the edit and
+///   the flush: that write is last-wins, as it is in TeamCity's own UI. What
+///   it does hold on is the configuration being renamed, moved, re-described
+///   or deleted -- each a reason to look at what one is about to change. The
+///   cost is small because the record is quiet: it carries no timestamp
+///   (`updated_at` is `None`) and nothing a build changes, so a sync does not
+///   move it on its own, and a false hold is one *Apply anyway* away.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
@@ -1173,7 +1187,13 @@ mod tests {
         // The payload the shape carries is where a Confluence page keeps
         // `version.number`, which is why "the mirror's version has passed the
         // one the edit was made against" needs no separate check (#286).
-        for op in ["transition", "approve", "update_page", "merge_pull_request"] {
+        for op in [
+            "transition",
+            "approve",
+            "update_page",
+            "merge_pull_request",
+            "set_parameter",
+        ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
                 project(op, Some(&before)),

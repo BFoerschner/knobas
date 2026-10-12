@@ -1,4 +1,6 @@
-//! The two writes M2 ratified for TeamCity: trigger a build, and re-run one.
+//! The two writes M2 ratified for TeamCity -- trigger a build, and re-run
+//! one -- and setting a build configuration's parameter, which the source
+//! views added (issue #668).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the other two
 //! adapters' write modules are: knobas has one outbound write path, and
@@ -57,4 +59,37 @@ pub(crate) async fn trigger(rest: &HttpRest, build_type_id: &str) -> Result<(), 
 pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<(), SourceError> {
     let build_type_id = rest.build_type_of(build_id).await?;
     rest.queue_build(&build_type_id).await
+}
+
+/// Set parameter `name` of build configuration `build_type_id` to `value`.
+///
+/// `PUT /app/rest/buildTypes/id:{id}/parameters/{name}/value` with the value
+/// as `text/plain`. On a parameter the configuration inherits from a project
+/// or template, TeamCity creates an own parameter of that name that overrides
+/// the inherited one; the inherited value stays where it was. On a password
+/// parameter only the value changes and the spec stays `password`, so no
+/// view draws it afterwards (both measured on the seeded 2026.1.3 server,
+/// 2026-10-12).
+///
+/// Idempotent, so a retry after a lost answer sets the same value twice.
+///
+/// # Errors
+///
+/// As [`trigger`]: a 403 (the account may not edit the project) is
+/// `Unauthorized`, a 404 for a configuration that is gone a refusal carrying
+/// TeamCity's sentence, and an empty name is refused before a request.
+pub(crate) async fn set_parameter(
+    rest: &HttpRest,
+    build_type_id: &str,
+    name: &str,
+    value: &str,
+) -> Result<(), SourceError> {
+    // `.` and `..` survive the escaping and are dot-segments to a URL, which
+    // would aim the request at another resource; no parameter is called that.
+    if matches!(name, "" | "." | "..") {
+        return Err(SourceError::protocol(format!(
+            "teamcity: {name:?} is not a parameter name"
+        )));
+    }
+    rest.put_parameter(build_type_id, name, value).await
 }

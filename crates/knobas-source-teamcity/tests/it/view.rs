@@ -347,18 +347,20 @@ async fn parameters_mark_the_inherited_and_never_carry_a_passwords_value() {
         .collect();
     assert_eq!(
         drawn,
+        // Every one editable (#668): an own value is changed, an inherited
+        // one gets an own override, a password is written blind.
         [
-            ("env.SEPA_RETRIES", "5", false, false, false),
-            ("env.SEPA_SANDBOX_KEY", "", false, true, false),
-            ("tidewater.region", "eu-central-1", true, false, false),
+            ("env.SEPA_RETRIES", "5", false, false, true),
+            ("env.SEPA_SANDBOX_KEY", "", false, true, true),
+            ("tidewater.region", "eu-central-1", true, false, true),
             (
                 "vcs.mirror",
                 "https://git.example/p.git",
                 false,
                 false,
-                false
+                true
             ),
-            ("vcs.token", "", false, true, false),
+            ("vcs.token", "", false, true, true),
         ]
     );
 

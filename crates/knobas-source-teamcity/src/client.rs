@@ -221,6 +221,42 @@ impl HttpRest {
         self.client.send(request).await.map(|_| ())
     }
 
+    /// `PUT /app/rest/buildTypes/id:{id}/parameters/{name}/value` -- one
+    /// parameter's new value, as plain text (issue #668).
+    ///
+    /// **`Accept: text/plain`, replacing the client's default.** The value
+    /// resource produces text only, and TeamCity answers a request that
+    /// accepts nothing but JSON with **406, before it writes** (measured on
+    /// the seeded 2026.1.3 server, 2026-10-12). The answer -- the value now
+    /// held -- is dropped.
+    ///
+    /// The name is percent-encoded as one path segment: TeamCity's names are
+    /// the user's, and a `/` or `?` in one must not move the request.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the request maps to.
+    pub(crate) async fn put_parameter(
+        &self,
+        build_type_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), SourceError> {
+        let path = format!(
+            "app/rest/buildTypes/id:{build_type_id}/parameters/{}/value",
+            crate::view::path_escaped(name)
+        );
+        let request = self
+            .client
+            .request(knobas_http::Method::PUT, &path)
+            .header(
+                knobas_http::header::ACCEPT,
+                knobas_http::header::HeaderValue::from_static("text/plain"),
+            )
+            .text(value.to_owned());
+        self.client.send(request).await.map(|_| ())
+    }
+
     /// Which build configuration a build belonged to.
     ///
     /// `GET /app/rest/builds/id:{id}` with an explicit `fields=` like every

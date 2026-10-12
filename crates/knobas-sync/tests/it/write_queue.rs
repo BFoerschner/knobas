@@ -923,6 +923,11 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
         },
+        WriteOp::SetParameter {
+            entity: "teamcity:buildType:Payout_Build".to_owned(),
+            name: "env.SEPA_RETRIES".to_owned(),
+            value: "7".to_owned(),
+        },
     ]
 }
 
@@ -952,7 +957,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::PauseMonitor { .. }
             | WriteOp::ResumeMonitor { .. }
             | WriteOp::CreateMonitor { .. }
-            | WriteOp::MergePullRequest { .. } => op.identifier(),
+            | WriteOp::MergePullRequest { .. }
+            | WriteOp::SetParameter { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1154,6 +1160,10 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // A merge changes a pull request the mirror holds: what is left
             // is that pull request, merged, which the next sync reads back.
             | WriteOp::MergePullRequest { .. }
+            // A parameter set changes a value on a configuration the mirror
+            // holds: what is left is that value, at the source, and nothing
+            // new exists that knobas cannot name.
+            | WriteOp::SetParameter { .. }
             // A build is not an artefact, and knobas never claimed one.
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }

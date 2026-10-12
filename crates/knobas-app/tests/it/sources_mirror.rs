@@ -670,6 +670,11 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Squash,
         },
+        knobas_source::WriteOp::SetParameter {
+            entity: "teamcity:buildType:Payout_Build".to_owned(),
+            name: "env.SEPA_RETRIES".to_owned(),
+            value: "7".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -688,6 +693,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::ResumeMonitor { .. } => "ResumeMonitor",
             knobas_source::WriteOp::CreateMonitor { .. } => "CreateMonitor",
             knobas_source::WriteOp::MergePullRequest { .. } => "MergePullRequest",
+            knobas_source::WriteOp::SetParameter { .. } => "SetParameter",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

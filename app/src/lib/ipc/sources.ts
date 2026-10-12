@@ -642,6 +642,12 @@ export type WriteOpPayload =
    * `knobas_source::MergeStyle`, and a word outside the three does not decode.
    */
   | { MergePullRequest: { entity: string; style: MergeStyle } }
+  /**
+   * Set a build configuration's parameter (#668). `entity` is the
+   * **configuration**; `name` the parameter's full name. On an inherited
+   * parameter the source creates an own value that overrides it.
+   */
+  | { SetParameter: { entity: string; name: string; value: string } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

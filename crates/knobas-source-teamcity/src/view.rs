@@ -70,12 +70,6 @@ impl Tab {
 /// How many builds *Recent builds* lists, and the success rate is over.
 const RECENT_BUILDS: u32 = 20;
 
-/// The [`WriteOp`](knobas_source::WriteOp) identifier a parameter's edit will
-/// go through (spec #660). Named on the settings block now so the block's
-/// shape does not change when #668 makes values editable; every value is
-/// `editable: false` until then, so nothing can dispatch it.
-const WRITE_OP_SET_PARAMETER: &str = "set_parameter";
-
 /// What the view needs from the source: its namespace, the base URL a build's
 /// page is composed from, and the client.
 pub(crate) struct Viewer<'a> {
@@ -113,7 +107,7 @@ pub(crate) async fn draw(
 
 /// A configuration id as TeamCity issues them -- letters, digits and `_` --
 /// and so nothing that could leave the path segment or the locator it goes in.
-fn config_id<'k>(entity: &str, id: &'k str) -> Result<&'k str, SourceError> {
+pub(crate) fn config_id<'k>(entity: &str, id: &'k str) -> Result<&'k str, SourceError> {
     let ok = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     ok.then_some(id).ok_or_else(|| {
         SourceError::protocol(format!(
@@ -374,8 +368,11 @@ fn age(d: chrono::TimeDelta) -> String {
 
 // --- Parameters ---------------------------------------------------------
 
-/// Own and inherited, in TeamCity's order (by name), every one read-only
-/// until #668. Drawn by [`drawn_value`], the rule the build view uses too.
+/// Own and inherited, in TeamCity's order (by name), every one editable
+/// through `set_parameter` (#668), which this adapter declares: an own value
+/// is changed, an inherited one gets an own override, and a password is
+/// written without its old value ever being drawn. Drawn by [`drawn_value`],
+/// the rule the build view uses too.
 fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
     let values: Vec<Setting> = record
         .parameters
@@ -388,7 +385,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
                 value,
                 inherited: p.inherited,
                 secret,
-                editable: false,
+                editable: true,
                 description: None,
             }
         })
@@ -401,7 +398,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         vec![Block::Settings {
             title: None,
             entity: entity.to_owned(),
-            write_op: WRITE_OP_SET_PARAMETER.to_owned(),
+            write_op: crate::WRITE_OP_SET_PARAMETER.to_owned(),
             values,
         }],
     )
@@ -1088,9 +1085,9 @@ fn size_of(n: u64) -> String {
     format!("{size:.1} {}", UNITS[unit])
 }
 
-/// A file name as a URL path segment: everything but the unreserved
-/// characters percent-encoded.
-fn path_escaped(name: &str) -> String {
+/// A file or parameter name as a URL path segment: everything but the
+/// unreserved characters percent-encoded.
+pub(crate) fn path_escaped(name: &str) -> String {
     name.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
