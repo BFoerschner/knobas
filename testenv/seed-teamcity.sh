@@ -404,7 +404,24 @@ if [ -z "$TOKEN" ]; then
       walk_wizard
       # Out of maintenance. The application is up when the create-admin page
       # (or its redirect) renders; the REST API is not usable before that.
-      create_admin || die "left maintenance, but /setupAdmin.html shows no create form and $ADMIN_USER does not authenticate"
+      #
+      # No create form is ALSO what a set-up server that was merely stopped
+      # shows: its REST answered 503 above because the application was still
+      # starting, so this branch walked a wizard of nothing but
+      # APPLICATION_STARTING. That is every run since the products start on
+      # demand (testenv/live, #633), so the administrator's credentials are
+      # asked again now that the application is up, for up to a minute.
+      if ! create_admin; then
+        _i=0
+        while rest GET /app/rest/server; [ "$REST_STATUS" != "200" ] && [ "$REST_STATUS" != "401" ]; do
+          _i=$((_i + 1))
+          [ "$_i" -lt 12 ] || break
+          sleep 5
+        done
+        [ "$REST_STATUS" = "200" ] \
+          || die "left maintenance, but /setupAdmin.html shows no create form and $ADMIN_USER does not authenticate (REST $REST_STATUS)"
+        say "already set up: $ADMIN_USER authenticates, once the application had started"
+      fi
       wizard_end ;;
   esac
 

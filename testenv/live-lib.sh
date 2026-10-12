@@ -28,9 +28,9 @@
 #
 # WHAT `down` MEANS DIFFERS, ON PURPOSE. TeamCity and Gitea are *stopped*:
 # their volumes hold the seeded builds and the seeded corpus, and the next `up`
-# finds them seeded in seconds. Jira and Confluence are `down -v`: they run on
-# 3-hour timebomb licences that a restart does not renew, so a kept volume is a
-# product whose licence has already run out. Their seed-state.json block goes
+# finds them seeded in seconds. Jira and Confluence are removed with their
+# volumes: they run on 3-hour timebomb licences that a restart does not renew,
+# so a kept volume is a product whose licence has already run out. Their seed-state.json block goes
 # with them, so `./seed --env` stops printing a URL nothing answers.
 #
 # NEVER THE SERVERS. A shell that has sourced hetzner/env has a `docker` on its
@@ -161,10 +161,17 @@ live_down() {
     gitea) _live_compose stop gitea ;;
     teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent ;;
     jira | confluence)
-      # The two services NAMED: a profile-scoped `down -v` with none named
-      # takes the default profile's containers and volumes too, Gitea's
-      # seeded corpus included.
-      _live_compose --profile real-atlassian down -v "$1" "$1-db"
+      # `rm` and the two named volumes, NOT `down -v`. A `down` with services
+      # named still removes the project's network once no RUNNING container
+      # is on it -- and a stopped Gitea, TeamCity or Kuma is still attached
+      # to it by id, so the next `up` of any of them fails with "network ...
+      # not found" (seen on this branch's first runs, #633). Named volumes,
+      # because `rm -v` removes only anonymous ones.
+      _live_compose --profile real-atlassian rm --stop --force "$1" "$1-db"
+      local v
+      for v in "knobas-testenv_$1-data" "knobas-testenv_$1-db-data"; do
+        if docker volume inspect "$v" >/dev/null 2>&1; then docker volume rm "$v" >/dev/null; fi
+      done
       local state=$LIVE_TESTENV/seed-state.json
       if [ -f "$state" ]; then
         jq --arg k "$1" 'del(.[$k])' "$state" >"$state.tmp" && mv "$state.tmp" "$state"

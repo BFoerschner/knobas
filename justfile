@@ -1460,15 +1460,15 @@ _atlassian-live-names:
 # #633; ADR-0013): fetch the timebomb keys, start `jira-db` and `jira`, walk
 # the setup wizard, seed the Tidewater content (twice -- the second run must
 # write nothing, #396) and prove it by reading it back, run every live suite
-# gated on the Jira URL, and `down -v` the pair -- from a trap, so the
-# teardown runs when a step fails too. All of that is `live_session jira`
+# gated on the Jira URL, and remove the pair with its volumes -- from a trap,
+# so the teardown runs when a step fails too. All of that is `live_session jira`
 # (testenv/live-lib.sh); a Jira already up from `just live-up jira` is used
 # as it is and left up.
 #
 # THREE HOURS IS THE WINDOW. The licence is a 10-user timebomb key that expires
 # three hours after it is applied and that a restart does not renew; the
 # product is disposable by design, which is why a run that started it ends in
-# `down -v`. The suites take seconds.
+# removing it with its volumes. The suites take seconds.
 #
 # MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
 # with the images pulled: see `atlassian-live` below for the pair's history
@@ -1512,7 +1512,8 @@ jira-live:
 # its timebomb key fetched before the container's first start (Confluence
 # reads it there), `confluence-db` and `confluence` started, the wizard
 # walked, the content seeded twice and verified, every Confluence-gated suite
-# run, and `down -v` from a trap. Refuses while TeamCity or Jira is up.
+# run, and the pair removed with its volumes from a trap. Refuses while
+# TeamCity or Jira is up.
 #
 # THE SUITES. `live_confluence_seeded` (#284) -- the **only** witness that
 # adapter has, since ADR-0013 refused a mockd half for a product with no
