@@ -1118,8 +1118,10 @@ gitea-live-capped:
 
 # The start-work flow over the real Gitea: ticket -> branch -> pull request ->
 # link -> In Progress, and back again when the pull request is merged (issue
-# #44). The suite is `crates/knobas-app/tests/start_work_live.rs` and it is one
-# test, deliberately -- what is under test is the round trip.
+# #44). The suite is `crates/knobas-app/tests/start_work_live.rs`: the round
+# trip is one test, deliberately -- what is under test is the round trip. Beside
+# it, read-only, is Gitea's app-level `under:` witness (#644), which syncs every
+# fixture repository into a database of its own and asks the app's search.
 #
 # WHICH RECIPE CERTIFIES WHAT. `gitea-live` above certifies the *adapter*
 # against the shapes interfaces §4.2 fixes. This one certifies the *flow* over

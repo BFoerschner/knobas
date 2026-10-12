@@ -23,6 +23,12 @@
 //! seeded Jira `just atlassian-live` stands up, and that is not this file.
 //! `just start-work-live`'s header says the same thing at more length.
 //!
+//! # The `under:` witness (issue #644)
+//!
+//! The second test here is not about start-work: it is Gitea's app-level
+//! `under:` witness, the only Gitea suite that reaches `knobas_app`'s search.
+//! It writes nothing to Gitea, so the budget below is untouched by it.
+//!
 //! # Why this is `#[ignore]`d and `tests/it/start_work.rs` is not
 //!
 //! It needs Docker, a seeded Gitea and a token -- the treatment
@@ -1098,33 +1104,37 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
     let state = gitea_app(&env, &repos.iter().map(|r| full(r)).collect::<Vec<_>>()).await;
     sync(&state, GITEA).await;
 
-    let mirrored: Vec<(String, String)> = sqlx::query_as(
-        "select kind, entity_id from sync.live_item where source_id = $1",
-    )
-    .bind(GITEA)
-    .fetch_all(&state.pool)
-    .await
-    .expect("the mirror is readable");
+    let mirrored: Vec<(String, String)> =
+        sqlx::query_as("select kind, entity_id from sync.live_item where source_id = $1")
+            .bind(GITEA)
+            .fetch_all(&state.pool)
+            .await
+            .expect("the mirror is readable");
     let in_repo = |entity: &str| -> String {
         let key = entity
             .strip_prefix(&format!("{GITEA}:"))
             .unwrap_or_else(|| panic!("{entity} is this source's"));
-        let (owner, repo) = match parse_key(key)
-            .unwrap_or_else(|| panic!("{entity} is a Gitea key"))
-        {
-            GiteaKey::Repo { owner, repo }
-            | GiteaKey::Pr { owner, repo, .. }
-            | GiteaKey::Branch { owner, repo, .. }
-            | GiteaKey::Commit { owner, repo, .. } => (owner, repo),
-        };
+        let (owner, repo) =
+            match parse_key(key).unwrap_or_else(|| panic!("{entity} is a Gitea key")) {
+                GiteaKey::Repo { owner, repo }
+                | GiteaKey::Pr { owner, repo, .. }
+                | GiteaKey::Branch { owner, repo, .. }
+                | GiteaKey::Commit { owner, repo, .. } => (owner, repo),
+            };
         format!("{owner}/{repo}")
     };
 
     for name in &repos {
         let full_name = full(name);
         let mut by_kind: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for (kind, entity) in mirrored.iter().filter(|(_, entity)| in_repo(entity) == full_name) {
-            by_kind.entry(kind.clone()).or_default().insert(entity.clone());
+        for (kind, entity) in mirrored
+            .iter()
+            .filter(|(_, entity)| in_repo(entity) == full_name)
+        {
+            by_kind
+                .entry(kind.clone())
+                .or_default()
+                .insert(entity.clone());
         }
         let expected: BTreeSet<String> = by_kind.values().flatten().cloned().collect();
         assert!(
@@ -1139,7 +1149,10 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
                 "{GITEA}:{full_name}@refs/heads/{}",
                 branch["name"].as_str().expect("a branch name")
             );
-            assert!(expected.contains(&id), "fixture branch {id} is mirrored: {expected:?}");
+            assert!(
+                expected.contains(&id),
+                "fixture branch {id} is mirrored: {expected:?}"
+            );
         }
         for pr in live_under::rows(&fixture, "prs")
             .iter()
@@ -1151,7 +1164,11 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
                 .unwrap_or_else(|| panic!("the seed recorded fixture pull request {}", pr["num"]))
                 ["real_index"];
             let id = format!("{GITEA}:{full_name}#{index}");
-            assert!(expected.contains(&id), "fixture pull request {} ({id}) is mirrored: {expected:?}", pr["num"]);
+            assert!(
+                expected.contains(&id),
+                "fixture pull request {} ({id}) is mirrored: {expected:?}",
+                pr["num"]
+            );
         }
         for commit in live_under::rows(&seeded, "commits")
             .iter()
@@ -1161,7 +1178,11 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
                 "{GITEA}:{full_name}@{}",
                 commit["real_sha"].as_str().expect("a real sha")
             );
-            assert!(expected.contains(&id), "fixture commit {} ({id}) is mirrored: {expected:?}", commit["fixture_sha"]);
+            assert!(
+                expected.contains(&id),
+                "fixture commit {} ({id}) is mirrored: {expected:?}",
+                commit["fixture_sha"]
+            );
         }
 
         for typed in [full_name.clone(), name.clone()] {
@@ -1170,7 +1191,11 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
             live_under::exactly(&raw, &found, &by_kind);
             println!(
                 "SEEDED {raw} -> {:?}",
-                found.kinds.iter().map(|(k, g)| (k, g.total)).collect::<Vec<_>>()
+                found
+                    .kinds
+                    .iter()
+                    .map(|(k, g)| (k, g.total))
+                    .collect::<Vec<_>>()
             );
         }
     }

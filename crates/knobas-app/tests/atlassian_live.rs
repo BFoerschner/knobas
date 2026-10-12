@@ -2464,7 +2464,11 @@ async fn under_the_seeded_epic_finds_it_and_its_five_children_through_the_search
         .filter(|t| t["key"] == EPIC || t["epic"] == EPIC)
         .map(|t| format!("{JIRA}:{}", t["key"].as_str().expect("a ticket key")))
         .collect();
-    assert_eq!(tickets.len(), 6, "the fixture's epic and its five children: {tickets:?}");
+    assert_eq!(
+        tickets.len(),
+        6,
+        "the fixture's epic and its five children: {tickets:?}"
+    );
     let expected = BTreeMap::from([("ticket".to_owned(), tickets)]);
 
     for typed in [EPIC.to_owned(), EPIC.to_lowercase()] {

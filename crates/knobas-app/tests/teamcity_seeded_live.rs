@@ -48,6 +48,13 @@
 //! after `live_teamcity_seeded.rs` in the same recipe without disturbing that
 //! suite's exact-set assertions or its leftover clearing.
 //!
+//! # The `under:` witness (issue #644)
+//!
+//! The second test is the SQL `under:` path on this server's records: each
+//! fixture configuration, by its id and its name, through the app's own
+//! search. Read-only too, and for the same reason it lives here and not in the
+//! adapter's crate: the search is an app-crate read.
+//!
 //! # Running it
 //!
 //! `#[ignore]`d, so `just check` runs none of it. The recipe is
@@ -380,7 +387,11 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
         .collect();
     configurations.sort();
     configurations.dedup();
-    assert_eq!(configurations.len(), 3, "the fixture's three configurations");
+    assert_eq!(
+        configurations.len(),
+        3,
+        "the fixture's three configurations"
+    );
 
     let builds: Vec<(String, String)> = sqlx::query_as(
         "select entity_id, payload->>'buildTypeId'

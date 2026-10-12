@@ -76,7 +76,10 @@ pub struct Group {
 impl Found {
     /// Every id the page shows, of every kind.
     pub fn ids(&self) -> BTreeSet<String> {
-        self.kinds.values().flat_map(|g| g.ids.iter().cloned()).collect()
+        self.kinds
+            .values()
+            .flat_map(|g| g.ids.iter().cloned())
+            .collect()
     }
 }
 
@@ -177,8 +180,7 @@ pub fn exactly(raw: &str, found: &Found, expected: &BTreeMap<String, BTreeSet<St
 /// `fixtures/tidewater/work.json`, the corpus every seed is derived from.
 pub fn fixture() -> serde_json::Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tidewater/work.json");
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     serde_json::from_str(&raw).expect("work.json is JSON")
 }
 
@@ -186,8 +188,12 @@ pub fn fixture() -> serde_json::Value {
 /// fixture's records, which no seed can dictate.
 pub fn seed_state() -> serde_json::Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json");
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} -- the live recipe's seed writes it", path.display()));
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e} -- the live recipe's seed writes it",
+            path.display()
+        )
+    });
     serde_json::from_str(&raw).expect("seed-state.json is JSON")
 }
 
