@@ -225,8 +225,14 @@ where
             panic!("delete_source waited on the paused demo load (#127's non-blocking timing)");
         }
     };
-    assert!(deleted.unwrap(), "the configuration row was there to remove");
-    assert!(still_paused, "the delete has to return while the load is paused");
+    assert!(
+        deleted.unwrap(),
+        "the configuration row was there to remove"
+    );
+    assert!(
+        still_paused,
+        "the delete has to return while the load is paused"
+    );
     assert_eq!(
         mirrored_items(&pool, &id).await,
         rewritten.len() as i64,
