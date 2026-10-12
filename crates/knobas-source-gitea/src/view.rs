@@ -184,6 +184,7 @@ fn overview_blocks(source_id: &str, owner: &str, repo: &str, record: &CommitDeta
                     tone: None,
                     chip: None,
                     url: sibling_url(record, &parent.sha),
+                    commit: None,
                 })
                 .collect(),
         });

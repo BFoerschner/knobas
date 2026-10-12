@@ -13,6 +13,8 @@ use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchC
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
+use crate::commands::entity::RESOLVE_URL;
+
 use super::{
     ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
 };
@@ -725,6 +727,14 @@ pub async fn reachable_transitions(
 /// A withdrawn entity is still held (`sync.item` keeps it, and its detail
 /// opens), so the check reads `sync.item` and not `sync.live_item`.
 ///
+/// **The second is a row's commit hint** (#665): a row that names a commit by
+/// its repository's URL and sha, because the adapter that drew it -- TeamCity,
+/// listing a build's changes -- cannot see another source's mirror. The app
+/// can: [`commit_page`] composes the commit's page from the two, and the
+/// paste resolver's own statement ([`RESOLVE_URL`]) finds the entity whose
+/// page it is. Found, the row gets that entity's id; not found, it stays
+/// plain text. Either way the hint is cleared, so it never reaches the shell.
+///
 /// # Errors
 ///
 /// As [`reachable_transitions`]: the build's failures, and whatever the
@@ -742,6 +752,7 @@ pub async fn view(
     let Some(mut view) = source.view(entity_id, section).await? else {
         return Ok(None);
     };
+    resolve_commit_hints(pool, &mut view).await?;
     let named: Vec<String> = view
         .sections
         .iter()
@@ -773,6 +784,60 @@ pub async fn view(
         }
     }
     Ok(Some(view))
+}
+
+/// Every row's commit hint, resolved to the mirrored commit where the mirror
+/// holds its page, and cleared (see [`view`]). One resolver read per hinted
+/// row; a build lists a handful of changes.
+///
+/// A resolved id is the mirror's own, so the rule-7 check after this keeps it.
+async fn resolve_commit_hints(
+    pool: &PgPool,
+    view: &mut knobas_source::view::SourceView,
+) -> Result<(), SourcesError> {
+    for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
+        let knobas_source::view::Block::Entities { rows, .. } = block else {
+            continue;
+        };
+        for row in rows {
+            let Some(hint) = row.commit.take() else {
+                continue;
+            };
+            if row.entity_id.is_some() {
+                continue;
+            }
+            let Some(page) = commit_page(&hint.repo_url, &hint.sha) else {
+                continue;
+            };
+            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
+                .bind(&page)
+                .fetch_optional(pool)
+                .await?;
+            row.entity_id = found.map(|(entity_id, _kind)| entity_id);
+        }
+    }
+    Ok(())
+}
+
+/// The web page of commit `sha` in the repository a git remote URL names:
+/// `<repository>/commit/<sha>`, the shape Gitea (and GitHub) give a commit's
+/// page, from a clone URL with its `.git` and trailing slash taken off.
+///
+/// `None` for a remote that is not an `http`/`https` URL -- an `ssh://` or
+/// scp-like `git@host:path` remote has no web page to look up -- and for a
+/// blank sha. A host whose commit pages have another shape simply misses:
+/// the row stays plain text, the failure direction ADR-0020 rule 7 asks for.
+fn commit_page(repo_url: &str, sha: &str) -> Option<String> {
+    let sha = sha.trim();
+    let repo = repo_url.trim().trim_end_matches('/');
+    let repo = repo
+        .strip_suffix(".git")
+        .unwrap_or(repo)
+        .trim_end_matches('/');
+    (crate::commands::entity::is_web_url(repo)
+        && !sha.is_empty()
+        && sha.chars().all(|c| c.is_ascii_hexdigit()))
+    .then(|| format!("{repo}/commit/{sha}"))
 }
 
 /// The adapter that owns `entity_id`, built the way a scheduled run builds it.

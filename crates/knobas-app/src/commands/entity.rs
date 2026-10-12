@@ -734,7 +734,7 @@ pub async fn resolve_url_inner(pool: &PgPool, url: &str) -> Result<Option<UrlMat
 /// normalisation's business: a URL with no host simply matches no row, which
 /// is the miss `web_url.rs` describes rather than a second opinion about what a
 /// well-formed URL is.
-fn is_web_url(url: &str) -> bool {
+pub(crate) fn is_web_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
 }

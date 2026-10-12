@@ -50,7 +50,12 @@ fn config_record() -> serde_json::Value {
             { "name": "env.SEPA_RETRIES", "value": "5", "inherited": false },
             { "name": "env.SEPA_SANDBOX_KEY", "value": SECRET, "inherited": false,
               "type": { "rawValue": "password display='hidden'" } },
-            { "name": "tidewater.region", "value": "eu-central-1", "inherited": true }
+            { "name": "tidewater.region", "value": "eu-central-1", "inherited": true },
+            // Not typed `password`, and still no value of it may be drawn: a
+            // URL's credential, and a value TeamCity masked.
+            { "name": "vcs.mirror", "value": "https://ci:mirror-token@git.example/p.git",
+              "inherited": false },
+            { "name": "vcs.token", "value": "*******", "inherited": false }
         ]},
         "steps": { "step": [
             { "id": "RUNNER_7", "name": "Run the suite", "type": "simpleRunner", "disabled": false,
@@ -196,7 +201,7 @@ async fn a_build_configuration_opens_on_its_overview_with_one_tab_per_part() {
         tabs,
         [
             ("overview", "Overview", None, false),
-            ("parameters", "Parameters", Some(3), false),
+            ("parameters", "Parameters", Some(5), false),
             ("steps", "Steps", Some(2), false),
             ("triggers", "Triggers", Some(2), false),
             ("vcs_roots", "VCS roots", Some(1), false),
@@ -346,6 +351,14 @@ async fn parameters_mark_the_inherited_and_never_carry_a_passwords_value() {
             ("env.SEPA_RETRIES", "5", false, false, false),
             ("env.SEPA_SANDBOX_KEY", "", false, true, false),
             ("tidewater.region", "eu-central-1", true, false, false),
+            (
+                "vcs.mirror",
+                "https://git.example/p.git",
+                false,
+                false,
+                false
+            ),
+            ("vcs.token", "", false, true, false),
         ]
     );
 
@@ -353,6 +366,10 @@ async fn parameters_mark_the_inherited_and_never_carry_a_passwords_value() {
     assert!(
         !serialized.contains(SECRET),
         "a password's value crossed into the view, though TeamCity sent it: {serialized}"
+    );
+    assert!(
+        !serialized.contains("mirror-token"),
+        "a URL's credential crossed into the view: {serialized}"
     );
 }
 
@@ -501,25 +518,6 @@ async fn one_section_is_read_without_the_others() {
     assert!(
         matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.contains("log")),
         "{refused:?}"
-    );
-}
-
-/// A build has no view in this ticket (#665 draws it), and answers `None`
-/// without a request, so its detail draws the mirror as before.
-#[tokio::test]
-async fn a_build_draws_no_view_yet() {
-    let server = teamcity().await;
-    let answer = source(&server)
-        .view("teamcity:build:1187", None)
-        .await
-        .expect("no error");
-    assert!(answer.is_none(), "{answer:?}");
-    assert!(
-        server
-            .received_requests()
-            .await
-            .expect("recorded")
-            .is_empty()
     );
 }
 

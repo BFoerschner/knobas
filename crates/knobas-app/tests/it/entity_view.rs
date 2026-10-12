@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use knobas_app::sources::{self, NewSource, Registry, SecretInput};
 use knobas_secrets::{MemoryStore, SecretStore};
 use knobas_source::instance::SourceInstance;
-use knobas_source::view::{Block, SourceView, ViewRow, ViewSection};
+use knobas_source::view::{Block, CommitHint, SourceView, ViewRow, ViewSection};
 use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
@@ -35,7 +35,8 @@ impl AdapterRegistry for DrawingRegistry {
 }
 
 /// Draws one section of parents for `<id>:drawn`, nothing for `<id>:plain`,
-/// and fails for `<id>:down`.
+/// fails for `<id>:down`, and draws `<id>:changes:<sha>` as a build's changes
+/// -- rows naming a commit by repository URL and sha, as TeamCity does (#665).
 struct Drawing {
     id: String,
     asked: Asked,
@@ -49,6 +50,7 @@ fn row(entity_id: Option<String>, title: &str) -> ViewRow {
         tone: None,
         chip: None,
         url: None,
+        commit: None,
     }
 }
 
@@ -92,6 +94,39 @@ impl Source for Drawing {
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
         let key = entity.split_once(':').map_or("", |(_, key)| key);
+        if let Some(sha) = key.strip_prefix("changes:") {
+            let hinted = |title: &str, repo_url: &str| ViewRow {
+                commit: Some(CommitHint {
+                    repo_url: repo_url.to_owned(),
+                    sha: sha.to_owned(),
+                }),
+                ..row(None, title)
+            };
+            return Ok(Some(SourceView {
+                sections: vec![ViewSection {
+                    id: "changes".into(),
+                    title: "Changes".into(),
+                    count: Some(4),
+                    deferred: false,
+                    blocks: vec![Block::Entities {
+                        title: None,
+                        rows: vec![
+                            // A clone URL, host in capitals: the commit page
+                            // the mirror holds, by the paste resolver's rule.
+                            hinted(
+                                "mirrored",
+                                "HTTP://Gitea.Example/tidewater/payout-service.git",
+                            ),
+                            // The same sha in a repository nothing mirrors.
+                            hinted("unmirrored", "http://gitea.example/tidewater/elsewhere.git"),
+                            // An scp-like git URL is no web page; a miss, not an error.
+                            hinted("ssh", "git@gitea.example:tidewater/payout-service.git"),
+                            row(None, "no hint"),
+                        ],
+                    }],
+                }],
+            }));
+        }
         match key {
             "plain" => Ok(None),
             "down" => Err(SourceError::Unreachable("connection refused".to_owned())),
@@ -250,5 +285,60 @@ async fn the_read_routes_to_the_entitys_source_and_keeps_none_and_failure_apart(
     assert!(
         matches!(unknown, knobas_app::sources::SourcesError::NotFound(_)),
         "{unknown:?}"
+    );
+}
+
+/// #665: a row that names a commit by repository URL and sha opens the
+/// mirrored commit when the mirror holds that commit's page -- resolved in
+/// the app with the paste resolver, since the adapter that drew it cannot see
+/// another source's mirror -- and is plain text when it does not. The hint
+/// never reaches the shell.
+#[tokio::test]
+async fn a_commit_named_by_repository_and_sha_opens_the_mirrored_commit() {
+    let f = fixture().await;
+    let sha = format!("{}0000", uuid::Uuid::new_v4().simple());
+    let mirrored = format!("{}:tidewater/payout-service@{sha}", f.id);
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'c')")
+        .bind(&mirrored)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload, web_url)
+         values ($1, $2, 'commit', 'c', '{}'::jsonb, $3)",
+    )
+    .bind(&mirrored)
+    .bind(&f.id)
+    .bind(format!(
+        "http://gitea.example/tidewater/payout-service/commit/{sha}"
+    ))
+    .execute(&f.pool)
+    .await
+    .unwrap();
+
+    let drawn = view(&f, &format!("changes:{sha}"), None)
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Entities { rows, .. } = &drawn.sections[0].blocks[0] else {
+        panic!("{drawn:#?}");
+    };
+    let resolved: Vec<_> = rows
+        .iter()
+        .map(|r| (r.title.as_str(), r.entity_id.clone(), r.commit.clone()))
+        .collect();
+    assert_eq!(
+        resolved,
+        [
+            ("mirrored", Some(mirrored.clone()), None),
+            ("unmirrored", None, None),
+            ("ssh", None, None),
+            ("no hint", None, None),
+        ]
+    );
+    let wire = serde_json::to_string(&drawn).unwrap();
+    assert!(
+        !wire.contains("repo_url"),
+        "the hint crossed to the shell: {wire}"
     );
 }

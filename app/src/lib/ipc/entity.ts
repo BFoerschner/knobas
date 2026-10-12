@@ -748,7 +748,13 @@ export interface Fact {
   tone: Tone | null;
 }
 
-/** One row of an entity list. `entity_id` is set only where the mirror holds it. */
+/**
+ * One row of an entity list. `entity_id` is set only where the mirror holds it.
+ *
+ * Rust's `ViewRow` has one more field, `commit` (#665): a commit named by its
+ * repository and sha, which the app resolves to `entity_id` and clears. It is
+ * absent on the wire to the shell, so it has no mirror here.
+ */
 export interface ViewRow {
   entity_id: string | null;
   title: string;

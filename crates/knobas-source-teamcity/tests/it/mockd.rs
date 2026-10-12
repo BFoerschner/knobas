@@ -55,26 +55,30 @@ fn adapter(base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
     }
 }
 
-/// The adapter with its **build configuration view** excused, for
-/// [`passes_the_contract_battery`] only. **Not a witness** of that view.
+/// The adapter with its **views** excused, for [`passes_the_contract_battery`]
+/// only. **Not a witness** of either view.
 ///
 /// Battery clause 9 reads the source view of every entity the sync emitted.
-/// A configuration's view reads `GET /app/rest/buildTypes/id:{id}`, which
-/// mockd does not serve -- and will not: mockd is frozen, *nothing new*
-/// (ADR-0013, `docs/agents/working-model.md`), the rule #297 met the same way
-/// for Jira's connection probe. So `view` answers `Ok(None)` for a
-/// `teamcity:buildType:…` entity without a request, and delegates every other
-/// call -- every other kind's view included -- to the real adapter, so
-/// clauses 1–9 still run against it everywhere mockd can answer.
+/// A configuration's view reads `GET /app/rest/buildTypes/id:{id}`, and a
+/// build's reads `GET /app/rest/builds/id:{id}` with view fields, its changes
+/// and its artifacts -- none of which mockd serves, and will not: mockd is
+/// frozen, *nothing new* (ADR-0013, `docs/agents/working-model.md`), the rule
+/// #297 met the same way for Jira's connection probe. So `view` answers
+/// `Ok(None)` for a `teamcity:buildType:…` or `teamcity:build:…` entity
+/// without a request, and delegates every other call to the real adapter, so
+/// clauses 1–8 still run against it everywhere mockd can answer. TeamCity
+/// emits no third kind, so clause 9 meets no view here.
 ///
-/// The configuration view is witnessed where a witness can be: against the
-/// real server by `passes_the_contract_battery_against_the_seeded_server` in
-/// `live_teamcity_seeded.rs` (clause 9 included), and for its mapping by the
-/// wiremock tests in `tests/it/view.rs`. Ruling on #664, 2026-10-12.
-struct ConfigViewExcused(Box<dyn Source>);
+/// Both views are witnessed where a witness can be: against the real server
+/// by `passes_the_contract_battery_against_the_seeded_server` in
+/// `live_teamcity_seeded.rs` (clause 9 included), and for their mapping by
+/// the wiremock tests in `tests/it/view.rs` (configuration) and
+/// `tests/it/view_build.rs` (build). Rulings on #664 (the configuration,
+/// 2026-10-12) and the same rule extended to the build by #665's dispatch.
+struct ViewsExcused(Box<dyn Source>);
 
 #[async_trait::async_trait]
-impl Source for ConfigViewExcused {
+impl Source for ViewsExcused {
     fn descriptor(&self) -> knobas_source::SourceDescriptor {
         self.0.descriptor()
     }
@@ -107,7 +111,7 @@ impl Source for ConfigViewExcused {
         entity: &str,
         section: Option<&str>,
     ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
-        if entity.starts_with("teamcity:buildType:") {
+        if entity.starts_with("teamcity:buildType:") || entity.starts_with("teamcity:build:") {
             return Ok(None);
         }
         self.0.view(entity, section).await
@@ -202,9 +206,9 @@ async fn passes_the_contract_battery() {
             Fault::Unauthorized => denied_url.clone(),
             Fault::Unreachable => dead_url.clone(),
         };
-        // The configuration view is excused here and witnessed elsewhere;
-        // see `ConfigViewExcused`.
-        Box::new(ConfigViewExcused(adapter(&url, config.clone()))) as Box<dyn Source>
+        // The views are excused here and witnessed elsewhere; see
+        // `ViewsExcused`.
+        Box::new(ViewsExcused(adapter(&url, config.clone()))) as Box<dyn Source>
     })
     .await;
 

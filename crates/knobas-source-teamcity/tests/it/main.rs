@@ -9,3 +9,4 @@
 
 mod mockd;
 mod view;
+mod view_build;
