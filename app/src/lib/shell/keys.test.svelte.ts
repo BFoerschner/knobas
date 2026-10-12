@@ -236,3 +236,90 @@ test("a Cmd-T whose propagation was stopped below window never reaches the timer
 
   dialog.remove();
 });
+
+/**
+ * Back and forward from the keyboard and the mouse (#693): ⌘[ / ⌘] as a
+ * browser binds them, ⌘← / ⌘→ too, and the mouse's own back and forward
+ * buttons. A text field keeps its keys: ⌘[ outdents in an editor and ⌘←
+ * moves to the start of the line, so none of them navigates from inside one.
+ */
+test("⌘[ and ⌘] step back and forward through the addresses", async () => {
+  const { router } = at("#/ctx/all");
+  router.go("#/ticket/mock:PAY-231");
+
+  const back = press("[", { metaKey: true });
+  expect(back.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
+
+  press("]", { metaKey: true });
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
+
+  press("ArrowLeft", { metaKey: true });
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
+  press("ArrowRight", { metaKey: true });
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+});
+
+test("inside a text field the history keys are the field's", async () => {
+  const { router } = at("#/ctx/all");
+  router.go("#/ticket/mock:PAY-231");
+  const field = document.createElement("textarea");
+  document.body.append(field);
+  field.focus();
+
+  for (const key of ["[", "ArrowLeft"]) {
+    const event = new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true, cancelable: true });
+    field.dispatchEvent(event);
+    expect(event.defaultPrevented, key).toBe(false);
+  }
+  await new Promise((settle) => setTimeout(settle, 20));
+  expect(location.hash).toBe("#/ticket/mock:PAY-231");
+  expect(router.canGoBack).toBe(true);
+  field.remove();
+});
+
+test("the mouse's back and forward buttons navigate, and nothing else happens", async () => {
+  const { router } = at("#/ctx/all");
+  router.go("#/ticket/mock:PAY-231");
+
+  const click = (button: number) => {
+    const up = new MouseEvent("mouseup", { button, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(up);
+    return up;
+  };
+  expect(click(3).defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
+  expect(click(4).defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+
+  // The main and middle buttons are not history's.
+  expect(click(0).defaultPrevented).toBe(false);
+  expect(click(1).defaultPrevented).toBe(false);
+});
+
+/**
+ * Two keys that look like history's and are not (#697 review): ⌘← that a
+ * focused control already answered (a view's tab bar moves a tab on it), and
+ * AltGr's bracket on a Windows or Linux layout, which arrives as Ctrl+Alt+[.
+ * A Mac layout that types `[` with ⌥ (German) still goes back on ⌘⌥[.
+ */
+test("a key a control answered, or AltGr's bracket, does not step; ⌘⌥[ does", async () => {
+  const { router } = at("#/ctx/all");
+  router.go("#/ticket/mock:PAY-231");
+
+  const tab = document.createElement("button");
+  tab.addEventListener("keydown", (event) => event.preventDefault());
+  document.body.append(tab);
+  tab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", metaKey: true, bubbles: true, cancelable: true }));
+  press("[", { ctrlKey: true, altKey: true });
+  await new Promise((settle) => setTimeout(settle, 20));
+  expect(location.hash).toBe("#/ticket/mock:PAY-231");
+  tab.remove();
+
+  expect(press("[", { metaKey: true, altKey: true }).defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+});

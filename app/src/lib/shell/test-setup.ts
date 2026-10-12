@@ -9,7 +9,15 @@
  */
 import { afterAll, afterEach, expect } from "vitest";
 
+import { viewMemory } from "../detail/view-read";
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
+
+/**
+ * The detail's session memory (#693) is a module singleton, like the session
+ * it remembers; each test is a fresh session, or a test would open on the
+ * entity the previous one left drawn.
+ */
+afterEach(() => viewMemory.clear());
 
 /**
  * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact

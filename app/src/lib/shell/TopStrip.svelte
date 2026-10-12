@@ -291,6 +291,36 @@
 <header class="topbar">
   <ContextTabs {router} {contexts} />
 
+  <!--
+    Back and forward (#693), as a browser draws them: one hairline pair,
+    disabled where history has nowhere to go, so a reader sees whether back
+    goes anywhere before pressing it. Left of the search field because that
+    is where the eye expects them. `Esc` still closes things; these walk the
+    addresses, which is what ⌘[ / ⌘] and the mouse's side buttons do too.
+  -->
+  <span class="hist" role="group" aria-label="History">
+    <button
+      class="hist-btn"
+      aria-label="Back (⌘[)"
+      title="Back (⌘[)"
+      aria-keyshortcuts="Meta+["
+      disabled={!router.canGoBack}
+      onclick={() => router.goBack()}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>
+    </button>
+    <button
+      class="hist-btn"
+      aria-label="Forward (⌘])"
+      title="Forward (⌘])"
+      aria-keyshortcuts="Meta+]"
+      disabled={!router.canGoForward}
+      onclick={() => router.goForward()}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+    </button>
+  </span>
+
   <button class="searchfield" onclick={onsearch} title="Search everything and act in place (⌘K)">
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="7" cy="7" r="4.5" />
@@ -487,3 +517,54 @@
     </svg>
   </button>
 </header>
+
+<style>
+  /*
+    The pair is one control drawn as two halves: a shared hairline, a hairline
+    between, no fill until hover. Disabled is .4 opacity, `.btn:disabled`'s value, and
+    nothing else, so the strip stays as quiet as it was when there is nowhere to go.
+  */
+  .hist {
+    display: flex;
+    flex: none;
+    height: 26px;
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+  }
+
+  .hist-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    color: var(--muted);
+  }
+
+  .hist-btn + .hist-btn {
+    border-left: 1px solid var(--hair);
+  }
+
+  .hist-btn:hover:not(:disabled) {
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .hist-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .hist-btn:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .hist-btn svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+</style>

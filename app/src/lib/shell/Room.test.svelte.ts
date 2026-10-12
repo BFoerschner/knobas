@@ -34,6 +34,11 @@ let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Pr
  * about.
  */
 /** Every note *New note* wrote. */
+/** What `get_entity` answers; not in the mirror unless a test says otherwise. */
+const notInMirror = (entityId: string): Promise<EntityDetail> =>
+  Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null });
+let entity = notInMirror;
+
 const written: string[] = [];
 /**
  * The `links` argument of each `createNote` call — what a new note is **born
@@ -67,8 +72,7 @@ vi.mock("../ipc/entity", () => ({
   },
   // No source view (#661): the panel is the mirror's, as before.
   entityView: () => Promise.resolve(null),
-  getEntity: (entityId: string): Promise<EntityDetail> =>
-    Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null }),
+  getEntity: (entityId: string): Promise<EntityDetail> => entity(entityId),
   createNote: (_title?: string, _bodyMd?: string, links?: NoteLinkInput[]) => {
     written.push("note:new");
     born.push(links);
@@ -292,6 +296,7 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
 beforeEach(() => {
   calls.length = 0;
   assetCalls.length = 0;
+  entity = notInMirror;
   answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
   board = () => Promise.resolve({ columns: [], sources: [] });
   assets = () => Promise.resolve([]);
@@ -1401,6 +1406,99 @@ test("the Assets tile maximises and restores like any other tile", async () => {
   expect(screen.restoreTile()).toBe(true);
   flushSync();
   expect(screen.tiles()).toEqual(["Tickets", "Assets"]);
+
+  screen.done();
+});
+
+/**
+ * Moving from one open detail to another (#693): the first panel stays drawn
+ * until the second's row has been read, as a browser keeps a page until the
+ * next one paints, rather than blanking to *Reading…* for a frame and fading
+ * the whole panel in again. A read that does not answer promptly is not
+ * waited on: the next panel is mounted and says it is reading.
+ */
+test("a detail opened from another keeps the first drawn until its row is read, without fading in again", async () => {
+  const detail = (id: string): EntityDetail => ({
+    row: { ...row("commit", id), entity_id: `mock:${id}` },
+    source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
+    kind_info: null,
+    body_text: "",
+    author: null,
+    payload: {},
+    web_url: null,
+    deleted_at: null,
+    links: [],
+    activity: [],
+  });
+  let releaseB!: () => void;
+  const gateB = new Promise<void>((resolve) => (releaseB = resolve));
+  entity = (id) => (id === "mock:B" ? gateB.then(() => detail("B")) : Promise.resolve(detail(id.slice(5))));
+
+  const screen = render("#/ctx/all");
+  screen.router.go("#/commit/mock:A");
+  flushSync();
+  const title = () => screen.target.querySelector(".detail h2")?.textContent;
+  await vi.waitFor(() => expect(title()).toBe("Title of A"));
+  const first = screen.target.querySelector(".detail")!;
+  expect(first.parentElement!.classList.contains("swap"), "a panel opened over the room fades in").toBe(false);
+
+  screen.router.go("#/commit/mock:B");
+  flushSync();
+  expect(title(), "the first panel is still drawn while B is read").toBe("Title of A");
+
+  releaseB();
+  await vi.waitFor(() => expect(title()).toBe("Title of B"));
+  const second = screen.target.querySelector(".detail")!;
+  expect(second.parentElement!.classList.contains("swap"), "a swapped panel does not fade in").toBe(true);
+
+  // A read that never answers is not waited on past a moment.
+  entity = (id) => (id === "mock:C" ? new Promise(() => {}) : Promise.resolve(detail(id.slice(5))));
+  screen.router.go("#/commit/mock:C");
+  flushSync();
+  expect(title()).toBe("Title of B");
+  await vi.waitFor(() => expect(title()).toBe("Reading…"));
+
+  screen.done();
+});
+
+/**
+ * A hold the address has already left (#697 review): the reader moved from A
+ * to B and closed the panel before B's row answered. B's late answer must not
+ * draw B over a room whose address has no detail open.
+ */
+test("a detail closed while its row was being read is not drawn when the read answers", async () => {
+  const detail = (id: string): EntityDetail => ({
+    row: { ...row("commit", id), entity_id: `mock:${id}` },
+    source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
+    kind_info: null,
+    body_text: "",
+    author: null,
+    payload: {},
+    web_url: null,
+    deleted_at: null,
+    links: [],
+    activity: [],
+  });
+  let releaseB!: () => void;
+  const gateB = new Promise<void>((resolve) => (releaseB = resolve));
+  entity = (id) => (id === "mock:B" ? gateB.then(() => detail("B")) : Promise.resolve(detail(id.slice(5))));
+
+  const screen = render("#/ctx/all");
+  screen.router.go("#/commit/mock:A");
+  flushSync();
+  await vi.waitFor(() => expect(screen.target.querySelector(".detail h2")?.textContent).toBe("Title of A"));
+
+  screen.router.go("#/commit/mock:B");
+  flushSync();
+  screen.router.back();
+  flushSync();
+  expect(screen.target.querySelector(".detail"), "closing ends the hold at once").toBeNull();
+
+  releaseB();
+  await gateB;
+  await new Promise((settle) => setTimeout(settle, 200));
+  flushSync();
+  expect(screen.target.querySelector(".detail"), "B's late row draws nothing").toBeNull();
 
   screen.done();
 });

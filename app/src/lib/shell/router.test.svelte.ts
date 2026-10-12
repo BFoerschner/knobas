@@ -7,7 +7,7 @@
  * unless it is percent-encoded. `hashFor` encodes, `parseHash` decodes, and
  * the two have to stay each other's inverse.
  */
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { createRouter, hashFor, parseHash } from "./router.svelte";
 
@@ -437,5 +437,69 @@ test("replace under an open detail keeps the detail and moves the remembered roo
   router.back();
   expect(location.hash).toBe("#/ctx/all");
 
+  stop();
+});
+
+/**
+ * Back and forward, like a browser (#693).
+ *
+ * The window cannot ask the webview whether there is anywhere to go forward
+ * to, so the router keeps its own place in history: one step per `go` to a
+ * new address, none for `replace`, and the place read back off the entry on a
+ * traversal. jsdom traverses on a later task, so each step waits for the
+ * router to have heard it.
+ */
+test("back and forward are available exactly where the history has somewhere to go", async () => {
+  location.hash = "#/ctx/all";
+  const router = createRouter();
+  const stop = router.start();
+  expect([router.canGoBack, router.canGoForward], "a fresh session").toEqual([false, false]);
+
+  router.go("#/ticket/mock:PAY-231");
+  router.go("#/ticket/mock:PAY-232");
+  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
+  // The same address again is not a step.
+  router.go("#/ticket/mock:PAY-232");
+
+  router.goBack();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+  await vi.waitFor(() => expect(router.route).toMatchObject({ detail: { entityId: "mock:PAY-231" } }));
+  expect([router.canGoBack, router.canGoForward]).toEqual([true, true]);
+
+  router.goForward();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-232"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
+  expect(router.canGoBack).toBe(true);
+
+  // `replace` rewrites where the reader stands and is not a step: back still
+  // lands on the entry before it, and forward stays empty.
+  router.replace({ view: "room", ctx: "all", detail: null });
+  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
+
+  router.goBack();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+  router.goBack();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoBack).toBe(false));
+  expect(router.canGoForward).toBe(true);
+
+  // A new address from the middle of history drops what was ahead of it.
+  router.go("#/sources");
+  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
+
+  // `replace` in the middle of history keeps what is ahead of it, as a
+  // browser's does: it rewrites one entry and steps nowhere.
+  router.goBack();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
+  router.replace({ view: "room", ctx: "src:jira", detail: null });
+  expect([router.canGoBack, router.canGoForward]).toEqual([false, true]);
+  router.goForward();
+  await vi.waitFor(() => expect(location.hash).toBe("#/sources"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
+
+  // Nowhere to go is a no-op, not a step out of the session.
+  router.goForward();
+  expect(location.hash).toBe("#/sources");
   stop();
 });
