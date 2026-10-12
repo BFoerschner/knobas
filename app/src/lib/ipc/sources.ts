@@ -602,6 +602,9 @@ export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";
  */
 export type WaitReason = "unreachable" | "unauthorized";
 
+/** How a merge lands its commits — `knobas_source::MergeStyle`. */
+export type MergeStyle = "merge" | "rebase" | "squash";
+
 /**
  * The serialized `knobas_source::WriteOp` a queued write carries.
  *
@@ -612,9 +615,6 @@ export type WaitReason = "unreachable" | "unauthorized";
  * op can still be applied and discarded, and only *editing* needs to know
  * where the words are.
  */
-/** How a merge lands its commits — `knobas_source::MergeStyle`. */
-export type MergeStyle = "merge" | "rebase" | "squash";
-
 export type WriteOpPayload =
   | { Comment: { entity: string; body: string } }
   | { Transition: { entity: string; status: string } }

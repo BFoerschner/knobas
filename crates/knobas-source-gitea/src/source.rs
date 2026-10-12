@@ -215,7 +215,7 @@ impl Source for GiteaSource {
             }
             WriteOp::MergePullRequest { entity, style } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
-                write::merge(&self.client, &owner, &repo, index, style.as_str()).await?;
+                write::merge(&self.client, &owner, &repo, index, *style).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }

@@ -26,7 +26,7 @@
 
 use serde_json::json;
 
-use knobas_source::SourceError;
+use knobas_source::{MergeStyle, SourceError};
 
 use crate::client::GiteaClient;
 
@@ -166,12 +166,15 @@ pub(crate) async fn merge(
     owner: &str,
     repo: &str,
     index: u64,
-    style: &str,
+    style: MergeStyle,
 ) -> Result<(), SourceError> {
     let path = format!(
         "/repos/{}/{}/pulls/{index}/merge",
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    client.post(&path, &json!({ "Do": style })).await.map(|_| ())
+    client
+        .post(&path, &json!({ "Do": style.as_str() }))
+        .await
+        .map(|_| ())
 }

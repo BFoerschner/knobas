@@ -379,7 +379,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// **The whole mirrored record** -- `"transition"`, `"approve"` and
 /// `"merge_pull_request"`, the ops that put a *judgement* onto a target whose
-/// current state is the whole reason for the judgement. Any change to the target at all holds the write.
+/// current state is the whole reason for the judgement. Any change to the
+/// target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there

@@ -339,6 +339,9 @@ async fn a_merge_aimed_at_a_repository_is_refused_before_a_request() {
         })
         .await
         .expect_err("a repository is not a pull request");
-    assert!(matches!(error, SourceError::Protocol { status: None, .. }), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }

@@ -306,14 +306,10 @@ fn merge_action(pull: &Pull) -> Option<Block> {
         actions: vec![ViewAction {
             write_op: crate::WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
             label: "Merge…".to_owned(),
-            options: [
-                knobas_source::MergeStyle::Merge,
-                knobas_source::MergeStyle::Rebase,
-                knobas_source::MergeStyle::Squash,
-            ]
-            .iter()
-            .map(|style| style.as_str().to_owned())
-            .collect(),
+            options: knobas_source::MergeStyle::ALL
+                .iter()
+                .map(|style| style.as_str().to_owned())
+                .collect(),
             confirm: Some(confirm),
         }],
     })

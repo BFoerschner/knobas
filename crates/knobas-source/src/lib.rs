@@ -659,6 +659,10 @@ pub enum MergeStyle {
 }
 
 impl MergeStyle {
+    /// Every style, in the order a view offers them: `merge` first, the
+    /// default a source's own *Merge* button takes.
+    pub const ALL: [MergeStyle; 3] = [MergeStyle::Merge, MergeStyle::Rebase, MergeStyle::Squash];
+
     /// The word on the wire, which is also the option a view offers.
     #[must_use]
     pub fn as_str(self) -> &'static str {
