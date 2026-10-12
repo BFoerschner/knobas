@@ -145,7 +145,9 @@ pub async fn update_source<R: tauri::Runtime>(
 /// source deleted with `purge_items` is over, it has no `sync.item` rows and
 /// nothing of it is searchable. What it is not is synchronous -- the mirror
 /// can be non-empty for the length of one already-running sync after this
-/// returns.
+/// returns. That covers the rows the run has already *rewritten*, too: the
+/// purge here skips rows a run holds rather than waiting for its commit (#632),
+/// and those are purged with the rest when the run settles.
 ///
 /// **Three residuals, all logged rather than papered over**, and they are what
 /// a reader chasing "I deleted it and it is still in search" should look for
