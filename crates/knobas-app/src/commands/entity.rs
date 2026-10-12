@@ -64,7 +64,7 @@ pub struct EntityRow {
     ///
     /// Since #596 it is the **parent chain** the row's kind declares
     /// (ADR-0018) -- `owner/repo` for a Gitea branch, pull request or commit --
-    /// and the ancestor path where a kind declares none.
+    /// and the ancestor path where the declared chain yields nothing.
     ///
     /// `None` for every row whose kind declares no parent and whose record
     /// carries no readable `ancestors`: the ADR-0007 **miss**. Joined by

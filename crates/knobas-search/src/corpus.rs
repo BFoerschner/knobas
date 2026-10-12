@@ -143,8 +143,8 @@ pub struct Corpus {
     ///    spelling would be a second answer to "where is this", and the
     ///    launcher row and the detail panel both draw it. Since #596 that is
     ///    the parent chain the row's kind declares (ADR-0018), `owner/repo` for
-    ///    a Gitea commit, with #284's Confluence ancestors where a kind
-    ///    declares none. ADR-0007: it misses to `null` for every other kind.
+    ///    a Gitea commit, with #284's Confluence ancestors where the
+    ///    declared chain yields nothing. ADR-0007: it misses to `null` for every other kind.
     ///    It reads the declarations from `pd.d`, a relation [`crate::sql`]
     ///    joins into the detail stage for every corpus, as `ud` is for
     ///    `under:`.

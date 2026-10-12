@@ -9781,8 +9781,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   command, event, DTO, module or barrel moves, and no migration. Its **value** now comes from
   `knobas_core::path_line_read!`, expanded at the same eight places and nowhere else: the parent chain
   the row's kind declares (`declared_parent_path!`, each parent's first declared name, outermost
-  first, joined by `ANCESTOR_SEPARATOR`), and #284's ancestor read as the fallback where a kind
-  declares none. So a Gitea branch, pull request or commit carries `owner/repo`, and a
+  first, joined by `ANCESTOR_SEPARATOR`), and #284's ancestor read as the fallback where the declared
+  chain yields nothing (no parent declared, or a declared one that misses). So a Gitea branch, pull request or commit carries `owner/repo`, and a
   Confluence page's line is what it was. `declared_parent_path!` is built on
   `declared_parent_names!`, so the branch on `at`'s two shapes is still only in
   `declared_parents!` and `resolve_parents` (the deputy's ruling of 2026-10-11 on #594);

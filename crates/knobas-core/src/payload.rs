@@ -716,9 +716,10 @@ macro_rules! declared_parent_path {
 }
 
 /// SQL for "where this record sits", as the one line a row draws: the parent
-/// chain the record's kind declares ([`declared_parent_path!`]), or, where it
-/// declares none, the Confluence ancestor path [`ancestor_path_read!`] has read
-/// since #284.
+/// chain the record's kind declares ([`declared_parent_path!`]), or, where that
+/// yields nothing (no parent declared, or a declared one that misses), the
+/// Confluence ancestor path [`ancestor_path_read!`] has read since #284. Only a
+/// payload with readable `ancestors` reaches the fallback with a value.
 ///
 /// **The one expression every row's `path` is.** The launcher's search, its
 /// board and its lists, a room's lines and the detail panel all expand this
