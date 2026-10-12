@@ -60,6 +60,15 @@ fn build_record() -> serde_json::Value {
         "triggered": { "type": "user", "user": { "username": "knobas" } },
         "agent": { "name": "knobas-agent" },
         "testOccurrences": { "failed": 1 },
+        "revisions": { "count": 1, "revision": [
+            { "version": SHA,
+              "vcsBranchName": "refs/heads/feature/PAY-231-sepa-retry",
+              "vcs-root-instance": {
+                  "name": "Payout / payout-service",
+                  "properties": root(&format!(
+                      "http://knobas:{ROOT_TOKEN}@gitea:3000/tidewater/payout-service.git"
+                  ))["properties"].clone() } }
+        ]},
         "properties": { "property": [
             { "name": "env.SEPA_RETRIES", "value": "5" },
             { "name": "env.SEPA_SANDBOX_KEY", "value": SECRET },
@@ -338,6 +347,93 @@ async fn a_change_names_its_commit_by_repository_and_sha() {
 
     let wire = serde_json::to_string(&view).expect("serializes");
     assert!(!wire.contains(ROOT_TOKEN), "a root's credential: {wire}");
+}
+
+/// The revision a build ran on is on its overview, named by repository and
+/// sha like a change (#683): a first build or a re-run lists no change, and
+/// still opens the commit it built.
+#[tokio::test]
+async fn the_overview_names_the_revision_it_built_by_repository_and_sha() {
+    let server = teamcity().await;
+    let view = read(&server, None).await;
+    let overview = section(&view, "overview");
+    let revision = overview
+        .blocks
+        .iter()
+        .find(|b| matches!(b, Block::Entities { title: Some(t), .. } if t == "Revision"))
+        .unwrap_or_else(|| panic!("no revision block: {overview:#?}"));
+    assert_eq!(
+        rows(revision),
+        [ViewRow {
+            entity_id: None,
+            title: "Payout / payout-service".into(),
+            meta: Some("feature/PAY-231-sepa-retry".into()),
+            tone: None,
+            chip: Some("179eb1fb0144".into()),
+            url: None,
+            commit: Some(knobas_source::view::CommitHint {
+                repo_url: "http://gitea:3000/tidewater/payout-service.git".into(),
+                sha: SHA.into(),
+            }),
+        }]
+    );
+    let wire = serde_json::to_string(&view).expect("serializes");
+    assert!(!wire.contains(ROOT_TOKEN), "a root's credential: {wire}");
+}
+
+/// More failed tests than one read lists: the tab keeps the build's true
+/// count and ends on a muted row that sends the reader to TeamCity (#683).
+#[tokio::test]
+async fn more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row() {
+    let server = MockServer::start().await;
+    let page: Vec<_> = (0..100)
+        .map(|i| json!({ "name": format!("t{i}"), "newFailure": false, "muted": false }))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/app/rest/testOccurrences"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "count": 100, "testOccurrence": page })),
+        )
+        .mount(&server)
+        .await;
+    let mut record = build_record();
+    record["testOccurrences"] = json!({ "failed": 142 });
+    Mock::given(method("GET"))
+        .and(path(BUILD_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(record))
+        .mount(&server)
+        .await;
+
+    let view = read(&server, Some("tests")).await;
+    let tests = section(&view, "tests");
+    assert_eq!(
+        tests.count,
+        Some(142),
+        "the opened tab keeps the true total"
+    );
+    let last = rows(tests.blocks.last().expect("blocks"));
+    assert_eq!(
+        last,
+        [ViewRow {
+            entity_id: None,
+            title: "The first 100 of 142 failed tests; the rest are on TeamCity.".into(),
+            meta: None,
+            tone: Some(Tone::Muted),
+            chip: None,
+            url: Some(format!(
+                "{}/buildConfiguration/Payout_IntegrationTests/2401?buildTab=tests",
+                server.uri()
+            )),
+            commit: None,
+        }]
+    );
+    let listed = tests
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, Block::Entities { rows, .. } if rows[0].tone == Some(Tone::Err)))
+        .count();
+    assert_eq!(listed, 100);
 }
 
 #[tokio::test]

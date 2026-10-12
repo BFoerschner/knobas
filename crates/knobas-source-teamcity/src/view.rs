@@ -29,12 +29,12 @@ use knobas_source::view::{
     Block, CommitHint, Fact, Setting, SourceView, Tone, ViewAction, ViewRow, ViewSection,
 };
 
-use crate::client::HttpRest;
+use crate::client::{FAILED_TESTS, HttpRest};
 use crate::ids::{config_id, path_escaped};
 use crate::map;
 use crate::rest::{
-    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence, Trigger,
-    VcsRootEntry, parse_ts,
+    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Revision, Step,
+    TestOccurrence, Trigger, VcsRootEntry, parse_ts,
 };
 
 /// A build configuration's tabs, in the order they are drawn.
@@ -814,7 +814,46 @@ async fn build(
             ),
             BuildTab::Tests => {
                 let failed = rest.failed_tests(id).await?.test_occurrence;
-                (Some(failed.len()), failed_test_blocks(&failed))
+                // A full page may not be all of them: the build's own count
+                // is the total, as the stub shows it (#683).
+                let (total, config) = if failed.len() >= FAILED_TESTS as usize {
+                    let read;
+                    let record = match &record {
+                        Some(r) => r,
+                        None => {
+                            read = rest.build_record(id).await?;
+                            &read
+                        }
+                    };
+                    let total = record
+                        .test_occurrences
+                        .as_ref()
+                        .and_then(|t| t.failed)
+                        .map_or(failed.len(), |n| n as usize);
+                    (total, build_type_id(record).map(str::to_owned))
+                } else {
+                    (failed.len(), None)
+                };
+                let mut blocks = failed_test_blocks(&failed);
+                if total > failed.len() {
+                    blocks.push(Block::Entities {
+                        title: None,
+                        rows: vec![ViewRow {
+                            entity_id: None,
+                            title: format!(
+                                "The first {} of {total} failed tests; the rest are on TeamCity.",
+                                failed.len()
+                            ),
+                            meta: None,
+                            tone: Some(Tone::Muted),
+                            chip: None,
+                            url: map::build_web_url(viewer.base_url, config.as_deref(), id)
+                                .map(|u| format!("{u}?buildTab=tests")),
+                            commit: None,
+                        }],
+                    });
+                }
+                (Some(total), blocks)
             }
             BuildTab::Log if stub => (None, Vec::new()),
             BuildTab::Log => {
@@ -955,7 +994,54 @@ fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>)
             }],
         });
     }
+    let revisions: Vec<ViewRow> = record.revisions.revision.iter().map(revision_row).collect();
+    if !revisions.is_empty() {
+        blocks.push(Block::Entities {
+            title: Some(
+                if revisions.len() == 1 {
+                    "Revision"
+                } else {
+                    "Revisions"
+                }
+                .to_owned(),
+            ),
+            rows: revisions,
+        });
+    }
     blocks
+}
+
+/// The commit a build ran on in one VCS root (#683): the root's name, the
+/// short sha as the chip, the branch as the quiet line -- and the same commit
+/// hint a change carries, so a build that lists no change (a configuration's
+/// first build, a re-run) still opens the commit it built.
+fn revision_row(revision: &Revision) -> ViewRow {
+    let sha = nonblank(revision.version.as_deref());
+    let short = sha.map(|s| s.chars().take(12).collect::<String>());
+    let root = revision.vcs_root_instance.as_ref();
+    let repo_url = root
+        .and_then(|r| r.properties.get("url"))
+        .and_then(without_userinfo);
+    ViewRow {
+        entity_id: None,
+        title: root
+            .and_then(|r| nonblank(r.name.as_deref()))
+            .map(str::to_owned)
+            .or_else(|| short.clone())
+            .unwrap_or_else(|| "revision".to_owned()),
+        meta: nonblank(revision.vcs_branch_name.as_deref())
+            .map(|b| b.strip_prefix("refs/heads/").unwrap_or(b).to_owned()),
+        tone: None,
+        chip: short,
+        url: None,
+        commit: match (repo_url, sha) {
+            (Some(repo_url), Some(sha)) => Some(CommitHint {
+                repo_url,
+                sha: sha.to_owned(),
+            }),
+            _ => None,
+        },
+    }
 }
 
 /// Who or what started a build, where no person did.
