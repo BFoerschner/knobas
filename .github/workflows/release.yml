@@ -93,12 +93,16 @@ jobs:
       # reads. A release whose tag says v0.2.0 and whose dmg says 0.1.0 is a
       # support question forever, so disagree here instead -- before anything
       # has been built, and before any minutes are spent.
+      #
+      # `jq .version`, not a grep: `bundle.windows.wix.version` is a second
+      # `"version"` key in the same file (the MSI bundler takes digits only, so
+      # a `-dev` prerelease needs it), and a line-matching read sees both.
       - name: The tag and the manifest must agree
         env:
           TAG: ${{ steps.plan.outputs.tag }}
         run: |
           want="${TAG#v}"
-          conf=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' crates/knobas-app/tauri.conf.json)
+          conf=$(jq -r .version crates/knobas-app/tauri.conf.json)
           test -n "$conf"
           if [ "$want" != "$conf" ]; then
             echo "::error::tag $TAG is version '$want', but crates/knobas-app/tauri.conf.json says '$conf'. Bump the manifest (and the workspace Cargo.toml) or move the tag."
