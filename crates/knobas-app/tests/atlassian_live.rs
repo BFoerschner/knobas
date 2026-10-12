@@ -28,6 +28,12 @@
 //!   turns an adapter's refusal into the `refused` row the pending-writes panel
 //!   shows. Both halves are asserted against **Jira's own answer**, never
 //!   against knobas' mirror of it.
+//! * **`under:` on this Jira's records** (#644). The SQL half of the parent
+//!   rule -- trigger, stored declarations, parser, predicate -- through the
+//!   search the app runs, against the fixture's epic and its children.
+//!   [`under_the_seeded_epic_finds_it_and_its_five_children_through_the_search`]
+//!   is that, read-only; Confluence's counterpart is
+//!   [`under_its_grandparent_finds_the_seeded_grandchild`].
 //!
 //! The Confluence half (#287) is the M3.2 exit criterion, and it is here for
 //! the same reason: *a comment that mentions me becomes an inbox item* is a
@@ -96,7 +102,9 @@
 //! the full reasoning.
 
 mod live_digest;
+mod live_under;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1007,6 +1015,8 @@ async fn app_with(
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
@@ -2426,6 +2436,57 @@ async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
     }
 }
 
+/// **`under:PAY-200` finds the epic and its five children, through the search
+/// the app runs** (#644).
+///
+/// The SQL half of `under:` on records this Jira sent: the scheduler's sync
+/// writes them, the trigger fills `sync.item_parent` from the declarations
+/// `commands::search::searcher` stores, and `Searcher::search` answers the
+/// query. The source is configured with the seed's `epic_link_field`, as the
+/// Add-source dialog leaves it (#381): this classic project keeps epic
+/// membership nowhere else, and `map` stores it as `epic: {"key": …}`.
+///
+/// The expected set is the fixture's: `work.json`'s tickets whose `epic` is
+/// PAY-200, and PAY-200 itself, which answers to its own key as a parent. The
+/// lower-cased spelling is the same query, since `under:` ignores case.
+/// Read-only at Jira: it syncs into a database of its own.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn under_the_seeded_epic_finds_it_and_its_five_children_through_the_search() {
+    const EPIC: &str = "PAY-200";
+    let env = env();
+    let (state, _events) = app_with(
+        "atlassian_live_under_epic",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+        json!({ "username": env.user, "epic_link_field": env.epic_link_field }),
+    )
+    .await;
+    sync(&state, JIRA).await;
+
+    let tickets: BTreeSet<String> = live_under::rows(&live_under::fixture(), "tickets")
+        .iter()
+        .filter(|t| t["key"] == EPIC || t["epic"] == EPIC)
+        .map(|t| format!("{JIRA}:{}", t["key"].as_str().expect("a ticket key")))
+        .collect();
+    assert_eq!(
+        tickets.len(),
+        6,
+        "the fixture's epic and its five children: {tickets:?}"
+    );
+    let expected = BTreeMap::from([("ticket".to_owned(), tickets)]);
+
+    live_under::each_exactly(
+        &state.pool,
+        JIRA,
+        &[EPIC.to_owned(), EPIC.to_lowercase()],
+        &expected,
+    )
+    .await;
+    state.scheduler.shutdown().await;
+}
+
 /// **A day's real work, listed under *yesterday* with its refs** (issue #288,
 /// M3.3).
 ///
@@ -3323,6 +3384,8 @@ async fn wiki_app(
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
@@ -3696,6 +3759,11 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
 /// quoted (the deputy's ruling of 2026-10-12 on #597). The direct parent's
 /// scope is asserted as an exact set, the home page's as containment: other
 /// tests in this suite publish under the home page's subtree.
+///
+/// The query goes through `live_under::search` (#644), the helper the other
+/// three adapters' `under:` witnesses share: the searcher built the app's way,
+/// the token not unknown, Confluence answered on the `under:` coverage, and
+/// every match on the page.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn under_its_grandparent_finds_the_seeded_grandchild() {
@@ -3731,79 +3799,54 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
     let grandparent = title_of(wiki.content(&wiki.home_page_id, "version").await);
     let parent = title_of(wiki.content(&wiki.parent_page_id, "version").await);
 
-    // What the box writes for a picked name: quoted when it has a space.
-    let under = |name: &str| {
-        if name.chars().any(char::is_whitespace) {
-            format!("under:\"{name}\"")
-        } else {
-            format!("under:{name}")
-        }
-    };
-    let search = |raw: String| {
-        let pool = state.pool.clone();
-        async move {
-            let response = knobas_app::commands::search::search_inner(
-                &pool,
-                knobas_search::SearchQuery {
-                    raw: raw.clone(),
-                    limit: 30,
-                    filters: knobas_search::SearchFilters::default(),
-                },
-            )
-            .await
-            .expect("the search runs");
-            assert!(
-                response.interpreted.unknown_tokens.is_empty(),
-                "{raw} names a page and is not unknown: {:?}",
-                response.interpreted.unknown_tokens
-            );
-            let mut ids: Vec<String> = response
-                .groups
-                .iter()
-                .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
-                .collect();
-            ids.sort();
-            ids
-        }
-    };
     let entity = |id: &str| format!("confluence:{id}");
 
-    let by_grandparent = search(under(&grandparent)).await;
+    let by_grandparent =
+        live_under::search(&state.pool, CONFLUENCE, &live_under::under(&grandparent)).await;
+    let pages = &by_grandparent.kinds["page"];
+    assert_eq!(
+        by_grandparent.kinds.keys().collect::<Vec<_>>(),
+        ["page"],
+        "{}: Confluence mirrors pages only",
+        live_under::under(&grandparent)
+    );
+    assert_eq!(
+        pages.ids.len(),
+        pages.total,
+        "{} fits on one page, so containment below is read off every match",
+        live_under::under(&grandparent)
+    );
     for (what, id) in [
         ("the grandchild", &wiki.page),
         ("the parent", &wiki.parent_page_id),
         ("the grandparent itself", &wiki.home_page_id),
     ] {
         assert!(
-            by_grandparent.contains(&entity(id)),
-            "{} did not find {what} {}: {by_grandparent:?}",
-            under(&grandparent),
-            entity(id)
+            pages.ids.contains(&entity(id)),
+            "{} did not find {what} {}: {:?}",
+            live_under::under(&grandparent),
+            entity(id),
+            pages.ids
         );
     }
-    assert!(
-        by_grandparent
-            .iter()
-            .all(|id| id.starts_with("confluence:")),
-        "{by_grandparent:?}"
-    );
 
-    let by_parent = search(under(&parent)).await;
-    let mut expected = vec![entity(&wiki.parent_page_id), entity(&wiki.page)];
-    expected.sort();
-    assert_eq!(
-        by_parent,
-        expected,
-        "{} is the parent and its one seeded child",
-        under(&parent)
+    let by_parent = live_under::search(&state.pool, CONFLUENCE, &live_under::under(&parent)).await;
+    live_under::exactly(
+        &live_under::under(&parent),
+        &by_parent,
+        &BTreeMap::from([(
+            "page".to_owned(),
+            BTreeSet::from([entity(&wiki.parent_page_id), entity(&wiki.page)]),
+        )]),
     );
 
     println!(
-        "SEEDED {} -> {} hit(s), the grandchild {} among them; {} -> {by_parent:?}",
-        under(&grandparent),
-        by_grandparent.len(),
+        "SEEDED {} -> {} hit(s), the grandchild {} among them; {} -> {:?}",
+        live_under::under(&grandparent),
+        pages.total,
         entity(&wiki.page),
-        under(&parent)
+        live_under::under(&parent),
+        by_parent.ids()
     );
     state.scheduler.shutdown().await;
 }
