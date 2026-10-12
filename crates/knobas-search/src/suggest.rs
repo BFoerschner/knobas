@@ -68,9 +68,8 @@ select s.id from unnest($1::text[]) s(id)
    limit 1) l";
 
 /// Every `(name, kind)` a parent answers to: [`crate::under::parent_names!`],
-/// the fragment `under:`'s own
-/// lookup reads, so a suggested name is one `under:` knows and every name it
-/// knows is suggested (#615).
+/// the fragment `under:`'s own lookup reads, so a suggested name is one
+/// `under:` knows and every name it knows is suggested (#615).
 const PARENTS_SQL: &str = concat!(
     "select distinct p.name, p.kind from ",
     crate::under::parent_names!(),

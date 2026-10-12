@@ -230,8 +230,7 @@ pub async fn filter_suggestions(
 /// from which the database keeps `sync.item_parent` -- what `under:` reads.
 /// Bring-up calls this before the first sync, and every command calls it
 /// again, so the stored copy is always this binary's. A call that changes
-/// nothing writes nothing: one statement whose `on conflict` matches and
-/// updates no row, and a delete that finds none.
+/// nothing is one read and writes nothing.
 ///
 /// # Errors
 ///

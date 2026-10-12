@@ -8,8 +8,9 @@
 //! `declared_parent_names!` and `declared_names_as_parent!`, bound to the
 //! declarations `Vocabulary::declaring` builds in Rust -- after every kind of
 //! change the trigger code claims to follow: an insert, a payload update, a
-//! delete, a change to the stored declarations, and a source configured after
-//! its items were written.
+//! delete, a change to the stored declarations, a source configured after
+//! its items were written, a source given another adapter kind, and a source
+//! removed.
 //!
 //! Its own database (one per test module, #572), so it may write
 //! `sync.parent_declaration` freely; nothing here goes through
@@ -299,6 +300,37 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
     assert!(
         has(&rows, &format!("{c}:payments"), "Payments", "page"),
         "{rows:?}"
+    );
+
+    // The Gitea source pointed at the chain adapter: its items now declare
+    // what a chain page would, which for a commit, a PR or a repo is nothing.
+    sqlx::query("update knobas.source_config set kind = $2 where id = $1")
+        .bind(&g)
+        .bind(&chain)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let rows = agree(
+        &pool,
+        &prefix(&g),
+        &templates,
+        "a source's adapter kind change",
+    )
+    .await;
+    assert!(
+        rows.is_empty(),
+        "no chain declaration reaches these kinds: {rows:?}"
+    );
+
+    sqlx::query("delete from knobas.source_config where id = $1")
+        .bind(&c)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let rows = agree(&pool, &prefix(&c), &templates, "removing the source").await;
+    assert!(
+        rows.is_empty(),
+        "a source nobody configures declares nothing: {rows:?}"
     );
 }
 

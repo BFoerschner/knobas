@@ -418,15 +418,26 @@ async fn parented(pool: &PgPool, source: &str, t: &str, entities: bool) -> Vec<S
     ids
 }
 
-/// What `under:` and its suggestions answer for this test's names: the ids
-/// each query finds, the unknown tokens it reports, and the suggested parents.
-async fn under_answers(
-    pool: &PgPool,
-    t: &str,
-) -> (
-    Vec<(String, Vec<String>, Vec<String>)>,
-    Vec<(String, String)>,
-) {
+/// What one `under:` query answered.
+#[derive(Debug, PartialEq, Eq)]
+struct UnderAnswer {
+    raw: String,
+    /// The entity ids it found, sorted.
+    found: Vec<String>,
+    unknown_tokens: Vec<String>,
+}
+
+/// What `under:` and its suggestions answer for this test's names.
+#[derive(Debug, PartialEq, Eq)]
+struct UnderAnswers {
+    queries: Vec<UnderAnswer>,
+    /// The suggested parents carrying this test's token, as `(name, kind)`.
+    parents: Vec<(String, String)>,
+}
+
+/// [`UnderAnswers`] for this test's names, through the commands the
+/// launcher calls.
+async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
     let mut answers = Vec::new();
     for raw in [
         format!("under:own/pay-{t}"),
@@ -451,7 +462,11 @@ async fn under_answers(
             .map(|hit| hit.row.entity_id.clone())
             .collect();
         ids.sort();
-        answers.push((raw, ids, response.interpreted.unknown_tokens));
+        answers.push(UnderAnswer {
+            raw,
+            found: ids,
+            unknown_tokens: response.interpreted.unknown_tokens,
+        });
     }
     let parents = knobas_app::commands::search::filter_suggestions_inner(pool)
         .await
@@ -461,7 +476,10 @@ async fn under_answers(
         .filter(|parent| parent.name.contains(t))
         .map(|parent| (parent.name, parent.kind))
         .collect();
-    (answers, parents)
+    UnderAnswers {
+        queries: answers,
+        parents,
+    }
 }
 
 /// What the database stored for these items, every row counted.
@@ -501,7 +519,7 @@ async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
     let ids = parented(&from, &source, &t, true).await;
     let before = under_answers(&from, &t).await;
     assert!(
-        before.0[0].1.len() == 2 && !before.1.is_empty(),
+        before.queries[0].found.len() == 2 && !before.parents.is_empty(),
         "the source database answers `under:` before the backup: {before:?}"
     );
 
@@ -513,7 +531,25 @@ async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
     let target = knobas_db::test_util::scratch_database("under").await;
     backup::restore(&target, &archive).await.expect("restore");
     let into = target.pool(2).await.unwrap();
+    // Bring-up, which on a real machine ran before the restore did: the app
+    // stores its adapters' declarations before its first sync. Only then does
+    // the source re-sync, so the stored parents below come from the insert
+    // trigger and not from a declaration write recomputing after the fact.
+    knobas_app::commands::search::searcher(&into).await.unwrap();
+    let declared: i64 = sqlx::query_scalar("select count(*) from sync.item_parent")
+        .fetch_one(&into)
+        .await
+        .unwrap();
+    assert_eq!(
+        declared, 0,
+        "nothing is mirrored yet, so nothing is resolved"
+    );
     parented(&into, &source, &t, false).await;
+    let resolved = stored_parents(&into, &ids).await;
+    assert!(
+        !resolved.is_empty() && resolved.iter().all(|row| row.3 == 1),
+        "the re-sync's inserts resolve themselves, each row once: {resolved:?}"
+    );
 
     let after = under_answers(&into, &t).await;
     assert_eq!(
@@ -523,7 +559,7 @@ async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
     assert_eq!(
         stored_parents(&into, &ids).await,
         stored_parents(&from, &ids).await,
-        "the restored machine stores the parents differently, or twice"
+        "the restored machine stores the parents differently"
     );
 }
 

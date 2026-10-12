@@ -1284,6 +1284,10 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         seeding.elapsed().as_millis()
     );
     testing::seed_estate(&pool, "bench").await.unwrap();
+    // Timed too, and the larger part of the write cost: the seed's rows carry
+    // no parent, so its trigger walk finds nothing, while this update gives
+    // 6,667 rows one and the trigger resolves each of them.
+    let parenting = Instant::now();
     let parented = sqlx::query(
         "update sync.item
             set payload = payload || jsonb_build_object('repository', jsonb_build_object(
@@ -1297,6 +1301,10 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     .await
     .unwrap()
     .rows_affected();
+    println!(
+        "under: giving {parented} commits a repository took {} ms",
+        parenting.elapsed().as_millis()
+    );
     testing::prepare(&pool).await.unwrap();
     println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
     assert!(

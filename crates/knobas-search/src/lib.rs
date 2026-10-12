@@ -174,9 +174,9 @@ impl Searcher {
     /// recomputes it from `sync.parent_declaration` whenever an item, a
     /// declaration or a source's adapter kind changes. This writes that table
     /// whole -- each template's `payload_paths` under its adapter kind, every
-    /// other adapter kind removed -- and leaves a row that already says the
-    /// same thing untouched, so a call that changes nothing recomputes
-    /// nothing. The path line and coverage still read the in-memory copy
+    /// other adapter kind removed. It reads the table first and writes only
+    /// when it differs, so a call that changes nothing is one read, takes no
+    /// lock and recomputes nothing. The path line and coverage still read the in-memory copy
     /// [`Self::with_payload_paths`] keeps.
     ///
     /// The one way the app builds its searcher, and the one way a test that
@@ -200,6 +200,29 @@ impl Searcher {
             .iter()
             .map(|(_, paths)| sqlx::types::Json(paths))
             .collect();
+        // Read first, and write only on a difference: this runs on every
+        // command, and an `on conflict do update` locks the row it matches
+        // even when its `where` then declines to change it. Equal is the
+        // usual case -- every call after bring-up's first one.
+        let stored: Vec<(String, serde_json::Value)> = sqlx::query_as(
+            "select adapter_kind, payload_paths from sync.parent_declaration order by adapter_kind",
+        )
+        .fetch_all(&searcher.pool)
+        .await?;
+        let mut wanted: Vec<(String, serde_json::Value)> = searcher
+            .payload_paths
+            .iter()
+            .map(|(kind, paths)| {
+                (
+                    kind.clone(),
+                    serde_json::to_value(paths).unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect();
+        wanted.sort_by(|a, b| a.0.cmp(&b.0));
+        if stored == wanted {
+            return Ok(searcher);
+        }
         let mut tx = searcher.pool.begin().await?;
         sqlx::query(
             "insert into sync.parent_declaration (adapter_kind, payload_paths)

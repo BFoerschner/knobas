@@ -39,6 +39,11 @@
 -- `declared_parents!` (the deputy's ruling of 2026-10-11 on #594): this file
 -- carries its expansion, not a second spelling of it.
 --
+-- **The failure direction is a miss** (ADR-0007): a declaration whose path
+-- leads to nothing, or to a value of the wrong shape, stores no row for that
+-- item, so `under:` does not find it beneath that parent -- the answer the
+-- walk gave, and never a guessed name.
+--
 -- Every item is stored whatever its liveness; readers join
 -- `sync.live_item`. A row of a source no configured adapter declares for
 -- stores nothing, as it matched nothing before.
