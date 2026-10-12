@@ -531,6 +531,7 @@ knobas-app	test/it	entity::a_project_narrows_the_include_deleted_statements_too
 knobas-app	test/it	entity::a_project_narrows_the_room_within_its_sources
 knobas-app	test/it	entity::a_project_room_shows_a_configuration_only_project
 knobas-app	test/it	entity::a_relations_case_does_not_split_its_group
+knobas-app	test/it	entity::a_rooms_lines_carry_the_state_their_adapter_declares
 knobas-app	test/it	entity::a_tombstoned_entity_is_absent_unless_asked_for
 knobas-app	test/it	entity::a_tombstoned_entity_is_still_readable_and_says_so
 knobas-app	test/it	entity::activity_can_be_scoped_to_one_entity
@@ -583,6 +584,7 @@ knobas-app	test/it	entity_mirror::the_standup_digest_shape_matches_its_typescrip
 knobas-app	test/it	entity_mirror::the_standup_protocol_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_start_work_step_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_start_work_vocabularies_match_their_typescript_mirror
+knobas-app	test/it	entity_mirror::the_state_chip_and_its_tones_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_suggestion_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_url_match_shape_matches_its_typescript_mirror
 knobas-app	test/it	estate_exit::a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart
@@ -707,6 +709,7 @@ knobas-app	test/it	sources_mirror::the_patch_and_draft_payloads_the_mirror_descr
 knobas-app	test/it	sources_mirror::the_queue_counts_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_queued_write_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_source_summary_shape_matches_its_typescript_mirror
+knobas-app	test/it	sources_mirror::the_state_path_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_summary_auth_kind_is_the_same_union_as_the_input_dtos
 knobas-app	test/it	sources_mirror::the_sync_run_row_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_write_queue_unions_match_the_rust_enums
@@ -973,6 +976,7 @@ knobas-core	lib/knobas_core	suggest::tests::rule_class_serializes_as_its_column_
 knobas-core	lib/knobas_core	suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads
 knobas-core	lib/knobas_core	suggest::tests::the_rule_classes_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	suggest::tests::the_similarity_floor_in_the_statement_is_the_one_that_is_documented
+knobas-core	lib/knobas_core	tone::tests::the_five_tones_travel_lowercase
 knobas-core	lib/knobas_core	write_queue::tests::a_comments_target_changes_when_its_text_does
 knobas-core	lib/knobas_core	write_queue::tests::a_create_into_an_unmirrored_container_is_not_held
 knobas-core	lib/knobas_core	write_queue::tests::a_judgement_op_holds_on_the_whole_record
@@ -1098,6 +1102,8 @@ knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_is_each_parents_first_name_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_reads_nothing_undeclared
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
+knobas-core	test/it	payload_paths::a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust
+knobas-core	test/it	payload_paths::a_state_chip_misses_in_both_and_never_guesses
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both
 knobas-core	test/it	payload_paths::the_first_parent_candidate_that_resolves_wins_in_both
 knobas-core	test/it	projects::a_blank_project_key_contributes_nothing
@@ -1601,6 +1607,9 @@ knobas-search	test/it	sql_shape::rows_tied_on_rank_and_timestamp_are_ordered_by_
 knobas-search	test/it	sql_shape::the_best_match_comes_first_and_recency_only_breaks_ties
 knobas-search	test/it	sql_shape::the_launchers_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
+knobas-search	test/it	state_chip::a_built_in_lists_rows_carry_their_state_chip
+knobas-search	test/it	state_chip::a_search_hit_carries_its_state_chip
+knobas-search	test/it	state_chip::the_boards_newest_rows_carry_their_state_chip
 knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
 knobas-search	test/it	suggest::a_source_is_offered_only_once_it_has_a_live_row
 knobas-search	test/it	suggest::every_asset_is_offered_by_its_name_and_leads_somewhere
@@ -1677,6 +1686,8 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_with_no_workflow_that_answers_the_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_state_at_that_leads_to_an_object
+knobas-source	lib/knobas_source	contract::tests::rejects_a_state_no_item_draws_a_chip_for
 knobas-source	lib/knobas_source	contract::tests::rejects_a_write_capability_with_no_write_ops
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_cannot_connect_when_nothing_is_wrong
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_ignores_the_cursor
@@ -1899,6 +1910,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scope
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_branch_pr_and_commit_declare_their_repo_as_parent
+knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_open_or_closed
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
@@ -2275,6 +2287,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_n
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stands_still_when_nothing_finished
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stays_below_the_oldest_build_still_in_flight
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_declares_its_configuration_as_parent_by_name_and_id
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_draws_running_or_its_outcome
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_full_sync_is_declared_a_window_not_the_corpus
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_declares_two_kinds_and_two_write_ops
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_survives_the_ipc_hop
@@ -2407,6 +2420,7 @@ knobas-source-teamcity	test/live_teamcity_seeded	a_build_configurations_web_url_
 knobas-source-teamcity	test/live_teamcity_seeded	a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands_still
 knobas-source-teamcity	test/live_teamcity_seeded	a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200
 knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_its_configuration_and_is_found_by_under_its_name_and_id
+knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_its_state_chip
 knobas-source-teamcity	test/live_teamcity_seeded	passes_the_contract_battery_against_the_seeded_server
 knobas-source-teamcity	test/live_teamcity_seeded	test_connection_names_the_seeded_server_and_the_seed_account
 knobas-source-teamcity	test/live_teamcity_seeded	the_cleanup_reports_a_server_it_cannot_reach_rather_than_calling_the_build_gone
