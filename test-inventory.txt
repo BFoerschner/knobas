@@ -1569,7 +1569,7 @@ knobas-search	test/it	sql_shape::the_best_match_comes_first_and_recency_only_bre
 knobas-search	test/it	sql_shape::the_launchers_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
 knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
-knobas-search	test/it	suggest::an_asset_that_holds_something_is_offered_and_a_leaf_is_not
+knobas-search	test/it	suggest::every_asset_is_offered_by_its_name_and_leads_somewhere
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents

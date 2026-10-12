@@ -9817,8 +9817,9 @@ From this commit on, each of the following requires an orchestrator decision **a
     is a known one and the branch on `at`'s two shapes stays in `declared_parents!` (the deputy's
     ruling of 2026-10-11 on #594). A parent outside the mirror is offered with the kind its
     children declare, which is what that ruling kept `ParentPath.kind` for. The estate's parents
-    are the assets that hold another asset or expose a route, offered as `asset`; `under:` reaching
-    them is #600's.
+    are every asset by its name, offered as `asset`: `crate::under`'s asset arm, which #600 (PR
+    #608) gave `under:`, knows every asset's name and returns the asset itself, so a leaf leads
+    somewhere as a mirrored repo nothing sits in yet does.
   * **No `#[serde(default)]`, and none is owed**, for the reason #506's entry gives
     `SmartListSummary`: every value is constructed in `knobas_search::suggest` and serialized
     outwards, and nothing decodes one.
@@ -9837,7 +9838,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   parent's name spelled as the box completes it, quoted when it has a space, and must be
   understood and find something; the deputy's ruling of 2026-10-12 on #597),
   `a_parent_only_its_children_name_is_still_offered` and
-  `an_asset_that_holds_something_is_offered_and_a_leaf_is_not`; `suggest::tests::
+  `every_asset_is_offered_by_its_name_and_leads_somewhere`; `suggest::tests::
   every_kind_knobas_owns_is_probed`; `tests/it/under.rs`'s
   `a_quoted_name_with_a_space_scopes_like_any_other`; `knobas-app`'s `tests/it/search_ipc.rs`
   `the_suggestions_carry_kinds_sources_and_parents_with_their_kind` and `commands::search`'s

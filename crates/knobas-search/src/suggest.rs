@@ -14,8 +14,10 @@
 //!   live items declare for their parents and the names mirrored records
 //!   answer to as one, read through the **same two `knobas_core::payload`
 //!   reads** `under:` resolves through (the deputy's ruling of 2026-10-11 on
-//!   #594), so a suggestion is a value `crate::under` knows; and the estate's
-//!   assets that hold another asset or expose a route.
+//!   #594), so a suggestion is a value `crate::under` knows; and every asset
+//!   by its name, which is `crate::under`'s asset arm (#600: an asset answers
+//!   to its name, and `under:` returns the asset itself, so even a leaf leads
+//!   somewhere -- as a mirrored repo nothing sits in yet does).
 //!
 //! One read per launcher opening, never per keystroke: the box narrows the
 //! lists itself as the reader types, so the hot path pays nothing for them.
@@ -52,17 +54,16 @@ select k.kind from (
 /// Three arms. The first two are `crate::under`'s `KNOWN_SQL` with the kind
 /// kept: a parent the children declare -- mirrored or not, which is why the
 /// kind is the declaration's (#594) -- and a mirrored record answering to its
-/// sibling kinds' declared names. The third is the estate (ADR-0014): an
-/// asset that holds another asset or exposes a route, answering to its name.
+/// sibling kinds' declared names. The third is the estate (ADR-0014): every
+/// asset, answering to its name -- `KNOWN_SQL`'s asset arm, so here too a
+/// suggested name is one `under:` knows.
 const PARENTS_SQL: &str = concat!(
     "select p.name, p.kind from (",
     "select pn.name, pn.kind from sync.live_item i cross join lateral ",
     knobas_core::declared_parent_names!("$1"),
     " pn union select sn.name, i.kind from sync.live_item i cross join lateral ",
     knobas_core::declared_names_as_parent!("$1"),
-    " sn union select a.name, 'asset' from knobas.asset a \
-       where exists (select 1 from knobas.asset c where c.parent_id = a.id) \
-          or exists (select 1 from knobas.route r where r.asset_id = a.id)",
+    " sn union select a.name, 'asset' from knobas.asset a",
     ") p where nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
      order by p.name, p.kind"
 );

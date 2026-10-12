@@ -293,10 +293,12 @@ async fn a_parent_only_its_children_name_is_still_offered() {
     }
 }
 
-/// The estate's parents are offered as assets: one that holds another asset,
-/// one that exposes a route, and not a leaf that holds nothing.
+/// Every asset is offered by its name, as `asset`: one that holds another
+/// asset, one that exposes a route, and a leaf that holds nothing -- `under:`
+/// knows every asset's name and returns the asset itself (#600), so each one
+/// leads somewhere, a spaced name typed quoted as the box writes it.
 #[tokio::test]
-async fn an_asset_that_holds_something_is_offered_and_a_leaf_is_not() {
+async fn every_asset_is_offered_by_its_name_and_leads_somewhere() {
     let pool = pool().await;
     let t = token();
     asset(
@@ -317,7 +319,7 @@ async fn an_asset_that_holds_something_is_offered_and_a_leaf_is_not() {
         &pool,
         &format!("asset:lone-{t}"),
         None,
-        &format!("lone-{t}"),
+        &format!("Lone Rack {t}"),
     )
     .await;
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'route', 'web')")
@@ -339,10 +341,14 @@ async fn an_asset_that_holds_something_is_offered_and_a_leaf_is_not() {
     assert_eq!(
         parents_of(&suggestions, &t),
         [
+            parent(&format!("Lone Rack {t}"), "asset"),
             parent(&format!("hel1-{t}"), "asset"),
             parent(&format!("vm-{t}"), "asset"),
         ],
     );
+    for p in parents_of(&suggestions, &t) {
+        leads_somewhere(&searcher(&pool), &typed_under(&p.name)).await;
+    }
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
     assert!(
         kinds.contains(&"asset") && kinds.contains(&"route"),
