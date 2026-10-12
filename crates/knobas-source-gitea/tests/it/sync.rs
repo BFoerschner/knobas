@@ -47,7 +47,7 @@ async fn a_full_sync_emits_the_repository_and_every_branch() {
     // The position records what was seen, so the next run has something to
     // compare against.
     let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
-    assert_eq!(position["v"], 1);
+    assert_eq!(position["v"], 2);
     let repo = &position["repos"]["tidewater/payout-service"];
     assert_eq!(repo["repo_updated_at"], "2026-08-22T11:42:00Z");
     assert_eq!(
@@ -373,7 +373,7 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
         ("an unreadable cursor", Some("not json".to_owned())),
         (
             "a cursor naming no repository",
-            Some(r#"{"v":1,"repos":{}}"#.into()),
+            Some(r#"{"v":2,"repos":{}}"#.into()),
         ),
     ] {
         let mut sink = VecSink(Vec::new());
@@ -1428,4 +1428,69 @@ async fn a_budget_that_stops_short_keeps_the_boundary_it_was_handed() {
     let (idle, same) = again(&*tight, &moved).await;
     assert!(idle.is_empty(), "re-delivered {idle:?}");
     assert_eq!(same, moved);
+}
+
+/// Issue #610, the upgrade path for #595's payload change. An install that
+/// synced before #595 holds a version-1 cursor whose branch heads still match
+/// the server, so an incremental run under it would re-emit nothing and every
+/// mirrored branch and commit would keep the payload without a `repository`
+/// object. The version bump makes that cursor unusable, which turns the first
+/// run after the upgrade into a full sync.
+///
+/// Both halves on one fixture: the same position at version 1 re-emits, and at
+/// version 2 it is idle (battery clause 2). Without the second half this would
+/// pass on an adapter that ignored its cursor altogether.
+#[tokio::test]
+async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits() {
+    let fake = Fake::start(&State::tidewater()).await;
+    // A budget below the fixture's three commits, so "inside the budget" is a
+    // claim the run can get wrong.
+    let source = source(
+        fake.base_url(),
+        serde_json::json!({ "commits_per_repo": 2 }),
+    );
+    let (first, current) = full(&*source).await;
+    assert_eq!(ids(&first, "commit").len(), 2, "{first:?}");
+
+    // The same position, as a knobas from before #595 stored it.
+    let mut old: serde_json::Value = serde_json::from_str(&current).expect("the cursor is JSON");
+    assert_eq!(old["v"], 2, "{current}");
+    old["v"] = 1.into();
+    let old = old.to_string();
+
+    let (items, upgraded) = again(&*source, &old).await;
+    assert_eq!(
+        ids(&items, "branch"),
+        vec![
+            "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
+            "gitea:tidewater/payout-service@refs/heads/main",
+        ]
+    );
+    assert_eq!(ids(&items, "commit"), ids(&first, "commit"));
+    for item in items
+        .iter()
+        .filter(|i| i.kind == "branch" || i.kind == "commit")
+    {
+        assert_eq!(
+            item.payload["repository"],
+            serde_json::json!({
+                "full_name": "tidewater/payout-service",
+                "name": "payout-service",
+            }),
+            "{}",
+            item.entity
+        );
+        assert!(
+            !item.body_text.contains("payout-service"),
+            "{}: {}",
+            item.entity,
+            item.body_text
+        );
+    }
+    assert!(upgraded.starts_with(r#"{"v":2"#), "{upgraded}");
+
+    // The same heads at version 2: nothing moved, nothing is emitted.
+    let (idle, same) = again(&*source, &current).await;
+    assert!(idle.is_empty(), "idle run emitted {idle:?}");
+    assert_eq!(same, current);
 }
