@@ -283,3 +283,40 @@ Ruled 2026-10-12, in the issue body:
 - **Not chosen:** offering every enabled source with a "not synced yet" hint. That changes `SourceSuggestion` (a §10.8 DTO) and the launcher. If Björn wants it, it is a separate request.
 
 **If you disagree, the cost of reversing this is:** low. The filter is one `exists` probe in `crates/knobas-search/src/suggest.rs` and one test in `crates/knobas-search/tests/it/suggest.rs`. Dropping it brings back the `enabled`-only list. The hint variant is additive: a field on `SourceSuggestion` with its §10.8 entry, plus the launcher's rendering of it.
+
+## #612 — a repo found by its bare name: the adapter, the title, or the index
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/612#issuecomment-6118644395>
+
+**The fork:** a Gitea repo's title and body both carry its `full_name` (`map.rs`, `repo_item`), and PostgreSQL lexes `tidewater/payout-service` as one file-path lexeme. So `payout-service`, `payout` and `Payout-Service` match nothing of the repo. The ticket names three options. (1) The adapter adds the bare `name`, or the owner and the name as separate words, to the repo's `body_text`, at body weight B. (2) The same words at title weight. An adapter can only get them there by changing the `title` it stores, which is the title every surface shows. (3) A migration changes what `sync.item.fts` lexes. Options 1 and 2 change stored text, and an existing install only gets new text when it re-emits its repos, which ties them to #610's cursor bump. Option 3 changes no stored text.
+
+**Ruling:** (3), on the title only, and only by adding lexemes. The next free migration (`0027` at `origin/main` `5410e0a4`; take the number when the §10.8 entry is written, as #592's ruling said) changes `sync.item.fts` and nothing else. It uses one `alter column fts set expression`, the shape `0019` and `0026` used. The title stays at A as `0001` has it. When the title contains a `/`, the same title with each `/` read as a word break is added at A as well. The body stays at B and is lexed as before. The expression I measured on the embedded PostgreSQL 18.6:
+
+```sql
+setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+setweight(case when strpos(coalesce(title, ''), '/') > 0
+               then to_tsvector('english', translate(title, '/', ' '))
+               else ''::tsvector end, 'A') ||
+setweight(to_tsvector('english', coalesce(body_text, '')), 'B')
+```
+
+The same PR carries:
+- a §10.8 entry for the migration, **ratified under #612's "What to build" by this ruling and flagged for Björn's review**, in the shape of the `0026` entry;
+- no change to `knobas-source-gitea`: `repo_item`, the golden tests and `CURSOR_VERSION` stay as they are. Without an adapter change there is no live Gitea criterion. The witness is the `Searcher` against real PostgreSQL (ADR-0013);
+- this ruling appended to `docs/decisions/2026-10-unattended-rulings.md`.
+
+The ticket's "Blocked by" stays **None**. The fix doesn't rely on #610's re-emit. No glossary change and no ADR: this is a lexing detail of one corpus, like the URL table on `corpus::ROUTE`, and not a new term or an architectural decision.
+
+**Reasoning:**
+
+- **The spec decides the weight, and only (3) meets it.** #612 cites story 1: *"typing a repo's name to show that repo at the top of its group"*. Story 25 adds *"so that the thing *named* what I typed comes first in every kind"*, and #591's Implementation Decisions say *"the full-text corpus weights the title above the body for every kind"*. The repo's name is its title. Option 1 puts that name at B, where a repo whose description mentions `payout-service` ties it and recency decides. Measured on 18.6 with two repos, `tidewater/payout-service` and `tidewater/ledger` (body: *"consumes events from payout-service"*), for the query `payout-service`. Under `0001`'s expression only `tidewater/ledger` matches (0.4). Under the expression above, `tidewater/payout-service` scores 1 and `tidewater/ledger` 0.4. Under option 1 they would score 0.4 each.
+- **Option 2 changes what every surface shows.** A repo's `full_name` title is what the launcher row, the inbox, rooms and links draw. #591 changes searchable text and says *"Titles are not affected"*. Rewriting a title to make it searchable is outside the ticket.
+- **(3) keeps search free of source knowledge.** Story 35: *"so that search contains no source-specific knowledge"*. The rule is "a `/` in a title also separates words" for every kind. Nothing in it names Gitea.
+- **Criterion 4 is met by construction, and #610 stays separate.** A generated column is recomputed by the migration's table rewrite, so every repo already mirrored is findable the moment the migration runs. Options 1 and 2 can't do that. `sync.rs` re-emits a repo only *"when its `updated_at` differs from the one in the cursor"*. If #610 merges first, an install that runs its build holds a version-2 cursor, and options 1 and 2 would need a second bump to version 3 and another full sync per Gitea source.
+- **Frozen surface.** Option 1 adds none, and (3) adds one generated-column expression and an entry. A smallest-surface reading still has to do what the ticket says, and option 1 fails story 1 in the case the spec describes. #592's ruling took a migration over leaving a kind short of "every kind" for the same reason. The cost is one entry in the `0026` shape, and migration additions have been ratified under the ticket's criterion since the #42 entry.
+- **Additive, so nothing that matches today stops matching.** The whole lexeme stays: `tidewater/payout-service` still matches at A, measured at 1.4 (title A plus the body's copy at B), and `tests/it/under.rs`'s full-name query is unaffected. A title without a `/` lexes byte for byte as before (measured: `Fix typo in payout` → `'fix':1A 'payout':4A 'typo':2A`, unchanged). Bodies are untouched. That keeps every URL in every body lexed as `corpus::ROUTE`'s table records, and `0026`'s *"Which parts of a URL become lexemes at all is unchanged"* stays true.
+- **Effects outside repos, named so nobody meets them as surprises.** Every title with a `/` gains its parts, so the same gap closes for branch names too. Measured: `feature/payout-jitter` is now found by `jitter`, which `0001` misses. `knobas_core::suggest`'s `SIMILAR_TEXT` reads `sync.item.fts` for ticket, page and PR, so a slashed title there gains stems it can share. Its tests must stay green. The query `payout` now scores 2 on the repo (`payout-servic` and `payout`). That is the inflation #611 fixes for every hyphenated title, and it is not #612's. #611 is independent. If either ticket lands a `sync.item.fts` migration second, it restates the first one's expression whole and never drops it.
+- **The rewrite.** `sync.item` is the mirror's largest table, and `set expression` rewrites it and rebuilds `item_fts_idx`. On 18.6 it ran without complaint on a table with a dependent view and a GIN index. The implementer confirms that on the real schema (`sync.live_item`, as `0012` redefines it, selects `i.fts`) and records the measured rewrite time in the migration header, as `0019` did.
+
+**If you disagree, the cost of reversing this is:** low. One more migration restores `0001`'s expression for `sync.item.fts`, with a §10.8 entry. Then option 1 is built in the adapter: add the bare name to `repo_item`'s `body_text`, update the golden test, bump `CURSOR_VERSION` (to 3 if #610 has landed), and each Gitea source does one full sync. No IPC, DTO, descriptor or stored item changes in either direction, because the generated column is recomputed from `title` and `body_text` on every rewrite.
