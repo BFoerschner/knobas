@@ -201,15 +201,7 @@ pub(crate) struct Revision {
     /// The full ref, `refs/heads/main`.
     pub vcs_branch_name: Option<String>,
     #[serde(rename = "vcs-root-instance")]
-    pub vcs_root_instance: Option<NamedRootInstance>,
-}
-
-/// A revision's VCS root instance: its name, and its properties for `url`.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(crate) struct NamedRootInstance {
-    pub name: Option<String>,
-    #[serde(default)]
-    pub properties: Properties,
+    pub vcs_root_instance: Option<RootInstance>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -263,6 +255,8 @@ pub(crate) struct Change {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct RootInstance {
+    /// Asked for on a build's revisions (#683), not on a change.
+    pub name: Option<String>,
     #[serde(default)]
     pub properties: Properties,
 }

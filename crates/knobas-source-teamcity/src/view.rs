@@ -33,7 +33,7 @@ use crate::client::{FAILED_TESTS, HttpRest};
 use crate::ids::{config_id, path_escaped};
 use crate::map;
 use crate::rest::{
-    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Revision, Step,
+    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Revision, RootInstance, Step,
     TestOccurrence, Trigger, VcsRootEntry, parse_ts,
 };
 
@@ -829,29 +829,21 @@ async fn build(
                         .test_occurrences
                         .as_ref()
                         .and_then(|t| t.failed)
-                        .map_or(failed.len(), |n| n as usize);
+                        // Never fewer than were listed, whatever TeamCity counts.
+                        .map_or(failed.len(), |n| (n as usize).max(failed.len()));
                     (total, build_type_id(record).map(str::to_owned))
                 } else {
                     (failed.len(), None)
                 };
                 let mut blocks = failed_test_blocks(&failed);
                 if total > failed.len() {
-                    blocks.push(Block::Entities {
-                        title: None,
-                        rows: vec![ViewRow {
-                            entity_id: None,
-                            title: format!(
-                                "The first {} of {total} failed tests; the rest are on TeamCity.",
-                                failed.len()
-                            ),
-                            meta: None,
-                            tone: Some(Tone::Muted),
-                            chip: None,
-                            url: map::build_web_url(viewer.base_url, config.as_deref(), id)
-                                .map(|u| format!("{u}?buildTab=tests")),
-                            commit: None,
-                        }],
-                    });
+                    blocks.push(left_out_tests(
+                        viewer,
+                        config.as_deref(),
+                        id,
+                        failed.len(),
+                        total,
+                    ));
                 }
                 (Some(total), blocks)
             }
@@ -1017,30 +1009,21 @@ fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>)
 /// first build, a re-run) still opens the commit it built.
 fn revision_row(revision: &Revision) -> ViewRow {
     let sha = nonblank(revision.version.as_deref());
-    let short = sha.map(|s| s.chars().take(12).collect::<String>());
+    let short = sha.map(short_sha);
     let root = revision.vcs_root_instance.as_ref();
-    let repo_url = root
-        .and_then(|r| r.properties.get("url"))
-        .and_then(without_userinfo);
     ViewRow {
         entity_id: None,
         title: root
             .and_then(|r| nonblank(r.name.as_deref()))
             .map(str::to_owned)
             .or_else(|| short.clone())
-            .unwrap_or_else(|| "revision".to_owned()),
+            .unwrap_or_else(|| "Revision".to_owned()),
         meta: nonblank(revision.vcs_branch_name.as_deref())
             .map(|b| b.strip_prefix("refs/heads/").unwrap_or(b).to_owned()),
         tone: None,
         chip: short,
         url: None,
-        commit: match (repo_url, sha) {
-            (Some(repo_url), Some(sha)) => Some(CommitHint {
-                repo_url,
-                sha: sha.to_owned(),
-            }),
-            _ => None,
-        },
+        commit: commit_hint(root, sha),
     }
 }
 
@@ -1068,7 +1051,7 @@ fn stamp(raw: &str) -> String {
 /// repository and sha, which the app resolves against the mirror (#665).
 fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
     let sha = nonblank(change.version.as_deref());
-    let short = sha.map(|s| s.chars().take(12).collect::<String>());
+    let short = sha.map(short_sha);
     let subject = change
         .comment
         .as_deref()
@@ -1081,11 +1064,6 @@ fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
     .into_iter()
     .flatten()
     .collect();
-    let repo_url = change
-        .vcs_root_instance
-        .as_ref()
-        .and_then(|r| r.properties.get("url"))
-        .and_then(without_userinfo);
     ViewRow {
         entity_id: None,
         title: subject
@@ -1099,14 +1077,26 @@ fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
             map::root(viewer.base_url),
             change.id
         )),
-        commit: match (repo_url, sha) {
-            (Some(repo_url), Some(sha)) => Some(CommitHint {
-                repo_url,
-                sha: sha.to_owned(),
-            }),
-            _ => None,
-        },
+        commit: commit_hint(change.vcs_root_instance.as_ref(), sha),
     }
+}
+
+/// A commit named by its repository and sha, for the app to resolve against
+/// the mirror (#665): the root's `url` without its credential. `None` where
+/// either is missing.
+fn commit_hint(root: Option<&RootInstance>, sha: Option<&str>) -> Option<CommitHint> {
+    let repo_url = root
+        .and_then(|r| r.properties.get("url"))
+        .and_then(without_userinfo)?;
+    Some(CommitHint {
+        repo_url,
+        sha: sha?.to_owned(),
+    })
+}
+
+/// A sha as a chip shows it: its first twelve characters.
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(12).collect()
 }
 
 /// Per failed test: its name as a row, chipped `new`, `failed` or `muted`,
@@ -1150,6 +1140,31 @@ fn failed_test_blocks(failed: &[TestOccurrence]) -> Vec<Block> {
         }
     }
     blocks
+}
+
+/// The muted last row of a *Tests* tab that lists fewer failures than the
+/// build has (#683): how many of how many, and TeamCity's tests page for the
+/// rest -- the shape Gitea's cut lists have.
+fn left_out_tests(
+    viewer: &Viewer<'_>,
+    config: Option<&str>,
+    id: i64,
+    listed: usize,
+    total: usize,
+) -> Block {
+    Block::Entities {
+        title: None,
+        rows: vec![ViewRow {
+            entity_id: None,
+            title: format!("The first {listed} of {total} failed tests; the rest are on TeamCity."),
+            meta: None,
+            tone: Some(Tone::Muted),
+            chip: None,
+            url: map::build_web_url(viewer.base_url, config, id)
+                .map(|u| format!("{u}?buildTab=tests")),
+            commit: None,
+        }],
+    }
 }
 
 /// One top-level artifact: a file with its size and its download, or a
