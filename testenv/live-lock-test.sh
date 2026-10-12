@@ -175,8 +175,9 @@ checks=$((checks + 1))
 # trap gives it back. The lock must name the run's own process -- here a
 # subshell -- for its death to be seen.
 holder killed
-kill -9 "${pids[${#pids[@]}-1]}"
-sleep 0.2
+killed_pid=${pids[${#pids[@]}-1]}
+kill -9 "$killed_pid"
+wait "$killed_pid" 2>/dev/null || true
 taker afterkill
 rc=$(wait_rc afterkill)
 out=$(cat "$scratch/afterkill.out")
