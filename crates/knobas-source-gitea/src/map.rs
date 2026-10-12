@@ -69,14 +69,20 @@ pub(crate) fn real_time(value: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     value.filter(|t| t.timestamp() > 0)
 }
 
-/// The one-line summary of a commit message.
+/// The one-line summary of a commit message: its first line that is not
+/// blank, so the mirror and a source view title a commit the same (#678).
 pub(crate) fn subject(message: &str) -> String {
-    message.lines().next().unwrap_or_default().trim().to_owned()
+    message
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
 }
 
 /// The characters that would end a URL path early. Branch names may contain
 /// them; `/` must survive, because Gitea's branch URLs are nested.
-fn url_path(name: &str) -> String {
+pub(crate) fn url_path(name: &str) -> String {
     name.replace('%', "%25")
         .replace(' ', "%20")
         .replace('#', "%23")
@@ -511,6 +517,15 @@ mod tests {
             item.web_url.as_deref(),
             Some("https://gitea.example/tidewater/payout-service/commit/c90d11a")
         );
+    }
+
+    /// git allows a message that opens on blank lines; its subject is the
+    /// first line with something on it, here as in every source view (#678).
+    #[test]
+    fn a_subject_skips_the_blank_lines_a_message_opens_on() {
+        assert_eq!(subject("\n  \nPAY-231: jitter\n\nbody"), "PAY-231: jitter");
+        assert_eq!(subject("  one line  "), "one line");
+        assert_eq!(subject("\n\n"), "");
     }
 
     /// Go serialises an unset time as year 1 rather than as null. Left alone it

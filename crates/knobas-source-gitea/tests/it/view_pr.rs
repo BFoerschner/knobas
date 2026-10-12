@@ -434,9 +434,10 @@ async fn an_unknown_tab_and_a_refused_read_are_errors() {
     );
 }
 
-/// A pull request longer than the tab's budget of five pages says so: with
-/// the server's count, how many it left out; without one, that there may be
-/// more. A page budget that ran out is never drawn as the whole history.
+/// A pull request longer than the tab's budget of five pages says so in its
+/// last row: with the server's count, how many it left out; without one, that
+/// there may be more. A page budget that ran out is never drawn as the whole
+/// history, and the count is what the tab lists (#678).
 #[tokio::test]
 async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
     for (header, said) in [
@@ -461,29 +462,39 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
             .respond_with(answer)
             .mount(&server)
             .await;
+        // Read for the note's link only: the tab was asked for on its own.
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/pulls/142")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(open_pull()))
+            .mount(&server)
+            .await;
         let view = source(&server)
             .view(PR, Some("commits"))
             .await
             .unwrap()
             .unwrap();
         let commits = &view.sections[0];
-        let Block::Entities { rows, .. } = &commits.blocks[0] else {
+        let [Block::Entities { rows, .. }] = commits.blocks.as_slice() else {
             panic!("{commits:#?}");
         };
-        assert_eq!(rows.len(), 250, "five pages of fifty");
+        assert_eq!(rows.len(), 251, "five pages of fifty, then the note");
         assert_eq!(
-            commits.blocks.get(1),
-            Some(&Block::Text {
-                text: said.into(),
-                markdown: false
+            rows.last(),
+            Some(&ViewRow {
+                entity_id: None,
+                title: said.into(),
+                meta: None,
+                tone: Some(Tone::Muted),
+                chip: None,
+                url: Some(
+                    "https://gitea.example/tidewater/payout-service/pulls/142/commits".into()
+                ),
+                commit: None,
             }),
             "{header:?}"
         );
-        assert_eq!(
-            commits.count,
-            Some(header.map_or(250, |t| t.parse().unwrap()))
-        );
-        assert_eq!(server.received_requests().await.unwrap().len(), 5);
+        assert_eq!(commits.count, Some(250), "the count is what was read");
+        assert_eq!(server.received_requests().await.unwrap().len(), 6);
     }
 }
 

@@ -315,7 +315,8 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
     );
     assert_eq!(
         branches[1].meta.as_deref(),
-        Some("dccb3df0dc · 2026-08-31 20:08")
+        Some("dccb3df0dc · 2026-08-31"),
+        "its tip's short sha and how long ago, as a commit row says it"
     );
 
     let commits = rows(section(&view, "commits"));
@@ -437,4 +438,29 @@ async fn one_section_is_read_on_its_own() {
     let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, ["branches"]);
     assert!(source.view(ENTITY, Some("diff")).await.is_err());
+}
+
+/// A branch whose tip carries Go's zero time shows its sha and no age, as a
+/// commit row with that time does (#678).
+#[tokio::test]
+async fn a_branch_tip_at_gos_zero_time_shows_no_age() {
+    let server = gitea(Served {
+        branches: json!([branch(
+            "main",
+            "09479f8509479f8509479f8509479f8509479f85",
+            "0001-01-01T00:00:00Z"
+        )]),
+        ..Served::default()
+    })
+    .await;
+    let view = source(&server)
+        .view(ENTITY, Some("branches"))
+        .await
+        .unwrap()
+        .unwrap();
+    let metas: Vec<_> = rows(section(&view, "branches"))
+        .iter()
+        .map(|r| r.meta.as_deref())
+        .collect();
+    assert_eq!(metas, [Some("09479f8509")]);
 }

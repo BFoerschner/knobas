@@ -101,3 +101,23 @@ test("the short sha is a chip and the author and age follow it", () => {
   ]);
   screen.done();
 });
+
+test("a list's note that it was cut reads muted, with the source's page", () => {
+  const note: ViewRow = {
+    entity_id: null,
+    title: "The first 250 of 300 commits; the rest are on Gitea.",
+    meta: null,
+    tone: "muted",
+    chip: null,
+    url: "https://gitea.example/tidewater/payout-service/pulls/142/commits",
+  };
+  const screen = render([...ROWS, note]);
+  const [held, unheld, cut] = screen.rows().map((row) => row.querySelector(".eb-t")!);
+  expect(cut!.classList.contains("muted")).toBe(true);
+  // A row whose chip carries the tone keeps its title plain.
+  expect(held!.classList.contains("muted")).toBe(false);
+  expect(unheld!.classList.contains("muted")).toBe(false);
+  screen.rows()[2]!.querySelector<HTMLButtonElement>(".btn")!.click();
+  expect(screen.opened).toEqual([note.url]);
+  screen.done();
+});
