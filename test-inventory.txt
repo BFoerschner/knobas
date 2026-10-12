@@ -2015,6 +2015,7 @@ knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_ver
 knobas-source-gitea	test/it	view_pr::an_open_mergeable_pull_request_offers_a_merge
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
 knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
+knobas-source-gitea	test/it	view_repo::a_branch_tip_at_gos_zero_time_shows_no_age
 knobas-source-gitea	test/it	view_repo::a_plain_readme_is_text_and_not_markdown
 knobas-source-gitea	test/it	view_repo::a_repo_view_is_its_overview_pull_requests_branches_and_commits
 knobas-source-gitea	test/it	view_repo::a_repo_without_a_readme_draws_no_readme_block
