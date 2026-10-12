@@ -225,15 +225,21 @@ impl Source for TeamCitySource {
         )))
     }
 
-    /// No source view yet (ADR-0020). The build and build-configuration views
-    /// are spec #660's TeamCity tickets; until they land every kind draws the
-    /// mirror's generic projection.
+    /// A build configuration's overview, parameters, steps, triggers and VCS
+    /// roots (#664); `None` for a build, whose view is #665's (ADR-0020). See
+    /// [`crate::view`].
     async fn view(
         &self,
-        _entity: &str,
-        _section: Option<&str>,
+        entity: &str,
+        section: Option<&str>,
     ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
-        Ok(None)
+        let key = self.key_of(entity)?;
+        let viewer = crate::view::Viewer {
+            source_id: &self.id,
+            base_url: &self.base_url,
+            rest: &self.rest,
+        };
+        crate::view::draw(&viewer, entity, &key, section).await
     }
 }
 

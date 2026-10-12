@@ -83,6 +83,159 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
     "triggered(user(username)))"
 );
 
+/// What `GET /app/rest/buildTypes/id:{id}` is asked for when a build
+/// configuration's source view is drawn (#664): the one request that answers
+/// every tab but *Overview*'s recent builds, read by [`ConfigRecord`].
+///
+/// Parameters come with their `inherited` flag and their type's `rawValue`,
+/// which is where TeamCity says `password` -- the one thing that decides
+/// whether a value may be shown at all. A step's and a trigger's
+/// `properties` are asked for whole because which of them matter depends on
+/// the runner or trigger type; the view picks by name and draws nothing it
+/// does not know.
+///
+/// A VCS root's `properties` are asked for whole too, though the view reads
+/// only `url` and `branch`: `fields=` selects by field name, and a property's
+/// name is a *value* of the list, so there is no selector for two of them. The
+/// list includes `secure:password`, which TeamCity answers by name with no
+/// value (measured on the seeded 2026.1.3 server, 2026-10-12); the view draws
+/// neither it nor anything else but those two.
+pub(crate) const BUILD_CONFIG_VIEW_FIELDS: &str = concat!(
+    "id,projectId,projectName,description,paused,",
+    "parameters(property(name,value,inherited,type(rawValue))),",
+    "steps(step(id,name,type,disabled,properties(property(name,value)))),",
+    "triggers(trigger(id,type,disabled,properties(property(name,value)))),",
+    "vcs-root-entries(vcs-root-entry(id,checkout-rules,",
+    "vcs-root(id,name,vcsName,properties(property(name,value)))))"
+);
+
+/// What `/app/rest/builds` is asked for when a build configuration's view
+/// lists its recent builds (#664): what a row says -- number, outcome,
+/// branch, duration, age -- and nothing else. Parsed into [`Build`], whose
+/// other fields stay `None`.
+pub(crate) const RECENT_BUILD_FIELDS: &str = concat!(
+    "count,build(id,number,state,status,statusText,branchName,",
+    "queuedDate,startDate,finishDate)"
+);
+
+/// One build configuration as [`BUILD_CONFIG_VIEW_FIELDS`] answers it.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConfigRecord {
+    pub id: String,
+    pub project_id: Option<String>,
+    /// The project's full name -- `Parent / Child` for a nested one.
+    pub project_name: Option<String>,
+    pub description: Option<String>,
+    pub paused: Option<bool>,
+    #[serde(default)]
+    pub parameters: Properties,
+    #[serde(default)]
+    pub steps: Steps,
+    #[serde(default)]
+    pub triggers: Triggers,
+    #[serde(default, rename = "vcs-root-entries")]
+    pub vcs_root_entries: VcsRootEntries,
+}
+
+/// TeamCity's `{"property": [...]}` list, on parameters and on the
+/// properties of a step, a trigger or a VCS root.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Properties {
+    #[serde(default)]
+    pub property: Vec<Property>,
+}
+
+impl Properties {
+    /// The value of the property called `name`, if it has a non-blank one.
+    pub(crate) fn get(&self, name: &str) -> Option<&str> {
+        self.property
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.value.as_deref())
+            .filter(|v| !v.trim().is_empty())
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Property {
+    pub name: String,
+    pub value: Option<String>,
+    /// Set on a configuration's parameter that a project above it defines.
+    #[serde(default)]
+    pub inherited: bool,
+    /// The parameter's spec -- `password display='hidden'` for a secret.
+    #[serde(rename = "type")]
+    pub spec: Option<ParameterType>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParameterType {
+    pub raw_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Steps {
+    #[serde(default)]
+    pub step: Vec<Step>,
+}
+
+/// One build step. `type` is the runner (`simpleRunner` is *Command Line*).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Step {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub runner: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub properties: Properties,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Triggers {
+    #[serde(default)]
+    pub trigger: Vec<Trigger>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Trigger {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub properties: Properties,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct VcsRootEntries {
+    #[serde(default, rename = "vcs-root-entry")]
+    pub entry: Vec<VcsRootEntry>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct VcsRootEntry {
+    pub id: Option<String>,
+    #[serde(rename = "checkout-rules")]
+    pub checkout_rules: Option<String>,
+    #[serde(rename = "vcs-root")]
+    pub root: Option<VcsRoot>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VcsRoot {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub vcs_name: Option<String>,
+    #[serde(default)]
+    pub properties: Properties,
+}
+
 /// Every TeamCity list response: `{count, href, nextHref, <element>: [...]}`.
 /// One type for both collections -- the element key is the only difference.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -778,8 +931,44 @@ mod tests {
                  capped page from an exhausted query"
             );
         }
+        // The two source-view selectors (#664). `paused`, a parameter's
+        // `inherited` and its `type(rawValue)` are what the overview's
+        // warning, the inherited mark and the password mask are read from.
+        for needed in [
+            "paused",
+            "inherited",
+            "type(rawValue)",
+            "projectName",
+            "checkout-rules",
+        ] {
+            assert!(
+                BUILD_CONFIG_VIEW_FIELDS.contains(needed),
+                "BUILD_CONFIG_VIEW_FIELDS misses {needed}"
+            );
+        }
+        for needed in [
+            "number",
+            "state",
+            "status",
+            "statusText",
+            "branchName",
+            "startDate",
+            "finishDate",
+        ] {
+            assert!(
+                RECENT_BUILD_FIELDS.contains(needed),
+                "RECENT_BUILD_FIELDS misses {needed}"
+            );
+        }
         // No whitespace: these go into a query string verbatim.
-        for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, SERVER_FIELDS, USER_FIELDS] {
+        for f in [
+            BUILD_FIELDS,
+            BUILD_TYPE_FIELDS,
+            SERVER_FIELDS,
+            USER_FIELDS,
+            BUILD_CONFIG_VIEW_FIELDS,
+            RECENT_BUILD_FIELDS,
+        ] {
             assert!(!f.contains(' '), "{f:?} must not contain spaces");
             assert_eq!(
                 f.matches('(').count(),

@@ -90,7 +90,11 @@ fn status_element(state: Option<&str>, status: Option<&str>) -> Option<String> {
 /// *Open in browser* absent rather than pointed at a URL knobas guessed --
 /// the rule `knobas-source-confluence`'s mapping already follows for a page
 /// with no web link.
-fn build_web_url(base_url: &str, build_config_id: Option<&str>, id: i64) -> Option<String> {
+pub(crate) fn build_web_url(
+    base_url: &str,
+    build_config_id: Option<&str>,
+    id: i64,
+) -> Option<String> {
     let base = root(base_url);
     let config = build_config_id.map(str::trim).filter(|c| !c.is_empty())?;
     Some(format!("{base}/buildConfiguration/{config}/{id}"))

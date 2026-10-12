@@ -331,6 +331,63 @@ ensure_build_type() {  # ensure_build_type <id>
   fi
 }
 
+# --------------------------------------------------------------------------
+# What a build configuration's source view reads beyond its steps and VCS root
+# (#664): parameters -- one the project defines, which the configuration
+# inherits, one of its own, and one password -- and a trigger. The fixture says
+# nothing about either, so these are decisions, kept here in one place, and
+# all on Payout_IntegrationTests, the configuration with the failed build.
+#
+#   project Payout              tidewater.region = eu-central-1   (inherited)
+#   Payout_IntegrationTests     env.SEPA_RETRIES = 5
+#                               env.SEPA_SANDBOX_KEY = <password, SETTINGS_SECRET>
+#                               a VCS trigger on +:feature/*, DISABLED
+#
+# The trigger is disabled on purpose: the Gitea live suite pushes branches to
+# payout-service, and an enabled VCS trigger would queue a build on each push,
+# which spends the agent and moves the build counts the seeded TeamCity suite
+# asserts on (one environment, one fixture). A disabled trigger is still a
+# trigger the REST API answers with its type and properties.
+#
+# The password's value is a made-up seed string, recorded in seed-state.json
+# so the live suite can prove it never appears in a view. TeamCity masks it on
+# every read; the suite asserts that too.
+#
+# Endpoints: `setParameter` on a project and on a build type (PUT
+# .../parameters/<name>, idempotent: the same body twice is the same
+# parameter) and `addTriggerToBuildType` (POST .../triggers), all in the
+# vendored testenv/specs/teamcity.json. A password parameter is a parameter
+# whose `type.rawValue` is `password display='hidden'`, the spec TeamCity's
+# own UI writes for one.
+SETTINGS_CONFIG=Payout_IntegrationTests
+SETTINGS_SECRET=knobas-seed-sepa-sandbox-key
+ensure_parameter() {  # ensure_parameter <projects|buildTypes> <id> <name> <value> [<spec>]
+  if [ "$#" -gt 4 ]; then
+    _body=$(jq -n --arg n "$3" --arg v "$4" --arg t "$5" '{name:$n, value:$v, type:{rawValue:$t}}')
+  else
+    _body=$(jq -n --arg n "$3" --arg v "$4" '{name:$n, value:$v}')
+  fi
+  rest PUT "/app/rest/$1/id:$2/parameters/$3" "$_body"
+  expect "set parameter $3 on $2" 200
+}
+
+ensure_configuration_settings() {
+  ensure_parameter projects "$(project_of "$SETTINGS_CONFIG")" tidewater.region eu-central-1
+  ensure_parameter buildTypes "$SETTINGS_CONFIG" env.SEPA_RETRIES 5
+  ensure_parameter buildTypes "$SETTINGS_CONFIG" env.SEPA_SANDBOX_KEY "$SETTINGS_SECRET" "password display='hidden'"
+  rest GET "/app/rest/buildTypes/id:$SETTINGS_CONFIG/triggers"
+  expect "list triggers of $SETTINGS_CONFIG" 200
+  if [ "$(printf '%s' "$REST_BODY" | jq '[.trigger[]? | select(.type=="vcsTrigger")] | length')" = "0" ]; then
+    rest POST "/app/rest/buildTypes/id:$SETTINGS_CONFIG/triggers" \
+      '{"type":"vcsTrigger","disabled":true,"properties":{"property":[
+         {"name":"branchFilter","value":"+:feature/*"},
+         {"name":"quietPeriodMode","value":"DO_NOT_USE"}]}}'
+    expect "add a VCS trigger to $SETTINGS_CONFIG" 200
+    say "added a disabled VCS trigger to $SETTINGS_CONFIG"
+  fi
+  say "parameters of $SETTINGS_CONFIG: tidewater.region (inherited), env.SEPA_RETRIES, env.SEPA_SANDBOX_KEY (password)"
+}
+
 # The build by its fixture number, if the server has one in any state -- and
 # failing that, a QUEUED build of the configuration. A build takes its number
 # when it starts, so a queued one has none yet and no `number:` locator can
@@ -446,6 +503,7 @@ for cfg in $(jqf '[.builds[].cfg] | unique | .[]'); do
   ensure_vcs_root "$proj"
   ensure_build_type "$cfg"
 done
+ensure_configuration_settings
 
 # 2. The finished shapes, always: 412 on Ledger_Deploy_Staging (success) and
 #    1187 on Payout_IntegrationTests (failure). Queued together -- the one
@@ -541,7 +599,9 @@ BUILDS_JSON=$(printf '%s' "$BUILD_MAP" | jq -R -s '
   split("\n") | map(select(length > 0) | split(" ")
   | {fixture_number: (.[0] | tonumber), build_type: .[1], real_id: (.[2] | tonumber)})
   | sort_by(.fixture_number)')
-jq --argjson b "$BUILDS_JSON" '.teamcity += {builds: $b}' "$STATE" > "$STATE.tmp"
+jq --argjson b "$BUILDS_JSON" --arg c "$SETTINGS_CONFIG" --arg s "$SETTINGS_SECRET" \
+  '.teamcity += {builds: $b, settings: {build_type: $c, secret_parameter: "env.SEPA_SANDBOX_KEY", secret_value: $s}}' \
+  "$STATE" > "$STATE.tmp"
 mv "$STATE.tmp" "$STATE"
 say "wrote $STATE (teamcity.builds: $(printf '%s' "$BUILDS_JSON" | jq -r 'map("\(.fixture_number)->\(.real_id)") | join(", ")'))"
 
