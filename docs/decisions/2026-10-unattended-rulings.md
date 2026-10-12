@@ -527,3 +527,32 @@ Ruled 2026-10-12. Comment:
 - No glossary change, no ADR, nothing on §10.8.
 
 **Reasoning, in short:** #154 puts accepted residuals on `delete_source` where the reader meets them. #127 and #632 forbid the purge waiting for a run, which rules out (C). The demo path never had the eventual guarantee (#127's measurement covered the scheduler's `runs` map only), so no run's guarantee changes; the PR widens the demo gap, hence #636 rather than a residual alone. (B) touches `demo.rs`, a second command's destructive path, and needs #154's existence guard and its own witness: a ticket, not a merge-time edit. The cheap close for path 2 (`for no key update of i skip locked`) does not work: the `gone` delete still needs `FOR UPDATE`, which conflicts with `KEY SHARE`, so the purge would wait for the recompute — the wait #632 removes.
+||||||| parent of fcb10301 (Document the on-demand live products and record Björn's decision of 2026-10-12)
+
+## #633 — live suites run against real products started locally, on demand, one at a time
+
+Ruled 2026-10-12 by **Björn himself**, in the loop session, not by the deputy. Recorded in the
+issue body of #633: <https://github.com/BFoerschner/knobas/issues/633>
+
+**The fork:** since 2026-09-06 the three JVM products a live suite runs against (TeamCity, Jira,
+Confluence) lived on three Hetzner servers, kept up around the clock and reached through an SSH
+tunnel, with the Atlassian licences renewed on a timer there; Gitea stayed always-on in the
+notebook's Docker. Keep that estate for live suites, or run the products locally?
+
+**Ruling:** locally, on demand, one at a time. In Björn's words: *"Since we focus on one source now
+at a time we don't have to run them 24/7, so we can just spin one up when we have to test."* Each
+live recipe starts its product (and what it needs: TeamCity's VCS roots need Gitea; Jira and
+Confluence their PostgreSQL), waits, seeds it, runs its suites and stops it. Gitea becomes
+on-demand too. A second JVM product is refused while one is up, naming it.
+
+**Reasoning:** the loop works on one source at a time, so a product is needed for the length of
+one ticket's live runs and not between them; the servers' standing cost and the tunnel's moving
+parts bought availability nobody was using. The notebook's 8 GB Docker VM holds one JVM product,
+which is exactly what one source at a time asks of it. ADR-0013 is unchanged: the witness is still
+the real product, now in the notebook's Docker instead of on a server.
+
+**If you disagree, the cost of reversing this is:** small while the servers exist. `source
+testenv/hetzner/env` and `testenv/hetzner/tunnel up` still work for the seeds; the live recipes
+would need their Hetzner branches back (`git log -- justfile` for #633's diff) and `testenv/live`'s
+refusal of that shell lifted. After #634 decommissions the servers it means re-provisioning them
+(`testenv/hetzner/provision.sh`).
