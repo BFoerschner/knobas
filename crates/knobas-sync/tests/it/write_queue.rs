@@ -929,6 +929,14 @@ fn write_op_probes() -> Vec<WriteOp> {
             value: "7".to_owned(),
             base: Some("5".to_owned()),
         },
+        WriteOp::RunBuild {
+            entity: "teamcity:buildType:Payout_Build".to_owned(),
+            branch: Some("feature/PAY-231-sepa-retry".to_owned()),
+            parameters: vec![knobas_source::BuildParameter {
+                name: "env.SEPA_RETRIES".to_owned(),
+                value: "9".to_owned(),
+            }],
+        },
     ]
 }
 
@@ -959,7 +967,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::ResumeMonitor { .. }
             | WriteOp::CreateMonitor { .. }
             | WriteOp::MergePullRequest { .. }
-            | WriteOp::SetParameter { .. } => op.identifier(),
+            | WriteOp::SetParameter { .. }
+            | WriteOp::RunBuild { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1168,6 +1177,7 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // A build is not an artefact, and knobas never claimed one.
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
+            | WriteOp::RunBuild { .. }
             // The hour is at Jira and #328 owns that gap; the worklog's own
             // copy, not this line, is where it is answered.
             | WriteOp::LogWork { .. }

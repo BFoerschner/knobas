@@ -1,6 +1,7 @@
 //! The TeamCity adapter: build configurations and builds, plus M2's two
 //! ratified writes -- trigger a build, run one again (issue #43) -- and a
-//! configuration's parameter set from its view (issue #668).
+//! configuration's parameter set from its view (issue #668) and a custom run
+//! on a branch with parameter overrides (issue #669).
 //!
 //! Five endpoints, all JSON, all trimmed with an explicit `fields=`:
 //! `/app/rest/server` and `/app/rest/users/current` (test connection),
@@ -64,6 +65,9 @@ pub const WRITE_OP_RERUN_BUILD: &str = "rerun_build";
 /// See [`WRITE_OP_TRIGGER_BUILD`]. A build configuration's parameter, changed
 /// from its view's *Parameters* tab (issue #668).
 pub const WRITE_OP_SET_PARAMETER: &str = "set_parameter";
+/// See [`WRITE_OP_TRIGGER_BUILD`]. A build of a configuration on a branch,
+/// with parameter overrides, from its view's *Run…* (issue #669).
+pub const WRITE_OP_RUN_BUILD: &str = "run_build";
 
 /// `SyncItem::kind` for one build.
 pub(crate) const KIND_BUILD: &str = "build";

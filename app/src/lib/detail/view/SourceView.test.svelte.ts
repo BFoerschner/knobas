@@ -7,6 +7,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceView as View, ViewAction, ViewSection } from "../../ipc/entity";
+import type { BuildParameter } from "../../ipc/sources";
 import type { SettingMark } from "./settings";
 
 /** Every deferred read, as `[entity, section]`. */
@@ -83,6 +84,8 @@ const VIEW: View = {
 
 /** Every action the view asked to queue, as `[write_op, option]`. */
 const queued: [string, string | null][] = [];
+/** The values each queued action carried (#669), in the order queued. */
+const carried: BuildParameter[][] = [];
 /** What the next `onaction` answers: whether the write was queued. */
 let queues: () => Promise<boolean> = () => Promise.resolve(true);
 /** Every setting the view asked to save, as `[entity, write_op, name, value]`. */
@@ -107,8 +110,9 @@ function render(
       writeOps,
       onnavigate: (hash: string) => navigated.push(hash),
       onopenurl: () => {},
-      onaction: (action: ViewAction, option: string | null) => {
+      onaction: (action: ViewAction, option: string | null, parameters: BuildParameter[] = []) => {
         queued.push([action.write_op, option]);
+        carried.push(parameters);
         return queues();
       },
       settingMarks: marks,
@@ -135,6 +139,7 @@ function render(
 beforeEach(() => {
   reads.length = 0;
   queued.length = 0;
+  carried.length = 0;
   saved.length = 0;
   queues = () => Promise.resolve(true);
   document.body.replaceChildren();
@@ -399,5 +404,147 @@ test("an edit is handed up with the block's entity and op, and a mark comes back
   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await Promise.resolve();
   expect(saved).toEqual([["teamcity:buildType:X", "set_parameter", "env.RETRIES", "7"]]);
+  screen.done();
+});
+
+// --- Run… (#669) ------------------------------------------------------------
+
+const CONFIG = "teamcity:buildType:Payout_IntegrationTests";
+
+/** A configuration's view: *Run…* on the overview, its parameters on their own tab. */
+const RUN_VIEW: View = {
+  sections: [
+    {
+      id: "overview",
+      title: "Overview",
+      count: null,
+      deferred: false,
+      blocks: [
+        { type: "facts", facts: [{ label: "Project", value: "Payout", tone: null }] },
+        {
+          type: "actions",
+          actions: [
+            {
+              write_op: "run_build",
+              label: "Run…",
+              options: ["feature/PAY-231-sepa-retry", "fix/<b>PAY-228</b>"],
+              confirm: "Queue one build of this configuration.",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "parameters",
+      title: "Parameters",
+      count: 4,
+      deferred: false,
+      blocks: [
+        {
+          type: "settings",
+          title: null,
+          entity: CONFIG,
+          write_op: "set_parameter",
+          values: [
+            { name: "env.SEPA_RETRIES", value: "5", inherited: false, secret: false, editable: true, description: null },
+            { name: "env.SEPA_SANDBOX_KEY", value: "", inherited: false, secret: true, editable: true, description: null },
+            { name: "tidewater.region", value: "eu-central-1", inherited: true, secret: false, editable: true, description: null },
+            { name: "vcs.mirror", value: "https://git.example/p.git", inherited: false, secret: false, editable: false, description: null },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+function dialog(): HTMLElement {
+  return document.querySelector<HTMLElement>("[role=dialog]")!;
+}
+
+function field(name: string): HTMLInputElement | null {
+  return dialog().querySelector<HTMLInputElement>(`input[aria-label="${name}"]`);
+}
+
+function type(input: HTMLInputElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+test("Run… offers a branch with its suggestions and the parameters as they stand; untouched, it sends neither", async () => {
+  const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
+  button(screen.panel(), "Run…")!.click();
+  flushSync();
+
+  const branch = field("Branch")!;
+  expect(branch.value, "the default branch is the empty field").toBe("");
+  expect(branch.placeholder).toBe("default branch");
+  const list = document.getElementById(branch.getAttribute("list")!)!;
+  // Suggestions are source text: values, never markup.
+  expect([...list.querySelectorAll("option")].map((o) => o.value)).toEqual([
+    "feature/PAY-231-sepa-retry",
+    "fix/<b>PAY-228</b>",
+  ]);
+  expect(dialog().querySelector("[role=radio]"), "a typed branch, not a pick").toBeNull();
+
+  expect(field("env.SEPA_RETRIES")!.value).toBe("5");
+  expect(field("tidewater.region")!.value).toBe("eu-central-1");
+  const secret = field("env.SEPA_SANDBOX_KEY")!;
+  expect(secret.type).toBe("password");
+  expect(secret.value, "a secret is never prefilled").toBe("");
+  expect(field("vcs.mirror"), "a value the source does not let change is shown, not offered").toBeNull();
+  expect(dialog().textContent).toContain("https://git.example/p.git");
+
+  button(dialog(), "Run")!.click();
+  flushSync();
+  expect(queued).toEqual([["run_build", ""]]);
+  expect(carried).toEqual([[]]);
+  await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
+  screen.done();
+});
+
+test("Run… sends the branch typed and only the values changed, a secret only when typed", () => {
+  const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
+  button(screen.panel(), "Run…")!.click();
+  flushSync();
+
+  type(field("Branch")!, "fix/PAY-228-partial-refund-drift");
+  type(field("tidewater.region")!, "eu-west-1");
+  type(field("env.SEPA_RETRIES")!, "5");
+  expect(dialog().textContent).toContain("1 changed");
+  type(field("env.SEPA_SANDBOX_KEY")!, "typed-key");
+  expect(dialog().textContent).toContain("2 changed");
+
+  button(dialog(), "Run")!.click();
+  flushSync();
+  expect(queued).toEqual([["run_build", "fix/PAY-228-partial-refund-drift"]]);
+  expect(carried).toEqual([
+    [
+      { name: "env.SEPA_SANDBOX_KEY", value: "typed-key" },
+      { name: "tidewater.region", value: "eu-west-1" },
+    ],
+  ]);
+  screen.done();
+});
+
+test("a run offers only this entity's own settings, and a dialog opened again starts afresh", () => {
+  const other = render(RUN_VIEW, ["run_build"], {}, "teamcity:buildType:Ledger_Deploy_Staging");
+  button(other.panel(), "Run…")!.click();
+  flushSync();
+  expect(field("env.SEPA_RETRIES")).toBeNull();
+  other.done();
+
+  queues = () => Promise.resolve(true);
+  const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
+  button(screen.panel(), "Run…")!.click();
+  flushSync();
+  type(field("env.SEPA_RETRIES")!, "9");
+  type(field("Branch")!, "feature/x");
+  button(dialog(), "Cancel")!.click();
+  flushSync();
+  button(screen.panel(), "Run…")!.click();
+  flushSync();
+  expect(field("env.SEPA_RETRIES")!.value).toBe("5");
+  expect(field("Branch")!.value).toBe("");
   screen.done();
 });

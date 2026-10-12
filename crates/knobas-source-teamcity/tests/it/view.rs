@@ -13,7 +13,7 @@
 //! never draw it.
 
 use knobas_source::instance::SourceInstance;
-use knobas_source::view::{Block, Fact, SourceView, Tone, ViewSection};
+use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewSection};
 use knobas_source::{AuthMethod, Source, SourceError};
 use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param, query_param_contains};
@@ -313,6 +313,92 @@ async fn the_overview_says_where_it_lives_whether_it_is_paused_and_how_it_has_be
         ),
         "the build's own page, composed from the configured base URL"
     );
+}
+
+/// Story 21 (#669): the overview offers *Run…*, a `run_build` whose choices
+/// are the branches the recent builds ran on -- newest first, each once --
+/// for the dialog to suggest. Never the default branch by name: TeamCity
+/// resolves an explicit `branchName: main` to a logical branch that is not
+/// `<default>` (testenv/README.md, *The default branch is queued as
+/// `<default>`*), so the default is the empty field and not a suggestion.
+#[tokio::test]
+async fn the_overview_offers_a_run_suggesting_its_recent_builds_branches() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(CONFIG_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(config_record()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/app/rest/builds"))
+        .and(query_param_contains("fields", "defaultBranch"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "count": 5, "build": [
+                { "id": 1201, "state": "queued", "branchName": "fix/PAY-228-partial-refund-drift",
+                  "defaultBranch": false },
+                { "id": 1200, "number": "1200", "state": "finished", "status": "SUCCESS",
+                  "branchName": "main", "defaultBranch": true },
+                { "id": 1199, "number": "1199", "state": "finished", "status": "FAILURE",
+                  "branchName": "feature/PAY-231-sepa-retry" },
+                { "id": 1198, "number": "1198", "state": "finished", "status": "SUCCESS",
+                  "branchName": "fix/PAY-228-partial-refund-drift", "defaultBranch": false },
+                // A configuration whose root has no branch specification names no
+                // branch at all.
+                { "id": 1197, "number": "1197", "state": "finished", "status": "SUCCESS" }
+            ]})),
+        )
+        .mount(&server)
+        .await;
+    let view = whole_view(&server).await;
+    let overview = section(&view, "overview");
+    let Block::Actions { actions } = &overview.blocks[1] else {
+        panic!("the action follows the facts: {overview:#?}");
+    };
+    assert_eq!(
+        actions,
+        &[ViewAction {
+            write_op: "run_build".to_owned(),
+            label: "Run…".to_owned(),
+            options: vec![
+                "fix/PAY-228-partial-refund-drift".to_owned(),
+                "feature/PAY-231-sepa-retry".to_owned(),
+            ],
+            confirm: Some(
+                "Queue one build of this configuration. Leave the branch empty for the default \
+                 branch; only the values you change are sent, for this build alone."
+                    .to_owned()
+            ),
+        }]
+    );
+}
+
+/// A configuration with no builds yet can still be run: the action is drawn
+/// with nothing to suggest.
+#[tokio::test]
+async fn a_configuration_with_no_builds_still_offers_a_run() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(CONFIG_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(config_record()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/app/rest/builds"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "count": 0 })))
+        .mount(&server)
+        .await;
+    let view = whole_view(&server).await;
+    let actions: Vec<_> = section(&view, "overview")
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Actions { actions } => Some(actions),
+            _ => None,
+        })
+        .flatten()
+        .map(|a| (a.write_op.as_str(), a.options.len()))
+        .collect();
+    assert_eq!(actions, [("run_build", 0)]);
 }
 
 #[tokio::test]

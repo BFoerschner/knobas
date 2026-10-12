@@ -202,7 +202,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::ResumeMonitor { entity }
         | WriteOp::CreateMonitor { entity, .. }
         | WriteOp::MergePullRequest { entity, .. }
-        | WriteOp::SetParameter { entity, .. } => entity,
+        | WriteOp::SetParameter { entity, .. }
+        | WriteOp::RunBuild { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -890,6 +891,14 @@ mod tests {
                     name: "env.SEPA_RETRIES".to_owned(),
                     value: "7".to_owned(),
                     base: Some("5".to_owned()),
+                },
+                "teamcity:buildType:Payout_Build",
+            ),
+            (
+                WriteOp::RunBuild {
+                    entity: "teamcity:buildType:Payout_Build".to_owned(),
+                    branch: Some("feature/PAY-231-sepa-retry".to_owned()),
+                    parameters: Vec::new(),
                 },
                 "teamcity:buildType:Payout_Build",
             ),

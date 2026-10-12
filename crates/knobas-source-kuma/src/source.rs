@@ -301,7 +301,8 @@ impl Source for KumaSource {
             | WriteOp::CreatePage { .. }
             | WriteOp::UpdatePage { .. }
             | WriteOp::MergePullRequest { .. }
-            | WriteOp::SetParameter { .. } => {
+            | WriteOp::SetParameter { .. }
+            | WriteOp::RunBuild { .. } => {
                 return Err(SourceError::protocol(format!(
                     "the Uptime Kuma adapter offers pause, resume and create, so it cannot \
                      perform {:?}",

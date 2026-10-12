@@ -7,6 +7,9 @@
  * back at once; one that waits (the source unreachable), is held or refused
  * keeps its mark with the queue's own state until an `activity:new` finds it
  * gone.
+ *
+ * And the configuration's *Run…* (#669): the dialog's changed values and
+ * branch reach the queue as one `RunBuild`.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -78,7 +81,7 @@ vi.mock("../ipc/sources", () => ({
         adapter_version: "0",
         auth_methods: [],
         accepts_account: false,
-        write_ops: ["trigger_build", "rerun_build", "set_parameter"],
+        write_ops: ["trigger_build", "rerun_build", "set_parameter", "run_build"],
         entity_kinds: [],
         payload_paths: [],
         config_schema: {},
@@ -495,5 +498,60 @@ test("a row whose save is still being queued when the queue's first answer lands
   await settle();
   expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
   expect(screen.value("env.SEPA_RETRIES")).toBe("8");
+  screen.done();
+});
+
+// --- Run… (#669) ------------------------------------------------------------
+
+/** The configuration's view with *Run…* on its overview beside its parameters. */
+function runnable(): SourceView {
+  return {
+    sections: [
+      {
+        id: "overview",
+        title: "Overview",
+        count: null,
+        deferred: false,
+        blocks: [
+          {
+            type: "actions",
+            actions: [
+              {
+                write_op: "run_build",
+                label: "Run…",
+                options: ["feature/PAY-231-sepa-retry"],
+                confirm: "Queue one build of this configuration.",
+              },
+            ],
+          },
+        ],
+      },
+      ...parameters("5").sections,
+    ],
+  };
+}
+
+test("Run… queues one RunBuild: no branch for the default, and only the value changed", async () => {
+  views = [runnable()];
+  const screen = render();
+  await settle();
+  const run = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (b) => b.textContent!.trim() === "Run…",
+  )!;
+  run.click();
+  flushSync();
+  const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
+  const retries = dialog.querySelector<HTMLInputElement>('input[aria-label="env.SEPA_RETRIES"]')!;
+  retries.value = "9";
+  retries.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.trim() === "Run")!.click();
+  await settle();
+
+  expect(queued).toEqual([
+    { RunBuild: { entity: ID, branch: null, parameters: [{ name: "env.SEPA_RETRIES", value: "9" }] } },
+  ]);
+  expect(toasts.items.map((t) => t.text)).toEqual([expect.stringMatching(/^Run queued for /)]);
+  expect(document.querySelector("[role=dialog]")).toBeNull();
   screen.done();
 });

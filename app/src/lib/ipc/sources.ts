@@ -605,6 +605,12 @@ export type WaitReason = "unreachable" | "unauthorized";
 /** How a merge lands its commits — `knobas_source::MergeStyle`. */
 export type MergeStyle = "merge" | "rebase" | "squash";
 
+/** One override of a run (#669) -- `knobas_source::BuildParameter`. */
+export interface BuildParameter {
+  name: string;
+  value: string;
+}
+
 /**
  * The serialized `knobas_source::WriteOp` a queued write carries.
  *
@@ -651,6 +657,13 @@ export type WriteOpPayload =
    * is never drawn, and whose write is last-write-wins.
    */
   | { SetParameter: { entity: string; name: string; value: string; base: string | null } }
+  /**
+   * Run one build of a configuration (#669). `entity` is the
+   * **configuration**; `branch` the source's name for it, `null` for the
+   * default branch; `parameters` only the values the reader changed, for this
+   * build alone. Mirrors `knobas_source::WriteOp::RunBuild`.
+   */
+  | { RunBuild: { entity: string; branch: string | null; parameters: BuildParameter[] } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

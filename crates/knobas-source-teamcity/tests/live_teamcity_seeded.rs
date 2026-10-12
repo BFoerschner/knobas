@@ -37,6 +37,11 @@
 //!   suite deliberately does not run it -- builds finish there between any two
 //!   requests -- and mockd runs it against a fake that agrees with the adapter
 //!   by construction. Here the corpus is quiet because it is ours.
+//! * **A custom run through the adapter** (#669): `run_build` queues a build
+//!   on a feature branch with one parameter overridden; the build runs on
+//!   that branch with the override in its resulting parameters, the
+//!   configuration keeps its own value, and the next incremental run returns
+//!   exactly that build.
 //! * **The `sinceBuild` watermark on a build this suite queues**: full run,
 //!   idle run, one `POST /app/rest/buildQueue`, and the next run returns
 //!   exactly that build and moves the position to it; the run after that is
@@ -46,7 +51,8 @@
 //! # What this file writes, and what it takes away
 //!
 //! It is not read-only. One test queues one build through TeamCity's own REST
-//! API and waits for the one agent to run it; that build is **deleted again**
+//! API, and one through the adapter's `run_build`, and each waits for the one
+//! agent to run it; each build is **deleted again**
 //! when the test ends, passing or panicking alike -- [`Queued`] does it from
 //! `Drop`, on a thread with a runtime of its own, and checks afterwards that
 //! the build is really gone rather than assuming so. What a *killed* run left
@@ -624,6 +630,13 @@ impl Queued {
         assert!(status.is_success(), "POST buildQueue -> {status}: {body}");
         self.id = Some(id_of(&body));
         body
+    }
+
+    /// Own the removal of a build something else queued -- the adapter's
+    /// `run_build`, whose receipt names it (#669) -- from this line onwards.
+    fn adopt(&mut self, id: i64) {
+        assert!(self.id.is_none(), "this guard owns exactly one build");
+        self.id = Some(id);
     }
 
     /// Poll the guard's build until it is finished, or fail after
@@ -2359,4 +2372,138 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
         "the view after the restore is the view before the first write"
     );
     println!("SEEDED {config}: restored to the recorded point, and read back so");
+}
+
+/// Story 21 (#669) against the real server: *Run…* on the seeded
+/// configuration, on 1187's feature branch with `env.SEPA_RETRIES`
+/// overridden.
+///
+/// The view offers the action with that branch among its suggestions; the
+/// adapter's `run_build` queues the build and names it in its receipt; the
+/// build runs **on that branch** with the override in its **resulting
+/// parameters**, while the configuration keeps its own value (an override is
+/// for one build); and the next incremental run returns exactly that build
+/// and its configuration, with the branch. The build is deleted again by
+/// [`Queued`], and the server is back in the plain-seed state.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
+    use knobas_source::view::Block;
+    use knobas_source::{BuildParameter, WriteOp};
+
+    const BRANCH: &str = "feature/PAY-231-sepa-retry";
+    const OVERRIDDEN: &str = "env.SEPA_RETRIES";
+
+    let seeded = seeded();
+    let mut guard = Queued::new(&seeded).await;
+    let settings = seeded.seed.settings.clone().unwrap_or_else(|| {
+        panic!("seed-state.json has no teamcity.settings -- re-run `./seed --teamcity` (#664)")
+    });
+    let config = settings.build_type.clone();
+    let entity = format!("teamcity:buildType:{config}");
+    let source = seeded.scoped_to(&[config.as_str()]);
+    let own_value = async || -> String {
+        let (status, body) = seeded
+            .get(&format!(
+                "app/rest/buildTypes/id:{config}/parameters/{OVERRIDDEN}?fields=value"
+            ))
+            .await;
+        assert_eq!(status, 200, "{body}");
+        body["value"].as_str().unwrap_or_default().to_owned()
+    };
+    let before = own_value().await;
+
+    let (_, cursor) = full(&*source).await;
+    let (idle, _) = sync_from(&*source, Some(cursor.clone())).await;
+    assert!(idle.is_empty(), "nothing changed: {:?}", keys(&idle));
+
+    // The view offers Run…, suggesting the branch 1187 ran on.
+    let view = source
+        .view(&entity, None)
+        .await
+        .expect("the view reads")
+        .expect("TeamCity draws a build configuration");
+    let run = view.sections[0]
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Actions { actions } => actions.iter().find(|a| a.write_op == "run_build"),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no Run… on the overview: {:#?}", view.sections[0]));
+    println!("SEEDED Run… action: {run:?}");
+    assert!(
+        run.options.iter().any(|o| o == BRANCH),
+        "1187's branch is suggested: {run:?}"
+    );
+
+    let receipt = source
+        .write(WriteOp::RunBuild {
+            entity: entity.clone(),
+            branch: Some(BRANCH.to_owned()),
+            parameters: vec![BuildParameter {
+                name: OVERRIDDEN.to_owned(),
+                value: "9".to_owned(),
+            }],
+        })
+        .await
+        .unwrap_or_else(|e| panic!("the run is queued: {e:?}"));
+    let id: i64 = receipt
+        .remote_id
+        .as_deref()
+        .and_then(|id| id.parse().ok())
+        .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"));
+    guard.adopt(id);
+    assert!(
+        !seeded.seeded_ids().contains(&id),
+        "a new build, not a seeded one: {id}"
+    );
+
+    let record = guard.wait_finished(&seeded).await;
+    println!("SEEDED run build: {record}");
+    assert_eq!(record["branchName"], BRANCH, "{record}");
+    assert_eq!(record["defaultBranch"], false, "{record}");
+
+    let (status, resulting) = seeded
+        .get(&format!(
+            "app/rest/builds/id:{id}/resulting-properties?fields=property(name,value)"
+        ))
+        .await;
+    assert_eq!(status, 200, "{resulting}");
+    let ran_with = resulting["property"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["name"] == OVERRIDDEN))
+        .map(|p| p["value"].clone());
+    println!("SEEDED run build's resulting {OVERRIDDEN}: {ran_with:?}");
+    assert_eq!(
+        ran_with,
+        Some(serde_json::json!("9")),
+        "the build ran with the override: {resulting}"
+    );
+    assert_eq!(
+        own_value().await,
+        before,
+        "the configuration keeps its own value: an override is for one build"
+    );
+
+    let (items, _) = sync_from(&*source, Some(cursor.clone())).await;
+    assert_eq!(
+        keys(&items),
+        [format!("buildType:{config}"), format!("build:{id}")],
+        "the next incremental run returns exactly the build the run made and its configuration"
+    );
+    let build = of_kind(&items, "build")[0];
+    assert_eq!(build.payload["branchName"], BRANCH, "{:?}", build.payload);
+    println!(
+        "SEEDED next sync after the run: {:?}, branch {}",
+        keys(&items),
+        build.payload["branchName"]
+    );
+
+    drop(guard);
+    assert_eq!(
+        seeded.build_ids("defaultFilter:false,count:100").await,
+        seeded.seeded_ids_newest_first(),
+        "the server is back in the plain-seed state"
+    );
 }
