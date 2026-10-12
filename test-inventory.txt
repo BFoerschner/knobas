@@ -2412,6 +2412,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_in_flight_pol
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_mid_run_clock_advances_on_exactly_the_two_queries_the_race_sits_between
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_scope_narrows_by_configuration_and_by_project
 knobas-source-teamcity	lib/knobas_source_teamcity	view::tests::a_queued_build_has_no_number_yet_and_says_so
+knobas-source-teamcity	lib/knobas_source_teamcity	view::tests::a_roots_url_is_drawn_without_its_credential
 knobas-source-teamcity	lib/knobas_source_teamcity	view::tests::a_schedule_is_drawn_in_words
 knobas-source-teamcity	lib/knobas_source_teamcity	view::tests::spans_and_ages_read_at_a_glance
 knobas-source-teamcity	test/it	mockd::a_401_is_unauthorized_from_both_entry_points

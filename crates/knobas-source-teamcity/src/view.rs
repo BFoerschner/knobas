@@ -24,11 +24,36 @@ use crate::client::HttpRest;
 use crate::map;
 use crate::rest::{Build, ConfigRecord, Properties, Step, Trigger, VcsRootEntry, parse_ts};
 
-const OVERVIEW: &str = "overview";
-const PARAMETERS: &str = "parameters";
-const STEPS: &str = "steps";
-const TRIGGERS: &str = "triggers";
-const VCS_ROOTS: &str = "vcs_roots";
+/// A build configuration's tabs, in the order they are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Overview,
+    Parameters,
+    Steps,
+    Triggers,
+    VcsRoots,
+}
+
+impl Tab {
+    const ALL: [Tab; 5] = [
+        Tab::Overview,
+        Tab::Parameters,
+        Tab::Steps,
+        Tab::Triggers,
+        Tab::VcsRoots,
+    ];
+
+    /// The section id a deferred read would name; stable.
+    fn id(self) -> &'static str {
+        match self {
+            Tab::Overview => "overview",
+            Tab::Parameters => "parameters",
+            Tab::Steps => "steps",
+            Tab::Triggers => "triggers",
+            Tab::VcsRoots => "vcs_roots",
+        }
+    }
+}
 
 /// How many builds *Recent builds* lists, and the success rate is over.
 const RECENT_BUILDS: u32 = 20;
@@ -90,39 +115,39 @@ async fn build_config(
     id: &str,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
-    if let Some(wanted) = section
-        && ![OVERVIEW, PARAMETERS, STEPS, TRIGGERS, VCS_ROOTS].contains(&wanted)
-    {
-        return Err(SourceError::protocol(format!(
-            "teamcity: a build configuration's view has no section {wanted:?} (asked for \
-             {entity:?})"
-        )));
-    }
+    let wanted = match section {
+        None => None,
+        Some(asked) => Some(Tab::ALL.into_iter().find(|t| t.id() == asked).ok_or_else(|| {
+            SourceError::protocol(format!(
+                "teamcity: a build configuration's view has no section {asked:?} (asked for \
+                 {entity:?})"
+            ))
+        })?),
+    };
     let record = viewer.rest.build_config(id).await?;
-    let builds = if matches!(section, None | Some(OVERVIEW)) {
+    let builds = if matches!(wanted, None | Some(Tab::Overview)) {
         viewer.rest.recent_builds(id, RECENT_BUILDS).await?
     } else {
         Vec::new()
     };
     let now = Utc::now();
-    let all = [OVERVIEW, PARAMETERS, STEPS, TRIGGERS, VCS_ROOTS];
-    let sections = all
+    let sections = Tab::ALL
         .into_iter()
-        .filter(|s| section.is_none_or(|wanted| wanted == *s))
-        .map(|s| match s {
-            OVERVIEW => overview(viewer, &record, &builds, now),
-            PARAMETERS => parameters(entity, &record),
-            STEPS => steps(&record),
-            TRIGGERS => triggers(&record),
-            _ => vcs_roots(&record),
+        .filter(|t| wanted.is_none_or(|w| w == *t))
+        .map(|t| match t {
+            Tab::Overview => overview(viewer, &record, &builds, now),
+            Tab::Parameters => parameters(entity, &record),
+            Tab::Steps => steps(&record),
+            Tab::Triggers => triggers(&record),
+            Tab::VcsRoots => vcs_roots(&record),
         })
         .collect();
     Ok(SourceView { sections })
 }
 
-fn tab(id: &str, title: &str, count: Option<usize>, blocks: Vec<Block>) -> ViewSection {
+fn tab(tab: Tab, title: &str, count: Option<usize>, blocks: Vec<Block>) -> ViewSection {
     ViewSection {
-        id: id.to_owned(),
+        id: tab.id().to_owned(),
         title: title.to_owned(),
         count: count.map(|n| n as u64),
         deferred: false,
@@ -155,21 +180,23 @@ fn overview(
     if record.paused == Some(true) {
         facts.push(fact("Paused", "yes", Some(Tone::Warn)));
     }
-    if let Some(last) = builds.iter().find(|b| outcome(b).finished) {
-        let o = outcome(last);
+    if let Some(last) = builds.iter().find(|b| Outcome::of(b).finished()) {
+        let o = Outcome::of(last);
         facts.push(fact(
             "Last build",
-            format!("{} {}", number(last), o.word),
-            Some(o.tone),
+            format!("{} {}", number(last), o.word()),
+            Some(o.tone()),
         ));
     }
+    // Over the finished builds that say something about health: a canceled
+    // one was stopped, not judged.
     let judged: Vec<_> = builds
         .iter()
-        .map(outcome)
-        .filter(|o| o.finished && o.word != CANCELED)
+        .map(Outcome::of)
+        .filter(|o| o.finished() && *o != Outcome::Canceled)
         .collect();
     if !judged.is_empty() {
-        let passed = judged.iter().filter(|o| o.word == SUCCESS).count();
+        let passed = judged.iter().filter(|o| **o == Outcome::Success).count();
         facts.push(fact(
             "Success rate",
             format!(
@@ -197,35 +224,59 @@ fn overview(
                 .collect(),
         });
     }
-    tab(OVERVIEW, "Overview", None, blocks)
+    tab(Tab::Overview, "Overview", None, blocks)
 }
 
-const SUCCESS: &str = "success";
-const CANCELED: &str = "canceled";
-
-/// What happened to a build, as one word and the tone it is drawn in.
-struct Outcome {
-    word: &'static str,
-    tone: Tone,
-    finished: bool,
+/// What happened to a build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Queued,
+    Running,
+    Success,
+    Failed,
+    Error,
+    Canceled,
 }
 
-/// TeamCity's state and status, read the way `map::status_element` reads them:
-/// a finished `UNKNOWN` is a canceled build (issue #105).
-fn outcome(build: &Build) -> Outcome {
-    let finished = build.state.as_deref() == Some("finished");
-    let (word, tone) = match (build.state.as_deref(), build.status.as_deref()) {
-        (Some("running"), _) => ("running", Tone::Info),
-        (Some("queued"), _) => ("queued", Tone::Muted),
-        (_, Some("SUCCESS")) => (SUCCESS, Tone::Ok),
-        (_, Some("FAILURE")) => ("failed", Tone::Err),
-        (_, Some("ERROR")) => ("error", Tone::Err),
-        _ => (CANCELED, Tone::Muted),
-    };
-    Outcome {
-        word,
-        tone,
-        finished,
+impl Outcome {
+    /// TeamCity's state and status, by the rule `map::status_element` writes
+    /// down for the mirror: a finished `UNKNOWN` is a canceled build (issue
+    /// #105). That function renders a line for the search index; this one
+    /// picks a word and a tone, so the rule is restated rather than shared.
+    fn of(build: &Build) -> Outcome {
+        match (build.state.as_deref(), build.status.as_deref()) {
+            (Some("running"), _) => Outcome::Running,
+            (Some("queued"), _) => Outcome::Queued,
+            (_, Some("SUCCESS")) => Outcome::Success,
+            (_, Some("FAILURE")) => Outcome::Failed,
+            (_, Some("ERROR")) => Outcome::Error,
+            _ => Outcome::Canceled,
+        }
+    }
+
+    fn word(self) -> &'static str {
+        match self {
+            Outcome::Queued => "queued",
+            Outcome::Running => "running",
+            Outcome::Success => "success",
+            Outcome::Failed => "failed",
+            Outcome::Error => "error",
+            Outcome::Canceled => "canceled",
+        }
+    }
+
+    /// Colour only where something is wrong or moving.
+    fn tone(self) -> Tone {
+        match self {
+            Outcome::Running => Tone::Info,
+            Outcome::Success => Tone::Ok,
+            Outcome::Failed | Outcome::Error => Tone::Err,
+            Outcome::Queued | Outcome::Canceled => Tone::Muted,
+        }
+    }
+
+    fn finished(self) -> bool {
+        !matches!(self, Outcome::Queued | Outcome::Running)
     }
 }
 
@@ -241,13 +292,13 @@ fn number(build: &Build) -> String {
 /// One recent build: its number as the chip, coloured by outcome, its status
 /// text as the title, and `branch · duration · age` as the quiet line.
 fn build_row(viewer: &Viewer<'_>, config: &str, build: &Build, now: DateTime<Utc>) -> ViewRow {
-    let o = outcome(build);
+    let o = Outcome::of(build);
     let started = build.start_date.as_deref().and_then(parse_ts);
     let finished = build.finish_date.as_deref().and_then(parse_ts);
     let queued = build.queued_date.as_deref().and_then(parse_ts);
     let duration = match (started, finished) {
         (Some(s), Some(f)) => Some(f - s),
-        (Some(s), None) if o.word == "running" => Some(now - s),
+        (Some(s), None) if o == Outcome::Running => Some(now - s),
         _ => None,
     };
     let meta: Vec<String> = [
@@ -261,10 +312,10 @@ fn build_row(viewer: &Viewer<'_>, config: &str, build: &Build, now: DateTime<Utc
     ViewRow {
         entity_id: Some(format!("{}:{}", viewer.source_id, map::build_key(build.id))),
         title: nonblank(build.status_text.as_deref())
-            .unwrap_or(o.word)
+            .unwrap_or(o.word())
             .to_owned(),
         meta: (!meta.is_empty()).then(|| meta.join(" · ")),
-        tone: Some(o.tone),
+        tone: Some(o.tone()),
         chip: Some(number(build)),
         url: map::build_web_url(viewer.base_url, Some(config), build.id),
     }
@@ -322,7 +373,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         .collect();
     let count = values.len();
     tab(
-        PARAMETERS,
+        Tab::Parameters,
         "Parameters",
         Some(count),
         vec![Block::Settings {
@@ -339,7 +390,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
 fn steps(record: &ConfigRecord) -> ViewSection {
     let list = &record.steps.step;
     let blocks = list.iter().flat_map(step_blocks).collect();
-    tab(STEPS, "Steps", Some(list.len()), blocks)
+    tab(Tab::Steps, "Steps", Some(list.len()), blocks)
 }
 
 /// A step's name and runner, then its script where the runner has one --
@@ -356,7 +407,7 @@ fn step_blocks(step: &Step) -> Vec<Block> {
         facts.push(fact("Runner", runner_name(runner), None));
     }
     if step.disabled {
-        facts.push(fact("Disabled", "yes", Some(Tone::Muted)));
+        facts.push(disabled());
     }
     let mut blocks = vec![Block::Facts { facts }];
     if let Some(script) = script_of(&step.properties) {
@@ -408,7 +459,7 @@ fn triggers(record: &ConfigRecord) -> ViewSection {
             facts: trigger_facts(t),
         })
         .collect();
-    tab(TRIGGERS, "Triggers", Some(list.len()), blocks)
+    tab(Tab::Triggers, "Triggers", Some(list.len()), blocks)
 }
 
 /// A trigger's type and the properties that say when it fires and for what.
@@ -421,7 +472,7 @@ fn trigger_facts(trigger: &Trigger) -> Vec<Fact> {
     let p = &trigger.properties;
     let mut facts = vec![fact("Trigger", trigger_name(kind), None)];
     if trigger.disabled {
-        facts.push(fact("Disabled", "yes", Some(Tone::Muted)));
+        facts.push(disabled());
     }
     let mut push = |label: &str, value: Option<String>| {
         if let Some(value) = value {
@@ -515,7 +566,7 @@ fn vcs_roots(record: &ConfigRecord) -> ViewSection {
             facts: root_facts(e),
         })
         .collect();
-    tab(VCS_ROOTS, "VCS roots", Some(list.len()), blocks)
+    tab(Tab::VcsRoots, "VCS roots", Some(list.len()), blocks)
 }
 
 /// A root's name, its VCS, where it fetches from, its default branch and the
@@ -542,7 +593,7 @@ fn root_facts(entry: &VcsRootEntry) -> Vec<Fact> {
     }
     if let Some(root) = root {
         if let Some(url) = root.properties.get("url") {
-            facts.push(fact("URL", url, None));
+            facts.push(fact("URL", without_userinfo(url), None));
         }
         if let Some(branch) = root.properties.get("branch") {
             facts.push(fact("Default branch", branch, None));
@@ -552,6 +603,29 @@ fn root_facts(entry: &VcsRootEntry) -> Vec<Fact> {
         facts.push(fact("Checkout rules", rules, None));
     }
     facts
+}
+
+/// A step or trigger that is switched off: said, quietly.
+fn disabled() -> Fact {
+    fact("Disabled", "yes", Some(Tone::Muted))
+}
+
+/// A URL with any `user:password@` taken out: a git URL may carry the
+/// credential it fetches with, and a view says where, never with what.
+fn without_userinfo(url: &str) -> String {
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme), rest),
+        None => (None, url),
+    };
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(authority_end);
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    match scheme {
+        Some(scheme) => format!("{scheme}://{host}{path}"),
+        None => format!("{host}{path}"),
+    }
 }
 
 fn nonblank(value: Option<&str>) -> Option<&str> {
@@ -577,6 +651,34 @@ mod tests {
         assert_eq!(age(TimeDelta::seconds(720)), "12m ago");
         assert_eq!(age(TimeDelta::seconds(3 * 3600 + 5)), "3h ago");
         assert_eq!(age(TimeDelta::days(5)), "5d ago");
+    }
+
+    /// A git URL may carry a credential (`https://user:token@host/…`); the
+    /// view draws where a root fetches from, never with what.
+    #[test]
+    fn a_roots_url_is_drawn_without_its_credential() {
+        assert_eq!(
+            without_userinfo("https://knobas:s3cret@gitea.example/tidewater/p.git"),
+            "https://gitea.example/tidewater/p.git"
+        );
+        assert_eq!(
+            without_userinfo("ssh://git@gitea.example:2222/tidewater/p.git"),
+            "ssh://gitea.example:2222/tidewater/p.git"
+        );
+        assert_eq!(
+            without_userinfo("http://gitea:3000/tidewater/p.git"),
+            "http://gitea:3000/tidewater/p.git"
+        );
+        // scp-like and odd forms keep the host and drop what is before `@`.
+        assert_eq!(
+            without_userinfo("git@gitea.example:t/p.git"),
+            "gitea.example:t/p.git"
+        );
+        assert_eq!(
+            without_userinfo("https://gitea.example/a@b/p.git"),
+            "https://gitea.example/a@b/p.git",
+            "an `@` in the path is not userinfo"
+        );
     }
 
     #[test]
@@ -631,7 +733,10 @@ mod tests {
             triggered: None,
         };
         assert_eq!(number(&queued), "id 99");
-        let o = outcome(&queued);
-        assert_eq!((o.word, o.tone, o.finished), ("queued", Tone::Muted, false));
+        let o = Outcome::of(&queued);
+        assert_eq!(
+            (o.word(), o.tone(), o.finished()),
+            ("queued", Tone::Muted, false)
+        );
     }
 }

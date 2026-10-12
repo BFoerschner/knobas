@@ -93,6 +93,13 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
 /// `properties` are asked for whole because which of them matter depends on
 /// the runner or trigger type; the view picks by name and draws nothing it
 /// does not know.
+///
+/// A VCS root's `properties` are asked for whole too, though the view reads
+/// only `url` and `branch`: `fields=` selects by field name, and a property's
+/// name is a *value* of the list, so there is no selector for two of them. The
+/// list includes `secure:password`, which TeamCity answers by name with no
+/// value (measured on the seeded 2026.1.3 server, 2026-10-12); the view draws
+/// neither it nor anything else but those two.
 pub(crate) const BUILD_CONFIG_VIEW_FIELDS: &str = concat!(
     "id,projectId,projectName,description,paused,",
     "parameters(property(name,value,inherited,type(rawValue))),",
@@ -924,9 +931,9 @@ mod tests {
                  capped page from an exhausted query"
             );
         }
-        // The view's two (#664): `paused` and a parameter's `inherited` and
-        // `type(rawValue)` are what the overview's warning, the inherited
-        // mark and the password mask are read from.
+        // The two source-view selectors (#664). `paused`, a parameter's
+        // `inherited` and its `type(rawValue)` are what the overview's
+        // warning, the inherited mark and the password mask are read from.
         for needed in [
             "paused",
             "inherited",
