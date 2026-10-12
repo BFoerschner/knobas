@@ -43,6 +43,30 @@ export function settingPayload(
 }
 
 /**
+ * What a queued write sets, read back from its payload: the entity, the
+ * setting's name and the value it carries. The inverse of {@link PAYLOADS},
+ * by op, so a detail opened over a write still on the queue can find the row
+ * that write is for (#692).
+ */
+const SETS: Record<string, (payload: WriteOpPayload) => QueuedSetting | null> = {
+  set_parameter: (payload) => ("SetParameter" in payload ? payload.SetParameter : null),
+};
+
+/** A settings edit as it sits on the queue. */
+export interface QueuedSetting {
+  entity: string;
+  name: string;
+  value: string;
+}
+
+/** The setting `write` changes, or `null` when it is not an edit of `writeOp`. */
+export function queuedSetting(writeOp: string, write: QueuedWrite): QueuedSetting | null {
+  if (write.op !== writeOp) return null;
+  const read = SETS[writeOp]?.(write.payload);
+  return read ? { entity: read.entity, name: read.name, value: read.value } : null;
+}
+
+/**
  * Whether a block's values may be edited here: its op is one the source's
  * descriptor declares (`submit_write` refuses any other) and this shell can
  * build.
