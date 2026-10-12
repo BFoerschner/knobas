@@ -9,6 +9,7 @@
 //! `just search-perf` runs them by name (`test-layout-exceptions.txt`).
 
 mod ancestor_path;
+mod bare_name;
 mod corpus_seam;
 mod help_card;
 mod home;
