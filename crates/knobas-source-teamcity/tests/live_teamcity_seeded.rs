@@ -1989,7 +1989,10 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
 
     let tests = read(Some("tests")).await;
     let blocks = &tests.sections[0].blocks;
-    println!("SEEDED BUILD TESTS: {}", serde_json::to_string(blocks).expect("serializes"));
+    println!(
+        "SEEDED BUILD TESTS: {}",
+        serde_json::to_string(blocks).expect("serializes")
+    );
     assert!(
         matches!(&blocks[0], Block::Entities { rows, .. }
             if rows.len() == 1
@@ -2012,7 +2015,8 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
         text.lines().count()
     );
     assert!(
-        text.lines().any(|l| l.ends_with("test sepa::retry::gives_up_after_max_attempts ... FAILED")),
+        text.lines()
+            .any(|l| l.ends_with("test sepa::retry::gives_up_after_max_attempts ... FAILED")),
         "the tail holds a line the seed's step printed"
     );
     assert!(text.lines().count() <= 400);

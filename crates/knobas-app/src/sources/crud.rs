@@ -830,7 +830,10 @@ async fn resolve_commit_hints(
 fn commit_page(repo_url: &str, sha: &str) -> Option<String> {
     let sha = sha.trim();
     let repo = repo_url.trim().trim_end_matches('/');
-    let repo = repo.strip_suffix(".git").unwrap_or(repo).trim_end_matches('/');
+    let repo = repo
+        .strip_suffix(".git")
+        .unwrap_or(repo)
+        .trim_end_matches('/');
     (crate::commands::entity::is_web_url(repo)
         && !sha.is_empty()
         && sha.chars().all(|c| c.is_ascii_hexdigit()))

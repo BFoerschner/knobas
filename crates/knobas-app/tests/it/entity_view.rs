@@ -113,7 +113,10 @@ impl Source for Drawing {
                         rows: vec![
                             // A clone URL, host in capitals: the commit page
                             // the mirror holds, by the paste resolver's rule.
-                            hinted("mirrored", "HTTP://Gitea.Example/tidewater/payout-service.git"),
+                            hinted(
+                                "mirrored",
+                                "HTTP://Gitea.Example/tidewater/payout-service.git",
+                            ),
                             // The same sha in a repository nothing mirrors.
                             hinted("unmirrored", "http://gitea.example/tidewater/elsewhere.git"),
                             // An scp-like git URL is no web page; a miss, not an error.
@@ -334,5 +337,8 @@ async fn a_commit_named_by_repository_and_sha_opens_the_mirrored_commit() {
         ]
     );
     let wire = serde_json::to_string(&drawn).unwrap();
-    assert!(!wire.contains("repo_url"), "the hint crossed to the shell: {wire}");
+    assert!(
+        !wire.contains("repo_url"),
+        "the hint crossed to the shell: {wire}"
+    );
 }

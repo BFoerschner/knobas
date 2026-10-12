@@ -353,7 +353,10 @@ impl HttpRest {
         let locator = format!("build:(id:{id}),status:FAILURE,count:{FAILED_TESTS}");
         self.one(
             "app/rest/testOccurrences",
-            &[("locator", locator.as_str()), ("fields", FAILED_TEST_FIELDS)],
+            &[
+                ("locator", locator.as_str()),
+                ("fields", FAILED_TEST_FIELDS),
+            ],
         )
         .await
     }
@@ -438,7 +441,7 @@ pub(crate) fn tail(bytes: &[u8], cut: bool, lines: usize) -> (String, bool) {
     (kept.join("\n"), truncated)
 }
 
-/// What a by-id fetch's answer means: present, absent, or neither./// What a by-id fetch's answer means: present, absent, or neither.
+/// What a by-id fetch's answer means: present, absent, or neither.
 ///
 /// A free function rather than a `match` inside [`Rest::build_exists`] so it
 /// can be asserted per status without an HTTP server. That is not a stylistic
@@ -623,9 +626,8 @@ mod tests {
             tail(log.as_bytes(), false, 3),
             ("line 8\nline 9\nline 10".to_owned(), true)
         );
-        assert_eq!(
-            tail(log.as_bytes(), false, 10).1,
-            false,
+        assert!(
+            !tail(log.as_bytes(), false, 10).1,
             "exactly the cap is the whole log"
         );
         assert_eq!(tail(log.as_bytes(), false, 11).0.lines().count(), 10);

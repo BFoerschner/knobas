@@ -25,15 +25,15 @@
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Fact, Setting, SourceView, Tone, ViewRow, ViewSection};
-
-use knobas_source::view::CommitHint;
+use knobas_source::view::{
+    Block, CommitHint, Fact, Setting, SourceView, Tone, ViewRow, ViewSection,
+};
 
 use crate::client::HttpRest;
 use crate::map;
 use crate::rest::{
-    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence,
-    Trigger, VcsRootEntry, parse_ts,
+    Build, BuildRecord, Change, ConfigRecord, FileEntry, Properties, Step, TestOccurrence, Trigger,
+    VcsRootEntry, parse_ts,
 };
 
 /// A build configuration's tabs, in the order they are drawn.
@@ -269,10 +269,10 @@ impl Outcome {
     /// #105). That function renders a line for the search index; this one
     /// picks a word and a tone, so the rule is restated rather than shared.
     fn of(build: &Build) -> Outcome {
-        Outcome::from(build.state.as_deref(), build.status.as_deref())
+        Outcome::of_state(build.state.as_deref(), build.status.as_deref())
     }
 
-    fn from(state: Option<&str>, status: Option<&str>) -> Outcome {
+    fn of_state(state: Option<&str>, status: Option<&str>) -> Outcome {
         match (state, status) {
             (Some("running"), _) => Outcome::Running,
             (Some("queued"), _) => Outcome::Queued,
@@ -382,11 +382,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         .property
         .iter()
         .map(|p| {
-            let secret = p
-                .spec
-                .as_ref()
-                .and_then(|t| t.raw_value.as_deref())
-                .is_some_and(|raw| raw.trim_start().starts_with("password"));
+            let secret = is_password(p);
             Setting {
                 name: p.name.clone(),
                 value: if secret {
@@ -718,9 +714,9 @@ pub(crate) const LOG_TAIL_LINES: usize = 400;
 
 /// The view of build `id`: every tab, or the one `section` names.
 ///
-/// The build record is read for every tab but *Tests* and *Log*, which read
-/// only their own resource; *Changes* and *Artifacts* are read only when the
-/// whole view or that tab is asked for.
+/// The build record is read for the whole view and for the tabs it answers
+/// (*Overview*, *Parameters*, *Artifacts*' download paths); *Changes*,
+/// *Tests* and *Log* read only their own resource.
 async fn build(
     viewer: &Viewer<'_>,
     entity: &str,
@@ -742,10 +738,16 @@ async fn build(
     };
     let rest = viewer.rest;
     let wants = |tab: BuildTab| wanted.is_none_or(|w| w == tab);
-    let record = if matches!(wanted, Some(BuildTab::Tests | BuildTab::Log)) {
-        None
-    } else {
+    // The record answers the overview, the parameters, the failed count
+    // and an artifact's download path; the other tabs read only their own.
+    let record = if wanted.is_none()
+        || matches!(
+            wanted,
+            Some(BuildTab::Overview | BuildTab::Parameters | BuildTab::Artifacts)
+        ) {
         Some(rest.build_record(id).await?)
+    } else {
+        None
     };
     let changes = if wants(BuildTab::Changes) {
         rest.build_changes(id).await?.change
@@ -843,7 +845,7 @@ fn build_type_id(record: &BuildRecord) -> Option<&str> {
 /// What happened, where, and for how long; then the configuration, as an
 /// address.
 fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>) -> Vec<Block> {
-    let o = Outcome::from(record.state.as_deref(), record.status.as_deref());
+    let o = Outcome::of_state(record.state.as_deref(), record.status.as_deref());
     let mut facts = vec![fact("Outcome", o.word(), Some(o.tone()))];
     let mut push = |label: &str, value: Option<String>| {
         if let Some(value) = value {
@@ -872,13 +874,16 @@ fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>)
         "Branch",
         nonblank(record.branch_name.as_deref()).map(str::to_owned),
     );
-    push("Triggered by", record.triggered.as_ref().and_then(|t| {
-        t.user
-            .as_ref()
-            .and_then(|u| nonblank(u.username.as_deref()))
-            .or_else(|| nonblank(t.kind.as_deref()).map(trigger_kind))
-            .map(str::to_owned)
-    }));
+    push(
+        "Triggered by",
+        record.triggered.as_ref().and_then(|t| {
+            t.user
+                .as_ref()
+                .and_then(|u| nonblank(u.username.as_deref()))
+                .or_else(|| nonblank(t.kind.as_deref()).map(trigger_kind))
+                .map(str::to_owned)
+        }),
+    );
     push("Queued", record.queued_date.as_deref().map(stamp));
     push("Started", record.start_date.as_deref().map(stamp));
     push("Finished", record.finish_date.as_deref().map(stamp));
@@ -981,7 +986,11 @@ fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
         meta: (!meta.is_empty()).then(|| meta.join(" · ")),
         tone: None,
         chip: short,
-        url: Some(format!("{}/change/{}", map::root(viewer.base_url), change.id)),
+        url: Some(format!(
+            "{}/change/{}",
+            map::root(viewer.base_url),
+            change.id
+        )),
         commit: match (repo_url, sha) {
             (Some(repo_url), Some(sha)) => Some(CommitHint {
                 repo_url,
@@ -1041,15 +1050,12 @@ fn artifact_row(viewer: &Viewer<'_>, config: Option<&str>, id: i64, file: &FileE
     let (title, meta, url) = match &file.children {
         Some(children) => (
             format!("{}/", file.name),
-            children
-                .get("count")
-                .and_then(serde_json::Value::as_u64)
-                .map(|n| format!("{n} files")),
+            children.count.map(|n| format!("{n} files")),
             None,
         ),
         None => (
             file.name.clone(),
-            file.size.map(bytes),
+            file.size.map(size_of),
             config.map(|config| {
                 format!(
                     "{}/repository/download/{config}/{id}:id/{}",
@@ -1071,7 +1077,7 @@ fn artifact_row(viewer: &Viewer<'_>, config: Option<&str>, id: i64, file: &FileE
 }
 
 /// A size as `150 B`, `1.5 KB`, `5.1 MB`, `2.0 GB`.
-fn bytes(n: u64) -> String {
+fn size_of(n: u64) -> String {
     const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
     if n < 1024 {
         return format!("{n} B");
@@ -1109,12 +1115,7 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
         .build_type
         .iter()
         .flat_map(|t| &t.parameters.property)
-        .filter(|p| {
-            p.spec
-                .as_ref()
-                .and_then(|t| t.raw_value.as_deref())
-                .is_some_and(|raw| raw.trim_start().starts_with("password"))
-        })
+        .filter(|p| is_password(p))
         .map(|p| p.name.as_str())
         .collect();
     record
@@ -1130,7 +1131,7 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
                 Some(raw.to_owned())
             };
             let secret = passwords.contains(&p.name.as_str())
-                || p.name.contains("secure:")
+                || is_secure_name(&p.name)
                 || masked
                 || shown.is_none();
             Setting {
@@ -1147,6 +1148,20 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
             }
         })
         .collect()
+}
+
+/// A parameter whose spec says `password`: its value is never drawn.
+fn is_password(p: &crate::rest::Property) -> bool {
+    p.spec
+        .as_ref()
+        .and_then(|t| t.raw_value.as_deref())
+        .is_some_and(|raw| raw.trim_start().starts_with("password"))
+}
+
+/// A property TeamCity stores securely (`secure:password`, and on a build
+/// `vcsroot.<root>.secure:password`): never drawn.
+fn is_secure_name(name: &str) -> bool {
+    name.starts_with("secure:") || name.contains(".secure:")
 }
 
 fn nonblank(value: Option<&str>) -> Option<&str> {

@@ -102,7 +102,9 @@ fn failed_tests() -> serde_json::Value {
 
 /// A log of `n` numbered lines.
 fn log(n: usize) -> String {
-    (1..=n).map(|i| format!("[19:51:4{}] line {i}\n", i % 10)).collect()
+    (1..=n)
+        .map(|i| format!("[19:51:4{}] line {i}\n", i % 10))
+        .collect()
 }
 
 /// A TeamCity that answers the build, its changes, its failed tests, its
@@ -125,13 +127,19 @@ async fn teamcity_with_log(log: String) -> MockServer {
             "fields",
             "buildType(id,name,projectName,parameters(property(name,type(rawValue))))",
         ))
-        .and(query_param_contains("fields", "properties(property(name,value))"))
+        .and(query_param_contains(
+            "fields",
+            "properties(property(name,value))",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(build_record()))
         .mount(&server)
         .await;
     get("/app/rest/changes")
         .and(query_param("locator", "build:(id:2401)"))
-        .and(query_param_contains("fields", "vcsRootInstance(properties("))
+        .and(query_param_contains(
+            "fields",
+            "vcsRootInstance(properties(",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(changes()))
         .mount(&server)
         .await;
@@ -140,7 +148,10 @@ async fn teamcity_with_log(log: String) -> MockServer {
             "locator",
             "build:(id:2401),status:FAILURE,count:100",
         ))
-        .and(query_param_contains("fields", "testOccurrence(name,details"))
+        .and(query_param_contains(
+            "fields",
+            "testOccurrence(name,details",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(failed_tests()))
         .mount(&server)
         .await;
@@ -299,7 +310,10 @@ async fn a_change_names_its_commit_by_repository_and_sha() {
 
     let first = &changes[0];
     assert_eq!(first.title, "PAY-231: cap retries at 5");
-    assert_eq!(first.entity_id, None, "the adapter cannot see Gitea's mirror");
+    assert_eq!(
+        first.entity_id, None,
+        "the adapter cannot see Gitea's mirror"
+    );
     assert_eq!(first.chip.as_deref(), Some("179eb1fb0144"));
     let meta = first.meta.as_deref().expect("a meta line");
     assert!(meta.starts_with("mara · "), "{meta}");
@@ -448,12 +462,7 @@ async fn parameters_are_what_the_build_ran_with_and_never_carry_a_secret() {
     let server = teamcity().await;
     let view = read(&server, None).await;
     let parameters = section(&view, "parameters");
-    let [
-        Block::Settings {
-            entity, values, ..
-        },
-    ] = parameters.blocks.as_slice()
-    else {
+    let [Block::Settings { entity, values, .. }] = parameters.blocks.as_slice() else {
         panic!("{parameters:#?}");
     };
     assert_eq!(entity, BUILD);
@@ -499,10 +508,7 @@ async fn a_value_teamcity_masked_is_drawn_as_a_secret() {
     let [Block::Settings { values, .. }] = section(&view, "parameters").blocks.as_slice() else {
         panic!("{view:#?}");
     };
-    assert_eq!(
-        (values[0].value.as_str(), values[0].secret),
-        ("", true)
-    );
+    assert_eq!((values[0].value.as_str(), values[0].secret), ("", true));
 }
 
 /// A refusal is the error it maps to, status and all (ADR-0020 rule 2).
@@ -526,7 +532,11 @@ async fn a_build_the_server_does_not_know_is_its_404() {
 #[tokio::test]
 async fn a_build_id_that_is_not_one_or_a_section_it_lacks_is_refused_unsent() {
     let server = teamcity().await;
-    for bad in ["teamcity:build:abc", "teamcity:build:", "teamcity:build:1,2"] {
+    for bad in [
+        "teamcity:build:abc",
+        "teamcity:build:",
+        "teamcity:build:1,2",
+    ] {
         let refused = source(&server).view(bad, None).await;
         assert!(
             matches!(refused, Err(SourceError::Protocol { .. })),

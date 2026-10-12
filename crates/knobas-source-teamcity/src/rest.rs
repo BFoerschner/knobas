@@ -144,8 +144,7 @@ pub(crate) const BUILD_CHANGE_FIELDS: &str = concat!(
 
 /// What `/app/rest/testOccurrences` is asked for when a build's *Tests* tab
 /// is read (#665).
-pub(crate) const FAILED_TEST_FIELDS: &str =
-    "count,testOccurrence(name,details,newFailure,muted)";
+pub(crate) const FAILED_TEST_FIELDS: &str = "count,testOccurrence(name,details,newFailure,muted)";
 
 /// What `/app/rest/builds/id:N/artifacts` is asked for (#665): a top-level
 /// file's name and size; a directory answers `children` and no size.
@@ -260,7 +259,12 @@ pub(crate) struct FileEntry {
     pub name: String,
     pub size: Option<u64>,
     /// Present on a directory.
-    pub children: Option<serde_json::Value>,
+    pub children: Option<Children>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Children {
+    pub count: Option<u64>,
 }
 
 /// One build configuration as [`BUILD_CONFIG_VIEW_FIELDS`] answers it.
