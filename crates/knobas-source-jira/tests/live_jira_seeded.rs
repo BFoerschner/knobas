@@ -57,9 +57,9 @@
 //!   serves both spellings, which is what hid this.
 //! * **That `fields.parent` reaches the payload when there is one** (#643): a
 //!   sub-task this suite files resolves to exactly one parent through the
-//!   descriptor's *first* candidate, and `under:` reaches it. The golden test
-//!   reads a hand-written record, so only this run sees `BASE_FIELDS` ask for
-//!   `parent`.
+//!   descriptor's *first* candidate, and `under:` reaches it. mockd serves
+//!   `fields.parent` from a shape written by the same reading as the adapter;
+//!   this is the one run where Jira itself answers it.
 //! * **That the adapter can find that id by itself** (#297): `test_connection`
 //!   reads `GET /rest/api/2/field` and reports the same id the seed recorded,
 //!   and a source configured from *that* answer -- never from
@@ -824,7 +824,11 @@ fn under(items: &[SyncItem], value: &str) -> Vec<String> {
             resolve_parents(&it.payload, &declared)
                 .into_iter()
                 .flat_map(|p| p.names)
-                .chain(resolve_names_as_parent(&it.payload, &it.kind, &declarations))
+                .chain(resolve_names_as_parent(
+                    &it.payload,
+                    &it.kind,
+                    &declarations,
+                ))
                 .any(|n| n.eq_ignore_ascii_case(value))
         })
         .map(|it| it.entity.key.clone())
@@ -1616,12 +1620,16 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
     )
     .await;
     let declared = ticket_parent_declaration();
-    let under = |value: &str| under(&items, value);
+    let under_pay_200 = |value: &str| under(&items, value);
     let expected = [
         "PAY-200", "PAY-219", "PAY-228", "PAY-231", "PAY-236", "PAY-240",
     ];
-    assert_eq!(under("PAY-200"), expected);
-    assert_eq!(under("pay-200"), expected, "under: matches ignoring case");
+    assert_eq!(under_pay_200("PAY-200"), expected);
+    assert_eq!(
+        under_pay_200("pay-200"),
+        expected,
+        "under: matches ignoring case"
+    );
 
     for key in &expected[1..] {
         let child = item(&items, key);
@@ -1640,7 +1648,7 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
         item(&items, "PAY-200").payload.get("epic").is_none(),
         "the epic belongs to no epic, so nothing is stored for it"
     );
-    println!("SEEDED under:PAY-200 -> {:?}", under("PAY-200"));
+    println!("SEEDED under:PAY-200 -> {:?}", under_pay_200("PAY-200"));
 }
 
 /// A sub-task this suite files under a seeded issue, deleted again when the
@@ -1797,13 +1805,12 @@ async fn delete_issue(
             .await
             .map_err(|e| format!("searching for {key}: {e}"))?;
         let status = response.status().as_u16();
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("searching for {key}: unreadable body: {e}"))?;
+        let text = response.text().await.unwrap_or_default();
         if status != 200 {
-            return Err(format!("searching for {key} -> {status}: {body}"));
+            return Err(format!("searching for {key} -> {status}: {text}"));
         }
+        let body: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("searching for {key}: unreadable body: {e}: {text}"))?;
         let named = body["issues"]
             .as_array()
             .into_iter()
@@ -1829,8 +1836,9 @@ async fn delete_issue(
 /// field and the corpus has no sub-task. Clause 6 gives both candidates one
 /// evidence slot (#301), so the battery passes while `fields.parent` resolves
 /// on nothing; the golden test and `knobas-search`'s `under_jira.rs` read
-/// hand-written shapes. What only this test sees is the wire: `BASE_FIELDS`
-/// has to request `parent`, or the payload never carries it.
+/// hand-written shapes, and mockd's records were written by the same reading
+/// as the adapter. This is the live witness of the wire: `BASE_FIELDS` has to
+/// request `parent`, or the payload never carries it.
 ///
 /// So the test files a Sub-task under PAY-219 -- a Task in PAY-200 --
 /// full-syncs with the source configured as the Add-source dialog leaves it,
