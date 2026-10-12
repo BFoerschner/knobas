@@ -10416,6 +10416,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   so in that environment a change would stay plain text: the resolver matches the URL as
   written and does not guess that two hosts are one.
 
+  *Closed by #683 (2026-10-13), in the environment and not in the resolver.* The seeded VCS
+  roots now say `http://127.0.0.1:3000`, Gitea's own `ROOT_URL` and so the prefix of every
+  mirrored commit's web URL; a `teamcity-gitea` forward makes that address reach Gitea inside
+  TeamCity's network namespace. The seed's change witness gives one build a change, and a
+  build's overview gains a *Revision* entity row carrying the same commit hint (no vocabulary
+  change). `teamcity_seeded_live.rs`'s
+  `a_builds_change_and_its_revision_open_the_mirrored_gitea_commit` syncs both products in one
+  app and opens both rows.
+
 - **The IPC schema — issue #680 (2026-10-12): `EntityOrder` gains the two room tile orders, and
   `EntityPage` counts what they drew.** Spec #660's problem statement and story 15: a room's Code
   and Builds tiles show what needs attention, not the newest rows of every kind. The ticket's own

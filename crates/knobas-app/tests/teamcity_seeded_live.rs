@@ -55,6 +55,18 @@
 //! search. Read-only too, and for the same reason it lives here and not in the
 //! adapter's crate: the search is an app-crate read.
 //!
+//! # A build leads to its code (issue #683)
+//!
+//! `a_builds_change_and_its_revision_open_the_mirrored_gitea_commit` is the one
+//! test here that needs **both** products: it configures the seeded Gitea
+//! beside TeamCity in the same app, syncs both, and opens the build view the
+//! detail panel opens. The change witness's second build lists a change, and
+//! fixture build 1187 lists none; each row named by repository and sha must
+//! carry the mirrored commit's id. `just teamcity-live-seeded` already starts
+//! and seeds Gitea (the VCS roots clone it) and exports `KNOBAS_GITEA_URL` and
+//! `KNOBAS_GITEA_TOKEN`, so it needs no recipe of its own. Read-only like the
+//! rest.
+//!
 //! # Running it
 //!
 //! `#[ignore]`d, so `just check` runs none of it. The recipe is
@@ -224,6 +236,37 @@ fn seeded_builds() -> Vec<SeededBuild> {
 /// `sync.live_item.author` against. Without it the app knows of nobody and the
 /// digest is empty for everyone.
 async fn app(env: &Env, account: &str) -> SourcesState {
+    app_with(env, account, None).await
+}
+
+/// The Gitea source a cross-product test adds beside TeamCity (#683): the
+/// seeded Gitea, as `./seed --env` names it, over the two repositories the
+/// seeded VCS roots build.
+struct GiteaEnv {
+    url: String,
+    token: String,
+}
+
+/// The configured Gitea source's id and entity namespace.
+const GITEA: &str = "gitea";
+
+fn gitea_env() -> GiteaEnv {
+    let need = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                panic!("{key} is not set -- `just teamcity-live-seeded` seeds Gitea and exports it")
+            })
+    };
+    GiteaEnv {
+        url: need("KNOBAS_GITEA_URL").trim_end_matches('/').to_owned(),
+        token: need("KNOBAS_GITEA_TOKEN"),
+    }
+}
+
+async fn app_with(env: &Env, account: &str, gitea: Option<&GiteaEnv>) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database("teamcity_live_digest").await;
     let pool = connector
         .pool(4)
@@ -255,6 +298,30 @@ async fn app(env: &Env, account: &str) -> SourcesState {
     )
     .await
     .expect("the source row is written");
+
+    if let Some(gitea) = gitea {
+        secrets
+            .put(
+                &knobas_secrets::KeychainAccount::source(GITEA),
+                &Secret::just(AuthMethod::Pat, gitea.token.clone()),
+            )
+            .expect("the Gitea token is stored");
+        knobas_sync::config::insert(
+            &pool,
+            &knobas_sync::config::InsertConfig {
+                id: GITEA.to_owned(),
+                adapter_kind: "gitea".to_owned(),
+                display_name: "Tidewater Git (seeded)".to_owned(),
+                base_url: gitea.url.clone(),
+                auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+                config: json!({ "repos": ["tidewater/payout-service", "tidewater/ledger-api"] }),
+                sync_interval_secs: 86_400,
+                enabled: true,
+            },
+        )
+        .await
+        .expect("the Gitea source row is written");
+    }
 
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
@@ -616,4 +683,156 @@ async fn a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_ne
         "the parameter is back at its recorded value"
     );
     println!("SEEDED {entity}: {NAME} restored to {before:?} and read back so");
+}
+
+/// The mirrored Gitea commit whose page is `<gitea>/tidewater/<repo>/commit/<sha>`,
+/// read by the web URL as Gitea wrote it -- not through the resolver under test.
+async fn mirrored_commit(state: &SourcesState, gitea: &GiteaEnv, repo: &str, sha: &str) -> String {
+    let page = format!("{}/tidewater/{repo}/commit/{sha}", gitea.url);
+    sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where source_id = $1 and kind = 'commit' and web_url = $2",
+    )
+    .bind(GITEA)
+    .bind(&page)
+    .fetch_optional(&state.pool)
+    .await
+    .expect("the mirror is readable")
+    .unwrap_or_else(|| panic!("the Gitea sync mirrored no commit at {page}"))
+}
+
+/// The rows of one entity-list block of a section, by the block's title.
+fn rows_of<'v>(
+    view: &'v knobas_source::view::SourceView,
+    section: &str,
+    title: Option<&str>,
+) -> &'v [knobas_source::view::ViewRow] {
+    use knobas_source::view::Block;
+    let found = view
+        .sections
+        .iter()
+        .find(|s| s.id == section)
+        .unwrap_or_else(|| panic!("no section {section}: {view:#?}"));
+    found
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Entities { title: t, rows } if t.as_deref() == title => Some(rows.as_slice()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no {title:?} rows in {section}: {found:#?}"))
+}
+
+/// **A build's change and its revision open the mirrored Gitea commit**
+/// (#683, spec #660 story 23), with Gitea and TeamCity synced in one app.
+///
+/// The seed's change witness is a configuration built twice on a branch that
+/// moved between, so its second build lists the head commit as a change; the
+/// failed fixture build 1187 is its configuration's first and lists none, and
+/// its *Revision* row is what still leads to its code. Both rows are drawn by
+/// the app's own read, `crud::view`, which resolves the adapter's commit hint
+/// against this mirror -- possible because the seeded VCS roots name Gitea by
+/// its ROOT_URL, `127.0.0.1:3000`, the address every commit's page carries.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded TeamCity and Gitea: `just teamcity-live-seeded`"]
+async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {
+    use knobas_app::sources::crud;
+
+    let env = env();
+    let gitea = gitea_env();
+    let account = env.account().await;
+    let state = app_with(&env, &account, Some(&gitea)).await;
+    sync(&state, TEAMCITY).await;
+    sync(&state, GITEA).await;
+
+    let view_of = async |id: i64| {
+        let entity = format!("{TEAMCITY}:build:{id}");
+        crud::view(
+            &state.pool,
+            &state.secrets,
+            state.registry.as_ref(),
+            &entity,
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the view of {entity} reads: {e:?}"))
+        .expect("TeamCity draws a build")
+    };
+
+    // The change witness: one change, and the revision it ran on, both the
+    // head the seed recorded.
+    let changes = &live_under::seed_state("KNOBAS_TEAMCITY_SEED_STATE")["teamcity"]["changes"];
+    let (after, repo, sha) = (
+        changes["after_id"].as_i64().unwrap_or_else(|| {
+            panic!("seed-state.json has no teamcity.changes -- re-run `./seed --teamcity`")
+        }),
+        changes["repo"].as_str().expect("a repo").to_owned(),
+        changes["sha"].as_str().expect("a sha").to_owned(),
+    );
+    let commit = mirrored_commit(&state, &gitea, &repo, &sha).await;
+    let view = view_of(after).await;
+    let listed = rows_of(&view, "changes", None);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|r| r.entity_id.as_deref())
+            .collect::<Vec<_>>(),
+        [Some(commit.as_str())],
+        "build {after}'s one change opens the mirrored commit: {listed:#?}"
+    );
+    let built = rows_of(&view, "overview", Some("Revision"));
+    assert_eq!(
+        built
+            .iter()
+            .map(|r| r.entity_id.as_deref())
+            .collect::<Vec<_>>(),
+        [Some(commit.as_str())],
+        "build {after}'s revision opens the same commit: {built:#?}"
+    );
+    println!(
+        "SEEDED CHANGE ROW (build {after}): {}",
+        serde_json::to_string(&listed[0]).expect("json")
+    );
+    println!(
+        "SEEDED REVISION ROW (build {after}): {}",
+        serde_json::to_string(&built[0]).expect("json")
+    );
+
+    // 1187: no change -- a first build -- and still a way to its code.
+    let failed = seeded_build_id();
+    let record = env
+        .get(&format!(
+            "app/rest/builds/id:{failed}?fields=revisions(revision(version))"
+        ))
+        .await;
+    let built_sha = record["revisions"]["revision"][0]["version"]
+        .as_str()
+        .unwrap_or_else(|| panic!("build {failed} names no revision: {record}"))
+        .to_owned();
+    let commit = mirrored_commit(&state, &gitea, "payout-service", &built_sha).await;
+    let view = view_of(failed).await;
+    assert!(
+        rows_of(&view, "changes", None).is_empty(),
+        "fixture build {FIXTURE_BUILD} is its configuration's first and lists no change"
+    );
+    let built = rows_of(&view, "overview", Some("Revision"));
+    assert_eq!(
+        built
+            .iter()
+            .map(|r| r.entity_id.as_deref())
+            .collect::<Vec<_>>(),
+        [Some(commit.as_str())],
+        "fixture build {FIXTURE_BUILD}'s revision opens the mirrored commit: {built:#?}"
+    );
+    println!(
+        "SEEDED REVISION ROW (build {failed}, no changes): {}",
+        serde_json::to_string(&built[0]).expect("json")
+    );
+    let wire = serde_json::to_string(&view).expect("json");
+    assert!(
+        !wire.contains("\"commit\""),
+        "the hint never reaches the shell: {wire}"
+    );
+
+    state.scheduler.shutdown().await;
 }

@@ -89,9 +89,13 @@ cd "$(dirname "$0")"
 TC_URL=http://127.0.0.1:8111
 STATE=seed-state.json
 FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
-# Inside the compose network, where the server fetches and the agent clones;
-# the host-side 127.0.0.1:3000 means nothing to either container.
-GITEA_INTERNAL_URL=http://gitea:3000
+# Gitea as it names itself: docker-compose.yml's ROOT_URL, the prefix of
+# every commit's `html_url` and so of every mirrored commit's web URL. The
+# VCS roots name it so, and a build's change then names a page the mirror
+# holds (#683). Inside TeamCity's containers 127.0.0.1:3000 is the
+# `teamcity-gitea` forward to the compose service; from here it is Gitea's
+# published port, which this script also writes branches through.
+GITEA_URL=http://127.0.0.1:3000
 GITEA_ORG=tidewater
 # The default branch of every seeded repository and so of every VCS root.
 # A build on it is queued with no branchName at all -- see queue_build.
@@ -188,6 +192,21 @@ repo_for_project() {  # repo_for_project <project id> -> repo name
     *) die "no repository decided for project $1 -- add it to repo_for_project" ;;
   esac
 }
+# The change witness (#683): what a build lists under *Changes*. TeamCity
+# lists none for a configuration's first build on a branch, and collects a
+# change only for a commit it has never seen on any branch -- re-pointing a
+# branch at a commit another branch already holds lists nothing (measured
+# 2026-10-13). So this is the one place the TeamCity seed writes to Gitea:
+# a branch of its own in ledger-api (no capped suite budgets that repository,
+# and nothing writes to its default branch), cut at `main`'s head, built,
+# given one commit -- one file, through the contents API -- and built again,
+# so the second build lists that commit. The branch stays: the commit has to
+# be on a branch for knobas' Gitea sync to mirror it. The configuration is the
+# one whose build succeeds in seconds.
+CHANGE_CONFIG=Ledger_Deploy_Staging
+CHANGE_REPO=ledger-api
+CHANGE_BRANCH=seed/change-witness
+
 # One VCS root per project, since both Payout configurations build the same
 # repository: Payout_PayoutService, Ledger_LedgerApi.
 vcs_root_id() {  # vcs_root_id <project id>
@@ -206,6 +225,7 @@ branch_spec() {  # branch_spec <repo>
   {
     jqf ".branches[] | select(.repo==\"$1\") | .name"
     jq -r --arg r "$1" '.synthesized_branches[]? | select(.repo==$r) | .branch' "$STATE"
+    [ "$1" = "$CHANGE_REPO" ] && echo "$CHANGE_BRANCH"
     echo main
   } | awk '!seen[$0]++ { printf "+:refs/heads/(%s)\n", $0 }'
 }
@@ -279,16 +299,32 @@ ensure_project() {  # ensure_project <id>
   say "created project $1"
 }
 
+# A root an older seed made heals here: its URL named `http://gitea:3000`
+# until #683, and its branch spec lacked the change witness's branch. Each
+# property is put back only when it differs, so a current root costs reads.
+heal_vcs_root() {  # heal_vcs_root <root id> <property> <value>
+  rest_text GET "/app/rest/vcs-roots/id:$1/properties/$2"
+  expect "read $2 of VCS root $1" 200 404
+  [ "$REST_STATUS" = "200" ] && [ "$REST_BODY" = "$3" ] && return 0
+  rest_text PUT "/app/rest/vcs-roots/id:$1/properties/$2" "$3"
+  expect "set $2 of VCS root $1" 200
+  say "VCS root $1: $2 set (an older seed made it)"
+}
+
 ensure_vcs_root() {  # ensure_vcs_root <project id>
   _proj=$1; _id=$(vcs_root_id "$_proj"); _repo=$(repo_for_project "$_proj")
   rest GET "/app/rest/vcs-roots/id:$_id"
-  [ "$REST_STATUS" = "200" ] && return 0
+  if [ "$REST_STATUS" = "200" ]; then
+    heal_vcs_root "$_id" url "$GITEA_URL/$GITEA_ORG/$_repo.git"
+    heal_vcs_root "$_id" teamcity:branchSpec "$(branch_spec "$_repo")"
+    return 0
+  fi
   [ "$REST_STATUS" = "404" ] || expect "read VCS root $_id" 200
   # PASSWORD with the seed's Gitea token as the password: Gitea takes an access
   # token there for git-over-HTTP, and it is the credential seed-state.json
   # already holds. `branch` is the default branch, spelled as a ref.
   _body=$(jq -n --arg i "$_id" --arg p "$_proj" --arg r "$_repo" \
-               --arg url "$GITEA_INTERNAL_URL/$GITEA_ORG/$_repo.git" \
+               --arg url "$GITEA_URL/$GITEA_ORG/$_repo.git" \
                --arg spec "$(branch_spec "$_repo")" --arg tok "$GITEA_TOKEN" \
                --arg default "$DEFAULT_BRANCH" \
     '{id:$i, name:($p + " / " + $r), vcsName:"jetbrains.git", project:{id:$p},
@@ -301,7 +337,7 @@ ensure_vcs_root() {  # ensure_vcs_root <project id>
         {name:"secure:password", value:$tok}]}}')
   rest POST /app/rest/vcs-roots "$_body"
   expect "create VCS root $_id" 200
-  say "created VCS root $_id -> $GITEA_INTERNAL_URL/$GITEA_ORG/$_repo.git"
+  say "created VCS root $_id -> $GITEA_URL/$GITEA_ORG/$_repo.git"
 }
 
 add_step() {  # add_step <build type id> <step name> <script>
@@ -385,17 +421,27 @@ ensure_build_type() {  # ensure_build_type <id>
 }
 
 # A finished build that an older seed ran is not this seed's build: the
-# failed one must carry the failed test its step now reports (#665). Such a
+# failed one must carry the failed test its step now reports (#665), and
+# every one must have run from the root's current URL (#683) -- a build keeps
+# the VCS root instance it ran from, so a build from the `http://gitea:3000`
+# root names its revision by that URL however the root reads now. Such a
 # build is deleted, so the loop below runs it again under the same number --
 # its id changes, and seed-state.json records the new one.
 ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
-  [ "$2" = "FAILURE" ] || return 0
-  rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed)"
-  expect "read the tests of build id $1" 200
-  [ "$(printf '%s' "$REST_BODY" | jq '.testOccurrences.failed // 0')" -ge 1 ] && return 0
+  rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed),revisions(revision(vcs-root-instance(properties(property(name,value)))))"
+  expect "read build id $1" 200
+  _why=''
+  case "$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')" in
+    "$GITEA_URL"/*) ;;
+    *) _why="it ran from an older VCS root URL" ;;
+  esac
+  if [ "$2" = "FAILURE" ] && [ "$(printf '%s' "$REST_BODY" | jq '.testOccurrences.failed // 0')" -lt 1 ]; then
+    _why="it reports no failed test"
+  fi
+  [ -z "$_why" ] && return 0
   rest DELETE "/app/rest/builds/id:$1"
   expect "delete build id $1, which an older seed ran" 200 204
-  say "deleted build id $1: an older seed ran it and it reports no failed test; running it again"
+  say "deleted build id $1: an older seed ran it and $_why; running it again"
   FOUND_ID=''
 }
 
@@ -566,6 +612,128 @@ assert_reports() {  # assert_reports <build id> <build type id>
 }
 
 # --------------------------------------------------------------------------
+# Gitea, for the change witness's branch. Sets GITEA_STATUS and GITEA_BODY.
+gitea() {  # gitea <METHOD> <path under /api/v1> [<json body>]
+  if [ "$#" -gt 2 ]; then
+    _raw=$(curl -sS --max-time 60 -X "$1" -H "Authorization: token $GITEA_TOKEN" \
+                -H 'Content-Type: application/json' -H 'Accept: application/json' \
+                -w '\n%{http_code}' -d "$3" "$GITEA_URL/api/v1$2") || _raw='
+000'
+  else
+    _raw=$(curl -sS --max-time 60 -X "$1" -H "Authorization: token $GITEA_TOKEN" \
+                -H 'Accept: application/json' -w '\n%{http_code}' "$GITEA_URL/api/v1$2") || _raw='
+000'
+  fi
+  GITEA_STATUS=$(printf '%s' "$_raw" | tail -n 1)
+  GITEA_BODY=$(printf '%s' "$_raw" | sed '$d')
+}
+
+# Cut the witness branch afresh at <sha>, deleting it first if it is there.
+cut_witness_branch() {  # cut_witness_branch <sha>
+  gitea DELETE "/repos/$GITEA_ORG/$CHANGE_REPO/branches/$(printf '%s' "$CHANGE_BRANCH" | jq -sRr @uri)"
+  case "$GITEA_STATUS" in
+    204|404) ;;
+    *) die "delete $CHANGE_BRANCH in $CHANGE_REPO: HTTP $GITEA_STATUS: $GITEA_BODY" ;;
+  esac
+  gitea POST "/repos/$GITEA_ORG/$CHANGE_REPO/branches" \
+    "$(jq -n --arg b "$CHANGE_BRANCH" --arg r "$1" '{new_branch_name:$b, old_ref_name:$r}')"
+  [ "$GITEA_STATUS" = "201" ] || die "cut $CHANGE_BRANCH at $1 in $CHANGE_REPO: HTTP $GITEA_STATUS: $GITEA_BODY"
+}
+
+# The witness's one commit, on its branch. Prints the commit's sha.
+commit_witness() {
+  gitea POST "/repos/$GITEA_ORG/$CHANGE_REPO/contents/seed-change-witness.txt" \
+    "$(jq -n --arg b "$CHANGE_BRANCH" \
+         --arg c "$(printf 'Written by testenv/seed-teamcity-builds.sh (#683): the commit a build lists as its change.\n' | base64)" \
+         '{branch:$b, content:$c, message:"Seed: the change a TeamCity build lists (#683)"}')"
+  [ "$GITEA_STATUS" = "201" ] || die "commit to $CHANGE_BRANCH in $CHANGE_REPO: HTTP $GITEA_STATUS: $GITEA_BODY"
+  printf '%s' "$GITEA_BODY" | jq -r .commit.sha
+}
+
+# Ask TeamCity to look at the root now, and wait until it has seen the
+# witness branch at <sha> -- a build queued sooner would take the old head.
+wait_for_head() {  # wait_for_head <sha>
+  _root=$(vcs_root_id "$(project_of "$CHANGE_CONFIG")")
+  _deadline=$(( $(date +%s) + BUILD_TIMEOUT ))
+  printf 'seed-teamcity-builds: waiting for TeamCity to see %s at %s ' "$CHANGE_BRANCH" "$1"
+  while :; do
+    rest POST "/app/rest/vcs-root-instances/checkingForChangesQueue?locator=vcsRoot:(id:$_root)" '{}'
+    # `{"entry":[{"name":"refs/heads/...","value":"<sha>"}]}`, measured.
+    rest GET "/app/rest/vcs-root-instances/vcsRoot:(id:$_root)/repositoryState"
+    if [ "$REST_STATUS" = "200" ] && [ "$(printf '%s' "$REST_BODY" \
+         | jq -r --arg b "refs/heads/$CHANGE_BRANCH" '.entry[]? | select(.name==$b) | .value')" = "$1" ]; then
+      echo ok; return 0
+    fi
+    [ "$(date +%s)" -lt "$_deadline" ] || { echo; die "TeamCity never saw $CHANGE_BRANCH at $1: $REST_BODY"; }
+    printf '.'; sleep 3
+  done
+}
+
+# Build the witness branch as it is now, and check the build ran on <sha>.
+# Prints nothing; leaves the build id in WITNESS_ID.
+build_witness() {  # build_witness <sha>
+  WITNESS_ID=$(queue_build "$CHANGE_CONFIG" "$CHANGE_BRANCH" "change witness")
+  wait_for_state "$WITNESS_ID" finished
+  rest GET "/app/rest/builds/id:$WITNESS_ID?fields=status,branchName,revisions(revision(version))"
+  expect "read build id $WITNESS_ID" 200
+  _got=$(printf '%s' "$REST_BODY" | jq -r '[.status, .branchName, .revisions.revision[0].version] | join(" ")')
+  [ "$_got" = "SUCCESS $CHANGE_BRANCH $1" ] \
+    || die "the change witness's build id $WITNESS_ID came out as '$_got', wanted 'SUCCESS $CHANGE_BRANCH $1'"
+}
+
+# The two builds, or the recorded pair where both are still there, the
+# second still lists its change and the branch still holds it. Sets
+# CHANGES_JSON for seed-state.json.
+ensure_change_witness() {
+  _branch=$(printf '%s' "$CHANGE_BRANCH" | jq -sRr @uri)
+  _rec=$(jq -c '.teamcity.changes // empty' "$STATE")
+  if [ -n "$_rec" ]; then
+    _sha=$(printf '%s' "$_rec" | jq -r .sha)
+    _b=$(printf '%s' "$_rec" | jq -r .before_id); _a=$(printf '%s' "$_rec" | jq -r .after_id)
+    gitea GET "/repos/$GITEA_ORG/$CHANGE_REPO/branches/$_branch"
+    _head=$(printf '%s' "$GITEA_BODY" | jq -r '.commit.id // empty' 2>/dev/null || true)
+    rest GET "/app/rest/builds/id:$_b?fields=state"
+    _bs=$REST_STATUS
+    rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
+    if [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$REST_STATUS" = "200" ] \
+       && [ "$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')" = "$_sha" ]; then
+      say "the change witness is there: build id $_a on $CHANGE_BRANCH lists $_sha (after build id $_b)"
+      CHANGES_JSON=$_rec
+      return 0
+    fi
+  fi
+
+  # Anything an earlier run left on the branch goes first, so the pair is
+  # the branch's first and second build.
+  rest GET "/app/rest/builds?locator=buildType:(id:$CHANGE_CONFIG),branch:(name:$CHANGE_BRANCH),defaultFilter:false,state:any&fields=build(id)"
+  expect "list the builds of $CHANGE_CONFIG on $CHANGE_BRANCH" 200
+  for _old in $(printf '%s' "$REST_BODY" | jq -r '.build[]?.id'); do
+    rest DELETE "/app/rest/builds/id:$_old"
+    expect "delete build id $_old on $CHANGE_BRANCH" 200 204
+    say "deleted build id $_old on $CHANGE_BRANCH (an earlier run's)"
+  done
+
+  gitea GET "/repos/$GITEA_ORG/$CHANGE_REPO/branches/$DEFAULT_BRANCH"
+  [ "$GITEA_STATUS" = "200" ] || die "read $DEFAULT_BRANCH of $CHANGE_REPO: HTTP $GITEA_STATUS"
+  _base=$(printf '%s' "$GITEA_BODY" | jq -r .commit.id)
+  cut_witness_branch "$_base"
+  wait_for_head "$_base"
+  build_witness "$_base"; _b=$WITNESS_ID
+  _sha=$(commit_witness)
+  wait_for_head "$_sha"
+  build_witness "$_sha"; _a=$WITNESS_ID
+
+  rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
+  expect "read the changes of build id $_a" 200
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')" = "$_sha" ] \
+    || die "build id $_a lists changes $(printf '%s' "$REST_BODY" | jq -c '[.change[]?.version]'), wanted [\"$_sha\"]"
+  say "the change witness: build id $_a on $CHANGE_BRANCH lists $_sha (after build id $_b on $_base)"
+  CHANGES_JSON=$(jq -n --arg c "$CHANGE_CONFIG" --arg r "$CHANGE_REPO" --arg br "$CHANGE_BRANCH" \
+    --arg s "$_sha" --argjson b "$_b" --argjson a "$_a" \
+    '{build_type:$c, repo:$r, branch:$br, sha:$s, before_id:$b, after_id:$a}')
+}
+
+# --------------------------------------------------------------------------
 rest GET /app/rest/server
 expect "GET /app/rest/server as the recorded token" 200
 say "server $(printf '%s' "$REST_BODY" | jq -r .version), token ok"
@@ -677,14 +845,25 @@ for num in $(jqf '.builds[] | select(.status == "running") | .num'); do
   fi
 done
 
-# 4. seed-state.json: fixture number -> real id, under the teamcity block
+# 4. The change witness (#683), after the fixture's builds: the agent is
+#    free, and a held 1188 (--running) would keep it from running anything.
+if [ -n "$RUNNING_LINE" ]; then
+  CHANGES_JSON=$(jq -c '.teamcity.changes // empty' "$STATE")
+  say "the change witness waits while build $RUNNING_LINE holds the agent; re-run without --running for it"
+else
+  ensure_change_witness
+fi
+
+# 5. seed-state.json: fixture number -> real id, under the teamcity block
 #    seed-teamcity.sh wrote, without disturbing the rest of it.
 BUILDS_JSON=$(printf '%s' "$BUILD_MAP" | jq -R -s '
   split("\n") | map(select(length > 0) | split(" ")
   | {fixture_number: (.[0] | tonumber), build_type: .[1], real_id: (.[2] | tonumber)})
   | sort_by(.fixture_number)')
 jq --argjson b "$BUILDS_JSON" --arg c "$SETTINGS_CONFIG" --arg s "$SETTINGS_SECRET" \
-  '.teamcity += {builds: $b, settings: {build_type: $c, secret_parameter: "env.SEPA_SANDBOX_KEY", secret_value: $s}}' \
+   --argjson w "${CHANGES_JSON:-null}" \
+  '.teamcity += {builds: $b, settings: {build_type: $c, secret_parameter: "env.SEPA_SANDBOX_KEY", secret_value: $s}}
+   | if $w == null then del(.teamcity.changes) else .teamcity.changes = $w end' \
   "$STATE" > "$STATE.tmp"
 mv "$STATE.tmp" "$STATE"
 say "wrote $STATE (teamcity.builds: $(printf '%s' "$BUILDS_JSON" | jq -r 'map("\(.fixture_number)->\(.real_id)") | join(", ")'))"
