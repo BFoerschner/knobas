@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
-/// Bump when the meaning of a field changes; an older knobas then reads the
-/// cursor as unrecognised and syncs in full, which is the safe direction.
+/// Bump when the meaning of a field changes, or when what the adapter emits
+/// for an unchanged record changes; an older knobas then reads the cursor as
+/// unrecognised and syncs in full, which is the safe direction.
 ///
 /// **2** since issue #595 changed what a branch and a commit store: the payload
 /// gained a `repository: { full_name, name }` object, which `under:` reads, and
@@ -15,10 +16,12 @@ use chrono::{DateTime, Utc};
 /// commits past the watermark, so an install upgraded in place would keep the
 /// old payload on every row it had already mirrored (issue #610). Bumping is
 /// the whole upgrade plan, as it was for Jira's #345: a stored version-1 cursor
-/// stops parsing, each Gitea source does one full sync, which re-emits every
-/// branch and the commits inside `commits_per_repo` in the new shape, and comes
-/// back with a version-2 cursor. Commits older than the budget keep the old
-/// payload; ADR-0003 accepts that staleness for budgeted kinds.
+/// stops parsing, and each Gitea source does one backfill (a full sync), which
+/// re-emits every branch and the commits inside `commits_per_repo` in the new
+/// shape and comes back with a version-2 cursor. Commits older than the budget
+/// are never fetched again, so they keep the old payload and `under:` misses
+/// them. That limit comes from the budget (ADR-0003 is why `commit` is
+/// non-exhaustive), and rewriting those rows would need its own ruling.
 pub(crate) const CURSOR_VERSION: u32 = 2;
 
 /// Where the next run resumes, per repository.
