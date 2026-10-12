@@ -9694,14 +9694,22 @@ From this commit on, each of the following requires an orchestrator decision **a
      reason `reviewers`' array and entry do: a parent that is found must not excuse a misspelled name
      inside it.
   5. **Clause 4's counterpart:** a kind that declares no parent resolves none.
+  6. **A parent kind's own records answer to the names declared for it**, added by the deputy's
+     second ruling of 2026-10-11 on #595 (below). For each declared parent `kind`, on that kind's own
+     records in the corpus, every `names` path read from the record's root leads to a string (type
+     check), and where none resolved, no record names a key it does not have (misspelling check).
+     It has an evidence slot per parent kind of its own, so the children's parent objects resolving a
+     name cannot excuse the parent's records lacking it.
 
-  The two #301 tolerances hold for `parent` unchanged: a kind the corpus never populates is asked
-  nothing, and a field's candidates share one evidence slot. Nothing declared a parent before this
-  ticket, so the extension changes no existing adapter's certificate. Witnessed by five rejecting
-  cases in `contract.rs`'s tests, one per rule that can be broken by a declaration (a kind it does
-  not emit, `at` onto a string, `at` onto an array of strings, `at` at a key the records lack, a name
-  key the parent objects lack), and by the conforming adapter, which now declares a parent its corpus
-  resolves. Against the real container, `passes_the_contract_battery_against_the_real_container` in
+  The two #301 tolerances hold for `parent` unchanged, rule 6 included: a kind the corpus never
+  populates is asked nothing (a Jira epic outside the JQL), and a field's candidates share one
+  evidence slot (a parent kind's names share theirs). Nothing declared a parent before this
+  ticket, so the extension changes no existing adapter's certificate. Witnessed by seven rejecting
+  cases in `contract.rs`'s tests, one per rule that can be broken by a declaration or a record (a
+  kind it does not emit, `at` onto a string, `at` onto an array of strings, `at` at a key the records
+  lack, a name key the parent objects lack, a parent kind's records lacking the name their children
+  give them, and that name not being a string there), and by the conforming adapter, which now
+  declares a parent its corpus resolves, on the children and on the parent's own records. Against the real container, `passes_the_contract_battery_against_the_real_container` in
   `just gitea-live` runs the extended clause on Gitea's own records, a pull request's `base.repo`
   among them.
 
@@ -9719,6 +9727,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   shape (a pull request's `base.repo` is a repository, a Confluence ancestor a page, a Jira
   `fields.parent` an issue). It does not walk `at`, so the shape branch is still in one place.
   `knobas-core` is not on the frozen list; this paragraph is here because the ruling's condition is.
+  The pair stands by the deputy's second ruling of 2026-10-11 on #595
+  ([comment](https://github.com/BFoerschner/knobas/issues/595#issuecomment-6113509745);
+  `docs/decisions/2026-10-unattended-rulings.md`), which reads #594's "every `under:` read goes
+  through these two" as every read of a child's parent objects. It adds no descriptor field, but it
+  puts one obligation on the already-frozen `ParentPath.names`: the names must also resolve on the
+  parent kind's own records. The ruling's condition is that the battery certifies that obligation,
+  which is clause 6's rule 6 above. **Flagged for Björn's review** with the rest of this entry.
 
   **The IPC schema — one enum variant, no new command.** `knobas_search::FilterDimension` gains
   `Under` (`"under"`), and the union in `app/src/lib/ipc/search.ts` gains the member. Spec #591
