@@ -607,12 +607,15 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 /// # Why this is not a declared read
 ///
 /// #277 moved every payload read a `KindPaths` field can express onto the
-/// adapter's own declaration, and this is the one that cannot be: an ancestor
-/// path is a **list of strings joined in order**, and `KindPaths` has no slot
-/// shaped like that -- `reviewers` is the only list it carries and it is an
-/// unordered set of accounts, not a path. Adding a slot is a `knobas-source`
-/// change and therefore a §10.8 conversation of its own. So this stays under
-/// ADR-0007's *interim* discipline, and meets all three of its requirements:
+/// adapter's own declaration, and when this was written it was the one that
+/// could not be: an ancestor path is a **list of strings joined in order**,
+/// and `KindPaths` had no slot shaped like that. #594 added one --
+/// [`KindPaths::parent`], whose `at` may lead to the chain -- and #596 put
+/// every row's path on it through [`path_line_read!`], which expands this
+/// only as its **fallback** for a kind that declares no parent. Confluence
+/// declaring its page parent on `ancestors` (#599) is what lets this read
+/// expire into the declaration. Until then it stays under ADR-0007's
+/// *interim* discipline, and meets all three of its requirements:
 ///
 /// 1. **It misses, never guesses.** A payload with no `ancestors`, an
 ///    `ancestors` that is not an array, elements that are not objects,
@@ -621,9 +624,10 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 ///    yields `null` rather than an empty string. `string_agg` over no rows is
 ///    `null`, which is what makes that true by construction rather than by a
 ///    guard someone has to remember.
-/// 2. **One named statement**, this one, expanded by the two reads that draw a
-///    row (`knobas_search`'s launcher corpora and `knobas_app`'s room and
-///    entity statements) and nowhere else.
+/// 2. **One named statement**, this one, expanded inside [`path_line_read!`]
+///    and nowhere else; that is what the reads that draw a row
+///    (`knobas_search`'s launcher corpora, board and lists, and `knobas_app`'s
+///    room and entity statements) expand.
 /// 3. **The failure direction is absence**, pinned by
 ///    `knobas-core/tests/it/ancestor_path.rs` across all six unusable shapes.
 ///
@@ -681,6 +685,74 @@ macro_rules! ancestor_path_read {
               and btrim(a.value->>'title') <> '') end)"
         )
     };
+}
+
+/// SQL for "the parent chain this record declares, as one line": each parent's
+/// **first** declared name, outermost first, joined by
+/// [`ANCESTOR_SEPARATOR`] (#596, ADR-0018). `null` for a record whose kind
+/// declares no parent, whose declared `at` misses, or whose parents carry no
+/// usable name -- `string_agg` over no rows is `null`, so a miss is absence by
+/// construction, as in [`ancestor_path_read!`].
+///
+/// Built on [`declared_parent_names!`] and nothing else, so the branch on
+/// `at`'s two shapes stays in [`declared_parents!`] (the deputy's ruling of
+/// 2026-10-11 on #594). [`parent_path`] is the same rule over
+/// [`resolve_parents`], and `crates/knobas-core/tests/it/payload_paths.rs`
+/// holds the two to one answer. A parent that answers to no name is left out
+/// of the line rather than drawn as an empty segment, the refusal
+/// [`ancestor_path_read!`] makes for an ancestor with no title.
+///
+/// Rows read the line through [`path_line_read!`], never through this alone.
+#[macro_export]
+macro_rules! declared_parent_path {
+    ($decl:literal) => {
+        concat!(
+            "(select string_agg(f.name, ' \u{203a} ' order by f.pos) from \
+              (select distinct on (pn.pos) pn.pos, pn.name from ",
+            $crate::declared_parent_names!($decl),
+            " pn order by pn.pos, pn.name_ord) f)"
+        )
+    };
+}
+
+/// SQL for "where this record sits", as the one line a row draws: the parent
+/// chain the record's kind declares ([`declared_parent_path!`]), or, where that
+/// yields nothing (no parent declared, or a declared one that misses), the
+/// Confluence ancestor path [`ancestor_path_read!`] has read since #284. Only a
+/// payload with readable `ancestors` reaches the fallback with a value.
+///
+/// **The one expression every row's `path` is.** The launcher's search, its
+/// board and its lists, a room's lines and the detail panel all expand this
+/// and nothing else, so no two of them can disagree about where an item is.
+/// `$decl` is where the declarations are bound, as for [`declared_string!`];
+/// the row's alias must be `i`.
+///
+/// The ancestor read stays as the fallback until Confluence declares its page
+/// parent on `ancestors` (#599). The two then read the same array and draw the
+/// same line, and the fallback can expire into the declaration.
+#[macro_export]
+macro_rules! path_line_read {
+    ($decl:literal) => {
+        concat!(
+            "coalesce(",
+            $crate::declared_parent_path!($decl),
+            ", ",
+            $crate::ancestor_path_read!("i.payload"),
+            ")"
+        )
+    };
+}
+
+/// The line a row draws for a parent chain: each parent's first name,
+/// outermost first, joined by [`ANCESTOR_SEPARATOR`]; `None` when no parent
+/// answers to a name. The Rust side of [`declared_parent_path!`].
+#[must_use]
+pub fn parent_path(chain: &[ResolvedParent]) -> Option<String> {
+    let names: Vec<&str> = chain
+        .iter()
+        .filter_map(|parent| parent.names.first().map(String::as_str))
+        .collect();
+    (!names.is_empty()).then(|| names.join(ANCESTOR_SEPARATOR))
 }
 
 /// SQL for "the boolean the declared path leads to, or nothing" -- see
@@ -768,7 +840,8 @@ macro_rules! declared_parents {
 
 /// SQL for "every name every parent this record names answers to", as a table
 /// expression of `(pos, kind, name_ord, name)`. `under:` matches against
-/// `name`, and a later path line takes the first `name_ord` of each `pos`.
+/// `name`, and [`declared_parent_path!`] takes the first `name_ord` of each
+/// `pos` for the row's path line.
 ///
 /// Built on [`declared_parents!`] and nothing else, so the shape branch stays
 /// in one place. A name path that lands on anything but a non-blank string

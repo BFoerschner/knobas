@@ -500,6 +500,7 @@ knobas-app	test/it	demo::the_loaded_fixture_is_searchable_the_way_the_readme_pro
 knobas-app	test/it	entity::a_birth_line_is_written_even_when_no_born_link_could_be_drawn
 knobas-app	test/it	entity::a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one
 knobas-app	test/it	entity::a_born_link_survives_the_notes_first_autosave
+knobas-app	test/it	entity::a_commits_room_line_and_detail_carry_its_repo_as_the_path
 knobas-app	test/it	entity::a_confluence_space_is_a_project_room_and_a_jira_project_is_another
 knobas-app	test/it	entity::a_disabled_sources_entity_opens_with_the_marker_until_reenabled
 knobas-app	test/it	entity::a_duplicate_pair_and_relation_is_a_conflict
@@ -1079,6 +1080,8 @@ knobas-core	test/it	payload_paths::a_declared_path_resolves_the_same_in_sql_and_
 knobas-core	test/it	payload_paths::a_mirrored_parent_answers_to_its_declared_names_in_both
 knobas-core	test/it	payload_paths::a_parent_at_that_leads_to_neither_shape_misses_in_both
 knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust_in_both_shapes
+knobas-core	test/it	payload_paths::a_path_line_is_each_parents_first_name_in_sql_and_in_rust
+knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_the_row_falls_back_to_ancestors
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both
 knobas-core	test/it	payload_paths::the_first_parent_candidate_that_resolves_wins_in_both
@@ -1524,6 +1527,9 @@ knobas-search	test/it	lists::the_change_badge_clears_when_the_list_is_opened
 knobas-search	test/it	lists::the_limit_cuts_the_page_and_not_the_count
 knobas-search	test/it	lists::typing_a_list_in_the_box_answers_like_the_command
 knobas-search	test/it	lists_no_identity::a_list_with_no_identity_configured_says_so_instead_of_reading_empty
+knobas-search	test/it	path_line::a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path
+knobas-search	test/it	path_line::a_kind_that_declares_no_parent_carries_no_path
+knobas-search	test/it	path_line::the_boards_and_a_lists_rows_carry_the_same_path
 knobas-search	test/it	ranking::a_strong_body_match_still_beats_a_weak_title_match
 knobas-search	test/it	ranking::a_title_match_ranks_above_a_body_match_in_every_kind
 knobas-search	test/it	ranking::the_cap_and_the_limit_keep_the_title_match_and_the_true_total

@@ -5,9 +5,11 @@
  * hold a *Runbook*, and the thing that tells them apart is where the page
  * sits. The row draws an ancestor path under the title when the search hit
  * carries one — and, per ADR-0007's failure direction, nothing at all when it
- * does not, which is every ticket, build and commit in the mirror.
+ * does not. Since #596 the same line carries the parent chain any kind
+ * declares (a Gitea commit's `owner/repo`), and the row cannot tell the two
+ * apart, which is the point.
  *
- * The string itself is joined in SQL by `knobas_core::ancestor_path_read!` and
+ * The string itself is joined in SQL by `knobas_core::path_line_read!` and
  * arrives on `EntityRow.path`, so what is under test here is the row's own
  * contract: given a path it draws one, given none it draws none, and it draws
  * the string as **text** whatever a page title contains (roadmap §4 gotcha 7).
@@ -79,5 +81,22 @@ test("a path that looks like markup is drawn as text", () => {
   const path = screen.target.querySelector(".pa");
   expect(path?.textContent).toBe("Engineering › <img src=x onerror=alert(1)>");
   expect(path?.querySelector("img")).toBeNull();
+  screen.done();
+});
+
+/**
+ * A row draws its path even when its title already repeats it (#596): a
+ * TeamCity build's title names its configuration, and the path line names it
+ * again, because every row with a parent draws the parent the same way.
+ */
+test("a path the title already repeats is still drawn", () => {
+  const screen = render({
+    entityId: "teamcity:1187",
+    kind: "build",
+    sourceId: "teamcity",
+    title: "Payments / Deploy #42",
+    path: "Payments / Deploy",
+  });
+  expect(screen.target.querySelector(".pa")?.textContent).toBe("Payments / Deploy");
   screen.done();
 });

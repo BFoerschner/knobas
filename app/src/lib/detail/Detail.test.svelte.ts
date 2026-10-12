@@ -1149,7 +1149,7 @@ test("a page shows its ancestor path and its body as text", async () => {
           title: "SEPA payout retry design",
           updated_at: "2026-08-22T10:40:00Z",
           synced_at: "2026-08-22T14:30:00Z",
-          // Joined by `knobas_core::ancestor_path_read!` and carried on the
+          // Joined by `knobas_core::path_line_read!` and carried on the
           // row, so the panel and the launcher draw the same string. The
           // payload below still holds the `ancestors` the statement read it
           // out of, which is what makes this fixture a page and not a stub.

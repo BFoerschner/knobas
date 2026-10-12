@@ -386,7 +386,7 @@ macro_rules! rows_over {
             "with matched as (\n",
             "  select i.entity_id, i.kind, i.source_id, i.title, i.item_updated_at,\n",
             "         i.synced_at, ",
-            knobas_core::ancestor_path_read!("i.payload"),
+            knobas_core::path_line_read!("$3"),
             " as path,\n",
             "         0::real as rank, null::text as snippet\n",
             "    from sync.live_item i\n",
@@ -418,7 +418,7 @@ macro_rules! rows_over {
 /// of the six expressions the two share is the same expression: an asset has no
 /// `kind` column and no `source_id` column (both are the constants
 /// [`crate::corpus::ASSET`] already uses), its path is a **column** the store
-/// maintains rather than an `ancestor_path_read!` over a payload (the second of
+/// maintains rather than a `path_line_read!` over a payload (the second of
 /// the two cases [`crate::corpus::Corpus::path`] names), and it has one stamp
 /// where a mirrored row has two. A macro with a branch per corpus would be the
 /// same two templates with a conditional over them.
@@ -905,10 +905,14 @@ pub async fn rows(
     list: &BuiltinList,
     identity: &[String],
     limit: u32,
+    declarations: &knobas_core::payload::Declarations,
 ) -> Result<Vec<RawHit>, SearchError> {
+    // `$3` is read by a mirror list's path line (#596) and by no estate
+    // list, whose path is the store's column; it is bound typed either way.
     Ok(sqlx::query_as::<_, RawHit>(list.rows_sql)
         .bind(identity)
         .bind(i64::from(limit))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?)
 }
@@ -1135,7 +1139,7 @@ mod tests {
                 "{} does not name the estate as its source",
                 list.id
             );
-            // The path is the store's column, never an `ancestor_path_read!`
+            // The path is the store's column, never a `path_line_read!`
             // over a payload -- `corpus::Corpus::path`'s second case.
             assert!(
                 list.rows_sql.contains("nullif(a.path_text, '') as path"),

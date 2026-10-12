@@ -220,10 +220,10 @@
    * right there. The launcher row draws the same string, the launcher has no
    * payload to read it out of, and one rule with two implementations is the
    * drift #277 spent a whole test file pinning against. So the one spelling is
-   * `knobas_core::ancestor_path_read!` in SQL, both surfaces read what it
+   * `knobas_core::path_line_read!` in SQL, both surfaces read what it
    * joined, and this line is a field access rather than a second rule. It
-   * misses to `null`, so a ticket, a build and a page nobody has filed
-   * anywhere all show no path rather than a wrong one.
+   * misses to `null`, so a kind that declares no parent and a page nobody has
+   * filed anywhere both show no path rather than a wrong one.
    */
   const path = $derived(detail?.row.path ?? null);
   /** Narrowed once, so the button and its handler agree that it is a string. */

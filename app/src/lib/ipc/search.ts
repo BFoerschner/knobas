@@ -72,12 +72,14 @@ export interface SearchHit {
   title: string;
   /**
    * Where the row sits **inside its source**, as one line — a Confluence
-   * page's ancestor path, `Engineering › Payments` (#284).
+   * page's ancestor path, `Engineering › Payments` (#284) — and, since #596,
+   * the parent chain any kind declares (ADR-0018): `owner/repo` for a Gitea
+   * branch, pull request or commit.
    *
-   * `null` for every row whose record carries no readable `ancestors`, which
-   * is every kind but a page today: the ADR-0007 **miss**, so a row shows no
+   * `null` for every row whose kind declares no parent and whose record
+   * carries no readable `ancestors`: the ADR-0007 **miss**, so a row shows no
    * path rather than a wrong one and no caller has to ask what kind it holds.
-   * Joined by one SQL statement, `knobas_core::ancestor_path_read!`, so the
+   * Joined by one SQL expression, `knobas_core::path_line_read!`, so the
    * launcher row and the detail panel cannot disagree about what a path is.
    */
   path: string | null;

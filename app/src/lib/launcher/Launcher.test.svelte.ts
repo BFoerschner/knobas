@@ -1242,6 +1242,63 @@ test("an asset hit draws its monogram and the path from the root", async () => {
   expect(headings).toEqual(["Assets", "Routes"]);
 });
 
+/**
+ * Every hit whose kind declares a parent arrives with the parent chain on its
+ * `path` (#596), and the launcher draws whatever path a hit carries — no kind
+ * is named here, so a later adapter's parent needs no launcher code. Two
+ * "fix typo" commits from two repos are told apart by that line, and a hit
+ * with no path draws no line at all.
+ */
+test("two same-titled commits are told apart by their repo on the path line", async () => {
+  const commits: SearchResponse = {
+    ...response(),
+    groups: [
+      {
+        kind: "commit",
+        label: "Commit",
+        plural: "Commits",
+        monogram: "CO",
+        total: 2,
+        hits: [
+          hit({
+            entity_id: "gitea:tidewater/payout-service@c90d11",
+            kind: "commit",
+            source_id: "gitea",
+            title: "fix typo",
+            path: "tidewater/payout-service",
+          }),
+          hit({
+            entity_id: "gitea:tidewater/ledger@4e1a07",
+            kind: "commit",
+            source_id: "gitea",
+            title: "fix typo",
+            path: "tidewater/ledger",
+          }),
+        ],
+      },
+      {
+        kind: "monitor",
+        label: "Monitor",
+        plural: "Monitors",
+        monogram: "MO",
+        total: 1,
+        hits: [hit({ entity_id: "kuma:8", kind: "monitor", source_id: "kuma", title: "payout health" })],
+      },
+    ],
+    total: 3,
+  };
+  open({ ports: { search: async () => commits, launcherHome: async () => HOME } });
+  await settle();
+  await search("fix typo");
+
+  const rows = [...target.querySelectorAll(".res")];
+  expect(rows.map((row) => row.querySelector(".pa")?.textContent ?? null)).toEqual([
+    "tidewater/payout-service",
+    "tidewater/ledger",
+    null,
+  ]);
+});
+
 test("Enter on an asset opens the Tree at it, and on a route at its exposing asset", async () => {
   const onnavigate = vi.fn();
   open({

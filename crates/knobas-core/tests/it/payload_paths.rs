@@ -19,8 +19,8 @@
 //! nothing, a kind that declares nothing, a field that declares nothing.
 
 use knobas_core::payload::{
-    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, resolve_flag, resolve_list,
-    resolve_names_as_parent, resolve_parents, resolve_string,
+    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, parent_path, resolve_flag,
+    resolve_list, resolve_names_as_parent, resolve_parents, resolve_string,
 };
 use sqlx::{PgPool, Row};
 
@@ -732,4 +732,131 @@ async fn a_mirrored_parent_answers_to_its_declared_names_in_both() {
         &[],
     )
     .await;
+}
+
+// -- the path line (#596) ------------------------------------------------------
+//
+// A row's path line is the parent chain its kind declares: each parent's first
+// name, outermost first, joined by the one separator. `declared_parent_path!`
+// is that rule in SQL and `parent_path` over `resolve_parents` in Rust; both
+// stand on the pair above, so the shape branch is still in one place.
+// `path_line_read!`, the expression every row reads, falls back to the
+// Confluence ancestor read where a kind declares no parent.
+
+/// What one item's path line is, through each implementation: the declared
+/// chain in SQL, the same in Rust, and the whole line a row reads.
+async fn path_lines(
+    pool: &PgPool,
+    declarations: &Declarations,
+    source: &str,
+    kind: &str,
+    key: &str,
+    payload: serde_json::Value,
+) -> (Option<String>, Option<String>, Option<String>) {
+    const LINES: &str = concat!(
+        "select ",
+        knobas_core::declared_parent_path!("$1"),
+        " as declared, ",
+        knobas_core::path_line_read!("$1"),
+        " as line from sync.live_item i where i.entity_id = $2"
+    );
+    item(pool, source, kind, key, &payload).await;
+    let row = sqlx::query(LINES)
+        .bind(declarations.as_param())
+        .bind(format!("{source}:{key}"))
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{key}'s path line must resolve: {e}"));
+    let empty = KindPaths::default();
+    let declared = declarations.get(source, kind).unwrap_or(&empty);
+    let rust = parent_path(&resolve_parents(&payload, &declared.parent));
+    (row.get("declared"), rust, row.get("line"))
+}
+
+/// Gitea's one parent draws as its first name, `owner/repo`, not as every
+/// name it answers to; a Confluence chain draws outermost first, a parent with
+/// no usable name left out rather than drawn as an empty segment.
+#[tokio::test]
+async fn a_path_line_is_each_parents_first_name_in_sql_and_in_rust() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    let commit = path_lines(
+        &pool,
+        &declarations,
+        "gitea",
+        "commit",
+        "tidewater/payout-service@line",
+        serde_json::json!({
+            "repository": { "full_name": "tidewater/payout-service", "name": "payout-service" }
+        }),
+    )
+    .await;
+    let repo = Some("tidewater/payout-service".to_owned());
+    assert_eq!(commit, (repo.clone(), repo.clone(), repo));
+
+    let page = path_lines(
+        &pool,
+        &declarations,
+        "confluence",
+        "page",
+        "4801",
+        serde_json::json!({
+            "title": "SEPA retries",
+            "ancestors": [{ "title": "Runbooks" }, { "title": " " }, { "title": "Payments" }]
+        }),
+    )
+    .await;
+    let chain = Some("Runbooks \u{203a} Payments".to_owned());
+    assert_eq!(page, (chain.clone(), chain.clone(), chain));
+}
+
+/// The misses: a kind that declares no parent, an `at` that leads to neither
+/// shape, and a parent that answers to no name all draw no line -- unless the
+/// record carries Confluence's `ancestors`, which the row's line still reads
+/// where nothing is declared (#284, unchanged).
+#[tokio::test]
+async fn a_path_line_misses_in_both_and_the_row_falls_back_to_ancestors() {
+    let pool = scratch().await;
+    let declarations = parent_declarations();
+
+    for (key, payload) in [
+        (
+            "tidewater/payout-service@bare",
+            serde_json::json!({ "repository": "tidewater/payout-service" }),
+        ),
+        (
+            "tidewater/payout-service@nameless",
+            serde_json::json!({ "repository": { "id": 4 } }),
+        ),
+    ] {
+        let lines = path_lines(&pool, &declarations, "gitea", "commit", key, payload).await;
+        assert_eq!(lines, (None, None, None), "{key}");
+    }
+
+    let repo = path_lines(
+        &pool,
+        &declarations,
+        "gitea",
+        "repo",
+        "tidewater/payout-service",
+        serde_json::json!({ "full_name": "tidewater/payout-service", "name": "payout-service" }),
+    )
+    .await;
+    assert_eq!(repo, (None, None, None), "a repo declares no parent");
+
+    let undeclared = path_lines(
+        &pool,
+        &Declarations::empty(),
+        "confluence",
+        "page",
+        "4802",
+        serde_json::json!({ "title": "SEPA retries", "ancestors": [{ "title": "Engineering" }] }),
+    )
+    .await;
+    assert_eq!(
+        undeclared,
+        (None, None, Some("Engineering".to_owned())),
+        "a page whose kind declares nothing keeps its #284 ancestor line"
+    );
 }
