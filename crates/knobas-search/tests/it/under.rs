@@ -462,7 +462,13 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
     let host = format!("Hetzner-1-{t}");
     let root = asset(&pool, &site, None, "").await;
     let hetzner = asset(&pool, &host, Some(&root), &site).await;
-    let vm = asset(&pool, &format!("vm-{t}"), Some(&hetzner), &format!("{site} / {host}")).await;
+    let vm = asset(
+        &pool,
+        &format!("vm-{t}"),
+        Some(&hetzner),
+        &format!("{site} / {host}"),
+    )
+    .await;
     let pg = asset(
         &pool,
         &format!("pg-{t}"),
@@ -499,15 +505,24 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
 
     // Each row carries its ancestor chain; a route carries its asset's chain
     // and the asset itself, which is where it sits.
-    let response = searcher(&pool).search(q(&format!("under:{host}"))).await.unwrap();
+    let response = searcher(&pool)
+        .search(q(&format!("under:{host}")))
+        .await
+        .unwrap();
     let lines = paths(&response);
     assert_eq!(lines[&hetzner].as_deref(), Some(site.as_str()));
-    assert_eq!(lines[&vm].as_deref(), Some(format!("{site} / {host}").as_str()));
+    assert_eq!(
+        lines[&vm].as_deref(),
+        Some(format!("{site} / {host}").as_str())
+    );
     assert_eq!(
         lines[&pg].as_deref(),
         Some(format!("{site} / {host} / vm-{t}").as_str())
     );
-    assert_eq!(lines[&on_host].as_deref(), Some(format!("{site} / {host}").as_str()));
+    assert_eq!(
+        lines[&on_host].as_deref(),
+        Some(format!("{site} / {host}").as_str())
+    );
     assert_eq!(
         lines[&on_pg].as_deref(),
         Some(format!("{site} / {host} / vm-{t} / pg-{t}").as_str())

@@ -775,7 +775,11 @@ async fn moving_an_asset_moves_what_under_returns() {
     let after_old = search_inner(&pool, query(&format!("under:old-{t}")))
         .await
         .unwrap();
-    assert_eq!(ids(&after_old), [old.id.clone()], "nothing stale under the old host");
+    assert_eq!(
+        ids(&after_old),
+        [old.id.clone()],
+        "nothing stale under the old host"
+    );
 
     let after_new = search_inner(&pool, query(&format!("under:new-{t}")))
         .await
