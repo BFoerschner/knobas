@@ -37,6 +37,11 @@ unset KNOBAS_TESTENV_HETZNER
 
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$here/live-lib.sh"
+# Anything that would write -- seed-state.json, a compose call's working
+# directory -- lands in the scratch directory, never in this tree's testenv/,
+# even on a mutant that gets past a refusal.
+LIVE_TESTENV=$scratch/testenv
+mkdir -p "$LIVE_TESTENV"
 
 failures=0
 checks=0
