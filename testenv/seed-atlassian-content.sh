@@ -353,6 +353,26 @@ verify_jira() {
 }
 
 verify_confluence() {
+  # Searchable, and not only stored. The adapter's full sync is a CQL search,
+  # and Confluence indexes a page some seconds after it answers the create --
+  # so a suite run straight after a seed from empty saw two pages of seven
+  # (#633's first `atlassian-live`, where nothing ran between the content seed
+  # and the Confluence suites any more). Every page recorded in seed-state.json
+  # must come back from a search of the space, waited for up to 180 s.
+  _want=$(jq -r '[.confluence.pages[]?.id] | sort | join(" ")' "$STATE")
+  _waited=0
+  while :; do
+    conf GET "/rest/api/content/search?cql=$(urlenc "space = \"$SPACE_KEY\" and type = page")&limit=100"
+    _have=$(printf '%s' "$API_BODY" | jq -r '[.results[]?.id] | sort | join(" ")' 2>/dev/null || echo)
+    _missing=$(jq -rn --arg w "$_want" --arg h "$_have" '($w | split(" ")) - ($h | split(" ")) | join(" ")')
+    [ -n "$_missing" ] || break
+    if [ "$_waited" -ge 180 ]; then
+      echo "  pages not in a CQL search of $SPACE_KEY after ${_waited}s: $_missing" >&2; _fail=1; break
+    fi
+    sleep 5; _waited=$((_waited + 5))
+  done
+  [ -n "$_missing" ] || say "verify: every seeded page is in a CQL search of $SPACE_KEY (after ${_waited}s)"
+
   # The page with a body, and its first `## ` heading -- from the fixture, so
   # a renamed page in work.json is still what this checks for.
   _title=$(jqf '[.pages[] | select(.body)] | first | .title')
