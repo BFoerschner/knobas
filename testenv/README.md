@@ -184,6 +184,13 @@ context left behind on a machine would send these calls somewhere else. The
 three product monitors check the products at their published ports, so they
 are red whenever their product is stopped. See "Monitors" below.
 
+**The one real system that is not a container is Hetzner Cloud**, which the
+hcloud importer reads. Its project is empty since #634, so `just estate-live`
+runs at `ESTATE_LIVE_HCLOUD_SERVERS=0`; a PR that touches the hcloud producer
+owes a run at `=1`, and that server is spun up the same way a product is — on
+demand, for the one run — except that Björn creates and deletes it himself: no
+agent and no recipe does (the deputy's ruling on #634).
+
 `testenv/live-test.sh` holds the refusals and the put-back rule to account
 against a stub `docker`, in `just witness-unit` and so in `just check`.
 

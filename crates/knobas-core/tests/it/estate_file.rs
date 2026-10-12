@@ -5,9 +5,9 @@
 //! `testenv/estate.json` describes the **estate** (`CONTEXT.md`) as it runs:
 //! the notebook, OrbStack's VM and its Docker engine, the containers and
 //! databases on it -- the on-demand TeamCity, Jira and Confluence among them
-//! (#633) -- and their published ports as routes. Until #634 it also held three
-//! Hetzner servers, which were decommissioned. It is data about a real estate and the only asset
-//! fixture there will be -- the M4 spec (#427) rules out anything
+//! (#633) -- and their published ports as routes. Until #634 it also held
+//! three Hetzner servers, which were decommissioned. It is data about a real
+//! estate and the only asset fixture there will be -- the M4 spec (#427) rules out anything
 //! Tidewater-shaped for assets, because a made-up estate proves that the tree
 //! draws and not that a real estate fits it.
 //!
@@ -400,20 +400,16 @@ fn the_notebook_states_the_address_its_ping_watches() {
 
     let seeded: Value = serde_json::from_str(&read("testenv/monitors.json"))
         .expect("testenv/monitors.json is JSON");
-    let pings: Vec<&str> = seeded
+    let pings: Vec<&Value> = seeded
         .as_array()
         .expect("testenv/monitors.json is an array of monitors")
         .iter()
         .filter(|monitor| monitor["type"] == "ping")
-        .map(|monitor| field(monitor, "name"))
         .collect();
-    assert_eq!(pings, ["notebook"], "the one ping the seed creates");
-    let ping = seeded
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|monitor| monitor["name"] == "notebook")
-        .unwrap();
+    let [ping] = pings.as_slice() else {
+        panic!("the seed creates exactly one ping, the notebook's: {pings:?}");
+    };
+    assert_eq!(field(ping, "name"), "notebook", "the one ping the seed creates");
     assert_eq!(
         ping["hostname"].as_str(),
         Some(address),

@@ -656,7 +656,7 @@ re-provisioning after it. Before it, revert the PR that closed #634. After it,
 
 ## #634 — the hcloud importer's witness once the servers are gone
 
-Ruled 2026-10-12. Comment:
+Ruled 2026-10-12 by the deputy for Björn, flagged for his review. Comment:
 <https://github.com/BFoerschner/knobas/issues/634#issuecomment-6122037668>
 
 **The fork:** ADR-0015's consequence made the hcloud importer's witness *"a file generated from the
@@ -675,8 +675,10 @@ must come back `Ready`, nothing new, and preview all known with no changes. On a
 shrinks to an empty `Ready` file and an empty preview. The expected server count is declared and
 required (`ESTATE_LIVE_HCLOUD_SERVERS`); a different count is red, and no variable skips the half.
 A PR that touches the hcloud producer owes a run at `=1`, with a server Björn creates in the knobas
-project and deletes after the run — never an agent, never a recipe. This PR's own run is taken
-before the teardown, at `=3`. The teardown checklist starts by keeping the project and replacing
+project and deletes after the run — never an agent, never a recipe. This PR's own run was to be
+taken before the teardown, at `=3`; when the implementer ran it, the project the `.env` token
+reaches already answered zero servers (the count gate went red), so the PR carries the `=0` run
+and leaves the parse witness open for Björn's `=1`. The teardown checklist starts by keeping the project and replacing
 `.env`'s token with a read-only one, and ends with `ESTATE_LIVE_HCLOUD_SERVERS=0 just estate-live`
 posted on #634. ADR-0015 gains a dated strike-through consequence, `CONTEXT.md` **Importer** a dated
 amendment, and #509's §10.8 entry a dated line; no new ADR. Not A, not C, not D.
