@@ -24,4 +24,5 @@ mod sql_containment;
 mod sql_shape;
 mod suggest;
 mod under;
+mod under_teamcity;
 mod vocab;

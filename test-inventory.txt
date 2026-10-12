@@ -1601,6 +1601,8 @@ knobas-search	test/it	under::repeated_values_are_a_union_and_an_unmatched_one_is
 knobas-search	test/it	under::under_a_repo_returns_its_branches_prs_and_commits_and_the_repo
 knobas-search	test/it	under::under_a_repo_with_words_finds_the_commit_that_mentions_them
 knobas-search	test/it	under::under_an_asset_returns_its_whole_subtree_and_the_asset
+knobas-search	test/it	under_teamcity::a_build_carries_its_configuration_as_path_and_keeps_its_title
+knobas-search	test/it	under_teamcity::under_a_configuration_by_title_or_id_returns_its_builds_and_itself
 knobas-search	test/it	vocab::a_blank_username_is_nobody
 knobas-search	test/it	vocab::a_disabled_source_is_unnameable_but_still_in_the_vocabulary
 knobas-search	test/it	vocab::aliases_resolve_across_instances_and_identity_comes_from_the_configs
@@ -2236,6 +2238,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_n
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_never_regresses
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stands_still_when_nothing_finished
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stays_below_the_oldest_build_still_in_flight
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_declares_its_configuration_as_parent_by_title_and_id
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_full_sync_is_declared_a_window_not_the_corpus
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_declares_two_kinds_and_two_write_ops
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_survives_the_ipc_hop
