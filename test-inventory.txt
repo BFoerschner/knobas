@@ -191,7 +191,6 @@ knobas-app	lib/knobas_app	protocol::tests::inline_markdown_is_left_as_the_charac
 knobas-app	lib/knobas_app	protocol::tests::prose_is_paragraphs_and_a_run_of_bullets_is_one_list
 knobas-app	lib/knobas_app	protocol::tests::the_action_items_heading_is_matched_case_insensitively
 knobas-app	lib/knobas_app	protocol::tests::the_template_carries_the_three_sections_and_a_readable_action_item
-knobas-app	lib/knobas_app	sources::crud::tests::a_clone_url_alias_becomes_its_sources_base_url_and_nothing_else_does
 knobas-app	lib/knobas_app	sources::crud::tests::a_failed_test_only_blames_the_credential_when_the_source_did
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_unique_violation_reads_as_a_duplicate_id
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releases_the_backoff
@@ -1675,6 +1674,9 @@ knobas-secrets	lib/knobas_secrets	tests::the_envelope_round_trips_and_names_its_
 knobas-secrets	lib/knobas_secrets	tests::the_service_name_is_never_rebuilt_in_this_crate
 knobas-secrets	lib/knobas_secrets	tests::the_spawn_helpers_reach_the_store
 knobas-secrets	test/it	keyring_local::the_keyring_store_honours_the_store_contract
+knobas-source	lib/knobas_source	clone_urls::tests::a_clone_url_becomes_its_sources_base_url_and_nothing_else_does
+knobas-source	lib/knobas_source	clone_urls::tests::a_schema_declares_the_key_as_an_array_of_strings
+knobas-source	lib/knobas_source	clone_urls::tests::an_entry_is_a_url_or_an_scp_like_remote
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
@@ -1903,6 +1905,7 @@ knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_zero_rate_limit_is_
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::an_empty_object_is_the_default_configuration
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::an_unknown_field_is_refused
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_form_schema_and_the_parser_describe_the_same_fields
+knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_declares_its_clone_urls
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_defaults_are_the_parsers_defaults
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_cursor_round_trips
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_fresh_cursor_records_when_the_repository_set_was_seen
@@ -2509,6 +2512,7 @@ knobas-source-teamcity	test/it	view_build::a_change_names_its_commit_by_reposito
 knobas-source-teamcity	test/it	view_build::a_huge_log_is_streamed_and_only_its_end_is_kept
 knobas-source-teamcity	test/it	view_build::a_value_teamcity_masked_is_drawn_as_a_secret
 knobas-source-teamcity	test/it	view_build::artifacts_are_listed_with_their_sizes_and_their_download
+knobas-source-teamcity	test/it	view_build::exactly_one_reads_worth_of_failed_tests_ends_on_no_cut_row
 knobas-source-teamcity	test/it	view_build::more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row
 knobas-source-teamcity	test/it	view_build::parameters_are_what_the_build_ran_with_and_never_carry_a_secret
 knobas-source-teamcity	test/it	view_build::the_log_tab_is_the_last_four_hundred_lines_and_says_it_was_cut
