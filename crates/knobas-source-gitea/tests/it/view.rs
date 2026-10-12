@@ -228,7 +228,6 @@ async fn other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused() {
     let source = source(&server);
     for id in [
         "gitea:tidewater/payout-service",
-        "gitea:tidewater/payout-service#142",
         "gitea:tidewater/payout-service@refs/heads/main",
     ] {
         assert_eq!(source.view(id, None).await.unwrap(), None, "{id}");

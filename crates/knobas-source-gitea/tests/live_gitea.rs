@@ -462,6 +462,325 @@ async fn a_seeded_commits_view_carries_the_diff_the_seed_pushed() {
     println!("{checked} seeded commits drew the diff the seed pushed");
 }
 
+/// The seeded pull requests' source views (#662, ADR-0020), against the real
+/// server.
+///
+/// **What the seed made, and so what each view must say.** `seed-gitea.sh`
+/// opens `SEPA retry with exponential backoff` from
+/// `feature/PAY-231-sepa-retry` into `main` as `mara`, with the body
+/// `Refs PAY-231`; puts the fixture's three commits of that branch on it, each
+/// writing one new file (the PR's file list in fixture order) whose content is
+/// the commit message; comments as `jonas` then `mara`; has `priya` approve
+/// and asks `jonas` for a review. It merges `Fix ledger drift on partial
+/// refunds` in `ledger-api`.
+///
+/// So the SEPA view has all four tabs, *Files* deferred; its overview is
+/// open, `head → base`, priya's approval and jonas's request; *Files* is the
+/// server's own file listing (`/pulls/{n}/files`, an endpoint the view does
+/// not read), with each seeded commit's file added as its one line; *Commits*
+/// is the server's commit listing, the seeded messages among them;
+/// *Conversation* is the server's comments in order, the fixture's two among
+/// them. The ledger view reads merged.
+///
+/// Prints each tab, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() {
+    use knobas_source::view::{Block, DiffChange, DiffLineKind, Tone};
+
+    let env = env();
+    let source = env.one_repo();
+    let (items, _) = full(&*source).await;
+    let sepa = of_kind(&items, "pr")
+        .into_iter()
+        .find(|i| i.title == "SEPA retry with exponential backoff")
+        .expect("the seed opens the SEPA retry pull request");
+    let id = sepa.entity.to_string();
+    let number = sepa
+        .entity
+        .key
+        .rsplit_once('#')
+        .map(|(_, n)| n.to_owned())
+        .expect("a pull request key is owner/repo#n");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/tidewater/work.json"))
+            .expect("the fixture is JSON");
+    let person = |who: &str| -> String {
+        fixture["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == who)
+            .and_then(|p| p["username"].as_str())
+            .unwrap_or_else(|| panic!("the fixture names {who}"))
+            .to_owned()
+    };
+    let pr = fixture["prs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["title"] == "SEPA retry with exponential backoff")
+        .unwrap();
+    let mut seeded: Vec<&serde_json::Value> = fixture["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["branch"] == pr["from"])
+        .collect();
+    seeded.sort_by_key(|c| c["when"].as_str().unwrap_or_default().to_owned());
+
+    let http = reqwest::Client::new();
+    let get = |path: String| {
+        let http = http.clone();
+        let url = format!("{}/api/v1/repos/{}/{path}", env.url, env.full_name());
+        let auth = format!("token {}", env.token);
+        async move {
+            http.get(&url)
+                .header("Authorization", auth)
+                .send()
+                .await
+                .expect("the server answers")
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_else(|e| panic!("{url}: {e}"))
+        }
+    };
+
+    let view = source
+        .view(&id, None)
+        .await
+        .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
+        .unwrap_or_else(|| panic!("Gitea draws a pull request, and drew nothing for {id}"));
+    let tabs: Vec<_> = view
+        .sections
+        .iter()
+        .map(|s| (s.id.as_str(), s.count, s.deferred))
+        .collect();
+    println!("{id} tabs: {tabs:?}");
+    assert_eq!(
+        tabs.iter().map(|t| (t.0, t.2)).collect::<Vec<_>>(),
+        [
+            ("overview", false),
+            ("files", true),
+            ("commits", false),
+            ("conversation", false)
+        ]
+    );
+    assert!(view.sections[1].blocks.is_empty(), "files is a stub");
+
+    // Overview.
+    let overview = &view.sections[0].blocks;
+    let Block::Facts { facts } = &overview[0] else {
+        panic!("{id}'s overview opens on facts: {overview:#?}");
+    };
+    for fact in facts {
+        println!("  {:<10} {:<40} {:?}", fact.label, fact.value, fact.tone);
+    }
+    let has = |label: &str, value: &str, tone: Option<Tone>| {
+        assert!(
+            facts
+                .iter()
+                .any(|f| f.label == label && f.value == value && f.tone == tone),
+            "{id}: no {label} = {value:?} ({tone:?}) in {facts:#?}"
+        );
+    };
+    has("State", "open", Some(Tone::Info));
+    has("Author", &person("mara"), None);
+    has(
+        "Branches",
+        &format!(
+            "{} → {}",
+            pr["from"].as_str().unwrap(),
+            pr["to"].as_str().unwrap()
+        ),
+        None,
+    );
+    has(
+        "Review",
+        &format!("approved by {}", person("priya")),
+        Some(Tone::Ok),
+    );
+    has(
+        "Review",
+        &format!("requested from {}", person("jonas")),
+        Some(Tone::Muted),
+    );
+    assert!(
+        facts.iter().any(|f| f.label == "Mergeable"),
+        "{id}: an open pull request says whether it can be merged"
+    );
+    assert!(
+        overview.contains(&Block::Text {
+            text: format!("Refs {}", pr["ticket"].as_str().unwrap()),
+            markdown: true
+        }),
+        "{id}: the description: {overview:#?}"
+    );
+
+    // Files: read on its own, as the tab does.
+    let files_view = source
+        .view(&id, Some("files"))
+        .await
+        .expect("the files tab reads")
+        .expect("drawn");
+    let Block::Diff { files, truncated } = &files_view.sections[0].blocks[0] else {
+        panic!("{id}'s files tab is a diff: {files_view:#?}");
+    };
+    assert!(!truncated);
+    for file in files {
+        println!(
+            "  files: {:?} {} +{} -{}",
+            file.change, file.path, file.additions, file.deletions
+        );
+    }
+    let listed: Vec<String> = get(format!("pulls/{number}/files"))
+        .await
+        .as_array()
+        .expect("a file listing")
+        .iter()
+        .filter_map(|f| f["filename"].as_str().map(str::to_owned))
+        .collect();
+    let mut drawn: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    let mut listed_sorted = listed.clone();
+    drawn.sort();
+    listed_sorted.sort();
+    assert_eq!(drawn, listed_sorted, "{id}: the files are the server's");
+    assert_eq!(
+        view.sections[1].count,
+        Some(files.len() as u64),
+        "the stub's count is the files the tab draws"
+    );
+    let paths: Vec<&str> = pr["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["path"].as_str())
+        .collect();
+    for (commit, path) in seeded.iter().zip(&paths) {
+        let message = commit["msg"].as_str().unwrap();
+        let file = files
+            .iter()
+            .find(|f| f.path == *path)
+            .unwrap_or_else(|| panic!("{id}: the seed wrote {path}"));
+        assert_eq!(file.change, DiffChange::Added, "{path}");
+        assert_eq!((file.additions, file.deletions), (1, 0), "{path}");
+        let lines: Vec<_> = file.hunks.iter().flat_map(|h| &h.lines).collect();
+        assert_eq!(lines.len(), 1, "{path}: {lines:#?}");
+        assert_eq!(lines[0].kind, DiffLineKind::Add);
+        assert_eq!(
+            lines[0].text, message,
+            "{path}: the seed writes the message"
+        );
+    }
+
+    // Commits.
+    let Block::Entities { rows, .. } = &view.sections[2].blocks[0] else {
+        panic!(
+            "{id}'s commits tab is an entity list: {:#?}",
+            view.sections[2]
+        );
+    };
+    for row in rows {
+        println!("  commit: {:?} {} ({:?})", row.chip, row.title, row.meta);
+    }
+    let server: Vec<String> = get(format!(
+        "pulls/{number}/commits?files=false&verification=false"
+    ))
+    .await
+    .as_array()
+    .expect("a commit listing")
+    .iter()
+    .filter_map(|c| c["sha"].as_str().map(str::to_owned))
+    .collect();
+    let addressed: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            r.entity_id
+                .as_deref()
+                .and_then(|e| e.rsplit_once('@'))
+                .map(|(_, sha)| sha.to_owned())
+                .expect("each commit names its address")
+        })
+        .collect();
+    assert_eq!(
+        addressed, server,
+        "{id}: the commits are the server's, in its order"
+    );
+    assert_eq!(view.sections[2].count, Some(server.len() as u64));
+    let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+    for commit in &seeded {
+        let message = commit["msg"].as_str().unwrap();
+        assert!(titles.contains(&message), "{id}: {message:?} in {titles:?}");
+    }
+
+    // Conversation.
+    let conversation = &view.sections[3].blocks;
+    let said: Vec<(String, String)> = conversation
+        .chunks(2)
+        .map(|pair| match pair {
+            [Block::Facts { facts }, Block::Text { text, .. }] => {
+                (facts[0].label.clone(), text.clone())
+            }
+            other => panic!("{id}: a comment is its author and then its text: {other:#?}"),
+        })
+        .collect();
+    for (who, text) in &said {
+        println!("  comment: {who}: {text}");
+    }
+    let bodies: Vec<String> = get(format!("issues/{number}/comments"))
+        .await
+        .as_array()
+        .expect("a comment listing")
+        .iter()
+        .filter_map(|c| c["body"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        said.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(),
+        bodies,
+        "{id}: the conversation is the server's, in order"
+    );
+    let expected: Vec<(String, String)> = pr["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                person(c["who"].as_str().unwrap()),
+                c["text"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let seeded_said: Vec<_> = said.iter().filter(|s| expected.contains(s)).collect();
+    assert_eq!(
+        seeded_said,
+        expected.iter().collect::<Vec<_>>(),
+        "{id}: the fixture's comments, by their authors, in order"
+    );
+
+    // The fixture's merged pull request reads merged, not Gitea's `closed`.
+    let ledger = env.source(serde_json::json!({ "repos": [format!("{}/ledger-api", env.owner)] }));
+    let (items, _) = full(&*ledger).await;
+    let merged = of_kind(&items, "pr")
+        .into_iter()
+        .find(|i| i.title == "Fix ledger drift on partial refunds")
+        .expect("the seed merges the ledger pull request");
+    let view = ledger
+        .view(&merged.entity.to_string(), None)
+        .await
+        .expect("the ledger view reads")
+        .expect("drawn");
+    let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+        panic!("facts first: {view:#?}");
+    };
+    let state = facts.iter().find(|f| f.label == "State").expect("a state");
+    println!("{}: State {} {:?}", merged.entity, state.value, state.tone);
+    assert_eq!(
+        (state.value.as_str(), state.tone),
+        ("merged", Some(Tone::Ok))
+    );
+    assert!(!facts.iter().any(|f| f.label == "Mergeable"), "{facts:#?}");
+}
+
 /// Interfaces §4.2's key forms, against ids the *real* server issued.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]

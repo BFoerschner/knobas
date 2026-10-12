@@ -1935,6 +1935,7 @@ knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_o
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
+knobas-source-gitea	lib/knobas_source_gitea	view::pr::tests::an_age_reads_as_the_shells_does
 knobas-source-gitea	test/it	client::a_bad_token_is_unauthorized
 knobas-source-gitea	test/it	client::a_base_url_with_a_path_prefix_is_preserved
 knobas-source-gitea	test/it	client::a_closed_port_is_unreachable
@@ -1993,6 +1994,13 @@ knobas-source-gitea	test/it	view::a_commit_view_is_its_overview_and_its_diff
 knobas-source-gitea	test/it	view::a_diff_gitea_refuses_is_an_error_and_not_an_empty_diff
 knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view::other_kinds_draw_nothing_yet_and_a_foreign_id_is_refused
+knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
+knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
+knobas-source-gitea	test/it	view_pr::a_pull_request_past_the_commit_budget_says_what_it_left_out
+knobas-source-gitea	test/it	view_pr::a_pull_request_view_is_overview_files_commits_and_conversation
+knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_verdicts
+knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
+knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
 knobas-source-gitea	test/it	write::a_branch_is_created_from_the_ref_that_was_named
 knobas-source-gitea	test/it	write::a_comment_goes_on_the_issue_the_pull_request_shares_an_index_with
 knobas-source-gitea	test/it	write::a_pull_request_carries_its_title_body_head_and_base
@@ -2008,6 +2016,7 @@ knobas-source-gitea	test/live_gitea	a_commit_pushed_through_the_api_arrives_once
 knobas-source-gitea	test/live_gitea	a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run
 knobas-source-gitea	test/live_gitea	a_revoked_token_is_unauthorized
 knobas-source-gitea	test/live_gitea	a_seeded_commits_view_carries_the_diff_the_seed_pushed
+knobas-source-gitea	test/live_gitea	a_seeded_pull_requests_view_carries_its_files_commits_and_discussion
 knobas-source-gitea	test/live_gitea	a_synced_commit_carries_its_repo_and_is_found_by_under
 knobas-source-gitea	test/live_gitea	an_op_gitea_does_not_declare_never_reaches_the_real_server
 knobas-source-gitea	test/live_gitea	approving_your_own_pull_request_is_refused_by_the_server

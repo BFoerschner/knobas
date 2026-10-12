@@ -14,4 +14,5 @@ mod client;
 mod contract;
 mod sync;
 mod view;
+mod view_pr;
 mod write;

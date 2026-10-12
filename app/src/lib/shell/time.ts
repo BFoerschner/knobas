@@ -5,6 +5,10 @@
  * Every synced row carries one of these (spec §4: "per-row provenance — where
  * it came from and when it was last seen"), which is why it is a tested
  * function and not five copies of a `Math.round` in five components.
+ *
+ * One copy lives outside the shell: a Gitea pull request's *Commits* rows
+ * carry their age in a view's text (`crates/knobas-source-gitea/src/view/pr.rs`,
+ * `ago`), because a view row's meta is a string. Change both or neither.
  */
 
 /**
