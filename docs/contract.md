@@ -7687,6 +7687,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   one place. Its failure direction is stated there (it **misses**: an epic seeds fewer children
   rather than the wrong ones, an absent member never a wrong one) and pinned on both sides.
 
+  *Amended 2026-10-12 (#641, PR #648):* the named statement now reads two spellings, both Jira's:
+  `coalesce(i.payload->'fields'->'parent'->>'key', i.payload->'epic'->>'key')`. A classic Data
+  Center project carries no `fields.parent`, and since #640 the adapter stores the Epic Link beside
+  the record as `epic: {"key": …}` (the deputy's ruling of 2026-10-12 on #598). The order is the
+  Jira descriptor's `ticket` parent candidates, `fields.parent` first. Both seeds still read only
+  the macro, and the failure direction is unchanged. No surface moved. The sentence above that
+  names `fields.parent.key` as the path is left as history.
+
   **The sixth notification category is switched on here and its behaviour is #447's.**
   `every_inbox_category_has_a_toggle_in_the_interface` is a pin, not a nicety: a category with no
   switch in `NotificationsSection.svelte` is a demand nobody can ever be notified about, and the
