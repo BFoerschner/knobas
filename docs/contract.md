@@ -10116,7 +10116,15 @@ From this commit on, each of the following requires an orchestrator decision **a
     after every change it already exercised and a new one: an item moved to another source and
     back. It dies when the restated function tags the child arm `'parent'`, and when it copies the
     adapter kind in place of the source id.
-  - The benchmark: BENCH_PLACEHOLDER
+  - The benchmark, `just search-perf` on head `31ea1950` (load1 5.38 before, 6.85 after), with a
+    second, empty Gitea source configured so the probe pays the two-sources-on-one-adapter case:
+    `under_is_under_the_same_budget_beside_a_hundred_thousand_items` read repo full name p50 65 /
+    p90 67 ms, bare name 64 / 65, repo + word 43 / 44, name nothing has 52 / 55: **worst p90
+    67 ms**, against 69 ms on `438be884` without this change. `EXPLAIN ANALYZE` of the probe for the
+    empty source: 154 ms with the arm alone (13,334 child rows looked up through `sync.item`),
+    0.037 ms with `source_id`. The same run's `search_is_under_a_hundred_milliseconds…` failed on
+    the saved-list rail at its cap (`launcher_board` 106 ms p90), as it did on `438be884` the same
+    afternoon (`smart_lists` 138 ms p90); neither statement runs the coverage probe.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
