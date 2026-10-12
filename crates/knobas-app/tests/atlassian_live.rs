@@ -1009,6 +1009,8 @@ async fn app_with(
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(
@@ -3371,6 +3373,8 @@ async fn wiki_app(
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(

@@ -37,6 +37,23 @@ pub fn under(name: &str) -> String {
     }
 }
 
+/// Store the adapters' declarations the way bring-up does, **before** the
+/// scheduler starts and the first sync writes an item (#627).
+///
+/// The order is the app's, and it decides which half of the trigger work a
+/// witness runs: declared first, each synced row's parents are resolved by the
+/// `sync.item` insert trigger as the sync writer's upsert lands; declared
+/// after, by the declaration trigger recomputing every row at once. The app
+/// takes the first path on every sync but its very first launch's, so that is
+/// the one these suites hold. Every builder that wants it calls this between
+/// the scratch database and `Scheduler::start` -- a scheduler that is running
+/// may already be syncing.
+pub async fn declare(pool: &sqlx::PgPool) {
+    knobas_app::commands::search::searcher(pool)
+        .await
+        .expect("the adapters' declarations are stored");
+}
+
 /// What one `under:` query found: per kind, how many rows matched and the ids
 /// the page shows.
 ///

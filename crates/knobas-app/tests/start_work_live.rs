@@ -1184,6 +1184,8 @@ async fn gitea_app(env: &Env, repos: &[String]) -> SourcesState {
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
     let secrets = Arc::new(MemoryStore::new());
     secrets
         .put(

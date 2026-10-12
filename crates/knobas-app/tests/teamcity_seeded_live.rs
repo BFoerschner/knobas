@@ -219,6 +219,8 @@ async fn app(env: &Env, account: &str) -> SourcesState {
         .pool(4)
         .await
         .expect("a pool onto the scratch database");
+    // Bring-up's order (#627): the declarations before the first sync.
+    live_under::declare(&pool).await;
 
     let secrets = Arc::new(MemoryStore::new());
     secrets
