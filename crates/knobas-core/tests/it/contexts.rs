@@ -500,7 +500,10 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
         (&foreign, "is another source's ticket"),
         (&misshapen, "has a parent that is not the recorded shape"),
         (&foreign_classic, "is another source's ticket"),
-        (&misshapen_classic, "has an epic that is not the recorded shape"),
+        (
+            &misshapen_classic,
+            "has an epic that is not the recorded shape",
+        ),
         (&subtask, "has a direct parent, which wins over its epic"),
     ] {
         assert!(!got.contains(other), "{other} {why}");
@@ -1012,7 +1015,10 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         (&foreign, "is another source's ticket"),
         (&misshapen, "has a parent that is not the recorded shape"),
         (&foreign_classic, "is another source's ticket"),
-        (&misshapen_classic, "has an epic that is not the recorded shape"),
+        (
+            &misshapen_classic,
+            "has an epic that is not the recorded shape",
+        ),
     ] {
         assert!(!got.contains(other), "{other} {why}");
     }
