@@ -103,8 +103,8 @@ back to `knobas`/`knobas-dev` would run against a Kuma whose admin is something
 else and report the login failure as a broken adapter.
 
 `eval "$(./seed --env-kuma)"` prints **only** those four, and needs no
-`seed-state.json` — which is Gitea's, and re-minting it is how one worktree's
-seed 401s another's live run. `just kuma-live` uses that form for exactly that
+`seed-state.json` — which is Gitea's, and a Kuma suite has no business
+starting and seeding Gitea. `just kuma-live` uses that form for exactly that
 reason. Once `./seed
 --teamcity` has run it also prints `KNOBAS_TEAMCITY_URL` and
 `KNOBAS_TEAMCITY_TOKEN`; the seeded TeamCity suite additionally reads
@@ -241,19 +241,34 @@ directory, in either direction. That is `teamcity-live-seeded`.
 The repo's standing rule is that a worktree has exactly one owner. **This
 Docker environment is not covered by it**: there is one of it, shared by every
 worktree on the machine, and two agents seeding or running live suites against
-it at the same time will break each other. Four ways:
+it at the same time will break each other. The first entry below was one of
+the ways until #684 and is the rule that ended it; the four after it still are:
 
-- **The seed re-mints the Gitea token.** `seed-gitea.sh` reuses the token
-  recorded in `seed-state.json` while it still authenticates, but
-  `seed-state.json` is git-ignored and therefore lives *inside one worktree*. A
-  second agent seeding from its own worktree finds no recorded token, deletes
-  every existing `knobas-seed` token and mints a fresh one — and the first
-  agent's in-flight run starts answering 401. This happened during PR #130's
-  review. The same mechanism leaves **every other worktree's `seed-state.json`
-  holding a token that is already dead**, so a 401 from `eval "$(./seed --env)"`
-  usually means "another tree seeded last", not "the environment is broken";
-  re-running `./seed-gitea.sh` from *your* tree fixes it and rotates the token
-  again, which is the same collision from the other side.
+- **The Gitea token is per worktree** (since #684; before it, the seed
+  re-minted one shared token and was the first of these collisions).
+  `seed-state.json` is git-ignored and therefore lives *inside one worktree*,
+  while the Gitea container is everyone's. So the rule is:
+  - `seed-gitea.sh` keeps the token recorded in *this* tree's
+    `seed-state.json` while Gitea accepts it — one call to `/user`, whatever
+    the token is named.
+  - When Gitea refuses it (401), or the tree has none, the seed mints one
+    named `knobas-seed-<worktree directory>-<checksum of its path>` and first
+    deletes only tokens of **that** name — its own earlier token, whose value
+    it has lost. Another worktree's token is never revoked, nor is the shared
+    `knobas-seed` token the seed minted before #684, which a tree still
+    holding it keeps while it works.
+  - Any other answer to the probe, or none, is a refusal that changes
+    nothing.
+
+  So two worktrees seeding one after the other, or at the same time, both
+  keep a working token. A 401 from `eval "$(./seed --env)"` now means this
+  tree's own token is gone (a reset Gitea volume, a hand-deleted token), and
+  the next `./seed-gitea.sh` here replaces it. One token per worktree that
+  ever seeded accumulates on the admin account; a `down -v` clears them.
+  The rule is `testenv/gitea-token.sh`, held to it by
+  `testenv/gitea-token-test.sh` in `just witness-unit`. Before #684 it went
+  wrong four times in the #660 wave (PRs #674, #675, #681, #682) and once
+  during PR #130's review.
 - **The Gitea live suite sweeps.** `tests/live_gitea.rs` removes any leftover
   `knobas-` branch in `payout-service` before it starts, which is how a killed
   run heals (issue #143). It cannot tell a sibling's live branch from a corpse.
@@ -274,7 +289,7 @@ it at the same time will break each other. Four ways:
   no `kuma-api-key`, or has one the instance no longer answers to — Kuma hands
   a key's clear text out once, so `seed-kuma.sh` verifies the recorded key
   against `/metrics` and keeps it **while it still authenticates**, exactly as
-  `seed-gitea.sh` does with the Gitea token, and replaces it when it does not
+  `seed-gitea.sh` does with its Gitea token, and replaces it when it does not
   (since 2026-09-11, #552) — and only on an answer the instance actually gave,
   because re-minting destroys the instance's key: a probe that gets no answer
   at all refuses rather than guessing. So a sibling's re-mint heals itself on

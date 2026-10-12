@@ -74,11 +74,10 @@ print_env() {
 }
 
 # Kuma's two, on their own. `--env` needs seed-state.json, which is Gitea's:
-# `just kuma-live` would then have to seed Gitea to run a Kuma suite, and
-# seed-gitea.sh re-mints the Gitea token when the worktree it runs from has no
-# state file -- 401ing whatever agent is mid-run against it (README.md, "One
-# environment, one owner at a time"). A Kuma recipe has no business doing that,
-# so it asks for the half it needs.
+# `just kuma-live` would then have to seed Gitea to run a Kuma suite, which
+# is a Gitea container, a seed and a token of its own (one per worktree since
+# #684; README.md, "One environment, one owner at a time"). A Kuma recipe has
+# no business doing that, so it asks for the half it needs.
 print_env_kuma() {
   [ -r "$KEY_FILE" ] || {
     echo "seed: $KEY_FILE not found -- run ./seed-kuma.sh first" >&2; exit 1; }

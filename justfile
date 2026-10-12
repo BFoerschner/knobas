@@ -387,11 +387,14 @@ shell:
 # The test-layout script's own tests (issue #573) ride here too: they are bash
 # against fixture trees, need nothing installed, and take under a second.
 # So do the on-demand live products' (issue #633): the one-JVM-product rule
-# and what a run puts back, against a stub `docker`.
+# and what a run puts back, against a stub `docker`. And the Gitea seed
+# token's (issue #684): one worktree's seed never revokes another's token,
+# against a stub `curl` playing Gitea's token API.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
     testenv/live-test.sh
+    testenv/gitea-token-test.sh
 
 # The integration-test layout guard of ADR-0017 (issue #573): a top-level
 # `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its
@@ -1046,11 +1049,11 @@ _require-live-env SOURCE +NAMES:
 #
 # ONE ENVIRONMENT, ONE OWNER. There is a single Docker environment shared by
 # every worktree on the machine, and worktree exclusivity does not cover it:
-# `seed-gitea.sh` re-mints the Gitea token when the worktree it runs from has
-# no `seed-state.json`, so a second agent seeding mid-run makes the first
-# agent's requests answer 401 -- and a `seed-state.json` in a worktree that did
-# not do the latest seed holds a token that is already dead. Claim it before you
-# run this. testenv/README.md, "One environment, one owner at a time".
+# the suite's branch sweep cannot tell a sibling's live branch from a corpse.
+# The token is no longer one of the collisions: since #684 each worktree's
+# seed keeps its own (`testenv/gitea-token.sh`), and never revokes another's.
+# Claim it before you run this. testenv/README.md, "One environment, one owner
+# at a time".
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1094,8 +1097,7 @@ gitea-live:
 # happened to this shell.
 #
 # ONE ENVIRONMENT, ONE OWNER -- and this recipe is the harder of the two to
-# share. It seeds (so it re-mints the Gitea token, 401ing anyone else mid-run)
-# *and* it recreates the shared container capped to one record and back again,
+# share. It recreates the shared container capped to one record and back again,
 # so a concurrent `just gitea-live` reads a server answering short pages and
 # fails for a reason that is not in its own tree. Claim the environment before
 # you run this. testenv/README.md, "One environment, one owner at a time".
@@ -1188,8 +1190,9 @@ gitea-live-capped:
 # `gitea-live` names.
 #
 # Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
-# that writes to it. ONE ENVIRONMENT, ONE OWNER -- this seeds, so it re-mints
-# the Gitea token and 401s anyone else mid-run. Claim it first.
+# that writes to it. ONE ENVIRONMENT, ONE OWNER -- it writes branches and
+# pull requests a concurrent run's sweep can take (the token is per worktree
+# since #684, so seeding no longer 401s anyone). Claim it first.
 # testenv/README.md, "One environment, one owner at a time".
 start-work-live:
     #!/usr/bin/env bash
@@ -1202,9 +1205,9 @@ start-work-live:
 
 # Where the Uptime Kuma live recipe gets its gate variables. Kuma's own two,
 # not the whole seed's: `./seed --env` refuses without `seed-state.json`, which
-# is Gitea's, and seeding Gitea to run a Kuma suite would re-mint the Gitea
-# token under whatever agent is mid-run against it (testenv/README.md, "One
-# environment, one owner at a time"). `--env-kuma` is that half.
+# is Gitea's, and a Kuma suite has no business starting and seeding Gitea
+# (testenv/README.md, "One environment, one owner at a time"). `--env-kuma` is
+# that half.
 kuma_live_env := "testenv/, which is what the lines above this one do:
   docker compose up -d --wait uptime-kuma
   ./seed-kuma.sh
