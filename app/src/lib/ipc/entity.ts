@@ -799,7 +799,11 @@ export interface ViewAction {
   write_op: string;
   /** The button's words (`Merge…`). */
   label: string;
-  /** The dialog's choices, in the op's own words; the first is the default. */
+  /**
+   * The dialog's choices, in the op's own words; the first is the default.
+   * For an op whose choice is typed (`run_build`'s branch, #669) they are
+   * suggestions and none is picked: `actionForm` in `detail/view/actions.ts`.
+   */
   options: string[];
   /** The dialog's sentence. `null` queues on the button, with no dialog. */
   confirm: string | null;

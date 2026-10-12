@@ -24,7 +24,7 @@
     type SourceView as SourceViewData,
     type ViewAction,
   } from "../ipc/entity";
-  import { pendingWrites } from "../ipc/sources";
+  import { pendingWrites, type BuildParameter } from "../ipc/sources";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
@@ -174,9 +174,13 @@
    * so, and reads the mirror and the view again. Answers whether the write was
    * queued, so the action's dialog stays up on a refusal.
    */
-  async function queueAction(action: ViewAction, option: string | null): Promise<boolean> {
+  async function queueAction(
+    action: ViewAction,
+    option: string | null,
+    changed: BuildParameter[] = [],
+  ): Promise<boolean> {
     const name = actionName(action.label);
-    const payload = actionPayload(action, entityId, option);
+    const payload = actionPayload(action, entityId, option, changed);
     if (payload === null) {
       push({ text: `Could not queue the ${name.toLowerCase()}: knobas cannot send it`, tone: "err" });
       return false;

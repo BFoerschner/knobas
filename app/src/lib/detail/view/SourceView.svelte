@@ -5,7 +5,8 @@
   The shell draws the vocabulary and never learns which adapter drew it -- so
   nothing here names a source, a kind or a field. An actions block draws only
   the actions whose op the source declares (#667), and a settings block is
-  editable only where it does (#668). One component per block, in
+  editable only where it does (#668). An action's dialog may offer this
+  entity's own settings to change for one write (#669). One component per block, in
   this folder; a block this file does not know is not drawn (the vocabulary is
   frozen, and a new block arrives with its component in the same change).
 
@@ -24,6 +25,7 @@
     type ViewSection,
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
+  import type { BuildParameter } from "../../ipc/sources";
   import ActionsBlock from "./ActionsBlock.svelte";
   import { offeredActions } from "./actions";
   import { settingsWritable, type SettingMark, type SettingsTarget } from "./settings";
@@ -58,8 +60,8 @@
     writeOps: string[];
     onnavigate: (hash: string) => void;
     onopenurl: (url: string) => void;
-    /** Queue an action's write; answers whether it was queued. */
-    onaction: (action: ViewAction, option: string | null) => Promise<boolean>;
+    /** Queue an action's write with the values its dialog changed; answers whether it was queued. */
+    onaction: (action: ViewAction, option: string | null, changed: BuildParameter[]) => Promise<boolean>;
     /**
      * The edits of this entity's settings on their way through the queue, by
      * name (#668). Drawn only on a settings block that is of this entity.
@@ -92,6 +94,18 @@
     if (before === null || before === now) return;
     untrack(() => (reads = {}));
   });
+
+  /**
+   * This entity's own settings, from every tab already read with the view: what
+   * an action whose dialog changes values for one write offers (#669, a
+   * configuration's *Run…*). A settings block of another entity is not this
+   * one's to change.
+   */
+  const ownSettings = $derived(
+    view.sections
+      .flatMap((section) => section.blocks)
+      .flatMap((block) => (block.type === "settings" && block.entity === entityId ? block.values : [])),
+  );
 
   /** Unique per instance, so tab and panel ids cannot collide. */
   const uid = Math.random().toString(36).slice(2, 9);
@@ -233,7 +247,7 @@
                 onsave={(name, value, base) => onsetting(block, name, value, base)}
               />
             {:else if block.type === "actions"}
-              <ActionsBlock actions={block.actions} {onaction} />
+              <ActionsBlock actions={block.actions} parameters={ownSettings} {onaction} />
             {/if}
           </div>
         {/each}
