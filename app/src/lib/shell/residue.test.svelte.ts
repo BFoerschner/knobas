@@ -81,7 +81,7 @@ const ROW: EntityRow = {
   state: null,
 };
 
-const PAGE: EntityPage = { rows: [ROW], total: 1 };
+const PAGE: EntityPage = { rows: [ROW], total: 1, tally: null };
 
 const DETAIL: EntityDetail = {
   row: ROW,
@@ -550,7 +550,7 @@ const CASES: Case[] = [
       app: mount(Tile, {
         target,
         props: {
-          spec: { id: "tickets", label: "Tickets", kinds: ["ticket"] },
+          spec: { id: "tickets", label: "Tickets", kinds: ["ticket"], order: "updated_desc" as const },
           sources: [],
           miniBoardLayout: "columns" as const,
           onopen: () => {},

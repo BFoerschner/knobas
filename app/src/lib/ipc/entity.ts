@@ -71,8 +71,17 @@ export interface StateChip {
   tone: Tone;
 }
 
-/** Which ordering a room reads in — `EntityOrder`. */
-export type EntityOrder = "updated_desc" | "title_asc";
+/**
+ * Which ordering a room reads in — `EntityOrder`.
+ *
+ * The last two are the room tiles' (#680, `CONTEXT.md` **Tile**), driven by
+ * each row's declared state and its tone: `attention` drops settled rows (tone
+ * `ok` or `muted`) and draws the rest loudest first; `latest_per_parent`
+ * keeps the newest row of each declared parent, for kinds that declare a
+ * state, and draws every tone loudest first. A row with no state sorts by
+ * recency under both. Both read the live corpus only.
+ */
+export type EntityOrder = "updated_desc" | "title_asc" | "attention" | "latest_per_parent";
 
 /**
  * Which slice of the corpus a room wants — `EntityFilter`.
@@ -120,6 +129,20 @@ export interface EntityPage {
   rows: EntityRow[];
   /** The whole filtered set, before `limit`/`offset`. `0` for an empty page. */
   total: number;
+  /**
+   * Under a tile order (`attention`, `latest_per_parent`), the whole set
+   * counted by kind and tone, which a tile's header phrases; `null` under the
+   * plain orders (#680).
+   */
+  tally: KindTally[] | null;
+}
+
+/** How many rows of one kind, in one tone, a tile order drew — `KindTally`. */
+export interface KindTally {
+  kind: string;
+  /** The tone of the rows' state chip; `null` for rows that have none. */
+  tone: Tone | null;
+  count: number;
 }
 
 /** One page of the room `filter` addresses, newest (or first) `limit` rows. */

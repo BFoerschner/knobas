@@ -29,8 +29,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, NoteLinkInput, SourceRef,
-    SuggestionPage, UrlMatch,
+    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, NoteLinkInput,
+    SourceRef, SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
@@ -187,10 +187,41 @@ fn the_entity_page_shape_matches_its_typescript_mirror() {
     let page = EntityPage {
         rows: vec![row(Some(at()))],
         total: 42,
+        tally: None,
     };
     let wire = serde_json::to_value(page).unwrap();
-    assert_shape("EntityPage", &wire, &["rows", "total"]);
+    assert_shape("EntityPage", &wire, &["rows", "tally", "total"]);
     assert_shape("EntityRow", &wire["rows"][0], ENTITY_ROW_FIELDS);
+    assert_eq!(
+        wire["tally"],
+        serde_json::Value::Null,
+        "a plain order's page keeps the key and nulls it"
+    );
+
+    // A tile order's page (#680), with a tally line of each shape: one row
+    // with a tone and one without, which is `null` on the wire.
+    let tile = EntityPage {
+        rows: Vec::new(),
+        total: 3,
+        tally: Some(vec![
+            KindTally {
+                kind: "pr".to_owned(),
+                tone: Some(knobas_core::tone::Tone::Info),
+                count: 2,
+            },
+            KindTally {
+                kind: "branch".to_owned(),
+                tone: None,
+                count: 1,
+            },
+        ]),
+    };
+    let wire = serde_json::to_value(tile).unwrap();
+    assert_shape("EntityPage", &wire, &["rows", "tally", "total"]);
+    for line in wire["tally"].as_array().unwrap() {
+        assert_shape("KindTally", line, &["count", "kind", "tone"]);
+    }
+    assert_eq!(wire["tally"][1]["tone"], serde_json::Value::Null);
 }
 
 /// The filter is an *input* DTO, so it is pinned through a round trip: the
@@ -294,16 +325,22 @@ fn the_state_chip_and_its_tones_match_their_typescript_mirror() {
     );
 }
 
-/// Both orderings, in the spelling the mirror's union declares.
+/// Every ordering -- the two plain ones and the two tile orders (#680) -- in
+/// the spelling the mirror's union declares.
 ///
 /// Read out of `entity.ts` rather than listed here: an ordering added on one
 /// side only is a room the other side can never draw.
 #[test]
 fn the_entity_orders_match_their_typescript_mirror() {
-    let spellings: Vec<serde_json::Value> = [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc]
-        .into_iter()
-        .map(|order| serde_json::to_value(order).unwrap())
-        .collect();
+    let spellings: Vec<serde_json::Value> = [
+        EntityOrder::UpdatedDesc,
+        EntityOrder::TitleAsc,
+        EntityOrder::Attention,
+        EntityOrder::LatestPerParent,
+    ]
+    .into_iter()
+    .map(|order| serde_json::to_value(order).unwrap())
+    .collect();
     let spellings: Vec<&str> = spellings
         .iter()
         .map(|order| order.as_str().expect("an order serializes as a string"))

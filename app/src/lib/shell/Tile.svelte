@@ -27,7 +27,9 @@
   import EntityLine from "./EntityLine.svelte";
   import MiniBoardBody from "./MiniBoard.svelte";
   import { columnsRefusal, effectiveMiniBoardLayout, type MiniBoardLayout } from "./contexts";
-  import type { TileSpec } from "./kinds";
+  import { kindRegistry } from "./kind-registry.svelte";
+  import { kindLabel, kindSingular, type TileSpec } from "./kinds";
+  import { tileCount } from "./tile-count";
 
   let {
     spec,
@@ -129,6 +131,13 @@
    * the truth.
    */
   const PAGE = 50;
+  /**
+   * How many rows a maximised tile holds (#680): the same read in the same
+   * order, further down. Builds draws one row per configuration, so this is
+   * every configuration a room plausibly has; the header still counts them
+   * all.
+   */
+  const MAX_PAGE = 500;
 
   let page = $state<EntityPage | null>(null);
   let board = $state<MiniBoard | null>(null);
@@ -143,6 +152,8 @@
    * render.
    */
   let token = 0;
+  /** The filter of the read on screen, to tell a new room from a longer page. */
+  let shownFilterKey = "";
 
   $effect(() => {
     const mine = ++token;
@@ -152,13 +163,19 @@
       updated_within_days: null,
       context: ctx,
       project,
-      order: "updated_desc" as const,
+      order: spec.order,
       include_deleted: false,
     };
+    // The board is never paged, so only a list reads `maximised`.
+    const limit = !isMiniBoard && maximised ? MAX_PAGE : PAGE;
     // Cleared before the request, not after it: a tile showing the previous
     // room's rows while the new ones load is showing rows that are not in this
-    // room at all.
-    page = null;
+    // room at all. Maximising (#680) asks the same read for more rows, so the
+    // rows on screen are still this room's and stay until the longer page
+    // lands.
+    const key = JSON.stringify(filter);
+    if (key !== shownFilterKey) page = null;
+    shownFilterKey = key;
     board = null;
     error = null;
     // The board asks for the room's narrowing dimensions and nothing else: it
@@ -168,7 +185,7 @@
       ? miniBoard({ sources, context: ctx, project }).then((answer) => {
           if (mine === token) board = answer;
         })
-      : listEntities(filter, PAGE, 0).then((answer) => {
+      : listEntities(filter, limit, 0).then((answer) => {
           if (mine === token) page = answer;
         });
     void read.catch((rejection) => {
@@ -231,7 +248,18 @@
     if (isMiniBoard) {
       return board ? board.columns.reduce((all, column) => all + column.cards.length, 0) : null;
     }
-    return page ? page.total : null;
+    // A tile order says what it counts (#680): *3 open pull requests · 5
+    // branches*, *2 failing · 7 build configurations*. The words are the
+    // registry's, so the kinds are named as their adapters name them.
+    return page
+      ? tileCount(spec.order, spec.kinds, page, {
+          noun: (kind, n) => {
+            const info = kindRegistry.info(kind);
+            return (n === 1 ? kindSingular(kind, info) : kindLabel(kind, info)).toLowerCase();
+          },
+          groupedUnder: (kind) => kindRegistry.groupedUnder(kind),
+        })
+      : null;
   });
 
   /** Whether the read has answered at all — the "Reading…" state. */
@@ -248,8 +276,8 @@
    */
   const EMPTY: Record<string, string> = {
     tickets: "No ticket in this room yet.",
-    code: "No pull request, commit or repository belongs to this room.",
-    builds: "No pipeline runs in this room.",
+    code: "No open pull request or branch in this room.",
+    builds: "No build in this room.",
     docs: "No page in this room yet.",
     notes: "No note in this room yet.",
   };

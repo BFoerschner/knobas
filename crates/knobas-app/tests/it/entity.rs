@@ -1448,6 +1448,361 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
     );
 }
 
+// -- what a room's tiles draw first (#680) -----------------------------------
+
+/// Date a mirrored item `minutes` before now, the source's own timestamp the
+/// recency orders read.
+async fn dated(pool: &PgPool, entity: &str, minutes: i32) {
+    sqlx::query(
+        "update sync.item set item_updated_at = now() - make_interval(mins => $2)
+          where entity_id = $1",
+    )
+    .bind(entity)
+    .bind(minutes)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The registry's declarations for whatever is configured, as the command
+/// reads them.
+async fn builtin_declarations(pool: &PgPool) -> knobas_core::payload::Declarations {
+    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::builtin())
+        .await
+        .unwrap()
+}
+
+/// The Code tile's read (#680): a busy repo's fifty commits and thirty
+/// branches, all newer than its two open pull requests, do not push those
+/// pull requests off the tile. Under the `attention` order the open ones come
+/// first, the branches follow by recency, and a merged or closed pull request
+/// (a settled state: `ok` or `muted`) is not in the set at all. The tile asks
+/// for `pr` and `branch`, never `commit`, so a commit is not drawn either way;
+/// the commits are here to be newer than everything the tile does draw.
+#[tokio::test]
+async fn the_code_tile_draws_open_pull_requests_first_and_no_settled_one() {
+    use knobas_core::tone::Tone;
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let repo =
+        serde_json::json!({ "full_name": "tidewater/payout-service", "name": "payout-service" });
+    for n in 0..50 {
+        let key = format!("tidewater/payout-service@c{n:04}");
+        mirrored(
+            &pool,
+            &gitea,
+            "commit",
+            &key,
+            serde_json::json!({ "repository": repo }),
+        )
+        .await;
+        dated(&pool, &format!("{gitea}:{key}"), n).await;
+    }
+    for n in 0..30 {
+        let key = format!("tidewater/payout-service@refs/heads/b{n:02}");
+        mirrored(
+            &pool,
+            &gitea,
+            "branch",
+            &key,
+            serde_json::json!({ "repository": repo }),
+        )
+        .await;
+        dated(&pool, &format!("{gitea}:{key}"), 100 + n).await;
+    }
+    let pr = |state: &str, merged: bool| serde_json::json!({ "state": state, "merged": merged, "base": { "repo": repo } });
+    for (key, payload, minutes) in [
+        ("tidewater/payout-service#1", pr("open", false), 500),
+        ("tidewater/payout-service#2", pr("open", false), 600),
+        ("tidewater/payout-service#3", pr("closed", true), 1),
+        ("tidewater/payout-service#4", pr("closed", false), 2),
+    ] {
+        mirrored(&pool, &gitea, "pr", key, payload).await;
+        dated(&pool, &format!("{gitea}:{key}"), minutes).await;
+    }
+
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![gitea.clone()],
+            kinds: vec!["pr".to_owned(), "branch".to_owned()],
+            order: EntityOrder::Attention,
+            ..all()
+        },
+        10,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<&str> = page.rows.iter().map(|r| r.entity_id.as_str()).collect();
+    assert_eq!(
+        ids[..3],
+        [
+            format!("{gitea}:tidewater/payout-service#1"),
+            format!("{gitea}:tidewater/payout-service#2"),
+            format!("{gitea}:tidewater/payout-service@refs/heads/b00"),
+        ],
+        "both open pull requests first, newest first, then the newest branch"
+    );
+    assert!(
+        page.rows
+            .iter()
+            .all(|r| r.kind != "pr" || r.state.as_ref().is_some_and(|s| s.text == "open")),
+        "no merged or closed pull request is drawn: {ids:?}"
+    );
+    assert_eq!(page.total, 32, "two open pull requests and thirty branches");
+    let tally = page.tally.expect("the attention order counts what it drew");
+    let count = |kind: &str, tone: Option<Tone>| {
+        tally
+            .iter()
+            .find(|t| t.kind == kind && t.tone == tone)
+            .map_or(0, |t| t.count)
+    };
+    assert_eq!(count("pr", Some(Tone::Info)), 2);
+    assert_eq!(count("branch", None), 30);
+    assert_eq!(tally.len(), 2, "nothing else is counted: {tally:?}");
+}
+
+/// The Builds tile's read (#680): one row per build configuration, its
+/// **latest** build, failing first, then running, then succeeded. A newer
+/// success of one configuration does not hide another configuration's
+/// failure, and an older failure of a configuration whose latest build passed
+/// is not drawn. Two configurations that share a display name (`Build`)
+/// under different ids are two parents, because a parent is every name it
+/// answers to (`name` and `id`), not the one a path line shows.
+#[tokio::test]
+async fn the_builds_tile_draws_each_configurations_latest_build_failing_first() {
+    use knobas_core::tone::Tone;
+    let pool = seeded().await;
+    let teamcity = configured(&pool, "teamcity").await;
+    let config = |id: &str| serde_json::json!({ "id": id, "name": "Build", "projectId": "P" });
+    let build = |id: &str, state: &str, status: &str| serde_json::json!({ "state": state, "status": status, "buildType": config(id) });
+    for (key, payload, minutes) in [
+        // `Api_Build`: latest failed, an older run passed.
+        ("101", build("Api_Build", "finished", "FAILURE"), 30),
+        ("100", build("Api_Build", "finished", "SUCCESS"), 90),
+        // `Web_Build`, same name: latest passed, newest of all, after a failure.
+        ("201", build("Web_Build", "finished", "SUCCESS"), 1),
+        ("200", build("Web_Build", "finished", "FAILURE"), 60),
+        // `Ops_Build`: running now.
+        ("301", build("Ops_Build", "running", "SUCCESS"), 10),
+        ("300", build("Ops_Build", "finished", "FAILURE"), 70),
+    ] {
+        mirrored(&pool, &teamcity, "build", key, payload).await;
+        dated(&pool, &format!("{teamcity}:{key}"), minutes).await;
+    }
+
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![teamcity.clone()],
+            kinds: vec!["build".to_owned()],
+            order: EntityOrder::LatestPerParent,
+            ..all()
+        },
+        50,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+
+    let drawn: Vec<(String, Option<String>)> = page
+        .rows
+        .iter()
+        .map(|r| {
+            (
+                r.entity_id.clone(),
+                r.state.as_ref().map(|s| s.text.clone()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            (format!("{teamcity}:101"), Some("FAILURE".to_owned())),
+            (format!("{teamcity}:301"), Some("running".to_owned())),
+            (format!("{teamcity}:201"), Some("SUCCESS".to_owned())),
+        ],
+        "one row per configuration, its latest build, failing then running then succeeded"
+    );
+    assert_eq!(page.total, 3, "three configurations");
+    let tally = page
+        .tally
+        .expect("the latest-per-parent order counts what it drew");
+    let count = |tone: Tone| {
+        tally
+            .iter()
+            .find(|t| t.kind == "build" && t.tone == Some(tone))
+            .map_or(0, |t| t.count)
+    };
+    assert_eq!(
+        (count(Tone::Err), count(Tone::Info), count(Tone::Ok)),
+        (1, 1, 1)
+    );
+}
+
+/// §3a's fallback (#680): a kind whose source declares no state -- the mock
+/// adapter's pull requests and builds -- draws under both tile orders exactly
+/// what the recency order draws. Nothing is hidden, nothing is collapsed into
+/// its parent, nothing is reordered: a state the source never declared cannot
+/// say a row is settled, or that one build stands for another.
+#[tokio::test]
+async fn a_kind_with_no_declared_state_falls_back_to_recency() {
+    let pool = seeded().await;
+    let declarations = builtin_declarations(&pool).await;
+    for kind in ["pr", "build"] {
+        let read = |order| {
+            let filter = EntityFilter {
+                sources: vec!["mock".to_owned()],
+                kinds: vec![kind.to_owned()],
+                order,
+                ..all()
+            };
+            let pool = pool.clone();
+            let declarations = declarations.clone();
+            async move {
+                list_entities_inner(&pool, &filter, 500, 0, &declarations)
+                    .await
+                    .unwrap()
+            }
+        };
+        let recency = read(EntityOrder::UpdatedDesc).await;
+        assert!(
+            recency.rows.len() > 1,
+            "the mock corpus has several {kind} rows"
+        );
+        let ids = |page: &knobas_app::commands::entity::EntityPage| -> Vec<String> {
+            page.rows.iter().map(|r| r.entity_id.clone()).collect()
+        };
+        for order in [EntityOrder::Attention, EntityOrder::LatestPerParent] {
+            let page = read(order).await;
+            assert_eq!(ids(&page), ids(&recency), "{kind} under {order:?}");
+            assert_eq!(page.total, recency.total, "{kind} under {order:?}");
+        }
+        assert_eq!(
+            recency.tally, None,
+            "the plain orders count nothing but the total"
+        );
+    }
+
+    // The mock declares no parent either, so its builds could not be grouped
+    // whatever the rule said. A Gitea branch declares its repo as parent and
+    // no state: three branches of one repo stay three rows.
+    let gitea = configured(&pool, "gitea").await;
+    let repo = serde_json::json!({ "full_name": "tidewater/ledger", "name": "ledger" });
+    for (n, minutes) in [(0, 5), (1, 1), (2, 9)] {
+        let key = format!("tidewater/ledger@refs/heads/b{n}");
+        mirrored(
+            &pool,
+            &gitea,
+            "branch",
+            &key,
+            serde_json::json!({ "repository": repo }),
+        )
+        .await;
+        dated(&pool, &format!("{gitea}:{key}"), minutes).await;
+    }
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![gitea.clone()],
+            kinds: vec!["branch".to_owned()],
+            order: EntityOrder::LatestPerParent,
+            ..all()
+        },
+        10,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    assert_eq!(
+        ids,
+        [1, 0, 2].map(|n| format!("{gitea}:tidewater/ledger@refs/heads/b{n}")),
+        "a parent alone does not group a kind that declares no state"
+    );
+}
+
+/// A tile order is never left as a **named** prepared statement (#685's
+/// review).
+///
+/// PostgreSQL custom-plans a named statement for five executions and may then
+/// switch to a generic plan, which cannot fold the nullable filters, guesses
+/// the room is one row, and joins `knobas.entity` by a nested loop: on a
+/// 20,000-build room the Builds tile went from 0.45 s to 11-12 s at the sixth
+/// read of a connection. A test that reads a room five times cannot see that,
+/// and a timing would measure the machine, so this asserts on the cause: the
+/// session's `pg_prepared_statements`, which never lists the unnamed
+/// statement. One connection, so every read below is the same session.
+#[tokio::test]
+async fn the_tile_orders_are_never_named_prepared_statements() {
+    let shared = seeded().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with((*shared.connect_options()).clone())
+        .await
+        .unwrap();
+    let named = async || -> i64 {
+        sqlx::query_scalar("select count(*) from pg_prepared_statements")
+            .persistent(false)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let read = async |order| {
+        list_entities_inner(&pool, &EntityFilter { order, ..all() }, 5, 0, &no_paths())
+            .await
+            .unwrap();
+    };
+
+    // Positive control: a plain order is cached, so it must move the count,
+    // or the assertion below could pass on a session that names nothing.
+    let start = named().await;
+    read(EntityOrder::UpdatedDesc).await;
+    let control = named().await;
+    assert!(
+        control > start,
+        "the updated_desc read left no named statement ({start} -> {control}), \
+         so this test cannot tell a named statement from an unnamed one"
+    );
+
+    read(EntityOrder::Attention).await;
+    read(EntityOrder::LatestPerParent).await;
+    assert_eq!(
+        named().await,
+        control,
+        "a tile order was left in pg_prepared_statements, so PostgreSQL may \
+         plan it generically from its sixth read of a session"
+    );
+}
+
+/// The two tile orders read the live corpus only: the withdrawn are the
+/// detail's way in (§5a), and a tile has no reason to reach for them.
+#[tokio::test]
+async fn the_tile_orders_refuse_the_withdrawn() {
+    let pool = seeded().await;
+    for order in [EntityOrder::Attention, EntityOrder::LatestPerParent] {
+        let err = list_entities_inner(
+            &pool,
+            &EntityFilter {
+                order,
+                include_deleted: true,
+                ..all()
+            },
+            10,
+            0,
+            &no_paths(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, knobas_app::IpcErrorCode::Invalid, "{order:?}");
+    }
+}
+
 // -- the link commands ------------------------------------------------------
 //
 // The seam is the command layer, driven over the migrated test pool: a link is

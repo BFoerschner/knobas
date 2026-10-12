@@ -2159,9 +2159,14 @@ function listEntities(args: Record<string, unknown>) {
   const limit = Number(args["limit"] ?? 50);
   const offset = Number(args["offset"] ?? 0);
 
+  // The tile orders (#680) count what they drew; the plain orders do not.
+  // Spelled out rather than `tile-count.ts`'s `isTileOrder`: this bridge
+  // stands in for the IPC that `ipc/entity.ts` invokes, and imports only its
+  // types.
+  const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
   // The fixture has no link graph, so a context's membership is honestly
   // empty — the same answer `context_members` gives.
-  if (filter.context) return { rows: [], total: 0 };
+  if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null };
 
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
   if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
@@ -2174,7 +2179,18 @@ function listEntities(args: Record<string, unknown>) {
       : (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
   );
 
-  return { rows: rows.slice(offset, offset + limit).map(mirrorRow), total: rows.length };
+  // The fixture is the mock corpus, whose adapter declares no state: under
+  // the tile orders that is §3a's recency fallback, so the rows above are
+  // already the answer and the tally is a count per kind with no tone.
+  const mirrored = rows.map(mirrorRow);
+  const tally = tileOrder
+    ? [...new Set(mirrored.map((row) => row.kind))].map((kind) => ({
+        kind,
+        tone: null,
+        count: mirrored.filter((row) => row.kind === kind).length,
+      }))
+    : null;
+  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally };
 }
 
 /* ----------------------------------------------------------------- notes */
