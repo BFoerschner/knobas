@@ -13,7 +13,7 @@
 //! reload (#609). Nothing here asserts a wait reason. What each test asserts
 //! (a state, or what its own fake received) is the same whichever reason a
 //! sibling's flush leaves on the row, and a sibling cannot deliver a write:
-//! it has no credential for any source but its own.
+//! it has no credential for any source but its own test's.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -44,8 +44,7 @@ enum Answer {
 /// a receipt, a dwell or an interrupt.
 struct Fake {
     id: String,
-    answer: Arc<Mutex<Answer>>,
-    written: Arc<Mutex<Vec<WriteOp>>>,
+    line: Line,
 }
 
 #[async_trait::async_trait]
@@ -93,9 +92,9 @@ impl Source for Fake {
     }
 
     async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
-        match *self.answer.lock().unwrap() {
+        match *self.line.answer.lock().unwrap() {
             Answer::Accept => {
-                self.written.lock().unwrap().push(op);
+                self.line.written.lock().unwrap().push(op);
                 Ok(knobas_source::WriteReceipt::none())
             }
             Answer::Unreachable => Err(SourceError::Unreachable("connection timed out".to_owned())),
@@ -133,15 +132,16 @@ impl AdapterRegistry for FakeRegistry {
     }
 
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
-        // A sibling test's source: its build already failed on the
-        // credential, which this registry's secret store does not hold.
+        // Not reached for a sibling test's source -- its build fails first,
+        // on the credential this deps' secret store does not hold. Should
+        // that ever change, the sibling's writes wait on this error rather
+        // than land in a fake that is not theirs.
         let line = self.lines.get(&instance.id).ok_or_else(|| {
             SourceError::protocol(format!("no fake for source {:?}", instance.id))
         })?;
         Ok(Box::new(Fake {
             id: instance.id,
-            answer: Arc::clone(&line.answer),
-            written: Arc::clone(&line.written),
+            line: line.clone(),
         }))
     }
 }
@@ -239,8 +239,9 @@ impl Harness {
 }
 
 /// A migrated database, a configured source whose adapter is the fake, and a
-/// source id unique to this test -- the same shape as `write_queue.rs`'s
-/// harness, minus what these tests do not need.
+/// source id unique to this test -- `write_queue.rs`'s harness, minus what
+/// these tests do not need, and over [`sources`] so that one test can hold
+/// two sources on one [`SchedulerDeps`].
 async fn harness() -> Harness {
     let source = format!("ws{}", uuid::Uuid::new_v4().simple());
     sources(&[source]).await.pop().unwrap()
