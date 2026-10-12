@@ -134,6 +134,22 @@ const MAX_ID_CHARS: usize = 48;
 ///
 /// Lowering it stays cheap and raising it is not: the budget does not move, so
 /// a larger rail is a cheaper statement's to earn, not a constant's.
+///
+/// # Re-read on 2026-10-12 (#629)
+///
+/// A merge-manager saw `launcher_board` at 96 and then 108 ms at sixteen, on
+/// readings taken without the #533 conditions. Five runs that met them, on
+/// `a4723a7b` (after #605, #606, #608, #618 and #626 had all touched the
+/// statement or the fixture), read **86, 87, 83, 84 and 87 ms**: a spread of
+/// 4 ms against at least 13 ms of clearance, so the ruling's step to eight
+/// does not apply and those readings were load. The rail table of the same
+/// five runs, `launcher_board` p90 in ms, lowest and highest per column:
+///
+/// ```text
+/// saved lists       0    1    2    4    8   16
+/// lowest           40   52   55   59   80   87
+/// highest          42   54   57   63   84   87
+/// ```
 pub const MAX_SAVED_LISTS: i64 = 16;
 
 /// One row of `knobas.smart_list`.
