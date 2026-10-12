@@ -269,6 +269,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 url: Some(format!(
                     "https://gitea.example/tidewater/payout-service/commit/{FIRST_SHA}"
                 )),
+                commit: None,
             },
             ViewRow {
                 entity_id: Some(format!("gitea:tidewater/payout-service@{HEAD_SHA}")),
@@ -277,6 +278,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 tone: None,
                 chip: Some("c90d11a3f5".into()),
                 url: None,
+                commit: None,
             },
         ]
     );

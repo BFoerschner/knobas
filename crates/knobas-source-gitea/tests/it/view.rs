@@ -141,6 +141,7 @@ async fn a_commit_view_is_its_overview_and_its_diff() {
             url: Some(format!(
                 "https://gitea.example/tidewater/payout-service/commit/{PARENT}"
             )),
+            commit: None,
         }]
     );
     assert_eq!(

@@ -141,6 +141,25 @@ pub struct ViewRow {
     /// `tone`.
     pub chip: Option<String>,
     pub url: Option<String>,
+    /// A commit another source may hold, named by where it lives rather than
+    /// by an id (issue #665): a TeamCity change knows its sha and its VCS
+    /// root's URL, and cannot see a Gitea mirror. **The app's to resolve, not
+    /// the shell's to draw**: `entity_view` looks the commit's page up with
+    /// the paste resolver and, where the mirror holds it, sets `entity_id`;
+    /// either way it clears this field, so it never crosses to the shell.
+    /// Absent on the wire when `None`, so a row without one is the shape it
+    /// was before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitHint>,
+}
+
+/// Where a commit lives, for [`ViewRow::commit`]: a git repository's URL as
+/// the source knows it (a clone URL, `.git` and all, with no credential) and
+/// the commit's full sha.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CommitHint {
+    pub repo_url: String,
+    pub sha: String,
 }
 
 /// One named value of a [`Block::Settings`].
@@ -197,6 +216,7 @@ mod tests {
                         tone: Some(Tone::Ok),
                         chip: Some("merged".into()),
                         url: Some("https://gitea.example/c/c90d11".into()),
+                        commit: None,
                     },
                     ViewRow {
                         entity_id: None,
@@ -205,6 +225,10 @@ mod tests {
                         tone: None,
                         chip: None,
                         url: None,
+                        commit: Some(CommitHint {
+                            repo_url: "http://gitea:3000/tidewater/payout-service.git".into(),
+                            sha: "179eb1fb0144c3b61ed482890f1a5f4e162736eb".into(),
+                        }),
                     },
                 ],
             },
@@ -334,6 +358,24 @@ mod tests {
                 }]
             })
         );
+        // A row's commit hint is absent on the wire when it is `None`, so the
+        // shell's row keeps the shape #661 froze; one sent without it decodes.
+        let row = ViewRow {
+            entity_id: None,
+            title: "t".into(),
+            meta: None,
+            tone: None,
+            chip: None,
+            url: None,
+            commit: None,
+        };
+        let wire = serde_json::to_value(&row).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({ "entity_id": null, "title": "t", "meta": null, "tone": null,
+                                "chip": null, "url": null })
+        );
+        assert_eq!(serde_json::from_value::<ViewRow>(wire).unwrap(), row);
         assert_eq!(
             serde_json::to_value(Block::Settings {
                 title: None,

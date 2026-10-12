@@ -222,6 +222,7 @@ impl PullView<'_> {
             tone: None,
             chip: Some(short(&commit.sha)),
             url: commit.html_url.clone(),
+            commit: None,
         }
     }
 

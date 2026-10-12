@@ -318,6 +318,7 @@ fn build_row(viewer: &Viewer<'_>, config: &str, build: &Build, now: DateTime<Utc
         tone: Some(o.tone()),
         chip: Some(number(build)),
         url: map::build_web_url(viewer.base_url, Some(config), build.id),
+        commit: None,
     }
 }
 
