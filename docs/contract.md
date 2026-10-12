@@ -10056,7 +10056,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   the same day), he chose it, *"so the migration is allowed and this comment is his sign-off on
   it"*. The deputy's reading of option 1
   ([comment](https://github.com/BFoerschner/knobas/issues/642#issuecomment-6123097681)) is the
-  ticket's criteria.
+  ticket's criteria. **Björn then signed off a second column the same day**
+  ([comment](https://github.com/BFoerschner/knobas/issues/642#issuecomment-6124188649)):
+  `sync.item_parent.source_id`, *"Yes, add source_id"*, asked with the measurement stated (two
+  sources on one adapter cost about 150 ms per `under:` keystroke at 100k items without it, about
+  0.04 ms with it).
 
   **What `FilterAnswer` means for `FilterDimension::Under` — this replaces the #595 entry's
   sentence "The answer is read off the declaration, not measured on the corpus".** A listed source
@@ -10074,25 +10078,29 @@ From this commit on, each of the following requires an orchestrator decision **a
   `knobas_core::payload::Declarations::declares_a_parent`, whose only caller was the old verdict,
   is removed (`knobas-core` is not on the frozen list).
 
-  **Migration `0029`: one column, one restated function, one partial index.** No earlier migration
-  is edited.
+  **Migration `0029`: two columns, one restated function, one partial index.** No earlier
+  migration is edited.
   - `sync.item_parent` gains `arm text not null`, checked `in ('child', 'parent')`: `'child'` for a
     row `declared_parent_names!` wrote, `'parent'` for one `declared_names_as_parent!` wrote.
-  - `sync.resolve_item_parents(text[])` is restated (`create or replace`) to write it. The only
-    difference from `0028`'s text is the column list and a literal tag on each arm's select; both
-    expansions are pasted unchanged. The migration recomputes every row with
+  - `sync.item_parent` gains `source_id text not null`, the item's `source_id` copied. The update
+    trigger already resolves again an item whose `source_id` changes, so the copy cannot go stale,
+    and the stored rows still depend on the item and on `sync.parent_declaration` and on nothing
+    else (ADR-0019).
+  - `sync.resolve_item_parents(text[])` is restated (`create or replace`) to write both. The only
+    differences from `0028`'s text are the column lists and a literal tag on each arm's select;
+    both expansions are pasted unchanged. The migration recomputes every row with
     `sync.resolve_all_item_parents()` before setting `not null`, and takes no lock, as `0028`'s last
     statement does not.
-  - `item_parent_child_idx` on `sync.item_parent (adapter_kind, entity_id) where arm = 'child'`
+  - `item_parent_child_idx` on `sync.item_parent (source_id, adapter_kind) where arm = 'child'`
     serves the coverage probe.
   - No trigger, lock, other function or reader of `0028`'s columns changes: `under:`'s filter, its
     unknown-token lookup and the query box's suggestions still read both arms.
 
   **Reader.** `knobas_search::coverage::UNDER_COVERAGE_SQL`, one statement asked only for a query
-  that filtered by `under:`: the sources among the scoped ids with an `exists` over child-arm rows
-  of their configured adapter whose item is theirs and live. **Residual:** two sources of one
-  adapter, one naming parents and one not, makes the second read the first's child rows to prove
-  its absence. The launcher's `no_values` reason for `under:` becomes "nothing it has synced names
+  that filtered by `under:`: the sources among the scoped ids with an `exists` over their own
+  child-arm rows (`ip.source_id = s.id`) under their configured adapter whose item is live. A
+  source with no child rows answers from an empty index range, whatever another source of its
+  adapter has. The launcher's `no_values` reason for `under:` becomes "nothing it has synced names
   a parent" (`app/src/lib/launcher/coverage.ts`), a sentence true of a corpus, like the author one.
 
   **Witness.** All on real PostgreSQL (ADR-0013); each mutant was applied to a committed baseline.
@@ -10104,8 +10112,10 @@ From this commit on, each of the following requires an orchestrator decision **a
     Killed: the verdict restored to the declaration; the probe counting rows of both arms; the
     probe narrowed to the kind scope; the probe without the adapter match.
   - `tests/it/item_parent.rs`'s agreement test now compares `(entity_id, name, kind, arm)` against
-    the walk, with each arm's select tagged, after every change it already exercised. It dies when
-    the restated function tags the child arm `'parent'`.
+    the walk, with each arm's select tagged, and checks every row's `source_id` against its item's,
+    after every change it already exercised and a new one: an item moved to another source and
+    back. It dies when the restated function tags the child arm `'parent'`, and when it copies the
+    adapter kind in place of the source id.
   - The benchmark: BENCH_PLACEHOLDER
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**

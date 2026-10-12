@@ -1260,8 +1260,10 @@ const REPOS: i64 = 41;
 /// so its name sorts after every other test in this file (the module docs'
 /// "one database" paragraph).
 ///
-/// The timing is the **whole** `search` call: the unknown-token lookup and
-/// the scoped statement together, which is what the launcher waits for.
+/// The timing is the **whole** `search` call: the unknown-token lookup, the
+/// scoped statement and the `under:` coverage probe together, which is what
+/// the launcher waits for. A second, empty Gitea source is configured so the
+/// probe pays its worst case, two sources on one adapter (#642).
 #[tokio::test]
 #[ignore = "seeds a 100k corpus with declared parents and asserts on wall-clock time; run it deliberately"]
 async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
@@ -1305,6 +1307,20 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         "under: giving {parented} commits a repository took {} ms",
         parenting.elapsed().as_millis()
     );
+    // A second Gitea source that has synced nothing: the coverage probe's old
+    // residual (#642). Every `under:` keystroke below asks whether it names a
+    // parent, and before `sync.item_parent.source_id` proving that it does not
+    // read every Gitea child row the first source has -- 13,334, about
+    // 150 ms -- because the only way from a child row to its source was
+    // through `sync.item`.
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('gitea-quiet', 'gitea', 'Quiet Gitea', 'http://x', 'Pat')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     testing::prepare(&pool).await.unwrap();
     println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
     assert!(

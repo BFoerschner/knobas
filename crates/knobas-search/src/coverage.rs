@@ -157,11 +157,12 @@ select i.source_id                            as source_id,
 ///   declaring kind has no child row and gets it too.
 ///
 /// `exists` per source, served by `item_parent_child_idx` on
-/// `(adapter_kind, entity_id) where arm = 'child'`: an adapter with no child
-/// rows answers from an empty range, and one that has them usually answers on
-/// its first. The residual is two sources of one adapter, one naming parents
-/// and the other not: the second reads the first's child rows to prove its
-/// absence.
+/// `(source_id, adapter_kind) where arm = 'child'`: a source with no child
+/// rows answers from an empty range, whatever another source of the same
+/// adapter has, and one that has them answers on its first live one. The
+/// copied `source_id` is what bounds it (Björn's sign-off on #642): through
+/// `sync.item`, a second source on one adapter read every child row of the
+/// first to prove its absence, about 150 ms at the 100k benchmark.
 const UNDER_COVERAGE_SQL: &str = r"
 select s.id
   from knobas.source_config s
@@ -170,8 +171,8 @@ select s.id
                  from sync.item_parent ip
                  join sync.live_item i on i.entity_id = ip.entity_id
                 where ip.arm = 'child'
-                  and ip.adapter_kind = s.kind
-                  and i.source_id = s.id)
+                  and ip.source_id = s.id
+                  and ip.adapter_kind = s.kind)
 ";
 
 /// What the probe answered about one source that put rows in scope.

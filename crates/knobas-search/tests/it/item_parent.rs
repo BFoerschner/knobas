@@ -7,8 +7,8 @@
 //! file holds the stored answer to the walk -- `knobas_core`'s
 //! `declared_parent_names!` and `declared_names_as_parent!`, bound to the
 //! declarations `Vocabulary::declaring` builds in Rust -- after every kind of
-//! change the trigger code claims to follow: an insert, a payload update, a
-//! delete, a change to the stored declarations, a source configured after
+//! change the trigger code claims to follow: an insert, a payload update, an
+//! item moved to another source and back, a delete, a change to the stored declarations, a source configured after
 //! its items were written, a source given another adapter kind, and a source
 //! removed.
 //!
@@ -150,6 +150,21 @@ async fn agree(
         stored, walked,
         "after {step}: sync.item_parent is not the walk"
     );
+    // `source_id` is the item's, copied (migration `0029`, #642): the
+    // coverage probe reads it in place of joining `sync.item`.
+    let stale: Vec<(String, String, String)> = sqlx::query_as(
+        "select ip.entity_id, ip.source_id, x.source_id from sync.item_parent ip
+           join sync.item x on x.entity_id = ip.entity_id
+          where ip.entity_id like $1 || '%' and ip.source_id is distinct from x.source_id",
+    )
+    .bind(prefix)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        stale.is_empty(),
+        "after {step}: rows whose source_id is not their item's: {stale:?}"
+    );
     stored
 }
 
@@ -274,6 +289,24 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
         has(&rows, &c1, "tide/renamed", "repo", "child")
             && !has(&rows, &c1, "tide/ghost", "repo", "child")
     );
+
+    // The commit moves to another Gitea source and back: its rows follow
+    // the item's `source_id` each time.
+    let g2 = format!("g2{t}");
+    configure(&pool, &g2, &gitea).await;
+    for (to, step) in [
+        (&g2, "moving an item to another source"),
+        (&g, "moving it back"),
+    ] {
+        sqlx::query("update sync.item set source_id = $2 where entity_id = $1")
+            .bind(&c1)
+            .bind(to)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = agree(&pool, &prefix(&g), &templates, step).await;
+        assert!(has(&rows, &c1, "tide/renamed", "repo", "child"), "{rows:?}");
+    }
 
     sqlx::query("delete from knobas.entity where id = $1")
         .bind(&p1)

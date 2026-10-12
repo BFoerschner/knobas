@@ -1,11 +1,13 @@
--- 0029_which_arm_named_the_parent.sql -- `sync.item_parent.arm`, and
--- `sync.resolve_item_parents` restated to write it (issue #642, ADR-0019).
+-- 0029_which_arm_named_the_parent.sql -- `sync.item_parent.arm` and
+-- `sync.item_parent.source_id`, and `sync.resolve_item_parents` restated to
+-- write them (issue #642, ADR-0019).
 --
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests 0030 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Signed off by Björn on #642 on 2026-10-12
--- (option 1, "the migration is allowed"), recorded in `docs/contract.md`
--- section 10.8.
+-- twice: option 1, "the migration is allowed", and then the `source_id`
+-- column ("Yes, add source_id"), both recorded in `docs/contract.md` section
+-- 10.8.
 --
 -- ## Why
 --
@@ -31,23 +33,31 @@
 --   `knobas-search`'s `tests/it/item_parent.rs` still holds the stored text to
 --   the macros' current expansion and the stored rows, arm included, to the
 --   walk.
+-- * `source_id` is the item's, copied: the coverage probe asks per source,
+--   and without it the only way from a child row to its source was through
+--   `sync.item`. Two sources on one adapter, one naming parents and one not,
+--   then cost the second a lookup per child row of the first -- 13,334 at the
+--   100k benchmark, about 150 ms on every `under:` keystroke. The trigger
+--   already recomputes an item whose `source_id` changes, so the copy cannot
+--   go stale, and **the stored rows still depend on the item and on
+--   `sync.parent_declaration` and on nothing else** (ADR-0019).
 -- * `item_parent_child_idx` is the coverage probe's: per source, "is there a
---   child row of this adapter whose item is this source's and live". A source
---   whose adapter has no child rows at all -- the usual unconfigured classic
---   Jira, one source per adapter -- answers from an empty index range.
+--   child row of this source under this adapter whose item is live". A source
+--   with no child rows of its own answers from an empty index range, whatever
+--   any other source has.
 --
--- Every row is recomputed here, so the column is filled before it is made
--- `not null`. Like `0028`'s last statement it takes no lock: migrations run at
+-- Every row is recomputed here, so the columns are filled before they are
+-- made `not null`. Like `0028`'s last statement it takes no lock: migrations run at
 -- bring-up, before any sync.
 
-alter table sync.item_parent add column arm text;
+alter table sync.item_parent add column arm text, add column source_id text;
 
 create or replace function sync.resolve_item_parents(ids text[]) returns void
 language plpgsql as $fn$
 begin
   delete from sync.item_parent p using unnest(ids) as u(id) where p.entity_id = u.id;
-  insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm)
-  select i.entity_id, a.adapter_kind, n.name, n.kind, n.arm
+  insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id)
+  select i.entity_id, a.adapter_kind, n.name, n.kind, n.arm, i.source_id
     from unnest(ids) as u(id)
     join sync.item i on i.entity_id = u.id
     join sync.declared_adapters() as a on i.kind = any(a.reached)
@@ -64,7 +74,8 @@ select sync.resolve_all_item_parents();
 
 alter table sync.item_parent
   alter column arm set not null,
+  alter column source_id set not null,
   add constraint item_parent_arm_check check (arm in ('child', 'parent'));
 
-create index item_parent_child_idx on sync.item_parent (adapter_kind, entity_id)
+create index item_parent_child_idx on sync.item_parent (source_id, adapter_kind)
   where arm = 'child';
