@@ -9886,8 +9886,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `knobas-db`'s `tests/schema.rs`: `zero_twenty_seven_changes_only_a_title_that_holds_a_slash`
   (against `0001`'s expression; dies when the term is added to every title) and
   `zero_twenty_seven_reaches_a_row_mirrored_before_it` (a database wound back to `0001`'s
-  expression, a row written there, then the runner). `ranking.rs`, `under.rs` and
-  `corpus_seam.rs` pass unchanged.
+  expression, a row written there, then the runner). `ranking.rs`, `under.rs`,
+  `corpus_seam.rs` and `knobas-core`'s suggestion tests (the readers of `SIMILAR_TEXT`) pass
+  unchanged.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
