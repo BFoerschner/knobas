@@ -63,21 +63,18 @@ live_needs() {
 
 # live_running <container>
 live_running() {
-  docker ps --format '{{.Names}}' | grep -qx -- "$1"
+  # `grep -x >/dev/null`, not `grep -q`: under pipefail an early-exiting grep
+  # can kill `docker ps` with SIGPIPE and turn a match into a failure.
+  docker ps --format '{{.Names}}' | grep -x -- "$1" >/dev/null
 }
 
 live_is_up() {
   live_running "$(_live_main "$1")"
 }
 
-# live_guard <product> -- refuse, in one line on stderr and before any docker
-# call that changes anything, a product this machine must not start now.
-live_guard() {
-  local product=$1 other context
-  _live_main "$product" >/dev/null || {
-    echo "live: unknown product '$product'; one of: gitea teamcity jira confluence" >&2
-    return 1
-  }
+# _live_guard_shell -- refuse a shell whose docker reaches the Hetzner servers.
+_live_guard_shell() {
+  local context
   if [ -n "${KNOBAS_TESTENV_HETZNER:-}" ] || case "$(command -v docker)" in */hetzner/bin/docker) true ;; *) false ;; esac; then
     echo "live: this shell has sourced testenv/hetzner/env, whose docker shim routes to the Hetzner servers; live products run locally now -- open a fresh shell" >&2
     return 1
@@ -88,6 +85,17 @@ live_guard() {
       echo "live: the docker context is '$context', a Hetzner server; live products run locally now -- docker context use orbstack" >&2
       return 1 ;;
   esac
+}
+
+# live_guard <product> -- refuse, in one line on stderr and before any docker
+# call that changes anything, a product this machine must not start now.
+live_guard() {
+  local product=$1 other
+  _live_main "$product" >/dev/null || {
+    echo "live: unknown product '$product'; one of: gitea teamcity jira confluence" >&2
+    return 1
+  }
+  _live_guard_shell || return 1
   [ "$product" != gitea ] || return 0
   for other in teamcity jira confluence; do
     [ "$other" != "$product" ] || continue
@@ -156,6 +164,10 @@ live_up() {
 
 # live_down <product> -- this product only; what it needed stays as it is.
 live_down() {
+  # The guard first, for the Hetzner half: through hetzner/env's shim this
+  # `rm` and `volume rm` would land on a server. Its one-JVM half cannot refuse
+  # a product that is itself the one up, and `down` of another is harmless.
+  _live_guard_shell || return 1
   _live_main "$1" >/dev/null || { live_guard "$1"; return 1; }
   case $1 in
     gitea) _live_compose stop gitea ;;

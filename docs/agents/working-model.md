@@ -24,7 +24,8 @@ Implementation now runs ticket-driven:
   output in its body, and the merge-manager re-runs it before squashing. The recipes, in full —
   keep this list current, a suite whose recipe is missing from it is one nobody knows to run:
   `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
-  `just teamcity-live-seeded`, `just atlassian-live`, `just kuma-live` (#442),
+  `just teamcity-live-seeded`, `just jira-live` and `just confluence-live` (#633; `just
+  atlassian-live` runs the two in turn), `just kuma-live` (#442),
   `just estate-live` (#509 — the hcloud importer, which is not an adapter but is a read of a
   real system and is the only witness for the `hcloud_id` values in
   `testenv/hetzner/estate.json`), and `just search-perf` (#556 — the one recipe on this list that
@@ -154,7 +155,7 @@ What makes the streams independent (all built in M0):
 
 Per-task discipline (unchanged): TDD, frequent commits, a review pass (mattpocock code-review) before merging a stream, verification-before-completion with command output.
 
-**Test strategy by layer (decided by Björn 2026-08-24: containerized test environment + faithful API mocks, all on the dev machine — Docker 29.x / Compose v5 verified present; amended 2026-09-03 by ADR-0013, which reverses the mock-first premise):** the real container is the witness for every adapter and every write path, and no mock is a witness for any acceptance or exit criterion. Each system gets a seed from the Tidewater fixtures, a `just <system>-live` recipe and a live suite (the Atlassian pair's recipe stands up, seeds, runs and tears down inside its three-hour licence; Gitea's and TeamCity's run against the long-lived environment); the Process rule above says which PRs carry a live run. `knobas-mockd` is deprecated: frozen, nothing new, port 8211 unreserved, deleted once the live suites assert what its Jira and TeamCity tests assert. The layers, as amended:
+**Test strategy by layer (decided by Björn 2026-08-24: containerized test environment + faithful API mocks, all on the dev machine — Docker 29.x / Compose v5 verified present; amended 2026-09-03 by ADR-0013, which reverses the mock-first premise):** the real container is the witness for every adapter and every write path, and no mock is a witness for any acceptance or exit criterion. Each system gets a seed from the Tidewater fixtures, a `just <system>-live` recipe and a live suite (since #633 every recipe starts its product on this machine, seeds it, runs and stops it again, one JVM product at a time — Jira's and Confluence's removed with their volumes inside a three-hour licence, Gitea's and TeamCity's stopped with their seeded volumes kept; `testenv/README.md`, *Live products, on demand*); the Process rule above says which PRs carry a live run. `knobas-mockd` is deprecated: frozen, nothing new, port 8211 unreserved, deleted once the live suites assert what its Jira and TeamCity tests assert. The layers, as amended:
 
 - **Unit tests** per crate (TDD), plain `cargo test`.
 - **Trait-level mock** (`knobas-source-mock`, M0): fakes a source at the `Source`-trait layer — what the UI, sync engine, and contract battery test against. Cheap, no HTTP.

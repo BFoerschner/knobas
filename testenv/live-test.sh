@@ -100,6 +100,19 @@ KNOBAS_TESTENV_HETZNER=1 \
 STUB_CONTEXT=knobas-jira \
   check_guard "a docker context aimed at a server is refused" refused jira knobas-jira
 
+# check_down_refused <what> -- `live_down jira` must refuse before any call.
+check_down_refused() {
+  checks=$((checks + 1))
+  : >"$STUB_LOG"
+  if live_down jira 2>"$scratch/err"; then
+    fail "$1" "expected: refused" "actual:   ok"
+  elif [ -s "$STUB_LOG" ]; then
+    fail "$1: a refusal touches nothing" "$(cat "$STUB_LOG")"
+  fi
+}
+KNOBAS_TESTENV_HETZNER=1 check_down_refused "a hetzner/env shell cannot take a product down either"
+STUB_CONTEXT=knobas-jira check_down_refused "nor can a server's docker context"
+
 # --- what a run puts back ---------------------------------------------------
 
 # check_eq <what> <expected> <actual>

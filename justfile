@@ -1081,8 +1081,9 @@ gitea-live:
 #
 # The uncap runs from `live_session`'s traps (`live_on_exit`), ahead of the
 # session stopping a Gitea it started, and those traps are `INT` and `TERM` as
-# well as `EXIT`, the rule `inventory` above states and `check-ports.sh` follows: bash need not run an `EXIT` trap when a signal it
-# has no handler for terminates the shell, and this recipe's slow live run is
+# well as `EXIT`, the rule `inventory` above states and `check-ports.sh`
+# follows: bash need not run an `EXIT` trap when a signal it has no handler for
+# terminates the shell, and this recipe's slow live run is
 # one somebody will Ctrl-C. Each signal trap **clears the `EXIT` trap first**,
 # then restores, then re-raises -- so the container is uncapped exactly once and
 # the recipe still dies of the signal it was sent rather than reporting a tidy
@@ -1447,8 +1448,11 @@ atlassian_live_confluence_tests := "a_comment_that_mentions_me_becomes_an_inbox_
 _atlassian-live-names:
     #!/usr/bin/env bash
     set -euo pipefail
-    listed=$(env -u RUSTUP_TOOLCHAIN cargo test -q -p knobas-app --test atlassian_live \
-      -- --ignored --list 2>/dev/null | sed -n 's/: test$//p')
+    # stderr kept: a compile error here is this recipe's failure, and should
+    # say so rather than end the run without a word.
+    list=$(env -u RUSTUP_TOOLCHAIN cargo test -q -p knobas-app --test atlassian_live \
+      -- --ignored --list) || { echo "error: could not list atlassian_live's tests" >&2; exit 1; }
+    listed=$(sed -n 's/: test$//p' <<<"$list")
     for name in {{ atlassian_live_confluence_tests }}; do
       grep -qx -- "$name" <<<"$listed" || {
         echo "error: atlassian_live has no test '$name', which the justfile's" >&2
@@ -1471,8 +1475,9 @@ _atlassian-live-names:
 # removing it with its volumes. The suites take seconds.
 #
 # MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
-# with the images pulled: see `atlassian-live` below for the pair's history
-# and the issue #633 PR for this recipe's own wall clock.
+# with the images pulled, 2026-10-12 (#633): 299 s in all, seeded and verified
+# at 244-263 s, the three suites ~15 s once compiled. `atlassian-live` below
+# keeps the pair's earlier history.
 #
 # THE SUITES. `live_jira_seeded` (#276) -- sync, payload, cursor, the real
 # 401; the Jira half of the app crate's `atlassian_live` -- credential health
