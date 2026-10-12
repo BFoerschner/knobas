@@ -55,6 +55,11 @@
 //!   the Epic Link custom field, whose id is this instance's own, and *not*
 //!   `fields.parent`, which is absent from every issue in the corpus. mockd
 //!   serves both spellings, which is what hid this.
+//! * **That `fields.parent` reaches the payload when there is one** (#643): a
+//!   sub-task this suite files resolves to exactly one parent through the
+//!   descriptor's *first* candidate, and `under:` reaches it. The golden test
+//!   reads a hand-written record, so only this run sees `BASE_FIELDS` ask for
+//!   `parent`.
 //! * **That the adapter can find that id by itself** (#297): `test_connection`
 //!   reads `GET /rest/api/2/field` and reports the same id the seed recorded,
 //!   and a source configured from *that* answer -- never from
@@ -73,6 +78,12 @@
 //! with a runtime of its own, and checked afterwards rather than assumed. A
 //! label is the smallest reversible edit Jira has: it moves `updated`, which is
 //! the whole point, and it changes no field the fixture describes.
+//!
+//! One **sub-task**, filed under PAY-219 with [`LITTER_LABEL`] so that a
+//! `fields.parent` exists on this server at all -- the corpus has none -- and
+//! deleted again from [`SubTask`]'s `Drop`, which checks the issue answers 404
+//! and polls `/search` until it stops naming it (#643). It moves the `PAY` key
+//! counter, which nothing may assume stands still.
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
@@ -781,6 +792,45 @@ fn bad_token() -> String {
 /// ([`Seeded::refused_source`] has the whole reasoning).
 fn nobody() -> String {
     format!("knobas-live-nobody-{}", std::process::id())
+}
+
+/// The `ticket` kind's parent candidates, as the descriptor declares them --
+/// `fields.parent`, then `epic`.
+fn ticket_parent_declaration() -> Vec<knobas_source::ParentPath> {
+    knobas_source_jira::descriptor_template()
+        .payload_paths
+        .into_iter()
+        .find(|paths| paths.kind == "ticket")
+        .expect("a ticket declares its parent")
+        .parent
+}
+
+/// The keys `under:value` returns over one run, ascending: every item one of
+/// whose parents is named `value`, and every item that answers to `value` as a
+/// parent itself.
+///
+/// Computed with `knobas_core::payload`'s resolvers over the descriptor's own
+/// declaration -- the Rust half of the rule the SQL `under:` predicate is the
+/// other half of, held together by `knobas-core`'s agreement test -- and
+/// matched ignoring case, as `under:` matches.
+fn under(items: &[SyncItem], value: &str) -> Vec<String> {
+    use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
+
+    let declarations = knobas_source_jira::descriptor_template().payload_paths;
+    let declared = ticket_parent_declaration();
+    let mut found: Vec<String> = items
+        .iter()
+        .filter(|it| {
+            resolve_parents(&it.payload, &declared)
+                .into_iter()
+                .flat_map(|p| p.names)
+                .chain(resolve_names_as_parent(&it.payload, &it.kind, &declarations))
+                .any(|n| n.eq_ignore_ascii_case(value))
+        })
+        .map(|it| it.entity.key.clone())
+        .collect();
+    found.sort();
+    found
 }
 
 // ---------------------------------------------------------------------------
@@ -1557,7 +1607,7 @@ async fn the_search_that_reads_as_an_empty_corpus_is_never_the_first_call() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
-    use knobas_core::payload::{resolve_names_as_parent, resolve_parents};
+    use knobas_core::payload::resolve_parents;
 
     let seeded = seeded();
     seeded.clear_leftovers().await;
@@ -1565,32 +1615,8 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
         &*seeded.source(serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field })),
     )
     .await;
-    let declarations = knobas_source_jira::descriptor_template().payload_paths;
-    let declared = &declarations
-        .iter()
-        .find(|paths| paths.kind == "ticket")
-        .expect("a ticket declares its parent")
-        .parent;
-
-    let under = |value: &str| -> Vec<String> {
-        let mut found: Vec<String> = items
-            .iter()
-            .filter(|it| {
-                let names = resolve_parents(&it.payload, declared)
-                    .into_iter()
-                    .flat_map(|p| p.names)
-                    .chain(resolve_names_as_parent(
-                        &it.payload,
-                        &it.kind,
-                        &declarations,
-                    ));
-                names.into_iter().any(|n| n.eq_ignore_ascii_case(value))
-            })
-            .map(|it| it.entity.key.clone())
-            .collect();
-        found.sort();
-        found
-    };
+    let declared = ticket_parent_declaration();
+    let under = |value: &str| under(&items, value);
     let expected = [
         "PAY-200", "PAY-219", "PAY-228", "PAY-231", "PAY-236", "PAY-240",
     ];
@@ -1605,7 +1631,7 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
             "{key} carries the epic the adapter stored from {}",
             seeded.seed.epic_link_field
         );
-        let parents = resolve_parents(&child.payload, declared);
+        let parents = resolve_parents(&child.payload, &declared);
         assert_eq!(parents.len(), 1, "{key} sits in one epic: {parents:?}");
         assert_eq!(parents[0].kind, "ticket");
         assert_eq!(parents[0].names, vec!["PAY-200".to_owned()]);
@@ -1615,6 +1641,257 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
         "the epic belongs to no epic, so nothing is stored for it"
     );
     println!("SEEDED under:PAY-200 -> {:?}", under("PAY-200"));
+}
+
+/// A sub-task this suite files under a seeded issue, deleted again when the
+/// guard drops -- passing or panicking alike -- and the deletion checked, the
+/// way [`Labeled`] checks its unlabel.
+///
+/// The seed puts no sub-task in the corpus (`fixtures/tidewater/work.json` has
+/// none), so this is the one place a `fields.parent` exists on this server.
+/// Marked with [`LITTER_LABEL`]; a killed run's sub-task is an issue the seed
+/// did not create, which [`Seeded::clear_leftovers`] deletes.
+struct SubTask {
+    url: String,
+    user: String,
+    password: String,
+    parent: String,
+    key: Option<String>,
+}
+
+impl SubTask {
+    /// File a Sub-task under `parent`, and own its deletion from this line on.
+    ///
+    /// `POST /rest/api/2/issue` with `parent: {key}` and the issue type by
+    /// name: the *Basic software development* template's scheme has
+    /// Sub-task (`testenv/seed-atlassian-content.sh`'s header). A refusal here
+    /// is the instance saying sub-tasks are off or have no create screen, and
+    /// the assertion prints its answer.
+    async fn file(seeded: &Seeded, parent: &str) -> SubTask {
+        let project = parent.split('-').next().expect("a key has a project");
+        let mut guard = SubTask {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            parent: parent.to_owned(),
+            key: None,
+        };
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/api/2/issue",
+                Some(serde_json::json!({
+                    "fields": {
+                        "project": { "key": project },
+                        "parent": { "key": parent },
+                        "issuetype": { "name": "Sub-task" },
+                        "summary": format!("knobas live suite: a sub-task of {parent}"),
+                        "labels": [LITTER_LABEL],
+                    }
+                })),
+            )
+            .await;
+        assert_eq!(status, 201, "filing a Sub-task under {parent}: {body}");
+        guard.key = Some(
+            body["key"]
+                .as_str()
+                .unwrap_or_else(|| panic!("a created issue has a key: {body}"))
+                .to_owned(),
+        );
+        guard
+    }
+
+    fn key(&self) -> &str {
+        self.key.as_deref().expect("filed")
+    }
+}
+
+impl Drop for SubTask {
+    fn drop(&mut self) {
+        let Some(key) = self.key.take() else {
+            return;
+        };
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        let (filed, parent) = (key.clone(), self.parent.clone());
+        // A thread with a runtime of its own and a client built inside it, for
+        // the reasons `Labeled`'s `Drop` gives.
+        let report = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move {
+                    delete_issue(&client(), &url, &user, &password, &filed, &parent).await
+                })
+        })
+        .join();
+        let failure = match report {
+            Ok(Ok(())) => return,
+            Ok(Err(e)) => e,
+            Err(_) => format!(
+                "the cleanup thread panicked (its own message is on stderr), so {key} may still \
+                 exist; the next run's leftover clearing deletes it"
+            ),
+        };
+        let report = format!(
+            "the live suite did not delete the sub-task it filed, so the server is no longer in \
+             the plain-seed state: {failure}"
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite cleanup: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// Delete one issue and **check** it is gone: the issue itself answers 404,
+/// and `/search` stops naming it under `parent` within [`INDEX_BUDGET`] --
+/// the index is updated asynchronously and can name an issue already deleted,
+/// which is what [`Seeded::clear_leftovers`]' 404 tolerance is for.
+async fn delete_issue(
+    http: &reqwest::Client,
+    url: &str,
+    user: &str,
+    password: &str,
+    key: &str,
+    parent: &str,
+) -> Result<(), String> {
+    let response = http
+        .delete(format!("{url}/rest/api/2/issue/{key}"))
+        .header("Accept", "application/json")
+        .basic_auth(user, Some(password))
+        .send()
+        .await
+        .map_err(|e| format!("DELETE issue {key}: {e}"))?;
+    if response.status().as_u16() != 204 {
+        return Err(format!(
+            "DELETE issue {key} -> {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+    let response = http
+        .get(format!("{url}/rest/api/2/issue/{key}?fields=key"))
+        .header("Accept", "application/json")
+        .basic_auth(user, Some(password))
+        .send()
+        .await
+        .map_err(|e| format!("GET issue {key}: {e}"))?;
+    if response.status().as_u16() != 404 {
+        return Err(format!(
+            "GET issue {key} after its deletion -> {}, not 404",
+            response.status()
+        ));
+    }
+    let jql = url_encode(&format!("parent = {parent}"));
+    let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
+    loop {
+        let response = http
+            .get(format!(
+                "{url}/rest/api/2/search?jql={jql}&maxResults=100&fields=key"
+            ))
+            .header("Accept", "application/json")
+            .basic_auth(user, Some(password))
+            .send()
+            .await
+            .map_err(|e| format!("searching for {key}: {e}"))?;
+        let status = response.status().as_u16();
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("searching for {key}: unreadable body: {e}"))?;
+        if status != 200 {
+            return Err(format!("searching for {key} -> {status}: {body}"));
+        }
+        let named = body["issues"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|i| i["key"] == key);
+        if !named {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{key} is deleted but /search still names it after {INDEX_BUDGET:?}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// **A sub-task's parent is `fields.parent`, and `under:` reaches it** -- the
+/// live witness for the `ticket` kind's *first* parent candidate (#643).
+///
+/// Every other `under:` assertion here runs through the second candidate,
+/// `epic`, because a classic project keeps epic membership in the Epic Link
+/// field and the corpus has no sub-task. Clause 6 gives both candidates one
+/// evidence slot (#301), so the battery passes while `fields.parent` resolves
+/// on nothing; the golden test and `knobas-search`'s `under_jira.rs` read
+/// hand-written shapes. What only this test sees is the wire: `BASE_FIELDS`
+/// has to request `parent`, or the payload never carries it.
+///
+/// So the test files a Sub-task under PAY-219 -- a Task in PAY-200 --
+/// full-syncs with the source configured as the Add-source dialog leaves it,
+/// and deletes the sub-task again from [`SubTask`]'s `Drop` (the deputy's
+/// ruling of 2026-10-12 on #643). Exactly one parent, PAY-219, whatever this
+/// instance does with the sub-task's Epic Link: the first candidate that
+/// resolves wins. Measured on Jira 10.3.24, 2026-10-12: the sub-task's Epic
+/// Link comes back null, so the adapter stores no `epic` for it and
+/// `fields.parent` is the only candidate that resolves.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it() {
+    use knobas_core::payload::resolve_parents;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let sub_task = SubTask::file(&seeded, "PAY-219").await;
+    let key = sub_task.key().to_owned();
+    let source =
+        seeded.source(serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field }));
+
+    // Filed is not yet searchable: the index is updated asynchronously.
+    let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
+    let items = loop {
+        let (items, _) = full(&*source).await;
+        if items.iter().any(|i| i.entity.key == key) {
+            break items;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{key} was filed but no full sync named it within {INDEX_BUDGET:?}: {:?}",
+            keys(&items)
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+
+    let stored = &item(&items, &key).payload;
+    assert_eq!(
+        stored["fields"]["parent"]["key"],
+        serde_json::json!("PAY-219"),
+        "{key} carries its parent in `fields.parent`, which only reaches the payload if the \
+         run asked for it: {}",
+        stored["fields"]
+    );
+    let parents = resolve_parents(stored, &ticket_parent_declaration());
+    assert_eq!(parents.len(), 1, "{key} has one parent: {parents:?}");
+    assert_eq!(parents[0].kind, "ticket");
+    assert_eq!(parents[0].names, vec!["PAY-219".to_owned()]);
+
+    let mut expected = vec!["PAY-219".to_owned(), key.clone()];
+    expected.sort();
+    assert_eq!(under(&items, "PAY-219"), expected);
+    println!(
+        "SEEDED sub-task {key}: fields.parent.key = PAY-219, Epic Link {} = {}, stored epic = \
+         {}; under:PAY-219 -> {:?}",
+        seeded.seed.epic_link_field,
+        stored["fields"][&seeded.seed.epic_link_field],
+        stored.get("epic").cloned().unwrap_or_default(),
+        under(&items, "PAY-219")
+    );
+    drop(sub_task);
 }
 
 /// The contract battery -- the suite every adapter must pass -- against the
