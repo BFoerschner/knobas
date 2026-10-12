@@ -21,7 +21,7 @@ Implementation now runs ticket-driven:
   reviewer in a throwaway worktree) and the **standard pass** (everything else).
 - **A PR at the real systems' edge carries its live run (rule, Björn 2026-09-02, ADR-0013).** A PR
   touching an adapter crate, a `WriteOp`, the descriptor, or the sync engine carries its live run's
-  output in its body, and the merge-manager re-runs it before squashing. The recipes, in full —
+  output in its body, naming the head it was taken on, and the merge-manager re-runs it before squashing **only if something that suite exercises changed since that head** (amended 2026-10-12, Björn): its own fix commits or the rebase touching the adapter crate the suite runs, `knobas-source`, `knobas-sync`, `knobas-http`, the seed and `testenv/` scripts it uses, or the app code an app-level live suite drives. Comments, docs, the frontend and test code outside the suite do not; a transcript whose head is not named is re-run. The recipes, in full —
   keep this list current, a suite whose recipe is missing from it is one nobody knows to run:
   `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
   `just teamcity-live-seeded`, `just jira-live` and `just confluence-live` (#633; `just
