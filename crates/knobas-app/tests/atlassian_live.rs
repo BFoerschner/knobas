@@ -3591,6 +3591,132 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
     state.scheduler.shutdown().await;
 }
 
+/// **`under:` its grandparent finds the seeded grandchild** (#599, ADR-0018),
+/// through the real Confluence, the real sync engine and the real search
+/// statement.
+///
+/// The seed nests *SEPA payout retry design* under *Payments architecture
+/// overview*, which hangs off the space home (#396), so the home page is the
+/// grandparent and the page is two levels below it. Confluence declares a
+/// page's parent chain on the `ancestors` its records keep, so the grandchild
+/// names its grandparent itself: `under:` reaches it with no walk of the
+/// mirror. Both titles are read back from the server rather than from the
+/// mirror, and typed the way the query box writes a name with a space --
+/// quoted (the deputy's ruling of 2026-10-12 on #597). The direct parent's
+/// scope is asserted as an exact set, the home page's as containment: other
+/// tests in this suite publish under the home page's subtree.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn under_its_grandparent_finds_the_seeded_grandchild() {
+    let wiki = wiki();
+    let (state, _events) = wiki_app(
+        "atlassian_live_under_grandparent",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
+    sync(&state, CONFLUENCE).await;
+
+    // The tree, as the server reports it: home > parent > page.
+    let record = wiki.content(&wiki.page, "ancestors").await;
+    let ancestors: Vec<String> = record["ancestors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no ancestors array on the server's record: {record}"))
+        .iter()
+        .map(|a| a["id"].as_str().expect("an ancestor id").to_owned())
+        .collect();
+    assert_eq!(
+        ancestors,
+        vec![wiki.home_page_id.clone(), wiki.parent_page_id.clone()],
+        "the seed nests the page under a page under the space home"
+    );
+    let title_of = |record: serde_json::Value| -> String {
+        record["title"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a page with no title: {record}"))
+            .to_owned()
+    };
+    let grandparent = title_of(wiki.content(&wiki.home_page_id, "version").await);
+    let parent = title_of(wiki.content(&wiki.parent_page_id, "version").await);
+
+    // What the box writes for a picked name: quoted when it has a space.
+    let under = |name: &str| {
+        if name.chars().any(char::is_whitespace) {
+            format!("under:\"{name}\"")
+        } else {
+            format!("under:{name}")
+        }
+    };
+    let search = |raw: String| {
+        let pool = state.pool.clone();
+        async move {
+            let response = knobas_app::commands::search::search_inner(
+                &pool,
+                knobas_search::SearchQuery {
+                    raw: raw.clone(),
+                    limit: 30,
+                    filters: knobas_search::SearchFilters::default(),
+                },
+            )
+            .await
+            .expect("the search runs");
+            assert!(
+                response.interpreted.unknown_tokens.is_empty(),
+                "{raw} names a page and is not unknown: {:?}",
+                response.interpreted.unknown_tokens
+            );
+            let mut ids: Vec<String> = response
+                .groups
+                .iter()
+                .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+                .collect();
+            ids.sort();
+            ids
+        }
+    };
+    let entity = |id: &str| format!("confluence:{id}");
+
+    let by_grandparent = search(under(&grandparent)).await;
+    for (what, id) in [
+        ("the grandchild", &wiki.page),
+        ("the parent", &wiki.parent_page_id),
+        ("the grandparent itself", &wiki.home_page_id),
+    ] {
+        assert!(
+            by_grandparent.contains(&entity(id)),
+            "{} did not find {what} {}: {by_grandparent:?}",
+            under(&grandparent),
+            entity(id)
+        );
+    }
+    assert!(
+        by_grandparent
+            .iter()
+            .all(|id| id.starts_with("confluence:")),
+        "{by_grandparent:?}"
+    );
+
+    let by_parent = search(under(&parent)).await;
+    let mut expected = vec![entity(&wiki.parent_page_id), entity(&wiki.page)];
+    expected.sort();
+    assert_eq!(
+        by_parent,
+        expected,
+        "{} is the parent and its one seeded child",
+        under(&parent)
+    );
+
+    println!(
+        "SEEDED {} -> {} hit(s), the grandchild {} among them; {} -> {by_parent:?}",
+        under(&grandparent),
+        by_grandparent.len(),
+        entity(&wiki.page),
+        under(&parent)
+    );
+    state.scheduler.shutdown().await;
+}
+
 /// **A page the source says is mine is on the digest, under the day it moved**
 /// (issue #288, the Confluence half of criterion 4).
 ///

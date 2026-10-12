@@ -99,15 +99,31 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// page is never "stuck". A source with no status cannot have a blocked-like
 /// one, so the set is empty rather than borrowing Jira's three names.
 ///
+/// **A page's parent is the page above it, and its chain is every ancestor**
+/// (ADR-0018, #599), read off the `ancestors` array [`crate::api::EXPAND`]
+/// already asks for (#284): outermost first, direct parent last, each an
+/// ancestor page's own record shape. That is the array shape of
+/// `ParentPath::at`, so `under:<title>` reaches a page from any ancestor, at
+/// any depth. Each answers to its `title` -- the name a reader types and a
+/// path line shows -- which a page's own record carries at its root too, so
+/// `under:` returns a mirrored ancestor itself. An ancestor in a space this
+/// source does not sync is still in its descendants' chain. Not the content
+/// id: nobody types it.
+///
 /// One entry, because this adapter emits one kind. A `comment` is not a kind
 /// here -- it lives in its page's payload, the way a Jira comment lives in its
 /// issue's -- so it needs no declaration.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, PayloadPath};
+    use knobas_source::{KindPaths, ParentPath, PayloadPath};
     vec![KindPaths {
         kind: crate::KIND_PAGE.to_owned(),
         project_key: vec![PayloadPath::of(["space", "key"])],
         project_name: vec![PayloadPath::of(["space", "name"])],
+        parent: vec![ParentPath {
+            kind: crate::KIND_PAGE.to_owned(),
+            at: PayloadPath::of(["ancestors"]),
+            names: vec![PayloadPath::of(["title"])],
+        }],
         ..KindPaths::default()
     }]
 }
@@ -279,6 +295,23 @@ mod tests {
             paths.blocked_statuses.is_empty(),
             "a page is never stuck, so it borrows no other product's names: {:?}",
             paths.blocked_statuses
+        );
+    }
+
+    /// A page sits under its ancestors (ADR-0018, #599): the chain is the
+    /// `ancestors` array, and each ancestor answers to its title. Literal, so
+    /// a declaration that moved to another key or another name fails here as
+    /// well as against the mapped record in `map.rs`.
+    #[test]
+    fn a_page_declares_its_ancestors_as_parent_by_title() {
+        use knobas_source::{ParentPath, PayloadPath};
+        assert_eq!(
+            descriptor_template().payload_paths[0].parent,
+            vec![ParentPath {
+                kind: "page".to_owned(),
+                at: PayloadPath::of(["ancestors"]),
+                names: vec![PayloadPath::of(["title"])],
+            }]
         );
     }
 

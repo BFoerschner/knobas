@@ -354,6 +354,52 @@ mod tests {
         assert_eq!(item.payload["version"]["number"], 3);
     }
 
+    /// **A page sits under its ancestors, every one of them** (ADR-0018,
+    /// #599). The descriptor declares the page's parent chain on the
+    /// `ancestors` the mapped payload keeps, outermost first, each answering
+    /// to its **title**; and a page's own record carries `title` at its root,
+    /// which is how `under:` returns the ancestor itself when it is mirrored.
+    /// Read through `knobas_core::payload`'s resolvers over the descriptor's
+    /// own declaration and the payload `to_sync_item` stores, so a declaration
+    /// and a mapping that drifted apart fail here.
+    #[test]
+    fn a_page_declares_its_ancestors_as_its_parent_chain_answered_to_by_title() {
+        use knobas_core::payload::{ResolvedParent, resolve_names_as_parent, resolve_parents};
+        let declarations = crate::descriptor_template().payload_paths;
+        let declared = &declarations
+            .iter()
+            .find(|paths| paths.kind == crate::KIND_PAGE)
+            .expect("a page declares its paths")
+            .parent;
+
+        let item = to_sync_item("confluence", "http://x.example", &a_page());
+        assert_eq!(
+            resolve_parents(&item.payload, declared),
+            vec![
+                ResolvedParent {
+                    kind: "page".to_owned(),
+                    names: vec!["Engineering".to_owned()],
+                },
+                ResolvedParent {
+                    kind: "page".to_owned(),
+                    names: vec!["Payments".to_owned()],
+                },
+            ],
+            "the whole chain, outermost first, each by its title"
+        );
+        assert_eq!(
+            resolve_names_as_parent(&item.payload, "page", &declarations),
+            vec!["SEPA payout retry design".to_owned()],
+            "a mirrored page answers to its own title as someone's ancestor"
+        );
+
+        // A top-level page names an empty chain: an answer, not a miss.
+        let mut top = a_page();
+        top.raw["ancestors"] = json!([]);
+        let item = to_sync_item("confluence", "http://x.example", &top);
+        assert!(resolve_parents(&item.payload, declared).is_empty());
+    }
+
     /// A page nobody has edited since it was created -- four of the five
     /// fixture pages -- still has an author, and it is the creator.
     #[test]

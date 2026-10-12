@@ -612,9 +612,13 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 /// and `KindPaths` had no slot shaped like that. #594 added one --
 /// [`KindPaths::parent`], whose `at` may lead to the chain -- and #596 put
 /// every row's path on it through [`path_line_read!`], which expands this
-/// only as its **fallback** for a kind that declares no parent. Confluence
-/// declaring its page parent on `ancestors` (#599) is what lets this read
-/// expire into the declaration. Until then it stays under ADR-0007's
+/// only as its **fallback** for a kind that declares no parent. Since #599
+/// Confluence declares its page parent on `ancestors`, so for a page the
+/// declared chain draws the same line from the same array and this is not
+/// reached. It stays because #599 keeps the ancestor path line unchanged for
+/// a read bound to no declarations -- a bare `Searcher::new`, which
+/// `knobas-search`'s `tests/it/ancestor_path.rs` searches with -- and its
+/// retirement is a change of its own. Until then it stays under ADR-0007's
 /// *interim* discipline, and meets all three of its requirements:
 ///
 /// 1. **It misses, never guesses.** A payload with no `ancestors`, an
@@ -727,9 +731,10 @@ macro_rules! declared_parent_path {
 /// `$decl` is where the declarations are bound, as for [`declared_string!`];
 /// the row's alias must be `i`.
 ///
-/// The ancestor read stays as the fallback until Confluence declares its page
-/// parent on `ancestors` (#599). The two then read the same array and draw the
-/// same line, and the fallback can expire into the declaration.
+/// Confluence declares its page parent on `ancestors` since #599, so for a
+/// page the two read the same array and draw the same line, the declared one
+/// first. The ancestor read stays as the fallback for a read bound to no
+/// declarations; see [`ancestor_path_read!`] for why it has not expired.
 #[macro_export]
 macro_rules! path_line_read {
     ($decl:literal) => {
