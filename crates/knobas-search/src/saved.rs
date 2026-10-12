@@ -140,7 +140,10 @@ const MAX_ID_CHARS: usize = 48;
 /// `launcher_board` at sixteen was reported at 96 and 108 ms from runs taken
 /// without the #533 re-run standard's four conditions
 /// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`). Five runs
-/// that met them, on `a4723a7b`, read the gate's asserted figure -- the size
+/// that met (b)-(d), with (a) shown by a 5-second process and gate-slot monitor
+/// over each whole run rather than an orchestrator hold (one further run was
+/// discarded on its evidence; ruling on #629, admitted for this not-reproduced
+/// verdict only), on `a4723a7b`, read the gate's asserted figure -- the size
 /// curve's `board, 16 saved` at 100 k -- at **86, 87, 83, 84 and 87 ms**: a
 /// spread of 4 ms against at least 13 ms of clearance, so that ruling's step
 /// to eight does not fire. The rail table is a separate timing of the same
