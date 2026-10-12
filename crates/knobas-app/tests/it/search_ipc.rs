@@ -777,7 +777,7 @@ async fn moving_an_asset_moves_what_under_returns() {
         .unwrap();
     assert_eq!(
         ids(&after_old),
-        [old.id.clone()],
+        std::slice::from_ref(&old.id),
         "nothing stale under the old host"
     );
 
