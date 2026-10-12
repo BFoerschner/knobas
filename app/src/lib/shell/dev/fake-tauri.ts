@@ -2162,6 +2162,8 @@ function listEntities(args: Record<string, unknown>) {
   // The fixture has no link graph, so a context's membership is honestly
   // empty — the same answer `context_members` gives.
   // The tile orders (#680) count what they drew; the plain orders do not.
+  // Spelled out rather than `ipc/entity.ts`'s `isTileOrder`: this bridge stands
+  // in for the one that module invokes, and imports only its types.
   const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
   if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null };
 

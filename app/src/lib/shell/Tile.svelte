@@ -153,7 +153,7 @@
    */
   let token = 0;
   /** The filter of the read on screen, to tell a new room from a longer page. */
-  let shown = "";
+  let shownFilterKey = "";
 
   $effect(() => {
     const mine = ++token;
@@ -174,8 +174,8 @@
     // rows on screen are still this room's and stay until the longer page
     // lands.
     const key = JSON.stringify(filter);
-    if (key !== shown) page = null;
-    shown = key;
+    if (key !== shownFilterKey) page = null;
+    shownFilterKey = key;
     board = null;
     error = null;
     // The board asks for the room's narrowing dimensions and nothing else: it

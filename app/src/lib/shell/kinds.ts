@@ -107,7 +107,7 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
  * The tiles a room with these kinds in it draws.
  *
  * A bucket carries only the kinds actually present, so a tile never queries a
- * kind the corpus does not have -- except a bucket that declares what it
+ * kind the corpus does not have — except a bucket that declares what it
  * `draws`, which fetches exactly that (see `BUCKETS`); a bucket nothing fills
  * is not drawn; and
  * anything no bucket claims gets a tile of its own, in the order the corpus

@@ -20,6 +20,11 @@
  */
 import type { EntityOrder, EntityPage } from "../ipc/entity";
 
+/** Whether `order` is one of the two tile orders, whose page carries a `tally`. */
+export function isTileOrder(order: EntityOrder): boolean {
+  return order === "attention" || order === "latest_per_parent";
+}
+
 /** The words a count is phrased in, from the kind registry. */
 export interface CountWords {
   /** What `n` of this kind are called, lowercase: *pull requests*, *branch*. */
@@ -40,7 +45,7 @@ export function tileCount(
   words: CountWords,
 ): string {
   const tally = page.tally;
-  if (!tally || (order !== "attention" && order !== "latest_per_parent")) {
+  if (!tally || !isTileOrder(order)) {
     return String(page.total);
   }
   // The tile's kinds first, in its order; anything else the set held after.

@@ -15,7 +15,8 @@
 //! Roadmap §4 gotcha 2 asks for dynamic SQL to live in one reviewed module
 //! behind `AssertSqlSafe`. This module dodges the question instead: every
 //! optional predicate is a **nullable parameter** (`$1::text[] is null or ...`)
-//! and the two orderings are two `const` statements chosen by a `match`, so
+//! and every ordering and scope is its own `const` statement chosen by a
+//! `match` (six since #680's two tile orders), so
 //! nothing here ever concatenates a string into SQL and `sqlx::query` is only
 //! ever handed a `&'static str`. A filter that grows a new optional predicate
 //! adds a parameter, not a branch.
@@ -159,7 +160,8 @@ pub struct EntityFilter {
     pub include_deleted: bool,
 }
 
-/// The two orderings a room offers.
+/// The orderings a room reads in: the two plain ones, and since #680 the two
+/// tile orders.
 ///
 /// `Serialize` behind `test-util` for the same reason [`EntityFilter`] carries
 /// it: it rides inside the filter's round trip, and pins this union against the
