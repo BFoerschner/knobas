@@ -395,7 +395,7 @@ async fn the_cap_and_the_limit_keep_the_title_match_and_the_true_total() {
     assert_eq!(r.total, 13, "{r:?}");
 }
 
-/// Story 1 and 25: the item named exactly the typed word comes first, above
+/// Stories 1 and 25: the item named exactly the typed word comes first, above
 /// every sibling whose hyphenated name only starts with it (#611).
 ///
 /// `to_tsvector` lexes `payout-service` as `payout-servic`, `payout` and

@@ -40,8 +40,8 @@
 //!
 //! * **`m` is deliberately narrow** -- entity id, kind, rank, whether the row
 //!   is named what was typed, updated-at and nothing else. It holds one row
-//!   per match, which for a common word is thousands; carrying titles and bodies through it is what turns a 20 ms
-//!   search into a 200 ms one.
+//!   per match, which for a common word is thousands; carrying titles and
+//!   bodies through it is what turns a 20 ms search into a 200 ms one.
 //! * **Exactly one match scan.** `m` is `materialized` because both `totals`
 //!   and `top` read it, and the alternative is scanning the index twice.
 //! * **`totals` LEFT JOIN `detail`**, so every matching kind comes back even
@@ -192,7 +192,8 @@ pub fn search_sql(
             sql.push_str("t.tsq as tsq,\n");
         }
         // The typed words as `to_tsvector` lexes a name, sorted and distinct,
-        // for `NAMED`: one array per search, compared against each match.
+        // for `NAMED`: one array per search, compared against each match. It
+        // must lex exactly as `NAMED` does, or no row is ever named.
         let _ = writeln!(
             sql,
             "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
