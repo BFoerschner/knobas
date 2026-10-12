@@ -428,6 +428,20 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 /// parent must resolve none, which is clause 4. Ratified by the deputy's ruling
 /// of 2026-10-11 on #594 and recorded in §10.8's #595 entry.
 ///
+/// **A parent kind's own records answer to the names declared for it.**
+/// `under:` returns a mirrored parent by reading the children's declared
+/// `names` off the parent's own record root
+/// ([`resolve_names_as_parent`](knobas_core::payload::resolve_names_as_parent)),
+/// which works only if a source names a parent in the parent's own shape. So
+/// on every record of a declared parent `kind`, each of those names is held to
+/// clause 2 (it leads to a string or to nothing) and clause 3 (where none
+/// resolved, no record names a key it does not have), in an evidence slot per
+/// parent kind of its own, so the children's parent objects resolving a name
+/// cannot excuse the parent's own records lacking it. Both tolerances below
+/// hold here too: a parent kind the corpus never populates (a Jira epic
+/// outside the JQL) is asked nothing, and the names share their slot as a
+/// candidate list does. Ratified by the deputy's ruling of 2026-10-11 on #595.
+///
 /// # What this cannot see, and why neither is fixable here
 ///
 /// A corpus-shaped question is answered by the corpus, so two declarations
@@ -541,6 +555,20 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         /// Some item of this kind has an object where the path's next key
         /// would sit, and does not have that key.
         names_a_missing_key: bool,
+    }
+
+    // A parent kind -> every `names` path any kind of this adapter declares
+    // for it, deduplicated: the names a record of that kind answers to as
+    // someone's parent, which is what `resolve_names_as_parent` reads off it.
+    let mut names_as_parent: std::collections::BTreeMap<&str, Vec<&PayloadPath>> =
+        std::collections::BTreeMap::new();
+    for parent in d.payload_paths.iter().flat_map(|p| &p.parent) {
+        let names = names_as_parent.entry(parent.kind.as_str()).or_default();
+        for name in &parent.names {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
     }
 
     let nothing = KindPaths::default();
@@ -687,6 +715,26 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                         "in a parent object of",
                     );
                 }
+            }
+        }
+        // The parent's own record (the deputy's ruling of 2026-10-11 on
+        // #595): `under:` returns a mirrored parent by reading the children's
+        // declared names off its root, so on this kind's records -- if it is
+        // anyone's parent kind -- each of those names is held to clause 2 and
+        // clause 3 in a slot of its own, apart from the children's.
+        if let Some(names) = names_as_parent.get(item.kind.as_str()) {
+            let seen = evidence
+                .entry((&item.kind, "the parent's own names"))
+                .or_default();
+            for name in names {
+                weigh(
+                    seen,
+                    "the parent's own names",
+                    &item.payload,
+                    name,
+                    Wanted::Text,
+                    "on",
+                );
             }
         }
         if paths.parent.is_empty() {
@@ -867,6 +915,14 @@ mod tests {
         /// Declares a parent whose name sits at `kee` inside the parent
         /// object, which carries `key`.
         MisspelledParentName,
+        /// Its tickets are their own parent kind, and the children's parent
+        /// objects carry `key` -- but the tickets' own records do not, so
+        /// `under:` could reach the children of an epic and never the epic
+        /// itself (the deputy's ruling of 2026-10-11 on #595).
+        ParentRecordsLackTheirName,
+        /// Its tickets carry `key` on their own records, but as an object
+        /// rather than the string a name has to be.
+        ParentRecordsNameIsNotAString,
     }
 
     struct TestSource {
@@ -1113,15 +1169,28 @@ mod tests {
                     // declarations above address: a status the paths reach,
                     // and an assignee the source explicitly says nothing
                     // about.
-                    payload: serde_json::json!({
-                        "fields": {
-                            "status": { "name": "In Progress" },
-                            "assignee": serde_json::Value::Null,
-                            "epic": { "key": "PAY-100" }
-                        },
-                        "labels": ["payments"],
-                        "reviewers": [{ "login": "mara.lindqvist" }]
-                    }),
+                    payload: {
+                        let mut payload = serde_json::json!({
+                            "key": "PAY-1",
+                            "fields": {
+                                "status": { "name": "In Progress" },
+                                "assignee": serde_json::Value::Null,
+                                "epic": { "key": "PAY-100" }
+                            },
+                            "labels": ["payments"],
+                            "reviewers": [{ "login": "mara.lindqvist" }]
+                        });
+                        match self.behavior {
+                            Behavior::ParentRecordsLackTheirName => {
+                                payload.as_object_mut().map(|o| o.remove("key"));
+                            }
+                            Behavior::ParentRecordsNameIsNotAString => {
+                                payload["key"] = serde_json::json!({ "id": 1 });
+                            }
+                            _ => {}
+                        }
+                        payload
+                    },
                     web_url: None,
                     deleted: false,
                 })
@@ -1504,6 +1573,34 @@ mod tests {
         rejects(
             Behavior::MisspelledParentName,
             "declares parent names of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    // -- clause 6 on a parent's own records (the deputy's ruling of
+    // 2026-10-11 on #595) ----------------------------------------------------
+    //
+    // `under:` returns the parent itself by reading the children's declared
+    // names off the parent's own record, so those names must resolve there
+    // too. The conforming adapter's tickets carry `key` at their root, as the
+    // epic objects inside them do.
+
+    #[tokio::test]
+    async fn rejects_parent_records_that_lack_the_name_their_children_give_them() {
+        rejects(
+            Behavior::ParentRecordsLackTheirName,
+            "declares the parent's own names of kind \"ticket\" at a path no item of that kind \
+             resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_record_whose_name_is_not_a_string() {
+        rejects(
+            Behavior::ParentRecordsNameIsNotAString,
+            "declares the parent's own names of kind \"ticket\" at [\"key\"], which leads to an \
+             object on this adapter's own item",
         )
         .await;
     }
