@@ -36,6 +36,8 @@ use serde_json::Value;
 
 use crate::config::GiteaConfig;
 
+mod pull;
+
 /// How many records a listing request asks for. Interfaces §4.1: "Page sizes:
 /// … Gitea 50", which is also Gitea's own default cap.
 ///
@@ -407,12 +409,19 @@ impl GiteaClient {
         repo: &str,
         sha: &str,
     ) -> Result<String, SourceError> {
-        let path = format!(
-            "{API_ROOT}/repos/{}/{}/git/commits/{}.diff",
+        self.get_text(&format!(
+            "/repos/{}/{}/git/commits/{}.diff",
             segment(owner)?,
             segment(repo)?,
             object_id(sha)?
-        );
+        ))
+        .await
+    }
+
+    /// `GET <base>/api/v1/<path>`, its body as text: a `.diff`, which is not
+    /// JSON.
+    async fn get_text(&self, path: &str) -> Result<String, SourceError> {
+        let path = format!("{API_ROOT}{path}");
         let response = self
             .http
             .send(self.http.request(Method::GET, &path))

@@ -1,9 +1,9 @@
 //! The source views this adapter draws (ADR-0020, issue #661).
 //!
-//! One kind so far: a **commit** opens on its overview (who, when, its
-//! parents, its whole message) and has its diff as a second tab. The other
-//! kinds answer `None` until their own tickets (#660): the detail then draws
-//! the mirror's generic projection, as it always has.
+//! A **commit** opens on its overview (who, when, its parents, its whole
+//! message) and has its diff as a second tab. A **pull request** is
+//! [`pr`]'s. The other kinds answer `None` until their own tickets (#660): the
+//! detail then draws the mirror's generic projection, as it always has.
 //!
 //! Every read here is live and nothing is stored (rule 1). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why.
@@ -14,6 +14,8 @@ use knobas_source::view::{Block, Fact, SourceView, ViewRow, ViewSection};
 use crate::keys::{self, GiteaKey};
 use crate::model::{CommitDetail, Signature};
 use crate::source::GiteaSource;
+
+mod pr;
 
 /// The commit view's first tab.
 const OVERVIEW: &str = "overview";
@@ -42,7 +44,14 @@ pub(crate) async fn draw(
                 .await
                 .map(Some)
         }
-        GiteaKey::Repo { .. } | GiteaKey::Pr { .. } | GiteaKey::Branch { .. } => Ok(None),
+        GiteaKey::Pr {
+            owner,
+            repo,
+            number,
+        } => pr::draw(source, entity, &owner, &repo, number, section)
+            .await
+            .map(Some),
+        GiteaKey::Repo { .. } | GiteaKey::Branch { .. } => Ok(None),
     }
 }
 
