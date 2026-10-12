@@ -108,14 +108,17 @@ impl Source for PausingSource {
     }
 }
 
-/// Whether anybody holds `0028`'s `(627, 0)` key: `pg_advisory_xact_lock(int4,
-/// int4)` shows as `classid` = the first key, `objid` = the second,
-/// `objsubid` = 2.
+/// Whether anybody holds `0028`'s `(627, 0)` key in this file's database:
+/// `pg_advisory_xact_lock(int4, int4)` shows as `classid` = the first key,
+/// `objid` = the second, `objsubid` = 2. Advisory keys are per database, and
+/// `pg_locks` lists every database on the server the gate's binaries share.
 async fn the_key_is_held(pool: &PgPool) -> bool {
     sqlx::query_scalar(
         "select exists (select 1 from pg_locks
                          where locktype = 'advisory' and classid = 627 and objid = 0
-                           and objsubid = 2 and granted)",
+                           and objsubid = 2 and granted
+                           and database = (select oid from pg_database
+                                            where datname = current_database()))",
     )
     .fetch_one(pool)
     .await
