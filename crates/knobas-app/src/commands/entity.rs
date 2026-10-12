@@ -2776,14 +2776,21 @@ mod tests {
         }
     }
 
-    /// The four statements are four, and each names its columns.
+    /// The six statements are six, and each names its columns.
     ///
     /// This reads the constants themselves -- the strings that are sent to
     /// PostgreSQL -- not the source file that spells them, so it is an
     /// assertion about the statement rather than about how it was written.
     #[test]
     fn every_statement_names_its_columns_and_no_two_are_the_same() {
-        let all = [LIVE_UPDATED, LIVE_TITLE, ALL_UPDATED, ALL_TITLE];
+        let all = [
+            LIVE_UPDATED,
+            LIVE_TITLE,
+            ALL_UPDATED,
+            ALL_TITLE,
+            LIVE_ATTENTION,
+            LIVE_LATEST,
+        ];
         for sql in all {
             assert!(
                 !sql.contains("select *"),
@@ -2794,14 +2801,15 @@ mod tests {
         let distinct = all.iter().collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             distinct.len(),
-            4,
+            6,
             "an ordering or a scope shares a statement"
         );
     }
 
-    /// Every combination reaches its own statement.
+    /// Every combination reaches its own statement, and a tile order asked
+    /// for the withdrawn is refused (#680).
     #[test]
-    fn the_four_combinations_choose_the_four_statements() {
+    fn every_combination_chooses_its_statement() {
         let filter = |include_deleted, order| EntityFilter {
             sources: Vec::new(),
             kinds: Vec::new(),
@@ -2811,16 +2819,18 @@ mod tests {
             order,
             include_deleted,
         };
+        let chosen = |include_deleted, order| statement(&filter(include_deleted, order)).ok();
+        assert_eq!(chosen(false, EntityOrder::UpdatedDesc), Some(LIVE_UPDATED));
+        assert_eq!(chosen(false, EntityOrder::TitleAsc), Some(LIVE_TITLE));
+        assert_eq!(chosen(true, EntityOrder::UpdatedDesc), Some(ALL_UPDATED));
+        assert_eq!(chosen(true, EntityOrder::TitleAsc), Some(ALL_TITLE));
+        assert_eq!(chosen(false, EntityOrder::Attention), Some(LIVE_ATTENTION));
         assert_eq!(
-            statement(&filter(false, EntityOrder::UpdatedDesc)),
-            LIVE_UPDATED
+            chosen(false, EntityOrder::LatestPerParent),
+            Some(LIVE_LATEST)
         );
-        assert_eq!(statement(&filter(false, EntityOrder::TitleAsc)), LIVE_TITLE);
-        assert_eq!(
-            statement(&filter(true, EntityOrder::UpdatedDesc)),
-            ALL_UPDATED
-        );
-        assert_eq!(statement(&filter(true, EntityOrder::TitleAsc)), ALL_TITLE);
+        assert_eq!(chosen(true, EntityOrder::Attention), None);
+        assert_eq!(chosen(true, EntityOrder::LatestPerParent), None);
     }
 
     /// An empty list is not an empty array.

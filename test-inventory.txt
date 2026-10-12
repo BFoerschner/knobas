@@ -117,9 +117,9 @@ knobas-app	lib/knobas_app	commands::backup::tests::the_share_parts_serialise_the
 knobas-app	lib/knobas_app	commands::backup::tests::the_status_and_the_record_serialise_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	commands::entity::tests::a_declared_kind_resolves_to_the_adapters_own_metadata
 knobas-app	lib/knobas_app	commands::entity::tests::an_empty_list_binds_as_null
+knobas-app	lib/knobas_app	commands::entity::tests::every_combination_chooses_its_statement
 knobas-app	lib/knobas_app	commands::entity::tests::every_statement_names_its_columns_and_no_two_are_the_same
 knobas-app	lib/knobas_app	commands::entity::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
-knobas-app	lib/knobas_app	commands::entity::tests::the_four_combinations_choose_the_four_statements
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::entity::tests::the_order_deserializes_as_the_frontend_spells_it
 knobas-app	lib/knobas_app	commands::entity::tests::two_adapters_declaring_one_kind_do_not_fight
@@ -512,6 +512,7 @@ knobas-app	test/it	entity::a_commits_room_line_and_detail_carry_its_repo_as_the_
 knobas-app	test/it	entity::a_confluence_space_is_a_project_room_and_a_jira_project_is_another
 knobas-app	test/it	entity::a_disabled_sources_entity_opens_with_the_marker_until_reenabled
 knobas-app	test/it	entity::a_duplicate_pair_and_relation_is_a_conflict
+knobas-app	test/it	entity::a_kind_with_no_declared_state_falls_back_to_recency
 knobas-app	test/it	entity::a_kuma_source_has_a_room_of_its_own_and_no_project_rooms
 knobas-app	test/it	entity::a_link_endpoint_that_is_not_in_the_mirror_is_not_found_at_the_command_seam
 knobas-app	test/it	entity::a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_both
@@ -546,9 +547,12 @@ knobas-app	test/it	entity::lists_the_newest_first_and_reports_the_unpaged_total
 knobas-app	test/it	entity::offset_walks_the_same_ordering_and_total_does_not_move
 knobas-app	test/it	entity::returns_the_row_its_source_and_the_raw_payload
 knobas-app	test/it	entity::saving_a_note_writes_no_activity_line_however_much_it_reconciles
+knobas-app	test/it	entity::the_builds_tile_draws_each_configurations_latest_build_failing_first
+knobas-app	test/it	entity::the_code_tile_draws_open_pull_requests_first_and_no_settled_one
 knobas-app	test/it	entity::the_detail_carries_the_entitys_own_activity
 knobas-app	test/it	entity::the_recency_window_is_bound_as_a_parameter
 knobas-app	test/it	entity::the_source_filter_selects_a_room
+knobas-app	test/it	entity::the_tile_orders_refuse_the_withdrawn
 knobas-app	test/it	entity::the_web_url_the_adapter_reported_survives_the_mirror
 knobas-app	test/it	entity::title_order_is_a_second_statement_not_string_interpolation
 knobas-app	test/it	entity::unlinking_an_unknown_id_is_not_found_and_a_malformed_one_is_invalid
