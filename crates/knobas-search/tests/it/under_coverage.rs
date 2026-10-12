@@ -184,6 +184,27 @@ async fn a_source_answers_under_only_if_something_it_synced_names_a_parent() {
 
     // Its one ticket in an epic is what made the configured source answer: a
     // Jira project where no ticket is in an epic has nothing to look under.
+    // Only a live item counts: a tombstoned child keeps its stored rows, and
+    // naming a parent through them would vouch for a ticket the user deleted.
+    for (tombstoned, answer) in [
+        (true, FilterAnswer::NoValues),
+        (false, FilterAnswer::Answered),
+    ] {
+        sqlx::query(
+            "update knobas.entity set deleted_at = case when $2 then now() end where id = $1",
+        )
+        .bind(format!("{configured}:{child}"))
+        .bind(tombstoned)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let answers = under_answers(&searcher, &format!("under:{epic} source:{configured}")).await;
+        assert_eq!(
+            answers,
+            vec![(configured.clone(), answer)],
+            "tombstoned: {tombstoned}"
+        );
+    }
     sqlx::query("delete from knobas.entity where id = $1")
         .bind(format!("{configured}:{child}"))
         .execute(&pool)

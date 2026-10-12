@@ -10089,8 +10089,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   - `sync.resolve_item_parents(text[])` is restated (`create or replace`) to write both. The only
     differences from `0028`'s text are the column lists and a literal tag on each arm's select;
     both expansions are pasted unchanged. The migration recomputes every row with
-    `sync.resolve_all_item_parents()` before setting `not null`, and takes no lock, as `0028`'s last
-    statement does not.
+    `sync.resolve_all_item_parents()` before setting `not null` and, like `0028`'s last
+    statement, takes no lock.
   - `item_parent_child_idx` on `sync.item_parent (source_id, adapter_kind) where arm = 'child'`
     serves the coverage probe.
   - No trigger, lock, other function or reader of `0028`'s columns changes: `under:`'s filter, its
@@ -10106,11 +10106,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Witness.** All on real PostgreSQL (ADR-0013); each mutant was applied to a committed baseline.
   - `knobas-search`'s `tests/it/under_coverage.rs`:
     `a_source_answers_under_only_if_something_it_synced_names_a_parent` (a configured classic Jira
-    answers; an unconfigured one, a Kuma, and the configured one once its epic child is deleted get
-    `no_values`) and `a_kind_scope_does_not_narrow_the_verdict` (`kind:repo under:<repo>` over
+    answers; an unconfigured one, a Kuma, and the configured one once its epic child is tombstoned
+    or deleted get `no_values`) and `a_kind_scope_does_not_narrow_the_verdict` (`kind:repo under:<repo>` over
     Gitea answers, and the same source given an adapter that declares nothing gets `no_values`).
     Killed: the verdict restored to the declaration; the probe counting rows of both arms; the
-    probe narrowed to the kind scope; the probe without the adapter match.
+    probe narrowed to the kind scope; the probe without the adapter match; the probe reading
+    `sync.item` in place of `sync.live_item` (added in review).
   - `tests/it/item_parent.rs`'s agreement test now compares `(entity_id, name, kind, arm)` against
     the walk, with each arm's select tagged, and checks every row's `source_id` against its item's,
     after every change it already exercised and a new one: an item moved to another source and
