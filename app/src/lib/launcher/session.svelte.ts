@@ -17,6 +17,7 @@
  * suffix are compiled by `vite-plugin-svelte`.
  */
 import {
+  type FilterSuggestions,
   type LauncherHome,
   type SearchQuery,
   type SearchResponse,
@@ -67,6 +68,15 @@ export interface SessionPorts {
   createSmartList?(label: string, query: string): Promise<SmartListSummary>;
   renameSmartList?(id: string, label: string): Promise<void>;
   deleteSmartList?(id: string): Promise<void>;
+  /**
+   * The values the box suggests after `kind:`, `source:` and `under:` —
+   * `filter_suggestions` (#601).
+   *
+   * **Optional, and its absence is the switch**, as {@link
+   * SessionPorts.resolveUrl}'s is: the two link pickers built on this class
+   * pass none and draw no suggestions; the launcher passes it.
+   */
+  filterSuggestions?(): Promise<FilterSuggestions>;
 }
 
 export interface SessionOptions extends SessionPorts {
@@ -126,6 +136,16 @@ export class Session {
    * nobody has saved.
    */
   savedId = $state<string | null>(null);
+  /**
+   * The values the box can suggest, or `null` until they are read (#601).
+   *
+   * Read **once per opening, and only when first needed** — the first time the
+   * box holds a `kind:`, `source:` or `under:` token being typed — so a reader
+   * who never types one never pays for the read, and a reopened launcher sees
+   * the values that exist then.
+   */
+  suggestions = $state<FilterSuggestions | null>(null);
+  #suggestionsAsked = false;
 
   constructor(options: SessionOptions) {
     this.#ports = options;
@@ -251,6 +271,26 @@ export class Session {
     await this.loadHome();
   }
 
+  /**
+   * Read the suggestion lists, once per opening.
+   *
+   * A failure leaves {@link Session.suggestions} `null` for the rest of the
+   * opening and says nothing:
+   * suggestions are a help to typing, the query still runs without them, and
+   * the error line belongs to the query's own answer.
+   */
+  async loadSuggestions(): Promise<void> {
+    const read = this.#ports.filterSuggestions;
+    if (!read || this.#suggestionsAsked) return;
+    this.#suggestionsAsked = true;
+    try {
+      this.suggestions = await read();
+    } catch {
+      // Not asked again until the next opening: a read that failed once on
+      // this keystroke would fail on the next one too.
+    }
+  }
+
   /** Load the board. Called once when the overlay opens. */
   async loadHome(): Promise<void> {
     try {
@@ -332,6 +372,9 @@ export class Session {
    */
   dispose(): void {
     this.#cancel();
+    // Read again on the next opening: the values that exist may have moved.
+    this.#suggestionsAsked = false;
+    this.suggestions = null;
     // Whatever else survives a close, this does not: it is a statement about
     // the query in the box, and the paste branch below empties the box. Left
     // set, a reopened launcher would read "Saved as list" over a query nobody

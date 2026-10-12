@@ -11,7 +11,13 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { LauncherHome, SearchResponse, Segment } from "../ipc";
+import type {
+  FilterSuggestions,
+  LauncherHome,
+  SearchQuery,
+  SearchResponse,
+  Segment,
+} from "../ipc";
 import type { CredentialHealth } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
 
@@ -1884,4 +1890,134 @@ test("the Tab chain renames and deletes a saved list, and offers nothing on a bu
   await settle();
   expect(removed).toHaveBeenCalledWith("sepa-retries");
   expect(target.querySelector(".chain"), "the chain closes behind the write").toBeNull();
+});
+
+// ── Value suggestions for `kind:`, `source:` and `under:` (#601) ──────────
+
+const SUGGESTIONS: FilterSuggestions = {
+  kinds: [
+    { kind: "commit", label: "Commit" },
+    { kind: "repo", label: "Repository" },
+    { kind: "ticket", label: "Ticket" },
+  ],
+  sources: [
+    { id: "gitea", display_name: "Gitea" },
+    { id: "jira-eu", display_name: "Jira EU" },
+  ],
+  parents: [
+    { name: "payout-service", kind: "page" },
+    { name: "payout-service", kind: "repo" },
+    { name: "Runbooks Overview", kind: "page" },
+    { name: "tidewater/payout-service", kind: "repo" },
+  ],
+};
+
+/** A launcher whose bridge answers the suggestion read, and records searches. */
+function openSuggesting() {
+  const searched: string[] = [];
+  const filterSuggestions = vi.fn(async () => SUGGESTIONS);
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        searched.push(query.raw);
+        return response();
+      },
+      filterSuggestions,
+    },
+  });
+  return { searched, filterSuggestions };
+}
+
+async function typeInto(value: string) {
+  const input = target.querySelector("input")!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+}
+
+/** What the suggestion list shows, one string per option. */
+function offered(): string[] {
+  return [...target.querySelectorAll('[aria-label="Suggestions"] [role="option"]')].map(
+    (el) => el.textContent?.replace(/\s+/g, " ").trim() ?? "",
+  );
+}
+
+test("kind: opens the kinds that exist, and typing narrows them", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("kind:");
+  expect(offered()).toEqual(["commit · Commit", "repo · Repository", "ticket · Ticket"]);
+
+  await typeInto("kind:re");
+  expect(offered()).toEqual(["repo · Repository"]);
+});
+
+test("source: opens the configured sources by id, with the name the sources list shows", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("sepa source:");
+  expect(offered()).toEqual(["gitea · Gitea", "jira-eu · Jira EU"]);
+});
+
+test("under: values show their kind, so a repo and a same-named page are told apart", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("under:payout");
+  expect(offered()).toEqual([
+    "payout-service · page",
+    "payout-service · repo",
+    "tidewater/payout-service · repo",
+  ]);
+});
+
+test("a picked value completes the token and runs the query", async () => {
+  const { searched } = openSuggesting();
+  await settle();
+  await typeInto("jitter under:payout");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+
+  const input = target.querySelector("input")!;
+  expect(input.value).toBe("jitter under:payout-service ");
+  expect(searched.at(-1)).toBe("jitter under:payout-service ");
+  // The token is complete, so the list has closed.
+  expect(offered()).toEqual([]);
+});
+
+test("a clicked value completes the token, and a name with a space is quoted", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("under:runb");
+  const option = target.querySelector<HTMLButtonElement>(
+    '[aria-label="Suggestions"] [role="option"]',
+  )!;
+  option.click();
+  await settle();
+  expect(target.querySelector("input")!.value).toBe('under:"Runbooks Overview" ');
+});
+
+test("Esc closes the suggestions before it clears the box", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("kind:");
+  expect(offered()).not.toEqual([]);
+
+  const event = press("Escape");
+  expect(event.defaultPrevented).toBe(true);
+  expect(offered()).toEqual([]);
+  expect(target.querySelector("input")!.value).toBe("kind:");
+});
+
+test("free-text keys open nothing, and the read is never asked for them", async () => {
+  const { filterSuggestions } = openSuggesting();
+  await settle();
+  for (const raw of ["author:", "author:ma", "updated:", "updated:7d", "sepa", "kind:repo "]) {
+    await typeInto(raw);
+    expect(offered(), raw).toEqual([]);
+  }
+  // `kind:repo ` is a finished token -- the box ends in a space -- so none of
+  // these is a value being typed, and the read is not made for any of them.
+  expect(filterSuggestions).toHaveBeenCalledTimes(0);
 });

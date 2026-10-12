@@ -19,5 +19,6 @@ mod ranking;
 mod search;
 mod sql_containment;
 mod sql_shape;
+mod suggest;
 mod under;
 mod vocab;

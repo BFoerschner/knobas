@@ -124,6 +124,7 @@ knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_comman
 knobas-app	lib/knobas_app	commands::entity::tests::the_order_deserializes_as_the_frontend_spells_it
 knobas-app	lib/knobas_app	commands::entity::tests::two_adapters_declaring_one_kind_do_not_fight
 knobas-app	lib/knobas_app	commands::search::tests::search_failures_keep_their_kind
+knobas-app	lib/knobas_app	commands::search::tests::the_filter_suggestions_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::search::tests::the_launcher_home_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::search::tests::the_two_entity_rows_are_one_wire_shape
 knobas-app	lib/knobas_app	commands::sources::tests::adding_a_source_voids_a_purge_the_scheduler_still_owes_that_id
@@ -656,6 +657,7 @@ knobas-app	test/it	search_ipc::only_a_certificate_inside_the_window_is_expiring
 knobas-app	test/it	search_ipc::the_asset_prefix_answers_from_the_estate_with_its_path
 knobas-app	test/it	search_ipc::the_launchers_not_monitored_list_is_the_monitors_tabs_roster
 knobas-app	test/it	search_ipc::the_rail_and_the_board_report_the_same_lists
+knobas-app	test/it	search_ipc::the_suggestions_carry_kinds_sources_and_parents_with_their_kind
 knobas-app	test/it	search_ipc::the_trees_search_answers_with_assets_and_their_paths
 knobas-app	test/it	search_ipc::the_wire_shape_is_the_contract
 knobas-app	test/it	search_ipc::under_reads_the_parent_the_compiled_in_gitea_adapter_declares
@@ -1477,6 +1479,7 @@ knobas-search	lib/knobas_search	sql::tests::the_saved_summary_keeps_every_value_
 knobas-search	lib/knobas_search	sql::tests::the_tsquery_is_computed_once_and_the_trailing_word_may_be_a_prefix
 knobas-search	lib/knobas_search	sql::tests::totals_outer_join_the_page_so_a_cut_kind_keeps_its_count
 knobas-search	lib/knobas_search	sql::tests::user_text_never_enters_the_sql_string
+knobas-search	lib/knobas_search	suggest::tests::every_kind_knobas_owns_is_probed
 knobas-search	lib/knobas_search	tests::a_pasted_document_is_refused_rather_than_truncated
 knobas-search	lib/knobas_search	tests::an_unbounded_filter_list_is_refused
 knobas-search	lib/knobas_search	tests::only_the_absent_corpora_short_circuit
@@ -1565,8 +1568,12 @@ knobas-search	test/it	sql_shape::rows_tied_on_rank_and_timestamp_are_ordered_by_
 knobas-search	test/it	sql_shape::the_best_match_comes_first_and_recency_only_breaks_ties
 knobas-search	test/it	sql_shape::the_launchers_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
+knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
+knobas-search	test/it	suggest::an_asset_that_holds_something_is_offered_and_a_leaf_is_not
+knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents
+knobas-search	test/it	under::a_quoted_name_with_a_space_scopes_like_any_other
 knobas-search	test/it	under::a_saved_list_holding_under_runs_it
 knobas-search	test/it	under::coverage_does_not_name_the_estate_as_unable_to_answer
 knobas-search	test/it	under::coverage_names_a_source_that_declares_no_parent

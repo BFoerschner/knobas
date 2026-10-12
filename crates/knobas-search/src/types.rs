@@ -509,3 +509,55 @@ mod tests {
         }
     }
 }
+
+/// The values the query box suggests after `kind:`, `source:` and `under:`
+/// (#601, spec #591 stories 27-30).
+///
+/// **Only values that exist right now**, so a picked suggestion never leads
+/// to an empty result or an unknown token: the kinds the corpus has live rows
+/// of, the sources that are configured and enabled, and the parents the
+/// mirror and the estate declare. Read once per launcher opening and narrowed
+/// by the box as the reader types, so the keystroke path pays nothing for it.
+/// Free-text keys (`author:`, `updated:`) get no suggestions and have no list
+/// here.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FilterSuggestions {
+    /// Every kind with at least one row in the launcher's corpora, by id.
+    pub kinds: Vec<KindSuggestion>,
+    /// Every enabled source, ordered by id -- the sources `source:` resolves.
+    pub sources: Vec<SourceSuggestion>,
+    /// Every name a parent answers to, with the parent's kind, ordered by
+    /// name and kind. A parent with two names (a Gitea repo's `owner/name`
+    /// and `name`) is listed once per name.
+    pub parents: Vec<ParentSuggestion>,
+}
+
+/// One kind `kind:` can name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct KindSuggestion {
+    /// The kind id, which is what the box completes `kind:` with.
+    pub kind: String,
+    /// The catalog's label for it, which is what a result group says.
+    pub label: String,
+}
+
+/// One source `source:` can name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceSuggestion {
+    /// The instance id, which is what the box completes `source:` with: an
+    /// exact id resolves to that instance and nothing else.
+    pub id: String,
+    /// The name the sources list shows.
+    pub display_name: String,
+}
+
+/// One name `under:` can scope by (ADR-0018).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ParentSuggestion {
+    /// The name the parent answers to, as its source spells it.
+    pub name: String,
+    /// The parent's kind, so `payout-service · repo` and a same-named page can
+    /// be told apart. For a parent outside the mirror it is the kind its
+    /// children declare, which is why `ParentPath` carries one (#594).
+    pub kind: String,
+}

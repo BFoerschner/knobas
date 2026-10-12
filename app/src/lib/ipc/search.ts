@@ -283,3 +283,49 @@ export function deleteSmartList(id: string): Promise<void> {
 export function smartListItems(id: string, limit: number): Promise<SearchResponse> {
   return invoke<SearchResponse>("smart_list_items", { id, limit });
 }
+
+/**
+ * The values the query box suggests after `kind:`, `source:` and `under:` —
+ * `knobas_search::FilterSuggestions` (#601).
+ *
+ * Only values that exist right now, so a picked suggestion never leads to an
+ * empty result or an unknown token. Read once per launcher opening; the box
+ * narrows the lists itself as the reader types. Free-text keys (`author:`,
+ * `updated:`) have no list and get no suggestions.
+ */
+export interface FilterSuggestions {
+  /** Every kind with a row in the launcher's corpora. */
+  kinds: KindSuggestion[];
+  /** Every enabled source, ordered by id. */
+  sources: SourceSuggestion[];
+  /** Every name a parent answers to, with its kind; a repo is listed under `owner/name` and `name`. */
+  parents: ParentSuggestion[];
+}
+
+/** One kind `kind:` can name — `knobas_search::KindSuggestion`. */
+export interface KindSuggestion {
+  /** The kind id, which is what `kind:` is completed with. */
+  kind: string;
+  /** What a result group of this kind is labelled. */
+  label: string;
+}
+
+/** One source `source:` can name — `knobas_search::SourceSuggestion`. */
+export interface SourceSuggestion {
+  /** The instance id, which is what `source:` is completed with. */
+  id: string;
+  display_name: string;
+}
+
+/** One name `under:` can scope by — `knobas_search::ParentSuggestion` (ADR-0018). */
+export interface ParentSuggestion {
+  /** The name the parent answers to, as its source spells it. */
+  name: string;
+  /** The parent's kind, drawn beside the name: `payout-service · repo`. */
+  kind: string;
+}
+
+/** The query box's suggestion lists (#601). */
+export function filterSuggestions(): Promise<FilterSuggestions> {
+  return invoke<FilterSuggestions>("filter_suggestions");
+}

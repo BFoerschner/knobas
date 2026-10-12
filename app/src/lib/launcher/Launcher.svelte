@@ -55,6 +55,7 @@
   import {
     createSmartList as defaultCreateSmartList,
     deleteSmartList as defaultDeleteSmartList,
+    filterSuggestions as defaultFilterSuggestions,
     launcherHome as defaultHome,
     ipcErrorMessage,
     renameSmartList as defaultRenameSmartList,
@@ -74,6 +75,7 @@
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import type { LauncherRow } from "./rows";
   import { Session, type SessionPorts } from "./session.svelte";
+  import { type Suggestion, activeToken, complete, suggest } from "./suggest";
 
   let {
     open = $bindable(false),
@@ -193,6 +195,7 @@
     createSmartList: defaultCreateSmartList,
     renameSmartList: defaultRenameSmartList,
     deleteSmartList: defaultDeleteSmartList,
+    filterSuggestions: defaultFilterSuggestions,
     ...ports,
   });
 
@@ -249,6 +252,74 @@
    * launcher's.
    */
   let renaming = $state<string | null>(null);
+
+  /**
+   * The value suggestions under the box (#601): the `kind:`, `source:` or
+   * `under:` token being typed, and the values it can still become.
+   *
+   * `dismissedAt` is the box text `Esc` closed the list on. The list stays
+   * closed until the text changes, and `Esc` is one rung of the ladder like
+   * every other: it closes the list before it clears the box.
+   */
+  const typing = $derived(activeToken(session.raw));
+  let dismissedAt = $state<string | null>(null);
+  let suggestionPicked = $state(0);
+  const offer = $derived<Suggestion[]>(
+    typing && session.suggestions && session.raw !== dismissedAt
+      ? suggest(typing, session.suggestions)
+      : [],
+  );
+
+  // Read the lists the first time a suggestible token is being typed, and
+  // not before: a reader who never types one never pays for the read.
+  $effect(() => {
+    if (open && typing) void session.loadSuggestions();
+  });
+
+  // A new keystroke is a new list, so the cursor starts on its first value.
+  $effect(() => {
+    void session.raw;
+    suggestionPicked = 0;
+  });
+
+  /** Complete the token being typed to `value`, and run the query. */
+  function pickSuggestion(value: string) {
+    if (!typing) return;
+    session.set(complete(session.raw, typing, value));
+    box?.focus();
+  }
+
+  /**
+   * The keyboard while the list is open: the arrows walk it, `Enter` and
+   * `Tab` pick, `Esc` closes it. `true` when the key was the list's.
+   */
+  function suggestionKey(event: KeyboardEvent): boolean {
+    if (offer.length === 0) return false;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        suggestionPicked = Math.min(offer.length - 1, suggestionPicked + 1);
+        return true;
+      case "ArrowUp":
+        event.preventDefault();
+        suggestionPicked = Math.max(0, suggestionPicked - 1);
+        return true;
+      case "Enter":
+      case "Tab": {
+        event.preventDefault();
+        const picked = offer[suggestionPicked];
+        if (picked) pickSuggestion(picked.value);
+        return true;
+      }
+      case "Escape":
+        event.preventDefault();
+        event.stopPropagation();
+        dismissedAt = session.raw;
+        return true;
+      default:
+        return false;
+    }
+  }
 
   /** The entity a row stands for, if it stands for one. */
   function entityOf(row: LauncherRow): { entityId: string; title: string } | null {
@@ -534,6 +605,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (suggestionKey(event)) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -640,6 +712,28 @@
         {onkeydown}
         onclose={close}
       />
+
+      {#if offer.length > 0}
+        <!--
+          Directly under the box, over the chips and the results: it completes
+          the word being typed, and it is what the keyboard drives while open.
+        -->
+        <div class="suggest" role="listbox" aria-label="Suggestions">
+          {#each offer as suggestion, index (`${suggestion.value}\u0000${suggestion.detail}`)}
+            <button
+              class="pfx sug"
+              class:on={index === suggestionPicked}
+              role="option"
+              aria-selected={index === suggestionPicked}
+              onclick={() => pickSuggestion(suggestion.value)}
+              onmouseenter={() => (suggestionPicked = index)}
+            >
+              <span class="nm">{suggestion.value}</span>
+              <span class="s"> · {suggestion.detail}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       {#if interpreted}
         <Chips {interpreted} sources={health} />
@@ -816,6 +910,21 @@
   .save:disabled {
     color: var(--faint);
     cursor: default;
+  }
+  /* The suggestions sit under the box they complete, one line per value. */
+  .suggest {
+    flex: none;
+    border-bottom: 1px solid var(--hair);
+    background: var(--panel);
+  }
+  .sug {
+    display: flex;
+    gap: 0;
+    border-bottom: 0;
+  }
+  .sug .s {
+    color: var(--faint);
+    white-space: pre;
   }
   /* The chain sits between the results and the footnote: it acts on the row
      above it, and it is the thing the keyboard is now driving. */

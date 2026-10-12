@@ -44,6 +44,7 @@ pub mod query;
 pub mod saved;
 pub mod snippet;
 pub mod sql;
+pub(crate) mod suggest;
 /// The deterministic corpus the perf gate and the bench share.
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
@@ -61,8 +62,9 @@ pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use saved::{Refusal, SavedList};
 pub use types::{
-    EntityRow, FilterAnswer, FilterCoverage, FilterDimension, ParsedQuery, Prefix, ResultGroup,
-    SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
+    EntityRow, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion,
+    ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
+    SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -262,6 +264,22 @@ impl Searcher {
             smart_lists: self.smart_lists_of(&vocab).await?,
             recent: home::recent(&self.pool, home::RECENT_LIMIT, &vocab.declarations).await?,
         })
+    }
+
+    /// The values the query box suggests after `kind:`, `source:` and
+    /// `under:` (#601) -- only values that exist right now; see
+    /// [`FilterSuggestions`].
+    ///
+    /// Three round trips: the vocabulary every query loads, the kinds with
+    /// rows, and the parents. Read once per launcher opening, and narrowed by
+    /// the box itself as the reader types.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if any read fails.
+    pub async fn filter_suggestions(&self) -> Result<FilterSuggestions, SearchError> {
+        let vocab = self.vocabulary().await?;
+        suggest::read(&self.pool, &vocab).await
     }
 
     /// The plan the board's recency read runs under.

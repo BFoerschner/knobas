@@ -197,6 +197,24 @@ pub async fn delete_smart_list(
     delete_smart_list_inner(&lifecycle.pool()?, &id).await
 }
 
+/// The values the query box suggests after `kind:`, `source:` and `under:`
+/// (#601): the kinds with rows, the enabled sources, and the names the
+/// mirror's and the estate's parents answer to, each with its kind. Only
+/// values that exist right now.
+///
+/// Read once per launcher opening -- the box narrows the lists itself as the
+/// reader types -- so the keystroke path never waits on it.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn filter_suggestions(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<knobas_search::FilterSuggestions, IpcError> {
+    filter_suggestions_inner(&lifecycle.pool()?).await
+}
+
 /// The launcher's engine, reading what the compiled-in adapters declare about
 /// their payloads -- the parent `under:` scopes by among it (#595).
 ///
@@ -246,6 +264,17 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
         pending_writes: u32::try_from(knobas_core::write_queue::counts(pool).await?.pending)
             .unwrap_or(u32::MAX),
     })
+}
+
+/// [`filter_suggestions`], against a pool.
+///
+/// # Errors
+///
+/// See [`filter_suggestions`].
+pub async fn filter_suggestions_inner(
+    pool: &PgPool,
+) -> Result<knobas_search::FilterSuggestions, IpcError> {
+    Ok(searcher(pool).filter_suggestions().await?)
 }
 
 /// [`smart_lists`], against a pool.
@@ -411,6 +440,65 @@ mod tests {
                  does not declare `{key}`, which the Rust type puts on the \
                  wire:\n{summary}"
             );
+        }
+    }
+
+    /// The query box's suggestion lists (#601) and their three element types,
+    /// against the hand-written mirror -- the wire's keys, from `serde_json`,
+    /// each found as a declaration line inside its own interface.
+    #[test]
+    fn the_filter_suggestions_shape_matches_its_typescript_mirror() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/search.ts");
+        let value = knobas_search::FilterSuggestions {
+            kinds: vec![knobas_search::KindSuggestion {
+                kind: "repo".to_owned(),
+                label: "Repo".to_owned(),
+            }],
+            sources: vec![knobas_search::SourceSuggestion {
+                id: "gitea".to_owned(),
+                display_name: "Gitea".to_owned(),
+            }],
+            parents: vec![knobas_search::ParentSuggestion {
+                name: "payout-service".to_owned(),
+                kind: "repo".to_owned(),
+            }],
+        };
+        let wire = serde_json::to_value(&value).expect("FilterSuggestions serializes");
+        for (interface, object, expected) in [
+            (
+                "FilterSuggestions",
+                &wire,
+                &["kinds", "parents", "sources"][..],
+            ),
+            ("KindSuggestion", &wire["kinds"][0], &["kind", "label"][..]),
+            (
+                "SourceSuggestion",
+                &wire["sources"][0],
+                &["display_name", "id"][..],
+            ),
+            (
+                "ParentSuggestion",
+                &wire["parents"][0],
+                &["kind", "name"][..],
+            ),
+        ] {
+            let body = interface_body(mirror, interface);
+            let mut keys: Vec<&str> = object
+                .as_object()
+                .expect("an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            assert_eq!(keys, expected, "{interface}");
+            for key in &keys {
+                assert!(
+                    declares(body, key),
+                    "`interface {interface}` in app/src/lib/ipc/search.ts does \
+                     not declare `{key}`, which the Rust type puts on the wire:\
+                     \n{body}"
+                );
+            }
         }
     }
 

@@ -392,6 +392,9 @@ pub fn run() {
             // append-only (§10.8). The Import commands above are what consume
             // what this answers with.
             commands::assets::produce_estate_file,
+            // #601's query-box suggestions, appended at the foot: a read on
+            // the search module, and the list is append-only (§10.8).
+            commands::search::filter_suggestions,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
