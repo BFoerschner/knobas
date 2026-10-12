@@ -24,9 +24,8 @@ import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
 let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
   Promise.resolve({ rows: [], total: 0, tally: null });
-let board: (
-  filter: Pick<EntityFilter, "sources" | "context" | "project">,
-) => Promise<MiniBoard> = () => Promise.resolve({ columns: [], sources: [] });
+let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Promise<MiniBoard> =
+  () => Promise.resolve({ columns: [], sources: [] });
 
 /**
  * `getEntity` too, because opening a row mounts the slide-over — which reads.
@@ -37,11 +36,7 @@ let board: (
 /** Every note *New note* wrote. */
 /** What `get_entity` answers; not in the mirror unless a test says otherwise. */
 const notInMirror = (entityId: string): Promise<EntityDetail> =>
-  Promise.reject({
-    code: "not_found",
-    message: `${entityId} is not in the mirror`,
-    source_id: null,
-  });
+  Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null });
 let entity = notInMirror;
 
 const written: string[] = [];
@@ -64,15 +59,13 @@ vi.mock("../ipc/entity", () => ({
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () =>
-    Promise.reject(new Error("no context creation in this test")),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   // The Tickets tile's read (#178). Empty by default -- this file is about
   // the room, not the board -- but answerable, because a project room's
   // narrowing is only observable through what its tiles draw, and the Tickets
   // tile is a board rather than a list of rows.
-  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) =>
-    board(filter),
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => board(filter),
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
     return answer(filter);
@@ -126,11 +119,9 @@ vi.mock("../ipc/entity", () => ({
  * that a project room asked nothing while a source room asked about itself.
  */
 const assetCalls: string[] = [];
-let assets: (ctxId: string) => Promise<MemberAsset[]> = () =>
-  Promise.resolve([]);
+let assets: (ctxId: string) => Promise<MemberAsset[]> = () => Promise.resolve([]);
 let roots: () => Promise<AssetRow[]> = () => Promise.resolve([]);
-let monitored: (sourceId: string) => Promise<MemberAsset[]> = () =>
-  Promise.resolve([]);
+let monitored: (sourceId: string) => Promise<MemberAsset[]> = () => Promise.resolve([]);
 
 vi.mock("../ipc/assets", () => ({
   contextAssets: (ctxId: string) => {
@@ -150,8 +141,7 @@ vi.mock("../ipc/assets", () => ({
 const { default: Room } = await import("./Room.svelte");
 const { builtinContexts, storedContext } = await import("./contexts");
 const { createRouter } = await import("./router.svelte");
-const { createMiniBoardOverrides } =
-  await import("./mini-board-overrides.svelte");
+const { createMiniBoardOverrides } = await import("./mini-board-overrides.svelte");
 
 /**
  * Two sources, and the projects their corpus shows (#209).
@@ -216,18 +206,16 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
   const SEG = ".tile-h .acts .seg";
   /** The Tickets tile's layout option that reads `label` (#245), or undefined where none does. */
   function layoutOption(label: string): HTMLButtonElement | undefined {
-    return [
-      ...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`),
-    ].find((node) => node.textContent?.trim() === label);
+    return [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].find(
+      (node) => node.textContent?.trim() === label,
+    );
   }
   /** The maximise control (#250) of the tile labelled `label`, or null where no such tile is drawn. */
   function maxButton(label: string): HTMLButtonElement | null {
     const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
       (node) => node.querySelector(".tile-h .lab")?.textContent === label,
     );
-    return (
-      tile?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max") ?? null
-    );
+    return tile?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max") ?? null;
   }
   return {
     target,
@@ -242,20 +230,16 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     /** Each mini board group as `[heading, count]`, in the order drawn. */
     groups: () =>
       [...target.querySelectorAll(".col")].map((col) =>
-        [...col.querySelectorAll(".col-h span")].map(
-          (span) => span.textContent ?? "",
-        ),
+        [...col.querySelectorAll(".col-h span")].map((span) => span.textContent ?? ""),
       ),
     /** The Tickets tile's layout control: `[word, pressed, refused, reason]` per option. */
     control: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].map(
-        (option) => [
-          option.textContent?.trim() ?? "",
-          option.getAttribute("aria-pressed") === "true",
-          option.getAttribute("aria-disabled") === "true",
-          option.getAttribute("title"),
-        ],
-      ),
+      [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].map((option) => [
+        option.textContent?.trim() ?? "",
+        option.getAttribute("aria-pressed") === "true",
+        option.getAttribute("aria-disabled") === "true",
+        option.getAttribute("title"),
+      ]),
     /**
      * What the layout option `label` is described by (#258). A dangling
      * `aria-describedby` is no description to assistive technology, and
@@ -269,9 +253,7 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
     /** The visually hidden reasons the layout control carries, in the order drawn. */
     hiddenReasons: () =>
-      [...target.querySelectorAll<HTMLElement>(`${SEG} .vh`)].map(
-        (node) => node.textContent?.trim() ?? "",
-      ),
+      [...target.querySelectorAll<HTMLElement>(`${SEG} .vh`)].map((node) => node.textContent?.trim() ?? ""),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
       const option = layoutOption(label);
@@ -279,24 +261,15 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       option!.click();
       flushSync();
     },
-    tiles: () =>
-      [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map(
-        (l) => l.textContent,
-      ),
+    tiles: () => [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map((l) => l.textContent),
     /** The grid's modifier classes (#250): `max` while a tile is maximised. */
-    grid: () =>
-      [...(target.querySelector(".tiles")?.classList ?? [])].filter(
-        (name) => name !== "tiles",
-      ),
+    grid: () => [...(target.querySelector(".tiles")?.classList ?? [])].filter((name) => name !== "tiles"),
     /** The maximise control of the tile labelled `label`, by the word it reads. */
     maxButton,
     /** Press the maximise control of the tile labelled `label`. */
     maximise: (label: string) => {
       const button = maxButton(label);
-      expect(
-        button,
-        `the ${label} tile is drawn and offers a maximise control`,
-      ).not.toBeNull();
+      expect(button, `the ${label} tile is drawn and offers a maximise control`).not.toBeNull();
       button!.click();
       flushSync();
     },
@@ -308,15 +281,9 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       flushSync();
     },
     /** The key on each mini-board card, in the order drawn. */
-    cards: () =>
-      [...target.querySelectorAll<HTMLElement>(".card .mono")].map(
-        (k) => k.textContent,
-      ),
+    cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
     /** Every list tile's rows, by the title they show. */
-    rows: () =>
-      [...target.querySelectorAll<HTMLElement>(".row .t")].map(
-        (t) => t.textContent,
-      ),
+    rows: () => [...target.querySelectorAll<HTMLElement>(".row .t")].map((t) => t.textContent),
     text: () => target.textContent ?? "",
     done: () => {
       unmount(app);
@@ -350,11 +317,7 @@ test("draws one tile per bucket present, and one per open kind", async () => {
     Promise.resolve(
       filter.kinds.length === 0
         ? {
-            rows: [
-              row("ticket", "PAY-1"),
-              row("page", "ENG-1"),
-              row("incident", "INC-1"),
-            ],
+            rows: [row("ticket", "PAY-1"), row("page", "ENG-1"), row("incident", "INC-1")],
             total: 3,
             tally: null,
           }
@@ -397,8 +360,7 @@ test("the room bar carries the unpaged total", async () => {
  * a test that checked only the first.
  */
 test("a source room filters by its source and is named after it", async () => {
-  answer = () =>
-    Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
 
   const screen = render("#/ctx/src:jira");
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Assets"]));
@@ -407,9 +369,7 @@ test("a source room filters by its source and is named after it", async () => {
   expect(screen.text()).toContain("Tidewater Jira");
   expect(calls[0]?.filter.sources).toEqual(["jira"]);
   // ...and the tile inherits it rather than reading the whole mirror.
-  expect(calls.every((call) => call.filter.sources.includes("jira"))).toBe(
-    true,
-  );
+  expect(calls.every((call) => call.filter.sources.includes("jira"))).toBe(true);
 
   screen.done();
 });
@@ -423,9 +383,7 @@ test("a source room filters by its source and is named after it", async () => {
  */
 test("a room with nothing in it draws no tiles at all", async () => {
   const screen = render("#/ctx/proj:jira:QUIET");
-  await vi.waitFor(() =>
-    expect(screen.text()).toContain("Nothing synced into this room yet"),
-  );
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
   expect(screen.tiles()).toEqual([]);
   screen.done();
 });
@@ -433,16 +391,10 @@ test("a room with nothing in it draws no tiles at all", async () => {
 /** A failed survey says why, rather than looking like an empty corpus. */
 test("a rejected survey shows its message", async () => {
   answer = () =>
-    Promise.reject({
-      code: "not_ready",
-      message: "the database is still starting",
-      source_id: null,
-    });
+    Promise.reject({ code: "not_ready", message: "the database is still starting", source_id: null });
 
   const screen = render("#/ctx/all");
-  await vi.waitFor(() =>
-    expect(screen.text()).toContain("the database is still starting"),
-  );
+  await vi.waitFor(() => expect(screen.text()).toContain("the database is still starting"));
   expect(screen.text()).not.toContain("Nothing synced into this room yet");
   screen.done();
 });
@@ -452,17 +404,10 @@ test("a rejected survey shows its message", async () => {
  * detail view knows what it is before it has fetched anything.
  */
 test("opening a row navigates to that entity's address", async () => {
-  answer = () =>
-    Promise.resolve({
-      rows: [row("incident", "INC-1")],
-      total: 1,
-      tally: null,
-    });
+  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null });
 
   const screen = render("#/ctx/src:jira");
-  await vi.waitFor(() =>
-    expect(screen.target.querySelector(".row")).not.toBeNull(),
-  );
+  await vi.waitFor(() => expect(screen.target.querySelector(".row")).not.toBeNull());
 
   screen.target.querySelector<HTMLButtonElement>(".row")?.click();
   flushSync();
@@ -479,11 +424,7 @@ test("the tile grid sizes itself with a modifier class", async () => {
   answer = (filter) =>
     Promise.resolve(
       filter.kinds.length === 0
-        ? {
-            rows: [row("ticket", "T"), row("page", "P"), row("build", "B")],
-            total: 3,
-            tally: null,
-          }
+        ? { rows: [row("ticket", "T"), row("page", "P"), row("build", "B")], total: 3, tally: null }
         : { rows: [], total: 0, tally: null },
     );
 
@@ -509,14 +450,13 @@ test("the tile grid sizes itself with a modifier class", async () => {
  */
 test("New note writes the note first and opens it", async () => {
   written.length = 0;
-  answer = () =>
-    Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
   const screen = render("#/ctx/all");
   await settle();
 
-  const button = [
-    ...screen.target.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((node) => node.textContent?.trim() === "New note");
+  const button = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (node) => node.textContent?.trim() === "New note",
+  );
   expect(button, "the room offers somewhere to start writing").toBeDefined();
 
   button!.click();
@@ -544,12 +484,7 @@ test("New note writes the note first and opens it", async () => {
  */
 async function bornWithFrom(hash: string, openADetail: boolean) {
   born.length = 0;
-  answer = () =>
-    Promise.resolve({
-      rows: [row("incident", "INC-1")],
-      total: 1,
-      tally: null,
-    });
+  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null });
   const screen = render("#/ctx/all");
   await settle();
   screen.relist([...CONTEXTS, storedContext(STORED), storedContext(PROMOTED)]);
@@ -563,14 +498,12 @@ async function bornWithFrom(hash: string, openADetail: boolean) {
     screen.target.querySelector<HTMLButtonElement>(".row")?.click();
     flushSync();
     await settle();
-    expect(screen.router.route, hash).toMatchObject({
-      detail: { entityId: "mock:INC-1" },
-    });
+    expect(screen.router.route, hash).toMatchObject({ detail: { entityId: "mock:INC-1" } });
   }
 
-  const button = [
-    ...screen.target.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((node) => node.textContent?.trim() === "New note");
+  const button = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (node) => node.textContent?.trim() === "New note",
+  );
   expect(button, `${hash} offers somewhere to start writing`).toBeDefined();
   button!.click();
   await settle();
@@ -708,15 +641,12 @@ const CORPUS: Item[] = [
 ];
 
 /** Everything the corpus holds, narrowed the way the backend narrows it. */
-function corpus(
-  filter: Pick<EntityFilter, "sources" | "project"> & { kinds?: string[] },
-): Item[] {
+function corpus(filter: Pick<EntityFilter, "sources" | "project"> & { kinds?: string[] }): Item[] {
   return CORPUS.filter(
     (item) =>
       (filter.sources.length === 0 || filter.sources.includes(item.source)) &&
       (filter.project === null || filter.project === item.project) &&
-      ((filter.kinds ?? []).length === 0 ||
-        (filter.kinds ?? []).includes(item.kind)),
+      ((filter.kinds ?? []).length === 0 || (filter.kinds ?? []).includes(item.kind)),
   );
 }
 
@@ -770,10 +700,7 @@ test("maximising a tile draws it alone and Restore draws the grid again", async 
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Restore");
   // The tile kept its own read; the tray under the grid kept its place.
   expect(screen.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC"]);
-  expect(
-    screen.target.querySelector(".tray"),
-    "the tray stays under a maximised tile",
-  ).not.toBeNull();
+  expect(screen.target.querySelector(".tray"), "the tray stays under a maximised tile").not.toBeNull();
 
   screen.maximise("Docs");
   await settle();
@@ -844,9 +771,7 @@ test("a fresh list of the same rooms leaves the tile maximised", async () => {
   screen.maximise("Docs");
   expect(screen.tiles()).toEqual(["Docs"]);
 
-  screen.relist(
-    CONTEXTS.map((context) => ({ ...context, filter: { ...context.filter } })),
-  );
+  screen.relist(CONTEXTS.map((context) => ({ ...context, filter: { ...context.filter } })));
   // The room re-reads its kinds for the new object; wait for that read to land.
   await settle();
   await vi.waitFor(() => expect(screen.tiles()).not.toEqual([]));
@@ -873,18 +798,13 @@ test("a detail opens over the maximised tile and leaves it maximised; restoreTil
   );
   await settle();
 
-  expect(screen.restoreTile(), "nothing to restore in a plain room").toBe(
-    false,
-  );
+  expect(screen.restoreTile(), "nothing to restore in a plain room").toBe(false);
   screen.maximise("Docs");
 
   screen.target.querySelector<HTMLButtonElement>(".row")?.click();
   await settle();
   expect(location.hash).toBe("#/page/mock:ENG-1");
-  expect(
-    screen.target.querySelector(".detail"),
-    "the slide-over opened",
-  ).not.toBeNull();
+  expect(screen.target.querySelector(".detail"), "the slide-over opened").not.toBeNull();
   expect(screen.tiles()).toEqual(["Docs"]);
 
   screen.router.back();
@@ -896,10 +816,7 @@ test("a detail opens over the maximised tile and leaves it maximised; restoreTil
   flushSync();
   await settle();
   expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
-  expect(
-    screen.restoreTile(),
-    "a second press has nothing left to restore",
-  ).toBe(false);
+  expect(screen.restoreTile(), "a second press has nothing left to restore").toBe(false);
 
   screen.done();
 });
@@ -963,11 +880,7 @@ test("a project room narrows every tile in it, its own count included", async ()
   expect(source.text()).toContain("6 items");
   expect(source.tiles()).toEqual(["Tickets", "Docs", "Incidents", "Assets"]);
   expect(source.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
-  expect(source.rows()).toEqual([
-    "Title of ENG-1",
-    "Title of OPS-DOC",
-    "Title of INC-1",
-  ]);
+  expect(source.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC", "Title of INC-1"]);
   source.done();
 });
 
@@ -1077,9 +990,7 @@ test("an empty project room says so, distinguishably from a broken one", async (
   serveCorpus();
 
   const screen = render("#/ctx/proj:jira:QUIET");
-  await vi.waitFor(() =>
-    expect(screen.text()).toContain("Nothing synced into this room yet"),
-  );
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
   await settle();
 
   expect(screen.text()).toContain("Quiet project");
@@ -1146,13 +1057,7 @@ function statusBoard(n: number): MiniBoard {
     columns: Array.from({ length: n }, (_, at) => ({
       status: `S${at + 1}`,
       cards: [
-        {
-          entity_id: `mock:S${at + 1}`,
-          source_id: "mock",
-          key: `PAY-${at + 1}`,
-          title: `S${at + 1}`,
-          priority: null,
-        },
+        { entity_id: `mock:S${at + 1}`, source_id: "mock", key: `PAY-${at + 1}`, title: `S${at + 1}`, priority: null },
       ],
     })),
     sources: [],
@@ -1190,15 +1095,7 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
     Promise.resolve({
       columns: STATUSES.map((status) => ({
         status,
-        cards: [
-          {
-            entity_id: `mock:${status}`,
-            source_id: "mock",
-            key: status,
-            title: status,
-            priority: null,
-          },
-        ],
+        cards: [{ entity_id: `mock:${status}`, source_id: "mock", key: status, title: status, priority: null }],
       })),
       sources: [],
     });
@@ -1333,9 +1230,7 @@ test("pressing the effective default on a demoted override clears it, seen once 
   await vi.waitFor(() => expect(screen.cards()).toHaveLength(6));
   await settle();
   expect(screen.layout()).toBe("stacked");
-  expect(
-    screen.control().map(([word, on, refused]) => [word, on, refused]),
-  ).toEqual([
+  expect(screen.control().map(([word, on, refused]) => [word, on, refused])).toEqual([
     ["columns", false, false],
     ["stacked", true, false],
   ]);
@@ -1421,8 +1316,7 @@ test("each kind of room draws the Assets tile its rule gives it, and reads for i
   ticketsEverywhere();
   assets = () => Promise.resolve([memberAsset("vm-db-01", "hel1")]);
   roots = () => Promise.resolve([memberAsset("hel1", null).asset]);
-  monitored = () =>
-    Promise.resolve([memberAsset("postgres", "hel1 / vm-db-01")]);
+  monitored = () => Promise.resolve([memberAsset("postgres", "hel1 / vm-db-01")]);
 
   // All work: the estate's top level.
   const screen = render("#/ctx/all");
@@ -1436,10 +1330,9 @@ test("each kind of room draws the Assets tile its rule gives it, and reads for i
   assetCalls.length = 0;
   screen.router.go("#/ctx/proj:jira:PAY");
   await settle();
-  expect(
-    screen.tiles(),
-    "a project is a source's grouping of its own items",
-  ).not.toContain("Assets");
+  expect(screen.tiles(), "a project is a source's grouping of its own items").not.toContain(
+    "Assets",
+  );
   expect(assetCalls).toEqual([]);
 
   // A source room: its own monitors' assets.
@@ -1479,9 +1372,7 @@ test("a stored room with assets and nothing synced draws the tile, not the empty
   // A project room is where the empty page still lives, and it is the room
   // this one has to be told apart from.
   const screen = render("#/ctx/proj:jira:QUIET");
-  await vi.waitFor(() =>
-    expect(screen.text()).toContain("Nothing synced into this room yet"),
-  );
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
 
   screen.relist([...CONTEXTS, storedContext(STORED)]);
   screen.router.go("#/ctx/ctx:pay");
@@ -1489,9 +1380,7 @@ test("a stored room with assets and nothing synced draws the tile, not the empty
 
   expect(screen.tiles()).toEqual(["Assets"]);
   expect(screen.text()).not.toContain("Nothing synced into this room yet");
-  expect(screen.grid(), "one tile is a list, not a two-column board").toContain(
-    "one",
-  );
+  expect(screen.grid(), "one tile is a list, not a two-column board").toContain("one");
   expect(screen.text()).toContain("top level");
 
   screen.done();
@@ -1531,12 +1420,7 @@ test("the Assets tile maximises and restores like any other tile", async () => {
 test("a detail opened from another keeps the first drawn until its row is read, without fading in again", async () => {
   const detail = (id: string): EntityDetail => ({
     row: { ...row("commit", id), entity_id: `mock:${id}` },
-    source: {
-      id: "mock",
-      display_name: "Mock",
-      adapter_kind: "mock",
-      enabled: true,
-    },
+    source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
     kind_info: null,
     body_text: "",
     author: null,
@@ -1548,10 +1432,7 @@ test("a detail opened from another keeps the first drawn until its row is read, 
   });
   let releaseB!: () => void;
   const gateB = new Promise<void>((resolve) => (releaseB = resolve));
-  entity = (id) =>
-    id === "mock:B"
-      ? gateB.then(() => detail("B"))
-      : Promise.resolve(detail(id.slice(5)));
+  entity = (id) => (id === "mock:B" ? gateB.then(() => detail("B")) : Promise.resolve(detail(id.slice(5))));
 
   const screen = render("#/ctx/all");
   screen.router.go("#/commit/mock:A");
@@ -1559,30 +1440,19 @@ test("a detail opened from another keeps the first drawn until its row is read, 
   const title = () => screen.target.querySelector(".detail h2")?.textContent;
   await vi.waitFor(() => expect(title()).toBe("Title of A"));
   const first = screen.target.querySelector(".detail")!;
-  expect(
-    first.parentElement!.classList.contains("swap"),
-    "a panel opened over the room fades in",
-  ).toBe(false);
+  expect(first.parentElement!.classList.contains("swap"), "a panel opened over the room fades in").toBe(false);
 
   screen.router.go("#/commit/mock:B");
   flushSync();
-  expect(title(), "the first panel is still drawn while B is read").toBe(
-    "Title of A",
-  );
+  expect(title(), "the first panel is still drawn while B is read").toBe("Title of A");
 
   releaseB();
   await vi.waitFor(() => expect(title()).toBe("Title of B"));
   const second = screen.target.querySelector(".detail")!;
-  expect(
-    second.parentElement!.classList.contains("swap"),
-    "a swapped panel does not fade in",
-  ).toBe(true);
+  expect(second.parentElement!.classList.contains("swap"), "a swapped panel does not fade in").toBe(true);
 
   // A read that never answers is not waited on past a moment.
-  entity = (id) =>
-    id === "mock:C"
-      ? new Promise(() => {})
-      : Promise.resolve(detail(id.slice(5)));
+  entity = (id) => (id === "mock:C" ? new Promise(() => {}) : Promise.resolve(detail(id.slice(5))));
   screen.router.go("#/commit/mock:C");
   flushSync();
   expect(title()).toBe("Title of B");
@@ -1599,12 +1469,7 @@ test("a detail opened from another keeps the first drawn until its row is read, 
 test("a detail closed while its row was being read is not drawn when the read answers", async () => {
   const detail = (id: string): EntityDetail => ({
     row: { ...row("commit", id), entity_id: `mock:${id}` },
-    source: {
-      id: "mock",
-      display_name: "Mock",
-      adapter_kind: "mock",
-      enabled: true,
-    },
+    source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
     kind_info: null,
     body_text: "",
     author: null,
@@ -1616,37 +1481,24 @@ test("a detail closed while its row was being read is not drawn when the read an
   });
   let releaseB!: () => void;
   const gateB = new Promise<void>((resolve) => (releaseB = resolve));
-  entity = (id) =>
-    id === "mock:B"
-      ? gateB.then(() => detail("B"))
-      : Promise.resolve(detail(id.slice(5)));
+  entity = (id) => (id === "mock:B" ? gateB.then(() => detail("B")) : Promise.resolve(detail(id.slice(5))));
 
   const screen = render("#/ctx/all");
   screen.router.go("#/commit/mock:A");
   flushSync();
-  await vi.waitFor(() =>
-    expect(screen.target.querySelector(".detail h2")?.textContent).toBe(
-      "Title of A",
-    ),
-  );
+  await vi.waitFor(() => expect(screen.target.querySelector(".detail h2")?.textContent).toBe("Title of A"));
 
   screen.router.go("#/commit/mock:B");
   flushSync();
   screen.router.back();
   flushSync();
-  expect(
-    screen.target.querySelector(".detail"),
-    "closing ends the hold at once",
-  ).toBeNull();
+  expect(screen.target.querySelector(".detail"), "closing ends the hold at once").toBeNull();
 
   releaseB();
   await gateB;
   await new Promise((settle) => setTimeout(settle, 200));
   flushSync();
-  expect(
-    screen.target.querySelector(".detail"),
-    "B's late row draws nothing",
-  ).toBeNull();
+  expect(screen.target.querySelector(".detail"), "B's late row draws nothing").toBeNull();
 
   screen.done();
 });

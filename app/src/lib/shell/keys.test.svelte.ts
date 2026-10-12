@@ -157,9 +157,7 @@ test("a key whose propagation was stopped below window never reaches the ladder"
   document.body.append(dialog);
   dialog.addEventListener("keydown", (event) => event.stopPropagation());
 
-  dialog.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-  );
+  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   expect(location.hash).toBe("#/ticket/mock:PAY-231");
 
   dialog.remove();
@@ -233,9 +231,7 @@ test("a Cmd-T whose propagation was stopped below window never reaches the timer
   document.body.append(dialog);
   dialog.addEventListener("keydown", (event) => event.stopPropagation());
 
-  dialog.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true }),
-  );
+  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true }));
   expect(toggleTimer).not.toHaveBeenCalled();
 
   dialog.remove();
@@ -275,12 +271,7 @@ test("inside a text field the history keys are the field's", async () => {
   field.focus();
 
   for (const key of ["[", "ArrowLeft"]) {
-    const event = new KeyboardEvent("keydown", {
-      key,
-      metaKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
+    const event = new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true, cancelable: true });
     field.dispatchEvent(event);
     expect(event.defaultPrevented, key).toBe(false);
   }
@@ -295,11 +286,7 @@ test("the mouse's back and forward buttons navigate, and nothing else happens", 
   router.go("#/ticket/mock:PAY-231");
 
   const click = (button: number) => {
-    const up = new MouseEvent("mouseup", {
-      button,
-      bubbles: true,
-      cancelable: true,
-    });
+    const up = new MouseEvent("mouseup", { button, bubbles: true, cancelable: true });
     document.body.dispatchEvent(up);
     return up;
   };
@@ -327,21 +314,12 @@ test("a key a control answered, or AltGr's bracket, does not step; ⌘⌥[ does"
   const tab = document.createElement("button");
   tab.addEventListener("keydown", (event) => event.preventDefault());
   document.body.append(tab);
-  tab.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "ArrowLeft",
-      metaKey: true,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+  tab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", metaKey: true, bubbles: true, cancelable: true }));
   press("[", { ctrlKey: true, altKey: true });
   await new Promise((settle) => setTimeout(settle, 20));
   expect(location.hash).toBe("#/ticket/mock:PAY-231");
   tab.remove();
 
-  expect(press("[", { metaKey: true, altKey: true }).defaultPrevented).toBe(
-    true,
-  );
+  expect(press("[", { metaKey: true, altKey: true }).defaultPrevented).toBe(true);
   await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
 });

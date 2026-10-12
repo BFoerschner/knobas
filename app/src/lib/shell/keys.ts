@@ -201,20 +201,9 @@ function historyStep(event: KeyboardEvent): "back" | "forward" | null {
 function inTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
-  if (
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  )
-    return true;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
   if (!(target instanceof HTMLInputElement)) return false;
-  return ![
-    "button",
-    "checkbox",
-    "radio",
-    "submit",
-    "reset",
-    "range",
-    "color",
-    "file",
-  ].includes(target.type);
+  return !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file"].includes(
+    target.type,
+  );
 }
