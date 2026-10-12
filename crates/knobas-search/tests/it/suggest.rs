@@ -441,3 +441,99 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
         leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
     }
 }
+
+/// Whether `under:` knows `name`, asked the way the box asks: the spelling a
+/// picked suggestion is typed with, and no unknown token in the answer.
+async fn under_knows(searcher: &Searcher, name: &str) -> bool {
+    searcher
+        .search(SearchQuery {
+            raw: typed_under(name),
+            limit: 1,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap()
+        .interpreted
+        .unknown_tokens
+        .is_empty()
+}
+
+/// What `under:` knows and what the box offers for it are one set (#615).
+///
+/// They are read by two statements, `under`'s and `suggest`'s, over the same
+/// three parent shapes: a parent only its children name, a mirrored parent
+/// nothing sits in, and an asset. A shape only `under:` reads is a name the
+/// box never offers; a shape only the box reads is an offer that greys out.
+/// So every name the seed could answer to -- the parents' names and some that
+/// are no parent's -- is asked of both, and the two answers must agree, in
+/// both directions, for each shape.
+#[tokio::test]
+async fn under_knows_exactly_the_names_the_box_offers() {
+    let pool = pool().await;
+    let t = token();
+    let owner = format!("Harbour{t}");
+    // A parent only its children name: a commit in a repo the mirror lacks.
+    let unmirrored = format!("Unmirrored Ledger {t}");
+    commit(&pool, "gitea", &owner, &unmirrored).await;
+    // A mirrored parent nothing sits in.
+    let lonely = format!("lonely-{t}");
+    item(
+        &pool,
+        "gitea",
+        "repo",
+        &format!("{owner}/{lonely}"),
+        serde_json::json!({ "full_name": format!("{owner}/{lonely}"), "name": lonely }),
+    )
+    .await;
+    // An asset.
+    let rack = format!("Rack Four {t}");
+    asset(&pool, &format!("asset:rack-{t}"), None, &rack).await;
+
+    let searcher = searcher(&pool);
+    let offered: Vec<String> = parents_of(&searcher.filter_suggestions().await.unwrap(), &t)
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+
+    let candidates = [
+        unmirrored.clone(),
+        format!("{owner}/{unmirrored}"),
+        lonely.clone(),
+        format!("{owner}/{lonely}"),
+        rack.clone(),
+        // No parent answers to these: the owner alone, and a name next to one.
+        owner.clone(),
+        format!("{lonely}-not"),
+    ];
+    let mut known = Vec::new();
+    for name in &candidates {
+        if under_knows(&searcher, name).await {
+            known.push(name.clone());
+        }
+    }
+    known.sort();
+
+    for name in &offered {
+        assert!(
+            known.contains(name),
+            "{name} is offered and under: does not know it"
+        );
+    }
+    for name in &known {
+        assert!(
+            offered.contains(name),
+            "under: knows {name} and the box never offers it"
+        );
+    }
+    // The seed reaches every shape, so neither direction was asked of an
+    // empty set, and the decoys were not known.
+    let mut expected = vec![
+        unmirrored.clone(),
+        format!("{owner}/{unmirrored}"),
+        lonely.clone(),
+        format!("{owner}/{lonely}"),
+        rack.clone(),
+    ];
+    expected.sort();
+    assert_eq!(known, expected);
+}
