@@ -35,6 +35,7 @@ mod map;
 mod rest;
 mod source;
 mod sync;
+mod view;
 mod write;
 
 pub use config::{TeamCityConfig, config_schema};

@@ -31,3 +31,9 @@ knobas-source-mock = { path = "../knobas-source-mock" }
 reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The docker-free stand-in for the source-view tests (`tests/it/view.rs`,
+# #664): mockd serves the sync contract and knows nothing of parameters,
+# steps or triggers. Every shape it serves there is re-asserted against the
+# real server in `tests/live_teamcity_seeded.rs`; on disagreement the fake is
+# what is wrong. Brings no `reqwest` of its own.
+wiremock = "0.6"

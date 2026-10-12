@@ -11,8 +11,9 @@ use knobas_source::{ConnectionInfo, SourceError};
 use crate::TeamCityConfig;
 use crate::http;
 use crate::rest::{
-    BUILD_FIELDS, BUILD_ID_FIELDS, BUILD_TYPE_FIELDS, Build, BuildType, CurrentUser, ListEnvelope,
-    Locator, SERVER_FIELDS, Server, USER_FIELDS,
+    BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS, BUILD_TYPE_FIELDS, Build, BuildType,
+    ConfigRecord, CurrentUser, ListEnvelope, Locator, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server,
+    USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -248,6 +249,63 @@ impl HttpRest {
                      run again"
                 ))
             })
+    }
+}
+
+impl HttpRest {
+    /// `GET /app/rest/buildTypes/id:{id}` -- one build configuration with its
+    /// parameters, steps, triggers and VCS roots, for its source view (#664).
+    ///
+    /// Not on [`Rest`], for [`Self::queue_build`]'s reason: that trait is the
+    /// sync run's, and its fake has no business answering a view.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, a 404 for a configuration that is gone
+    /// included.
+    pub(crate) async fn build_config(&self, id: &str) -> Result<ConfigRecord, SourceError> {
+        self.one(
+            &format!("app/rest/buildTypes/id:{id}"),
+            &[("fields", BUILD_CONFIG_VIEW_FIELDS)],
+        )
+        .await
+    }
+
+    /// The newest `count` builds of one configuration, in every state and on
+    /// every branch, newest first -- the view's *Recent builds* (#664).
+    ///
+    /// `defaultFilter:false` and `branch:default:any`: the sync's item queries
+    /// keep personal builds out (see [`Locator::default_filter`]), but a list
+    /// of what a configuration has been doing lately is exactly the question
+    /// "every build, whatever its state" that the probe asks, and nothing
+    /// here becomes an item.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn recent_builds(
+        &self,
+        build_type_id: &str,
+        count: u32,
+    ) -> Result<Vec<Build>, SourceError> {
+        let locator = Locator {
+            build_type_id: Some(build_type_id.to_owned()),
+            branch_any: true,
+            default_filter: Some(false),
+            count,
+            ..Locator::default()
+        }
+        .render();
+        let page = self
+            .list::<Build>(
+                "app/rest/builds",
+                &[
+                    ("locator", locator.as_str()),
+                    ("fields", RECENT_BUILD_FIELDS),
+                ],
+            )
+            .await?;
+        Ok(page.items.into_iter().map(|r| r.rec).collect())
     }
 }
 

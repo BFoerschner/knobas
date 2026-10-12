@@ -54,6 +54,7 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/app/rest/server", get(server))
         .route("/app/rest/users/current", get(current_user))
         .route("/app/rest/buildTypes", get(build_types))
+        .route("/app/rest/buildTypes/{locator}", get(build_type_by_locator))
         .route("/app/rest/builds", get(builds))
         .route("/app/rest/builds/{locator}", get(build_by_locator))
         // M2's write-back (issue #43): triggering a build and re-running one
@@ -511,6 +512,63 @@ async fn build_types(State(s): State<Arc<MockState>>, req: Request) -> Response 
         "nextHref": Value::Null,
         "buildType": types.iter().map(|t| build_type_json(t, &base)).collect::<Vec<_>>(),
     });
+    match project(full, sel.as_ref()) {
+        Ok(v) => Json(v).into_response(),
+        Err(name) => unknown_field(&s, &req, &name),
+    }
+}
+
+/// `GET /app/rest/buildTypes/id:{id}` -- one configuration, for the TeamCity
+/// adapter's source view (#664).
+///
+/// The record the listing serves, plus the four collections the view reads
+/// -- `parameters`, `steps`, `triggers`, `vcs-root-entries` -- **empty**: the
+/// fixture says nothing about any of them, and mockd invents no settings.
+/// What the view draws from real ones is witnessed against the seeded server
+/// (`live_teamcity_seeded.rs`); this route exists so the contract battery's
+/// clause 9 can read the view of every configuration mockd serves. An empty
+/// list carries no key set, so a typo below `property(...)` is excused here as
+/// it is under any absent object (`tc_fields::check_names`).
+async fn build_type_by_locator(
+    State(s): State<Arc<MockState>>,
+    Path(locator): Path<String>,
+    req: Request,
+) -> Response {
+    let q = query_map(&req);
+    let sel = match field_sel(&q, true) {
+        Ok(v) => v,
+        Err(m) => return unsupported(&s, &req, m),
+    };
+    let Some(id) = locator.strip_prefix("id:") else {
+        return unsupported(
+            &s,
+            &req,
+            format!("build type locator {locator:?} is not supported; mockd serves id:<id>"),
+        );
+    };
+    if let Some(r) = fault(&s).await {
+        return r;
+    }
+    let types = s.build_types();
+    let Some(bt) = types.iter().find(|t| t.id == id) else {
+        return tc_error(
+            StatusCode::NOT_FOUND,
+            format!("No build type nor template is found by id '{id}'."),
+        );
+    };
+    let mut full = build_type_json(bt, &s.base_url(API));
+    if let Value::Object(obj) = &mut full {
+        obj.insert(
+            "parameters".to_owned(),
+            json!({ "count": 0, "property": [] }),
+        );
+        obj.insert("steps".to_owned(), json!({ "count": 0, "step": [] }));
+        obj.insert("triggers".to_owned(), json!({ "count": 0, "trigger": [] }));
+        obj.insert(
+            "vcs-root-entries".to_owned(),
+            json!({ "count": 0, "vcs-root-entry": [] }),
+        );
+    }
     match project(full, sel.as_ref()) {
         Ok(v) => Json(v).into_response(),
         Err(name) => unknown_field(&s, &req, &name),

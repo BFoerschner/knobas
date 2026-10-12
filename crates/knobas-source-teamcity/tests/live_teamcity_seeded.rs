@@ -135,6 +135,20 @@ const FEATURE_BRANCH: &str = "fix/PAY-228-partial-refund-drift";
 struct Seed {
     version: String,
     builds: Vec<SeededBuild>,
+    /// What the seed set on one configuration for its source view (#664).
+    /// Optional so the suites that predate it still read an older
+    /// seed-state.json; the view's test asks for it by name.
+    settings: Option<SeededSettings>,
+}
+
+/// `teamcity.settings` in seed-state.json: the configuration that carries the
+/// seeded parameters and trigger, and the password parameter's value -- the
+/// string no view may contain.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededSettings {
+    build_type: String,
+    secret_parameter: String,
+    secret_value: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1701,4 +1715,201 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     );
     assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
     println!("SEEDED refusal on the deleted build: {refused:?}");
+}
+
+/// The build configuration's source view against the real server (#664,
+/// ADR-0013): the seeded configuration lists its seeded build with its
+/// outcome, its seeded parameters -- own, inherited and a password that is
+/// never drawn -- its step's script, its trigger and its VCS root.
+///
+/// Read-only. Run the battery beside it for clause 9 over every emitted
+/// entity; this test is about what the view *says*.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() {
+    use knobas_source::view::{Block, Fact, SourceView, Tone, ViewSection};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let settings = seeded.seed.settings.clone().unwrap_or_else(|| {
+        panic!("seed-state.json has no teamcity.settings -- re-run `./seed --teamcity` (#664)")
+    });
+    let source = seeded.source(serde_json::json!({}));
+    let view_of = async |config: &str| -> SourceView {
+        source
+            .view(&format!("teamcity:buildType:{config}"), None)
+            .await
+            .unwrap_or_else(|e| panic!("the view of {config} reads: {e:?}"))
+            .unwrap_or_else(|| panic!("TeamCity draws a build configuration ({config})"))
+    };
+    let section = |view: &SourceView, id: &str| -> ViewSection {
+        view.sections
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("no section {id}: {view:#?}"))
+    };
+    let facts = |block: &Block| -> Vec<Fact> {
+        match block {
+            Block::Facts { facts } => facts.clone(),
+            other => panic!("expected facts, got {other:#?}"),
+        }
+    };
+    let value = |facts: &[Fact], label: &str| -> (String, Option<Tone>) {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| (f.value.clone(), f.tone))
+            .unwrap_or_else(|| panic!("no fact {label}: {facts:#?}"))
+    };
+
+    let view = view_of(&settings.build_type).await;
+    println!(
+        "SEEDED VIEW {}:\n{}",
+        settings.build_type,
+        serde_json::to_string_pretty(&view).expect("serializes")
+    );
+    let tabs: Vec<_> = view
+        .sections
+        .iter()
+        .map(|s| (s.id.as_str(), s.count))
+        .collect();
+    assert_eq!(
+        tabs,
+        [
+            ("overview", None),
+            ("parameters", Some(3)),
+            ("steps", Some(1)),
+            ("triggers", Some(1)),
+            ("vcs_roots", Some(1)),
+        ]
+    );
+
+    // Overview: the seeded failed build, by number, outcome and address.
+    let overview = section(&view, "overview");
+    let overview_facts = facts(&overview.blocks[0]);
+    assert_eq!(value(&overview_facts, "Project").0, "Payout");
+    assert_eq!(
+        value(&overview_facts, "Last build"),
+        ("#1187 failed".to_owned(), Some(Tone::Err))
+    );
+    assert_eq!(
+        value(&overview_facts, "Success rate").0,
+        "0 % of 1 finished"
+    );
+    let rows = overview
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Entities { rows, .. } => Some(rows.clone()),
+            _ => None,
+        })
+        .expect("recent builds");
+    let failed = seeded.fixture_build(1187).real_id;
+    let row = rows
+        .iter()
+        .find(|r| r.chip.as_deref() == Some("#1187"))
+        .unwrap_or_else(|| panic!("build 1187 is listed: {rows:#?}"));
+    assert_eq!(row.tone, Some(Tone::Err));
+    assert_eq!(row.entity_id, Some(format!("teamcity:build:{failed}")));
+    assert!(
+        row.meta
+            .as_deref()
+            .is_some_and(|m| m.starts_with("feature/PAY-231-sepa-retry · ")),
+        "{row:#?}"
+    );
+    assert!(
+        row.title.starts_with("Exit code 1"),
+        "the real statusText: {row:#?}"
+    );
+
+    // Parameters: own, inherited, and the password -- secret, empty, and
+    // nowhere in the view.
+    let parameters = section(&view, "parameters");
+    let [Block::Settings { values, .. }] = parameters.blocks.as_slice() else {
+        panic!("one settings block: {parameters:#?}");
+    };
+    let drawn: Vec<_> = values
+        .iter()
+        .map(|v| {
+            (
+                v.name.as_str(),
+                v.value.as_str(),
+                v.inherited,
+                v.secret,
+                v.editable,
+            )
+        })
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            ("env.SEPA_RETRIES", "5", false, false, false),
+            (settings.secret_parameter.as_str(), "", false, true, false),
+            ("tidewater.region", "eu-central-1", true, false, false),
+        ]
+    );
+    let serialized = serde_json::to_string(&view).expect("serializes");
+    assert!(
+        !serialized.contains(&settings.secret_value),
+        "the password's value is in the view"
+    );
+    // ...and the server masks it too: the view's mask is not the only one.
+    let (status, raw) = seeded
+        .get(&format!(
+            "app/rest/buildTypes/id:{}/parameters/{}?fields=name,value",
+            settings.build_type, settings.secret_parameter
+        ))
+        .await;
+    assert_eq!(status, 200, "{raw}");
+    println!("SEEDED password parameter as TeamCity answers it: {raw}");
+    assert!(
+        !raw.to_string().contains(&settings.secret_value),
+        "TeamCity served the password's value: {raw}"
+    );
+
+    // Steps: the seeded command-line step and its script.
+    let steps = section(&view, "steps");
+    let step = facts(&steps.blocks[0]);
+    assert_eq!(value(&step, "Runner").0, "Command Line");
+    assert!(
+        matches!(&steps.blocks[1], Block::Log { text, truncated: false }
+            if text.contains("KNOBAS_FIXTURE_LOG") && text.ends_with("exit 1")),
+        "{:#?}",
+        steps.blocks[1]
+    );
+
+    // Trigger and VCS root.
+    let trigger = facts(&section(&view, "triggers").blocks[0]);
+    assert_eq!(value(&trigger, "Trigger").0, "VCS");
+    assert_eq!(value(&trigger, "Branch filter").0, "+:feature/*");
+    assert_eq!(
+        value(&trigger, "Disabled"),
+        ("yes".to_owned(), Some(Tone::Muted))
+    );
+    let root = facts(&section(&view, "vcs_roots").blocks[0]);
+    assert_eq!(value(&root, "Root").0, "Payout / payout-service");
+    assert_eq!(value(&root, "Type").0, "Git");
+    assert_eq!(
+        value(&root, "URL").0,
+        "http://gitea:3000/tidewater/payout-service.git"
+    );
+
+    // The other seeded configuration's build, which passed.
+    let ledger = view_of("Ledger_Deploy_Staging").await;
+    let ledger_overview = section(&ledger, "overview");
+    assert_eq!(
+        value(&facts(&ledger_overview.blocks[0]), "Last build"),
+        ("#412 success".to_owned(), Some(Tone::Ok))
+    );
+    let passed = seeded.fixture_build(412).real_id;
+    assert!(
+        ledger_overview
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Entities { rows, .. }
+            if rows.iter().any(|r| r.entity_id == Some(format!("teamcity:build:{passed}"))
+                && r.tone == Some(Tone::Ok)))),
+        "{ledger_overview:#?}"
+    );
 }
