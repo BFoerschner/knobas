@@ -101,8 +101,9 @@ export interface ResultGroup {
 /**
  * A filter dimension search reports coverage for — `knobas_search::FilterDimension`.
  *
- * `author` since #141, and `under` since #595: a source that declares a parent
- * for none of its kinds cannot answer `under:<name>` (ADR-0018). The union is
+ * `author` since #141, and `under` since #595: a source that has synced
+ * nothing naming a parent cannot answer `under:<name>` (ADR-0018; measured on
+ * the corpus since #642). The union is
  * what made the second dimension an addition rather than a reshape.
  */
 export type FilterDimension = "author" | "under";

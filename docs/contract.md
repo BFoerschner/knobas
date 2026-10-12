@@ -9776,6 +9776,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   The answer is read off the declaration, not measured on the corpus: `answered` for a source
   declaring a parent for any kind, `no_values` otherwise, and the same "which sources put rows in
   this query's corpus" probe decides who is listed, so one round trip serves both dimensions.
+  *(Replaced 2026-10-12 by Björn's ruling on #642: the answer is measured on the corpus. See the
+  #642 entry below; who is listed is unchanged.)*
   `the_response_shape_matches_its_typescript_mirror` now reads the union's own line for both
   members, since `"under"` appears in the mirror's comments. The launcher draws the gap
   (`underGaps`, `Results.svelte`) the way it draws the author one.
@@ -10045,6 +10047,66 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   - `under.rs`, `suggest.rs` (including `under_knows_exactly_the_names_the_box_offers`) and
     `corpus_seam.rs` pass, with their seeds still raw `insert`s.
+
+- **Migration `0029` and what one frozen wire value means — issue #642 (2026-10-12): `under:`
+  coverage is measured on the corpus. Björn ruled it and signed off the migration on #642 on
+  2026-10-12** ([comment](https://github.com/BFoerschner/knobas/issues/642#issuecomment-6123571497)):
+  *"option 1 — measure it on the data. A source answers `under:` only if something it synced
+  actually names a parent."* Asked with the cost stated (a migration on the table #627 signed off
+  the same day), he chose it, *"so the migration is allowed and this comment is his sign-off on
+  it"*. The deputy's reading of option 1
+  ([comment](https://github.com/BFoerschner/knobas/issues/642#issuecomment-6123097681)) is the
+  ticket's criteria.
+
+  **What `FilterAnswer` means for `FilterDimension::Under` — this replaces the #595 entry's
+  sentence "The answer is read off the declaration, not measured on the corpus".** A listed source
+  is `answered` when some live item it synced names a parent through the **child arm**
+  (`knobas_core::declared_parent_names!`), under the adapter the source is configured with, over
+  **all** of the source's kinds and not the query's kind scope: `under:` returns the parent itself,
+  so `kind:repo under:<repo>` shows the repo, and Gitea answers it because its commits name repos.
+  It is `no_values` otherwise, which covers a source whose adapter declares no parent, a classic
+  Jira with neither `epic` nor `fields.parent` stored (`epic_link_field` never configured), and a
+  Jira project where no ticket is in an epic. A row from the names-as-parent arm does not count:
+  every Jira ticket answers to its own key. **Who is listed is unchanged**: the scoped probe that
+  serves `author:` still decides which sources put rows in this query's corpus. The wire shape is
+  unchanged: no variant, field, command or DTO moves. The `CONTEXT.md` **Coverage** entry already
+  says "measured on the corpus", so the glossary does not change; the code now agrees with it.
+  `knobas_core::payload::Declarations::declares_a_parent`, whose only caller was the old verdict,
+  is removed (`knobas-core` is not on the frozen list).
+
+  **Migration `0029`: one column, one restated function, one partial index.** No earlier migration
+  is edited.
+  - `sync.item_parent` gains `arm text not null`, checked `in ('child', 'parent')`: `'child'` for a
+    row `declared_parent_names!` wrote, `'parent'` for one `declared_names_as_parent!` wrote.
+  - `sync.resolve_item_parents(text[])` is restated (`create or replace`) to write it. The only
+    difference from `0028`'s text is the column list and a literal tag on each arm's select; both
+    expansions are pasted unchanged. The migration recomputes every row with
+    `sync.resolve_all_item_parents()` before setting `not null`, and takes no lock, as `0028`'s last
+    statement does not.
+  - `item_parent_child_idx` on `sync.item_parent (adapter_kind, entity_id) where arm = 'child'`
+    serves the coverage probe.
+  - No trigger, lock, other function or reader of `0028`'s columns changes: `under:`'s filter, its
+    unknown-token lookup and the query box's suggestions still read both arms.
+
+  **Reader.** `knobas_search::coverage::UNDER_COVERAGE_SQL`, one statement asked only for a query
+  that filtered by `under:`: the sources among the scoped ids with an `exists` over child-arm rows
+  of their configured adapter whose item is theirs and live. **Residual:** two sources of one
+  adapter, one naming parents and one not, makes the second read the first's child rows to prove
+  its absence. The launcher's `no_values` reason for `under:` becomes "nothing it has synced names
+  a parent" (`app/src/lib/launcher/coverage.ts`), a sentence true of a corpus, like the author one.
+
+  **Witness.** All on real PostgreSQL (ADR-0013); each mutant was applied to a committed baseline.
+  - `knobas-search`'s `tests/it/under_coverage.rs`:
+    `a_source_answers_under_only_if_something_it_synced_names_a_parent` (a configured classic Jira
+    answers; an unconfigured one, a Kuma, and the configured one once its epic child is deleted get
+    `no_values`) and `a_kind_scope_does_not_narrow_the_verdict` (`kind:repo under:<repo>` over
+    Gitea answers, and the same source given an adapter that declares nothing gets `no_values`).
+    Killed: the verdict restored to the declaration; the probe counting rows of both arms; the
+    probe narrowed to the kind scope; the probe without the adapter match.
+  - `tests/it/item_parent.rs`'s agreement test now compares `(entity_id, name, kind, arm)` against
+    the walk, with each arm's select tagged, after every change it already exercised. It dies when
+    the restated function tags the child arm `'parent'`.
+  - The benchmark: BENCH_PLACEHOLDER
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
