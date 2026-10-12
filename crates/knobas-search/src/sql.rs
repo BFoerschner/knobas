@@ -748,7 +748,7 @@ mod tests {
         "object",
         "string",
         " \u{203a} ",
-        // `path_line_read!`'s declared half (#596): the keys a parent
+        // `path_line_read!`'s declaration keys (#596): the keys a parent
         // declaration is read by, and the empty array its guards fall back to.
         "parent",
         "kind",

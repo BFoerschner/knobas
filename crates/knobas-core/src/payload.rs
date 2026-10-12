@@ -595,9 +595,11 @@ macro_rules! declared_string {
 /// neither of them holds a copy of it and neither can disagree about it. What
 /// this constant is for is that the macro cannot use it -- `concat!` folds
 /// literals and not `const` items, so the glyph has to be written a second
-/// time inside the statement. [`parent_path`] joins on this constant, and
-/// `crates/knobas-core/tests/it/payload_paths.rs` holds the SQL line and the
-/// Rust one to one answer, so the two spellings cannot drift apart unnoticed.
+/// time inside the statement. `the_path_line_joins_on_the_one_separator`
+/// (`crates/knobas-core/tests/it/ancestor_path.rs`) is what keeps that second
+/// spelling honest: it asserts the SQL joins on exactly this value, so the two
+/// cannot drift apart unnoticed. [`parent_path`], the Rust side, joins on the
+/// constant itself.
 ///
 /// #284's `ancestor_path_read!` drew Confluence's `ancestors` on this
 /// separator until #646 retired it: since #599 Confluence declares that array
@@ -620,6 +622,14 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 /// `Engineering ›  › SEPA` is worse than the segment simply not being there.
 ///
 /// Rows read the line through [`path_line_read!`], never through this alone.
+///
+/// **Do not "simplify" the `order by f.pos` away.** The reasoning #284 wrote
+/// for `ancestor_path_read!`'s `order by a.ordinality` carries over: a
+/// *reversed* order fails the path-line tests (`Engineering › Payments ›
+/// SEPA` in `knobas-core/tests/it/ancestor_path.rs`), but a *removed* one may
+/// not, because PostgreSQL happens to aggregate in scan order today, and
+/// `string_agg` without an `ORDER BY` has no defined order at all. Order is
+/// the whole meaning of a path.
 #[macro_export]
 macro_rules! declared_parent_path {
     ($decl:literal) => {

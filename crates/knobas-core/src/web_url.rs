@@ -14,9 +14,10 @@
 //! second implementation of one rule, in a different language, that nothing
 //! forces to agree; #284's `ancestor_path_read!` was written against the
 //! database for the same reason, and `knobas-core/tests/it/ancestor_path.rs`
-//! still pins the path line that replaced it (#646) the same way. So the pasted URL is bound as a parameter and put
-//! through [`web_url_normalized!`] too, and the two sides cannot disagree
-//! because they are the same characters.
+//! still pins the path line that replaced it (#646) the same way. So the
+//! pasted URL is bound as a parameter and put through
+//! [`web_url_normalized!`] too, and the two sides cannot disagree because
+//! they are the same characters.
 //!
 //! The migration that creates the index carries a **third** copy, because an
 //! index definition cannot expand a Rust macro. That copy is not load-bearing
