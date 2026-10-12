@@ -345,9 +345,14 @@ async fn a_refusal_never_names_what_the_view_would_not_draw() {
                 "type": { "rawValue": "password display='hidden'" } }),
     )
     .await;
-    for (name, base) in [
-        ("vcs.mirror", "https://git.example/p.git"),
-        ("env.KEY", "plain before"),
+    for (name, base, says) in [
+        (
+            "vcs.mirror",
+            "https://git.example/p.git",
+            "now \\\"https://git.example/q.git\\\"",
+        ),
+        // A value that became a secret is said to be one, not drawn as "".
+        ("env.KEY", "plain before", "it is now a secret"),
     ] {
         let error = source(&server)
             .write(set_from(name, base, "x"))
@@ -355,6 +360,7 @@ async fn a_refusal_never_names_what_the_view_would_not_draw() {
             .expect_err("refused");
         let text = format!("{error:?}");
         assert!(text.contains("changed since you edited"), "{text}");
+        assert!(text.contains(says), "{says}: {text}");
         assert!(
             !text.contains("mirror-token") && !text.contains("now-a-secret-value"),
             "{text}"
