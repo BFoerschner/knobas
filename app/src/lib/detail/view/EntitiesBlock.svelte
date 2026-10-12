@@ -7,6 +7,7 @@
 <script lang="ts">
   import type { ViewRow } from "../../ipc/entity";
   import { hashFor } from "../../shell/router.svelte";
+  import StateChip from "../../shell/StateChip.svelte";
   import { toneClass } from "./tone";
 
   let {
@@ -45,7 +46,8 @@
         <span class="eb-t plain">{row.title}</span>
       {/if}
       {#if row.chip}
-        <span class="eb-chip {toneClass(row.tone)}">{row.chip}</span>
+        <!-- The rooms' own chip (#666), so a row's state reads the same here. -->
+        <StateChip state={{ text: row.chip, tone: row.tone ?? "muted" }} />
       {/if}
       {#if row.meta}
         <span class="eb-meta {row.chip ? '' : toneClass(row.tone)}">{row.meta}</span>
@@ -112,28 +114,7 @@
     The untoned colour at zero specificity, so a tone's class from `app.css`
     (`.ok`, `.fail`, ...) wins over it.
   */
-  :where(.eb-meta, .eb-chip) {
+  :where(.eb-meta) {
     color: var(--muted);
-  }
-
-  .eb-chip {
-    flex: none;
-    font: 500 10px var(--mono);
-    padding: 1px 5px;
-    border: 1px solid var(--hair2);
-    border-radius: 2px;
-  }
-
-
-  .eb-chip.ok {
-    border-color: color-mix(in srgb, var(--ok) 45%, transparent);
-  }
-
-  .eb-chip.fail {
-    border-color: color-mix(in srgb, var(--fail) 45%, transparent);
-  }
-
-  .eb-chip.amber {
-    border-color: color-mix(in srgb, var(--amber) 45%, transparent);
   }
 </style>

@@ -13,6 +13,7 @@
   offers to try again rather than leaving an empty tab.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { entityView, type ViewBlock, type SourceView, type ViewSection } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import DiffBlock from "./DiffBlock.svelte";
@@ -72,8 +73,14 @@
 
   function open(section: ViewSection) {
     picked = section.id;
-    if (section.deferred && reads[section.id] === undefined) read(section);
   }
+
+  // The shown tab's deferred read, on its first showing -- a click, a key,
+  // or the view opening on a first section that is itself deferred.
+  $effect(() => {
+    const section = current;
+    if (section?.deferred && reads[section.id] === undefined) untrack(() => read(section));
+  });
 
   let tabs = $state<(HTMLButtonElement | null)[]>([]);
 

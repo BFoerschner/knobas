@@ -161,6 +161,9 @@ test("no view is the panel as it always was, with nothing said about it", async 
   const screen = render();
   await vi.waitFor(() => expect(calls).toContain(`entity_view ${ID} null`));
   await vi.waitFor(() => expect(screen.text()).toContain("PAY-231: jitter in backoff"));
+  // The `null` has landed: a macrotask runs after the answer's microtasks, so
+  // what follows is the panel *after* the answer, not before it.
+  await new Promise((settle) => setTimeout(settle, 0));
   flushSync();
   expect(screen.tabs()).toEqual([]);
   expect(screen.raw()).toBeNull();

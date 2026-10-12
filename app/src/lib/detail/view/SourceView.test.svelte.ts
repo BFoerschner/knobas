@@ -149,6 +149,18 @@ test("a deferred tab is read once, on its first opening", async () => {
   screen.done();
 });
 
+test("a view that opens on a deferred section reads it, once", async () => {
+  const screen = render({ sections: [log("log", true), log("tail", false)] });
+  expect(reads).toEqual([["gitea:tidewater/payout-service@c90d11", "log"]]);
+  await vi.waitFor(() => expect(screen.panel().textContent).toContain("step 3 failed"));
+  screen.tabs()[1]!.click();
+  flushSync();
+  screen.tabs()[0]!.click();
+  flushSync();
+  expect(reads, "the blocks are kept, not read again").toHaveLength(1);
+  screen.done();
+});
+
 test("a deferred tab that fails says why and can be read again", async () => {
   let fail = true;
   answer = (section) =>
