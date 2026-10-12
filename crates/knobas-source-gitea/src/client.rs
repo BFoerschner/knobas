@@ -370,6 +370,60 @@ impl GiteaClient {
         }
     }
 
+    /// `GET /repos/{o}/{r}/git/commits/{sha}` -- one commit, with its
+    /// parents, for its source view (#661). The projections Gitea defaults to
+    /// on are turned off, as for [`Self::commits`]: the view reads its diff
+    /// from [`Self::commit_diff`], which is the text every git server prints.
+    pub(crate) async fn commit(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<crate::model::CommitDetail, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/git/commits/{}",
+                segment(owner)?,
+                segment(repo)?,
+                object_id(sha)?
+            ),
+            &[
+                ("stat", "false".to_owned()),
+                ("verification", "false".to_owned()),
+                ("files", "false".to_owned()),
+            ],
+        )
+        .await
+    }
+
+    /// `GET /repos/{o}/{r}/git/commits/{sha}.diff` -- the commit's change as
+    /// `git diff` prints it, for [`knobas_source::diff`] to parse.
+    ///
+    /// A refusal is the error it maps to, never an empty text: an empty diff
+    /// would draw *no changes* over a commit that has some.
+    pub(crate) async fn commit_diff(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<String, SourceError> {
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/git/commits/{}.diff",
+            segment(owner)?,
+            segment(repo)?,
+            object_id(sha)?
+        );
+        let response = self
+            .http
+            .send(self.http.request(Method::GET, &path))
+            .await?;
+        response.text().await.map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {path} answered an unreadable body: {error}"
+            ))
+        })
+    }
+
     /// `GET <base>/api/v1/<path>?<query>`, decoded as `T`.
     ///
     /// The query values are owned because every one of them is computed;
@@ -458,6 +512,15 @@ impl GiteaClient {
 /// `("limit", "50"), ("page", "<n>")`.
 fn page_params(page: u32) -> ((&'static str, String), (&'static str, String)) {
     (("limit", PAGE_SIZE.to_string()), ("page", page.to_string()))
+}
+
+/// A commit's object id, refused unless it is 4 to 64 hex characters --
+/// git's shortest abbreviation up to a SHA-256 id (40 for SHA-1) -- which is
+/// also nothing that could leave the path it is put in.
+fn object_id(value: &str) -> Result<&str, SourceError> {
+    let ok = (4..=64).contains(&value.len()) && value.chars().all(|c| c.is_ascii_hexdigit());
+    ok.then_some(value)
+        .ok_or_else(|| SourceError::protocol(format!("gitea: {value:?} is not a commit id")))
 }
 
 /// One path segment, refused unless it is a name Gitea could have issued.

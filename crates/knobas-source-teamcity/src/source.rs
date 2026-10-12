@@ -224,6 +224,17 @@ impl Source for TeamCitySource {
              for {entity:?}"
         )))
     }
+
+    /// No source view yet (ADR-0020). The build and build-configuration views
+    /// are spec #660's TeamCity tickets; until they land every kind draws the
+    /// mirror's generic projection.
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

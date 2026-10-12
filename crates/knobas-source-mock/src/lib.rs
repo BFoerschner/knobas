@@ -946,6 +946,16 @@ impl Source for MockSource {
              so there are no reachable transitions to read for {entity:?}"
         )))
     }
+
+    /// No source view (ADR-0020): the mock draws nothing for any kind, so the
+    /// demo's details are the generic projection.
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
 }
 
 // -- construction, the shape every adapter crate exposes ---------------------

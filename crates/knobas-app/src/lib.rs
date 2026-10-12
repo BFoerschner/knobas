@@ -263,6 +263,7 @@ pub fn run() {
             commands::entity::follow_merges,
             commands::entity::submit_write,
             commands::entity::reachable_transitions,
+            commands::entity::entity_view,
             commands::entity::inbox_items,
             commands::entity::inbox_count,
             commands::entity::snooze_inbox_item,

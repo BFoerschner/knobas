@@ -75,6 +75,7 @@ mod map;
 mod model;
 mod source;
 mod sync;
+mod view;
 mod write;
 
 pub use config::{GiteaConfig, config_schema};

@@ -10,7 +10,8 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-    import {
+  import {
+    entityView,
     getEntity,
     miniBoard,
     promoteContext,
@@ -19,6 +20,7 @@
     unlink,
     type EntityDetail,
     type LinkEntry,
+    type SourceView as SourceViewData,
   } from "../ipc/entity";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
@@ -36,6 +38,7 @@
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
+  import SourceView from "./view/SourceView.svelte";
   import {
     pageSections,
     replaceSectionBody,
@@ -80,10 +83,13 @@
     const mine = ++token;
     detail = null;
     error = null;
+    sourceView = null;
+    viewFailure = null;
     void getEntity(id)
       .then((answer) => {
         if (mine !== token) return;
         detail = answer;
+        readView(id, mine);
       })
       .catch((rejection) => {
         if (mine !== token) return;
@@ -93,6 +99,41 @@
         };
       });
   });
+
+  // -- the source view (#661, ADR-0020) ---------------------------------------
+  //
+  // What the entity's own adapter draws for its kind, read live after the
+  // mirror's row has landed. Three answers, each drawn differently: a view
+  // replaces the generic projection with tabs and moves it behind *Raw*;
+  // `null` leaves this panel exactly as it was; a failure leaves it too, under
+  // one line saying why (rule 2: never silent about an error, never noisy
+  // about an absence). Until the answer lands the panel is the mirror's, so
+  // a source that draws nothing costs a reader nothing.
+
+  /** The view, once one was drawn. */
+  let sourceView = $state<SourceViewData | null>(null);
+  /** Why the view could not be read, when it could not. */
+  let viewFailure = $state<string | null>(null);
+  /** Whether the reader opened *Raw*; its projection is drawn only then. */
+  let rawOpen = $state(false);
+
+  /**
+   * Ask the entity's source for its view. Keyed on `token`, the read
+   * generation of the `get_entity` it follows: an answer for an address the
+   * panel has left is dropped exactly as a stale entity read is. Not re-read
+   * by `refresh()`: a link drawn or withdrawn changes the mirror's row, not
+   * what the source draws.
+   */
+  function readView(id: string, mine: number) {
+    rawOpen = false;
+    void entityView(id)
+      .then((answer) => {
+        if (mine === token) sourceView = answer;
+      })
+      .catch((rejection: unknown) => {
+        if (mine === token) viewFailure = ipcErrorMessage(rejection);
+      });
+  }
 
   /**
    * Re-read this entity without blanking the panel.
@@ -916,6 +957,25 @@
         </div>
       </div>
 
+      {#if viewFailure !== null}
+        <!-- One line, and only for a read that failed (ADR-0020 rule 2). -->
+        <p class="mirror-line">
+          <span class="pulse"></span>
+          Showing the mirror: {viewFailure}
+        </p>
+      {/if}
+
+      {#if sourceView}
+        <SourceView
+          entityId={detail.row.entity_id}
+          view={sourceView}
+          webUrl={webUrl}
+          sourceName={detail.source.display_name}
+          {onnavigate}
+          onopenurl={(url) => void open(url)}
+        />
+      {/if}
+
       <!--
         A Confluence page renders its own markup; everything else renders the
         normalized text the mirror holds. Two arms of one section rather than
@@ -1015,7 +1075,12 @@
             </div>
           {/each}
         </div>
-      {:else if detail.body_text}
+      {:else if detail.body_text && !sourceView}
+        <!--
+          Not under a drawn view: the mirror's body text is what the source
+          said about the item, and a view draws that itself (a commit's
+          message is its overview's text), so a second copy would be noise.
+        -->
         <div class="sec">
           <div class="sec-h"><span class="lab">Description</span></div>
           <p class="d-body">{detail.body_text}</p>
@@ -1082,13 +1147,31 @@
         </div>
       {/if}
 
-      <div class="sec">
-        <div class="sec-h">
-          <span class="lab">Details</span>
-          <span class="k muted">{fields.length}</span>
+      {#if sourceView}
+        <!--
+          The generic projection, kept and out of the way (story 13): nothing
+          the mirror holds is lost, and none of it is in the reader's path.
+          Drawn only while open -- forty rows of JSON nobody asked to see are
+          not worth laying out.
+        -->
+        <details class="sec raw" ontoggle={(event) => (rawOpen = event.currentTarget.open)}>
+          <summary class="sec-h">
+            <span class="lab">Raw</span>
+            <span class="k muted">{fields.length}</span>
+          </summary>
+          {#if rawOpen}
+            <PayloadView {fields} />
+          {/if}
+        </details>
+      {:else}
+        <div class="sec">
+          <div class="sec-h">
+            <span class="lab">Details</span>
+            <span class="k muted">{fields.length}</span>
+          </div>
+          <PayloadView {fields} />
         </div>
-        <PayloadView {fields} />
-      </div>
+      {/if}
 
       <!--
         Where this repo's clone is on this disk (#499). Above the links because
@@ -1137,6 +1220,54 @@
   */
   .d-h:focus-visible {
     outline: none;
+  }
+
+  /*
+    The view could not be read: one quiet line over the mirror's panel, the
+    `.prompt` treatment without its band -- the panel below still works.
+  */
+  .mirror-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--hair);
+    font: 400 11.5px var(--mono);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .mirror-line .pulse {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  /* *Raw*: a disclosure in the section's own heading, quiet until opened. */
+  .raw > summary {
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0;
+  }
+
+  .raw > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .raw > summary::before {
+    content: "▸";
+    color: var(--faint);
+    font-size: 10px;
+  }
+
+  .raw[open] > summary {
+    margin-bottom: 6px;
+  }
+
+  .raw[open] > summary::before {
+    content: "▾";
   }
 
   .acts {

@@ -189,7 +189,7 @@ What an [adapter](#adapter) draws for one of its own kinds when the detail opens
 _Avoid_: page (that is a wiki kind), template, layout, widget, panel (the detail is the panel; a view is what fills it)
 
 **Diff**:
-The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file, its path (and old path when renamed), what happened to it (added, modified, deleted, renamed), its added and removed line counts, and its hunks. Parsed from the unified diff text a git server answers, by one parser every git adapter shares. Capped per file and per view; a file over the cap keeps its counts and says it was cut. (ADR-0020)
+The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file, its path (and old path when renamed), what happened to it (added, modified, deleted, renamed, or binary where git prints no lines), its added and removed line counts, and its hunks. Parsed from the unified diff text a git server answers, by one parser every git adapter shares. Capped per file and per view; a file over the cap keeps its counts and says it was cut. (ADR-0020)
 _Avoid_: patch (the text the server sends, before it is parsed), changeset, delta
 
 **Unclaimed write**:

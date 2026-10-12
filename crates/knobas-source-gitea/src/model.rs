@@ -144,6 +144,48 @@ pub(crate) struct CommitUser {
     pub date: Option<String>,
 }
 
+/// One commit as `GET /repos/{o}/{r}/git/commits/{sha}` answers it, for its
+/// source view (#661): the listing record plus the committer and the parents.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct CommitDetail {
+    pub sha: String,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub author: Option<UserRef>,
+    #[serde(default)]
+    pub commit: Option<CommitDetailInner>,
+    #[serde(default)]
+    pub parents: Vec<ParentRef>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct CommitDetailInner {
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub author: Option<Signature>,
+    #[serde(default)]
+    pub committer: Option<Signature>,
+}
+
+/// Who and when, as git records it on a commit.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub(crate) struct Signature {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Gitea types this as a plain string, not a `date-time`.
+    #[serde(default)]
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct ParentRef {
+    pub sha: String,
+}
+
 impl Commit {
     /// When this commit happened, preferring the list record's own field and
     /// falling back to the embedded author date.

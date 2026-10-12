@@ -65,6 +65,8 @@ vi.mock("../ipc/entity", () => ({
     calls.push({ filter, limit, offset });
     return answer(filter);
   },
+  // No source view (#661): the panel is the mirror's, as before.
+  entityView: () => Promise.resolve(null),
   getEntity: (entityId: string): Promise<EntityDetail> =>
     Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null }),
   createNote: (_title?: string, _bodyMd?: string, links?: NoteLinkInput[]) => {

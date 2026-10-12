@@ -35,6 +35,8 @@ vi.mock("../ipc/entity", () => ({
   createContext: () =>
     Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
+  // No source view (#661): `Detail.view.test` is where a view is drawn.
+  entityView: () => Promise.resolve(null),
   getEntity: (entityId: string) => {
     calls.push(entityId);
     return answer(entityId);

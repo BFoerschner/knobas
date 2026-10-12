@@ -298,6 +298,170 @@ async fn passes_the_contract_battery_against_the_real_container() {
     .await;
 }
 
+/// A seeded commit's source view carries the diff the seed pushed (#661,
+/// ADR-0020), read from the real server's `.diff`.
+///
+/// **What the seed pushes, and so what each view must say.** `seed-gitea.sh`'s
+/// `ensure_commit` makes every commit of `fixtures/tidewater/work.json`
+/// through Gitea's contents endpoint, writing **one new file** whose whole
+/// content is the commit message and a newline. So each of those must draw: a
+/// *Diff* tab counting one file; that file added, `+1 −0`; its one line the
+/// commit's message, numbered 1 on the new side. Every commit the sync emits
+/// -- the fixture's, `auto_init`'s, and whatever other live suites merged
+/// into this repository -- must draw the files the server itself lists for it
+/// (`files=true`, an endpoint the view does not read). The *Overview* must name the commit's
+/// full sha and its seeded author, and each parent must be the address of a
+/// commit this sync emitted where the sync holds it.
+///
+/// Prints each view's diff summary, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_seeded_commits_view_carries_the_diff_the_seed_pushed() {
+    use knobas_source::view::{Block, DiffChange, DiffLineKind};
+
+    let env = env();
+    let source = env.one_repo();
+    let (items, _) = full(&*source).await;
+    let commits = of_kind(&items, "commit");
+    let emitted: std::collections::HashSet<String> =
+        commits.iter().map(|c| c.entity.to_string()).collect();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/tidewater/work.json"))
+            .expect("the fixture is JSON");
+    let seeded: std::collections::HashSet<&str> = fixture["commits"]
+        .as_array()
+        .expect("the fixture lists commits")
+        .iter()
+        .filter(|c| c["repo"].as_str() == Some(env.repo.as_str()))
+        .filter_map(|c| c["msg"].as_str())
+        .collect();
+    let http = reqwest::Client::new();
+    let mut checked = 0;
+    for commit in &commits {
+        let id = commit.entity.to_string();
+        let sha = commit
+            .entity
+            .key
+            .rsplit_once('@')
+            .map(|(_, sha)| sha.to_owned())
+            .expect("a commit key is owner/repo@sha");
+        let record: serde_json::Value = http
+            .get(format!(
+                "{}/api/v1/repos/{}/git/commits/{sha}?files=true&stat=true",
+                env.url,
+                env.full_name()
+            ))
+            .header("Authorization", format!("token {}", env.token))
+            .send()
+            .await
+            .expect("the server answers")
+            .json()
+            .await
+            .expect("a commit record");
+        let message = record["commit"]["message"]
+            .as_str()
+            .expect("a message")
+            .trim_end()
+            .to_owned();
+        let parents = record["parents"].as_array().map_or(0, Vec::len);
+
+        let view = source
+            .view(&id, None)
+            .await
+            .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
+            .unwrap_or_else(|| panic!("Gitea draws a commit, and drew nothing for {id}"));
+        let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["overview", "diff"], "{id}");
+
+        let overview = &view.sections[0].blocks;
+        let Block::Facts { facts } = &overview[0] else {
+            panic!("{id}'s overview opens on facts: {overview:#?}");
+        };
+        assert!(
+            facts.iter().any(|f| f.label == "SHA" && f.value == sha),
+            "{id}: {facts:#?}"
+        );
+        let author = record["commit"]["author"]["name"].as_str().unwrap_or("");
+        assert!(
+            facts
+                .iter()
+                .any(|f| f.label == "Author" && f.value.starts_with(author)),
+            "{id} names its author {author:?}: {facts:#?}"
+        );
+        let rows: Vec<_> = overview
+            .iter()
+            .filter_map(|b| match b {
+                Block::Entities { rows, .. } => Some(rows),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(rows.len(), parents, "{id}: one row per parent");
+        for row in &rows {
+            let parent = row
+                .entity_id
+                .as_deref()
+                .expect("the adapter names its parents");
+            assert!(parent.starts_with("gitea:"), "{parent}");
+            if emitted.contains(parent) {
+                assert!(row.url.is_some(), "{parent} has a web page");
+            }
+        }
+
+        let diff = &view.sections[1];
+        let Block::Diff { files, truncated } = &diff.blocks[0] else {
+            panic!("{id}'s diff tab is a diff: {diff:#?}");
+        };
+        assert!(!truncated);
+        assert_eq!(diff.count, Some(files.len() as u64));
+        let listed: Vec<&str> = record["files"]
+            .as_array()
+            .expect("files=true lists the files")
+            .iter()
+            .filter_map(|f| f["filename"].as_str())
+            .collect();
+        println!(
+            "{} {:<52} {:?}",
+            &sha[..10],
+            message,
+            files
+                .iter()
+                .map(|f| format!(
+                    "{:?} {} +{} -{}",
+                    f.change, f.path, f.additions, f.deletions
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            listed,
+            "{id}: the files the view draws are the files the server lists"
+        );
+        if !seeded.contains(message.as_str()) {
+            // `auto_init`'s first commit, a merge another live suite made:
+            // not the seed's, so held only to the server's own listing above.
+            continue;
+        }
+        assert_eq!(files.len(), 1, "{id}: the seed writes one file per commit");
+        let file = &files[0];
+        assert_eq!(file.change, DiffChange::Added, "{id}");
+        assert_eq!((file.additions, file.deletions), (1, 0), "{id}");
+        let lines: Vec<_> = file.hunks.iter().flat_map(|h| &h.lines).collect();
+        assert_eq!(lines.len(), 1, "{id}: {lines:#?}");
+        assert_eq!(lines[0].kind, DiffLineKind::Add);
+        assert_eq!((lines[0].old, lines[0].new), (None, Some(1)));
+        assert_eq!(lines[0].text, message, "{id}: the seed writes the message");
+        checked += 1;
+    }
+    assert_eq!(
+        checked,
+        seeded.len(),
+        "every fixture commit of {} is synced and drawn",
+        env.repo
+    );
+    println!("{checked} seeded commits drew the diff the seed pushed");
+}
+
 /// Interfaces §4.2's key forms, against ids the *real* server issued.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]

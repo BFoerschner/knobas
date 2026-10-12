@@ -375,6 +375,16 @@ impl Source for Observed<'_> {
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
         self.inner.reachable_transitions(entity).await
     }
+
+    /// Delegated, and unreported: a view belongs to a detail somebody opened,
+    /// not to a sync run (as for `reachable_transitions`).
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        self.inner.view(entity, section).await
+    }
 }
 
 /// The sink the adapter is really handed.

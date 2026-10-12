@@ -1229,6 +1229,45 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
     .map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
+/// The **source view** of one entity (#661, ADR-0020): what its adapter draws
+/// for its kind, read live when the detail opens and never stored.
+///
+/// `section: None` reads the whole view, deferred sections as stubs;
+/// `Some(id)` reads that one deferred section when the reader opens its tab.
+/// Routed like [`reachable_transitions`]: the entity id names the source, so
+/// there is no `source_id` argument.
+///
+/// **Three answers, and the shell draws each differently** (rule 2): a view is
+/// drawn as tabs with the generic projection behind *Raw*; `null` is an
+/// adapter with nothing to draw for this kind, and the panel is what it was
+/// before views existed; a rejection draws the same panel under one line,
+/// *Showing the mirror: <message>*. An entity-list row keeps its address only
+/// where the mirror holds that entity (rule 7, `sources::crud::view`).
+///
+/// # Errors
+///
+/// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
+/// is not a configured source, `unauthorized` / `unreachable` / `internal` as
+/// the adapter's own failure maps;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn entity_view<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    section: Option<String>,
+) -> Result<Option<knobas_source::view::SourceView>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::crud::view(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &entity_id,
+        section.as_deref(),
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))
+}
+
 /// Everything the note view draws for one note (#46).
 ///
 /// Deliberately **not** [`EntityDetail`], and the difference is not tidiness:

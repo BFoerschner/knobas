@@ -63,6 +63,15 @@ struct Recording {
 
 #[async_trait]
 impl Source for Recording {
+    /// Draws nothing: this fake has no source view (#661).
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, knobas_source::SourceError> {
+        Ok(None)
+    }
+
     fn descriptor(&self) -> SourceDescriptor {
         descriptor(&self.id, &self.kind, &self.write_ops)
     }

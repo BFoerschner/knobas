@@ -737,6 +737,117 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
   return invoke<string[]>("reachable_transitions", { entityId });
 }
 
+// -- the source view (#661, ADR-0020) ----------------------------------------
+//
+// The mirror of `knobas_source::view`, field for field. Frozen with it: a new
+// block, field or tone is a §10.8 entry on both sides.
+
+export interface Fact {
+  label: string;
+  value: string;
+  tone: Tone | null;
+}
+
+/** One row of an entity list. `entity_id` is set only where the mirror holds it. */
+export interface ViewRow {
+  entity_id: string | null;
+  title: string;
+  meta: string | null;
+  tone: Tone | null;
+  chip: string | null;
+  url: string | null;
+}
+
+export interface Setting {
+  name: string;
+  /** Empty for a `secret` value: the adapter never sends one. */
+  value: string;
+  inherited: boolean;
+  secret: boolean;
+  editable: boolean;
+  description: string | null;
+}
+
+export type DiffChange = "added" | "modified" | "deleted" | "renamed" | "binary";
+
+export interface DiffLine {
+  kind: "context" | "add" | "del";
+  /** The line's number before the change; `null` for an added line. */
+  old: number | null;
+  /** The line's number after the change; `null` for a removed line. */
+  new: number | null;
+  text: string;
+}
+
+export interface Hunk {
+  /** The `@@ -a,b +c,d @@ context` line as the server sent it. */
+  header: string;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  /** Where it was before, for a rename. */
+  old_path: string | null;
+  change: DiffChange;
+  /** Counted over the whole file, even where its lines were cut. */
+  additions: number;
+  deletions: number;
+  hunks: Hunk[];
+  /** Some of its lines were cut by a cap. */
+  truncated: boolean;
+}
+
+/**
+ * One typed piece of a section: the vocabulary the shell draws, and nothing else.
+ * `Block` in Rust; `ViewBlock` here, because the barrel already exports a
+ * time-tracking `Block`.
+ */
+export type ViewBlock =
+  | { type: "facts"; facts: Fact[] }
+  | { type: "text"; text: string; markdown: boolean }
+  | { type: "entities"; title: string | null; rows: ViewRow[] }
+  | { type: "diff"; files: DiffFile[]; truncated: boolean }
+  | { type: "log"; text: string; truncated: boolean }
+  | {
+      type: "settings";
+      title: string | null;
+      entity: string;
+      write_op: string;
+      values: Setting[];
+    };
+
+/** One tab. A `deferred` one carries no blocks until its own read. */
+export interface ViewSection {
+  id: string;
+  title: string;
+  count: number | null;
+  deferred: boolean;
+  blocks: ViewBlock[];
+}
+
+export interface SourceView {
+  sections: ViewSection[];
+}
+
+/**
+ * The source view of one entity — `knobas_app::commands::entity::entity_view`
+ * (#661, ADR-0020).
+ *
+ * Read live from the entity's own source and never stored. `section` omitted
+ * reads the whole view, deferred sections as stubs; a section id reads that
+ * one section's blocks, and the answer holds exactly that section.
+ *
+ * Three answers, each drawn differently: a view (tabs, the generic projection
+ * behind *Raw*); `null`, a source with nothing to draw for this kind (the panel
+ * as it always was); and a rejection, which draws the same panel under one line
+ * naming it. Rejects with `invalid`, `not_found`, `unauthorized`,
+ * `unreachable` or `internal` as {@link reachableTransitions} does.
+ */
+export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
+  return invoke<SourceView | null>("entity_view", { entityId, section });
+}
+
 // ---------------------------------------------------------------------------
 // The start-work flow — `knobas_app::commands::entity`'s start-work block and
 // `knobas_core::start_work` (issue #44).
