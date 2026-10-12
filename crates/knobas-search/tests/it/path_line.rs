@@ -202,7 +202,8 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
     // An `under:` query binds the declarations for its predicate, and the
     // path line reads that same placeholder rather than a second bind: its
     // rows draw the line too.
-    let scoped = searcher(&pool).await
+    let scoped = searcher(&pool)
+        .await
         .search(q(&format!("under:tidewater/payout-{t} {t}")))
         .await
         .unwrap();
@@ -242,7 +243,8 @@ async fn a_kind_that_declares_no_parent_carries_no_path() {
     )
     .await;
 
-    let response = searcher(&pool).await
+    let response = searcher(&pool)
+        .await
         .search(q(&format!("health {t}")))
         .await
         .unwrap();
@@ -275,7 +277,11 @@ async fn the_boards_and_a_lists_rows_carry_the_same_path() {
     assert_eq!(commit.path, Some(format!("tidewater/board-{t}")));
 
     // Just synced: everything the mirror saw in the last hour, newest first.
-    let listed = searcher(&pool).await.search(q("list:just-synced")).await.unwrap();
+    let listed = searcher(&pool)
+        .await
+        .search(q("list:just-synced"))
+        .await
+        .unwrap();
     let in_list: Vec<(String, Option<String>)> = paths(&listed)
         .into_iter()
         .filter(|(id, _)| ids.contains(id))

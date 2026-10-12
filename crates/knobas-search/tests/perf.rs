@@ -1279,7 +1279,10 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     // file, the corpus is already there and the insert does nothing.
     let seeding = Instant::now();
     testing::seed_corpus(&pool, 100_000).await.unwrap();
-    println!("under: seed_corpus(100000) took {} ms", seeding.elapsed().as_millis());
+    println!(
+        "under: seed_corpus(100000) took {} ms",
+        seeding.elapsed().as_millis()
+    );
     testing::seed_estate(&pool, "bench").await.unwrap();
     let parented = sqlx::query(
         "update sync.item
@@ -1296,7 +1299,10 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     .rows_affected();
     testing::prepare(&pool).await.unwrap();
     println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
-    assert!(parented > 0, "no Gitea commit in the corpus: the fixture moved");
+    assert!(
+        parented > 0,
+        "no Gitea commit in the corpus: the fixture moved"
+    );
 
     for _ in 0..3 {
         searcher.search(q("under:bench/repo-7")).await.unwrap();
@@ -1325,7 +1331,11 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         );
         // A repo case that draws nothing, or an unknown one that draws
         // something, is a fixture that stopped being the one this measures.
-        assert_eq!(hits > 0, *draws, "{name} ({raw}) drew {hits}: the fixture moved");
+        assert_eq!(
+            hits > 0,
+            *draws,
+            "{name} ({raw}) drew {hits}: the fixture moved"
+        );
         assert_eq!(
             response.interpreted.unknown_tokens.is_empty(),
             *draws,

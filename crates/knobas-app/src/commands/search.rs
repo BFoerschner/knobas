@@ -237,13 +237,11 @@ pub async fn filter_suggestions(
 ///
 /// `internal` if the declarations cannot be written.
 pub async fn searcher(pool: &PgPool) -> Result<knobas_search::Searcher, IpcError> {
-    Ok(
-        knobas_search::Searcher::declaring(
-            pool.clone(),
-            crate::sources::Registry::builtin().templates(),
-        )
-        .await?,
+    Ok(knobas_search::Searcher::declaring(
+        pool.clone(),
+        crate::sources::Registry::builtin().templates(),
     )
+    .await?)
 }
 
 /// [`search`], against a pool.

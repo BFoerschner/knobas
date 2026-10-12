@@ -205,13 +205,15 @@ async fn a_bare_name_two_owners_share_scopes_to_both() {
     let first = repo(&pool, &format!("alpha{t}"), &name, "one").await;
     let second = repo(&pool, &format!("beta{t}"), &name, "two").await;
 
-    let both = searcher(&pool).await
+    let both = searcher(&pool)
+        .await
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
     assert_eq!(ids(&both), sorted([first.clone(), second].concat()));
 
-    let one = searcher(&pool).await
+    let one = searcher(&pool)
+        .await
         .search(q(&format!("under:alpha{t}/{name}")))
         .await
         .unwrap();
@@ -229,7 +231,8 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
     let b = repo(&pool, &format!("o{t}"), &format!("b-{t}"), "second").await;
     repo(&pool, &format!("o{t}"), &format!("c-{t}"), "third").await;
 
-    let union = searcher(&pool).await
+    let union = searcher(&pool)
+        .await
         .search(q(&format!("under:a-{t} under:b-{t}")))
         .await
         .unwrap();
@@ -246,7 +249,8 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
 
     // One known and one unknown: the known one still scopes, the unknown one
     // is still reported.
-    let mixed = searcher(&pool).await
+    let mixed = searcher(&pool)
+        .await
         .search(q(&format!("under:a-{t} {nope}")))
         .await
         .unwrap();
@@ -278,7 +282,8 @@ async fn under_a_repo_with_words_finds_the_commit_that_mentions_them() {
     )
     .await;
 
-    let response = searcher(&pool).await
+    let response = searcher(&pool)
+        .await
         .search(q(&format!("under:{name} jitter{t}")))
         .await
         .unwrap();
@@ -332,7 +337,8 @@ async fn coverage_names_a_source_that_declares_no_parent() {
     )
     .await;
 
-    let response = searcher(&pool).await
+    let response = searcher(&pool)
+        .await
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
@@ -373,7 +379,8 @@ async fn a_saved_list_holding_under_runs_it() {
     let ours = repo(&pool, &format!("o{t}"), &name, "first").await;
     repo(&pool, &format!("o{t}"), &format!("other-{t}"), "second").await;
 
-    let saved = searcher(&pool).await
+    let saved = searcher(&pool)
+        .await
         .save_list(&format!("Everything in {name}"), &format!("under:{name}"))
         .await
         .unwrap();
@@ -382,7 +389,8 @@ async fn a_saved_list_holding_under_runs_it() {
         "the rail counts the repo and its three children"
     );
 
-    let opened = searcher(&pool).await
+    let opened = searcher(&pool)
+        .await
         .smart_list_items(&saved.id, 30)
         .await
         .unwrap();
@@ -507,7 +515,8 @@ async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
 
     // Each row carries its ancestor chain; a route carries its asset's chain
     // and the asset itself, which is where it sits.
-    let response = searcher(&pool).await
+    let response = searcher(&pool)
+        .await
         .search(q(&format!("under:{host}")))
         .await
         .unwrap();
@@ -554,7 +563,8 @@ async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
     )
     .await;
 
-    let estate_only = searcher(&pool).await
+    let estate_only = searcher(&pool)
+        .await
         .search(q(&format!("asset: under:{host}")))
         .await
         .unwrap();
@@ -565,7 +575,8 @@ async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
         estate_only.coverage
     );
 
-    let everywhere = searcher(&pool).await
+    let everywhere = searcher(&pool)
+        .await
         .search(q(&format!("under:{host}")))
         .await
         .unwrap();

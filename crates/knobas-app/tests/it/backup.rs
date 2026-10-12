@@ -370,12 +370,24 @@ async fn a_restore_refuses_a_database_that_already_holds_knobas_data() {
 /// `base.repo`, and that repo. Raw inserts, as a sync's rows land.
 async fn parented(pool: &PgPool, source: &str, t: &str, entities: bool) -> Vec<String> {
     let rows = [
-        ("commit", "c1", serde_json::json!({
-            "repository": { "full_name": format!("own/ghost-{t}"), "name": format!("ghost-{t}") } })),
-        ("pr", "p1", serde_json::json!({
-            "base": { "repo": { "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") } } })),
-        ("repo", "r1", serde_json::json!({
-            "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") })),
+        (
+            "commit",
+            "c1",
+            serde_json::json!({
+            "repository": { "full_name": format!("own/ghost-{t}"), "name": format!("ghost-{t}") } }),
+        ),
+        (
+            "pr",
+            "p1",
+            serde_json::json!({
+            "base": { "repo": { "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") } } }),
+        ),
+        (
+            "repo",
+            "r1",
+            serde_json::json!({
+            "full_name": format!("own/pay-{t}"), "name": format!("pay-{t}") }),
+        ),
     ];
     let mut ids = Vec::new();
     for (kind, key, payload) in rows {
@@ -408,7 +420,13 @@ async fn parented(pool: &PgPool, source: &str, t: &str, entities: bool) -> Vec<S
 
 /// What `under:` and its suggestions answer for this test's names: the ids
 /// each query finds, the unknown tokens it reports, and the suggested parents.
-async fn under_answers(pool: &PgPool, t: &str) -> (Vec<(String, Vec<String>, Vec<String>)>, Vec<(String, String)>) {
+async fn under_answers(
+    pool: &PgPool,
+    t: &str,
+) -> (
+    Vec<(String, Vec<String>, Vec<String>)>,
+    Vec<(String, String)>,
+) {
     let mut answers = Vec::new();
     for raw in [
         format!("under:own/pay-{t}"),
@@ -418,7 +436,11 @@ async fn under_answers(pool: &PgPool, t: &str) -> (Vec<(String, Vec<String>, Vec
     ] {
         let response = search_inner(
             pool,
-            SearchQuery { raw: raw.clone(), limit: 20, filters: SearchFilters::default() },
+            SearchQuery {
+                raw: raw.clone(),
+                limit: 20,
+                filters: SearchFilters::default(),
+            },
         )
         .await
         .unwrap();
@@ -494,7 +516,10 @@ async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
     parented(&into, &source, &t, false).await;
 
     let after = under_answers(&into, &t).await;
-    assert_eq!(after, before, "the restored machine answers `under:` differently");
+    assert_eq!(
+        after, before,
+        "the restored machine answers `under:` differently"
+    );
     assert_eq!(
         stored_parents(&into, &ids).await,
         stored_parents(&from, &ids).await,

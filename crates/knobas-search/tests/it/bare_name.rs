@@ -169,7 +169,11 @@ async fn the_repo_named_for_the_query_outranks_a_newer_one_that_mentions_it() {
     )
     .await;
 
-    let response = searcher(&pool).await.search(q("payout-service")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("payout-service"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [named, mentions]);
 }
 
@@ -211,7 +215,11 @@ async fn the_bare_name_finds_the_repo_and_not_its_branch_or_commits() {
         .await;
     }
 
-    let response = searcher(&pool).await.search(q("payout-service")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("payout-service"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [ours]);
     assert!(group_ids(&response, "commit").is_empty(), "{response:?}");
     assert!(group_ids(&response, "branch").is_empty(), "{response:?}");
@@ -253,7 +261,11 @@ async fn the_full_name_still_puts_its_repo_first() {
     )
     .await;
 
-    let response = searcher(&pool).await.search(q("tidewater/payout")).await.unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(q("tidewater/payout"))
+        .await
+        .unwrap();
     assert_eq!(group_ids(&response, "repo"), [named, sibling]);
 }
 

@@ -88,9 +88,7 @@ pub(crate) async fn read(
     vocab: &Vocabulary,
 ) -> Result<FilterSuggestions, SearchError> {
     let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
-    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
-        .fetch_all(pool)
-        .await?;
+    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL).fetch_all(pool).await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()

@@ -130,10 +130,18 @@ async fn walked(pool: &PgPool, prefix: &str, templates: &[(String, Vec<KindPaths
         .unwrap()
 }
 
-async fn agree(pool: &PgPool, prefix: &str, templates: &[(String, Vec<KindPaths>)], step: &str) -> Rows {
+async fn agree(
+    pool: &PgPool,
+    prefix: &str,
+    templates: &[(String, Vec<KindPaths>)],
+    step: &str,
+) -> Rows {
     let stored = stored(pool, prefix).await;
     let walked = walked(pool, prefix, templates).await;
-    assert_eq!(stored, walked, "after {step}: sync.item_parent is not the walk");
+    assert_eq!(
+        stored, walked,
+        "after {step}: sync.item_parent is not the walk"
+    );
     stored
 }
 
@@ -157,22 +165,60 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
 
     store_declaration(&pool, &gitea, &gitea_paths()).await;
     store_declaration(&pool, &chain, &chain_paths()).await;
-    let mut templates = vec![(gitea.clone(), gitea_paths()), (chain.clone(), chain_paths())];
+    let mut templates = vec![
+        (gitea.clone(), gitea_paths()),
+        (chain.clone(), chain_paths()),
+    ];
     configure(&pool, &g, &gitea).await;
 
     // A commit naming a repo only its children name (never mirrored), a PR
     // naming a mirrored repo through `base.repo`, and that repo.
-    item(&pool, &g, "commit", "c1", serde_json::json!({
-        "repository": { "full_name": "tide/ghost", "name": "ghost" } })).await;
-    item(&pool, &g, "pr", "p1", serde_json::json!({
-        "base": { "repo": { "full_name": "tide/payout", "name": "payout" } } })).await;
-    item(&pool, &g, "repo", "r1", serde_json::json!({
-        "full_name": "tide/payout", "name": "payout" })).await;
+    item(
+        &pool,
+        &g,
+        "commit",
+        "c1",
+        serde_json::json!({
+        "repository": { "full_name": "tide/ghost", "name": "ghost" } }),
+    )
+    .await;
+    item(
+        &pool,
+        &g,
+        "pr",
+        "p1",
+        serde_json::json!({
+        "base": { "repo": { "full_name": "tide/payout", "name": "payout" } } }),
+    )
+    .await;
+    item(
+        &pool,
+        &g,
+        "repo",
+        "r1",
+        serde_json::json!({
+        "full_name": "tide/payout", "name": "payout" }),
+    )
+    .await;
     // Pages of a source nobody has configured yet: a chain of two ancestors,
     // and the inner ancestor itself, mirrored.
-    item(&pool, &c, "page", "leaf", serde_json::json!({
-        "ancestors": [{ "title": "Handbook" }, { "title": "Payments" }] })).await;
-    item(&pool, &c, "page", "payments", serde_json::json!({ "title": "Payments" })).await;
+    item(
+        &pool,
+        &c,
+        "page",
+        "leaf",
+        serde_json::json!({
+        "ancestors": [{ "title": "Handbook" }, { "title": "Payments" }] }),
+    )
+    .await;
+    item(
+        &pool,
+        &c,
+        "page",
+        "payments",
+        serde_json::json!({ "title": "Payments" }),
+    )
+    .await;
     // The estate is read off its column, not stored; it is here so the
     // fixture holds every arm `under:` reads.
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'asset', $2)")
@@ -190,9 +236,18 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
 
     let rows = agree(&pool, &prefix(&g), &templates, "the inserts").await;
     let (c1, p1, r1) = (format!("{g}:c1"), format!("{g}:p1"), format!("{g}:r1"));
-    assert!(has(&rows, &c1, "tide/ghost", "repo"), "an unmirrored parent: {rows:?}");
-    assert!(has(&rows, &p1, "payout", "repo"), "the PR's parent: {rows:?}");
-    assert!(has(&rows, &r1, "tide/payout", "repo"), "a mirrored parent's own name: {rows:?}");
+    assert!(
+        has(&rows, &c1, "tide/ghost", "repo"),
+        "an unmirrored parent: {rows:?}"
+    );
+    assert!(
+        has(&rows, &p1, "payout", "repo"),
+        "the PR's parent: {rows:?}"
+    );
+    assert!(
+        has(&rows, &r1, "tide/payout", "repo"),
+        "a mirrored parent's own name: {rows:?}"
+    );
     assert!(
         stored(&pool, &prefix(&c)).await.is_empty(),
         "an unconfigured source declares nothing"
@@ -215,7 +270,10 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
         .await
         .unwrap();
     let rows = agree(&pool, &prefix(&g), &templates, "a delete").await;
-    assert!(!rows.iter().any(|(e, _, _)| *e == p1), "the deleted PR's rows go with it");
+    assert!(
+        !rows.iter().any(|(e, _, _)| *e == p1),
+        "the deleted PR's rows go with it"
+    );
 
     // The declaration loses its bare-name path: every Gitea item answers to
     // its full name only.
@@ -228,14 +286,20 @@ async fn the_stored_parents_are_the_walk_after_every_change() {
     store_declaration(&pool, &gitea, &narrower).await;
     templates[0].1 = narrower;
     let rows = agree(&pool, &prefix(&g), &templates, "a declaration change").await;
-    assert!(!has(&rows, &r1, "payout", "repo"), "the bare name went with its path: {rows:?}");
+    assert!(
+        !has(&rows, &r1, "payout", "repo"),
+        "the bare name went with its path: {rows:?}"
+    );
     assert!(has(&rows, &r1, "tide/payout", "repo"));
 
     configure(&pool, &c, &chain).await;
     let rows = agree(&pool, &prefix(&c), &templates, "configuring the source").await;
     let leaf = format!("{c}:leaf");
     assert!(has(&rows, &leaf, "Handbook", "page") && has(&rows, &leaf, "Payments", "page"));
-    assert!(has(&rows, &format!("{c}:payments"), "Payments", "page"), "{rows:?}");
+    assert!(
+        has(&rows, &format!("{c}:payments"), "Payments", "page"),
+        "{rows:?}"
+    );
 }
 
 /// The trigger function carries the macros' expansion as text, because a
@@ -254,8 +318,14 @@ async fn the_stored_function_is_the_macros_expansion() {
     .await
     .unwrap();
     for (name, expansion) in [
-        ("declared_parent_names!", knobas_core::declared_parent_names!("decl")),
-        ("declared_names_as_parent!", knobas_core::declared_names_as_parent!("decl")),
+        (
+            "declared_parent_names!",
+            knobas_core::declared_parent_names!("decl"),
+        ),
+        (
+            "declared_names_as_parent!",
+            knobas_core::declared_names_as_parent!("decl"),
+        ),
     ] {
         assert!(
             source.contains(expansion),
