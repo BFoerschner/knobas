@@ -202,7 +202,8 @@ pub enum EntityOrder {
 
 impl EntityOrder {
     /// Whether this is one of the room tiles' orders, which count what they
-    /// draw ([`EntityPage::tally`]) and read the live corpus only.
+    /// draw ([`EntityPage::tally`]), read the live corpus only, and are
+    /// planned afresh at every read (see [`list_entities_inner`]).
     fn is_tile_order(self) -> bool {
         matches!(self, EntityOrder::Attention | EntityOrder::LatestPerParent)
     }
@@ -525,6 +526,17 @@ pub async fn list_entities_inner(
     };
 
     let rows = sqlx::query(statement(filter)?)
+        // A tile order is never a named prepared statement (#685's review).
+        // PostgreSQL custom-plans a named one for five executions and may
+        // then go generic, and a generic plan cannot fold the nullable
+        // filters (`$7 is null or ...`): it estimates the room at one row and
+        // joins `knobas.entity` by a nested loop with a scan per row. On a
+        // 20,000-build room the Builds tile went from 0.45 s to 11-12 s at
+        // the sixth read of a connection. The unnamed statement is planned at
+        // Bind with the values in hand, for about 2 ms a read --
+        // `knobas_search::sql::query_as_with`'s remedy for the same switch.
+        // The plain orders' plans survive going generic, so they keep theirs.
+        .persistent(!filter.order.is_tile_order())
         .bind(any_of(&filter.sources))
         .bind(any_of(&filter.kinds))
         .bind(within)

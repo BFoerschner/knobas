@@ -1727,6 +1727,65 @@ async fn a_kind_with_no_declared_state_falls_back_to_recency() {
     );
 }
 
+/// A tile order is never left as a **named** prepared statement (#685's
+/// review).
+///
+/// PostgreSQL custom-plans a named statement for five executions and may then
+/// switch to a generic plan, which cannot fold the nullable filters, guesses
+/// the room is one row, and joins `knobas.entity` by a nested loop: on a
+/// 20,000-build room the Builds tile went from 0.45 s to 11-12 s at the sixth
+/// read of a connection. A test that reads a room five times cannot see that,
+/// and a timing would measure the machine, so this asserts on the cause: the
+/// session's `pg_prepared_statements`, which never lists the unnamed
+/// statement. One connection, so every read below is the same session.
+#[tokio::test]
+async fn the_tile_orders_are_never_named_prepared_statements() {
+    let shared = seeded().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with((*shared.connect_options()).clone())
+        .await
+        .unwrap();
+    let named = async || -> i64 {
+        sqlx::query_scalar("select count(*) from pg_prepared_statements")
+            .persistent(false)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let read = async |order| {
+        list_entities_inner(
+            &pool,
+            &EntityFilter { order, ..all() },
+            5,
+            0,
+            &no_paths(),
+        )
+        .await
+        .unwrap();
+    };
+
+    // Positive control: a plain order is cached, so it must move the count,
+    // or the assertion below could pass on a session that names nothing.
+    let start = named().await;
+    read(EntityOrder::UpdatedDesc).await;
+    let control = named().await;
+    assert!(
+        control > start,
+        "the updated_desc read left no named statement ({start} -> {control}), \
+         so this test cannot tell a named statement from an unnamed one"
+    );
+
+    read(EntityOrder::Attention).await;
+    read(EntityOrder::LatestPerParent).await;
+    assert_eq!(
+        named().await,
+        control,
+        "a tile order was left in pg_prepared_statements, so PostgreSQL may \
+         plan it generically from its sixth read of a session"
+    );
+}
+
 /// The two tile orders read the live corpus only: the withdrawn are the
 /// detail's way in (§5a), and a tile has no reason to reach for them.
 #[tokio::test]
