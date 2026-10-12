@@ -26,7 +26,7 @@
 //! a choice. The custom run ([`run`], issue #669) is where a reader picks
 //! one: the same endpoint, with `branchName` and `properties` added.
 
-use knobas_source::SourceError;
+use knobas_source::{BuildParameter, SourceError};
 
 use crate::client::HttpRest;
 
@@ -153,14 +153,14 @@ pub(crate) async fn run(
     rest: &HttpRest,
     build_type_id: &str,
     branch: Option<&str>,
-    overrides: &[(&str, &str)],
+    overrides: &[BuildParameter],
 ) -> Result<Option<i64>, SourceError> {
     if let Some(branch) = branch.filter(|b| b.trim().is_empty()) {
         return Err(SourceError::protocol(format!(
             "teamcity: {branch:?} is not a branch -- leave the branch out to run the default one"
         )));
     }
-    if overrides.iter().any(|(name, _)| name.trim().is_empty()) {
+    if overrides.iter().any(|p| p.name.trim().is_empty()) {
         return Err(SourceError::protocol(
             "teamcity: a parameter override has no name".to_owned(),
         ));

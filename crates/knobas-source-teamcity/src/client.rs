@@ -237,18 +237,14 @@ impl HttpRest {
         &self,
         build_type_id: &str,
         branch: Option<&str>,
-        overrides: &[(&str, &str)],
+        overrides: &[knobas_source::BuildParameter],
     ) -> Result<Option<i64>, SourceError> {
         let mut body = serde_json::json!({ "buildType": { "id": build_type_id } });
         if let Some(branch) = branch {
             body["branchName"] = serde_json::Value::from(branch);
         }
         if !overrides.is_empty() {
-            let property: Vec<serde_json::Value> = overrides
-                .iter()
-                .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
-                .collect();
-            body["properties"] = serde_json::json!({ "property": property });
+            body["properties"] = serde_json::json!({ "property": overrides });
         }
         let request = self
             .client

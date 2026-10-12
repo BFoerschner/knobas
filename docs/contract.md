@@ -10578,7 +10578,6 @@ From this commit on, each of the following requires an orchestrator decision **a
   row settled `sent`, the new value in the app's own `crud::view`). Each restores to a point it recorded, from a `Drop` guard, and reads
   the restore back.
 
-
 - **`crates/knobas-source/src/**` and the IPC schema — issue #669 (2026-10-13): `WriteOp::
   RunBuild`.** Spec #660 story 21: run a build configuration on a branch the reader picks, with
   parameter overrides. The spec names `run_build { entity, branch: Option, parameters }` among the

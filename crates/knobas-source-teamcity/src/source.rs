@@ -208,11 +208,7 @@ impl Source for TeamCitySource {
             } => {
                 let config = self.build_config_id(entity)?;
                 let config = crate::ids::config_id(entity, &config)?;
-                let overrides: Vec<(&str, &str)> = parameters
-                    .iter()
-                    .map(|p| (p.name.as_str(), p.value.as_str()))
-                    .collect();
-                let queued = write::run(&self.rest, config, branch.as_deref(), &overrides).await?;
+                let queued = write::run(&self.rest, config, branch.as_deref(), parameters).await?;
                 Ok(WriteReceipt {
                     remote_id: queued.map(|id| id.to_string()),
                 })

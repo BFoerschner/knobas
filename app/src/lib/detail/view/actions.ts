@@ -39,17 +39,20 @@ const PAYLOADS: Record<
 
 /**
  * How an op's dialog asks for its input. `pick`: one of the options, the
- * first picked. `suggest`: free text, the options offered as suggestions and
- * none picked. `parameters`: the dialog also offers the entity's own settings
- * to change for this one write, and sends only what changed.
+ * first picked. `suggest`: free text in a field called `label`, the options
+ * offered as suggestions and none picked, `empty` saying what an empty field
+ * means. `parameters`: the dialog also offers the entity's own settings to
+ * change for this one write, and sends only what changed.
+ *
+ * The words are the op's, so they live here with its payload and the dialog
+ * names nothing.
  */
-export interface ActionForm {
-  choice: "pick" | "suggest";
-  parameters: boolean;
-}
+export type ActionForm =
+  | { choice: "pick"; parameters: boolean }
+  | { choice: "suggest"; label: string; empty: string; parameters: boolean };
 
 const FORMS: Record<string, ActionForm> = {
-  run_build: { choice: "suggest", parameters: true },
+  run_build: { choice: "suggest", label: "Branch", empty: "default branch", parameters: true },
 };
 
 /** The dialog `action` draws; an op with no entry picks one of its options. */

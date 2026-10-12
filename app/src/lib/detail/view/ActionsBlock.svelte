@@ -119,13 +119,13 @@
       {/if}
       {#if form?.choice === "suggest"}
         <div class="ab-f">
-          <label class="lab" for="ab-branch-{uid}">Branch</label>
+          <label class="lab" for="ab-field-{uid}">{form.label}</label>
           <input
-            id="ab-branch-{uid}"
+            id="ab-field-{uid}"
             class="inp k"
             list="ab-sug-{uid}"
-            aria-label="Branch"
-            placeholder="default branch"
+            aria-label={form.label}
+            placeholder={form.empty}
             autocomplete="off"
             spellcheck="false"
             bind:value={picked}
@@ -163,7 +163,7 @@
               <span class="ab-pn" class:inh={setting.inherited}>{setting.name}</span>
               {#if setting.editable}
                 <input
-                  class="ab-pi"
+                  class="inp k ab-pi"
                   type={setting.secret ? "password" : "text"}
                   aria-label={setting.name}
                   placeholder={setting.secret ? "hidden" : undefined}
@@ -255,20 +255,10 @@
     color: var(--text);
   }
 
+  /* `.inp k` at the row's height. */
   .ab-pi {
-    width: 100%;
     height: 22px;
     padding: 0 6px;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--hair2);
-    border-radius: 2px;
-  }
-
-  .ab-pi:focus {
-    outline: none;
-    border-color: var(--link);
   }
 
   .ab-pv {

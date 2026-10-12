@@ -68,7 +68,7 @@ test("a run is queued as RunBuild with its branch and overrides; an empty branch
 });
 
 test("a run's branch is typed with its options as suggestions; a merge picks one of its options", () => {
-  expect(actionForm(RUN)).toEqual({ choice: "suggest", parameters: true });
+  expect(actionForm(RUN)).toEqual({ choice: "suggest", label: "Branch", empty: "default branch", parameters: true });
   expect(actionForm(MERGE)).toEqual({ choice: "pick", parameters: false });
 });
 
