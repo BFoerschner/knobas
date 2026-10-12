@@ -1579,6 +1579,7 @@ knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
 knobas-search	test/it	suggest::a_source_is_offered_only_once_it_has_a_live_row
 knobas-search	test/it	suggest::every_asset_is_offered_by_its_name_and_leads_somewhere
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
+knobas-search	test/it	suggest::under_knows_exactly_the_names_the_box_offers
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents
 knobas-search	test/it	under::a_quoted_name_with_a_space_scopes_like_any_other
