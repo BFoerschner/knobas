@@ -116,7 +116,7 @@ const MAX_ID_CHARS: usize = 48;
 /// **Two runs and not one**, because no run can reach past the cap it is taken
 /// at -- [`create`] refuses the row. The first was taken with this constant
 /// still at 64, on a quiet machine, and is what condemned it; the second at
-/// the value below, with another agent's suite on the same Mac. They agree to
+/// sixteen, with another agent's suite on the same Mac. They agree to
 /// within 7 ms, and the gate passed in both.
 ///
 /// 64 costs **212 ms**, twice the budget, so the guess was wrong by a factor
@@ -161,21 +161,24 @@ const MAX_ID_CHARS: usize = 48;
 /// hold (no other agent, gate or cargo build on the machine for the whole run)
 /// and a 5-second process and gate-slot monitor, each with load1 under 12 at
 /// start and end and a monotonic rail in both columns -- all four of #533's
-/// conditions. The gate's asserted figure, the size curve's `board, 16 saved`
-/// at 100 k, read **87, 89, 95, 92 and 98 ms**: a spread of 11 against 2 ms of
-/// clearance. The rail table's own timing at sixteen read 89, 93, 90, 90 and
+/// conditions. The gate asserts three figures at the cap. The size curve's
+/// `board, 16 saved` at 100 k -- the one #629 tabled -- read **87, 89, 95, 92
+/// and 98 ms**: a spread of 11 against 2 ms of clearance. The rail table's
+/// last row, a separate timing of the same board, read 89, 93, 90, 90 and
 /// **102** for `launcher_board` and 88, **100**, 89, 89 and 91 for
 /// `smart_lists`, so two of the five held runs failed the gate outright. Under
 /// #533's rule -- a quiet run clearing the budget by less than its own spread
 /// steps the constant to eight without a ruling -- it stepped.
 ///
-/// It is not a commit's cost. Five held runs of `1f1de04b`, the code #629 read
-/// at 83 to 87, put the rail's `launcher_board` at sixteen at **105**, 87, 87,
-/// 86 and 88: the margin #629 saw was already thinner than this machine's
-/// spread before #630, #645, #647 or #650 landed, so no fix to one of them
-/// could restore it, and the bisect stopped there (a midpoint, `fb3133c7`,
-/// read 87 to 93). The cap comes down; the budget and the summary statement
-/// do not move.
+/// No fix to one commit could have kept sixteen. Five held runs of
+/// `1f1de04b`, the code #629 read at 83 to 87, put the size curve's figure at
+/// 86 to 89 -- so something since may have added a few milliseconds there --
+/// but put the rail's `launcher_board` at sixteen at **105**, 87, 87, 86 and
+/// 88: a held red before #630, #645, #647 or #650 landed. Undoing their cost
+/// would leave code the same rule already steps to eight, so the bisect
+/// stopped at a midpoint (`fb3133c7`, size curve 88 to 90, rail 87 to 93) and
+/// the small drift was left unlocated. The cap comes down; the budget and the
+/// summary statement do not move.
 ///
 /// At eight, five held runs on the commit that stepped it read the size
 /// curve's `board, 8 saved` at **85, 85, 85, 85 and 84 ms** (spread 1,
@@ -193,9 +196,9 @@ const MAX_ID_CHARS: usize = 48;
 /// The rail's `launcher_board` at eight spans 84 to 90, a spread of 6 against
 /// at least 10 ms of clearance, so eight holds under the same rule. The section
 /// above that called eight "not meaningfully cheaper" was right about the
-/// milliseconds -- eight buys 5 to 10 ms at the cap -- and is overtaken by the
-/// rule: the margin is for the clock, and at sixteen the clock's own spread ate
-/// it. A database restored with more than eight saved lists keeps them all;
+/// milliseconds -- in the same run's rail, eight read 2 to 16 ms below sixteen
+/// -- and is overtaken by the rule: the margin is for the clock, and at
+/// sixteen the clock's own spread ate it. A database restored with more than eight saved lists keeps them all;
 /// [`create`] refuses the next one until the count is below eight again.
 pub const MAX_SAVED_LISTS: i64 = 8;
 
