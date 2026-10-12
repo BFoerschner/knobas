@@ -12,9 +12,9 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::{fact, login, short, when_of};
-use crate::{keys, map};
 use crate::model::{Commit, UserRef};
 use crate::source::GiteaSource;
+use crate::{keys, map};
 
 const OVERVIEW: &str = "overview";
 const FILES: &str = "files";
