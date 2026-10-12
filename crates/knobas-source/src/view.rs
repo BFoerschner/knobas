@@ -109,6 +109,13 @@ pub struct ViewAction {
     /// The choices the action's dialog offers, in the op's own words (a
     /// merge's styles: `"merge"`, `"rebase"`, `"squash"`). The first is the
     /// default. Empty when the op takes no choice.
+    ///
+    /// An op whose choice is free text offers its options as suggestions
+    /// instead, and preselects none: `run_build`'s are the branches the
+    /// configuration's recent builds ran on, and its empty branch is the
+    /// default branch (#669). Which ops are which is the shell's table
+    /// (`app/src/lib/detail/view/actions.ts`), one entry per op, as the
+    /// payload it queues is.
     pub options: Vec<String>,
     /// The dialog's sentence, asking the reader to confirm. `None` queues on
     /// the button with no dialog -- which only an op with no options may do.

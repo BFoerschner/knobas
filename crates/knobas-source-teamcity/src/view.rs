@@ -26,7 +26,7 @@
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{
-    Block, CommitHint, Fact, Setting, SourceView, Tone, ViewRow, ViewSection,
+    Block, CommitHint, Fact, Setting, SourceView, Tone, ViewAction, ViewRow, ViewSection,
 };
 
 use crate::client::HttpRest;
@@ -217,7 +217,7 @@ fn overview(
         ));
     }
 
-    let mut blocks = vec![Block::Facts { facts }];
+    let mut blocks = vec![Block::Facts { facts }, run_action(builds)];
     if let Some(description) = nonblank(record.description.as_deref()) {
         blocks.push(Block::Text {
             text: description.to_owned(),
@@ -234,6 +234,40 @@ fn overview(
         });
     }
     tab(Tab::Overview, "Overview", None, blocks)
+}
+
+/// *Run…* (#669): a [`run_build`](crate::WRITE_OP_RUN_BUILD) whose choices
+/// are the branches the recent builds ran on, newest first and each once, for
+/// the dialog to suggest. The dialog's branch starts empty, which is the
+/// default branch; the parameters it offers are the *Parameters* tab's.
+///
+/// **Never the default branch by name.** TeamCity resolves an explicit
+/// `branchName: main` against the branch specification to a logical branch
+/// that is *not* `<default>` (testenv/README.md), so suggesting it would
+/// offer a run of the default branch that is not one. Always drawn: a paused
+/// configuration still runs on request, and a refusal is TeamCity's to give.
+fn run_action(builds: &[Build]) -> Block {
+    let mut options: Vec<String> = Vec::new();
+    for build in builds {
+        let Some(branch) = nonblank(build.branch_name.as_deref()) else {
+            continue;
+        };
+        if build.default_branch != Some(true) && !options.iter().any(|o| o == branch) {
+            options.push(branch.to_owned());
+        }
+    }
+    Block::Actions {
+        actions: vec![ViewAction {
+            write_op: crate::WRITE_OP_RUN_BUILD.to_owned(),
+            label: "Run…".to_owned(),
+            options,
+            confirm: Some(
+                "Queue one build of this configuration. Leave the branch empty for the default \
+                 branch; only the values you change are sent, for this build alone."
+                    .to_owned(),
+            ),
+        }],
+    }
 }
 
 /// What happened to a build.
@@ -1251,6 +1285,7 @@ mod tests {
             status: None,
             status_text: None,
             branch_name: None,
+            default_branch: None,
             queued_date: None,
             start_date: None,
             finish_date: None,

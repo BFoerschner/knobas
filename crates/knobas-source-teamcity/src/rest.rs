@@ -117,10 +117,11 @@ pub(crate) const BUILD_CONFIG_VIEW_FIELDS: &str = concat!(
 
 /// What `/app/rest/builds` is asked for when a build configuration's view
 /// lists its recent builds (#664): what a row says -- number, outcome,
-/// branch, duration, age -- and nothing else. Parsed into [`Build`], whose
+/// branch, duration, age -- and whether the branch is the default one, which
+/// *Run…* does not suggest by name (#669). Parsed into [`Build`], whose
 /// other fields stay `None`.
 pub(crate) const RECENT_BUILD_FIELDS: &str = concat!(
-    "count,build(id,number,state,status,statusText,branchName,",
+    "count,build(id,number,state,status,statusText,branchName,defaultBranch,",
     "queuedDate,startDate,finishDate)"
 );
 
@@ -471,6 +472,9 @@ pub(crate) struct Build {
     pub status: Option<String>,
     pub status_text: Option<String>,
     pub branch_name: Option<String>,
+    /// Whether `branch_name` is the configuration's default branch. Asked for
+    /// only by the view's recent builds (#669).
+    pub default_branch: Option<bool>,
     pub queued_date: Option<String>,
     pub start_date: Option<String>,
     pub finish_date: Option<String>,
