@@ -346,6 +346,7 @@ const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
 const AssetsTile = (await import("./AssetsTile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
+const SourceView = (await import("../detail/view/SourceView.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const InboxView = (await import("../inbox/InboxView.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
@@ -640,6 +641,28 @@ const CASES: Case[] = [
           contextLabel: "All work",
           onclose: () => {},
           onnavigate: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * A source view's tabs (#661). Its effect is a deferred section's read,
+     * and the view opens on one, so the read is in flight from the first
+     * mount -- the window case 2 unmounts inside.
+     */
+    name: "SourceView",
+    source: "lib/detail/view/SourceView.svelte",
+    open: (target) => ({
+      app: mount(SourceView, {
+        target,
+        props: {
+          entityId: "mock:PAY-231",
+          view: { sections: [{ id: "log", title: "Log", count: null, deferred: true, blocks: [] }] },
+          webUrl: null,
+          sourceName: "Mock",
+          onnavigate: () => {},
+          onopenurl: () => {},
         },
       }),
     }),
