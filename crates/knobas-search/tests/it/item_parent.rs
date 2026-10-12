@@ -94,11 +94,16 @@ async fn item(pool: &PgPool, source: &str, kind: &str, key: &str, payload: serde
 
 type Rows = Vec<(String, String, String)>;
 
-/// What the database stored for this test's items.
+/// What the readers see of the database's stored rows for this test's items:
+/// `sync.item_parent` matched to each item's configured adapter on
+/// `adapter_kind`, the join `under::parent_names!` and `corpus::LIVE_ITEM`
+/// make (the deputy's second ruling on #627).
 async fn stored(pool: &PgPool, prefix: &str) -> Rows {
     sqlx::query_as(
-        "select entity_id, name, kind from sync.item_parent
-          where entity_id like $1 || '%' order by 1, 2, 3",
+        "select ip.entity_id, ip.name, ip.kind from sync.item_parent ip
+           join sync.item x on x.entity_id = ip.entity_id
+           join knobas.source_config s on s.id = x.source_id and s.kind = ip.adapter_kind
+          where ip.entity_id like $1 || '%' order by 1, 2, 3",
     )
     .bind(prefix)
     .fetch_all(pool)
@@ -352,11 +357,11 @@ async fn the_stored_function_is_the_macros_expansion() {
     for (name, expansion) in [
         (
             "declared_parent_names!",
-            knobas_core::declared_parent_names!("decl"),
+            knobas_core::declared_parent_names!("dd.decl"),
         ),
         (
             "declared_names_as_parent!",
-            knobas_core::declared_names_as_parent!("decl"),
+            knobas_core::declared_names_as_parent!("dd.decl"),
         ),
     ] {
         assert!(

@@ -44,7 +44,12 @@ use crate::query::Parsed;
 ///
 /// Joined to `sync.live_item`, so a withdrawn item or a disabled source does
 /// not vouch for a name the corpus no longer has -- the same reason the
-/// coverage probe reads it; the table holds every item, live or not. A
+/// coverage probe reads it; the table holds every item, live or not. And
+/// joined to `knobas.source_config` on the row's `adapter_kind`: a stored row
+/// says what one adapter's declarations make of the item, and it counts only
+/// while the item's source is configured with that adapter --
+/// `Vocabulary::declaring`'s rule, applied at read time so that no stored row
+/// depends on a config row (the deputy's second ruling on #627). A
 /// deleted asset's row is gone, so `knobas.asset` needs no such view. The
 /// asset arm is the name `corpus::estate_subtree!` starts its walk from, and a
 /// reader's `lower(name)` filter reaches it as `lower(a.name)`, the same
@@ -53,6 +58,7 @@ macro_rules! parent_names {
     () => {
         "(select ip.name, ip.kind from sync.item_parent ip \
            join sync.live_item i on i.entity_id = ip.entity_id \
+           join knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind \
          union all select a.name, 'asset' from knobas.asset a)"
     };
 }

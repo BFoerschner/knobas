@@ -176,7 +176,9 @@ pub struct Corpus {
     /// the database runs those reads when a row or a declaration changes and
     /// stores their answer in `sync.item_parent` (migration `0028`,
     /// ADR-0019), so the predicate is an index read on `lower(name)` and
-    /// `ud.d` goes unread here.
+    /// `ud.d` goes unread here. A stored row counts only while its item's
+    /// source is configured with the adapter the row was resolved for --
+    /// the join on `adapter_kind`, which `under::parent_names!` makes too.
     ///
     /// For the estate it is no payload read at all (#600): an asset's parent
     /// is its `parent_id` column and a route's is the asset exposing it
@@ -242,6 +244,8 @@ pub const LIVE_ITEM: Corpus = Corpus {
     scope: None,
     under: Some(
         "i.entity_id in (select ip.entity_id from sync.item_parent ip \
+          join sync.item x on x.entity_id = ip.entity_id \
+          join knobas.source_config s on s.id = x.source_id and s.kind = ip.adapter_kind \
           where lower(ip.name) = any(ud.v))",
     ),
 };
