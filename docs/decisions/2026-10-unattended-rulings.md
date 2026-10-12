@@ -301,6 +301,7 @@ Ruled 2026-10-12. Comment:
 
 That costs a second pass over the same files and a release in which most Confluence page titles cannot be scoped to. After #601 merges, reversing means removing a tested parser arm and a completion rule, and any saved list that stores `under:"…"` stops resolving and starts reporting an unknown token.
 
+
 ## #600 — an asset answers to its name
 
 Ruled 2026-10-12. Comment:
