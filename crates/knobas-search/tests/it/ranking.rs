@@ -217,13 +217,16 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     // An asset's "body" is its property values (migration `0019`, weight C):
     // one VM named for the token, one that only carries it as a hostname.
     // Inserted in order, so `updated_at` makes the property match the newer.
-    // The name is two words, not `{t}-db`: `to_tsvector` gives a hyphenated
-    // compound a lexeme for the whole *and* for each part, so the token would
-    // be counted twice in the name and outrank the property at equal weights.
+    // The name is hyphenated on purpose. `to_tsvector` gives `{t}-db` a lexeme
+    // for the whole *and* one for each part, and before #611 the launcher's
+    // prefix query counted the token twice in the name -- enough to outrank
+    // the property at equal weights, which would leave this pair blind to the
+    // weighting it is here to witness. A finished word now ranks by its whole
+    // matches (`sql.rs`), so the name counts the token once.
     seed_asset(
         &pool,
         &format!("asset:{t}-title"),
-        &format!("{t} primary"),
+        &format!("{t}-db"),
         serde_json::json!({}),
     )
     .await;
@@ -390,4 +393,94 @@ async fn the_cap_and_the_limit_keep_the_title_match_and_the_true_total() {
     assert_eq!(group(&r, "ticket").hits.len(), 3, "{r:?}");
     assert_eq!(group(&r, "ticket").total, 13, "{r:?}");
     assert_eq!(r.total, 13, "{r:?}");
+}
+
+/// Stories 1 and 25: the item named exactly the typed word comes first, above
+/// every sibling whose hyphenated name only starts with it (#611).
+///
+/// `to_tsvector` lexes `payout-service` as `payout-servic`, `payout` and
+/// `servic`, and the launcher's prefix query `payout:*` matched the first two,
+/// so a hyphenated name counted the word twice and scored 2 against the plain
+/// name's 1. The plain name is the oldest row in each kind, so recency can
+/// only produce the wrong answer. An asset (`knobas.asset`) and a page (the
+/// mirror's `sync.item`) are two relations with two `fts` columns.
+#[tokio::test]
+async fn the_item_named_exactly_the_word_ranks_above_its_hyphenated_siblings() {
+    let pool = pool().await;
+    let t = token("named");
+
+    // Inserted in order: the plain name is the oldest asset.
+    for (suffix, name) in [
+        ("plain", t.clone()),
+        ("service", format!("{t}-service")),
+        ("worker", format!("{t}-worker")),
+    ] {
+        seed_asset(
+            &pool,
+            &format!("asset:{t}-{suffix}"),
+            &name,
+            serde_json::json!({}),
+        )
+        .await;
+    }
+    for (suffix, title, age) in [
+        ("plain", t.clone(), 30),
+        ("service", format!("{t}-service"), 2),
+        ("worker", format!("{t}-worker"), 1),
+    ] {
+        seed(
+            &pool,
+            &format!("confluence:{t}-{suffix}"),
+            "page",
+            &title,
+            "Attendees, action items, nothing else.",
+            days_ago(age),
+        )
+        .await;
+    }
+
+    let r = searcher(&pool).search(q(&t)).await.unwrap();
+
+    assert_eq!(
+        group_ids(&r, "asset")[0],
+        format!("asset:{t}-plain"),
+        "{r:?}"
+    );
+    assert_eq!(
+        group_ids(&r, "page")[0],
+        format!("confluence:{t}-plain"),
+        "{r:?}"
+    );
+    assert_eq!(group(&r, "asset").total, 3, "{r:?}");
+    assert_eq!(group(&r, "page").total, 3, "{r:?}");
+}
+
+/// A hyphenated name stays findable by its full spelling and by each part
+/// (#611): the fix changes how a match ranks, never whether it matches.
+///
+/// The second part is a token of its own, so a search for it alone answers
+/// from this test's rows and not from whatever else the shared database holds.
+#[tokio::test]
+async fn a_hyphenated_name_is_found_by_its_whole_spelling_and_by_each_part() {
+    let pool = pool().await;
+    let t = token("whole");
+    let u = token("part");
+    let name = format!("{t}-{u}");
+    let id = format!("confluence:{t}");
+
+    seed(
+        &pool,
+        &id,
+        "page",
+        &name,
+        "Attendees, action items, nothing else.",
+        days_ago(1),
+    )
+    .await;
+
+    let searcher = searcher(&pool);
+    for typed in [name.clone(), t.clone(), u.clone()] {
+        let r = searcher.search(q(&typed)).await.unwrap();
+        assert_eq!(group_ids(&r, "page"), [id.as_str()], "{typed}: {r:?}");
+    }
 }

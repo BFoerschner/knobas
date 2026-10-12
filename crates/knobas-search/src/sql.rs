@@ -38,10 +38,10 @@
 //!
 //! Four properties are load-bearing:
 //!
-//! * **`m` is deliberately narrow** -- entity id, kind, rank, updated-at and
-//!   nothing else. It holds one row per match, which for a common word is
-//!   thousands; carrying titles and bodies through it is what turns a 20 ms
-//!   search into a 200 ms one.
+//! * **`m` is deliberately narrow** -- entity id, kind, rank, whether the row
+//!   is named what was typed, updated-at and nothing else. It holds one row
+//!   per match, which for a common word is thousands; carrying titles and
+//!   bodies through it is what turns a 20 ms search into a 200 ms one.
 //! * **Exactly one match scan.** `m` is `materialized` because both `totals`
 //!   and `top` read it, and the alternative is scanning the index twice.
 //! * **`totals` LEFT JOIN `detail`**, so every matching kind comes back even
@@ -183,11 +183,21 @@ pub fn search_sql(
             // tsquery, and ':*' on its own is a syntax error.
             sql.push_str(concat!(
                 "case when t.tsq::text = '' then null::tsquery\n",
-                "              else (t.tsq::text || ':*')::tsquery end as tsq\n"
+                "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
+                // The same words with none of them a prefix: what a row is
+                // ranked by when it holds the last word whole (`RANK_WHOLE`).
+                "         t.tsq as whole,\n"
             ));
         } else {
-            sql.push_str("t.tsq as tsq\n");
+            sql.push_str("t.tsq as tsq,\n");
         }
+        // The typed words as `to_tsvector` lexes a name, sorted and distinct,
+        // for `NAMED`: one array per search, compared against each match. It
+        // must lex exactly as `NAMED` does, or no row is ever named.
+        let _ = writeln!(
+            sql,
+            "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
+        );
         let _ = writeln!(
             sql,
             "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
@@ -201,14 +211,19 @@ pub fn search_sql(
         if index > 0 {
             sql.push_str("  union all\n");
         }
-        let rank = if text.is_some() {
-            format!("ts_rank_cd({}, q.tsq)", corpus.fts)
+        let rank = match (text.is_some(), prefix_last) {
+            (true, true) => RANK_WHOLE.replace("{fts}", corpus.fts),
+            (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
+            (false, _) => "0::real".to_owned(),
+        };
+        let named = if text.is_some() {
+            NAMED.replace("{title}", corpus.title)
         } else {
-            "0::real".to_owned()
+            "false".to_owned()
         };
         let _ = writeln!(
             sql,
-            "  select {} as entity_id, {} as kind, {rank} as rank,\n         {} as item_updated_at, {index} as corpus",
+            "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {index} as corpus",
             corpus.entity_id, corpus.kind, corpus.updated_at
         );
         let _ = write!(sql, "    from {}", corpus.relation);
@@ -260,7 +275,7 @@ pub fn search_sql(
         };
         let _ = writeln!(
             sql,
-            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path,\n         {snippet} as snippet",
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path,\n         {snippet} as snippet",
             corpus.source_id, corpus.title, corpus.synced_at, corpus.path
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
@@ -617,6 +632,46 @@ fn clamp_days(days: u32) -> i32 {
         .min(MAX_UPDATED_WITHIN_DAYS)
 }
 
+/// A match's rank while the last word may still be a prefix, for a corpus
+/// whose index is `{fts}`.
+///
+/// `to_tsvector` gives a hyphenated compound a lexeme for the whole and one
+/// for each part (`payout-service` is `payout-servic`, `payout` and
+/// `servic`), so the prefix `payout:*` matches the name twice. Before #611 a
+/// row named `payout-service` scored 2 where a row named `payout` scored 1.
+/// The first part is a lexeme of its own, so a row that holds the typed
+/// words *whole* (`q.whole`, the same query with no prefix) is ranked by
+/// them, and the compound adds nothing.
+///
+/// A row that matches only as a prefix is ranked as before: the word is not
+/// finished yet, or the row holds only longer words. Two costs follow, both
+/// the price of keeping this a query and not a migration of every `fts`
+/// column. While a word is unfinished, a compound still counts it twice. And
+/// a row that holds the word whole is ranked without the longer words it
+/// also holds, so typing `pay` ranks `pay payment` by `pay` alone.
+///
+/// Matching is untouched: `{fts} @@ q.tsq` decides which rows come back,
+/// this only decides their order.
+const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.whole)\n              else ts_rank_cd({fts}, q.tsq) end";
+
+/// Whether a match is *named* exactly what was typed, for a corpus whose
+/// title is `{title}`: the title, lexed as the index lexes it, is the typed
+/// words and nothing else.
+///
+/// Once a compound no longer counts twice, `payout` and `payout-service` tie
+/// for `payout` and recency would decide; story 25 asks for *"the thing
+/// named what I typed"* first. So this is the ordering's second key, read
+/// only between equal ranks: a body that says the word four times still
+/// beats a name that is the word (story 26 rules out a title tier). Lexemes
+/// and not text, so `Payouts` is named `payout`, and both sides are sorted
+/// and distinct arrays (`tsvector_to_array`), so word order does not matter.
+///
+/// The title and not the index's weight-A lexemes: the title is short, where
+/// reading a slice of `fts` would detoast a whole body's vector once more per
+/// match, and it is the name a reader sees whatever else a migration adds to
+/// weight A.
+const NAMED: &str = "tsvector_to_array(to_tsvector('english', {title})) = q.words";
+
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
 /// `entity_id` is the last key on purpose: rank ties and identical timestamps
@@ -627,6 +682,9 @@ fn order_by(prefix: &str, ranked: bool, nullable: bool) -> String {
     let mut keys = Vec::new();
     if ranked {
         keys.push(format!("{prefix}rank desc{nulls}"));
+        // Only between equal ranks, so a name is never a tier of its own
+        // (story 26): see `NAMED`.
+        keys.push(format!("{prefix}named desc{nulls}"));
     }
     keys.push(format!("{prefix}item_updated_at desc nulls last"));
     keys.push(format!("{prefix}entity_id"));
@@ -934,6 +992,13 @@ mod tests {
         // The empty-tsquery guard: `':*'` appended to nothing is a syntax
         // error, not an empty match.
         assert!(typing.sql.contains("null::tsquery"), "{}", typing.sql);
+        // While a word may be a prefix, a row holding the words whole is
+        // ranked by them (`RANK_WHOLE`, #611).
+        assert!(
+            typing.sql.contains("ts_rank_cd(i.fts, q.whole)"),
+            "{}",
+            typing.sql
+        );
 
         let done = search_sql(
             &[&LIVE_ITEM],
@@ -944,6 +1009,25 @@ mod tests {
             50,
         );
         assert!(!done.sql.contains("':*'"), "{}", done.sql);
+        assert!(!done.sql.contains("q.whole"), "{}", done.sql);
+        // Either way, a row named exactly what was typed comes first among
+        // equal ranks (`NAMED`), and only among them.
+        for built in [&typing, &done] {
+            assert!(
+                built
+                    .sql
+                    .contains("tsvector_to_array(to_tsvector('english', i.title)) = q.words"),
+                "{}",
+                built.sql
+            );
+            assert!(
+                built
+                    .sql
+                    .contains("m.rank desc, m.named desc, m.item_updated_at desc"),
+                "{}",
+                built.sql
+            );
+        }
         assert_eq!(done.sql.matches("websearch_to_tsquery").count(), 1);
     }
 
