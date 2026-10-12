@@ -1306,7 +1306,11 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     let cases: &[(&str, &str, bool)] = &[
         ("repo, full name", "under:bench/repo-7", true),
         ("repo, bare name", "under:repo-7", true),
-        ("repo + word", "under:bench/repo-7 payout", true),
+        // `w219` is one of `seed_corpus`'s 512 body words, in about 4,000
+        // rows of the corpus and 8 of `repo-7`'s 162 commits. Not `payout`:
+        // that word is in rows whose number is 0 mod 20, and a Gitea
+        // commit's number is 4 mod 5, so no commit carries it.
+        ("repo + word", "under:bench/repo-7 w219", true),
         ("name nothing has", "under:zzzznothing", false),
     ];
 
