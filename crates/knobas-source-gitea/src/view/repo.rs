@@ -6,6 +6,9 @@
 //! * *Pull requests* (count = open) -- the open ones, with the rooms' chip.
 //! * *Branches* (count) -- the default branch first, then by last commit,
 //!   newest first.
+//!
+//! Both lists stop after twenty pages; one that did keeps its count as what
+//! it read and ends on a muted row naming Gitea's page for the rest (#678).
 //! * *Commits* -- the default branch's latest twenty.
 //!
 //! An empty repository (no commits at all) draws its overview and empty
@@ -83,6 +86,7 @@ async fn overview(
 ) -> Result<ViewSection, SourceError> {
     let mut facts = vec![fact("Default branch", record.default_branch().to_owned())];
     if let Some(description) = record
+        .repo
         .description
         .as_deref()
         .map(str::trim)
@@ -104,14 +108,14 @@ async fn overview(
     if record.forks_count > 0 {
         facts.push(fact("Forks", record.forks_count.to_string()));
     }
-    if record.empty {
+    if record.repo.empty {
         facts.push(fact("Contents", "empty".to_owned()));
     } else if record.size > 0 {
         facts.push(fact("Size", size_of(record.size)));
     }
 
     let mut blocks = vec![Block::Facts { facts }];
-    if !record.empty {
+    if !record.repo.empty {
         blocks.extend(readme(source, owner, repo).await?);
     }
     Ok(ViewSection {
@@ -216,21 +220,27 @@ async fn pulls(
     owner: &str,
     repo: &str,
 ) -> Result<ViewSection, SourceError> {
-    let open = if record.can_have_pulls() {
+    let open = if record.repo.can_have_pulls() {
         rows::open_pulls(source, owner, repo).await?
     } else {
-        Vec::new()
+        rows::Paged {
+            items: Vec::new(),
+            cut: false,
+        }
     };
     let rows: Vec<ViewRow> = open
+        .items
         .iter()
         .map(|p| rows::pull_row(&source.id, owner, repo, p))
         .collect();
-    Ok(listed(
-        PULLS,
-        "Pull requests",
-        Some(rows.len() as u64),
-        rows,
-    ))
+    let note = rows::left_out(
+        "open pull requests",
+        rows.len(),
+        None,
+        open.cut,
+        record.web("/pulls"),
+    );
+    Ok(listed(PULLS, "Pull requests", rows, note))
 }
 
 async fn branches(
@@ -240,9 +250,11 @@ async fn branches(
     repo: &str,
 ) -> Result<ViewSection, SourceError> {
     let mut all: Vec<ListedBranch> = Vec::new();
+    let mut cut = true;
     for page in 1..=BRANCH_PAGES {
         let batch = source.client.branches(owner, repo, page).await?;
         if batch.is_empty() {
+            cut = false;
             break;
         }
         for raw in batch {
@@ -265,11 +277,13 @@ async fn branches(
             .then_with(|| when(b).cmp(&when(a)))
             .then_with(|| a.name.cmp(&b.name))
     });
+    let now = chrono::Utc::now();
     let rows: Vec<ViewRow> = all
         .iter()
         .map(|b| {
             let tip = b.commit.as_ref();
-            let stamp = tip.and_then(|c| c.timestamp.as_deref()).map(rows::stamp);
+            // How long ago its tip was committed, as a commit row says it.
+            let age = when(b).map(|t| super::ago(t.with_timezone(&chrono::Utc), now));
             let short = tip.map(|c| super::short(&c.id));
             let is_default = b.name == default;
             ViewRow {
@@ -279,7 +293,7 @@ async fn branches(
                     keys::branch_key(owner, repo, &b.name)
                 )),
                 title: b.name.clone(),
-                meta: rows::joined([short.as_deref(), stamp.as_deref()]),
+                meta: rows::joined([short.as_deref(), age.as_deref()]),
                 tone: is_default.then_some(Tone::Muted),
                 chip: is_default.then(|| "default".to_owned()),
                 url: None,
@@ -287,7 +301,8 @@ async fn branches(
             }
         })
         .collect();
-    Ok(listed(BRANCHES, "Branches", Some(rows.len() as u64), rows))
+    let note = rows::left_out("branches", rows.len(), None, cut, record.web("/branches"));
+    Ok(listed(BRANCHES, "Branches", rows, note))
 }
 
 async fn commits(
@@ -296,7 +311,7 @@ async fn commits(
     owner: &str,
     repo: &str,
 ) -> Result<ViewSection, SourceError> {
-    let latest: Vec<ListedCommit> = if record.empty {
+    let latest: Vec<ListedCommit> = if record.repo.empty {
         Vec::new()
     } else {
         source
@@ -306,16 +321,27 @@ async fn commits(
     };
     let rows = latest
         .iter()
-        .map(|c| rows::commit_row(&source.id, owner, repo, c))
+        .map(|c| rows::commit_row(&source.id, owner, repo, &c.record))
         .collect();
-    Ok(listed(COMMITS, "Commits", None, rows))
+    Ok(ViewSection {
+        id: COMMITS.to_owned(),
+        title: "Commits".to_owned(),
+        // The latest twenty by design, not a list that stopped paging.
+        count: None,
+        deferred: false,
+        blocks: vec![Block::Entities { title: None, rows }],
+    })
 }
 
-fn listed(id: &str, title: &str, count: Option<u64>, rows: Vec<ViewRow>) -> ViewSection {
+/// A list counted by what it holds, with the note saying where the rest is
+/// after it where the read stopped on its budget (#678).
+fn listed(id: &str, title: &str, mut rows: Vec<ViewRow>, note: Option<ViewRow>) -> ViewSection {
+    let count = rows.len() as u64;
+    rows.extend(note);
     ViewSection {
         id: id.to_owned(),
         title: title.to_owned(),
-        count,
+        count: Some(count),
         deferred: false,
         blocks: vec![Block::Entities { title: None, rows }],
     }

@@ -43,7 +43,10 @@
           {row.title}
         </button>
       {:else}
-        <span class="eb-t plain">{row.title}</span>
+        <!-- With no chip or meta to carry it, the tone is the title's: a
+             list's muted note that it was cut (#678). -->
+        {@const own = row.chip || row.meta ? "" : toneClass(row.tone)}
+        <span class="eb-t plain {own}" class:toned={own !== ""}>{row.title}</span>
       {/if}
       {#if row.chip}
         <!-- The rooms' own chip (#666), so a row's state reads the same here. -->
@@ -93,7 +96,7 @@
     text-decoration: underline;
   }
 
-  .eb-t.plain {
+  .eb-t.plain:not(.toned) {
     color: var(--text);
   }
 

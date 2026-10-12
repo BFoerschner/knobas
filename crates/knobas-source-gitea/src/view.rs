@@ -8,6 +8,7 @@
 //! Every read here is live and nothing is stored (rule 1). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why.
 
+use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, ViewRow, ViewSection};
 
@@ -248,10 +249,59 @@ fn when_of(raw: &str) -> String {
         .unwrap_or_else(|_| raw.to_owned())
 }
 
+/// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
+/// it, so a commit's age reads the same here as on a room's row: minutes,
+/// then hours, then the UTC date. A time in the future is *just now*.
+pub(super) fn ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let seconds = (now - then).num_seconds();
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let minutes = (seconds as f64 / 60.0).round() as i64;
+    if minutes < 1 {
+        return "just now".to_owned();
+    }
+    if minutes < 60 {
+        return format!("{minutes} min ago");
+    }
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let hours = (minutes as f64 / 60.0).round() as i64;
+    if hours < 24 {
+        return format!("{hours} h ago");
+    }
+    then.format("%Y-%m-%d").to_string()
+}
+
 /// The web page of another commit in the same repository, made from this
 /// commit's own: Gitea's is `<base>/<owner>/<repo>/commit/<sha>`.
 fn sibling_url(record: &CommitDetail, sha: &str) -> Option<String> {
     let own = record.html_url.as_deref()?;
     let base = own.strip_suffix(record.sha.as_str())?;
     base.ends_with("/commit/").then(|| format!("{base}{sha}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(raw: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(raw)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// The boundaries of the shell's `ago()`, which this mirrors.
+    #[test]
+    fn an_age_reads_as_the_shells_does() {
+        let now = at("2026-08-22T12:00:00Z");
+        for (then, said) in [
+            ("2026-08-22T12:05:00Z", "just now"),
+            ("2026-08-22T11:59:40Z", "just now"),
+            ("2026-08-22T11:59:00Z", "1 min ago"),
+            ("2026-08-22T11:01:00Z", "59 min ago"),
+            ("2026-08-22T11:00:00Z", "1 h ago"),
+            ("2026-08-21T12:31:00Z", "23 h ago"),
+            ("2026-08-21T12:00:00Z", "2026-08-21"),
+        ] {
+            assert_eq!(ago(at(then), now), said, "{then}");
+        }
+    }
 }

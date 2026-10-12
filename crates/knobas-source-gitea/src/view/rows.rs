@@ -5,11 +5,13 @@
 //! so it opens that thing's detail; the app clears the id where the mirror
 //! does not hold it (ADR-0020 rule 7).
 
+use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{Tone, ViewRow};
 
-use crate::keys;
+use crate::model::{Commit, Repo};
 use crate::source::GiteaSource;
+use crate::{keys, map};
 
 /// How many of the default branch's newest commits a *Commits* tab lists.
 pub(super) const LATEST_COMMITS: u32 = 20;
@@ -18,23 +20,20 @@ pub(super) const LATEST_COMMITS: u32 = 20;
 /// A repository past that has a different problem than its view.
 const PULL_PAGES: u32 = 20;
 
-/// The repository fields the two views read.
+/// How many commits a *Commits* tab lists at most, a pull request's and a
+/// branch's alike: five of Gitea's pages of fifty.
+pub(super) const COMMIT_CAP: usize = 250;
+
+/// The repository fields the two views read: the sync's own projection, and
+/// what only a view shows.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct RepoRecord {
-    #[serde(default)]
-    pub default_branch: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
+    #[serde(flatten)]
+    pub repo: Repo,
     #[serde(default)]
     pub private: bool,
     #[serde(default)]
     pub internal: bool,
-    #[serde(default)]
-    pub empty: bool,
-    #[serde(default)]
-    pub mirror: bool,
-    #[serde(default = "enabled")]
-    pub has_pull_requests: bool,
     #[serde(default)]
     pub stars_count: u64,
     #[serde(default)]
@@ -44,50 +43,35 @@ pub(super) struct RepoRecord {
     pub size: u64,
 }
 
-fn enabled() -> bool {
-    true
-}
-
 impl RepoRecord {
     /// The branch everything is measured against. Gitea names one on every
     /// repository, an empty one included; `main` is its own default.
     pub(super) fn default_branch(&self) -> &str {
-        self.default_branch
+        self.repo
+            .default_branch
             .as_deref()
             .filter(|b| !b.is_empty())
             .unwrap_or("main")
     }
 
-    /// Whether `/pulls` can answer anything but a bare 404 -- Gitea's
-    /// `CanEnablePulls`, as `model::Repo::can_have_pulls` reads it.
-    pub(super) fn can_have_pulls(&self) -> bool {
-        self.has_pull_requests && !self.mirror && !self.empty
+    /// The repository's web page with `tail` after it (`/branches`), where
+    /// Gitea named the page.
+    pub(super) fn web(&self, tail: &str) -> Option<String> {
+        let base = self.repo.html_url.as_deref()?.trim_end_matches('/');
+        (!base.is_empty()).then(|| format!("{base}{tail}"))
     }
 }
 
-/// A commit as the compare and `/commits` list it.
+/// A commit as the compare, `/commits` and `/pulls/{n}/commits` list it.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct ListedCommit {
-    pub sha: String,
-    #[serde(default)]
-    pub html_url: Option<String>,
-    #[serde(default)]
-    pub created: Option<String>,
-    #[serde(default)]
-    pub commit: Option<ListedInner>,
+    #[serde(flatten)]
+    pub record: Commit,
     /// The files this commit touched; the compare carries them by default.
     /// `/commits?files=false` answers `null` here (1.27.3, measured), which
     /// is none, not an unreadable record.
     #[serde(default)]
     pub files: Option<Vec<TouchedFile>>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub(super) struct ListedInner {
-    #[serde(default)]
-    pub message: Option<String>,
-    #[serde(default)]
-    pub author: Option<super::Signature>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -168,41 +152,110 @@ impl OpenPull {
     }
 }
 
+/// What a paged read gathered, and whether it stopped on its page budget
+/// rather than on an empty page.
+pub(super) struct Paged<T> {
+    pub items: Vec<T>,
+    pub cut: bool,
+}
+
 /// Every open pull request of a repository, page by page until an empty one
 /// (#81's rule), at most [`PULL_PAGES`] pages.
 pub(super) async fn open_pulls(
     source: &GiteaSource,
     owner: &str,
     repo: &str,
-) -> Result<Vec<OpenPull>, SourceError> {
-    let mut all = Vec::new();
+) -> Result<Paged<OpenPull>, SourceError> {
+    let mut items = Vec::new();
     for page in 1..=PULL_PAGES {
         let batch: Vec<OpenPull> = source.client.open_pulls_as(owner, repo, page).await?;
         if batch.is_empty() {
-            break;
+            return Ok(Paged { items, cut: false });
         }
-        all.extend(batch);
+        items.extend(batch);
     }
-    Ok(all)
+    Ok(Paged { items, cut: true })
 }
 
-/// The first line of a commit message: what a row is titled by.
-pub(super) fn subject(message: Option<&str>) -> String {
-    message
-        .unwrap_or_default()
-        .lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or_default()
-        .trim()
-        .to_owned()
+/// The last row of a list that holds less than the source has: muted, no
+/// address, and Gitea's own page for the rest. `None` where the list is
+/// whole.
+///
+/// `read` is what the list holds, `total` the source's own count where it
+/// sent one, and `cut` whether the read stopped on its budget.
+pub(super) fn left_out(
+    noun: &str,
+    read: usize,
+    total: Option<usize>,
+    cut: bool,
+    url: Option<String>,
+) -> Option<ViewRow> {
+    let title = match total {
+        Some(total) if total > read => {
+            format!("The first {read} of {total} {noun}; the rest are on Gitea.")
+        }
+        _ if cut => format!("The first {read} {noun}; there may be more on Gitea."),
+        _ => return None,
+    };
+    Some(ViewRow {
+        entity_id: None,
+        title,
+        meta: None,
+        tone: Some(Tone::Muted),
+        chip: None,
+        url,
+    })
 }
 
-/// A git time as a row's quiet reading: to the minute, in the offset it was
-/// recorded in. Verbatim where it does not parse.
-pub(super) fn stamp(raw: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
-        .unwrap_or_else(|_| raw.to_owned())
+/// A commit, however Gitea listed it, as every view's row reads it.
+pub(super) struct CommitLine<'a> {
+    pub sha: &'a str,
+    pub message: Option<&'a str>,
+    pub author: Option<&'a str>,
+    pub when: Option<DateTime<Utc>>,
+    pub url: Option<&'a str>,
+}
+
+impl<'a> From<&'a Commit> for CommitLine<'a> {
+    /// The author git recorded, or the Gitea account where git named none.
+    fn from(c: &'a Commit) -> Self {
+        let inner = c.commit.as_ref();
+        let git_author = inner
+            .and_then(|i| i.author.as_ref())
+            .and_then(|a| a.name.as_deref());
+        Self {
+            sha: &c.sha,
+            message: inner.and_then(|i| i.message.as_deref()),
+            author: non_blank(git_author)
+                .or_else(|| non_blank(c.author.as_ref().and_then(|u| u.login.as_deref()))),
+            when: c.happened_at(),
+            url: c.html_url.as_deref(),
+        }
+    }
+}
+
+impl<'a> From<&'a TipCommit> for CommitLine<'a> {
+    fn from(tip: &'a TipCommit) -> Self {
+        let author = tip.author.as_ref();
+        Self {
+            sha: &tip.id,
+            message: tip.message.as_deref(),
+            author: non_blank(author.and_then(|a| a.name.as_deref()))
+                .or_else(|| non_blank(author.and_then(|a| a.username.as_deref()))),
+            when: tip.timestamp.as_deref().and_then(utc),
+            url: tip.url.as_deref(),
+        }
+    }
+}
+
+fn non_blank(text: Option<&str>) -> Option<&str> {
+    text.map(str::trim).filter(|t| !t.is_empty())
+}
+
+fn utc(raw: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|t| t.with_timezone(&Utc))
 }
 
 /// `a · b · c`, skipping the blanks.
@@ -216,54 +269,35 @@ pub(super) fn joined<'a>(parts: impl IntoIterator<Item = Option<&'a str>>) -> Op
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// A listed commit as a row: its subject, then short sha, author and time.
-pub(super) fn commit_row(source_id: &str, owner: &str, repo: &str, c: &ListedCommit) -> ViewRow {
-    let inner = c.commit.as_ref();
-    let author = inner.and_then(|i| i.author.as_ref());
-    let when = c
-        .created
-        .as_deref()
-        .or_else(|| author.and_then(|a| a.date.as_deref()))
-        .map(stamp);
+/// A commit as a row, the same in every list (#678): its subject as the
+/// title (its short sha where the message is blank), the short sha as the
+/// chip, `author · age` as the meta.
+pub(super) fn commit_row<'a>(
+    source_id: &str,
+    owner: &str,
+    repo: &str,
+    commit: impl Into<CommitLine<'a>>,
+) -> ViewRow {
+    let line = commit.into();
+    let short = super::short(line.sha);
+    let subject = map::subject(line.message.unwrap_or_default());
+    let age = line.when.map(|t| super::ago(t, Utc::now()));
     ViewRow {
+        // The address the commit would have; the app clears it where the
+        // mirror does not hold it (rule 7).
         entity_id: Some(format!(
             "{source_id}:{}",
-            keys::commit_key(owner, repo, &c.sha)
+            keys::commit_key(owner, repo, line.sha)
         )),
-        title: subject(inner.and_then(|i| i.message.as_deref())),
-        meta: joined([
-            Some(super::short(&c.sha).as_str()),
-            author.and_then(|a| a.name.as_deref()),
-            when.as_deref(),
-        ]),
+        title: if subject.is_empty() {
+            short.clone()
+        } else {
+            subject
+        },
+        meta: joined([line.author, age.as_deref()]),
         tone: None,
-        chip: None,
-        url: c.html_url.clone(),
-        commit: None,
-    }
-}
-
-/// A branch's tip as a row, the same reading as [`commit_row`].
-pub(super) fn tip_row(source_id: &str, owner: &str, repo: &str, tip: &TipCommit) -> ViewRow {
-    let author = tip
-        .author
-        .as_ref()
-        .and_then(|a| a.name.as_deref().or(a.username.as_deref()));
-    let when = tip.timestamp.as_deref().map(stamp);
-    ViewRow {
-        entity_id: Some(format!(
-            "{source_id}:{}",
-            keys::commit_key(owner, repo, &tip.id)
-        )),
-        title: subject(tip.message.as_deref()),
-        meta: joined([
-            Some(super::short(&tip.id).as_str()),
-            author,
-            when.as_deref(),
-        ]),
-        tone: None,
-        chip: None,
-        url: tip.url.clone(),
+        chip: Some(short),
+        url: line.url.map(str::to_owned),
         commit: None,
     }
 }

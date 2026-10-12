@@ -872,10 +872,14 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
     assert_eq!(last.len(), 1, "{overview:#?}");
 
     let commits = &view.sections[1];
-    assert_eq!(commits.count, Some(ahead as u64), "the count is ahead");
+    assert_eq!(
+        commits.count,
+        Some(ahead as u64),
+        "the count is what it lists: all it is ahead, under the cap"
+    );
     let rows = entity_rows(commits, None);
     for row in &rows {
-        println!("commit {:<52} {:?}", row.title, row.meta);
+        println!("commit {:<52} {:?} {:?}", row.title, row.chip, row.meta);
     }
     for message in &seeded {
         assert!(
@@ -883,6 +887,36 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
             "the seeded commit {message:?} is listed: {rows:#?}"
         );
     }
+    // One commit row (#678): the tip from `/branches` and the same commit
+    // from the compare read the same.
+    assert!(
+        rows.contains(&last[0]),
+        "the last commit reads as its row in the list: {last:#?} in {rows:#?}"
+    );
+    // And the pull request's Commits, from `/pulls/{n}/commits`, list the
+    // same commits in the same rows.
+    let pr_id = pulls
+        .iter()
+        .find(|r| r.title == pr_title)
+        .and_then(|r| r.entity_id.clone())
+        .expect("the seeded pull request has an address");
+    let in_pr = source
+        .view(&pr_id, Some("commits"))
+        .await
+        .unwrap_or_else(|error| panic!("the commits of {pr_id} failed: {error:?}"))
+        .expect("Gitea draws a pull request");
+    let in_pr = entity_rows(&in_pr.sections[0], None);
+    let mut shared = 0;
+    for row in &in_pr {
+        if let Some(same) = rows.iter().find(|r| r.entity_id == row.entity_id) {
+            assert_eq!(same, row, "one commit, one row in both views");
+            shared += 1;
+        }
+    }
+    assert!(
+        shared >= seeded.len(),
+        "the pull request lists the branch's seeded commits: {in_pr:#?}"
+    );
 
     let stub = &view.sections[2];
     assert!(stub.deferred && stub.blocks.is_empty());

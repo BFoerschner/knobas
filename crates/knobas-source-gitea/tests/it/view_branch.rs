@@ -280,9 +280,9 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
         [ViewRow {
             entity_id: Some(format!("gitea:tidewater/payout-service@{TIP}")),
             title: "PAY-231: jitter in backoff, cap at 5 attempts".into(),
-            meta: Some("c90d11a3f5 · Mara Lindqvist · 2026-08-22 11:42".into()),
+            meta: Some("Mara Lindqvist · 2026-08-22".into()),
             tone: None,
-            chip: None,
+            chip: Some("c90d11a3f5".into()),
             url: Some(format!(
                 "https://gitea.example/tidewater/payout-service/commit/{TIP}"
             )),
@@ -304,7 +304,11 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
     );
 
     let commits = section(&view, "commits");
-    assert_eq!(commits.count, Some(2), "the count is ahead");
+    assert_eq!(
+        commits.count,
+        Some(2),
+        "the count is what it lists: all it is ahead"
+    );
     assert!(!commits.deferred);
     let rows = list(commits, None);
     let titles: Vec<_> = rows

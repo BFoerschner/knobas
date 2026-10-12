@@ -315,7 +315,8 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
     );
     assert_eq!(
         branches[1].meta.as_deref(),
-        Some("dccb3df0dc · 2026-08-31 20:08")
+        Some("dccb3df0dc · 2026-08-31"),
+        "its tip's short sha and how long ago, as a commit row says it"
     );
 
     let commits = rows(section(&view, "commits"));

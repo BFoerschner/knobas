@@ -1914,6 +1914,7 @@ knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_deleted_branch_keeps_i
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_pull_request_indexes_its_discussion
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_pull_request_with_no_update_falls_back_to_when_it_was_opened
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_repository_becomes_a_searchable_item
+knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_subject_skips_the_blank_lines_a_message_opens_on
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::the_go_zero_time_is_no_timestamp_at_all
 knobas-source-gitea	lib/knobas_source_gitea	model::tests::a_commit_prefers_its_own_timestamp_over_the_authors
 knobas-source-gitea	lib/knobas_source_gitea	model::tests::an_unknown_field_does_not_stop_a_record_being_read
@@ -1937,9 +1938,9 @@ knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_o
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
-knobas-source-gitea	lib/knobas_source_gitea	view::pr::tests::an_age_reads_as_the_shells_does
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::a_long_text_is_cut_at_a_line_within_the_cap
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::sizes_read_in_the_unit_that_fits
+knobas-source-gitea	lib/knobas_source_gitea	view::tests::an_age_reads_as_the_shells_does
 knobas-source-gitea	test/it	client::a_bad_token_is_unauthorized
 knobas-source-gitea	test/it	client::a_base_url_with_a_path_prefix_is_preserved
 knobas-source-gitea	test/it	client::a_closed_port_is_unreachable
@@ -2019,6 +2020,10 @@ knobas-source-gitea	test/it	view_repo::a_repo_view_is_its_overview_pull_requests
 knobas-source-gitea	test/it	view_repo::a_repo_without_a_readme_draws_no_readme_block
 knobas-source-gitea	test/it	view_repo::an_empty_repo_draws_an_overview_and_no_failure
 knobas-source-gitea	test/it	view_repo::one_section_is_read_on_its_own
+knobas-source-gitea	test/it	view_rows::a_branchs_commits_stop_at_250_and_say_so
+knobas-source-gitea	test/it	view_rows::a_list_that_ended_on_its_own_has_no_note
+knobas-source-gitea	test/it	view_rows::a_list_that_stopped_paging_ends_with_where_the_rest_is
+knobas-source-gitea	test/it	view_rows::one_commit_is_one_row_in_every_view_that_lists_it
 knobas-source-gitea	test/it	write::a_branch_is_created_from_the_ref_that_was_named
 knobas-source-gitea	test/it	write::a_comment_goes_on_the_issue_the_pull_request_shares_an_index_with
 knobas-source-gitea	test/it	write::a_merge_aimed_at_a_repository_is_refused_before_a_request

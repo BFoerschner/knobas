@@ -4,8 +4,9 @@
 //!
 //! * *Overview* -- facts (the base, ahead and behind), the last commit, and
 //!   the open pull request whose head is this branch, or `none`.
-//! * *Commits* (count = ahead) -- what the branch carries over the default
-//!   branch, from `compare/{default}...{branch}`.
+//! * *Commits* (count = listed) -- what the branch carries over the default
+//!   branch, from `compare/{default}...{branch}`, at most
+//!   [`rows::COMMIT_CAP`] of them and then a note saying where the rest is.
 //! * *Diff* (deferred, count = files) -- the same compare as a diff
 //!   (`?output=diff`).
 //!
@@ -22,6 +23,7 @@ use knobas_source::view::{Block, Fact, SourceView, Tone, ViewSection};
 
 use super::fact;
 use super::rows::{self, BranchRecord, ListedCommit, RepoRecord};
+use crate::map;
 use crate::source::GiteaSource;
 
 const OVERVIEW: &str = "overview";
@@ -97,23 +99,29 @@ async fn whole(
     let is_default = branch == base;
     let tip: BranchRecord = source.client.branch_as(owner, repo, branch).await?;
     // A mirror's `/pulls` is a bare 404: it has none, which is not a failure.
-    let pulls: Vec<_> = if record.can_have_pulls() {
+    let open = if record.repo.can_have_pulls() {
         rows::open_pulls(source, owner, repo).await?
     } else {
-        Vec::new()
-    }
-    .into_iter()
-    .filter(|p| p.is_from(owner, repo, branch))
-    .collect();
+        rows::Paged {
+            items: Vec::new(),
+            cut: false,
+        }
+    };
+    let pulls: Vec<_> = open
+        .items
+        .iter()
+        .filter(|p| p.is_from(owner, repo, branch))
+        .collect();
 
     let mut facts = Vec::new();
-    let (commits, ahead, files) = if is_default {
+    // The commits the tab lists, the tab's count, the note ending the list.
+    let (commits, count, files, note) = if is_default {
         facts.push(fact("Branch", "default branch".to_owned()));
         let latest: Vec<ListedCommit> = source
             .client
             .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
             .await?;
-        (latest, None, None)
+        (latest, None, None, None)
     } else {
         let ahead: Compare = source.client.compare_as(owner, repo, base, branch).await?;
         // Behind is a count, so it is read as one; the reverse compare
@@ -132,13 +140,34 @@ async fn whole(
         facts.push(fact("Base", base.to_owned()));
         facts.push(fact("Ahead", ahead.commit_count().to_string()));
         facts.push(fact("Behind", behind.to_string()));
-        let (count, files) = (ahead.commit_count(), ahead.files());
-        (ahead.commits, Some(count), Some(files))
+        let files = ahead.files();
+        let total = usize::try_from(ahead.commit_count()).unwrap_or(usize::MAX);
+        let mut commits = ahead.commits;
+        let read = commits.len();
+        commits.truncate(rows::COMMIT_CAP);
+        let listed = commits.len();
+        let note = rows::left_out(
+            "commits",
+            listed,
+            Some(total.max(read)),
+            false,
+            record.web(&format!(
+                "/compare/{}...{}",
+                map::url_path(base),
+                map::url_path(branch)
+            )),
+        );
+        (commits, Some(listed as u64), Some(files), note)
     };
     if pulls.is_empty() {
         facts.push(Fact {
             label: "Pull request".to_owned(),
-            value: "none".to_owned(),
+            // Where the walk stopped on its budget, its none is not a none.
+            value: if open.cut {
+                format!("none in the first {} open", open.items.len())
+            } else {
+                "none".to_owned()
+            },
             tone: Some(Tone::Muted),
         });
     }
@@ -147,7 +176,7 @@ async fn whole(
     if let Some(commit) = &tip.commit {
         blocks.push(Block::Entities {
             title: Some("Last commit".to_owned()),
-            rows: vec![rows::tip_row(id, owner, repo, commit)],
+            rows: vec![rows::commit_row(id, owner, repo, commit)],
         });
     }
     if !pulls.is_empty() {
@@ -164,6 +193,11 @@ async fn whole(
         });
     }
 
+    let mut commit_rows: Vec<_> = commits
+        .iter()
+        .map(|c| rows::commit_row(id, owner, repo, &c.record))
+        .collect();
+    commit_rows.extend(note);
     let mut sections = vec![
         ViewSection {
             id: OVERVIEW.to_owned(),
@@ -175,14 +209,11 @@ async fn whole(
         ViewSection {
             id: COMMITS.to_owned(),
             title: "Commits".to_owned(),
-            count: ahead,
+            count,
             deferred: false,
             blocks: vec![Block::Entities {
                 title: None,
-                rows: commits
-                    .iter()
-                    .map(|c| rows::commit_row(id, owner, repo, c))
-                    .collect(),
+                rows: commit_rows,
             }],
         },
     ];

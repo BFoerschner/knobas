@@ -17,4 +17,5 @@ mod view;
 mod view_branch;
 mod view_pr;
 mod view_repo;
+mod view_rows;
 mod write;

@@ -7,23 +7,23 @@
 //! whole `.diff` -- so it is a stub with a count until its tab is opened
 //! (ADR-0020 rule 3).
 
-use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewRow, ViewSection};
 
-use super::{fact, login, short, when_of};
-use crate::model::{Commit, UserRef};
+use super::rows::{self, ListedCommit};
+use super::{fact, login, when_of};
+use crate::model::UserRef;
 use crate::source::GiteaSource;
-use crate::{keys, map};
 
 const OVERVIEW: &str = "overview";
 const FILES: &str = "files";
 const COMMITS: &str = "commits";
 const CONVERSATION: &str = "conversation";
 
-/// How many pages of commits the *Commits* tab reads at most: 250 commits at
-/// Gitea's page of 50. A longer pull request says how many it left out.
-const COMMIT_PAGES: u32 = 5;
+/// How many pages of commits the *Commits* tab reads at most: the shared cap
+/// at Gitea's page of 50. A longer pull request says how many it left out.
+#[allow(clippy::cast_possible_truncation)]
+const COMMIT_PAGES: u32 = (rows::COMMIT_CAP / crate::client::PAGE_SIZE as usize) as u32;
 
 /// The view of pull request `number` in `owner/repo`, or of its one section.
 pub(super) async fn draw(
@@ -46,13 +46,13 @@ pub(super) async fn draw(
             vec![
                 at.overview(&pull).await?,
                 files_stub(&pull),
-                at.commits().await?,
+                at.commits(Some(&pull)).await?,
                 at.conversation().await?,
             ]
         }
         Some(OVERVIEW) => vec![at.overview(&at.pull().await?).await?],
         Some(FILES) => vec![at.files().await?],
-        Some(COMMITS) => vec![at.commits().await?],
+        Some(COMMITS) => vec![at.commits(None).await?],
         Some(CONVERSATION) => vec![at.conversation().await?],
         Some(other) => {
             return Err(SourceError::protocol(format!(
@@ -133,10 +133,12 @@ impl PullView<'_> {
         })
     }
 
-    async fn commits(&self) -> Result<ViewSection, SourceError> {
+    /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
+    /// a note where Gitea has more (#678).
+    async fn commits(&self, pull: Option<&Pull>) -> Result<ViewSection, SourceError> {
         let mut records = Vec::new();
         let mut total = None;
-        let mut capped = true;
+        let mut cut = true;
         for page in 1..=COMMIT_PAGES {
             let (batch, count) = self
                 .source
@@ -149,81 +151,36 @@ impl PullView<'_> {
             let done = batch.is_empty();
             records.extend(batch);
             if done || total.is_some_and(|t| records.len() >= t) {
-                capped = false;
+                cut = false;
                 break;
             }
         }
         // Counted before parsing: a record that does not parse was still
         // read, and is not one the budget left out.
         let read = records.len();
-        let now = Utc::now();
-        let rows: Vec<ViewRow> = records
+        let mut rows: Vec<ViewRow> = records
             .into_iter()
-            .filter_map(|r| serde_json::from_value::<Commit>(r).ok())
-            .map(|c| self.commit_row(&c, now))
+            .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
+            .map(|c| rows::commit_row(&self.source.id, self.owner, self.repo, &c.record))
             .collect();
-        let total = total.unwrap_or(read).max(read);
-        // Said whenever the walk stopped on its budget: with the server's
-        // count, how many it left out; without one, that there may be more.
-        let left_out = if total > read {
-            Some(format!(
-                "The first {read} of {total} commits; the rest are on Gitea."
-            ))
-        } else if capped {
-            Some(format!(
-                "The first {read} commits; there may be more on Gitea."
-            ))
-        } else {
-            None
+        let listed = rows.len();
+        if let Some(mut note) = rows::left_out("commits", read, total, cut, None) {
+            // Where the rest is: the pull request's own page, read for the
+            // note when this tab was asked for on its own.
+            let page = match pull {
+                Some(pull) => pull.html_url.clone(),
+                None => self.pull().await?.html_url,
+            };
+            note.url = page.map(|page| format!("{}/commits", page.trim_end_matches('/')));
+            rows.push(note);
         }
-        .map(|text| Block::Text {
-            text,
-            markdown: false,
-        });
-        let mut blocks = vec![Block::Entities { title: None, rows }];
-        blocks.extend(left_out);
         Ok(ViewSection {
             id: COMMITS.to_owned(),
             title: "Commits".to_owned(),
-            count: Some(total as u64),
+            count: Some(listed as u64),
             deferred: false,
-            blocks,
+            blocks: vec![Block::Entities { title: None, rows }],
         })
-    }
-
-    fn commit_row(&self, commit: &Commit, now: DateTime<Utc>) -> ViewRow {
-        let inner = commit.commit.as_ref();
-        let title = inner
-            .and_then(|c| c.message.as_deref())
-            .map(map::subject)
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| short(&commit.sha));
-        let author = inner
-            .and_then(|c| c.author.as_ref())
-            .and_then(|a| a.name.clone())
-            .or_else(|| login(commit.author.as_ref()))
-            .filter(|a| !a.trim().is_empty());
-        let when = commit.happened_at().map(|t| ago(t, now));
-        let meta = match (author, when) {
-            (Some(who), Some(when)) => Some(format!("{who} · {when}")),
-            (Some(one), None) | (None, Some(one)) => Some(one),
-            (None, None) => None,
-        };
-        ViewRow {
-            // The address the commit would have; the app clears it where the
-            // mirror does not hold it (rule 7).
-            entity_id: Some(format!(
-                "{}:{}",
-                self.source.id,
-                keys::commit_key(self.owner, self.repo, &commit.sha)
-            )),
-            title,
-            meta,
-            tone: None,
-            chip: Some(short(&commit.sha)),
-            url: commit.html_url.clone(),
-            commit: None,
-        }
     }
 
     /// Each comment, in order, as its author and time and then its text.
@@ -429,27 +386,6 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
         .collect()
 }
 
-/// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
-/// it, so a commit's age reads the same here as on a room's row: minutes,
-/// then hours, then the UTC date. A time in the future is *just now*.
-fn ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let seconds = (now - then).num_seconds();
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    let minutes = (seconds as f64 / 60.0).round() as i64;
-    if minutes < 1 {
-        return "just now".to_owned();
-    }
-    if minutes < 60 {
-        return format!("{minutes} min ago");
-    }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    let hours = (minutes as f64 / 60.0).round() as i64;
-    if hours < 24 {
-        return format!("{hours} h ago");
-    }
-    then.format("%Y-%m-%d").to_string()
-}
-
 /// The fields of Gitea's `PullRequest` this view reads.
 #[derive(Debug, serde::Deserialize)]
 struct Pull {
@@ -479,6 +415,8 @@ struct Pull {
     merged_at: Option<String>,
     #[serde(default)]
     changed_files: Option<u64>,
+    #[serde(default)]
+    html_url: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -513,32 +451,4 @@ struct PullComment {
     body: Option<String>,
     #[serde(default)]
     created_at: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn at(raw: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(raw)
-            .unwrap()
-            .with_timezone(&Utc)
-    }
-
-    /// The boundaries of the shell's `ago()`, which this mirrors.
-    #[test]
-    fn an_age_reads_as_the_shells_does() {
-        let now = at("2026-08-22T12:00:00Z");
-        for (then, said) in [
-            ("2026-08-22T12:05:00Z", "just now"),
-            ("2026-08-22T11:59:40Z", "just now"),
-            ("2026-08-22T11:59:00Z", "1 min ago"),
-            ("2026-08-22T11:01:00Z", "59 min ago"),
-            ("2026-08-22T11:00:00Z", "1 h ago"),
-            ("2026-08-21T12:31:00Z", "23 h ago"),
-            ("2026-08-21T12:00:00Z", "2026-08-21"),
-        ] {
-            assert_eq!(ago(at(then), now), said, "{then}");
-        }
-    }
 }
