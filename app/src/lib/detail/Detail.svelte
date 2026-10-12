@@ -43,7 +43,7 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { actionName, actionPayload } from "./view/actions";
-  import { openState, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
+  import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
     replaceSectionBody,
@@ -137,7 +137,9 @@
     rawOpen = false;
     void entityView(id)
       .then((answer) => {
-        if (mine === token) sourceView = answer;
+        if (mine !== token) return;
+        sourceView = answer;
+        if (answer) void adoptQueuedSettings(answer, mine);
       })
       .catch((rejection: unknown) => {
         if (mine === token) viewFailure = ipcErrorMessage(rejection);
@@ -271,6 +273,47 @@
     if (settingWrites[name] !== write.id && settingMarks[name] === undefined) push({ text: `${name} set` });
     else if (settingMarks[name]?.state === "pending") push({ text: `${name} queued` });
     return true;
+  }
+
+  /**
+   * Mark the rows whose edits are still on the queue (#692).
+   *
+   * A detail closed while a setting's write waited loses its marks with it;
+   * the write does not leave the queue. So when a view is drawn, every open
+   * write of a settings block's op, aimed at the block's entity and naming one
+   * of its rows, marks that row and is watched as a fresh save is. The newest
+   * write for a row wins, as a second save would. A row saved from this panel
+   * meanwhile keeps its own write, even one `submit_write` has not answered.
+   */
+  async function adoptQueuedSettings(view: SourceViewData, mine: number) {
+    const blocks = view.sections.flatMap((s) => s.blocks).filter((b) => b.type === "settings");
+    if (blocks.length === 0) return;
+    let open;
+    try {
+      open = await pendingWrites();
+    } catch {
+      // Unmarked rows, as before #692; a save asks the queue again.
+      return;
+    }
+    if (mine !== token) return;
+    const found: Record<string, { id: number; mark: SettingMark }> = {};
+    for (const block of blocks) {
+      const names = new Set(block.values.map((v) => v.name));
+      for (const write of open) {
+        const edit = queuedSetting(block.write_op, write);
+        const state = openState(write);
+        if (edit === null || state === null || edit.entity !== block.entity || !names.has(edit.name)) continue;
+        if ((found[edit.name]?.id ?? -1) > write.id) continue;
+        found[edit.name] = { id: write.id, mark: { state, detail: write.detail, value: edit.value } };
+      }
+    }
+    for (const [name, { id, mark }] of Object.entries(found)) {
+      // A row saved from this panel meanwhile, queued or still being queued, keeps its save.
+      if (settingWrites[name] !== undefined || settingMarks[name] !== undefined) continue;
+      settingWrites[name] = id;
+      settingMarks[name] = mark;
+    }
+    if (Object.keys(settingWrites).length > 0) watchQueue(true);
   }
 
   /** Settles run one after another, so two never re-read the view for one write. */
