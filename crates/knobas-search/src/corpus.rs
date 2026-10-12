@@ -201,8 +201,9 @@ pub struct Corpus {
 /// 18 ms with a word beside the filter (#600).
 ///
 /// What an asset answers to is spelled twice, here and in
-/// `crate::under`'s `KNOWN_SQL`, which reports a value no asset is called as
-/// an unknown token. Change one and the other must follow.
+/// `crate::under`'s `parent_names!` asset arm, which `KNOWN_SQL` reports a
+/// value no asset is called as an unknown token through. Change one and the
+/// other must follow.
 macro_rules! estate_subtree {
     () => {
         concat!(
