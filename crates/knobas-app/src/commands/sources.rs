@@ -145,9 +145,8 @@ pub async fn update_source<R: tauri::Runtime>(
 /// the scheduler started and the run of *Load demo data*, which purges behind
 /// itself (#636): once the last such run of a source deleted with
 /// `purge_items` is over, it has no `sync.item` rows and nothing of it is
-/// searchable. What it is not is synchronous -- the mirror
-/// can be non-empty for the length of one already-running sync after this
-/// returns. That covers the rows the run has already *rewritten*, too: the
+/// searchable. What it is not is synchronous -- the mirror can be non-empty
+/// for the length of one already-running sync after this returns. That covers the rows the run has already *rewritten*, too: the
 /// purge here skips rows a run holds rather than waiting for its commit (#632),
 /// and those are purged with the rest when the run settles.
 ///

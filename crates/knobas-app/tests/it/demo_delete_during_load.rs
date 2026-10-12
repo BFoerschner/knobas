@@ -300,6 +300,7 @@ impl Named {
     fn run(&self) -> Vec<String> {
         self.rewritten.iter().chain(&self.new).cloned().collect()
     }
+    /// Every key the old mirror held or the load emitted.
     fn all(&self) -> Vec<String> {
         self.untouched.iter().chain(&self.run()).cloned().collect()
     }
