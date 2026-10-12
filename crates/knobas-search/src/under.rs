@@ -24,8 +24,8 @@ use crate::SearchError;
 use crate::query::Parsed;
 
 /// Every `(name, kind)` a parent answers to, through the declarations bound
-/// at `$decl`, as a table expression -- the one place the parent shapes are
-/// written, read by [`KNOWN_SQL`] here and by `crate::suggest`'s
+/// at `$decl`, as a table expression -- the one place the parent arms are
+/// put together, read by [`KNOWN_SQL`] here and by `crate::suggest`'s
 /// `PARENTS_SQL`, so what `under:` knows and what the box offers for it
 /// cannot drift apart (#615).
 ///
