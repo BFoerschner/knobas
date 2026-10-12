@@ -28,6 +28,12 @@
 //!   turns an adapter's refusal into the `refused` row the pending-writes panel
 //!   shows. Both halves are asserted against **Jira's own answer**, never
 //!   against knobas' mirror of it.
+//! * **`under:` on this Jira's records** (#644). The SQL half of the parent
+//!   rule -- trigger, stored declarations, parser, predicate -- through the
+//!   search the app runs, against the fixture's epic and its children.
+//!   [`under_the_seeded_epic_finds_it_and_its_five_children_through_the_search`]
+//!   is that, read-only; Confluence's counterpart is
+//!   [`under_its_grandparent_finds_the_seeded_grandchild`].
 //!
 //! The Confluence half (#287) is the M3.2 exit criterion, and it is here for
 //! the same reason: *a comment that mentions me becomes an inbox item* is a
@@ -2471,12 +2477,13 @@ async fn under_the_seeded_epic_finds_it_and_its_five_children_through_the_search
     );
     let expected = BTreeMap::from([("ticket".to_owned(), tickets)]);
 
-    for typed in [EPIC.to_owned(), EPIC.to_lowercase()] {
-        let raw = live_under::under(&typed);
-        let found = live_under::search(&state.pool, JIRA, &raw).await;
-        live_under::exactly(&raw, &found, &expected);
-        println!("SEEDED {raw} -> {:?}", found.ids());
-    }
+    live_under::each_exactly(
+        &state.pool,
+        JIRA,
+        &[EPIC.to_owned(), EPIC.to_lowercase()],
+        &expected,
+    )
+    .await;
     state.scheduler.shutdown().await;
 }
 
@@ -3792,22 +3799,22 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
     let grandparent = title_of(wiki.content(&wiki.home_page_id, "version").await);
     let parent = title_of(wiki.content(&wiki.parent_page_id, "version").await);
 
-    let under = live_under::under;
     let entity = |id: &str| format!("confluence:{id}");
 
-    let by_grandparent = live_under::search(&state.pool, CONFLUENCE, &under(&grandparent)).await;
+    let by_grandparent =
+        live_under::search(&state.pool, CONFLUENCE, &live_under::under(&grandparent)).await;
     let pages = &by_grandparent.kinds["page"];
     assert_eq!(
         by_grandparent.kinds.keys().collect::<Vec<_>>(),
         ["page"],
         "{}: Confluence mirrors pages only",
-        under(&grandparent)
+        live_under::under(&grandparent)
     );
     assert_eq!(
         pages.ids.len(),
         pages.total,
         "{} fits on one page, so containment below is read off every match",
-        under(&grandparent)
+        live_under::under(&grandparent)
     );
     for (what, id) in [
         ("the grandchild", &wiki.page),
@@ -3817,15 +3824,15 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
         assert!(
             pages.ids.contains(&entity(id)),
             "{} did not find {what} {}: {:?}",
-            under(&grandparent),
+            live_under::under(&grandparent),
             entity(id),
             pages.ids
         );
     }
 
-    let by_parent = live_under::search(&state.pool, CONFLUENCE, &under(&parent)).await;
+    let by_parent = live_under::search(&state.pool, CONFLUENCE, &live_under::under(&parent)).await;
     live_under::exactly(
-        &under(&parent),
+        &live_under::under(&parent),
         &by_parent,
         &BTreeMap::from([(
             "page".to_owned(),
@@ -3835,10 +3842,10 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
 
     println!(
         "SEEDED {} -> {} hit(s), the grandchild {} among them; {} -> {:?}",
-        under(&grandparent),
+        live_under::under(&grandparent),
         pages.total,
         entity(&wiki.page),
-        under(&parent),
+        live_under::under(&parent),
         by_parent.ids()
     );
     state.scheduler.shutdown().await;

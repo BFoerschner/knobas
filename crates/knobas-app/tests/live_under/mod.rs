@@ -177,6 +177,29 @@ pub fn exactly(raw: &str, found: &Found, expected: &BTreeMap<String, BTreeSet<St
     }
 }
 
+/// `under:` each of `names` -- the spellings one parent answers to -- finds
+/// [`exactly`] `expected`, through [`search`].
+pub async fn each_exactly(
+    pool: &sqlx::PgPool,
+    source: &str,
+    names: &[String],
+    expected: &BTreeMap<String, BTreeSet<String>>,
+) {
+    for name in names {
+        let raw = under(name);
+        let found = search(pool, source, &raw).await;
+        exactly(&raw, &found, expected);
+        println!(
+            "SEEDED {raw} -> {:?}",
+            found
+                .kinds
+                .iter()
+                .map(|(k, g)| (k, g.total))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
 /// `fixtures/tidewater/work.json`, the corpus every seed is derived from.
 pub fn fixture() -> serde_json::Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tidewater/work.json");
@@ -185,9 +208,15 @@ pub fn fixture() -> serde_json::Value {
 }
 
 /// `testenv/seed-state.json`: the ids the real servers assigned to the
-/// fixture's records, which no seed can dictate.
-pub fn seed_state() -> serde_json::Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json");
+/// fixture's records, which no seed can dictate. `override_var` names the
+/// variable that points a suite elsewhere (`KNOBAS_TEAMCITY_SEED_STATE` and
+/// its siblings), so this reader and a suite's own agree on where the file is.
+pub fn seed_state(override_var: &str) -> serde_json::Value {
+    let path = std::env::var(override_var)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
+        });
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
             "{}: {e} -- the live recipe's seed writes it",

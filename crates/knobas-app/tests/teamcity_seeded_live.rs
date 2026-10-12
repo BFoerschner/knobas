@@ -73,7 +73,6 @@ mod live_digest;
 mod live_under;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use knobas_app::sources::{Registry, SourcesState};
@@ -180,34 +179,38 @@ impl Env {
 /// `live_teamcity_seeded.rs` uses, and `KNOBAS_TEAMCITY_SEED_STATE` overrides
 /// its location there and here alike.
 fn seeded_build_id() -> i64 {
-    let path = std::env::var("KNOBAS_TEAMCITY_SEED_STATE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
-        });
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
-            "{}: {e} -- `./seed --teamcity` writes the number-to-id map this suite reads",
-            path.display()
-        )
-    });
-    let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
-    let builds = whole["teamcity"]["builds"].as_array().unwrap_or_else(|| {
-        panic!(
-            "{}: no `teamcity.builds` -- run `./seed --teamcity`",
-            path.display()
-        )
-    });
-    builds
-        .iter()
-        .find(|b| b["fixture_number"] == json!(FIXTURE_BUILD))
-        .and_then(|b| b["real_id"].as_i64())
+    seeded_builds()
+        .into_iter()
+        .find(|b| b.number == FIXTURE_BUILD)
+        .map(|b| b.real_id)
+        .unwrap_or_else(|| panic!("the seed recorded no real id for fixture build {FIXTURE_BUILD}"))
+}
+
+/// One build the seed ran, as `seed-state.json` records it.
+struct SeededBuild {
+    /// The fixture's `num`.
+    number: i64,
+    /// The configuration it ran in, the fixture's `cfg`.
+    config: String,
+    /// The id the server assigned.
+    real_id: i64,
+}
+
+/// Every build the seed recorded.
+fn seeded_builds() -> Vec<SeededBuild> {
+    let whole = live_under::seed_state("KNOBAS_TEAMCITY_SEED_STATE");
+    whole["teamcity"]["builds"]
+        .as_array()
         .unwrap_or_else(|| {
-            panic!(
-                "{}: the seed recorded no real id for fixture build {FIXTURE_BUILD}",
-                path.display()
-            )
+            panic!("seed-state.json: no `teamcity.builds` -- run `./seed --teamcity`")
         })
+        .iter()
+        .map(|b| SeededBuild {
+            number: b["fixture_number"].as_i64().expect("a fixture number"),
+            config: b["build_type"].as_str().expect("a build type").to_owned(),
+            real_id: b["real_id"].as_i64().expect("a real id"),
+        })
+        .collect()
 }
 
 // -- the app, wired the way the app wires it --------------------------------
@@ -413,8 +416,11 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
             .filter(|(_, config)| config == id)
             .map(|(entity, _)| entity.clone())
             .collect();
-        for (number, _, real_id) in seeded.iter().filter(|(_, cfg, _)| cfg == id) {
-            let build = format!("{TEAMCITY}:build:{real_id}");
+        for seeded in seeded.iter().filter(|b| &b.config == id) {
+            let (number, build) = (
+                seeded.number,
+                format!("{TEAMCITY}:build:{}", seeded.real_id),
+            );
             assert!(
                 of_config.contains(&build),
                 "fixture build {number} ({build}) of {id} is mirrored: {of_config:?}"
@@ -428,36 +434,7 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
             expected.insert("build".to_owned(), of_config);
         }
 
-        for typed in [id.clone(), name.clone()] {
-            let raw = live_under::under(&typed);
-            let found = live_under::search(&state.pool, TEAMCITY, &raw).await;
-            live_under::exactly(&raw, &found, &expected);
-            println!("SEEDED {raw} -> {:?}", found.ids());
-        }
+        live_under::each_exactly(&state.pool, TEAMCITY, &[id.clone(), name], &expected).await;
     }
     state.scheduler.shutdown().await;
-}
-
-/// Every build the seed recorded: its fixture number, configuration and real id.
-fn seeded_builds() -> Vec<(i64, String, i64)> {
-    let path = std::env::var("KNOBAS_TEAMCITY_SEED_STATE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
-        });
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} -- run `./seed --teamcity`", path.display()));
-    let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
-    whole["teamcity"]["builds"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{}: no `teamcity.builds`", path.display()))
-        .iter()
-        .map(|b| {
-            (
-                b["fixture_number"].as_i64().expect("a fixture number"),
-                b["build_type"].as_str().expect("a build type").to_owned(),
-                b["real_id"].as_i64().expect("a real id"),
-            )
-        })
-        .collect()
 }

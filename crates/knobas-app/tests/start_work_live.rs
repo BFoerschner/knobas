@@ -223,6 +223,56 @@ impl Env {
             .collect()
     }
 
+    /// Everything Gitea holds in one repository, as the entity ids the mirror
+    /// should give them, by kind: the repository, every branch, every pull
+    /// request of any state, and every commit on any branch -- the walk the
+    /// adapter makes, asked of the server's own listings (#644).
+    async fn everything_in(&self, full_name: &str) -> BTreeMap<String, BTreeSet<String>> {
+        let id = |tail: &str| format!("{GITEA}:{full_name}{tail}");
+        let branches: Vec<String> = self
+            .listing(&format!("/repos/{full_name}/branches"), &[])
+            .await
+            .iter()
+            .map(|row| row["name"].as_str().expect("a branch name").to_owned())
+            .collect();
+        let mut commits = BTreeSet::new();
+        for branch in &branches {
+            for row in self
+                .listing(
+                    &format!("/repos/{full_name}/commits"),
+                    &[
+                        ("sha", branch),
+                        ("stat", "false"),
+                        ("verification", "false"),
+                    ],
+                )
+                .await
+            {
+                commits.insert(id(&format!("@{}", row["sha"].as_str().expect("a sha"))));
+            }
+        }
+        let pulls = self
+            .listing(&format!("/repos/{full_name}/pulls"), &[("state", "all")])
+            .await
+            .iter()
+            .map(|row| id(&format!("#{}", row["number"].as_u64().expect("a number"))))
+            .collect::<BTreeSet<_>>();
+        let mut by_kind = BTreeMap::from([
+            ("repo".to_owned(), BTreeSet::from([id("")])),
+            (
+                "branch".to_owned(),
+                branches
+                    .iter()
+                    .map(|b| id(&format!("@refs/heads/{b}")))
+                    .collect(),
+            ),
+            ("commit".to_owned(), commits),
+            ("pr".to_owned(), pulls),
+        ]);
+        by_kind.retain(|_, ids| !ids.is_empty());
+        by_kind
+    }
+
     /// Every pull request, as `(number, head branch, merged)`.
     async fn pulls(&self) -> Vec<(u64, String, bool)> {
         self.listing(
@@ -1078,23 +1128,24 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 /// and everything mirrored in it, through the search the app runs** (#644).
 ///
 /// The source is configured with every repository `work.json` names, so the
-/// three scopes have to be told apart. Which repository a mirrored item sits
-/// in is read off its entity key, which the adapter builds from the repository
-/// it was asked to walk -- not off `repository` or `base.repo`, where the
-/// descriptor declares the parent -- so a declaration that missed would leave
-/// this set full and the search's empty. Each fixture branch, pull request
-/// and commit of the repository is checked to be in its set (the last two by
-/// the index and sha `seed-state.json` says Gitea and git assigned), so an
-/// empty mirror cannot pass. Read-only at Gitea: it syncs into a database of its own, and its own
-/// source, configured here; the round trip above owns the litter.
+/// three repositories' `under:` sets have to be told apart. What sits in a repository is asked of
+/// **Gitea**, by the repository's own listings ([`Env::everything_in`]) --
+/// not read off the mirror, and not off `repository` or `base.repo`, where the
+/// descriptor declares the parent -- so a declaration that missed, or an
+/// adapter that filed an item under the wrong repository, leaves this set full
+/// and the search's wrong. Each fixture branch, pull request and commit of the
+/// repository is checked to be in it (the last two by the index and sha
+/// `seed-state.json` says Gitea and git assigned), so an empty server cannot
+/// pass. Read-only at Gitea: it syncs into a database of its own, with its own
+/// source configured here; the round trip above owns the litter, and runs
+/// before this one.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
 async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commits() {
-    use knobas_source_gitea::keys::{GiteaKey, parse_key};
-
     let env = env();
     let fixture = live_under::fixture();
-    let seeded = live_under::seed_state();
+    let seeded = live_under::seed_state("KNOBAS_GITEA_SEED_STATE");
+    let pulls_seeded = live_under::rows(&seeded, "pull_requests");
     let repos: Vec<String> = live_under::rows(&fixture, "repos")
         .iter()
         .map(|r| r["name"].as_str().expect("a repo name").to_owned())
@@ -1104,38 +1155,9 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
     let state = gitea_app(&env, &repos.iter().map(|r| full(r)).collect::<Vec<_>>()).await;
     sync(&state, GITEA).await;
 
-    let mirrored: Vec<(String, String)> =
-        sqlx::query_as("select kind, entity_id from sync.live_item where source_id = $1")
-            .bind(GITEA)
-            .fetch_all(&state.pool)
-            .await
-            .expect("the mirror is readable");
-    let in_repo = |entity: &str| -> String {
-        let key = entity
-            .strip_prefix(&format!("{GITEA}:"))
-            .unwrap_or_else(|| panic!("{entity} is this source's"));
-        let (owner, repo) =
-            match parse_key(key).unwrap_or_else(|| panic!("{entity} is a Gitea key")) {
-                GiteaKey::Repo { owner, repo }
-                | GiteaKey::Pr { owner, repo, .. }
-                | GiteaKey::Branch { owner, repo, .. }
-                | GiteaKey::Commit { owner, repo, .. } => (owner, repo),
-            };
-        format!("{owner}/{repo}")
-    };
-
     for name in &repos {
         let full_name = full(name);
-        let mut by_kind: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for (kind, entity) in mirrored
-            .iter()
-            .filter(|(_, entity)| in_repo(entity) == full_name)
-        {
-            by_kind
-                .entry(kind.clone())
-                .or_default()
-                .insert(entity.clone());
-        }
+        let by_kind = env.everything_in(&full_name).await;
         let expected: BTreeSet<String> = by_kind.values().flatten().cloned().collect();
         assert!(
             expected.contains(&format!("{GITEA}:{full_name}")),
@@ -1158,8 +1180,8 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
             .iter()
             .filter(|p| p["repo"] == name.as_str())
         {
-            let index = &live_under::rows(&seeded, "pull_requests")
-                .into_iter()
+            let index = &pulls_seeded
+                .iter()
                 .find(|s| s["fixture_number"] == pr["num"])
                 .unwrap_or_else(|| panic!("the seed recorded fixture pull request {}", pr["num"]))
                 ["real_index"];
@@ -1185,19 +1207,7 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
             );
         }
 
-        for typed in [full_name.clone(), name.clone()] {
-            let raw = live_under::under(&typed);
-            let found = live_under::search(&state.pool, GITEA, &raw).await;
-            live_under::exactly(&raw, &found, &by_kind);
-            println!(
-                "SEEDED {raw} -> {:?}",
-                found
-                    .kinds
-                    .iter()
-                    .map(|(k, g)| (k, g.total))
-                    .collect::<Vec<_>>()
-            );
-        }
+        live_under::each_exactly(&state.pool, GITEA, &[full_name, name.clone()], &by_kind).await;
     }
     state.scheduler.shutdown().await;
 }

@@ -1479,7 +1479,8 @@ _atlassian-live-names:
 #
 # THE SUITES. `live_jira_seeded` (#276) -- sync, payload, cursor, the real
 # 401; the Jira half of the app crate's `atlassian_live` -- credential health
-# end to end, and the three write ops read back out of Jira; and `share_exit`
+# end to end, the three write ops read back out of Jira, and `under:` through
+# the app's search on the seeded epic (#644, read-only); and `share_exit`
 # (#455), M4.2's exit witness, every call of which is a read. Serial and
 # unparallelised: one server, and tests that write to it. Each suite takes
 # back what it wrote from a `Drop` that checks rather than assumes, and a
