@@ -124,13 +124,14 @@
 
   // -- the source view (#661, ADR-0020) ---------------------------------------
   //
-  // What the entity's own adapter draws for its kind, read live after the
-  // mirror's row has landed. Three answers, each drawn differently: a view
+  // What the entity's own adapter draws for its kind, read live beside the
+  // mirror's row. Three answers, each drawn differently: a view
   // replaces the generic projection with tabs and moves it behind *Raw*;
   // `null` leaves this panel exactly as it was; a failure leaves it too, under
   // one line saying why (rule 2: never silent about an error, never noisy
-  // about an absence). Until the answer lands the panel is the mirror's, so
-  // a source that draws nothing costs a reader nothing.
+  // about an absence). Until the answer lands the body waits under one line
+  // (#693, `viewWaiting`), so it is drawn once rather than drawn and swapped;
+  // a source remembered as drawing nothing for the kind does not wait.
 
   /** The view, once one was drawn. */
   let sourceView = $state<SourceViewData | null>(null);
@@ -172,11 +173,12 @@
 
   /**
    * Ask the entity's source for its view. Keyed on `token`, the read
-   * generation of the `get_entity` it follows: an answer for an address the
+   * generation of the `get_entity` beside it: an answer for an address the
    * panel has left is dropped exactly as a stale entity read is. Not re-read
    * by `refresh()`: a link drawn or withdrawn changes the mirror's row, not
    * what the source draws. A write queued from the view is what re-reads it
-   * (`rereadView`).
+   * (`rereadView`). Answers the patience timer, for the opening effect to
+   * clear when the panel moves on.
    */
   function readView(id: string, mine: number): ReturnType<typeof setTimeout> {
     rawOpen = false;
