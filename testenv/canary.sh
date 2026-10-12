@@ -25,10 +25,10 @@
 # either of them can knock over is 8299.
 #
 # WHY A HOST PROCESS AND NOT A CONTAINER. Kuma reaches it at
-# http://host.docker.internal:8299/, the same host alias the three tunnel
+# http://host.docker.internal:8299/, the same host alias the three product
 # checks use, so the canary exercises that path too: if the alias breaks, the
 # canary says so rather than three product checks going red at once for a
-# reason that looks like the tunnel.
+# reason that looks like the products being stopped.
 #
 # 8299 is outside the interfaces §5 port map (3000, 3001, 8080, 8090, 8111,
 # 8200, 8210, 8212) on purpose: it is a host port, not a published container
@@ -41,8 +41,7 @@ PIDFILE="$HOME/.knobas-canary-$PORT.pid"
 
 # Not in testenv/: `./reset` would have to learn to kill the process before
 # removing the file, and a stale pidfile in the repo is one more thing a
-# `git status` has to explain. $HOME for the same reason ./hetzner/tunnel keeps
-# its own under ~/.ssh/ -- a different directory, the same argument.
+# `git status` has to explain.
 
 say() { echo "canary: $*"; }
 die() { echo "canary: $*" >&2; exit 1; }
@@ -108,8 +107,7 @@ up() {
   # 40 tries, not "20 seconds": `answers` carries `--max-time 3`, so a socket
   # that accepts and then hangs makes each turn ~3.5 s rather than 0.5 s and
   # the wall clock is nothing like 40 x 0.5. Saying "40 tries" is the thing
-  # this loop actually counts. (`hetzner/tunnel` can honestly say 20 s because
-  # its probe is `nc -z`, which returns at once.)
+  # this loop actually counts.
   # Both failure paths KILL before removing the pidfile. Removing it first
   # would disown a responder that is still holding the socket, and this
   # script's whole ownership rule is "a port that answers with no pidfile is

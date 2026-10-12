@@ -38,9 +38,10 @@
 //! pointed at something with a certificate, which is a decision about the
 //! estate rather than about this adapter.
 //!
-//! **The whole roster's states.** The tunnel checks are red whenever
-//! `hetzner/tunnel` is down, and that is a fact about the notebook rather than
-//! about the adapter, so this suite asserts that every monitor carries *a*
+//! **The whole roster's states.** The three product checks are red whenever
+//! their product is not started -- TeamCity, Jira and Confluence run on demand
+//! (#633) -- and that is a fact about the notebook rather than about the
+//! adapter, so this suite asserts that every monitor carries *a*
 //! state Kuma published and never that a particular monitor is up. The seed's
 //! own README makes the same rule ("asserts presence, never a particular
 //! value").
@@ -76,14 +77,12 @@ const SCRATCH_URL: &str = "http://host.docker.internal:8299/";
 /// helper put there. `monitors.json` names neither, so the seed sweeps both.
 const CREATED: &str = "knobas-live-created";
 
-/// The eight monitors `testenv/monitors.json` names.
-const SEEDED: [&str; 8] = [
-    "knobas-teamcity",
-    "knobas-jira",
-    "knobas-confluence",
-    "teamcity (tunnel)",
-    "jira (tunnel)",
-    "confluence (tunnel)",
+/// The six monitors `testenv/monitors.json` names.
+const SEEDED: [&str; 6] = [
+    "notebook",
+    "teamcity",
+    "jira",
+    "confluence",
     "gitea",
     "canary",
 ];
@@ -316,8 +315,9 @@ async fn a_full_sync_mirrors_every_seeded_monitor() {
         let payload = &item.payload;
         assert_eq!(payload["id"], item.entity.key.as_str());
         assert_eq!(payload["name"], item.title.as_str());
-        // A state Kuma published, never a particular one: the tunnel checks are
-        // red whenever the tunnel is down, which is a fact about the notebook.
+        // A state Kuma published, never a particular one: the product checks
+        // are red whenever their product is stopped, which is a fact about the
+        // notebook.
         let state = payload["state"]
             .as_str()
             .unwrap_or_else(|| panic!("{} carries no state: {payload}", item.title));
@@ -367,12 +367,12 @@ async fn a_full_sync_mirrors_every_seeded_monitor() {
             other => panic!("{} is of unexpected type {other:?}", item.title),
         }
     }
-    assert_eq!(pings, 3, "one ping per Hetzner server");
-    assert_eq!(https, 5, "three tunnel checks, Gitea and the canary");
+    assert_eq!(pings, 1, "one ping, on the notebook's address");
+    assert_eq!(https, 5, "three product checks, Gitea and the canary");
 
     // The `-1` sentinel, where the estate happens to show it: a check that did
     // not answer has no response time rather than a negative one. Not asserted
-    // as *present*, because it depends on the tunnel -- but wherever a monitor
+    // as *present*, because it depends on which products are up -- but wherever a monitor
     // is down, this is the shape the mirror must hold.
     for item in &items {
         if item.payload["state"] == "down" {

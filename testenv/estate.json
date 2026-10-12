@@ -1,0 +1,326 @@
+{
+  "version": 1,
+  "name": "knobas test estate",
+  "description": "The real test infrastructure knobas is developed against: this notebook, OrbStack's Linux VM and the Docker engine in it, and the containers testenv/docker-compose.yml runs there -- Gitea and Uptime Kuma, and the real TeamCity, Jira and Confluence that `testenv/live` starts on demand, one at a time (#633). Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the names the local Uptime Kuma actually holds, seeded from `monitors.json` (#441). Until 2026-10-12 three Hetzner servers held the JVM products; they were decommissioned (#634) and left this file with them.",
+  "assets": [
+    {
+      "id": "asset:knobas-estate",
+      "type": "site",
+      "name": "knobas test estate",
+      "environment": "dev",
+      "owner": "Björn Förschner",
+      "description": "The root. Environment and owner are set here only; everything below inherits them from the nearest ancestor that sets them (spec §12.1)."
+    },
+    {
+      "id": "asset:notebook",
+      "type": "hypervisor",
+      "name": "devs-MacBook-Pro",
+      "parent": "asset:knobas-estate",
+      "description": "The development notebook, and the machine `just check` and every live recipe run on. Typed hypervisor because what it holds here is the Linux VM OrbStack runs; the type table has no name for a physical workstation. Its `ip` is the address the containers in that VM reach it at -- what `host.docker.internal` resolves to under OrbStack -- and the address the `notebook` ping watches.",
+      "properties": {
+        "os": "macOS 26.5.2",
+        "arch": "arm64",
+        "role": "development notebook",
+        "ip": "0.250.250.254"
+      },
+      "monitors": [
+        "notebook"
+      ]
+    },
+    {
+      "id": "asset:orbstack",
+      "type": "vm",
+      "name": "OrbStack Linux VM",
+      "parent": "asset:notebook",
+      "description": "OrbStack's Linux VM, where the notebook's Docker engine runs. Its 8 GB is what holds one JVM product at a time (#633); `docker info` read 12 CPUs and 8392974336 bytes on 2026-10-12.",
+      "properties": {
+        "docker_context": "orbstack",
+        "docker_socket": "~/.orbstack/run/docker.sock",
+        "vcpu": 12,
+        "memory_gb": 8
+      }
+    },
+    {
+      "id": "asset:orbstack-docker",
+      "type": "container_engine",
+      "name": "Docker engine (OrbStack)",
+      "parent": "asset:orbstack",
+      "description": "The engine `testenv/docker-compose.yml` brings every service up on: Gitea and Uptime Kuma, and, on demand through `testenv/live`, the real TeamCity, Jira and Confluence with what each needs.",
+      "properties": {
+        "docker_context": "orbstack",
+        "compose_project": "knobas-testenv",
+        "compose_file": "testenv/docker-compose.yml"
+      }
+    },
+    {
+      "id": "asset:knobas-gitea",
+      "type": "container",
+      "name": "knobas-gitea",
+      "parent": "asset:orbstack-docker",
+      "description": "Gitea: a real product, the Gitea adapter's witness, and the VCS the TeamCity builds clone from over the compose network. On demand since #633: `just live-up gitea`, and `just live-up teamcity` brings it up first.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-gitea",
+        "image": "gitea/gitea",
+        "compose_service": "gitea",
+        "published_port": "127.0.0.1:3000"
+      },
+      "monitors": [
+        "gitea"
+      ]
+    },
+    {
+      "id": "asset:knobas-uptime-kuma",
+      "type": "container",
+      "name": "knobas-uptime-kuma",
+      "parent": "asset:orbstack-docker",
+      "description": "Uptime Kuma v2: the system of record for every monitor this file names. It does not watch itself.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-uptime-kuma",
+        "image": "louislam/uptime-kuma",
+        "compose_service": "uptime-kuma",
+        "published_port": "127.0.0.1:3001"
+      }
+    },
+    {
+      "id": "asset:knobas-mockd",
+      "type": "container",
+      "name": "knobas-mockd",
+      "parent": "asset:orbstack-docker",
+      "description": "Our own mock of Jira Data Center and TeamCity. Deprecated since 2026-09-03 (ADR-0013) and unmonitored: it is recorded because the compose file still runs it, and it leaves this file the day the service goes.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-mockd",
+        "compose_service": "mockd",
+        "published_ports": "127.0.0.1:8200, 127.0.0.1:8210, 127.0.0.1:8212",
+        "status": "deprecated (ADR-0013)"
+      }
+    },
+    {
+      "id": "asset:knobas-teamcity",
+      "type": "container",
+      "name": "knobas-teamcity",
+      "parent": "asset:orbstack-docker",
+      "description": "The TeamCity server. On demand: `just live-up teamcity` starts it beside Gitea, and `just live-down teamcity` stops it and keeps its volumes, so the next start finds it seeded.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-teamcity",
+        "image": "jetbrains/teamcity-server",
+        "compose_service": "teamcity",
+        "compose_profile": "real-teamcity",
+        "published_port": "127.0.0.1:8111"
+      },
+      "monitors": [
+        "teamcity"
+      ]
+    },
+    {
+      "id": "asset:db-teamcity",
+      "type": "database",
+      "name": "teamcity",
+      "parent": "asset:knobas-teamcity",
+      "description": "TeamCity's internal database. There is no database container for it: the engine is embedded in the server, which is what the compose file's comment rules and what `down -v` throws away.",
+      "properties": {
+        "engine": "HSQLDB, embedded in the server",
+        "data_dir": "/data/teamcity_server/datadir"
+      }
+    },
+    {
+      "id": "asset:knobas-teamcity-agent",
+      "type": "container",
+      "name": "knobas-teamcity-agent",
+      "parent": "asset:orbstack-docker",
+      "description": "The one build agent, because a server with none runs nothing. It publishes no port and has no monitor of its own; it starts and stops with its server.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-teamcity-agent",
+        "image": "jetbrains/teamcity-agent",
+        "compose_service": "teamcity-agent",
+        "compose_profile": "real-teamcity",
+        "agent_name": "knobas-agent"
+      }
+    },
+    {
+      "id": "asset:knobas-jira",
+      "type": "container",
+      "name": "knobas-jira",
+      "parent": "asset:orbstack-docker",
+      "description": "Jira Software Data Center 10.3 LTS, on a 10-user, 3-hour timebomb licence. On demand: `just live-down jira` removes it with its volumes, because a kept volume is a product whose licence has already run out.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-jira",
+        "image": "atlassian/jira-software",
+        "compose_service": "jira",
+        "compose_profile": "real-atlassian",
+        "published_port": "127.0.0.1:8080"
+      },
+      "monitors": [
+        "jira"
+      ]
+    },
+    {
+      "id": "asset:knobas-jira-db",
+      "type": "container",
+      "name": "knobas-jira-db",
+      "parent": "asset:orbstack-docker",
+      "description": "Jira's PostgreSQL, started and removed with Jira.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-jira-db",
+        "image": "postgres",
+        "compose_service": "jira-db",
+        "compose_profile": "real-atlassian"
+      }
+    },
+    {
+      "id": "asset:db-jira",
+      "type": "database",
+      "name": "jira",
+      "parent": "asset:knobas-jira-db",
+      "properties": {
+        "engine": "PostgreSQL 15",
+        "user": "jira",
+        "jdbc_url": "jdbc:postgresql://jira-db:5432/jira",
+        "collation": "C, which Jira requires"
+      }
+    },
+    {
+      "id": "asset:knobas-confluence",
+      "type": "container",
+      "name": "knobas-confluence",
+      "parent": "asset:orbstack-docker",
+      "description": "Confluence Data Center, the only contract there is for it: Atlassian publishes no machine-readable Confluence DC spec. On demand, and removed with its volumes, as Jira is.",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-confluence",
+        "image": "atlassian/confluence",
+        "compose_service": "confluence",
+        "compose_profile": "real-atlassian",
+        "published_port": "127.0.0.1:8090"
+      },
+      "monitors": [
+        "confluence"
+      ]
+    },
+    {
+      "id": "asset:knobas-confluence-db",
+      "type": "container",
+      "name": "knobas-confluence-db",
+      "parent": "asset:orbstack-docker",
+      "properties": {
+        "docker_context": "orbstack",
+        "container_name": "knobas-confluence-db",
+        "image": "postgres",
+        "compose_service": "confluence-db",
+        "compose_profile": "real-atlassian"
+      },
+      "description": "Confluence's PostgreSQL, started and removed with Confluence."
+    },
+    {
+      "id": "asset:db-confluence",
+      "type": "database",
+      "name": "confluence",
+      "parent": "asset:knobas-confluence-db",
+      "properties": {
+        "engine": "PostgreSQL 15",
+        "user": "confluence",
+        "jdbc_url": "jdbc:postgresql://confluence-db:5432/confluence",
+        "collation": "C, which Confluence requires"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "route:notebook-gitea",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-gitea",
+      "name": "Gitea",
+      "url": "http://127.0.0.1:3000/",
+      "properties": {
+        "opened_by": "docker compose up (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-kuma",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-uptime-kuma",
+      "name": "Uptime Kuma",
+      "url": "http://127.0.0.1:3001/",
+      "properties": {
+        "opened_by": "docker compose up (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-mockd-admin",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd health and admin",
+      "url": "http://127.0.0.1:8200/",
+      "properties": {
+        "opened_by": "docker compose up (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-mockd-jira",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd Jira Data Center REST v2",
+      "url": "http://127.0.0.1:8210/",
+      "properties": {
+        "opened_by": "docker compose up (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-mockd-teamcity",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-mockd",
+      "name": "mockd TeamCity REST",
+      "url": "http://127.0.0.1:8212/",
+      "properties": {
+        "opened_by": "docker compose up (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-teamcity",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-teamcity",
+      "name": "TeamCity",
+      "url": "http://127.0.0.1:8111/",
+      "properties": {
+        "opened_by": "testenv/live up teamcity (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-jira",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-jira",
+      "name": "Jira",
+      "url": "http://127.0.0.1:8080/",
+      "properties": {
+        "opened_by": "testenv/live up jira (published port)"
+      }
+    },
+    {
+      "id": "route:notebook-confluence",
+      "asset": "asset:notebook",
+      "target": "asset:knobas-confluence",
+      "name": "Confluence",
+      "url": "http://127.0.0.1:8090/",
+      "properties": {
+        "opened_by": "testenv/live up confluence (published port)"
+      }
+    },
+    {
+      "id": "route:compose-gitea",
+      "asset": "asset:orbstack-docker",
+      "target": "asset:knobas-gitea",
+      "name": "gitea (compose network)",
+      "url": "http://gitea:3000/",
+      "description": "Gitea by its compose service name, on the network every container in this engine shares. TeamCity's VCS roots name it so, and a build clones through it; the `gitea` monitor watches the same host.",
+      "properties": {
+        "opened_by": "docker compose (the knobas-testenv network)"
+      }
+    }
+  ]
+}

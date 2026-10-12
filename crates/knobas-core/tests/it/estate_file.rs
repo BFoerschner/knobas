@@ -1,11 +1,12 @@
-//! The schema check that keeps `testenv/hetzner/estate.json` honest.
+//! The schema check that keeps `testenv/estate.json` honest.
 //!
 //! # What the file is
 //!
-//! `testenv/hetzner/estate.json` describes the **estate** (`CONTEXT.md`) as it
-//! is provisioned: the notebook and its OrbStack Docker engine, the three
-//! Hetzner servers with their containers and databases, and the tunnel's
-//! forwards as routes. It is data about a real estate and the only asset
+//! `testenv/estate.json` describes the **estate** (`CONTEXT.md`) as it runs:
+//! the notebook, OrbStack's VM and its Docker engine, the containers and
+//! databases on it -- the on-demand TeamCity, Jira and Confluence among them
+//! (#633) -- and their published ports as routes. Until #634 it also held three
+//! Hetzner servers, which were decommissioned. It is data about a real estate and the only asset
 //! fixture there will be -- the M4 spec (#427) rules out anything
 //! Tidewater-shaped for assets, because a made-up estate proves that the tree
 //! draws and not that a real estate fits it.
@@ -26,15 +27,16 @@
 //!
 //! # Why the two coverage tests read the real files
 //!
-//! [`every_hetzner_server_in_the_host_list_is_here_with_its_address`] and
-//! [`every_compose_service_the_notebook_runs_is_recorded`] are the ones that
-//! catch the drift that actually happens: a fourth server, or a new service in
-//! the compose file, added by somebody who has never heard of this JSON. They
-//! read `README.md`'s host-list table and `docker-compose.yml`'s service list
-//! rather than a copy of them, so the day either grows a row the estate file
-//! is red until it grows one too. Both parses are deliberately narrow and both
-//! assert that they found something, so a rewrite that moves the table or the
-//! services elsewhere fails loudly instead of silently checking nothing.
+//! [`every_compose_service_the_notebook_runs_is_recorded`] and
+//! [`the_notebook_states_the_address_its_ping_watches`] are the ones that catch
+//! the drift that actually happens: a new service in the compose file, or a
+//! seeded monitor moved, by somebody who has never heard of this JSON. They read
+//! `docker-compose.yml`'s service list and `monitors.json` rather than a copy
+//! of them, so the day either changes the estate file is red until it follows.
+//! The parses are deliberately narrow and assert that they found something, so
+//! a rewrite that moves the services elsewhere fails loudly instead of silently
+//! checking nothing. (Until #634 a third read the Hetzner README's host-list
+//! table; the servers and the table are gone.)
 //!
 //! A closed key vocabulary ([`ASSET_KEYS`], [`ROUTE_KEYS`]) covers the one
 //! mistake none of the referential checks can see: a misspelled key reads as an
@@ -80,8 +82,8 @@ fn read(relative: &str) -> String {
 }
 
 fn estate() -> Value {
-    serde_json::from_str(&read("testenv/hetzner/estate.json"))
-        .expect("testenv/hetzner/estate.json is JSON")
+    serde_json::from_str(&read("testenv/estate.json"))
+        .expect("testenv/estate.json is JSON")
 }
 
 /// One of the file's two arrays, which must be there and must not be empty --
@@ -261,8 +263,11 @@ fn every_type_is_in_the_type_table() {
 /// shape that occurs in provisioned infrastructure and is not offered is a
 /// convention that has drifted from the thing it describes.
 ///
-/// It runs on **types**, not on assets, so the seven distinct pairs this file
-/// holds are seven assertions and not twenty-odd. It is one-directional on
+/// It runs on **types**, not on assets, so the five distinct pairs this file
+/// holds are five assertions and not twenty-odd. (Seven until #634: the
+/// Hetzner site under the root and the servers directly under that site went
+/// with the servers. The table still suggests both pairs, and the floor below
+/// fell with the estate, not with the table.) It is one-directional on
 /// purpose: a type may suggest a pair the estate has no instance of -- the
 /// design draws chains this infrastructure does not reach into -- and only the
 /// other direction is a drift.
@@ -284,7 +289,7 @@ fn every_pair_the_real_estate_holds_is_a_pair_the_type_table_suggests() {
         pairs.insert((holder, field(asset, "type")));
     }
     assert!(
-        pairs.len() >= 7,
+        pairs.len() >= 5,
         "the estate has stopped describing a tree of more than one shape: {pairs:?}"
     );
 
@@ -342,57 +347,6 @@ fn the_environment_and_the_owner_are_set_at_the_root_and_nowhere_else() {
     }
 }
 
-/// A row of this directory's README host-list table:
-/// `| `knobas-teamcity` | cx23 | teamcity, teamcity-agent | `real-teamcity` | 127.0.0.1:8111 |`
-#[derive(Debug)]
-struct HostRow {
-    server: String,
-    server_type: String,
-    /// The `runs` column: the compose services this server, and no other, runs.
-    runs: Vec<String>,
-    compose_profile: String,
-}
-
-/// The servers the README's host-list table names, read out of the table.
-fn host_list() -> Vec<HostRow> {
-    let readme = read("testenv/hetzner/README.md");
-    let rows: Vec<HostRow> = readme
-        .lines()
-        .filter(|line| line.starts_with("| `knobas-"))
-        .map(|line| {
-            let cells: Vec<&str> = line
-                .split('|')
-                .map(|cell| cell.trim().trim_matches('`'))
-                .collect();
-            assert!(
-                cells.len() >= 6,
-                "a host-list row has five columns and this one reads {cells:?}"
-            );
-            HostRow {
-                server: cells[1].to_owned(),
-                server_type: cells[2].to_owned(),
-                runs: cells[3]
-                    .split(',')
-                    .map(|service| service.trim().to_owned())
-                    .filter(|service| !service.is_empty())
-                    .collect(),
-                compose_profile: cells[4].to_owned(),
-            }
-        })
-        .collect();
-    // A floor, not an equality: a fourth server is a legitimate row and the
-    // test below is what has to notice it, with a message about the estate
-    // file. This assertion is only here so that a table which moved fails as a
-    // broken parse instead of silently checking nothing.
-    assert!(
-        rows.len() >= 3,
-        "this parse found {rows:?} in the host-list table of \
-         testenv/hetzner/README.md, which has never had fewer than three rows; \
-         if the table moved, fix this parse rather than deleting the check"
-    );
-    rows
-}
-
 /// Whether `descendant` is `ancestor`, or is held by it however deep.
 ///
 /// The walk is bounded by the number of assets so that a cycle fails here as a
@@ -415,147 +369,93 @@ fn is_held_by(assets: &[Value], ancestor: &str, descendant: &str) -> bool {
     false
 }
 
+/// **The notebook states the address its ping watches** (#634).
+///
+/// Until #634 the three Hetzner servers carried their public `ip`, and the
+/// three `ping` monitors watched those addresses: that is what put a ping
+/// check inside `monitor_url_host`'s reach on the real estate (#479). With the
+/// servers gone, the one ping left is `notebook`, on the address OrbStack's
+/// containers reach this machine at -- what `host.docker.internal` resolves to
+/// there -- and the notebook states it as its `ip`.
+///
+/// `ip` and not `ipv4`: the type schema's own word for this field
+/// (`knobas_core::asset::TYPES`, a hypervisor's and a vm's), and what
+/// `monitor_url_host` reads. A property the schema does not declare is legal,
+/// so nothing but this line would notice the file spelling it its own way.
+/// Read against `monitors.json` rather than a copy, so the two cannot drift
+/// apart without this going red.
 #[test]
-fn every_hetzner_server_in_the_host_list_is_here_with_its_address() {
+fn the_notebook_states_the_address_its_ping_watches() {
+    let estate = estate();
+    let notebook = assets(&estate)
+        .iter()
+        .find(|asset| id(asset) == "asset:notebook")
+        .expect("the estate holds the notebook");
+    let address = notebook["properties"]["ip"]
+        .as_str()
+        .expect("the notebook needs its `ip` property");
+    address
+        .parse::<Ipv4Addr>()
+        .unwrap_or_else(|e| panic!("the notebook's ip `{address}` is not an address: {e}"));
+
+    let seeded: Value = serde_json::from_str(&read("testenv/monitors.json"))
+        .expect("testenv/monitors.json is JSON");
+    let pings: Vec<&str> = seeded
+        .as_array()
+        .expect("testenv/monitors.json is an array of monitors")
+        .iter()
+        .filter(|monitor| monitor["type"] == "ping")
+        .map(|monitor| field(monitor, "name"))
+        .collect();
+    assert_eq!(pings, ["notebook"], "the one ping the seed creates");
+    let ping = seeded
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|monitor| monitor["name"] == "notebook")
+        .unwrap();
+    assert_eq!(
+        ping["hostname"].as_str(),
+        Some(address),
+        "the `notebook` ping watches an address the notebook does not state"
+    );
+    assert!(
+        notebook["monitors"]
+            .as_array()
+            .is_some_and(|names| names.iter().any(|name| name == "notebook")),
+        "and the notebook names it, so the import draws the link"
+    );
+}
+
+/// **Every compose service runs on the notebook's engine** (#634).
+///
+/// The fact the set comparison in
+/// [`every_compose_service_the_notebook_runs_is_recorded`] cannot carry: where
+/// it runs. Until #634 the README's host list put TeamCity, Jira and Confluence
+/// on three Hetzner servers and a test read that table; now every service runs
+/// in OrbStack's Docker, on demand or always, so every container recording a
+/// compose service hangs off `asset:orbstack-docker`.
+#[test]
+fn every_compose_service_runs_on_the_notebooks_engine() {
     let estate = estate();
     let assets = assets(&estate);
-    let rows = host_list();
-    let mut hcloud_ids: HashSet<String> = HashSet::new();
-    for row in &rows {
-        let server = &row.server;
-        // By id and not by name: a server and the container on it share a name
-        // (`knobas-jira` is both), which is why the README gives the server the
-        // `hetzner-` id. Finding by name would take whichever of the two comes
-        // first in the file and go green or red on the order of an array.
-        let server_id = format!(
-            "asset:hetzner-{}",
-            server
-                .strip_prefix("knobas-")
-                .expect("the host list names every server `knobas-<role>`")
-        );
-        let asset = assets
-            .iter()
-            .find(|asset| id(asset) == server_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "the README's host list names the server `{server}` and the \
-                     estate file has no `{server_id}`"
-                )
-            });
-        assert_eq!(
-            field(asset, "name"),
-            server,
-            "`{server_id}` is the host list's `{server}` and should be called that"
-        );
-        assert_eq!(
-            asset["properties"]["server_type"].as_str(),
-            Some(row.server_type.as_str()),
-            "the host list says `{server}` is a {} and the estate file does not",
-            row.server_type
-        );
-        assert_eq!(
-            asset["properties"]["compose_profile"].as_str(),
-            Some(row.compose_profile.as_str()),
-            "the host list runs `{server}` under the profile `{}` and the \
-             estate file does not",
-            row.compose_profile
-        );
-        assert!(
-            asset["properties"]["role"]
-                .as_str()
-                .is_some_and(|role| !role.is_empty()),
-            "`{server}` needs the `role` provision.sh labels it with"
-        );
-        assert_eq!(
-            field(asset, "type"),
-            "vm",
-            "`{server}` is a cloud server and belongs in the tree as a vm"
-        );
-        // `ip` and not `ipv4`: the type schema's own word for this field
-        // (`knobas_core::asset::TYPES`, a vm's and a hypervisor's), and what
-        // `monitor_url_host` reads to reach a ping check on this server
-        // (#479). A property the schema does not declare is legal -- `ssh_host`
-        // beside it is one -- so nothing but this line would have noticed the
-        // file spelling it its own way.
-        let address = asset["properties"]["ip"]
-            .as_str()
-            .unwrap_or_else(|| panic!("`{server}` needs its public `ip` property"));
-        address.parse::<Ipv4Addr>().unwrap_or_else(|e| {
-            panic!("`{server}`'s ip property `{address}` is not an address: {e}")
-        });
-
-        // `hcloud_id` is the **origin key** of the hcloud producer
-        // (`CONTEXT.md`; `knobas_app::assets::HCLOUD_PRODUCER`, issue #508):
-        // what a produced file matches an existing asset on when its own id is
-        // not one the tree holds. So a server without one is a server the
-        // importer will create a second copy of, and the estate file is the
-        // only committed copy of the values -- `hcloud server list` is what
-        // settles a disagreement, exactly as it is for the addresses.
-        //
-        // **A string of digits and not a number**, because the two are
-        // different property values (`knobas_app::assets::PropertyValue`:
-        // `"8080"` and `8080` are not one property) and the match is on the
-        // stored value. The producer and this file have to agree on which, and
-        // text is the reading that keeps an identifier out of an f64.
-        let hcloud_id = asset["properties"]["hcloud_id"]
-            .as_str()
-            .unwrap_or_else(|| {
-                panic!(
-                    "`{server}` needs its `hcloud_id`, written as a string: \
-                     it is the origin key an hcloud import matches this \
-                     server on"
-                )
-            });
-        assert!(
-            !hcloud_id.is_empty() && hcloud_id.chars().all(|c| c.is_ascii_digit()),
-            "`{server}`'s hcloud_id is `{hcloud_id}`, and hcloud numbers its \
-             servers"
-        );
-        assert!(
-            hcloud_ids.insert(hcloud_id.to_owned()),
-            "`{hcloud_id}` is the hcloud_id of two servers in this file. An \
-             origin key names one thing, and an import of a file carrying \
-             it would be refused rather than guess which"
-        );
-
-        // The `runs` column, which is the fact the set-comparison in
-        // `every_compose_service_the_notebook_runs_is_recorded` cannot carry:
-        // that service runs on *this* server. Without it, a container hung off
-        // the wrong host's Docker engine is green in both tests.
-        for service in &row.runs {
-            let running = assets
-                .iter()
-                .find(|asset| {
-                    asset["properties"]["compose_service"].as_str() == Some(service.as_str())
-                })
-                .unwrap_or_else(|| {
-                    panic!(
-                        "the host list says `{server}` runs `{service}` and no \
-                         asset in the estate file records that compose service"
-                    )
-                });
-            assert!(
-                is_held_by(assets, &server_id, id(running)),
-                "the host list runs `{service}` on `{server}`, and the estate \
-                 file's `{}` is not held by `{server_id}`",
-                id(running)
-            );
+    let mut checked = 0;
+    for asset in assets {
+        if asset["properties"]["compose_service"].as_str().is_none() {
+            continue;
         }
+        assert!(
+            is_held_by(assets, "asset:orbstack-docker", id(asset)),
+            "`{}` records a compose service and is not held by the notebook's \
+             Docker engine, which is the only engine this estate has",
+            id(asset)
+        );
+        checked += 1;
     }
-
-    // And the other direction, which the row loop cannot see: a server dropped
-    // from the host list but left in the estate file, or one added to the file
-    // that the table never grew a row for.
-    let under_nbg1 = assets
-        .iter()
-        .filter(|asset| asset.get("parent").and_then(Value::as_str) == Some("asset:hetzner-nbg1"))
-        .count();
-    assert_eq!(
-        under_nbg1,
-        rows.len(),
-        "the host list names {} servers and the estate file holds {under_nbg1} \
-         under `asset:hetzner-nbg1`",
-        rows.len()
+    assert!(
+        checked >= 8,
+        "only {checked} assets record a compose service; the parse has broken \
+         rather than the estate having shrunk"
     );
 }
 
@@ -616,10 +516,9 @@ fn every_compose_service_the_notebook_runs_is_recorded() {
 /// **Every container carries the origin key the Docker importer matches it on**
 /// (#510, spec #491 story 67).
 ///
-/// The unique thing this can say, and it is the reason it exists: the three
-/// `hcloud_id` values in this file have **no** gate -- `README.md` says so, and
-/// `just estate-live` is their only witness -- but a container's origin key is
-/// two values that every other line of the same file already implies. Its
+/// The unique thing this can say, and it is the reason it exists: a
+/// container's origin key is two values that every other line of the same
+/// file already implies, so it can be gated here with no engine running. Its
 /// `container_name` is its own `name`, and its `docker_context` is the one on
 /// the engine it hangs off. So a hand edit that renames a container and forgets
 /// the property, or moves it to another engine, is red here rather than red on
@@ -717,9 +616,9 @@ const ASSET_KEYS: &[&str] = &[
 ];
 // No `monitors` here: a monitor is "attached to an asset by a `monitored-by`
 // link" (`CONTEXT.md`, *Monitor*), so a route that grew one would name a
-// monitor the import has nowhere to hang. The tunnel routes share their names
-// with the monitors of the containers they land on, and it is those containers
-// that carry them.
+// monitor the import has nowhere to hang. The products' routes share their
+// names with the monitors of the containers they land on, and it is those
+// containers that carry them.
 const ROUTE_KEYS: &[&str] = &[
     "id",
     "asset",
@@ -790,7 +689,7 @@ fn a_monitor_is_named_by_a_name() {
     // The file exists partly to carry these; none at all means the key was
     // renamed and every assertion above skipped.
     assert!(
-        named >= 7,
+        named >= 5,
         "only {named} monitors are named in the estate file"
     );
 }

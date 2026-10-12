@@ -1116,7 +1116,7 @@ pub struct RouteRow {
     pub target_id: Option<String>,
     /// That asset's name, `null` with the target.
     pub target_name: Option<String>,
-    /// What the route is called -- *Gitea*, *TeamCity (tunnel)*.
+    /// What the route is called -- *Gitea*, *TeamCity*.
     pub name: String,
     /// The URL or endpoint, carrying its scheme.
     pub url: String,
@@ -1325,7 +1325,7 @@ const ROUTES_EXPOSED: &str = "select r.id, r.asset_id, r.target_id, r.name, r.ur
 ///   is reached.
 ///
 /// The estate settles it (ADR-0013: the real thing is the witness).
-/// **Every** route in `testenv/hetzner/estate.json` lands on a container, so
+/// **Every** route in `testenv/estate.json` lands on a container, so
 /// under the ancestors alone no server, no engine and no site in the real
 /// estate would ever read a single route -- the pane's *Reachable via* would
 /// be empty on every asset a person actually looks at, and "how is this box
@@ -1339,8 +1339,8 @@ const ROUTES_EXPOSED: &str = "select r.id, r.asset_id, r.target_id, r.name, r.ur
 /// criterion's own words -- *the VM that holds the container* -- read like one
 /// step, and in the real estate they are not: a container sits inside a
 /// `container_engine` which sits on the `vm`
-/// (`testenv/hetzner/estate.json`: `knobas-teamcity` the container, *Docker
-/// engine (knobas-teamcity)*, `knobas-teamcity` the VM). A one-hop rule would
+/// (`testenv/estate.json`: `knobas-teamcity` the container, *Docker
+/// engine (OrbStack)*, *OrbStack Linux VM*). A one-hop rule would
 /// stop at the engine and answer nothing for the box, which is the question
 /// being asked. There is no honest depth between one and all of them.
 ///
@@ -3986,7 +3986,7 @@ pub enum Importer {
 /// file's ids are its own, and they are what a second import of it recognises
 /// (#439); there is no live system on the other end of it whose terms an origin
 /// key could name. So for this producer the planner keeps its one matching
-/// rule, and `testenv/hetzner/estate.json` imports exactly as it did before.
+/// rule, and `testenv/estate.json` imports exactly as it did before.
 pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
 
 /// The hcloud importer's files: one entry per server, keyed by `hcloud_id`
@@ -3994,7 +3994,7 @@ pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
 ///
 /// **Declared by #508 and produced by #509**, a ticket apart: #508 gave the
 /// planner the rule and gave the three checked-in servers their `hcloud_id`
-/// property, and #509 added [`hcloud`] behind it and the chooser's entry in
+/// property (decommissioned since, #634), and #509 added [`hcloud`] behind it and the chooser's entry in
 /// `IMPORT_PRODUCERS` (`app/src/lib/ipc/assets.ts`). A producer declared here
 /// with no chooser entry is still the expected state -- Docker is the next one
 /// -- which is why `commands::assets`'
@@ -4007,7 +4007,7 @@ pub const HCLOUD_PRODUCER: &str = "hcloud";
 ///
 /// **Declared by #510, together with the properties that make it match.** #508
 /// deliberately left it undeclared, because a container's key is its context
-/// plus its name and no container in `testenv/hetzner/estate.json` carried
+/// plus its name and no container in `testenv/estate.json` carried
 /// either as a property -- the context sat on the engine above it -- so a
 /// declaration then would have been a key that matches nothing. This ticket
 /// writes both onto every container in that file and onto every container the
@@ -4315,7 +4315,7 @@ async fn new_asset_ids(
 /// estate"*, [`move_to`] is *"or to the top of the estate"*,
 /// [`ImportEntry::parent_id`] is *"`null` only for an asset at the top"*, and
 /// [`FileAsset::parent`] is an `Option` the Import has written as a top-level
-/// asset since #439. `testenv/hetzner/estate.json` has exactly one parentless
+/// asset since #439. `testenv/estate.json` has exactly one parentless
 /// asset. An importer that refused the one answer the Import accepts would be
 /// the *"second set of rules"* spec #491's story 69 forbids.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
@@ -7106,8 +7106,8 @@ mod tests {
     /// A route's address is a URL or an endpoint, and the rule is *a scheme*.
     ///
     /// The three accepted spellings are ones the real estate holds or plainly
-    /// will (`testenv/hetzner/estate.json`'s tunnels are `http://`, its
-    /// databases speak `postgres://`, every server is reached over `ssh://`),
+    /// will (`testenv/estate.json`'s routes are `http://`, its
+    /// databases speak `postgres://`, a server is reached over `ssh://`),
     /// and the refusals are the two ways a reader gets it wrong: a bare host,
     /// which does not say *how* the thing is reached, and a pasted line with
     /// whitespace in it, which is not one address.
@@ -7451,51 +7451,64 @@ mod tests {
     /// values everything downstream carries.
     ///
     /// The file is the only asset fixture there is (ADR-0013), and this is the
-    /// half of reading it that needs no database: a `2` becomes a number and a
-    /// `"cx23"` becomes text, which is the translation #428 left to this
-    /// ticket. The `description` landing in the bag is here too, because it is
-    /// the one field of the format with nowhere of its own to go.
+    /// half of reading it that needs no database: an `8` becomes a number and a
+    /// `"development notebook"` becomes text, which is the translation #428
+    /// left to this ticket. The `description` landing in the bag is here too,
+    /// because it is the one field of the format with nowhere of its own to
+    /// go.
     #[test]
     fn the_checked_in_estate_parses_and_its_scalars_become_tagged_values() {
-        const ESTATE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+        const ESTATE: &str = include_str!("../../../../testenv/estate.json");
         let parsed: EstateFile = serde_json::from_str(ESTATE).expect("the real estate file");
-        assert_eq!(parsed.assets.len(), 23, "the estate file's assets");
+        assert_eq!(parsed.assets.len(), 16, "the estate file's assets");
         assert_eq!(parsed.routes.len(), 9, "the estate file's routes");
 
-        let server = parsed
+        let notebook = parsed
             .assets
             .iter()
-            .find(|asset| asset.id == "asset:hetzner-teamcity")
-            .expect("the TeamCity host is in the estate file");
+            .find(|asset| asset.id == "asset:notebook")
+            .expect("the notebook is in the estate file");
         let bag = bag_of(
-            Some(vet_type(&server.type_id).expect("`vm` is a type")),
-            &server.properties,
-            server.description.as_deref(),
+            Some(vet_type(&notebook.type_id).expect("`hypervisor` is a type")),
+            &notebook.properties,
+            notebook.description.as_deref(),
         )
-        .expect("the server's properties translate");
+        .expect("the notebook's properties translate");
         assert_eq!(
-            bag["vcpu"],
-            serde_json::json!({ "kind": "number", "value": 2.0 }),
-            "a JSON number is a number property"
-        );
-        assert_eq!(
-            bag["server_type"],
-            serde_json::json!({ "kind": "text", "value": "cx23" }),
+            bag["role"],
+            serde_json::json!({ "kind": "text", "value": "development notebook" }),
             "a JSON string on an undeclared key is a text property"
         );
         assert!(
             bag[DESCRIPTION_KEY]["value"]
                 .as_str()
-                .is_some_and(|text| text.contains("SSH")),
+                .is_some_and(|text| text.contains("OrbStack")),
             "the entry's description is a text property of its own: {:?}",
             bag[DESCRIPTION_KEY]
         );
-        // The negative control for the two above: a declared key takes the
-        // kind its *type* declares, and `os` is one -- so a table that
-        // answered `text` to everything would pass the pair and fail nothing.
+        // The negative control for the pair: a declared key takes the kind its
+        // *type* declares, and `ip` is one -- so a table that answered `text`
+        // to everything would pass the pair and fail nothing.
         assert_eq!(
-            bag["os"],
-            serde_json::json!({ "kind": "text", "value": "ubuntu-24.04" })
+            bag["ip"],
+            serde_json::json!({ "kind": "text", "value": "0.250.250.254" })
+        );
+
+        let vm = parsed
+            .assets
+            .iter()
+            .find(|asset| asset.id == "asset:orbstack")
+            .expect("OrbStack's VM is in the estate file");
+        let bag = bag_of(
+            Some(vet_type(&vm.type_id).expect("`vm` is a type")),
+            &vm.properties,
+            None,
+        )
+        .expect("the VM's properties translate");
+        assert_eq!(
+            bag["memory_gb"],
+            serde_json::json!({ "kind": "number", "value": 8.0 }),
+            "a JSON number is a number property"
         );
     }
 

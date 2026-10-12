@@ -44,7 +44,7 @@
 //! mechanism #508 built: [`super::Producer::origin_key`] is a list of property
 //! keys and [`super::origin_key_of`] reads them from a property bag on both
 //! sides. So a container carries [`NAME_KEY`] beside its name, and
-//! `testenv/hetzner/estate.json` carries it too -- the route the deputy's
+//! `testenv/estate.json` carries it too -- the route the deputy's
 //! ruling of 2026-09-08 on #508 (part 2) pointed at, and the one
 //! `CONTEXT.md`'s *"the property an importer sets"* already described. The
 //! alternative was to teach `Producer` to read a key out of an entry's *field*
@@ -54,7 +54,7 @@
 //! # What a produced container carries, and what it deliberately does not
 //!
 //! [`CONTEXT_KEY`] and [`NAME_KEY`], and nothing else. The third acceptance
-//! criterion measures this producer against `testenv/hetzner/estate.json` --
+//! criterion measures this producer against `testenv/estate.json` --
 //! the produced file must preview **all known with no changes** -- and
 //! [`super::preview_import`] walks the *file's* properties, so every key
 //! written here is a key that file has to carry with the value this producer
@@ -64,8 +64,8 @@
 //!   against all four real contexts. `docker ps`' `Image` column is
 //!   the image *reference* where the local engine has one (`gitea/gitea` on
 //!   `orbstack`) and the image **id** where it does not -- `e34446c9dbf8`,
-//!   `30267c7f633a`, `fe0737ba566a` on the three Hetzner engines, whose images
-//!   compose pulled by digest. The estate has carried `image` by hand as
+//!   `30267c7f633a`, `fe0737ba566a` on the three Hetzner engines (since
+//!   decommissioned, #634), whose images compose pulled by digest. The estate has carried `image` by hand as
 //!   `jetbrains/teamcity-server` since M4.0, so writing this column would put
 //!   six containers into *would change* with a hash, on every run.
 //! * **`compose_service` says nothing docker owns.** It is a label of one
@@ -83,14 +83,14 @@
 //!
 //! `docker ps` and not `docker ps -a`: an exited container is not a thing in
 //! the estate, and reading them would put entries into the produced file that
-//! match nothing. The notebook's engine holds two of them today -- `docker
-//! --context orbstack ps -a` on 2026-09-08 listed `knobas-teamcity` (*Exited
-//! (0) 2 days ago*) and `knobas-teamcity-agent` (*Exited (143)*), left behind
-//! by the local `real-teamcity` profile -- and `testenv/hetzner/estate.json`
-//! records those two names only under `docker_context: knobas-teamcity`, on
-//! the Hetzner engine. Under `-a` they would be produced with the key
-//! (`orbstack`, `knobas-teamcity`), match nothing, and preview as **new**, so
-//! `just estate-live` is red on `-a` on its next run. In `just check` the
+//! match nothing. When this was decided the notebook's engine held two --
+//! `docker --context orbstack ps -a` on 2026-09-08 listed `knobas-teamcity`
+//! (*Exited (0) 2 days ago*) and `knobas-teamcity-agent` (*Exited (143)*),
+//! which the estate then recorded only on a Hetzner engine, so under `-a`
+//! they previewed as **new**. Since #634 the estate records those two on the
+//! notebook's engine, where TeamCity is stopped between runs (#633), so that
+//! example no longer bites; any other exited container still would. In
+//! `just check` the
 //! literal argument list is asserted by
 //! `the_context_is_the_only_thing_substituted_and_it_is_one_argument`, which
 //! is red on `-a` too. (`testenv/docker-compose.yml`'s `kuma-seed` is *not*
@@ -110,9 +110,9 @@
 //! That the docker CLI answers in the shape [`containers`] parses is witnessed
 //! by a **stub executable** in `tests/it/assets_ipc.rs`, which certifies the
 //! parse, the argument rule, the landing and the refusals and can never go red
-//! when docker changes its output. That the four real contexts answer in it,
+//! when docker changes its output. That the real context answers in it,
 //! and that the `docker_context` and `container_name` values in
-//! `testenv/hetzner/estate.json` are the ones the real engines hold, is
+//! `testenv/estate.json` are the ones the real engines hold, is
 //! witnessed by `just estate-live` and by nothing in `just check` (ADR-0013).
 //!
 //! [`IpcErrorCode::Unreachable`]: crate::IpcErrorCode::Unreachable
@@ -159,9 +159,9 @@ pub const PROGRAM: &str = "docker";
 /// The asset type whose [`CONTEXT_KEY`] is read.
 ///
 /// **The filter is load-bearing and not a tidiness.** In
-/// `testenv/hetzner/estate.json` the three Hetzner servers and the OrbStack VM
-/// carry `docker_context` as well -- a `vm` is where the engine runs, and the
-/// property is on both -- so a producer that read every asset carrying the key
+/// `testenv/estate.json` the OrbStack VM carries `docker_context` as well
+/// (and so did the three Hetzner servers until #634) -- a `vm` is where the
+/// engine runs, and the property is on both -- so a producer that read every asset carrying the key
 /// would spawn each context twice and emit two entries with one origin key.
 /// The Import refuses that file (*"describes one asset twice"*), which is a
 /// refusal about the file rather than about the read that made it.
@@ -299,7 +299,8 @@ struct PsLine {
 /// this machine writes, and there is one CLI whatever the engine --
 /// `--context` moves the *engine*, not the program -- so this parse is of one
 /// program's output and not of four servers'. What witnessed it against all
-/// four is `just estate-live` (2026-09-08, eight containers over four engines);
+/// four is `just estate-live` (2026-09-08, eight containers over four engines;
+/// one engine, the notebook's, since #634);
 /// nothing in `just check` can, because a stub writes whatever the test wrote
 /// into it, and an array shape from a future CLI is the failure this paragraph
 /// is the only warning about. A blank line is skipped; anything else that is
@@ -598,11 +599,11 @@ mod tests {
                 names: vec!["knobas-gitea".to_owned()],
             },
             Found {
-                engine: engine("asset:hetzner-jira-docker", "knobas-jira"),
+                engine: engine("asset:remote-docker", "remote"),
                 names: vec!["knobas-jira".to_owned(), "knobas-jira-db".to_owned()],
             },
         ];
-        let new: HashSet<String> = [asset_id("knobas-jira", "knobas-jira-db")]
+        let new: HashSet<String> = [asset_id("remote", "knobas-jira-db")]
             .into_iter()
             .collect();
         let file = parsed(&estate_file(&found, &new).expect("a file"));
@@ -623,7 +624,7 @@ mod tests {
 
         assert_eq!(
             entries[2]["parent"],
-            serde_json::json!("asset:hetzner-jira-docker"),
+            serde_json::json!("asset:remote-docker"),
             "the new one lands under the engine it was read through"
         );
     }

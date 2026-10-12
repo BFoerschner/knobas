@@ -111,14 +111,14 @@ const KUMA: &str = "kuma";
 /// gives it and `./seed-kuma.sh` guarantees is there.
 const CANARY: &str = "canary";
 
-/// The estate as provisioned — the same bytes `estate_exit.rs`, `share_exit.rs`
+/// The estate as it runs — the same bytes `estate_exit.rs`, `share_exit.rs`
 /// and the demo profile load.
 ///
 /// The estate file is the **witness** here rather than the subject: what this
-/// suite needs from it is a real tree to hang the canary's asset in and seven
+/// suite needs from it is a real tree to hang the canary's asset in and five
 /// real monitor names to resolve, and it asserts both rather than editing
 /// either.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 
 /// Where the canary's asset hangs, and what it is called.
 ///
@@ -130,11 +130,11 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 /// `assets::create` accepts any type under any parent"* (`CONTEXT.md`, **Type
 /// convention**).
 ///
-/// **Made here rather than in `testenv/hetzner/estate.json`.** The estate file's
+/// **Made here rather than in `testenv/estate.json`.** The estate file's
 /// own README says of the seeded list that the canary *"watches nothing and so
 /// appears in no asset"* (#441), and this suite does not overturn that: what
 /// the file describes is the infrastructure the products run on, and the canary
-/// is a responder that exists to be knocked over. So the file's seven names are
+/// is a responder that exists to be knocked over. So the file's five names are
 /// resolved against the real server here — which is #445's rule witnessed live,
 /// and the thing an invented asset could not have witnessed — and the canary's
 /// own asset and link are drawn through the two shipped paths a reader has for
@@ -518,8 +518,8 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
 
     // ---- the estate imported ----------------------------------------------
     //
-    // #445 against the **real** server rather than the recording: seven names
-    // somebody typed into `estate.json` answering to seven monitors somebody
+    // #445 against the **real** server rather than the recording: five names
+    // somebody typed into `estate.json` answering to five monitors somebody
     // typed into Uptime Kuma. `adapter_to_mirror.rs` makes the same assertion
     // against `support/metrics.txt`, which is a recording of this server and
     // therefore agrees with it by construction until somebody edits one of the
@@ -535,8 +535,8 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
             imported.monitors_kept,
             imported.monitors_linked,
         ),
-        (23, 9, 7, 7),
-        "the real estate, with every one of its seven monitor names resolved against \
+        (16, 9, 5, 5),
+        "the real estate, with every one of its five monitor names resolved against \
          the monitors the real Kuma published"
     );
     // The first three counts are already pinned by `estate_exit.rs` and
@@ -544,10 +544,11 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     // reddens those two first and this line with them -- one more place, not a
     // new claim. What is new is the last one: `estate_exit.rs` asserts
     // `monitors_linked == 0`, because no adapter emitted a monitor when it was
-    // written, and `adapter_to_mirror.rs` asserts seven against a *recording* of
+    // written, and `adapter_to_mirror.rs` asserts five against a *recording* of
     // this server -- which agrees with it by construction until somebody edits
-    // one of the two files. Seven, here, is seven names typed into `estate.json`
-    // answering to seven monitors typed into Uptime Kuma.
+    // one of the two files (#634 edited both, and re-recorded it). Five, here,
+    // is five names typed into `estate.json` answering to five monitors typed
+    // into Uptime Kuma.
 
     // ---- the canary's asset, and a context somewhere else ------------------
     let canary_asset = assets::create(

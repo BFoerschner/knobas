@@ -847,7 +847,7 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
 /// bridge could see it: #537 widened the corpus to 27 and found the `21` by
 /// grep. The estate's own count is pinned by `demo.rs`'s
 /// `the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing`,
-/// which reads `testenv/hetzner/estate.json`; this is the work half's.
+/// which reads `testenv/estate.json`; this is the work half's.
 ///
 /// The oracle is a **real sync through the adapter**, not a sum of fixture
 /// array lengths: what the subtitle claims is what the button produces, and an

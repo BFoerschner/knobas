@@ -26,9 +26,10 @@ Implementation now runs ticket-driven:
   `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
   `just teamcity-live-seeded`, `just jira-live` and `just confluence-live` (#633; `just
   atlassian-live` runs the two in turn), `just kuma-live` (#442),
-  `just estate-live` (#509 — the hcloud importer, which is not an adapter but is a read of a
-  real system and is the only witness for the `hcloud_id` values in
-  `testenv/hetzner/estate.json`), and `just search-perf` (#556 — the one recipe on this list that
+  `just estate-live` (#509, #510, #634 — the two importers, which are not adapters but are reads
+  of real systems; run with `ESTATE_LIVE_HCLOUD_SERVERS=0` against the empty Hetzner project, and a
+  PR touching the hcloud producer owes a run at `=1` that Björn makes, standing the server up and
+  deleting it himself — no agent creates or deletes one), and `just search-perf` (#556 — the one recipe on this list that
   is not a live suite: the launcher's perf gate, which the next bullet covers); a PR runs
   whichever its change reaches, and one touching the start-work flow reaches `start-work-live`. `just check` stays as it is; the
   live run is in addition to it, never inside it. A mockd run is not a substitute: the real

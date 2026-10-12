@@ -21,7 +21,7 @@
 //! tickets, and the pull requests, builds, pages, commits, repositories and
 //! branches around them -- because a demo corpus of somebody's real Jira is a
 //! demo nobody can ship. The estate half is the opposite and deliberately so --
-//! ADR-0013, *the real container is the witness*: `testenv/hetzner/estate.json`
+//! ADR-0013, *the real container is the witness*: `testenv/estate.json`
 //! describes the machines this repo is actually developed and tested on, so
 //! what the demo's Tree shows is an estate that exists rather than one drawn
 //! to fit the model. Spec #427 says it in as many words -- *nothing
@@ -50,7 +50,7 @@ use sqlx::PgPool;
 /// `crates/knobas-app/tests/it/assets_ipc.rs` and `knobas-core`'s
 /// `tests/it/estate_file.rs` embed, so the three fail together the day the file
 /// stops being an estate file.
-const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
 /// Why a demo load did not happen.
 #[derive(Debug, thiserror::Error)]

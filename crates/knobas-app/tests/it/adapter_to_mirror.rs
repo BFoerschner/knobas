@@ -934,7 +934,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
 /// resolution rule and takes the monitor names on trust; `map.rs` pins what
 /// the adapter calls a monitor and takes the estate file on trust. Both are
 /// green while the two vocabularies disagree -- and the whole join is a string
-/// comparison between a name somebody typed into `testenv/hetzner/estate.json`
+/// comparison between a name somebody typed into `testenv/estate.json`
 /// and a name somebody typed into Uptime Kuma, which is the single most
 /// likely thing in this milestone to be off by a space or a case.
 ///
@@ -950,7 +950,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
 #[tokio::test]
 async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
     /// The file the demo profile and `estate_exit.rs` load -- the real estate.
-    const ESTATE_FILE: &str = include_str!("../../../../testenv/hetzner/estate.json");
+    const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
     let kuma = spawn_mock_kuma().await;
     let scratch = knobas_db::test_util::scratch_database("kuma-estate-import").await;

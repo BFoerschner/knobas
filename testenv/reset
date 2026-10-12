@@ -24,8 +24,8 @@ echo "reset: kuma-api-key and seed-state.json removed. Re-run ./seed after up."
 #
 # An `if`, not `cmd && echo`: a trailing `&&` whose left side is false is the
 # LAST command of the script and makes it exit 1. That is exactly how
-# fetch-timebomb-keys.sh came to fail on its own success path
-# (hetzner/README.md).
+# fetch-timebomb-keys.sh came to fail on its own success path (its own
+# comment on `--write` says how).
 if ./canary.sh status >/dev/null 2>&1; then
   echo "reset: the canary is still bound on 127.0.0.1:8299 -- ./canary.sh down to release it"
 fi

@@ -116,7 +116,7 @@ test("accepting or dismissing removes the row from the next read and drops the c
 });
 
 /**
- * The estate the fixture answers with is `testenv/hetzner/estate.json` (#440).
+ * The estate the fixture answers with is `testenv/estate.json` (#440).
  *
  * Read here off the **file on disk**, not off the same import the fixture
  * uses: an assertion that compared the fixture to its own input would agree
@@ -125,7 +125,7 @@ test("accepting or dismissing removes the row from the next read and drops the c
  * that is the half a browser screenshot is evidence about. If it is wrong, a
  * QA pass photographs a pane the app would never draw.
  */
-const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/hetzner/estate.json"), "utf8");
+const ESTATE_TEXT = readFileSync(join(process.cwd(), "../testenv/estate.json"), "utf8");
 const ESTATE_ON_DISK = JSON.parse(ESTATE_TEXT) as {
   name: string;
   assets: {
@@ -150,7 +150,7 @@ test("the estate is the checked-in file, and every type it names has a chip", ()
   const handlers = demoHandlers();
 
   // The top of the estate: the file has exactly one asset with no parent, and
-  // a fixture that lost the `parent` mapping would draw all twenty-three here.
+  // a fixture that lost the `parent` mapping would draw all sixteen here.
   const roots = ESTATE_ON_DISK.assets.filter((asset) => asset.parent === undefined);
   expect(column(handlers, null).map((row) => row.id)).toEqual(roots.map((asset) => asset.id));
 
@@ -175,62 +175,73 @@ test("the estate is the checked-in file, and every type it names has a chip", ()
 });
 
 /**
- * The three servers and their containers — criterion 1's own words — and the
- * property mapping, on the pane of a machine that exercises every branch of
- * it: a declared key the file fills, a declared key it does not, a custom
- * string, a custom **number**, and the `description` that has no column.
+ * The machines and their containers — criterion 1's own words — and the
+ * property mapping, on the panes of the two machines that between them
+ * exercise every branch of it: a declared key the file fills, a declared key
+ * it does not, a custom string, a custom **number**, and the `description`
+ * that has no column. (Until #634 one Hetzner server's pane carried all five;
+ * the servers are gone and the notebook and OrbStack's VM split them.)
  */
-test("a server's pane draws the file's properties at the kinds the type declares", () => {
+test("a machine's pane draws the file's properties at the kinds the type declares", () => {
   const handlers = demoHandlers();
 
-  const nbg1 = column(handlers, "asset:hetzner-nbg1");
-  expect(nbg1.map((row) => row.name)).toEqual([
-    "knobas-confluence",
-    "knobas-jira",
-    "knobas-teamcity",
-  ]);
-  // Each of the three holds a Docker engine, and each engine holds containers.
-  for (const server of nbg1) {
-    const engines = column(handlers, server.id);
-    expect(engines).toHaveLength(1);
-    expect(column(handlers, engines[0]!.id).length).toBeGreaterThan(0);
-  }
+  // The notebook holds OrbStack's VM, the VM one Docker engine, and the engine
+  // every container the estate runs.
+  const vms = column(handlers, "asset:notebook");
+  expect(vms.map((row) => row.id)).toEqual(["asset:orbstack"]);
+  const engines = column(handlers, "asset:orbstack");
+  expect(engines.map((row) => row.id)).toEqual(["asset:orbstack-docker"]);
+  expect(column(handlers, "asset:orbstack-docker").length).toBeGreaterThan(5);
 
-  const detail = handlers["get_asset"]!({ assetId: "asset:hetzner-teamcity" }) as {
-    properties: { key: string; label: string; value: unknown; custom: boolean }[];
-  };
-  const file = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:hetzner-teamcity")!;
-  const at = (key: string) => detail.properties.find((property) => property.key === key);
+  type Detail = { properties: { key: string; label: string; value: unknown; custom: boolean }[] };
+  const notebook = handlers["get_asset"]!({ assetId: "asset:notebook" }) as Detail;
+  const notebookFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:notebook")!;
+  const on = (detail: Detail, key: string) =>
+    detail.properties.find((property) => property.key === key);
 
-  // Declared by `vm`, in the type's order, and labelled by the type.
-  expect(detail.properties.slice(0, 4).map((property) => property.key)).toEqual([
+  // Declared by `hypervisor`, in the type's order, and labelled by the type.
+  expect(notebook.properties.slice(0, 3).map((property) => property.key)).toEqual([
     "hostname",
     "ip",
     "os",
-    "size",
   ]);
-  expect(at("os")).toEqual({
+  expect(on(notebook, "os")).toEqual({
     key: "os",
     label: "OS",
-    value: { kind: "text", value: file.properties!.os },
+    value: { kind: "text", value: notebookFile.properties!.os },
     custom: false,
   });
   // Declared and unfilled: `null`, which is the em dash the pane draws.
-  expect(at("hostname")!.value).toBeNull();
-  // Custom, labelled by its own key, and a number stays a number — the one
-  // place `valueOf` reads the JSON's type rather than the schema's.
-  expect(at("vcpu")).toEqual({
-    key: "vcpu",
-    label: "vcpu",
-    value: { kind: "number", value: file.properties!.vcpu },
+  expect(on(notebook, "hostname")!.value).toBeNull();
+  // Custom, labelled by its own key.
+  expect(on(notebook, "role")).toEqual({
+    key: "role",
+    label: "role",
+    value: { kind: "text", value: notebookFile.properties!.role },
     custom: true,
   });
   // The description has no column in this model, so it is a property.
-  expect(at("description")!.value).toEqual({ kind: "text", value: file.description });
+  expect(on(notebook, "description")!.value).toEqual({
+    kind: "text",
+    value: notebookFile.description,
+  });
+
+  // A number stays a number — the one place `valueOf` reads the JSON's type
+  // rather than the schema's.
+  const vm = handlers["get_asset"]!({ assetId: "asset:orbstack" }) as Detail;
+  const vmFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:orbstack")!;
+  expect(on(vm, "memory_gb")).toEqual({
+    key: "memory_gb",
+    label: "memory_gb",
+    value: { kind: "number", value: vmFile.properties!.memory_gb },
+    custom: true,
+  });
 
   // And the custom rows are in key order, after the declared ones.
-  const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
-  expect(custom).toEqual([...custom].sort());
+  for (const detail of [notebook, vm]) {
+    const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
+    expect(custom).toEqual([...custom].sort());
+  }
 });
 
 /**
@@ -245,10 +256,13 @@ test("a server's pane draws the file's properties at the kinds the type declares
  *
  * `knobas-gitea` is the asset to stand on because both of the estate's ways of
  * reaching a container meet on it: the notebook's published port, whose
- * exposer is four columns to the left and **is** in the layout, and the
- * tunnel's `-R` forward, whose exposer is a Hetzner server in another branch
- * entirely and is in no open column — so one wire is drawn and one is not,
- * which is #433's rule rather than an absence of routes.
+ * exposer is three columns to the left, and the compose network's name for
+ * it, whose exposer is the Docker engine one column to the left -- two wires
+ * from two different columns. (Until #634 the second was the SSH tunnel's `-R`
+ * forward, exposed by a Hetzner server in another branch and in no open
+ * column, so one wire was drawn and one was not; that negative is
+ * `tree.ts`'s own suite's now, since nothing in the real estate is exposed
+ * off the path any more.)
  */
 test("a route in the real estate draws a wire to the asset that exposes it", () => {
   const handlers = demoHandlers();
@@ -268,13 +282,20 @@ test("a route in the real estate draws a wire to the asset that exposes it", () 
       rowId: "asset:notebook",
       dashed: false,
     },
+    {
+      key: wireKey("via", "route:compose-gitea"),
+      column: 3,
+      rowId: "asset:orbstack-docker",
+      dashed: false,
+    },
   ]);
 
-  // The same wire at a window too narrow for five columns: the row is behind a
-  // spine, so it lands on the spine and is dashed.
+  // The same wires at a window too narrow for five columns: both rows are
+  // behind spines, so each lands on its spine and is dashed.
   const narrow = stripFor(columns.length, 400, null);
   expect(wiresFor(detail, columns, narrow)).toEqual([
     { key: wireKey("via", "route:notebook-gitea"), column: 1, rowId: null, dashed: true },
+    { key: wireKey("via", "route:compose-gitea"), column: 3, rowId: null, dashed: true },
   ]);
 });
 
@@ -376,9 +397,17 @@ test("the fixture roster is the file's monitors, with every chip reachable", () 
     samples: { taken_at: string; state: string | null }[];
   }[];
 
+  // Every monitor the seed creates is a row, and every name the estate keeps
+  // is one of them (the canary is the one row nothing in the estate names).
+  const seeded = (
+    JSON.parse(readFileSync(join(process.cwd(), "../testenv/monitors.json"), "utf8")) as {
+      name: string;
+    }[]
+  ).map((monitor) => monitor.name);
+  expect(roster.map((row) => row.name).sort()).toEqual([...seeded].sort());
   const named = ESTATE_ON_DISK.assets.flatMap((asset) => asset.monitors ?? []);
   expect(named.length).toBeGreaterThan(0);
-  expect(roster.map((row) => row.name).sort()).toEqual([...named].sort());
+  for (const name of named) expect(seeded).toContain(name);
 
   // Every chip has something in it: a roster where everything is `up` can be
   // photographed without showing that the chips do anything.
@@ -389,7 +418,7 @@ test("the fixture roster is the file's monitors, with every chip reachable", () 
 
   for (const row of roster) {
     expect(row.state, `${row.name} is not its last sample`).toBe(row.samples.at(-1)?.state ?? null);
-    expect(row.assets.length, `${row.name} watches nothing`).toBeGreaterThan(0);
+    expect(row.assets.length > 0, `${row.name} watches nothing`).toBe(named.includes(row.name));
     // A monitor Kuma no longer publishes has no page left to open, so the
     // button is absent rather than dead.
     if (row.tombstoned) expect(row.web_url, `${row.name} is paused and still links`).toBeNull();

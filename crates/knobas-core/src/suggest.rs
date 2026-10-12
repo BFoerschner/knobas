@@ -430,8 +430,10 @@ macro_rules! host_of {
 /// and a `ping` a `hostname` and no `url`, so the two keys are one fact under
 /// two spellings and a rule that read only the first could not see a ping at
 /// all -- which is what #479 was: three of the eight monitors
-/// `testenv/monitors.json` seeds are pings carrying the Hetzner servers'
-/// addresses in `hostname`, and the three real servers were out of reach.
+/// `testenv/monitors.json` then seeded were pings carrying the Hetzner
+/// servers' addresses in `hostname`, and the three real servers were out of
+/// reach. (The servers were decommissioned in #634; the one ping left watches
+/// the notebook's address.)
 ///
 /// `coalesce` and **not** a union: a monitor carrying both is matched on the
 /// URL only, the way `reading_of` prefers the URL. A blank `url`, or one that
@@ -496,10 +498,11 @@ macro_rules! host_of {
 /// That `coalesce` is the one place this rule reads #451's sentence -- "the
 /// host of a route the asset exposes" -- as naming *which routes are in play*
 /// rather than which end of one gets the suggestion, and the estate the
-/// milestone is developed against is why. `testenv/hetzner/estate.json`'s only
-/// route whose host a seeded monitor watches is `route:tunnel-gitea-reverse`,
-/// `http://gitea:3000/`, exposed by `asset:hetzner-teamcity` and targeting
-/// `asset:knobas-gitea`; the monitor is `gitea`,
+/// milestone is developed against is why. `testenv/estate.json`'s only route
+/// whose host a seeded monitor watches is `route:compose-gitea`,
+/// `http://gitea:3000/`, exposed by `asset:orbstack-docker` and targeting
+/// `asset:knobas-gitea` (until #634, `route:tunnel-gitea-reverse` from a
+/// Hetzner server, in the same shape); the monitor is `gitea`,
 /// `http://gitea:3000/api/healthz`. The thing that answers at that host is
 /// Gitea. Crediting the exposing end would make the rule's *only* route
 /// firing on the real estate a proposal naming the wrong asset -- and the
@@ -522,7 +525,7 @@ macro_rules! host_of {
 ///
 /// The cost is **a host several assets share**, and it is the known weakness
 /// of this rule rather than an oversight: eight routes in
-/// `testenv/hetzner/estate.json` carry `127.0.0.1` and land on six different
+/// `testenv/estate.json` carry `127.0.0.1` and land on six different
 /// assets, so a Kuma running on the notebook rather than in a container would
 /// watch `http://127.0.0.1:8111/` and be proposed to all six. Nothing fires
 /// on it today -- the seeded Kuma is in a container and reaches the notebook as

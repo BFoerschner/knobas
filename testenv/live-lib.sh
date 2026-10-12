@@ -8,8 +8,9 @@
 # test." So TeamCity, Jira, Confluence and Gitea run in the notebook's Docker,
 # one at a time, started when a live suite needs one and stopped after it.
 # This supersedes the 2026-09-06 move of the three JVM products to Hetzner for
-# live suites (hetzner/README.md); ADR-0013 is unchanged -- the witness is
-# still the real product. Recorded in docs/decisions/2026-10-unattended-rulings.md.
+# live suites; those servers were decommissioned after it (#634). ADR-0013 is
+# unchanged -- the witness is still the real product. Recorded in
+# docs/decisions/2026-10-unattended-rulings.md.
 #
 # Four products, and what each brings up:
 #
@@ -33,11 +34,11 @@
 # so a kept volume is a product whose licence has already run out. Their seed-state.json block goes
 # with them, so `./seed --env` stops printing a URL nothing answers.
 #
-# NEVER THE SERVERS. A shell that has sourced hetzner/env has a `docker` on its
-# PATH that routes these containers' names to the Hetzner servers; a call made
-# through it from here would start a product on a server the live suites no
-# longer use. `live_guard` refuses that shell, and a docker context aimed at
-# one of the servers, before anything else.
+# NEVER A REMOTE ENGINE. Until #634 the docker contexts `knobas-teamcity`,
+# `knobas-jira` and `knobas-confluence` reached three Hetzner servers over ssh.
+# The servers are gone, and a context of that name left active on a machine
+# would send these calls to an address that answers nothing -- or to whatever
+# holds it next. `live_guard` refuses such a context before anything else.
 
 LIVE_TESTENV=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -72,17 +73,13 @@ live_is_up() {
   live_running "$(_live_main "$1")"
 }
 
-# _live_guard_shell -- refuse a shell whose docker reaches the Hetzner servers.
+# _live_guard_shell -- refuse a docker context that is not this machine's.
 _live_guard_shell() {
   local context
-  if [ -n "${KNOBAS_TESTENV_HETZNER:-}" ] || case "$(command -v docker)" in */hetzner/bin/docker) true ;; *) false ;; esac; then
-    echo "live: this shell has sourced testenv/hetzner/env, whose docker shim routes to the Hetzner servers; live products run locally now -- open a fresh shell" >&2
-    return 1
-  fi
   context=$(docker context show 2>/dev/null || true)
   case $context in
     knobas-*)
-      echo "live: the docker context is '$context', a Hetzner server; live products run locally now -- docker context use orbstack" >&2
+      echo "live: the docker context is '$context', left from the decommissioned Hetzner servers (#634); live products run locally -- docker context use orbstack" >&2
       return 1 ;;
   esac
 }
@@ -164,9 +161,9 @@ live_up() {
 
 # live_down <product> -- this product only; what it needed stays as it is.
 live_down() {
-  # The guard first, for the Hetzner half: through hetzner/env's shim this
-  # `rm` and `volume rm` would land on a server. Its one-JVM half cannot refuse
-  # a product that is itself the one up, and `down` of another is harmless.
+  # The context guard first: through a remote context this `rm` and `volume
+  # rm` would land somewhere else. Its one-JVM half cannot refuse a product
+  # that is itself the one up, and `down` of another is harmless.
   _live_guard_shell || return 1
   _live_main "$1" >/dev/null || { live_guard "$1"; return 1; }
   case $1 in

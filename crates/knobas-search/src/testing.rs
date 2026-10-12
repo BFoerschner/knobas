@@ -484,7 +484,7 @@ const ESTATE_SHAPE: [i64; 3] = [3, 100, 10];
 /// One route per this many assets, on the deepest level only.
 ///
 /// Routes hang off containers in the real estate -- every one of the nine in
-/// `testenv/hetzner/estate.json` does -- and one in two is a good deal denser
+/// `testenv/estate.json` does -- and one in two is a good deal denser
 /// than that file, which is again the point of an upper bound.
 const ROUTES_PER: i64 = 2;
 
@@ -580,7 +580,7 @@ pub async fn seed_estate(pool: &PgPool, tag: &str) -> Result<(), SearchError> {
                     .execute(&mut *tx)
                     .await?;
                     // `http://127.0.0.1:<port>/`, which is the shape every
-                    // route in `testenv/hetzner/estate.json` has -- and the
+                    // route in `testenv/estate.json` has -- and the
                     // shape a port is *reachable* in: a path fuses the port
                     // into one lexeme with it (`corpus::ROUTE`'s table), so a
                     // fixture with one would measure a query that matches

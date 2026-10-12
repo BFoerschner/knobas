@@ -16,11 +16,10 @@
 //! # Which properties a server becomes, and why those spellings
 //!
 //! The ticket names what is read: *"name, server type, image, location, IPv4,
-//! labels"*. What each becomes is decided by the estate this repository is
-//! developed against, `testenv/hetzner/estate.json`, which has carried those
-//! facts by hand since M4.0 and is the record the third acceptance criterion
-//! measures this producer against -- so the keys are **its** keys and not new
-//! ones beside them:
+//! labels"*. What each becomes was decided by the estate this repository was
+//! developed against, whose three Hetzner servers carried those facts by hand
+//! from M4.0 until they were decommissioned (#634) -- so the keys are **its**
+//! keys and not new ones beside them:
 //!
 //! | hcloud | property | why that key |
 //! |---|---|---|
@@ -62,6 +61,13 @@
 //! nothing in `just check` (ADR-0013). The recorded half cannot fail if
 //! Hetzner changes its JSON, and says so rather than implying otherwise.
 //!
+//! Since #634 the live half is a round trip over whatever the knobas project
+//! holds -- produce, apply, produce again, all known -- and the project is
+//! empty between runs, so an ordinary run witnesses the request and not a
+//! server's parse. **A change to this file owes a run with a server in the
+//! project** (`ESTATE_LIVE_HCLOUD_SERVERS=1 just estate-live`), which Björn
+//! makes: he stands the server up and deletes it again, never an agent.
+//!
 //! [`Source`]: knobas_source::Source
 
 use std::collections::{BTreeMap, HashSet};
@@ -96,9 +102,9 @@ pub const ORIGIN_KEY: &str = "hcloud_id";
 /// The type every produced server carries.
 ///
 /// `vm` and not `hypervisor`: an hcloud server is a virtual machine, which is
-/// what the three in `testenv/hetzner/estate.json` are typed as, and a produced
-/// entry that disagreed with them would be a *change* on every one of the three
-/// rather than a match.
+/// what the estate's three Hetzner servers were typed as until #634, and a
+/// produced entry that disagreed with them would have been a *change* on every
+/// one of the three rather than a match.
 const SERVER_TYPE_ID: &str = "vm";
 
 /// The keys this producer writes itself, each beside what it writes into it.
@@ -131,7 +137,7 @@ const PAGE: u32 = 50;
 struct Server {
     /// hcloud's own id. A number on the wire; the [origin key](ORIGIN_KEY) it
     /// becomes is its decimal spelling as **text**, which is the shape #508
-    /// wrote into `testenv/hetzner/estate.json` and the shape
+    /// wrote into the estate file and the shape
     /// [`super::property_of`] has to see for the stored values to compare
     /// equal (a number and a string that looks like one are two different
     /// origin keys).

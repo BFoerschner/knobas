@@ -25,7 +25,7 @@
 //! machines, and the claim would be about none of them.
 //!
 //! What the sharer's profile holds is the real estate --
-//! `testenv/hetzner/estate.json`, the machines this repository is developed
+//! `testenv/estate.json`, the machines this repository is developed
 //! on, as ADR-0013 and `tests/it/estate_exit.rs` require -- plus the things the
 //! criterion names: a room with a member, a link to a Jira ticket, and the two
 //! kinds of private thing a share export exists to leave behind, a note and an
@@ -39,8 +39,8 @@
 //! [`the_shared_link_crosses_and_the_ticket_behind_it_has_not_arrived_yet`].
 //! The second is a claim about a real system answering, and no fixture can
 //! stand in for it: [`a_shared_link_resolves_once_the_jira_source_is_configured_and_synced`]
-//! is `#[ignore]`d and runs against testenv's seeded Jira, on Hetzner, through
-//! `just atlassian-live`.
+//! is `#[ignore]`d and runs against testenv's seeded Jira, started on this
+//! machine on demand, through `just jira-live`.
 //!
 //! # What this cannot witness
 //!
@@ -61,11 +61,11 @@ use knobas_core::entity::EntityRef;
 use knobas_core::link::Origin;
 use sqlx::PgPool;
 
-/// The estate as provisioned, embedded -- the same bytes `sources::demo`,
+/// The estate as it runs, embedded -- the same bytes `sources::demo`,
 /// `tests/it/assets_ipc.rs` and `tests/it/estate_exit.rs` read.
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 
-/// The container the checklist follows, the server that holds it, and where
+/// The container the checklist follows, the machine that holds it, and where
 /// the container sits by the names a reader sees.
 ///
 /// The same three `tests/it/estate_exit.rs` follows, on purpose: M4.0's exit
@@ -74,9 +74,9 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
 /// asset, and the pair is what says a share export moved the estate rather
 /// than something shaped like it.
 const CONTAINER: &str = "asset:knobas-teamcity";
-const SERVER: &str = "asset:hetzner-teamcity";
+const SERVER: &str = "asset:orbstack";
 const CONTAINER_PATH: &str =
-    "knobas test estate / Hetzner Cloud nbg1 / knobas-teamcity / Docker engine (knobas-teamcity)";
+    "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / Docker engine (OrbStack)";
 
 /// The ticket the sharer's link names.
 ///
@@ -154,7 +154,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
         .value;
     assert_eq!(
         (outcome.assets_created, outcome.routes_created),
-        (23, 9),
+        (16, 9),
         "the real estate, as `tests/it/estate_exit.rs` counts it"
     );
 
@@ -313,7 +313,7 @@ async fn shared() -> PgPool {
 /// **The estate is in the Tree on the clean machine** (#455, criterion 2).
 ///
 /// Through `assets::tree` and `assets::get`, which are what the Tree's columns
-/// and its held-by line call -- not a row count, because "23 rows are in the
+/// and its held-by line call -- not a row count, because "16 rows are in the
 /// table" and "the Tree draws the estate" are different claims and only the
 /// second one is the criterion. The path is the whole five-deep chain, in
 /// names, which is the reading that would break if the archive had carried the
@@ -378,7 +378,7 @@ async fn the_estate_is_in_the_tree_on_the_clean_machine() {
 /// of a copied table: a machine that had the `knobas.link` row and had lost
 /// `knobas.asset.parent_id` would list exactly one member.
 ///
-/// The negative is the other half: the site above the server is not in the
+/// The negative is the other half: the notebook above the VM is not in the
 /// room, so the tile is the subtree and not the estate.
 #[tokio::test]
 async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
@@ -408,8 +408,8 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
          is a member too: {listed:?}"
     );
     assert!(
-        !listed.contains(&"asset:hetzner-nbg1"),
-        "the site *above* the server is not a member: {listed:?}"
+        !listed.contains(&"asset:notebook"),
+        "the notebook *above* the VM is not a member: {listed:?}"
     );
     assert_eq!(
         tile.iter()
@@ -417,8 +417,7 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
             .and_then(|(_, path)| path.clone())
             .as_deref(),
         Some(CONTAINER_PATH),
-        "and the tile draws each member's path, which is what tells the container \
-         from the server of the same name"
+        "and the tile draws each member's path"
     );
 }
 
@@ -645,7 +644,7 @@ async fn engine(
 /// ticket, comment, worklog or token is created, so there is nothing to clean
 /// up and no `PAY` counter is advanced.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs testenv's seeded Jira on Hetzner: `just atlassian-live`"]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() {
     let env = jira();
 

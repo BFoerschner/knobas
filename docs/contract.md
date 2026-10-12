@@ -280,7 +280,7 @@ Rule (roadmap §4: events are not for throughput): **events carry coarse state, 
 
 Note (issue #240, 2026-09-02, ruled at triage under the maintainer's delegation): as of #240 `demo_load` is an emitter of `sync:state` too — one terminal status for the mock source after its run returns, read through `status_for` and sent through the same `SyncEvents` the scheduler uses, which is the P3 grant ("all runs emit coarse `sync:state`") applied to the one run that had stayed silent; not an amendment — no new event, no payload change, no new command, no migration.
 
-Note (issue #440, 2026-09-06): as of #440 `demo_load` loads **two** things — the Tidewater fixture through the mock adapter, and `testenv/hetzner/estate.json` through `assets::apply_import`, which is spec #427's estate arriving in the demo profile (ADR-0013: the real container is the witness). Not an amendment — no new command, no argument, no new event, no migration, and the answer is still the mock run's `SyncReport`; the estate's counts are logged, because a second load's counts are not the run's. What *is* new is a failure class: a `demo_load` can now reject with the import's own code (`invalid` for a file that is not an estate file, `conflict` for a lost race) where before it could only be the sync's. The wizard shows the message either way, so no caller branches on the difference; it is written down because the set of codes a frozen command can answer with is part of what §2 pins.
+Note (issue #440, 2026-09-06): as of #440 `demo_load` loads **two** things — the Tidewater fixture through the mock adapter, and `testenv/hetzner/estate.json` (`testenv/estate.json` since #634) through `assets::apply_import`, which is spec #427's estate arriving in the demo profile (ADR-0013: the real container is the witness). Not an amendment — no new command, no argument, no new event, no migration, and the answer is still the mock run's `SyncReport`; the estate's counts are logged, because a second load's counts are not the run's. What *is* new is a failure class: a `demo_load` can now reject with the import's own code (`invalid` for a file that is not an estate file, `conflict` for a lost race) where before it could only be the sync's. The wizard shows the message either way, so no caller branches on the difference; it is written down because the set of codes a frozen command can answer with is part of what §2 pins.
 
 ### 2.4 Search and the launcher — stream E
 
@@ -9242,6 +9242,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   under another), and a token the far end refuses putting the field back where an unreachable
   Hetzner does not — story 62's second half, and the only way back from a credential that stopped
   being accepted, since an importer has no sources view (ADR-0015).
+
+  *Amended 2026-10-12 (#634, the deputy's ruling of that day on #634):* the Hetzner servers were
+  decommissioned and left `testenv/estate.json` (moved there from `testenv/hetzner/`), so the
+  pinned live test `the_real_estate_is_already_in_the_tree` is rewritten as
+  `the_real_project_round_trips_through_the_importer` — produce, apply, produce again over whatever
+  the real project holds, all known with no changes, at a server count `ESTATE_LIVE_HCLOUD_SERVERS`
+  declares. The witness paragraph above is history; ADR-0015's amended consequence and
+  `docs/decisions/2026-10-unattended-rulings.md` (`## #634`) are the current statement. No command,
+  type or wire shape in this entry changes.
 
 - **One field on `ShareParts`, issue #507 (2026-09-08): saved smart lists in the share export.** The
   share export's parts gain **`smart_lists`**, on by default, and the dialog draws its toggle only

@@ -410,13 +410,13 @@ async fn a_pause_on_a_source_with_only_its_api_key_is_refused_before_it_is_queue
     state.scheduler.shutdown().await;
 }
 
-/// The estate as provisioned, so the create below is *for the local Gitea
+/// The estate as it runs, so the create below is *for the local Gitea
 /// asset* the ticket names rather than for one this test invented.
 ///
 /// `alert_chain_live.rs` reads the same bytes for the same reason: the file is
 /// the estate the products run on, and `asset:knobas-gitea` is a container in
 /// it with a route that reaches it (`route:notebook-gitea`).
-const ESTATE_FILE: &str = include_str!("../../../testenv/hetzner/estate.json");
+const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 const GITEA_ASSET: &str = "asset:knobas-gitea";
 
 /// The monitor this test makes, through the shipped path. A name

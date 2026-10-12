@@ -17,26 +17,6 @@ KEY_FILE=kuma-api-key
 # none -- `./seed --env-kuma` hands the suites 127.0.0.1:3001 regardless.
 PROBE_URL=http://127.0.0.1:3001/metrics
 
-# Three of the monitors ping the Hetzner servers by IP, and the IPs are in
-# hetzner/hosts.env, which provision.sh writes and .gitignore keeps out of the
-# repo. Not because the addresses are secret -- hetzner/estate.json commits the
-# same three, and the M4 spec (#427) says plainly that it carries no secret --
-# but because the file is one account's provisioning output and belongs to
-# whoever ran provision.sh. monitors.json carries `${KNOBAS_HETZNER_*_IP}`
-# placeholders and they are resolved here, in the container's environment.
-#
-# Refusing without the file beats seeding a partial list: the monitor list IS
-# the estate (M4 spec, issue #427), and a Kuma missing the servers is one whose
-# green means less than it looks. `hosts.env` is `VAR=value` lines only, so a
-# plain `.` is safe; shellcheck cannot follow a path that exists on one machine.
-HOSTS=hetzner/hosts.env
-[ -r "$HOSTS" ] || {
-  echo "seed-kuma: $HOSTS not found -- monitors.json pings the three Hetzner servers by IP." >&2
-  echo "seed-kuma: run ./hetzner/provision.sh (README.md, 'On Hetzner instead of the laptop')." >&2
-  exit 1; }
-# shellcheck source=/dev/null
-. "./$HOSTS"
-
 # A key file is a credential only while the instance still answers to it. Kuma
 # hands a key's clear text out exactly once, so a sibling worktree's seed that
 # re-minted `knobas-seed` leaves this tree holding a well-formed key the
@@ -83,9 +63,6 @@ fi
 # `just kuma-live` (issue #554). Rename both halves or neither.
 out=$(docker compose --profile seed run --rm -T \
         -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
-        -e KNOBAS_HETZNER_TEAMCITY_IP="${KNOBAS_HETZNER_TEAMCITY_IP:-}" \
-        -e KNOBAS_HETZNER_JIRA_IP="${KNOBAS_HETZNER_JIRA_IP:-}" \
-        -e KNOBAS_HETZNER_CONFLUENCE_IP="${KNOBAS_HETZNER_CONFLUENCE_IP:-}" \
         kuma-seed)
 
 case "$out" in

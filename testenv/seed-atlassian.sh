@@ -608,10 +608,10 @@ wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
 # Merge one product's block into seed-state.json rather than rewriting it:
 # seed-gitea.sh owns its own keys in the same file.
 #
-# UNDER A LOCK, because two of these can run at once: `just atlassian-live`
-# starts Jira's seed and Confluence's together when each product has a server
-# of its own (testenv/hetzner/README.md), and this is a read-modify-write of one
-# file -- the loser of an unguarded race would silently drop the other product's
+# UNDER A LOCK, because two of these can run at once -- two worktrees seeding,
+# or, until #633, `just atlassian-live` starting Jira's seed and Confluence's
+# together when each product had a server of its own -- and this is a
+# read-modify-write of one file -- the loser of an unguarded race would silently drop the other product's
 # block, and the recipe's `_require-live-env` would then refuse a pair that was
 # in fact seeded. `mkdir` is the atomic primitive every sh has; the lock is held
 # for one jq and one mv, so a wait here is milliseconds and a 10 s one means a

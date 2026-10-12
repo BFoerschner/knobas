@@ -54,7 +54,10 @@ import type {
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 // The estate itself. See `FIXTURE_ESTATE` below for why it is read and not
 // copied, and for the check that it reaches no production bundle.
-import ESTATE_FILE from "../../../../../testenv/hetzner/estate.json";
+import ESTATE_FILE from "../../../../../testenv/estate.json";
+// The monitors the seeded Uptime Kuma holds -- the roster's rows. See
+// `fakeMonitorRoster`.
+import SEEDED_MONITORS from "../../../../../testenv/monitors.json";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -393,9 +396,10 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // `?fake-ipc` therefore draws the tile's empty state rather than a red
     // "command not found".
     context_assets: () => [],
-    // The Monitors tab (#448). Derived from the estate file's own monitor
-    // names -- see `fakeMonitorRoster` -- so the roster a browser draws is the
-    // set of monitors the file asks for, with a reading invented on top.
+    // The Monitors tab (#448). Derived from the seed's monitor list and the
+    // estate file's names -- see `fakeMonitorRoster` -- so the roster a
+    // browser draws is the set of monitors the seed creates, with a reading
+    // invented on top.
     monitor_roster: () => fakeMonitorRoster(),
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
@@ -617,9 +621,9 @@ const ASSET_TYPES: {
  * The section below is the fixture's estate, and it is the **real** one, read
  * out of the file rather than copied into this one.
  *
- * `testenv/hetzner/estate.json` is the estate as provisioned (#438), and since
+ * `testenv/estate.json` is the estate as it runs (#438, #634), and since
  * #440 it is the file `--demo` imports -- so a browser pointed at `?fake-ipc`
- * and a person looking at `just demo` are looking at the same twenty-three
+ * and a person looking at `just demo` are looking at the same sixteen
  * assets and the same nine routes. This module's own docs have said since #428
  * that *"when that file lands, this can read it instead"*, and this is that.
  *
@@ -810,7 +814,7 @@ function assetFromFile(entry: EstateFileAsset): FixtureAsset {
 }
 
 /**
- * The estate the Tree draws: twenty-three assets, five levels at the deepest.
+ * The estate the Tree draws: sixteen assets, five levels at the deepest.
  *
  * Stateful within the session, like the contexts: an asset created, renamed,
  * moved or deleted here stays that way for as long as the page lives, so the
@@ -835,8 +839,8 @@ const FILE_ASSET_IDS = new Set(ESTATE.assets.map((entry) => entry.id));
  * `assets::route_row_of` calls `custom_properties` and not `properties_of`.
  *
  * **The URL is the file's, verbatim, and one of the nine does not name a
- * loopback address.** `route:tunnel-gitea-reverse` is the reverse forward, and
- * the host in its URL is `gitea` -- the docker network name the TeamCity
+ * loopback address.** `route:compose-gitea` is Gitea on the compose network,
+ * and the host in its URL is `gitea` -- the docker network name the TeamCity
  * containers resolve, which is why the estate spells it that way and why it
  * resolves nowhere else. The hand-copy this replaces substituted a loopback
  * address for it, citing `house-rules.test.ts`'s *no runtime network
@@ -866,16 +870,17 @@ function routeFromFile(route: EstateFileRoute): FixtureRoute {
 }
 
 /**
- * The nine routes the estate exposes (#432, drawn as wires by #433): the five
- * ports the notebook publishes, and the four forwards
- * `testenv/hetzner/tunnel` opens -- three `-L` and the one `-R` that runs the
- * other way, from a Hetzner server back to the notebook's Gitea.
+ * The nine routes the estate exposes (#432, drawn as wires by #433): the eight
+ * ports the notebook publishes -- three of them the on-demand products' -- and
+ * Gitea's name on the compose network, exposed by the Docker engine. (Until
+ * #634 three of them were SSH tunnel forwards to Hetzner servers, and one ran
+ * back from a server to Gitea.)
  *
  * They are what makes the Tree's wires visible in a browser at all: a wire
  * runs from a route's row to the row (or the spine) of the asset at its far
  * end, so a fixture with no routes draws none, whatever the code does. Every
- * one of these lands on an asset three or four columns away, which is the case
- * a same-machine route could not photograph.
+ * one of these lands on an asset one to three columns away, which is the case
+ * a same-asset route could not photograph.
  */
 const FIXTURE_ROUTES: FixtureRoute[] = ESTATE.routes.map(routeFromFile);
 
@@ -1264,8 +1269,8 @@ function assetDetail(args: Record<string, unknown>) {
  */
 const FIXTURE_DEPENDENCIES: { from: string; to: string; relation: string }[] = [
   // TeamCity's VCS roots are the Gitea repositories it reaches through
-  // `route:tunnel-gitea-reverse`, which is in the file.
-  { from: "asset:hetzner-teamcity", to: "asset:knobas-gitea", relation: "depends-on" },
+  // `route:compose-gitea`, which is in the file.
+  { from: "asset:knobas-teamcity", to: "asset:knobas-gitea", relation: "depends-on" },
   // An agent is no use without the server it registers with.
   { from: "asset:knobas-teamcity-agent", to: "asset:knobas-teamcity", relation: "depends-on" },
   // The mockd container answers the loopback ports the laptop's suites use.
@@ -1452,13 +1457,13 @@ let PRODUCED_FILE: string | null = null;
  * would see before it shipped. The name it skips is
  * `asset:orbstack-docker`'s, because a reader recognises it from the Tree; it
  * is **not** a claim about that engine, which since #510 carries a
- * `docker_context` like every other engine in `testenv/hetzner/estate.json`.
+ * `docker_context` like every other engine in `testenv/estate.json`.
  * No engine in this fixture's estate can honestly be skipped, which is the
  * whole reason this state has to be invented here.
  *
  * As above, it says nothing about docker: there is no CLI here and no match.
  * `crates/knobas-app/tests/it/assets_ipc.rs` drives a stub docker and
- * `just estate-live` drives the four real contexts.
+ * `just estate-live` drives the real context.
  */
 function dockerProduce() {
   PRODUCED_FILE = JSON.stringify(
@@ -2977,10 +2982,13 @@ function fakeRuns(args: Record<string, unknown>) {
 /**
  * The monitors the estate file asks for, as `monitor_roster` answers them.
  *
- * **Derived from the file and not listed here.** `estate.json` names each
- * asset's monitors by their Uptime Kuma name (story 25), so the set of
- * monitors that ought to exist is already written down once; a second list
- * here would be a fixture that drifts from the file the Import loads.
+ * **Derived from the files and not listed here.** `testenv/monitors.json` is
+ * the list the seeded Uptime Kuma holds, and `estate.json` names each asset's
+ * monitors by their Kuma name (story 25), so both the rows and what each one
+ * watches are already written down once; a second list here would be a
+ * fixture that drifts from the files the seed and the Import load. The
+ * `canary` is a row like the others and watches nothing, as in the real
+ * roster (`assets::monitor_roster` draws every mirrored monitor).
  *
  * What this *does* invent is the reading — a state, a response time, a day of
  * samples — because `/metrics` is a live system and there is nothing on disk
@@ -2989,6 +2997,12 @@ function fakeRuns(args: Record<string, unknown>) {
  * be photographed without showing that the chips do anything.
  */
 const FIXTURE_MONITOR_STATES = ["up", "warn", "down", "pending", "up", "maintenance", "up"];
+
+/**
+ * The paused row. Gitea's because the five other states are dealt to the
+ * other five rows, so pausing this one leaves every chip with something in it.
+ */
+const FIXTURE_PAUSED = "gitea";
 
 /**
  * How many minutes ago the newest sample of the fixture roster is.
@@ -3454,8 +3468,15 @@ function fakeUnmonitored() {
 }
 
 /**
- * `monitor_roster`: every monitor the file names, with a reading, a day of
- * samples and the asset it watches.
+ * The roster rows drawn as **port** checks, so the tab shows more than one
+ * monitor type: the three on-demand products'. A fixture choice and not a
+ * claim -- the seeded Kuma checks them over HTTP (`testenv/monitors.json`).
+ */
+const FIXTURE_PORT_CHECKS = new Set(["teamcity", "jira", "confluence"]);
+
+/**
+ * `monitor_roster`: every monitor the seed creates, with a reading, a day of
+ * samples and the assets the estate file says it watches.
  *
  * The **last** sample is what the row's `state` says, which is the rule the
  * backend follows (`assets::monitor_roster`): the chip and the bar's
@@ -3465,9 +3486,10 @@ function fakeUnmonitored() {
  */
 function fakeMonitorRoster() {
   const now = Date.now();
-  const named = FIXTURE_ESTATE.flatMap((asset) =>
-    asset.monitors.map((name) => ({ name, asset })),
-  );
+  const named = SEEDED_MONITORS.map(({ name }) => ({
+    name,
+    watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
+  }));
   return named.map((entry, index) => {
     const state = FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up";
     const samples = fakeSamples(state, index, now);
@@ -3476,15 +3498,15 @@ function fakeMonitorRoster() {
     // One paused monitor, because a roster with none cannot show what a
     // silenced check looks like and it is the state the tab most needs to be
     // able to say out loud.
-    const tombstoned = entry.name === "confluence (tunnel)";
+    const tombstoned = entry.name === FIXTURE_PAUSED;
     return {
       entity_id: `kuma:${index + 1}`,
       source_id: "kuma",
       name: entry.name,
       state: last?.state ?? null,
-      monitor_type: entry.name.includes("(tunnel)") ? "port" : "http",
-      target: entry.name.includes("(tunnel)")
-        ? `${entry.asset.name}.invalid:8080`
+      monitor_type: FIXTURE_PORT_CHECKS.has(entry.name) ? "port" : "http",
+      target: FIXTURE_PORT_CHECKS.has(entry.name)
+        ? `${entry.name}.invalid:8080`
         : `http://localhost:3001/${entry.name.replace(/\W+/g, "-")}`,
       response_time_ms: state === "warn" ? 2_140 : 13 + index * 7,
       checked_at: new Date(now - 60_000).toISOString(),
@@ -3497,13 +3519,11 @@ function fakeMonitorRoster() {
       cert_days_remaining: index === 0 ? 9 : null,
       web_url: tombstoned ? null : `http://localhost:3001/dashboard/${index + 1}`,
       tombstoned,
-      assets: [
-        {
-          id: entry.asset.id,
-          name: entry.asset.name,
-          path: assetPathText(entry.asset),
-        },
-      ],
+      assets: entry.watching.map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        path: assetPathText(asset),
+      })),
       // The fixture's Kuma has an account, so the tab draws its buttons
       // (issue #452) -- and the per-row half of the rule is the fixture's
       // too: the paused monitor is the one offered *Resume*. A fixture that

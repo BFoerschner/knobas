@@ -175,13 +175,15 @@ use PropertyKind::{Number as N, Text as T, Url as U};
 ///   suggestion here, and
 ///   [`tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time`] reads
 ///   them back.
-/// * **What the real estate actually holds.** `testenv/hetzner/estate.json`
-///   describes provisioned infrastructure, and it holds three pairs the chains
-///   do not draw -- a site under a site, a VM directly under a site, and a
-///   database inside a container. `knobas-core`'s own `tests/it/estate_file.rs`
-///   asserts that every parent-and-child pair in that file is suggested here,
-///   so the conventions answer to an estate that exists (ADR-0013) rather than
-///   to a diagram.
+/// * **What the real estate actually holds.** `testenv/estate.json` describes
+///   running infrastructure, and it holds a pair the chains do not draw -- a
+///   database inside a container. Until #634 it held two more, a site under a
+///   site and a VM directly under a site (three Hetzner servers in their cloud
+///   location); those servers were decommissioned and both pairs stay
+///   suggested, because an hcloud import lands its servers in exactly that
+///   shape. `knobas-core`'s own `tests/it/estate_file.rs` asserts that every
+///   parent-and-child pair in that file is suggested here, so the conventions
+///   answer to an estate that exists (ADR-0013) rather than to a diagram.
 ///
 /// * **The neighbouring types §12.1's prose names, and the few this estate
 ///   will plainly grow into.** A service or a database server on a VM, a
@@ -361,7 +363,7 @@ mod tests {
     /// this is what is left.
     ///
     /// Spelled lower snake case, the way this repository spells every other
-    /// enumerated column value, and the way `testenv/hetzner/estate.json`
+    /// enumerated column value, and the way `testenv/estate.json`
     /// already spells them -- #438 chose the spelling and left the table to
     /// this ticket, so a hyphen here would have made the checked-in estate
     /// unimportable.

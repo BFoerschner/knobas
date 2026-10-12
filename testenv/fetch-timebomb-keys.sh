@@ -82,8 +82,8 @@ write=0; [ "${1:-}" = "--write" ] && write=1
 # made the loop -- and so the pipeline, and under `set -e` the script -- exit 1
 # whenever --write was NOT given. Nothing noticed while every caller was an
 # `eval "$(./fetch-timebomb-keys.sh)"`, which ignores the status; the licence
-# renewer on the Hetzner servers (testenv/hetzner/renew-licence.sh) runs under
-# `pipefail` and saw an empty key from a fetch that had printed both.
+# renewer that ran on the Hetzner servers until #634 ran under `pipefail` and
+# saw an empty key from a fetch that had printed both.
 printf '%s\n' "$pairs" | while read -r var key; do
   line="export $var='$key'"
   echo "$line"
