@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 
+use knobas_core::payload::{Declarations, KindPaths};
 use knobas_source::{KindInfo, SourceDescriptor};
 use sqlx::PgPool;
 
@@ -71,6 +72,14 @@ pub struct Vocabulary {
     pub identity: Vec<String>,
     /// Display metadata for result groups.
     pub kinds: KindCatalog,
+    /// What every configured source declares about its payloads, under its
+    /// instance id -- the parent `under:` scopes by (ADR-0018), among the rest.
+    ///
+    /// Empty from [`Self::load`]; [`Self::declaring`] fills it from the
+    /// adapters' templates. Assembled here rather than by a second listing of
+    /// `knobas.source_config`, because this is the one query on the hot path
+    /// that already holds every source's id and adapter kind.
+    pub declarations: Declarations,
 }
 
 /// Built-in source aliases (spec §4), mapping an alias to an **adapter kind**
@@ -197,7 +206,28 @@ impl Vocabulary {
             sources,
             identity,
             kinds,
+            declarations: Declarations::empty(),
         })
+    }
+
+    /// The same vocabulary, with each configured source given its adapter
+    /// kind's declared payload paths under its own instance id --
+    /// `knobas_app::sources::paths::declared_paths`' rule, applied to the
+    /// sources this already read. A source whose adapter is not among
+    /// `templates` declares nothing, and every path-driven read misses on it.
+    #[must_use]
+    pub fn declaring(mut self, templates: &[(String, Vec<KindPaths>)]) -> Self {
+        self.declarations = self.sources.iter().fold(
+            Declarations::empty(),
+            |declarations, source| match templates
+                .iter()
+                .find(|(adapter_kind, _)| *adapter_kind == source.adapter_kind)
+            {
+                Some((_, paths)) => declarations.with(source.id.clone(), paths.clone()),
+                None => declarations,
+            },
+        );
+        self
     }
 
     /// Which configured source instances a `/token` or `source:token` names.
@@ -299,6 +329,7 @@ impl Vocabulary {
             ],
             identity: vec!["mara.lindqvist".to_owned()],
             kinds: KindCatalog::from_kinds(["ticket", "pr", "build", "page", "commit"]),
+            declarations: Declarations::empty(),
         }
     }
 }

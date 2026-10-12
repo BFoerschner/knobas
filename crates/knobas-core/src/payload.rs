@@ -288,6 +288,22 @@ impl Declarations {
         self.0.get(source_id)?.get(kind)
     }
 
+    /// Everything one source declares, kind by kind -- what
+    /// [`resolve_names_as_parent`] reads, since a parent kind is named by the
+    /// declarations of *other* kinds of the same source.
+    pub fn of_source(&self, source_id: &str) -> impl Iterator<Item = &KindPaths> {
+        self.0.get(source_id).into_iter().flat_map(BTreeMap::values)
+    }
+
+    /// Whether any kind of this source declares a parent -- the question
+    /// `under:`'s coverage asks of a source (#595). A source that declares none
+    /// has nothing the filter can match.
+    #[must_use]
+    pub fn declares_a_parent(&self, source_id: &str) -> bool {
+        self.of_source(source_id)
+            .any(|kind| !kind.parent.is_empty())
+    }
+
     /// The jsonb every path-driven statement binds.
     ///
     /// One parameter for the whole map rather than one per field: a read
@@ -436,6 +452,103 @@ pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec
             };
             if !text.trim().is_empty() {
                 out.push(text.trim().to_owned());
+            }
+        }
+    }
+    out
+}
+
+/// One parent an item names: its kind, and the names it answers to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResolvedParent {
+    /// The parent's entity kind, as the declaration says it.
+    pub kind: String,
+    /// Every name the declared `names` paths lead to inside this parent, in
+    /// declaration order -- usable strings only, trimmed, under the same
+    /// refusal [`resolve_string`] makes. Empty for a parent the record names
+    /// without saying what it is called; such a parent is still in the chain.
+    pub names: Vec<String>,
+}
+
+/// The parents a record names, outermost first, direct parent last (ADR-0018).
+///
+/// **One of the two places the two shapes of [`ParentPath::at`] are told
+/// apart** -- the other is [`declared_parents!`](crate::declared_parents), and
+/// `crates/knobas-core/tests/it/payload_paths.rs` holds them to one answer (the
+/// deputy's ruling of 2026-10-11 on #594). No reader spells the branch itself.
+///
+/// Candidates in declaration order; the first whose `at` leads to **an object**
+/// (the direct parent, a chain of one) or **an array** (the chain) wins. An
+/// array's elements that are not objects are dropped from the chain, the
+/// refusal [`resolve_list`] makes per element. An empty array resolves, to no
+/// parent at all -- a top-level page saying it has no ancestors is an answer,
+/// not a miss. Anything else is a miss and the next candidate is tried, and so
+/// is the **empty path**: it addresses the record itself, which is an object,
+/// and an item is never its own parent.
+#[must_use]
+pub fn resolve_parents(
+    payload: &serde_json::Value,
+    candidates: &[ParentPath],
+) -> Vec<ResolvedParent> {
+    for candidate in candidates {
+        if candidate.at.segments().is_empty() {
+            continue;
+        }
+        let objects: Vec<&serde_json::Value> = match at(payload, &candidate.at) {
+            Some(object @ serde_json::Value::Object(_)) => vec![object],
+            Some(serde_json::Value::Array(chain)) => {
+                chain.iter().filter(|e| e.is_object()).collect()
+            }
+            _ => continue,
+        };
+        return objects
+            .into_iter()
+            .map(|object| ResolvedParent {
+                kind: candidate.kind.clone(),
+                names: parent_names(object, &candidate.names),
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
+/// The names one parent object answers to: each declared path's usable
+/// string, in declaration order.
+fn parent_names(object: &serde_json::Value, names: &[PayloadPath]) -> Vec<String> {
+    names
+        .iter()
+        .filter_map(|path| resolve_string(object, std::slice::from_ref(path)))
+        .collect()
+}
+
+/// The names a **mirrored** record answers to as a parent of `kind`.
+///
+/// `under:` also returns the parent itself when it is mirrored (ADR-0018), and
+/// the only thing that says what a parent is called is the children's
+/// declaration. So the parent is found by reading those declared `names` off
+/// its **own** record: every [`ParentPath`] of this source whose `kind` is the
+/// record's kind contributes its names, read from the payload's root. That
+/// holds because a source names a parent with the parent's own record shape --
+/// a Gitea pull request's `base.repo` is a repository object, a Confluence
+/// ancestor is a page, a Jira `fields.parent` is an issue. That assumption is
+/// an obligation on every adapter, and contract battery clause 6 certifies it
+/// against the adapter's own corpus (the deputy's ruling of 2026-10-11 on
+/// #595). Distinct names, in the order first declared;
+/// [`declared_names_as_parent!`](crate::declared_names_as_parent) is the same
+/// rule in SQL, and yields a set.
+#[must_use]
+pub fn resolve_names_as_parent<'a>(
+    payload: &serde_json::Value,
+    kind: &str,
+    declared: impl IntoIterator<Item = &'a KindPaths>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for paths in declared {
+        for parent in paths.parent.iter().filter(|p| p.kind == kind) {
+            for name in parent_names(payload, &parent.names) {
+                if !out.contains(&name) {
+                    out.push(name);
+                }
             }
         }
     }
@@ -611,6 +724,99 @@ macro_rules! declared_list {
                   then i.payload #> c.at_segs else '[]'::jsonb end) as e(elem) \
              where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
                and nullif(btrim(e.elem #>> c.entry_segs), '') is not null)"
+        )
+    };
+}
+
+/// SQL for "the parents this record names", as a table expression of
+/// `(pos, kind, obj, names)`: one row per parent object, `pos` ordering the
+/// chain outermost first, `names` the winning candidate's declared name paths.
+///
+/// **The one SQL place the two shapes of [`ParentPath::at`] are told apart**
+/// ([`resolve_parents`] is the Rust one). Written to be joined -- `cross join
+/// lateral declared_parents!("$1") p` -- and read through
+/// [`declared_parent_names!`] by every `under:` statement.
+///
+/// The winning candidate is the first, in declaration order, whose non-empty
+/// `at` leads to an object or an array. An object becomes a one-element array
+/// so both shapes walk alike, and elements that are not objects are dropped.
+/// `jsonb_array_elements` raises on a scalar, so the `case` is what lets a
+/// record whose `at` leads somewhere odd miss instead of failing the read for
+/// every source.
+#[macro_export]
+macro_rules! declared_parents {
+    ($decl:literal) => {
+        concat!(
+            "(select e.pos, w.kind, e.obj, w.names from (select c.kind, c.at_segs, c.names from \
+              (select t.p->>'kind' as kind, ",
+            $crate::declared_segments!("t.p->'at'"),
+            " as at_segs, t.p->'names' as names, t.ord from jsonb_array_elements(",
+            $crate::declared_array!($decl, "parent"),
+            ") with ordinality as t(p, ord)) c \
+              where cardinality(c.at_segs) > 0 \
+                and jsonb_typeof(i.payload #> c.at_segs) in ('object', 'array') \
+              order by c.ord limit 1) w \
+             cross join lateral jsonb_array_elements(\
+               case when jsonb_typeof(i.payload #> w.at_segs) = 'array' \
+                    then i.payload #> w.at_segs \
+                    else jsonb_build_array(i.payload #> w.at_segs) end) \
+               with ordinality as e(obj, pos) \
+             where jsonb_typeof(e.obj) = 'object')"
+        )
+    };
+}
+
+/// SQL for "every name every parent this record names answers to", as a table
+/// expression of `(pos, kind, name_ord, name)`. `under:` matches against
+/// `name`, and a later path line takes the first `name_ord` of each `pos`.
+///
+/// Built on [`declared_parents!`] and nothing else, so the shape branch stays
+/// in one place. A name path that lands on anything but a non-blank string
+/// contributes nothing, the refusal [`declared_string!`] makes.
+#[macro_export]
+macro_rules! declared_parent_names {
+    ($decl:literal) => {
+        concat!(
+            "(select pr.pos, pr.kind, n.name_ord, btrim(pr.obj #>> n.segs) as name from ",
+            $crate::declared_parents!($decl),
+            " pr cross join lateral (select ",
+            $crate::declared_segments!("q.np"),
+            " as segs, q.name_ord from jsonb_array_elements(\
+               case when jsonb_typeof(pr.names) = 'array' then pr.names else '[]'::jsonb end) \
+               with ordinality as q(np, name_ord)) n \
+             where jsonb_typeof(pr.obj #> n.segs) = 'string' \
+               and nullif(btrim(pr.obj #>> n.segs), '') is not null)"
+        )
+    };
+}
+
+/// SQL for "the names this mirrored record answers to as a parent", as a
+/// table expression of one column, `name` -- see [`resolve_names_as_parent`]
+/// for the rule. A set: `distinct`, in no order.
+///
+/// Reads every kind this record's source declares, not only its own: a repo
+/// declares no parent, and it is the commit's declaration that says a repo
+/// answers to `full_name` and `name`.
+#[macro_export]
+macro_rules! declared_names_as_parent {
+    ($decl:literal) => {
+        concat!(
+            "(select distinct btrim(i.payload #>> s.segs) as name from (select ",
+            $crate::declared_segments!("nm.np"),
+            " as segs from jsonb_each(case when jsonb_typeof(",
+            $decl,
+            "::jsonb -> i.source_id) = 'object' then ",
+            $decl,
+            "::jsonb -> i.source_id else '{}'::jsonb end) as k(kind, kp) \
+             cross join lateral jsonb_array_elements(\
+               case when jsonb_typeof(k.kp->'parent') = 'array' then k.kp->'parent' \
+                    else '[]'::jsonb end) as pp(p) \
+             cross join lateral jsonb_array_elements(\
+               case when jsonb_typeof(pp.p->'names') = 'array' then pp.p->'names' \
+                    else '[]'::jsonb end) as nm(np) \
+             where pp.p->>'kind' = i.kind) s \
+             where jsonb_typeof(i.payload #> s.segs) = 'string' \
+               and nullif(btrim(i.payload #>> s.segs), '') is not null)"
         )
     };
 }

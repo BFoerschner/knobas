@@ -12,7 +12,7 @@
   import type { SearchResponse } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import Row from "./Row.svelte";
-  import { authorGaps } from "./coverage";
+  import { authorGaps, underGaps } from "./coverage";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -53,6 +53,8 @@
    * under the fold explains nothing.
    */
   const gaps = $derived(authorGaps(response));
+  /** The same report for `under:` (#595), drawn the same way. */
+  const parentGaps = $derived(underGaps(response));
 </script>
 
 {#if gaps.length > 0}
@@ -64,6 +66,17 @@
     <p class="gap-h">An author search cannot be answered by:</p>
     <ul>
       {#each gaps as gap (gap.sourceId)}
+        <li><span class="gap-s">{gap.name}</span> — {gap.reason}</li>
+      {/each}
+    </ul>
+  </div>
+{/if}
+
+{#if parentGaps.length > 0}
+  <div class="gap">
+    <p class="gap-h">An under: search cannot be answered by:</p>
+    <ul>
+      {#each parentGaps as gap (gap.sourceId)}
         <li><span class="gap-s">{gap.name}</span> — {gap.reason}</li>
       {/each}
     </ul>

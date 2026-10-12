@@ -417,6 +417,31 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 ///    on, and such a resolver would pass every other clause here while quietly
 ///    putting a value on screen that no source said.
 ///
+/// **The parent declaration (#595, ADR-0018) is held to the same four**, with
+/// two things only it can get wrong. Its `kind` must be one of `entity_kinds`
+/// (an `under:` suggestion says what a parent is from that word alone, since
+/// the parent need not be mirrored), and its `at` must not be the empty path,
+/// which is the record itself. Clause 2's type check reads "an object or an
+/// array of objects" for `at` and "a string" for each name inside a parent
+/// object; clause 3 weighs `at` and the names in separate slots, so a parent
+/// that is found cannot excuse a misspelled name inside it. A kind declaring no
+/// parent must resolve none, which is clause 4. Ratified by the deputy's ruling
+/// of 2026-10-11 on #594 and recorded in §10.8's #595 entry.
+///
+/// **A parent kind's own records answer to the names declared for it.**
+/// `under:` returns a mirrored parent by reading the children's declared
+/// `names` off the parent's own record root
+/// ([`resolve_names_as_parent`](knobas_core::payload::resolve_names_as_parent)),
+/// which works only if a source names a parent in the parent's own shape. So
+/// on every record of a declared parent `kind`, each of those names is held to
+/// clause 2 (it leads to a string or to nothing) and clause 3 (where none
+/// resolved, no record names a key it does not have), in an evidence slot per
+/// parent kind of its own, so the children's parent objects resolving a name
+/// cannot excuse the parent's own records lacking it. Both tolerances below
+/// hold here too: a parent kind the corpus never populates (a Jira epic
+/// outside the JQL) is asked nothing, and the names share their slot as a
+/// candidate list does. Ratified by the deputy's ruling of 2026-10-11 on #595.
+///
 /// # What this cannot see, and why neither is fixable here
 ///
 /// A corpus-shaped question is answered by the corpus, so two declarations
@@ -449,7 +474,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
     use knobas_core::payload::{
         KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
-        resolve_string,
+        resolve_parents, resolve_string,
     };
 
     let kinds: std::collections::HashSet<&str> =
@@ -464,6 +489,27 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             paths.kind,
             kinds
         );
+        // A parent's kind is what an `under:` suggestion says it is, and it is
+        // declared rather than looked up because the parent need not be
+        // mirrored (ADR-0018) -- so it has to be a kind this adapter emits, or
+        // the suggestion names something nothing here can ever open.
+        for parent in &paths.parent {
+            assert!(
+                kinds.contains(parent.kind.as_str()),
+                "descriptor.payload_paths declares a parent of kind {:?} for kind {:?}, which is not \
+                 one of descriptor.entity_kinds {:?} -- a parent is an entity of this adapter's \
+                 own, and `under:` would name a kind nothing here emits",
+                parent.kind,
+                paths.kind,
+                kinds
+            );
+            assert!(
+                !parent.at.segments().is_empty(),
+                "descriptor.payload_paths declares a parent for kind {:?} at the empty path, which \
+                 is the record itself -- an item is never its own parent",
+                paths.kind
+            );
+        }
         assert!(
             declared_for.insert(paths.kind.as_str()),
             "descriptor.payload_paths declares kind {:?} twice; readers take the first entry, \
@@ -509,6 +555,20 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         /// Some item of this kind has an object where the path's next key
         /// would sit, and does not have that key.
         names_a_missing_key: bool,
+    }
+
+    // A parent kind -> every `names` path any kind of this adapter declares
+    // for it, deduplicated: the names a record of that kind answers to as
+    // someone's parent, which is what `resolve_names_as_parent` reads off it.
+    let mut names_as_parent: std::collections::BTreeMap<&str, Vec<&PayloadPath>> =
+        std::collections::BTreeMap::new();
+    for parent in d.payload_paths.iter().flat_map(|p| &p.parent) {
+        let names = names_as_parent.entry(parent.kind.as_str()).or_default();
+        for name in &parent.names {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
     }
 
     let nothing = KindPaths::default();
@@ -599,6 +659,91 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                     "in an element of",
                 );
             }
+        }
+
+        // The parent declaration (#595): clause 2's type check on where the
+        // parent is -- one object, or an array of objects -- and on each name
+        // inside one, and clause 3's evidence for both. `at` and the names get
+        // a slot each, for `reviewers`' reason: a resolving `at` must not
+        // excuse a misspelled name inside the parent it found.
+        for candidate in &paths.parent {
+            let seen = evidence.entry((&item.kind, field::PARENT)).or_default();
+            let found = at(&item.payload, &candidate.at);
+            if let Some(value) = found {
+                let shape = match value {
+                    serde_json::Value::Object(_) => None,
+                    serde_json::Value::Array(chain)
+                        if chain.iter().all(serde_json::Value::is_object) =>
+                    {
+                        None
+                    }
+                    serde_json::Value::Array(_) => Some("an array that is not all objects"),
+                    serde_json::Value::String(_) => Some("a string"),
+                    serde_json::Value::Number(_) => Some("a number"),
+                    _ => Some("a boolean"),
+                };
+                if let Some(shape) = shape {
+                    panic!(
+                        "descriptor.payload_paths declares parent of kind {:?} at {:?}, which leads \
+                         to {shape} on this adapter's own item {} -- a parent must be an object or \
+                         an array of objects, or nothing at all, or every `under:` read misses on \
+                         it while looking like an item with no parent. Payload: {}",
+                        item.kind,
+                        candidate.at.segments(),
+                        item.entity,
+                        item.payload
+                    );
+                }
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+
+            let objects: Vec<&serde_json::Value> = match found {
+                Some(serde_json::Value::Array(chain)) => chain.iter().collect(),
+                Some(object) => vec![object],
+                None => Vec::new(),
+            };
+            let names = evidence.entry((&item.kind, "parent names")).or_default();
+            for object in objects {
+                for name in &candidate.names {
+                    weigh(
+                        names,
+                        "parent names",
+                        object,
+                        name,
+                        Wanted::Text,
+                        "in a parent object of",
+                    );
+                }
+            }
+        }
+        // The parent's own record (the deputy's ruling of 2026-10-11 on
+        // #595): `under:` returns a mirrored parent by reading the children's
+        // declared names off its root, so on this kind's records -- if it is
+        // anyone's parent kind -- each of those names is held to clause 2 and
+        // clause 3 in a slot of its own, apart from the children's.
+        if let Some(names) = names_as_parent.get(item.kind.as_str()) {
+            let seen = evidence
+                .entry((&item.kind, "the parent's own names"))
+                .or_default();
+            for name in names {
+                weigh(
+                    seen,
+                    "the parent's own names",
+                    &item.payload,
+                    name,
+                    Wanted::Text,
+                    "on",
+                );
+            }
+        }
+        if paths.parent.is_empty() {
+            assert!(
+                resolve_parents(&item.payload, &paths.parent).is_empty(),
+                "kind {:?} declares no parent, so every `under:` read must miss on item {}",
+                item.kind,
+                item.entity
+            );
         }
 
         // Clause 4: what this kind does not declare, no reader may produce --
@@ -756,6 +901,33 @@ mod tests {
         /// clause accepts. Tolerance, not a bug: see
         /// `accepts_a_later_candidate_an_earlier_one_resolves_for`.
         ASecondCandidateNoItemResolves,
+        /// Declares a parent whose kind is not one of its own `entity_kinds`
+        /// -- a name no `under:` suggestion could ever say what it is.
+        ParentOfAKindItDoesNotEmit,
+        /// Declares a parent `at` the status name, which leads to a string:
+        /// neither an object nor a chain of them (#595).
+        ParentAtOntoAString,
+        /// Declares a parent `at` an array whose elements are strings, not
+        /// parent objects.
+        ParentAtOntoAnArrayOfStrings,
+        /// Declares a parent at `fields.epicc`, a key its records do not have.
+        MisspelledParentAt,
+        /// Declares a parent whose name sits at `kee` inside the parent
+        /// object, which carries `key`.
+        MisspelledParentName,
+        /// Its tickets are their own parent kind, and the children's parent
+        /// objects carry `key` -- but the tickets' own records do not, so
+        /// `under:` could reach the children of an epic and never the epic
+        /// itself (the deputy's ruling of 2026-10-11 on #595).
+        ParentRecordsLackTheirName,
+        /// Its tickets carry `key` on their own records, but as an object
+        /// rather than the string a name has to be.
+        ParentRecordsNameIsNotAString,
+        /// Declares the parent's names as `key` then `kee`. `key` resolves on
+        /// the epic objects and on the tickets' own records, `kee` on neither:
+        /// the names share their slot, so the battery accepts. Tolerance, not
+        /// a bug: see `accepts_a_parent_name_an_earlier_name_resolves_for`.
+        ASecondParentNameNoRecordCarries,
     }
 
     struct TestSource {
@@ -843,11 +1015,20 @@ mod tests {
                 // here", which is what keeps this safe to run against a live
                 // instance whose issues are unassigned.
                 payload_paths: {
+                    use crate::ParentPath;
                     use crate::{KindPaths, ListPath, PayloadPath};
+                    let parent = |kind: &str, at: &[&str], name: &str| ParentPath {
+                        kind: kind.to_owned(),
+                        at: PayloadPath::of(at.iter().copied()),
+                        names: vec![PayloadPath::of([name])],
+                    };
+                    // The conforming adapter's tickets sit under an epic, a
+                    // ticket itself -- so its parent kind is one it emits.
                     let ticket = |status: PayloadPath| KindPaths {
                         kind: "ticket".to_owned(),
                         status_name: vec![status],
                         assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
+                        parent: vec![parent("ticket", &["fields", "epic"], "key")],
                         ..KindPaths::default()
                     };
                     let good = ticket(PayloadPath::of(["fields", "status", "name"]));
@@ -897,6 +1078,33 @@ mod tests {
                                 PayloadPath::of(["fields", "status", "name"]),
                                 PayloadPath::of(["fields", "status", "nam"]),
                             ],
+                            ..good
+                        }],
+                        Behavior::ParentOfAKindItDoesNotEmit => vec![KindPaths {
+                            parent: vec![parent("epic", &["fields", "epic"], "key")],
+                            ..good
+                        }],
+                        Behavior::ParentAtOntoAString => vec![KindPaths {
+                            parent: vec![parent("ticket", &["fields", "status", "name"], "key")],
+                            ..good
+                        }],
+                        Behavior::ParentAtOntoAnArrayOfStrings => vec![KindPaths {
+                            parent: vec![parent("ticket", &["labels"], "key")],
+                            ..good
+                        }],
+                        Behavior::MisspelledParentAt => vec![KindPaths {
+                            parent: vec![parent("ticket", &["fields", "epicc"], "key")],
+                            ..good
+                        }],
+                        Behavior::MisspelledParentName => vec![KindPaths {
+                            parent: vec![parent("ticket", &["fields", "epic"], "kee")],
+                            ..good
+                        }],
+                        Behavior::ASecondParentNameNoRecordCarries => vec![KindPaths {
+                            parent: vec![ParentPath {
+                                names: vec![PayloadPath::of(["key"]), PayloadPath::of(["kee"])],
+                                ..parent("ticket", &["fields", "epic"], "key")
+                            }],
                             ..good
                         }],
                         _ => vec![good],
@@ -973,13 +1181,30 @@ mod tests {
                     // declarations above address: a status the paths reach,
                     // and an assignee the source explicitly says nothing
                     // about.
-                    payload: serde_json::json!({
-                        "fields": {
-                            "status": { "name": "In Progress" },
-                            "assignee": serde_json::Value::Null
-                        },
-                        "reviewers": [{ "login": "mara.lindqvist" }]
-                    }),
+                    payload: {
+                        let mut payload = serde_json::json!({
+                            "key": "PAY-1",
+                            "fields": {
+                                "status": { "name": "In Progress" },
+                                "assignee": serde_json::Value::Null,
+                                "epic": { "key": "PAY-100" }
+                            },
+                            "labels": ["payments"],
+                            "reviewers": [{ "login": "mara.lindqvist" }]
+                        });
+                        match self.behavior {
+                            Behavior::ParentRecordsLackTheirName => {
+                                if let Some(record) = payload.as_object_mut() {
+                                    record.remove("key");
+                                }
+                            }
+                            Behavior::ParentRecordsNameIsNotAString => {
+                                payload["key"] = serde_json::json!({ "id": 1 });
+                            }
+                            _ => {}
+                        }
+                        payload
+                    },
                     web_url: None,
                     deleted: false,
                 })
@@ -1309,6 +1534,91 @@ mod tests {
         .await;
     }
 
+    // -- clause 6 on the parent declaration (#595) ---------------------------
+    //
+    // The same rules as every other declared field, applied to `parent`: its
+    // kind is one the adapter emits, its `at` leads to an object or an array
+    // of objects, each name inside a parent leads to a string, and where
+    // nothing of a kind resolved, no record names a key it does not have. A
+    // wrong parent declaration otherwise surfaces only as an empty `under:`,
+    // which looks exactly like an empty repo.
+
+    #[tokio::test]
+    async fn rejects_a_parent_of_a_kind_the_adapter_does_not_emit() {
+        rejects(
+            Behavior::ParentOfAKindItDoesNotEmit,
+            "declares a parent of kind \"epic\" for kind \"ticket\", which is not one of \
+             descriptor.entity_kinds",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_at_that_leads_to_a_string() {
+        rejects(
+            Behavior::ParentAtOntoAString,
+            "declares parent of kind \"ticket\" at [\"fields\", \"status\", \"name\"], which \
+             leads to a string",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_at_that_leads_to_an_array_of_strings() {
+        rejects(
+            Behavior::ParentAtOntoAnArrayOfStrings,
+            "declares parent of kind \"ticket\" at [\"labels\"], which leads to an array that \
+             is not all objects",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_at_a_key_the_records_do_not_have() {
+        rejects(
+            Behavior::MisspelledParentAt,
+            "declares parent of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_name_key_the_parent_objects_do_not_carry() {
+        rejects(
+            Behavior::MisspelledParentName,
+            "declares parent names of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    // -- clause 6 on a parent's own records (the deputy's ruling of
+    // 2026-10-11 on #595) ----------------------------------------------------
+    //
+    // `under:` returns the parent itself by reading the children's declared
+    // names off the parent's own record, so those names must resolve there
+    // too. The conforming adapter's tickets carry `key` at their root, as the
+    // epic objects inside them do.
+
+    #[tokio::test]
+    async fn rejects_parent_records_that_lack_the_name_their_children_give_them() {
+        rejects(
+            Behavior::ParentRecordsLackTheirName,
+            "declares the parent's own names of kind \"ticket\" at a path no item of that kind \
+             resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parent_record_whose_name_is_not_a_string() {
+        rejects(
+            Behavior::ParentRecordsNameIsNotAString,
+            "declares the parent's own names of kind \"ticket\" at [\"key\"], which leads to an \
+             object on this adapter's own item",
+        )
+        .await;
+    }
+
     // -- clause 6's two tolerances (#301) -------------------------------------
     //
     // Both are deliberate, both are documented on `check_payload_paths` and in
@@ -1370,6 +1680,20 @@ mod tests {
             "a field's candidates are one adapter's alternative spellings and share one \
                  evidence slot -- a spelling this instance does not use must not fail it",
         );
+    }
+
+    /// The second tolerance as it reaches a parent's names, on the children's
+    /// parent objects and on the parent's own records alike. A parent answers
+    /// to every name that resolves (`resolve_names_as_parent` unions them), so
+    /// a name no record carries is one `under:` can never reach the parent by
+    /// -- but the deputy's ruling of 2026-10-11 on #595 put this rule "under
+    /// the same two #301 tolerances", and per-name slots would be a
+    /// tightening. If that is ever ruled, this test goes red first.
+    #[tokio::test]
+    async fn accepts_a_parent_name_an_earlier_name_resolves_for() {
+        run(Behavior::ASecondParentNameNoRecordCarries)
+            .await
+            .expect("a parent's names share one evidence slot, as a field's candidates do");
     }
 
     // -- clause 7: sink failures ---------------------------------------------

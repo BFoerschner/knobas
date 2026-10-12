@@ -48,6 +48,7 @@ pub mod sql;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 pub mod types;
+pub(crate) mod under;
 pub mod vocab;
 
 use std::time::Instant;
@@ -111,6 +112,12 @@ pub enum SearchError {
 pub struct Searcher {
     pool: PgPool,
     kinds: KindCatalog,
+    /// Each compiled-in adapter kind's declared payload paths, which every
+    /// query's vocabulary hands to its configured sources (`under:` reads the
+    /// parent through them). Empty from [`Self::new`]: then no source declares
+    /// anything and `under:` matches nothing, which is the honest answer for a
+    /// searcher nobody told about the adapters.
+    payload_paths: Vec<(String, Vec<knobas_core::payload::KindPaths>)>,
 }
 
 impl Searcher {
@@ -124,13 +131,42 @@ impl Searcher {
         Self {
             pool,
             kinds: KindCatalog::default(),
+            payload_paths: Vec::new(),
         }
     }
 
     /// A searcher labelling groups from what the adapters declared.
     #[must_use]
     pub fn with_kinds(pool: PgPool, kinds: KindCatalog) -> Self {
-        Self { pool, kinds }
+        Self {
+            pool,
+            kinds,
+            payload_paths: Vec::new(),
+        }
+    }
+
+    /// The same searcher, reading what these adapters declare about their
+    /// payloads -- their **templates**, since where a source keeps its parent
+    /// is a property of the adapter kind and not of the instance (#277's
+    /// reading, which `knobas_app::sources::paths` makes too).
+    #[must_use]
+    pub fn with_payload_paths(
+        mut self,
+        templates: impl IntoIterator<Item = knobas_source::SourceDescriptor>,
+    ) -> Self {
+        self.payload_paths = templates
+            .into_iter()
+            .map(|template| (template.adapter_kind, template.payload_paths))
+            .collect();
+        self
+    }
+
+    /// What this installation is configured with, its sources given their
+    /// declarations. One round trip, the one every query already made.
+    async fn vocabulary(&self) -> Result<Vocabulary, SearchError> {
+        Ok(Vocabulary::load(&self.pool, self.kinds.clone())
+            .await?
+            .declaring(&self.payload_paths))
     }
 
     /// The pool this searcher reads through.
@@ -150,8 +186,12 @@ impl Searcher {
         let started = Instant::now();
         let query = validate(query)?;
 
-        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
-        let parsed = query::parse(&query.raw, &vocab);
+        let vocab = self.vocabulary().await?;
+        let mut parsed = query::parse(&query.raw, &vocab);
+        // Whether an `under:` value names any parent is the mirror's to say,
+        // and it is said before the echo is built so the greyed-out token
+        // rides back with everything else the parse reported.
+        under::report_unknown(&self.pool, &mut parsed).await?;
         let filters = query::merge(&parsed, &query.filters);
         let interpreted = ParsedQuery {
             filters: filters.echo(),
@@ -190,11 +230,11 @@ impl Searcher {
         let groups = group::group(rows, &vocab.kinds);
 
         // A second round trip, and only for a query that filtered by author
-        // (issue #141). It answers a question the statement above structurally
+        // (issue #141) or by parent (#595). It answers a question the statement above structurally
         // cannot: the match set says which rows came back, never whether a
         // source *could have* contributed one -- and those two are what an
         // empty `author:` result has to be told apart by.
-        let coverage = coverage::author_coverage(&self.pool, &vocab, &filters).await?;
+        let coverage = coverage::report(&self.pool, &vocab, &filters).await?;
 
         Ok(SearchResponse {
             interpreted,
@@ -249,7 +289,7 @@ impl Searcher {
     ///
     /// [`SearchError::Db`] if the summary cannot be read.
     pub async fn smart_lists(&self) -> Result<Vec<SmartListSummary>, SearchError> {
-        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        let vocab = self.vocabulary().await?;
         let mut out = lists::summaries(&self.pool, &vocab.identity).await?;
         out.extend(saved::summaries(&self.pool, &vocab).await?);
         Ok(out)
@@ -267,7 +307,7 @@ impl Searcher {
     /// cannot run, and when [`saved::MAX_SAVED_LISTS`] are already saved;
     /// [`SearchError::Db`] if the row cannot be written.
     pub async fn save_list(&self, label: &str, raw: &str) -> Result<SmartListSummary, SearchError> {
-        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        let vocab = self.vocabulary().await?;
         let created = saved::create(&self.pool, &vocab, label, raw).await?;
         // Read back through the same function the rail reads, rather than
         // assembling a summary here: a second way to build this row is a
@@ -320,7 +360,7 @@ impl Searcher {
         limit: u32,
     ) -> Result<SearchResponse, SearchError> {
         let started = Instant::now();
-        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        let vocab = self.vocabulary().await?;
         let interpreted = ParsedQuery {
             text: String::new(),
             prefix: Some(Prefix::List),
@@ -391,7 +431,7 @@ impl Searcher {
         // read the other way: a saved list *is* a filter the user wrote, so an
         // empty `author:` in it has the same two meanings issue #141 exists to
         // tell apart.
-        let coverage = coverage::author_coverage(&self.pool, vocab, &runnable.filters).await?;
+        let coverage = coverage::report(&self.pool, vocab, &runnable.filters).await?;
         lists::mark_seen(&self.pool, &saved.id).await?;
 
         Ok(SearchResponse {

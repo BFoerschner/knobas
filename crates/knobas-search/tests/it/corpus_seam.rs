@@ -294,6 +294,7 @@ async fn a_second_corpus_adds_no_binds_and_still_executes() {
         mine: false,
         named_authors: Vec::new(),
         identity_authors: Vec::new(),
+        ..EffectiveFilters::default()
     };
     let one = search_sql(&[&corpus::LIVE_ITEM], Some("sepa"), true, &filters, 10, 20);
     let two = search_sql(CORPORA, Some("sepa"), true, &filters, 10, 20);

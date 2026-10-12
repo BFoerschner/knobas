@@ -120,7 +120,15 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
         "user": { "login": "mara", "id": 7 },
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
         "head": { "label": "feature/PAY-231-sepa-retry", "ref": "feature/PAY-231-sepa-retry" },
-        "base": { "label": "main", "ref": "main" },
+        "base": {
+            "label": "main", "ref": "main",
+            // Gitea's `PRBranchInfo` carries the repository it is in, and the
+            // descriptor declares a pull request's parent there (#595).
+            "repo": {
+                "id": 1, "name": "payout-service", "full_name": "tidewater/payout-service",
+                "owner": { "login": "tidewater", "id": 7 }
+            }
+        },
         "created_at": "2026-08-21T17:41:00Z", "updated_at": updated
     })
 }

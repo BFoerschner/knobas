@@ -99,10 +99,11 @@ export interface ResultGroup {
 /**
  * A filter dimension search reports coverage for — `knobas_search::FilterDimension`.
  *
- * One member today (issue #141 scopes the behaviour to authorship). The union
- * is what makes a second dimension an addition rather than a reshape.
+ * `author` since #141, and `under` since #595: a source that declares a parent
+ * for none of its kinds cannot answer `under:<name>` (ADR-0018). The union is
+ * what made the second dimension an addition rather than a reshape.
  */
-export type FilterDimension = "author";
+export type FilterDimension = "author" | "under";
 
 /**
  * What one source could do with a filter — `knobas_search::FilterAnswer`.

@@ -38,6 +38,31 @@ fn non_blank(value: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The repository a branch or commit sits in, as the stored payload carries it.
+///
+/// Gitea's branch and commit records do not name their repository, and the
+/// repo is their **parent** (ADR-0018), which the descriptor declares at
+/// `repository` (`crate::payload_paths`). So the adapter writes it in, in
+/// Gitea's own repository spelling -- the `full_name` and `name` a pull
+/// request's `base.repo` already carries -- so that one declaration of names
+/// reads both, and the full name, first, is the one a path line shows. An
+/// object and not a bare `owner/name`, because a parent is an object or a
+/// chain of them (contract battery clause 6).
+fn repository(at: RepoRef<'_>) -> Value {
+    serde_json::json!({ "full_name": at.full_name, "name": at.name })
+}
+
+/// The record verbatim, plus the [`repository`] it sits in where the record
+/// does not already name one. The one departure from §3a's "payload =
+/// the raw record verbatim", and the one ADR-0018 asks for by name.
+fn with_repository(raw: &Value, at: RepoRef<'_>) -> Value {
+    let mut payload = raw.clone();
+    if let Some(record) = payload.as_object_mut() {
+        record.entry("repository").or_insert_with(|| repository(at));
+    }
+    payload
+}
+
 /// Drop timestamps that are not timestamps: Go's zero time (year 1) is how
 /// Gitea says "unset" for several fields.
 pub(crate) fn real_time(value: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
@@ -101,10 +126,11 @@ pub(crate) fn branch_item(
         ),
         kind: KIND_BRANCH.to_owned(),
         title: branch.name.clone(),
+        // Not the repo's name: being inside a repo is a filter, not a word
+        // (ADR-0018). `under:` reads the stored `repository` instead.
         body_text: body_text(
             [
                 Some(branch.name.clone()),
-                Some(at.full_name.to_owned()),
                 head.and_then(|c| c.message.clone()),
             ]
             .into_iter()
@@ -112,7 +138,7 @@ pub(crate) fn branch_item(
         ),
         author,
         updated_at: real_time(head.and_then(|c| c.timestamp)),
-        payload: raw.clone(),
+        payload: with_repository(raw, at),
         web_url: at.html_url.map(|base| {
             format!(
                 "{}/src/branch/{}",
@@ -134,12 +160,14 @@ pub(crate) fn branch_tombstone(source_id: &str, at: RepoRef<'_>, branch: &str) -
         entity: EntityRef::new(source_id, &keys::branch_key(at.owner, at.name, branch)),
         kind: KIND_BRANCH.to_owned(),
         title: branch.to_owned(),
-        body_text: body_text([branch.to_owned(), at.full_name.to_owned()]),
+        body_text: body_text([branch.to_owned()]),
         author: None,
         updated_at: None,
+        // The same `repository` object a live branch carries: the parent
+        // declaration reads both, and clause 6 checks both.
         payload: serde_json::json!({
             "name": branch,
-            "repository": at.full_name,
+            "repository": repository(at),
             "deleted": true
         }),
         web_url: None,
@@ -207,10 +235,10 @@ pub(crate) fn commit_item(
         entity: EntityRef::new(source_id, &keys::commit_key(at.owner, at.name, &commit.sha)),
         kind: KIND_COMMIT.to_owned(),
         title,
-        body_text: body_text([message, at.full_name.to_owned()]),
+        body_text: body_text([message]),
         author,
         updated_at: real_time(commit.happened_at()),
-        payload: raw.clone(),
+        payload: with_repository(raw, at),
         web_url: non_blank(commit.html_url.as_deref()),
         deleted: false,
     }
@@ -291,9 +319,12 @@ mod tests {
         );
         assert_eq!(item.kind, crate::KIND_BRANCH);
         assert_eq!(item.title, "feature/PAY-231-sepa-retry");
-        // Two repositories both have a `main`; the searchable text is what
-        // tells them apart.
-        assert!(item.body_text.contains("tidewater/payout-service"));
+        // Being inside a repo is a filter, not a word (ADR-0018): the branch's
+        // text no longer carries the repo's name, so a search for the repo
+        // finds the repo and not every branch in it. `under:` and the stored
+        // repository below are what tell two `main`s apart now.
+        assert!(!item.body_text.contains("tidewater/payout-service"));
+        assert!(!item.body_text.contains("payout-service"));
         assert!(item.body_text.contains("jitter in backoff"));
         assert_eq!(item.author.as_deref(), Some("mara"));
         assert_eq!(
@@ -306,8 +337,25 @@ mod tests {
                 "https://gitea.example/tidewater/payout-service/src/branch/feature/PAY-231-sepa-retry"
             )
         );
-        assert_eq!(item.payload, raw);
+        // Gitea's branch record does not name its repository, so the adapter
+        // writes it in, in Gitea's own repository spelling -- full name first
+        // -- for the declared parent to read. Everything else is the record
+        // verbatim.
+        assert_eq!(item.payload["repository"], repository_object());
+        let mut verbatim = item.payload.clone();
+        verbatim.as_object_mut().unwrap().remove("repository");
+        assert_eq!(verbatim, raw);
         assert!(!item.deleted);
+    }
+
+    /// The repository a branch or commit sits in, as the stored payload must
+    /// carry it: `full_name` and `name`, the keys a pull request's
+    /// `base.repo` already carries.
+    fn repository_object() -> Value {
+        serde_json::json!({
+            "full_name": "tidewater/payout-service",
+            "name": "payout-service"
+        })
     }
 
     /// Gitea leaves `username` empty for a commit whose email matches no
@@ -363,6 +411,10 @@ mod tests {
         assert_eq!(item.title, "fix/PAY-228-partial-refund-drift");
         assert_eq!(item.kind, crate::KIND_BRANCH);
         assert!(item.web_url.is_none(), "there is nothing left to open");
+        // The same repository object a live branch carries, not a bare
+        // string: clause 6's type check reads the tombstone too.
+        assert_eq!(item.payload["repository"], repository_object());
+        assert!(!item.body_text.contains("payout-service"));
     }
 
     #[test]
@@ -403,8 +455,10 @@ mod tests {
             "2026-08-22T10:20:00+00:00"
         );
         // The payload stays the record Gitea sent: comments are searchable, not
-        // grafted onto it (spec §3a "raw payload kept").
+        // grafted onto it (spec §3a "raw payload kept"). A pull request names
+        // its repository already, at `base.repo`, so nothing is written in.
         assert_eq!(item.payload, raw);
+        assert!(!item.body_text.contains("payout-service"));
     }
 
     /// A pull request that has never been edited carries a Go zero
@@ -446,7 +500,12 @@ mod tests {
         // The whole message is searchable -- ticket keys turn up in trailers
         // and bodies, and M2's suggestion engine reads exactly this text.
         assert!(item.body_text.contains("Cap at 5 attempts."));
-        assert!(item.body_text.contains("tidewater/payout-service"));
+        // The repo is the commit's parent, not a word in it (ADR-0018).
+        assert!(!item.body_text.contains("payout-service"));
+        // A commit's record does not name its repository; the stored payload
+        // does, for the declared parent to read.
+        assert_eq!(item.payload["repository"], repository_object());
+        assert_eq!(item.payload["sha"], raw["sha"]);
         assert_eq!(item.author.as_deref(), Some("mara"));
         assert_eq!(
             item.web_url.as_deref(),

@@ -2916,6 +2916,7 @@ dependencies = [
  "knobas-db",
  "knobas-search",
  "knobas-source",
+ "knobas-source-gitea",
  "knobas-source-mock",
  "serde",
  "serde_json",

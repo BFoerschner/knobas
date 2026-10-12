@@ -656,6 +656,7 @@ knobas-app	test/it	search_ipc::the_launchers_not_monitored_list_is_the_monitors_
 knobas-app	test/it	search_ipc::the_rail_and_the_board_report_the_same_lists
 knobas-app	test/it	search_ipc::the_trees_search_answers_with_assets_and_their_paths
 knobas-app	test/it	search_ipc::the_wire_shape_is_the_contract
+knobas-app	test/it	search_ipc::under_reads_the_parent_the_compiled_in_gitea_adapter_declares
 knobas-app	test/it	sources_crud::a_credential_that_is_still_wrong_does_not_release_the_backoff
 knobas-app	test/it	sources_crud::a_discovered_config_value_reaches_the_report
 knobas-app	test/it	sources_crud::a_draft_for_a_saved_source_re_tests_the_stored_secret
@@ -1075,8 +1076,12 @@ knobas-core	test/it	notes::an_unresolved_ref_creates_no_link_and_says_it_is_unre
 knobas-core	test/it	notes::an_untitled_note_is_given_a_name_rather_than_none
 knobas-core	test/it	notes::deleting_a_note_removes_its_body_and_tombstones_its_address
 knobas-core	test/it	payload_paths::a_declared_path_resolves_the_same_in_sql_and_in_rust
+knobas-core	test/it	payload_paths::a_mirrored_parent_answers_to_its_declared_names_in_both
+knobas-core	test/it	payload_paths::a_parent_at_that_leads_to_neither_shape_misses_in_both
+knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust_in_both_shapes
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both
+knobas-core	test/it	payload_paths::the_first_parent_candidate_that_resolves_wins_in_both
 knobas-core	test/it	projects::a_blank_project_key_contributes_nothing
 knobas-core	test/it	projects::a_build_and_its_configuration_are_one_project
 knobas-core	test/it	projects::a_build_configuration_with_no_readable_name_is_reported_by_its_key
@@ -1443,6 +1448,7 @@ knobas-search	lib/knobas_search	query::tests::the_leading_table_is_ordered_longe
 knobas-search	lib/knobas_search	query::tests::the_trailing_word_is_a_prefix_match_only_while_it_is_being_typed
 knobas-search	lib/knobas_search	query::tests::tokenizing_keeps_a_phrase_whole_and_its_quotes_on
 knobas-search	lib/knobas_search	query::tests::type_falls_back_to_kind_while_the_catalog_is_empty
+knobas-search	lib/knobas_search	query::tests::under_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::unknown_tokens_are_capped_so_a_paste_cannot_grow_the_response
 knobas-search	lib/knobas_search	query::tests::websearch_operators_and_phrases_survive_into_the_text
 knobas-search	lib/knobas_search	saved::tests::a_slug_is_addressable_whatever_the_label_was
@@ -1552,6 +1558,13 @@ knobas-search	test/it	sql_shape::rows_tied_on_rank_and_timestamp_are_ordered_by_
 knobas-search	test/it	sql_shape::the_best_match_comes_first_and_recency_only_breaks_ties
 knobas-search	test/it	sql_shape::the_launchers_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
+knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
+knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents
+knobas-search	test/it	under::a_saved_list_holding_under_runs_it
+knobas-search	test/it	under::coverage_names_a_source_that_declares_no_parent
+knobas-search	test/it	under::repeated_values_are_a_union_and_an_unmatched_one_is_unknown
+knobas-search	test/it	under::under_a_repo_returns_its_branches_prs_and_commits_and_the_repo
+knobas-search	test/it	under::under_a_repo_with_words_finds_the_commit_that_mentions_them
 knobas-search	test/it	vocab::a_blank_username_is_nobody
 knobas-search	test/it	vocab::a_disabled_source_is_unnameable_but_still_in_the_vocabulary
 knobas-search	test/it	vocab::aliases_resolve_across_instances_and_identity_comes_from_the_configs
@@ -1580,6 +1593,7 @@ knobas-secrets	test/it	keyring_local::the_keyring_store_honours_the_store_contra
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
+knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
@@ -1587,6 +1601,12 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_a_key_the_records_do_not_have
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_that_leads_to_a_string
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_that_leads_to_an_array_of_strings
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_name_key_the_parent_objects_do_not_carry
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_of_a_kind_the_adapter_does_not_emit
+knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_record_whose_name_is_not_a_string
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_into_an_object_that_does_not_have_that_key
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_before_its_last_segment
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
@@ -1607,6 +1627,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_an_ill_formed_item_id
 knobas-source	lib/knobas_source	contract::tests::rejects_an_undeclared_kind
 knobas-source	lib/knobas_source	contract::tests::rejects_an_unknown_write_op_identifier
 knobas-source	lib/knobas_source	contract::tests::rejects_one_kinds_payload_paths_declared_twice
+knobas-source	lib/knobas_source	contract::tests::rejects_parent_records_that_lack_the_name_their_children_give_them
 knobas-source	lib/knobas_source	contract::tests::rejects_payload_paths_for_a_kind_the_adapter_does_not_emit
 knobas-source	lib/knobas_source	contract::tests::rejects_write_ops_without_the_write_capability
 knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_names
@@ -1811,6 +1832,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_refused_entry_is_carr
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scoped_failure_becomes_a_skip
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
+knobas-source-gitea	lib/knobas_source_gitea	tests::a_branch_pr_and_commit_declare_their_repo_as_parent
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
@@ -1878,6 +1900,7 @@ knobas-source-gitea	test/litter_guard	nothing_the_seed_puts_in_the_container_cou
 knobas-source-gitea	test/live_gitea	a_commit_pushed_through_the_api_arrives_once_and_only_once_and_so_does_the_next_push
 knobas-source-gitea	test/live_gitea	a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run
 knobas-source-gitea	test/live_gitea	a_revoked_token_is_unauthorized
+knobas-source-gitea	test/live_gitea	a_synced_commit_carries_its_repo_and_is_found_by_under
 knobas-source-gitea	test/live_gitea	an_op_gitea_does_not_declare_never_reaches_the_real_server
 knobas-source-gitea	test/live_gitea	approving_your_own_pull_request_is_refused_by_the_server
 knobas-source-gitea	test/live_gitea	etag_support_probe

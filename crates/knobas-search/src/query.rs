@@ -18,6 +18,8 @@
 //! reason. The alternative, demoting an unrecognised filter to a search word,
 //! quietly changes the result set in a way nobody on screen can see.
 
+use knobas_core::payload::Declarations;
+
 use crate::types::{ParsedQuery, Prefix, SearchFilters};
 use crate::vocab::Vocabulary;
 
@@ -67,6 +69,20 @@ pub struct Parsed {
     /// [`merge`] can resolve `mine` -- including when `mine` came from a chip
     /// and the text never mentioned it.
     pub identity: Vec<String>,
+    /// The `under:` values, each with the token it was typed as, in the order
+    /// typed and lowercased -- `under:` matches ignoring case (ADR-0018).
+    ///
+    /// Here and not on [`ParsedQuery`]'s filters: `SearchFilters` is the
+    /// frozen wire shape the chips travel in, and `under:` has no chip -- it
+    /// lives in the text, which is also how a saved list stores it. The token
+    /// is kept because whether a value names any parent is a question for the
+    /// mirror, asked after the parse, and the answer is reported in the
+    /// spelling the reader typed.
+    pub under: Vec<(String, String)>,
+    /// What every source declares, carried over from the vocabulary for the
+    /// same reason [`Self::identity`] is: [`merge`] hands it to the statement,
+    /// which reads the parent each child declares.
+    pub declarations: Declarations,
 }
 
 /// The filters a query actually runs with, after the typed grammar and the
@@ -88,6 +104,13 @@ pub struct EffectiveFilters {
     /// A filter in its own right, which is why [`Self::is_empty`] consults it:
     /// `@jonas` with no text is a query somebody asked, not a browse.
     pub named_authors: Vec<String>,
+    /// The `under:` values, lowercased, OR-ed: the item sits beneath a parent
+    /// answering to one of them, or is that parent (ADR-0018).
+    pub under: Vec<String>,
+    /// The declarations the `under:` predicate reads the parent through.
+    /// Carried only when [`Self::under`] is set; empty otherwise, since
+    /// nothing else in the statement reads it.
+    pub declarations: Declarations,
     /// The usernames **`mine`** resolved to, and nothing else.
     ///
     /// Empty **with `mine` set** is a real state, not "no filter": it means
@@ -130,6 +153,13 @@ impl EffectiveFilters {
         self.mine || !self.named_authors.is_empty()
     }
 
+    /// Whether this query scoped by a parent. One spelling for the statement
+    /// and for coverage, for [`Self::filters_by_author`]'s reason.
+    #[must_use]
+    pub fn filters_by_under(&self) -> bool {
+        !self.under.is_empty()
+    }
+
     /// Whether anything is actually being filtered on.
     ///
     /// The engine's reason for asking: a query with neither text nor a filter
@@ -150,6 +180,7 @@ impl EffectiveFilters {
             && self.updated_within_days.is_none()
             && !self.mine
             && self.named_authors.is_empty()
+            && self.under.is_empty()
     }
 
     /// What the launcher draws its chips from.
@@ -242,6 +273,17 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
         updated_within_days: typed.updated_within_days.or(chips.updated_within_days),
         mine,
         named_authors: pick(&typed.authors, &chips.authors),
+        // Typed only: there is no `under:` chip to reconcile with.
+        under: parsed
+            .under
+            .iter()
+            .map(|(_, value)| value.clone())
+            .collect(),
+        declarations: if parsed.under.is_empty() {
+            Declarations::empty()
+        } else {
+            parsed.declarations.clone()
+        },
         // `mine` is what puts the identity in play, and only `mine`: a query
         // that named somebody else must not also quietly match the user.
         identity_authors: if mine {
@@ -264,11 +306,16 @@ impl Parsed {
             prefix_last_term: false,
             list_id: None,
             identity: vocab.identity.clone(),
+            under: Vec::new(),
+            declarations: vocab.declarations.clone(),
         }
     }
 
     /// Record a token nobody could make sense of, up to the display cap.
-    fn unknown(&mut self, token: &str) {
+    ///
+    /// Crate-visible because one kind of token is judged after the parse:
+    /// whether an `under:` value names any parent is the mirror's to say.
+    pub(crate) fn unknown(&mut self, token: &str) {
         if self.query.unknown_tokens.len() < MAX_UNKNOWN_TOKENS {
             self.query.unknown_tokens.push(token.to_owned());
         }
@@ -440,6 +487,17 @@ fn apply_key_value(
         "author" | "owner" | "by" => {
             parsed.claim_prefix(Prefix::Person);
             apply_person(parsed, value);
+        }
+        // A parent (ADR-0018). Lowercased, because it matches ignoring case;
+        // repeated values OR. Whether a value names any parent at all is not
+        // the grammar's to know -- the parent lives in the children's records
+        // -- so that is judged after the parse (`crate::under`). A bare
+        // `under:` is somebody mid-typing, as a bare `author:` is.
+        "under" => {
+            let value = value.trim().to_lowercase();
+            if !value.is_empty() && !parsed.under.iter().any(|(_, seen)| *seen == value) {
+                parsed.under.push((token.to_owned(), value));
+            }
         }
         // The estate's own keys. They have no home before M4, and demoting
         // them to search words would quietly widen the result set.
@@ -935,6 +993,8 @@ mod tests {
             // the usernames behind it would put names the user never typed
             // into the chip row.
             identity_authors: vec!["mara.lindqvist".to_owned()],
+            // No chip carries a parent: `under:` lives in the text.
+            ..EffectiveFilters::default()
         };
         let echo = filters.echo();
         assert_eq!(echo.sources, ["jira"]);
@@ -978,9 +1038,48 @@ mod tests {
                 named_authors: vec!["jonas".to_owned()],
                 ..EffectiveFilters::default()
             },
+            // `under:payout-service` alone is "everything in that repo".
+            EffectiveFilters {
+                under: vec!["payout-service".to_owned()],
+                ..EffectiveFilters::default()
+            },
         ];
         for filters in cases {
             assert!(!filters.is_empty(), "{filters:?}");
         }
+    }
+
+    /// `under:` is a filter, not a search word: lowercased, repeated values
+    /// collected once each in the order typed, the token kept for the report,
+    /// and a bare `under:` -- somebody mid-typing -- neither a filter nor an
+    /// unknown token. No chip carries it, so the echo does not either.
+    #[test]
+    fn under_is_a_typed_filter_that_ignores_case() {
+        let v = fixture();
+        let p = parse(
+            "under:Tidewater/Payout-Service jitter UNDER:ledger under:ledger",
+            &v,
+        );
+        assert_eq!(p.query.text, "jitter");
+        assert_eq!(
+            p.under,
+            [
+                (
+                    "under:Tidewater/Payout-Service".to_owned(),
+                    "tidewater/payout-service".to_owned()
+                ),
+                ("UNDER:ledger".to_owned(), "ledger".to_owned()),
+            ]
+        );
+        assert!(p.query.unknown_tokens.is_empty());
+        let merged = merge(&p, &SearchFilters::default());
+        assert_eq!(merged.under, ["tidewater/payout-service", "ledger"]);
+        assert!(merged.filters_by_under());
+        assert_eq!(merged.echo(), SearchFilters::default());
+
+        let typing = parse("under:", &v);
+        assert!(typing.under.is_empty());
+        assert!(typing.query.unknown_tokens.is_empty());
+        assert!(typing.query.text.is_empty());
     }
 }

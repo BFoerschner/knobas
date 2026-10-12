@@ -629,6 +629,7 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
             mine: true,
             identity_authors: vec!["mara".to_owned()],
             named_authors: Vec::new(),
+            ..EffectiveFilters::default()
         })
         .await,
         [format!("sq-jira:{tag}-1")]
@@ -830,6 +831,10 @@ async fn hostile_text_is_a_search_term_and_nothing_else() {
                 mine: true,
                 identity_authors: vec![evil.to_owned()],
                 named_authors: vec![evil.to_owned()],
+                // A parent value travels as a bind like every other, and so
+                // does the declaration it is read through.
+                under: vec![evil.to_owned()],
+                ..EffectiveFilters::default()
             },
             10,
             50,
