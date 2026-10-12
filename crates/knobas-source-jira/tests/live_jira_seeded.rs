@@ -1620,13 +1620,13 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
     )
     .await;
     let declared = ticket_parent_declaration();
-    let under_pay_200 = |value: &str| under(&items, value);
+    let under_these = |value: &str| under(&items, value);
     let expected = [
         "PAY-200", "PAY-219", "PAY-228", "PAY-231", "PAY-236", "PAY-240",
     ];
-    assert_eq!(under_pay_200("PAY-200"), expected);
+    assert_eq!(under_these("PAY-200"), expected);
     assert_eq!(
-        under_pay_200("pay-200"),
+        under_these("pay-200"),
         expected,
         "under: matches ignoring case"
     );
@@ -1648,7 +1648,7 @@ async fn under_the_seeded_epic_returns_its_five_children_and_the_epic() {
         item(&items, "PAY-200").payload.get("epic").is_none(),
         "the epic belongs to no epic, so nothing is stored for it"
     );
-    println!("SEEDED under:PAY-200 -> {:?}", under_pay_200("PAY-200"));
+    println!("SEEDED under:PAY-200 -> {:?}", under_these("PAY-200"));
 }
 
 /// A sub-task this suite files under a seeded issue, deleted again when the
@@ -1834,11 +1834,11 @@ async fn delete_issue(
 /// Every other `under:` assertion here runs through the second candidate,
 /// `epic`, because a classic project keeps epic membership in the Epic Link
 /// field and the corpus has no sub-task. Clause 6 gives both candidates one
-/// evidence slot (#301), so the battery passes while `fields.parent` resolves
-/// on nothing; the golden test and `knobas-search`'s `under_jira.rs` read
-/// hand-written shapes, and mockd's records were written by the same reading
-/// as the adapter. This is the live witness of the wire: `BASE_FIELDS` has to
-/// request `parent`, or the payload never carries it.
+/// evidence slot (#301), so the live battery passes while `fields.parent`
+/// resolves on nothing here; the golden test and `knobas-search`'s
+/// `under_jira.rs` read hand-written shapes, and mockd's records were written
+/// by the same reading as the adapter. This is the live witness of the wire:
+/// `BASE_FIELDS` has to request `parent`, or the payload never carries it.
 ///
 /// So the test files a Sub-task under PAY-219 -- a Task in PAY-200 --
 /// full-syncs with the source configured as the Add-source dialog leaves it,
