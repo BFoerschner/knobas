@@ -1483,6 +1483,70 @@ async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_name
     }
 }
 
+/// A synced build carries the state chip its descriptor declares (#666),
+/// read off the real server's records: the seed's failed integration run is
+/// `FAILURE` in the error tone, its successful deploy `SUCCESS` in the ok
+/// tone, and every build the seed leaves draws a chip. A configuration draws
+/// none.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_synced_build_carries_its_state_chip() {
+    use knobas_core::payload::{StateChip, resolve_state};
+    use knobas_core::tone::Tone;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let declarations = knobas_source_teamcity::descriptor_template().payload_paths;
+    let state = |kind: &str| {
+        declarations
+            .iter()
+            .find(|paths| paths.kind == kind)
+            .map(|paths| paths.state.clone())
+            .unwrap_or_default()
+    };
+    let build_state = state("build");
+    let chip_of = |real_id: i64| {
+        let build = of_kind(&items, "build")
+            .into_iter()
+            .find(|i| i.entity.key == format!("build:{real_id}"))
+            .unwrap_or_else(|| panic!("build id {real_id} missing; got {:?}", keys(&items)));
+        resolve_state(&build.payload, &build_state)
+    };
+
+    let failed = chip_of(seeded.fixture_build(1187).real_id);
+    let passed = chip_of(seeded.fixture_build(412).real_id);
+    println!("SEEDED 1187 state chip: {failed:?}");
+    println!("SEEDED 412 state chip: {passed:?}");
+    assert_eq!(
+        failed,
+        Some(StateChip {
+            text: "FAILURE".to_owned(),
+            tone: Tone::Err
+        })
+    );
+    assert_eq!(
+        passed,
+        Some(StateChip {
+            text: "SUCCESS".to_owned(),
+            tone: Tone::Ok
+        })
+    );
+    for build in of_kind(&items, "build") {
+        assert!(
+            resolve_state(&build.payload, &build_state).is_some(),
+            "every seeded build draws a chip; {} drew none: state {} status {}",
+            build.entity,
+            build.payload["state"],
+            build.payload["status"]
+        );
+    }
+    let config_state = state("build_config");
+    for config in of_kind(&items, "build_config") {
+        assert_eq!(resolve_state(&config.payload, &config_state), None);
+    }
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides, over the configurations nothing in this file queues
 /// on while it runs.
