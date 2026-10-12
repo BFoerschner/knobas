@@ -18,10 +18,11 @@ use chrono::{DateTime, Utc};
 /// the whole upgrade plan, as it was for Jira's #345: a stored version-1 cursor
 /// stops parsing, and each Gitea source does one backfill (a full sync), which
 /// re-emits every branch and the commits inside `commits_per_repo` in the new
-/// shape and comes back with a version-2 cursor. Commits older than the budget
-/// are never fetched again, so they keep the old payload and `under:` misses
-/// them. That limit comes from the budget (ADR-0003 is why `commit` is
-/// non-exhaustive), and rewriting those rows would need its own ruling.
+/// shape and comes back with a version-2 cursor. Commits beyond the newest
+/// `commits_per_repo` are never fetched again, so they keep the old payload and
+/// `under:` misses them. That limit comes from the budget (which is why ADR-0003
+/// records `commit` as non-exhaustive), and rewriting those rows would need its
+/// own ruling.
 pub(crate) const CURSOR_VERSION: u32 = 2;
 
 /// Where the next run resumes, per repository.
