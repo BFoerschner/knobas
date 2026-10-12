@@ -6,8 +6,8 @@
  * it came from and when it was last seen"), which is why it is a tested
  * function and not five copies of a `Math.round` in five components.
  *
- * One copy lives outside the shell: a Gitea pull request's *Commits* rows
- * carry their age in a view's text (`crates/knobas-source-gitea/src/view/pr.rs`,
+ * One copy lives outside the shell: the Gitea views' commit and branch rows
+ * carry their age in a view's text (`crates/knobas-source-gitea/src/view.rs`,
  * `ago`), because a view row's meta is a string. Change both or neither.
  */
 
