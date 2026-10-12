@@ -4,10 +4,11 @@
 //! The rule has exactly one implementation -- the SQL `web_url_normalized!`
 //! expands -- and it is applied to both sides of the comparison, so a Rust
 //! twin written to check it would be a second rule to keep in step. That is
-//! the reasoning `ancestor_path.rs` records for `ancestor_path_read!`, and
-//! this file is its sibling: the normalisation's *semantics* are pinned here,
-//! against the database, and `crates/knobas-app/tests/it/url_resolve.rs` pins
-//! what the command built on it answers.
+//! the reasoning `ancestor_path.rs` recorded for #284's `ancestor_path_read!`
+//! (retired by #646), and this file is its sibling: the normalisation's
+//! *semantics* are pinned here, against the database, and
+//! `crates/knobas-app/tests/it/url_resolve.rs` pins what the command built on
+//! it answers.
 //!
 //! **Every assertion is written as a pair or as an absence.** A normalisation
 //! rule is a claim that two spellings collapse together, so the interesting

@@ -732,18 +732,18 @@ mod tests {
     /// contains a quoted string not named here is either a new static fragment
     /// nobody reviewed, or -- the case that matters -- user text that reached
     /// the SQL instead of the bind list.
-    /// The six after the first four are `ancestor_path_read!`'s (#284): the
-    /// payload keys it walks, the three `jsonb_typeof` comparands it guards
-    /// on, and the separator it joins a path with. They are `concat!`ed
-    /// `&'static str`s inside that macro, so no value can reach them -- and
-    /// naming them here is what keeps this list closed rather than widened.
+    /// The four after the first four are the path line's (#284, #596): the
+    /// three `jsonb_typeof` comparands its declared reads guard on, and the
+    /// separator it joins a path with. They are `concat!`ed `&'static str`s
+    /// inside `knobas_core`'s macros, so no value can reach them -- and naming
+    /// them here is what keeps this list closed rather than widened. (#284's
+    /// `ancestor_path_read!` also emitted `'ancestors'` and `'title'`; #646
+    /// retired it, and the list lost the two keys with it.)
     const ALLOWED_LITERALS: &[&str] = &[
         "english",
         ":*",
         "",
         " — ",
-        "ancestors",
-        "title",
         "array",
         "object",
         "string",

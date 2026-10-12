@@ -980,8 +980,9 @@ knobas-core	lib/knobas_core	write_queue::tests::the_open_states_are_the_three_th
 knobas-core	lib/knobas_core	write_queue::tests::the_states_and_reasons_are_exactly_what_the_migration_allows
 knobas-core	test/it	ancestor_path::a_blank_title_is_not_a_segment_and_the_rest_still_form_a_path
 knobas-core	test/it	ancestor_path::a_pages_ancestors_join_outermost_first
+knobas-core	test/it	ancestor_path::an_ancestors_object_is_one_parent_as_every_declared_parent_is
 knobas-core	test/it	ancestor_path::every_unusable_shape_misses_rather_than_guessing
-knobas-core	test/it	ancestor_path::the_ancestor_path_joins_on_the_one_separator
+knobas-core	test/it	ancestor_path::the_path_line_joins_on_the_one_separator
 knobas-core	test/it	checkout_scan::a_repo_url_finds_its_checkout
 knobas-core	test/it	checkout_scan::a_repository_with_no_clone_is_a_miss
 knobas-core	test/it	checkout_scan::a_submodule_inside_a_clone_is_not_a_second_checkout
@@ -1090,7 +1091,7 @@ knobas-core	test/it	payload_paths::a_mirrored_parent_answers_to_its_declared_nam
 knobas-core	test/it	payload_paths::a_parent_at_that_leads_to_neither_shape_misses_in_both
 knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust_in_both_shapes
 knobas-core	test/it	payload_paths::a_path_line_is_each_parents_first_name_in_sql_and_in_rust
-knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_the_row_falls_back_to_ancestors
+knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_reads_nothing_undeclared
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both
 knobas-core	test/it	payload_paths::the_first_parent_candidate_that_resolves_wins_in_both

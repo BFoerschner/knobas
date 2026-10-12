@@ -12,9 +12,9 @@
 //! and it is backed by an expression index, so the rule exists in the database
 //! whatever else happens. A Rust twin normalising the pasted side would be a
 //! second implementation of one rule, in a different language, that nothing
-//! forces to agree; `ancestor_path_read!` records the same reasoning in
-//! `payload.rs`, and `knobas-core/tests/it/ancestor_path.rs` is written against
-//! the database for it. So the pasted URL is bound as a parameter and put
+//! forces to agree; #284's `ancestor_path_read!` was written against the
+//! database for the same reason, and `knobas-core/tests/it/ancestor_path.rs`
+//! still pins the path line that replaced it (#646) the same way. So the pasted URL is bound as a parameter and put
 //! through [`web_url_normalized!`] too, and the two sides cannot disagree
 //! because they are the same characters.
 //!
@@ -87,7 +87,7 @@ macro_rules! web_url_tail_trimmed {
 /// `$url` is the URL expression as a **literal** (`"i.web_url"`, `"$1::text"`),
 /// because that is what `concat!` folds: every statement built with this is a
 /// `&'static str`, so nothing here can concatenate a value into SQL. The same
-/// convention `ancestor_path_read!` follows.
+/// convention every declared payload read in `payload.rs` follows.
 ///
 /// The expression is `IMMUTABLE` throughout -- `regexp_replace`, `substring`,
 /// `lower` and `||` all are -- which is what lets an index be built on it.

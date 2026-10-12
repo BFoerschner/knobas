@@ -237,8 +237,11 @@ pub struct EntityRow {
     /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
     /// as a contract §10.8 exception under that ticket's criterion 5).
     ///
-    /// `None` for every row whose record carries no readable `ancestors`,
-    /// which is every kind but a page today: the ADR-0007 **miss**, so a
+    /// Since #596 it is the **parent chain** the row's kind declares
+    /// (ADR-0018), drawn by `knobas_core::path_line_read!`; a page's chain is
+    /// its `ancestors`, which Confluence declares (#599, and #646 retired the
+    /// undeclared ancestor read). `None` for every row whose kind declares no
+    /// parent or whose declared parent misses: the ADR-0007 **miss**, so a
     /// launcher row shows no path rather than a wrong one, and nothing
     /// downstream has to ask what kind it is holding.
     ///
