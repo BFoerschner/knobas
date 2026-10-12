@@ -19,6 +19,8 @@ const ID = "teamcity:buildType:Payout_IntegrationTests";
 const calls: string[] = [];
 const queued: WriteOpPayload[] = [];
 let submitFails = false;
+/** When set, the next `submit_write` answers once this resolves. */
+let submitGate: Promise<void> | null = null;
 /** When set, `pending_writes` fails once, as an IPC call can. */
 let pendingFailsOnce = false;
 /** What `pending_writes` answers next: the open rows. */
@@ -40,7 +42,10 @@ vi.mock("../ipc/entity", () => ({
     calls.push("submit_write");
     if (submitFails) return Promise.reject({ code: "invalid", message: "no such op", source_id: null });
     queued.push(payload);
-    return Promise.resolve({ ...row("pending"), id: nextId++ });
+    const write = { ...row("pending"), id: nextId++ };
+    const gate = submitGate;
+    submitGate = null;
+    return gate ? gate.then(() => write) : Promise.resolve(write);
   },
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
@@ -234,6 +239,7 @@ beforeEach(async () => {
   open = [];
   viewGate = null;
   pendingGate = null;
+  submitGate = null;
   nextId = 41;
   toasts.items = [];
   views = [parameters("5"), parameters("7")];
@@ -458,6 +464,34 @@ test("a row saved before the queue's first answer keeps its own write's mark", a
 
   // The open-time read lands late, with only the older write in it.
   release();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
+  expect(screen.value("env.SEPA_RETRIES")).toBe("8");
+  screen.done();
+});
+
+test("a row whose save is still being queued when the queue's first answer lands keeps its save", async () => {
+  // The queue the panel opens over: an older refused edit of the row.
+  open = [setting(31, "refused", "env.SEPA_RETRIES", "6", "first try")];
+  let answerQueue!: () => void;
+  pendingGate = new Promise((resolve) => (answerQueue = resolve));
+  views = [parameters("5")];
+  const screen = render();
+  await settle();
+
+  // The reader saves the row; the write is not on the queue yet.
+  let answerSave!: () => void;
+  submitGate = new Promise((resolve) => (answerSave = resolve));
+  await screen.edit("env.SEPA_RETRIES", "8");
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("saving…");
+
+  // The open-time read lands while the save is in flight: the older write does not take the row.
+  answerQueue();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("saving…");
+
+  open = [setting(31, "refused", "env.SEPA_RETRIES", "6", "first try"), setting(41, "pending", "env.SEPA_RETRIES", "8", null)];
+  answerSave();
   await settle();
   expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
   expect(screen.value("env.SEPA_RETRIES")).toBe("8");

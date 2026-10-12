@@ -283,7 +283,7 @@
    * write of a settings block's op, aimed at the block's entity and naming one
    * of its rows, marks that row and is watched as a fresh save is. The newest
    * write for a row wins, as a second save would. A row saved from this panel
-   * meanwhile keeps its own write.
+   * meanwhile keeps its own write, even one `submit_write` has not answered.
    */
   async function adoptQueuedSettings(view: SourceViewData, mine: number) {
     const blocks = view.sections.flatMap((s) => s.blocks).filter((b) => b.type === "settings");
@@ -308,7 +308,8 @@
       }
     }
     for (const [name, { id, mark }] of Object.entries(found)) {
-      if (settingWrites[name] !== undefined) continue;
+      // A row saved from this panel meanwhile, queued or still being queued, keeps its save.
+      if (settingWrites[name] !== undefined || settingMarks[name] !== undefined) continue;
       settingWrites[name] = id;
       settingMarks[name] = mark;
     }
