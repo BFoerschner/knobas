@@ -16,13 +16,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-# The pin that holds `knobas_core::recorded_parent_key!` to this crate's
-# `ticket` parent candidates (#649) runs the macro's SQL over mirrored rows, so
-# it needs a real PostgreSQL: the embedded test server `test-util` exposes. It
-# lives here rather than in `knobas-core` because it reads this crate's
-# descriptor, and `knobas-core` depending on an adapter would be a cycle.
-knobas-db = { path = "../knobas-db", features = ["test-util"] }
-sqlx.workspace = true
 # The HTTP-level mock the exit criteria are certified against (interfaces §5).
 # A dev-dependency only: nothing in the shipped adapter knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }

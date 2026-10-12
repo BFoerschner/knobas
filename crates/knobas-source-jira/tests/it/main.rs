@@ -8,4 +8,3 @@
 
 mod field_discovery;
 mod mockd;
-mod parent_key_pin;

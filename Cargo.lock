@@ -2997,14 +2997,12 @@ dependencies = [
  "async-trait",
  "chrono",
  "knobas-core",
- "knobas-db",
  "knobas-http",
  "knobas-mockd",
  "knobas-source",
  "reqwest",
  "serde",
  "serde_json",
- "sqlx",
  "tokio",
 ]
 

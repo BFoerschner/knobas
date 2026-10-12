@@ -3,15 +3,19 @@
 //!
 //! Contexts read a ticket's parent through `knobas_core::recorded_parent_key!`,
 //! a `coalesce` written by hand: `fields.parent.key`, then the classic
-//! `epic.key` (#641). `under:` reads the same relation through the descriptor's
-//! `ParentPath` candidates, in the order the deputy's ruling of 2026-10-12 on
-//! #598 set. Until this file only the macro's doc comment kept the two in
+//! `epic.key` (#641). `under:` resolves the same relation through the
+//! descriptor's `ParentPath` candidates, in the order the deputy's ruling of
+//! 2026-10-12 on #598 set: the walk `sync.item_parent` stores (ADR-0019) is
+//! `declared_parent_names!` over those candidates, and `resolve_parents` is
+//! its Rust twin. Until this file only the macro's doc comment kept the two in
 //! step ("the order is what the two are held to"). This is the pin, in the
 //! shape of `knobas-core`'s `tests/it/payload_paths.rs`: the macro's arms are
 //! compared with the declaration, and the SQL is run.
 //!
-//! It lives in this crate because it reads this crate's descriptor;
-//! `knobas-core` cannot depend on an adapter without a cycle.
+//! It lives here, beside `item_parent.rs` and `under_jira.rs`, because it reads
+//! the Jira descriptor: `knobas-core` cannot depend on an adapter without a
+//! cycle, and this crate already tests against that descriptor and a real
+//! PostgreSQL, so the pin adds no dependency anywhere.
 //!
 //! The two rules are not the same rule, by design, and the last test states
 //! where they part: `declared_parents!` takes the first candidate that is an
@@ -198,6 +202,7 @@ async fn the_first_candidate_carrying_a_key_wins_in_sql_and_for_under() {
         "the pin is about an order: {candidates:?}"
     );
     for first in 0..candidates.len() {
+        // The item's own key, which no candidate may answer with.
         let mut payload = serde_json::json!({ "key": "PAY-999" });
         for (later, candidate) in candidates.iter().enumerate().skip(first) {
             set_at(&mut payload, &key_path(candidate), &format!("PAY-{later}"));
@@ -238,14 +243,15 @@ async fn a_keyless_fields_parent_stops_under_and_falls_through_to_epic_for_conte
         Some("PAY-200")
     );
 
-    // `under:`, in Rust: the first candidate is an object, so it is the parent,
-    // and it answers to nothing.
+    // `under:`'s resolver, in Rust: the first candidate is an object, so it
+    // is the parent, and it answers to nothing.
     let under = resolve_parents(&payload, &ticket_candidates());
     assert_eq!(under.len(), 1, "{under:?}");
     assert_eq!(under[0].kind, KIND_TICKET);
     assert!(under[0].names.is_empty(), "{under:?}");
 
-    // `under:`, in SQL: the same one parent, and no name for it to match.
+    // `under:`'s walk, in SQL (what `sync.item_parent` stores): the same one
+    // parent, and no name for it to match.
     const PARENTS: &str = concat!(
         "select p.kind from sync.live_item i cross join lateral ",
         knobas_core::declared_parents!("$1"),

@@ -17,6 +17,7 @@ mod home;
 mod item_parent;
 mod lists;
 mod lists_no_identity;
+mod parent_key_pin;
 mod path_line;
 mod ranking;
 mod search;
