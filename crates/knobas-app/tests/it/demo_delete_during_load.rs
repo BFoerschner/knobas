@@ -185,6 +185,12 @@ where
         None,
     );
     demo::load_mirror_of(&pool, &seed).await.unwrap();
+    assert_eq!(
+        mirrored_items(&pool, &id).await,
+        (rewritten.len() + untouched.len()) as i64,
+        "a demo load of a source that exists purged its own mirror (#154: a source under the \
+         id wins)"
+    );
 
     let fresh = keys("NEW", 0..batch);
     let late = keys("LATE", 0..3);
