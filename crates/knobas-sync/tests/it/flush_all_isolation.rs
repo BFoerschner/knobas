@@ -43,7 +43,7 @@ fn code_only(source: &str) -> String {
         .join("\n")
 }
 
-fn names_a_wait_reason(code: &str) -> bool {
+fn names_why_a_write_waits(code: &str) -> bool {
     WAIT_REASON.iter().any(|needle| code.contains(needle))
 }
 
@@ -59,7 +59,7 @@ fn flushes_everything(code: &str) -> bool {
 /// `the_rule_actually_rejects_a_flush_beside_a_wait_reason`.
 fn offends(source: &str) -> bool {
     let code = code_only(source);
-    names_a_wait_reason(&code) && flushes_everything(&code)
+    names_why_a_write_waits(&code) && flushes_everything(&code)
 }
 
 #[test]
@@ -67,8 +67,8 @@ fn no_file_that_asserts_a_wait_reason_flushes_every_source() {
     let directory = tests_it();
 
     let mut scanned = 0_usize;
-    let mut name_a_reason: Vec<String> = Vec::new();
-    let mut flush: Vec<String> = Vec::new();
+    let mut names_a_reason: Vec<String> = Vec::new();
+    let mut flushes_all: Vec<String> = Vec::new();
     let mut offenders: Vec<String> = Vec::new();
     for path in rust_files(&directory) {
         let name = path
@@ -79,12 +79,14 @@ fn no_file_that_asserts_a_wait_reason_flushes_every_source() {
         scanned += 1;
         let source = std::fs::read_to_string(&path).expect("a readable source file");
         let code = code_only(&source);
-        if names_a_wait_reason(&code) {
-            name_a_reason.push(name.clone());
+        if names_why_a_write_waits(&code) {
+            names_a_reason.push(name.clone());
         }
         if flushes_everything(&code) {
-            flush.push(name.clone());
+            flushes_all.push(name.clone());
         }
+        // Through `offends` rather than the two lists above, so the scan runs
+        // the function the self-test below pins.
         if offends(&source) {
             offenders.push(name);
         }
@@ -96,7 +98,7 @@ fn no_file_that_asserts_a_wait_reason_flushes_every_source() {
          {offenders:?}\n\
          `flush_all` (and the real scheduler, whose tick calls it) fails to build \
          the other tests' sources and re-reasons their rows `unauthorized`, so a \
-         wait-reason assertion in the same database flakes under load (#609). \
+         wait-reason assertion in the same database flakes under load (#609, #620). \
          Move the flushing test to `write_queue_flush_all.rs`."
     );
 
@@ -106,14 +108,16 @@ fn no_file_that_asserts_a_wait_reason_flushes_every_source() {
         "the scan read only {scanned} files -- it is not looking at tests/it/"
     );
     assert!(
-        name_a_reason.iter().any(|name| name == "write_queue.rs"),
-        "write_queue.rs no longer names a wait reason in code ({name_a_reason:?}) \
-         -- the needle no longer matches"
+        names_a_reason.iter().any(|name| name == "write_queue.rs"),
+        "write_queue.rs no longer names a wait reason in code ({names_a_reason:?}) \
+         -- the file was renamed, or the needle no longer matches"
     );
     assert!(
-        flush.iter().any(|name| name == "write_queue_flush_all.rs"),
-        "write_queue_flush_all.rs no longer flushes every source in code ({flush:?}) \
-         -- the needle no longer matches"
+        flushes_all
+            .iter()
+            .any(|name| name == "write_queue_flush_all.rs"),
+        "write_queue_flush_all.rs no longer flushes every source in code ({flushes_all:?}) \
+         -- the file was renamed, or the needle no longer matches"
     );
 }
 
