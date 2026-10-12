@@ -367,17 +367,81 @@ export interface Router {
    * route names.
    */
   replace(route: Route): void;
-  /** One rung of the unwind ladder: back to the room. */
+  /**
+   * One rung of the unwind ladder: back to the room.
+   *
+   * **Not history's back.** `Esc` closes things (#693 keeps that meaning);
+   * {@link goBack} is the browser's back, to the previous address.
+   */
   back(): void;
+  /** Whether history holds an address before this one, in this session (#693). */
+  readonly canGoBack: boolean;
+  /** Whether history holds an address after this one, in this session (#693). */
+  readonly canGoForward: boolean;
+  /** The previous address, as a browser's back does. A no-op at the start. */
+  goBack(): void;
+  /** The next address, after a {@link goBack}. A no-op at the end. */
+  goForward(): void;
   /** Install the `hashchange` listener. Returns its teardown. */
   start(): () => void;
 }
 
+/**
+ * The key a history entry carries its place under (#693).
+ *
+ * The webview answers `history.length` and nothing about where in it the
+ * reader stands, so whether *forward* goes anywhere is the router's own
+ * bookkeeping: each entry is stamped with this session's id and its step, and
+ * a traversal reads the step back off the entry it landed on. The session id
+ * keeps a reload's older stamps from being read as this session's steps.
+ */
+const STAMP = "knobas:history";
+
+interface Stamp {
+  session: string;
+  step: number;
+}
+
+function stampOf(value: unknown): Stamp | null {
+  if (typeof value !== "object" || value === null) return null;
+  const stamp = (value as Record<string, unknown>)[STAMP];
+  if (typeof stamp !== "object" || stamp === null) return null;
+  const { session, step } = stamp as Record<string, unknown>;
+  return typeof session === "string" && typeof step === "number" ? { session, step } : null;
+}
+
 export function createRouter(): Router {
-  const state = $state<{ route: Route; ctx: string }>({
+  const state = $state<{ route: Route; ctx: string; step: number; last: number }>({
     route: parseHash(location.hash),
     ctx: DEFAULT_CTX,
+    // Where the reader stands, and the furthest step forward still reachable.
+    step: 0,
+    last: 0,
   });
+  const session = Math.random().toString(36).slice(2);
+
+  /** Write this session's step onto the entry the reader is on. */
+  function stamp(step: number) {
+    const current: unknown = history.state;
+    const kept = typeof current === "object" && current !== null ? current : {};
+    history.replaceState({ ...kept, [STAMP]: { session, step } }, "");
+  }
+
+  /**
+   * Learn where a traversal landed. An entry this session stamped says so;
+   * one it did not (an address typed or set from outside the router) is a
+   * new step, which is what it was when the webview made it.
+   */
+  function locate() {
+    const found = stampOf(history.state);
+    if (found !== null && found.session === session) {
+      state.step = found.step;
+      return;
+    }
+    state.step += 1;
+    state.last = state.step;
+    stamp(state.step);
+  }
 
   function read() {
     const next = parseHash(location.hash, state.ctx);
@@ -389,6 +453,7 @@ export function createRouter(): Router {
   }
 
   read();
+  stamp(0);
 
   return {
     get route() {
@@ -397,8 +462,25 @@ export function createRouter(): Router {
     get ctx() {
       return state.ctx;
     },
+    get canGoBack() {
+      return state.step > 0;
+    },
+    get canGoForward() {
+      return state.step < state.last;
+    },
     go(hash: string) {
+      const before = location.href;
       if (location.hash !== hash) location.hash = hash;
+      // Compared after the assignment, because the webview normalises a hash
+      // and an assignment that changes nothing makes no entry.
+      if (location.href !== before) {
+        // A new address is one step on, and whatever was ahead of the old one
+        // is gone, as a browser drops it. Stamped before the webview's own
+        // `hashchange` arrives, so that event reads this step back.
+        state.step += 1;
+        state.last = state.step;
+        stamp(state.step);
+      }
       // Read eagerly rather than waiting for `hashchange`, which browsers fire
       // on a later task: without this every navigation would render a frame
       // late, and assigning an *unchanged* hash fires no event at all, so a
@@ -409,7 +491,11 @@ export function createRouter(): Router {
     },
     replace(route: Route) {
       const hash = hashFor(route);
-      if (location.hash !== hash) location.replace(hash);
+      if (location.hash !== hash) {
+        location.replace(hash);
+        // The replaced entry comes back unstamped; it is the same step.
+        stamp(state.step);
+      }
       // Set before `read()` rather than left to it: the hash may be the same
       // detail address as before, which `read()` parses against whatever room
       // is remembered.
@@ -419,11 +505,26 @@ export function createRouter(): Router {
     back() {
       this.go(`#/ctx/${state.ctx}`);
     },
+    goBack() {
+      if (state.step > 0) history.back();
+    },
+    goForward() {
+      if (state.step < state.last) history.forward();
+    },
     start() {
-      const onhashchange = () => read();
-      window.addEventListener("hashchange", onhashchange);
+      // Both events, because a traversal fires both and a typed address fires
+      // `hashchange` alone; `locate` and `read` are idempotent per entry.
+      const onchange = () => {
+        locate();
+        read();
+      };
+      window.addEventListener("hashchange", onchange);
+      window.addEventListener("popstate", onchange);
       read();
-      return () => window.removeEventListener("hashchange", onhashchange);
+      return () => {
+        window.removeEventListener("hashchange", onchange);
+        window.removeEventListener("popstate", onchange);
+      };
     },
   };
 }

@@ -23,6 +23,12 @@
  * the detail on purpose -- a detail open over a maximised tile closes first,
  * and the tile is still there for the next press.
  *
+ * `⌘[` / `⌘]` (and `⌘←` / `⌘→`) are history's back and forward (#693), and
+ * so are the mouse's own back and forward buttons. They are not rungs either:
+ * `Esc` closes things, and back goes to the previous address, which may be
+ * the detail `Esc` just closed. Outside a text field only, because a field
+ * owns those keys (outdent, start of line).
+ *
  * `⌘T` is the timer (#278). It is not part of the ladder: it is a verb, not an
  * unwind, and it acts wherever the reader is.
  */
@@ -103,6 +109,13 @@ export interface KeyHandlers {
  */
 export function installKeys(router: Router, handlers: KeyHandlers): () => void {
   function onkeydown(event: KeyboardEvent) {
+    const step = historyStep(event);
+    if (step !== null) {
+      event.preventDefault();
+      if (step === "back") router.goBack();
+      else router.goForward();
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       handlers.openLauncher();
@@ -140,6 +153,51 @@ export function installKeys(router: Router, handlers: KeyHandlers): () => void {
     // Rung 5: in a room with nothing open, Esc does nothing at all.
   }
 
+  /**
+   * The mouse's back (3) and forward (4) buttons. Navigated on `mouseup`, the
+   * moment a browser does; every event of the press is `preventDefault`ed so
+   * the webview adds no navigation or selection of its own.
+   */
+  function onmouse(event: MouseEvent) {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    if (event.type !== "mouseup") return;
+    if (event.button === 3) router.goBack();
+    else router.goForward();
+  }
+
   window.addEventListener("keydown", onkeydown);
-  return () => window.removeEventListener("keydown", onkeydown);
+  for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
+    window.addEventListener(type, onmouse);
+  }
+  return () => {
+    window.removeEventListener("keydown", onkeydown);
+    for (const type of ["mousedown", "mouseup", "auxclick"] as const) {
+      window.removeEventListener(type, onmouse);
+    }
+  };
+}
+
+/** Whether a key press is history's back or forward, or neither (#693). */
+function historyStep(event: KeyboardEvent): "back" | "forward" | null {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return null;
+  const step =
+    event.key === "[" || event.key === "ArrowLeft"
+      ? "back"
+      : event.key === "]" || event.key === "ArrowRight"
+        ? "forward"
+        : null;
+  if (step === null || inTextField(event.target)) return null;
+  return step;
+}
+
+/** A field that types: its keys are its own. */
+function inTextField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (!(target instanceof HTMLInputElement)) return false;
+  return !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file"].includes(
+    target.type,
+  );
 }
