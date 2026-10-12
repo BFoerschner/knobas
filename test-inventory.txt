@@ -2470,6 +2470,7 @@ knobas-source-teamcity	test/it	view::a_build_configuration_opens_on_its_overview
 knobas-source-teamcity	test/it	view::a_build_draws_no_view_yet
 knobas-source-teamcity	test/it	view::a_configuration_id_that_is_not_one_is_refused_unsent
 knobas-source-teamcity	test/it	view::a_configuration_the_server_does_not_know_is_its_404
+knobas-source-teamcity	test/it	view::an_unknown_trigger_type_shows_its_type_and_no_properties
 knobas-source-teamcity	test/it	view::one_section_is_read_without_the_others
 knobas-source-teamcity	test/it	view::parameters_mark_the_inherited_and_never_carry_a_passwords_value
 knobas-source-teamcity	test/it	view::steps_show_their_runner_and_their_script
