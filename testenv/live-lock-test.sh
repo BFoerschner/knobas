@@ -208,7 +208,19 @@ session() { # session <name> <product> [<env>...]
     . "$here/live-lib.sh"
     LIVE_TESTENV=$fake
     live_session "$product" "$name"
-  ) >"$scratch/$name.out" 2>&1 && echo 0 || echo $?
+  ) >"$scratch/$name.out" 2>&1 &
+  # Bounded, as the takers are: a mutant that waits forever is a failure here,
+  # not a hung gate.
+  local pid=$! i
+  for ((i = 0; i < 200; i++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      if wait "$pid"; then echo 0; else echo $?; fi
+      return
+    fi
+    sleep 0.1
+  done
+  kill "$pid" 2>/dev/null || true
+  echo timeout
 }
 rc=$(session queued teamcity STUB_RUNNING="knobas-teamcity knobas-teamcity-agent knobas-jira" KNOBAS_LIVE_LOCK_WAIT=1)
 out=$(cat "$scratch/queued.out")
