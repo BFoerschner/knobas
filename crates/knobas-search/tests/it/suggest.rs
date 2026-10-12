@@ -373,12 +373,12 @@ async fn source(pool: &sqlx::PgPool, id: &str, enabled: bool) {
 }
 
 /// The offered source ids that carry this test's token, in the order offered.
-fn sources_of(suggestions: &FilterSuggestions, t: &str) -> Vec<String> {
+fn sources_of<'a>(suggestions: &'a FilterSuggestions, t: &str) -> Vec<&'a str> {
     suggestions
         .sources
         .iter()
         .filter(|s| s.id.contains(t))
-        .map(|s| s.id.clone())
+        .map(|s| s.id.as_str())
         .collect()
 }
 
@@ -415,7 +415,7 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     .await;
 
     let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
-    assert_eq!(sources_of(&suggestions, &t), [synced.clone()]);
+    assert_eq!(sources_of(&suggestions, &t), [synced.as_str()]);
     for s in &suggestions.sources {
         leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
     }
@@ -430,7 +430,10 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     .await;
 
     let suggestions = searcher(&pool).filter_suggestions().await.unwrap();
-    assert_eq!(sources_of(&suggestions, &t), [synced, unsynced]);
+    assert_eq!(
+        sources_of(&suggestions, &t),
+        [synced.as_str(), unsynced.as_str()]
+    );
     for s in &suggestions.sources {
         leads_somewhere(&searcher(&pool), &format!("source:{}", s.id)).await;
     }
