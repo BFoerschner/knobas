@@ -650,6 +650,7 @@ knobas-app	test/it	search_ipc::errors_carry_a_code_the_frontend_can_branch_on
 knobas-app	test/it	search_ipc::every_estate_list_badges_until_it_is_opened
 knobas-app	test/it	search_ipc::launcher_home_counts_the_pending_writes
 knobas-app	test/it	search_ipc::launcher_home_reports_source_health_beside_the_lists
+knobas-app	test/it	search_ipc::moving_an_asset_moves_what_under_returns
 knobas-app	test/it	search_ipc::no_markup_reaches_the_wire_in_a_snippet
 knobas-app	test/it	search_ipc::only_a_certificate_inside_the_window_is_expiring
 knobas-app	test/it	search_ipc::the_asset_prefix_answers_from_the_estate_with_its_path
@@ -1567,10 +1568,12 @@ knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents
 knobas-search	test/it	under::a_saved_list_holding_under_runs_it
+knobas-search	test/it	under::coverage_does_not_name_the_estate_as_unable_to_answer
 knobas-search	test/it	under::coverage_names_a_source_that_declares_no_parent
 knobas-search	test/it	under::repeated_values_are_a_union_and_an_unmatched_one_is_unknown
 knobas-search	test/it	under::under_a_repo_returns_its_branches_prs_and_commits_and_the_repo
 knobas-search	test/it	under::under_a_repo_with_words_finds_the_commit_that_mentions_them
+knobas-search	test/it	under::under_an_asset_returns_its_whole_subtree_and_the_asset
 knobas-search	test/it	vocab::a_blank_username_is_nobody
 knobas-search	test/it	vocab::a_disabled_source_is_unnameable_but_still_in_the_vocabulary
 knobas-search	test/it	vocab::aliases_resolve_across_instances_and_identity_comes_from_the_configs

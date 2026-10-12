@@ -708,6 +708,98 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     );
 }
 
+/// **Moving an asset moves what `under:` returns, with nothing stale** (#600).
+///
+/// Through the store's own `create`, `create_route` and `move_to`, because a
+/// move is the store's write: `under:` reads the `parent_id` it writes, and the
+/// path line reads the `path_text` it rewrites for the whole subtree. A VM with
+/// a container and a route moves from one site to another. The next search
+/// finds all three under the new site and none of them under the old one, and
+/// each row's path line names the new site.
+#[tokio::test]
+async fn moving_an_asset_moves_what_under_returns() {
+    use knobas_app::assets::Visibility;
+
+    let pool = pool().await;
+    let t = token("move");
+    let ids = |answer: &knobas_search::SearchResponse| {
+        let mut out: Vec<String> = answer
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .map(|hit| hit.row.entity_id.clone())
+            .collect();
+        out.sort();
+        out
+    };
+    let create = |parent: Option<String>, type_id: &'static str, name: String| {
+        let pool = pool.clone();
+        async move {
+            knobas_app::assets::create(&pool, parent.as_deref(), type_id, &name, &[])
+                .await
+                .unwrap()
+                .value
+        }
+    };
+
+    let old = create(None, "site", format!("old-{t}")).await;
+    let new = create(None, "site", format!("new-{t}")).await;
+    let vm = create(Some(old.id.clone()), "vm", format!("vm-{t}")).await;
+    let pg = create(Some(vm.id.clone()), "container", format!("pg-{t}")).await;
+    let route = knobas_app::assets::create_route(
+        &pool,
+        &pg.id,
+        &format!("postgres-{t}"),
+        "http://127.0.0.1:5432/",
+        None,
+        Visibility::Internal,
+        &[],
+    )
+    .await
+    .unwrap()
+    .value;
+    let mut moved = vec![vm.id.clone(), pg.id.clone(), route.id.clone()];
+    moved.sort();
+
+    let before = search_inner(&pool, query(&format!("under:old-{t}")))
+        .await
+        .unwrap();
+    let mut expected = [moved.clone(), vec![old.id.clone()]].concat();
+    expected.sort();
+    assert_eq!(ids(&before), expected);
+
+    knobas_app::assets::move_to(&pool, &vm.id, Some(&new.id))
+        .await
+        .unwrap();
+
+    let after_old = search_inner(&pool, query(&format!("under:old-{t}")))
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(&after_old),
+        std::slice::from_ref(&old.id),
+        "nothing stale under the old site"
+    );
+
+    let after_new = search_inner(&pool, query(&format!("under:new-{t}")))
+        .await
+        .unwrap();
+    let mut expected = [moved, vec![new.id.clone()]].concat();
+    expected.sort();
+    assert_eq!(ids(&after_new), expected);
+    let path = |id: &str| {
+        after_new
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .find(|hit| hit.row.entity_id == id)
+            .and_then(|hit| hit.row.path.clone())
+    };
+    assert_eq!(path(&vm.id), Some(format!("new-{t}")));
+    assert_eq!(path(&pg.id), Some(format!("new-{t} / vm-{t}")));
+    assert_eq!(path(&route.id), Some(format!("new-{t} / vm-{t} / pg-{t}")));
+}
+
 // ---------------------------------------------------------------------------
 // The three estate smart lists (#504)
 // ---------------------------------------------------------------------------

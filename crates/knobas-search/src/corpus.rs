@@ -66,6 +66,11 @@
 //! match, so "pve-02" still ranks the hypervisor itself first and its
 //! containers under it.
 //!
+//! (That is about *ranking* by ancestry on every keystroke. `under:` is the
+//! other question -- which rows sit beneath a named asset -- and it does walk
+//! `parent_id` per query, once per statement and only for a query that typed
+//! `under:`: [`estate_subtree!`] says why that is the right trade there.)
+//!
 //! Then M4's whole search change is:
 //!
 //! ```ignore
@@ -168,7 +173,45 @@ pub struct Corpus {
     /// For the mirror it is the two `knobas_core::payload` reads and nothing
     /// else (the deputy's ruling of 2026-10-11 on #594): the row sits beneath
     /// a parent answering to a value, or is that parent, mirrored.
+    ///
+    /// For the estate it is no payload read at all (#600): an asset's parent
+    /// is its `parent_id` column and a route's is the asset exposing it
+    /// (ADR-0014), so both read [`estate_subtree!`]'s walk over those columns.
     pub(crate) under: Option<&'static str>,
+}
+
+/// The ids of every asset `under:` names and of every asset beneath one, at
+/// any depth: a parenthesised subquery over `ud.v`, the lowercased values.
+///
+/// **Walked down from the named assets, per query, over `parent_id`** -- the
+/// column ADR-0014 makes an asset's parent, and the one a move writes. Not
+/// over `path_text`: that is a line of *names* for a reader, two siblings may
+/// share a name, and a name in it says nothing about which asset it was. And
+/// not kept anywhere: a move changes what this returns on the next keystroke
+/// because there is nothing to go stale.
+///
+/// An asset answers to its **name**, exactly and ignoring case (spec #591),
+/// and the walk starts *at* it, so the asset itself is in the set -- as the
+/// mirror returns a parent it holds. `union`, not `union all`: the store
+/// refuses a move that makes a cycle, and this terminates even if a row ever
+/// got one some other way. It reads `ud.v` and nothing of the outer row, so
+/// it is one walk per statement and not one per asset. Measured on
+/// `testing::seed_estate`'s upper bound (3,303 assets, 1,500 routes) with a
+/// site named by `under:`: all 1,601 rows of its subtree in 13 ms at p90, and
+/// 18 ms with a word beside the filter (#600).
+///
+/// What an asset answers to is spelled twice, here and in
+/// `crate::under`'s `KNOWN_SQL`, which reports a value no asset is called as
+/// an unknown token. Change one and the other must follow.
+macro_rules! estate_subtree {
+    () => {
+        concat!(
+            "(with recursive sub(id) as (",
+            "select x.id from knobas.asset x where lower(x.name) = any(ud.v)",
+            " union select c.id from knobas.asset c join sub on c.parent_id = sub.id",
+            ") select sub.id from sub)"
+        )
+    };
 }
 
 /// The synced mirror: M1's only corpus.
@@ -298,9 +341,9 @@ pub const ASSET: Corpus = Corpus {
     synced_at: "a.updated_at",
     path: "nullif(a.path_text, '')",
     scope: None,
-    // Knobas' own rows declare no parent through a payload. An asset's parent
-    // is a column (ADR-0014), and reading it for `under:` is #600.
-    under: None,
+    // Knobas' own rows declare no parent through a payload: an asset's parent
+    // is its `parent_id` column (ADR-0014), read directly (#600).
+    under: Some(concat!("a.id in ", estate_subtree!())),
 };
 
 /// Routes: what an asset is reachable at, and the second corpus of the estate
@@ -377,9 +420,9 @@ pub const ROUTE: Corpus = Corpus {
     synced_at: "r.updated_at",
     path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
     scope: None,
-    // Knobas' own rows declare no parent through a payload. An asset's parent
-    // is a column (ADR-0014), and reading it for `under:` is #600.
-    under: None,
+    // A route's parent is the asset exposing it (ADR-0014): it is beneath
+    // whatever that asset is beneath, and beneath the asset itself (#600).
+    under: Some(concat!("r.asset_id in ", estate_subtree!())),
 };
 
 /// Every corpus the launcher searches.

@@ -386,3 +386,203 @@ async fn a_saved_list_holding_under_runs_it() {
         .unwrap();
     assert_eq!(ids(&opened), sorted(ours));
 }
+
+// ---------------------------------------------------------------------------
+// The estate (#600)
+// ---------------------------------------------------------------------------
+//
+// An asset's parent is its `parent_id` column and a route's is the asset
+// exposing it (ADR-0014): fields knobas keeps, not declared paths, so these are
+// seeded straight into `knobas.asset` and `knobas.route` -- with the
+// `path_text` the store would have written, since keeping it is
+// `knobas_app::assets`' job and that crate depends on this one. The store's
+// own move is witnessed through it, in `knobas-app`'s `search_ipc.rs`.
+
+/// An asset and its entity row, under `parent` and at `path_text`.
+async fn asset(pool: &sqlx::PgPool, name: &str, parent: Option<&str>, path_text: &str) -> String {
+    let id = format!("asset:{}", uuid::Uuid::new_v4().simple());
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.asset (id, parent_id, type_id, name, path_text)
+         values ($1,$2,'vm',$3,$4)",
+    )
+    .bind(&id)
+    .bind(parent)
+    .bind(name)
+    .bind(path_text)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// A route `asset_id` exposes.
+async fn route(pool: &sqlx::PgPool, asset_id: &str, name: &str) -> String {
+    let id = format!("route:{}", uuid::Uuid::new_v4().simple());
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'route',$2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.route (id, asset_id, name, url) values ($1,$2,$3,'http://x/')")
+        .bind(&id)
+        .bind(asset_id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
+/// The path line each hit carries, by entity id.
+fn paths(response: &SearchResponse) -> std::collections::BTreeMap<String, Option<String>> {
+    response
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter())
+        .map(|h| (h.row.entity_id.clone(), h.row.path.clone()))
+        .collect()
+}
+
+/// `under:hetzner-1` is the whole subtree at any depth -- children,
+/// grandchildren, the routes any of them expose -- and the asset itself, by
+/// its name in any case. A sibling subtree and its routes stay out, and so do
+/// the asset's ancestors.
+#[tokio::test]
+async fn under_an_asset_returns_its_whole_subtree_and_the_asset() {
+    let pool = pool().await;
+    let t = token();
+    let site = format!("Site-{t}");
+    let host = format!("Hetzner-1-{t}");
+    let root = asset(&pool, &site, None, "").await;
+    let hetzner = asset(&pool, &host, Some(&root), &site).await;
+    let vm = asset(
+        &pool,
+        &format!("vm-{t}"),
+        Some(&hetzner),
+        &format!("{site} / {host}"),
+    )
+    .await;
+    let pg = asset(
+        &pool,
+        &format!("pg-{t}"),
+        Some(&vm),
+        &format!("{site} / {host} / vm-{t}"),
+    )
+    .await;
+    let on_host = route(&pool, &hetzner, &format!("console-{t}")).await;
+    let on_pg = route(&pool, &pg, &format!("postgres-{t}")).await;
+    // The sibling: beside hetzner-1 under the same site, with a route of its own.
+    let other = asset(&pool, &format!("hetzner-2-{t}"), Some(&root), &site).await;
+    route(&pool, &other, &format!("elsewhere-{t}")).await;
+
+    let ours = sorted(vec![
+        hetzner.clone(),
+        vm.clone(),
+        pg.clone(),
+        on_host.clone(),
+        on_pg.clone(),
+    ]);
+    for raw in [
+        format!("under:{host}"),
+        format!("under:{}", host.to_lowercase()),
+        format!("UNDER:{}", host.to_uppercase()),
+    ] {
+        let response = searcher(&pool).search(q(&raw)).await.unwrap();
+        assert_eq!(ids(&response), ours, "{raw}");
+        assert!(
+            response.interpreted.unknown_tokens.is_empty(),
+            "{raw} names an asset and is not unknown: {:?}",
+            response.interpreted.unknown_tokens
+        );
+    }
+
+    // Each row carries its ancestor chain; a route carries its asset's chain
+    // and the asset itself, which is where it sits.
+    let response = searcher(&pool)
+        .search(q(&format!("under:{host}")))
+        .await
+        .unwrap();
+    let lines = paths(&response);
+    assert_eq!(lines[&hetzner].as_deref(), Some(site.as_str()));
+    assert_eq!(
+        lines[&vm].as_deref(),
+        Some(format!("{site} / {host}").as_str())
+    );
+    assert_eq!(
+        lines[&pg].as_deref(),
+        Some(format!("{site} / {host} / vm-{t}").as_str())
+    );
+    assert_eq!(
+        lines[&on_host].as_deref(),
+        Some(format!("{site} / {host}").as_str())
+    );
+    assert_eq!(
+        lines[&on_pg].as_deref(),
+        Some(format!("{site} / {host} / vm-{t} / pg-{t}").as_str())
+    );
+}
+
+/// Coverage does not name the estate as unable to answer `under:`: it answers,
+/// so there is no gap to explain. Coverage lists configured sources, and the
+/// estate is knobas' own and is none of them -- so an `asset:` scope reports
+/// nothing, and a whole-corpus scope names only the source that really cannot
+/// answer (a Kuma, which declares no parent) while the estate's rows come back.
+#[tokio::test]
+async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
+    let pool = pool().await;
+    let t = token();
+    let host = format!("cov-host-{t}");
+    let root = asset(&pool, &host, None, "").await;
+    let vm = asset(&pool, &format!("cov-vm-{t}"), Some(&root), &host).await;
+    item(
+        &pool,
+        "kuma",
+        "monitor",
+        &format!("m-{t}"),
+        "payments-api",
+        "payments-api",
+        serde_json::json!({ "name": "payments-api" }),
+    )
+    .await;
+
+    let estate_only = searcher(&pool)
+        .search(q(&format!("asset: under:{host}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&estate_only), sorted(vec![root.clone(), vm.clone()]));
+    assert!(
+        estate_only.coverage.is_empty(),
+        "nothing in an estate scope is unable to answer: {:?}",
+        estate_only.coverage
+    );
+
+    let everywhere = searcher(&pool)
+        .search(q(&format!("under:{host}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&everywhere), sorted(vec![root, vm]));
+    let under = everywhere
+        .coverage
+        .iter()
+        .find(|c| c.dimension == FilterDimension::Under)
+        .expect("the Kuma is in scope and cannot answer");
+    for source in &under.sources {
+        assert!(
+            !["asset", "route"].contains(&source.source_id.as_str()),
+            "the estate is reported on: {under:?}"
+        );
+    }
+    assert!(
+        under
+            .sources
+            .iter()
+            .any(|s| s.source_id == "kuma" && s.answer == FilterAnswer::NoValues)
+    );
+}

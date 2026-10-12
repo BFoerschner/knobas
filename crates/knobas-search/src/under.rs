@@ -12,6 +12,11 @@
 //! a mirrored parent answering to it. Every source's rows are asked, whatever
 //! the query's `source:` or kind scope: a name that exists outside the scope is
 //! not a typo, and the empty result such a query gets is a true one.
+//!
+//! **And the estate's names, read off the column** (#600): an asset answers to
+//! its name, and a parent that is an asset declares nothing through a payload
+//! -- its children point at it by `parent_id` -- so `knobas.asset.name` is the
+//! whole of what the estate answers to. A route is no one's parent.
 
 use sqlx::PgPool;
 
@@ -19,17 +24,21 @@ use crate::SearchError;
 use crate::query::Parsed;
 
 /// The distinct lowercased names among `$2` that any live item answers to as
-/// a parent or names as one, read through the declarations bound at `$1`.
+/// a parent or names as one, read through the declarations bound at `$1` --
+/// or that an asset is called.
 ///
 /// `sync.live_item`, so a withdrawn item or a disabled source does not vouch
 /// for a name the corpus no longer has -- the same reason the coverage probe
-/// reads it.
+/// reads it. A deleted asset's row is gone, so `knobas.asset` needs no such
+/// view. The asset arm is the name match `corpus::estate_subtree!` starts its
+/// walk from, spelled the same way: change one and the other must follow.
 const KNOWN_SQL: &str = concat!(
     "select distinct lower(n.name) from sync.live_item i cross join lateral (select pn.name from ",
     knobas_core::declared_parent_names!("$1"),
     " pn union all select sn.name from ",
     knobas_core::declared_names_as_parent!("$1"),
-    " sn) n where lower(n.name) = any($2)"
+    " sn) n where lower(n.name) = any($2)",
+    " union select lower(a.name) from knobas.asset a where lower(a.name) = any($2)"
 );
 
 /// Report every `under:` value no parent answers to as an unknown token, in
