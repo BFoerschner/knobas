@@ -172,6 +172,51 @@ pub enum EntityOrder {
     UpdatedDesc,
     /// Alphabetical by title.
     TitleAsc,
+    /// **What needs attention first** (#680): a room's Code tile. A row whose
+    /// declared state is **settled** -- tone `ok` (done and good: a merged
+    /// pull request) or `muted` (over: a closed one) -- is not in the set.
+    /// What is left is ordered by its state's tone, loudest first (`err`,
+    /// `warn`, `info`), then rows with no state, each run newest first.
+    ///
+    /// Driven by the declared state and its tone, never by a kind or an
+    /// adapter: a kind whose source declares no state, and a record whose
+    /// declared state misses, has no tone, so nothing hides it and it sorts
+    /// by recency (§3a; the ADR-0007 miss fails toward drawing the row).
+    Attention,
+    /// **One row per parent, its latest** (#680): a room's Builds tile. Where
+    /// a row's kind declares a state, its rows are grouped by the parent
+    /// chain their kind declares (ADR-0018) -- every name each parent answers
+    /// to, so two configurations sharing a display name stay two -- and only
+    /// the newest of each group is kept: a configuration's health is its
+    /// latest build. The kept rows are ordered by tone, every tone drawn
+    /// (`err`, `warn`, `info`, `ok`, `muted`, then no state), each run newest
+    /// first.
+    ///
+    /// A kind that declares no state is not grouped, and a row whose parent
+    /// misses stands alone: both fall back to recency (§3a), so a source
+    /// that never said what its builds' outcomes are draws every build.
+    LatestPerParent,
+}
+
+impl EntityOrder {
+    /// Whether this is one of the room tiles' orders, which count what they
+    /// draw ([`EntityPage::tally`]) and read the live corpus only.
+    fn is_tile_order(self) -> bool {
+        matches!(self, EntityOrder::Attention | EntityOrder::LatestPerParent)
+    }
+}
+
+/// How many rows of one kind, in one tone, a tile order drew (#680).
+///
+/// What a tile's header phrases ("2 open pull requests · 5 branches", "1
+/// failing · 7 build configurations"), counted over the whole ordered set
+/// rather than the page, as [`EntityPage::total`] is.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct KindTally {
+    pub kind: String,
+    /// The tone of the rows' state chip; `None` for rows that have none.
+    pub tone: Option<knobas_core::tone::Tone>,
+    pub count: i64,
 }
 
 /// One page of a room, plus the size of the set it was cut from.
@@ -180,6 +225,11 @@ pub struct EntityPage {
     pub rows: Vec<EntityRow>,
     /// The whole filtered set, before `limit`/`offset`. `0` for an empty page.
     pub total: i64,
+    /// Under a tile order ([`EntityOrder::Attention`],
+    /// [`EntityOrder::LatestPerParent`]), the set counted by kind and tone,
+    /// in no particular order; `None` under the plain orders, whose header
+    /// is `total` alone (#680).
+    pub tally: Option<Vec<KindTally>>,
 }
 
 /// The live corpus, newest first.
@@ -290,14 +340,120 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 "#
 );
 
-/// The statement this filter reads through. Four constants, one `match`.
-fn statement(filter: &EntityFilter) -> &'static str {
-    match (filter.include_deleted, filter.order) {
+/// The live corpus a tile order starts from: the same five filters as
+/// [`LIVE_UPDATED`], each row with its path line and state chip, as the CTE
+/// `ruled`. `$extra` is one more selected column, or nothing.
+macro_rules! tile_ruled {
+    ($extra:expr) => {
+        concat!(
+            r#"
+with ruled as (
+  select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+         "#,
+            knobas_core::path_line_read!("$8"),
+            r#" as path,
+         "#,
+            knobas_core::declared_state!("$8"),
+            r#" as state"#,
+            $extra,
+            r#"
+    from sync.live_item i
+   where ($1::text[] is null or i.source_id = any($1))
+     and ($2::text[] is null or i.kind      = any($2))
+     and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+     and ($6::text[] is null or i.entity_id = any($6))
+     and ($7::text   is null or "#,
+            knobas_core::project_key_read!("$8"),
+            r#" = $7)
+)"#
+        )
+    };
+}
+
+/// A tile order's page (a literal, so each statement stays one `concat!`),
+/// over the CTE `drawn` (the ordered set, with each
+/// row's `tone`): the rows loudest tone first, then newest first, with the
+/// set's total and its [`KindTally`] beside every row.
+///
+/// The tone ranks `err`, `warn`, `info`, `ok`, `muted`, and a row with no
+/// state after all five: the order a reader looking for what needs attention
+/// reads them in (#680, `CONTEXT.md` **Tile**).
+macro_rules! tile_page {
+    () => {
+        r#"
+select d.entity_id, d.source_id, d.kind, d.title, d.item_updated_at, d.synced_at,
+       d.path, d.state,
+       count(*) over () as total,
+       (select jsonb_agg(jsonb_build_object('kind', t.kind, 'tone', t.tone, 'count', t.n))
+          from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally
+  from drawn d
+ order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
+          d.item_updated_at desc nulls last, d.entity_id
+ limit $4 offset $5
+"#
+    };
+}
+
+/// [`EntityOrder::Attention`]: the live corpus without its settled rows.
+const LIVE_ATTENTION: &str = concat!(
+    tile_ruled!(""),
+    r#",
+drawn as (
+  select r.*, r.state->>'tone' as tone
+    from ruled r
+   where r.state is null or r.state->>'tone' not in ('ok', 'muted')
+)"#,
+    tile_page!(),
+);
+
+/// [`EntityOrder::LatestPerParent`]: the newest row of each parent, for kinds
+/// that declare a state. `parent_key` is every name of every parent in the
+/// declared chain, in order; `null` -- no grouping -- for a kind that
+/// declares no state and for a record whose parent misses, which then
+/// stands alone under its own id.
+const LIVE_LATEST: &str = concat!(
+    tile_ruled!(concat!(
+        r#",
+         case when "#,
+        knobas_core::declares_field!("$8", "state"),
+        r#" then (select array_agg(pn.name order by pn.pos, pn.name_ord) from "#,
+        knobas_core::declared_parent_names!("$8"),
+        r#" pn) end as parent_key"#
+    )),
+    r#",
+drawn as (
+  select distinct on (r.source_id, r.kind, r.parent_key,
+                      case when r.parent_key is null then r.entity_id end)
+         r.*, r.state->>'tone' as tone
+    from ruled r
+   order by r.source_id, r.kind, r.parent_key,
+            case when r.parent_key is null then r.entity_id end,
+            r.item_updated_at desc nulls last, r.entity_id
+)"#,
+    tile_page!(),
+);
+
+/// The statement this filter reads through. Six constants, one `match`.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a tile order that asks for
+/// the withdrawn too: a tile draws the live corpus, and the withdrawn are the
+/// detail's way in (§5a).
+fn statement(filter: &EntityFilter) -> Result<&'static str, IpcError> {
+    Ok(match (filter.include_deleted, filter.order) {
         (false, EntityOrder::UpdatedDesc) => LIVE_UPDATED,
         (false, EntityOrder::TitleAsc) => LIVE_TITLE,
         (true, EntityOrder::UpdatedDesc) => ALL_UPDATED,
         (true, EntityOrder::TitleAsc) => ALL_TITLE,
-    }
+        (false, EntityOrder::Attention) => LIVE_ATTENTION,
+        (false, EntityOrder::LatestPerParent) => LIVE_LATEST,
+        (true, order) => {
+            return Err(IpcError::invalid(format!(
+                "the {order:?} order reads the live corpus only"
+            )));
+        }
+    })
 }
 
 /// An empty list is *no filter*, which on the wire is `NULL`.
@@ -341,7 +497,7 @@ pub async fn list_entities_inner(
         None => None,
     };
 
-    let rows = sqlx::query(statement(filter))
+    let rows = sqlx::query(statement(filter)?)
         .bind(any_of(&filter.sources))
         .bind(any_of(&filter.kinds))
         .bind(within)
@@ -359,6 +515,19 @@ pub async fn list_entities_inner(
     // past the end of a full one -- the count the caller can act on is the one
     // it can see.
     let total: i64 = rows.first().map_or(0, |row| row.get("total"));
+    // The tally rides on every row for the same reason; an empty page under
+    // a tile order is an empty set, which counts nothing.
+    let tally = if filter.order.is_tile_order() {
+        Some(match rows.first() {
+            Some(row) => row
+                .try_get::<Option<sqlx::types::Json<Vec<KindTally>>>, _>("tally")?
+                .map(|tally| tally.0)
+                .unwrap_or_default(),
+            None => Vec::new(),
+        })
+    } else {
+        None
+    };
 
     Ok(EntityPage {
         rows: rows
@@ -377,6 +546,7 @@ pub async fn list_entities_inner(
             })
             .collect::<Result<_, _>>()?,
         total,
+        tally,
     })
 }
 

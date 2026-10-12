@@ -813,6 +813,28 @@ macro_rules! declared_state {
     };
 }
 
+/// SQL for "this record's kind declares `$field` at all": `true` when its
+/// source names at least one candidate for the field, whatever the record
+/// itself holds (#680).
+///
+/// A question about the **declaration**, not the payload, and so not a
+/// read ADR-0007 governs: it is what lets a rule treat a kind its source
+/// never gave a state differently from a record whose declared state missed.
+/// A room's Builds tile groups a build under its configuration only where the
+/// kind declares a state; a kind that declares none keeps every row, which
+/// is §3a's recency fallback. `$decl` and the row alias `i` as for
+/// [`declared_string!`].
+#[macro_export]
+macro_rules! declares_field {
+    ($decl:literal, $field:literal) => {
+        concat!(
+            "(jsonb_array_length(",
+            $crate::declared_array!($decl, $field),
+            ") > 0)"
+        )
+    };
+}
+
 /// SQL for "the boolean the declared path leads to, or nothing" -- see
 /// [`declared_string!`] for the arguments and [`resolve_flag`] for why only a
 /// JSON boolean counts.
