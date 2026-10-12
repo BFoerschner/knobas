@@ -43,6 +43,10 @@ chmod +x "$scratch/bin/docker"
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
 export KNOBAS_LIVE_LOCK="$scratch/knobas-live-jvm.lock"
 export KNOBAS_LIVE_LOCK_POLL=0.1
+# Short, so a mutant that never lets a waiter through fails in seconds instead
+# of hanging the gate for the real 45 minutes; cases that test the wait itself
+# set their own.
+export KNOBAS_LIVE_LOCK_WAIT=5
 unset KNOBAS_LIVE_LOCK_HOLDER
 
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
