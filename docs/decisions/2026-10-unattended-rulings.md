@@ -224,6 +224,8 @@ Waiting costs little. The declaration is six lines, nothing else is blocked by #
 
 What that spends: `main` carries a TeamCity descriptor that no real record has read, which is the condition ADR-0013 was written to end. And until the follow-up runs, a misspelled second name would show up only as an `under:` that misses the configuration itself. To let #598 and #599 be written while the tunnel is down, say so too. Each would then be dispatched as usual and would park at an open PR the way #607 has, and the live runs would still be made one at a time when the tunnel is back.
 
+*Overtaken the same day by Björn's #633 (section below): the live suites now run against products started locally, so #607's live run no longer waits on the host key, and nobody verifies it. The merge condition stands in substance: `just teamcity-live-seeded`, now against the local TeamCity, green on the squashed head. Nobody in the loop runs the tunnel, ssh to the servers or `hcloud`.*
+
 ## #597 — mutant M1 and clause 6: the battery the mutation driver never ran
 
 Ruled 2026-10-12. Comment:
