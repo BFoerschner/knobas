@@ -250,11 +250,15 @@ impl GiteaClient {
         page: u32,
     ) -> Result<Vec<Value>, SourceError> {
         let (limit, page) = page_params(page);
-        self.get_json(
-            &format!("/repos/{}/{}/branches", segment(owner)?, segment(repo)?),
-            &[limit, page],
-        )
-        .await
+        // An empty repository's listing is `200 null`, not `[]` (Gitea
+        // 1.27.3, measured 2026-10-12): no branches, which is an empty page.
+        let batch: Option<Vec<Value>> = self
+            .get_json(
+                &format!("/repos/{}/{}/branches", segment(owner)?, segment(repo)?),
+                &[limit, page],
+            )
+            .await?;
+        Ok(batch.unwrap_or_default())
     }
 
     pub(crate) async fn pulls(

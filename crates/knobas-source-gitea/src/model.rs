@@ -32,11 +32,29 @@ pub(crate) struct Repo {
     /// these with 409, which Task 7's walk uses this field to avoid asking for.
     #[serde(default)]
     pub empty: bool,
+    /// A pull mirror. Gitea refuses `/pulls` on one with a bare 404.
+    #[serde(default)]
+    pub mirror: bool,
+    /// Whether the pull-request unit is switched on. With it off, `/pulls` is
+    /// the same bare 404. Absent reads as on, which is Gitea's default.
+    #[serde(default = "enabled")]
+    pub has_pull_requests: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 impl Repo {
     /// `full_name` split into its two halves, or `None` if the server sent
     /// something this adapter cannot address.
+    /// Whether `/pulls` can answer anything but 404 here. Gitea's own test is
+    /// `CanEnablePulls() = !IsMirror && !IsEmpty` plus read access to the
+    /// unit, and on a cursor-less run that 404 would end the whole sync.
+    pub(crate) fn can_have_pulls(&self) -> bool {
+        self.has_pull_requests && !self.mirror && !self.empty
+    }
+
     pub(crate) fn owner_repo(&self) -> Option<(&str, &str)> {
         let (owner, name) = self.full_name.split_once('/')?;
         (!owner.is_empty() && !name.is_empty() && !name.contains('/')).then_some((owner, name))
@@ -155,6 +173,8 @@ mod tests {
             html_url: None,
             default_branch: None,
             empty: false,
+            mirror: false,
+            has_pull_requests: true,
         };
         assert_eq!(
             repo("tidewater/payout-service").owner_repo(),
@@ -204,8 +224,9 @@ mod tests {
         assert_eq!(commit.happened_at(), None);
     }
 
-    /// The three steering fields parse from minimal records: `empty` and
-    /// `default_branch` steer the commit walk (`sync::commits` avoids the 409
+    /// The steering fields parse from minimal records: `empty`, `mirror` and
+    /// `has_pull_requests` decide whether `sync::pulls` may ask at all,
+    /// `empty` and `default_branch` steer the commit walk (`sync::commits` avoids the 409
     /// an empty repository answers, and `sync::walk_order` spends the budget
     /// on the default branch first), and `comments` is the count that saves
     /// `sync::fetch_comments` a request per pull request that has no
@@ -218,6 +239,22 @@ mod tests {
         .unwrap();
         assert_eq!(repo.default_branch.as_deref(), Some("trunk"));
         assert!(repo.empty);
+        assert!(
+            !repo.can_have_pulls(),
+            "an empty repository answers /pulls with 404"
+        );
+
+        // A record that does not say reads as Gitea's default: pull requests on.
+        let plain: Repo =
+            serde_json::from_value(serde_json::json!({ "full_name": "tidewater/plain" })).unwrap();
+        assert!(plain.can_have_pulls());
+        for (field, value) in [("has_pull_requests", false), ("mirror", true)] {
+            let repo: Repo = serde_json::from_value(
+                serde_json::json!({ "full_name": "tidewater/off", field: value }),
+            )
+            .unwrap();
+            assert!(!repo.can_have_pulls(), "{field}={value}");
+        }
 
         let pr: PullRequest =
             serde_json::from_value(serde_json::json!({ "number": 142, "comments": 2 })).unwrap();

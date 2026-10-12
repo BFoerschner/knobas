@@ -217,6 +217,24 @@ impl From<SourceError> for RepoError {
     }
 }
 
+/// A failure that ends the run inside one repository's walk, saying which.
+///
+/// Gitea's 404 body is `not found` for a missing repository and a missing
+/// endpoint alike, so `HTTP 404 Not Found: not found` on its own names nothing
+/// the user can go and look at. Only the message changes: the status is what
+/// classifies the failure downstream, and the other variants carry either no
+/// text worth prefixing (`Unauthorized`) or a fault that is not about the
+/// repository (`Sink`, `Unreachable`).
+fn in_repository(full_name: &str, error: SourceError) -> SourceError {
+    match error {
+        SourceError::Protocol { status, message } => SourceError::Protocol {
+            status,
+            message: format!("gitea: {full_name}: {message}"),
+        },
+        other => other,
+    }
+}
+
 /// The failure a reached page cap ends the run with.
 ///
 /// **"at least", not "more than."** The cap fires when the cap'th page came
@@ -348,10 +366,12 @@ pub(crate) async fn run(
                 walked += 1;
                 next.repos.insert(selected.full_name.clone(), after);
             }
-            Err(RepoError::Fatal(error)) => return Err(error),
+            Err(RepoError::Fatal(error)) => return Err(in_repository(&selected.full_name, error)),
             // A cursor-less run may not report success over a hole: see the
             // module docs.
-            Err(RepoError::Skip(error)) if full_sync => return Err(error),
+            Err(RepoError::Skip(error)) if full_sync => {
+                return Err(in_repository(&selected.full_name, error));
+            }
             Err(RepoError::Skip(error)) => {
                 // A 403 or a 404, and nothing else: a revoked credential
                 // answers 401, which `is_repo_scoped` reads as fatal and this
@@ -534,7 +554,10 @@ async fn sync_repo(
     let moved = branches(source, at, before, after, sink, emitted).await?;
 
     // 3. Pull requests, newest-updated first, down to the watermark.
-    pulls(source, at, before, after, sink, emitted).await?;
+    //    Not where the record says Gitea would answer 404 (a mirror, an empty
+    //    repository, the unit switched off), which a cursor-less run would
+    //    otherwise read as a hole and fail on.
+    pulls(source, at, &selected.repo, before, after, sink, emitted).await?;
 
     // 4. Commits, only where a head moved. On a first sync every branch counts
     //    as moved, so this is the full walk the budget bounds.
@@ -643,6 +666,7 @@ async fn branches(
 async fn pulls(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
+    repo: &model::Repo,
     before: &RepoCursor,
     after: &mut RepoCursor,
     sink: &mut (dyn Sink + Send),
@@ -652,7 +676,7 @@ async fn pulls(
     // in with rather than a blank one.
     after.pulls_updated_to = before.pulls_updated_to;
     after.pulls_at_watermark = before.pulls_at_watermark.clone();
-    if source.config.prs_per_repo == 0 {
+    if source.config.prs_per_repo == 0 || !repo.can_have_pulls() {
         return Ok(());
     }
 
