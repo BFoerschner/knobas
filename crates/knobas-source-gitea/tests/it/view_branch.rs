@@ -328,10 +328,20 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
     assert!(diff.deferred, "a branch's diff is read when its tab opens");
     assert!(diff.blocks.is_empty());
     assert_eq!(diff.count, Some(2), "files changed, not file touches");
-    assert!(
-        !paths(&server).await.iter().any(|p| p.ends_with(".diff")),
-        "the whole view reads no diff"
-    );
+    // The diff is the compare with `?output=diff`: its path is the JSON
+    // compare's, so only the query tells the two reads apart.
+    let diff_reads = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| {
+            r.url
+                .query_pairs()
+                .any(|(k, v)| k == "output" && v == "diff")
+        })
+        .count();
+    assert_eq!(diff_reads, 0, "the whole view reads no diff");
 }
 
 /// The deferred read: the compare's own diff, from the API (`?output=diff`),
@@ -476,7 +486,7 @@ async fn behind_is_read_as_a_count_not_as_the_reverse_compare() {
         .expect("Gitea draws a branch");
     let reverse = format!("{REPO}/compare/{FEATURE_WIRE}...main");
     assert!(
-        !paths(&server).await.iter().any(|p| *p == reverse),
+        !paths(&server).await.contains(&reverse),
         "asked for the reverse compare: {:?}",
         paths(&server).await
     );
