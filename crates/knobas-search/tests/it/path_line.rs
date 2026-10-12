@@ -6,8 +6,9 @@
 //! first such rows are Gitea's branches, pull requests and commits, whose
 //! parent is their repo, shown as `owner/repo` -- the first name the
 //! declaration gives -- so two "fix typo" commits from different repos are
-//! told apart by their row. `ancestor_path.rs` stays as it was and still
-//! passes: the Confluence line has not moved.
+//! told apart by their row. The Confluence line has not moved:
+//! `ancestor_path.rs` still asserts it, read through Confluence's own
+//! declaration since #646.
 //!
 //! The items are shaped the way the real Gitea adapter stores them, and the
 //! declaration is that adapter's own descriptor, not a copy of it. One

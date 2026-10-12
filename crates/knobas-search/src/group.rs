@@ -60,9 +60,10 @@ pub struct RawHit {
     title: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     synced_at: Option<DateTime<Utc>>,
-    /// Where the row sits inside its source, joined by the statement (#284).
-    /// Null for a group header, and null for every record with no readable
-    /// `ancestors` -- two absences that mean the same thing to a reader.
+    /// Where the row sits inside its source, joined by the statement (#284,
+    /// #596). Null for a group header, and null for every record whose kind
+    /// declares no parent or whose declared parent misses -- two absences that
+    /// mean the same thing to a reader.
     path: Option<String>,
     rank: Option<f32>,
     snippet: Option<String>,
