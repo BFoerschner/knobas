@@ -343,21 +343,25 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 );
 
 /// The live corpus a tile order starts from: the same five filters as
-/// [`LIVE_UPDATED`], each row with its path line and state chip, as the CTE
-/// `ruled`. `$extra` is one more selected column, or nothing.
+/// [`LIVE_UPDATED`], as the CTE `ruled`, with the four columns every tile
+/// order reads and `$rule`, the one more column its rule needs.
+///
+/// **Only what the rule needs is computed here, per row of the room.** A
+/// declared read is a walk of the declarations per row: on a room of 20,000
+/// builds the state chip cost about 350 ms, the path line about 180 ms and
+/// the parent key about 200 ms (the #685 review's measurement, on a loaded
+/// machine), against 25 ms for the whole `updated_desc` page. The path
+/// line is drawn for the page alone ([`tile_page!`]), and
+/// [`EntityOrder::LatestPerParent`] reads the state of each group's newest
+/// row only.
 macro_rules! tile_ruled {
-    ($extra:expr) => {
+    ($rule:expr) => {
         concat!(
             r#"
 with ruled as (
-  select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+  select i.entity_id, i.source_id, i.kind, i.item_updated_at,
          "#,
-            knobas_core::path_line_read!("$8"),
-            r#" as path,
-         "#,
-            knobas_core::declared_state!("$8"),
-            r#" as state"#,
-            $extra,
+            $rule,
             r#"
     from sync.live_item i
    where ($1::text[] is null or i.source_id = any($1))
@@ -372,36 +376,48 @@ with ruled as (
     };
 }
 
-/// A tile order's page (a literal, so each statement stays one `concat!`),
-/// over the CTE `drawn` (the ordered set, with each
-/// row's `tone`): the rows loudest tone first, then newest first, with the
-/// set's total and its [`KindTally`] beside every row.
+/// A tile order's page, over the CTE `drawn` (the ordered set: `entity_id`,
+/// `kind`, `item_updated_at`, `state` and its `tone`): the rows loudest tone
+/// first, then newest first, with the set's total and its [`KindTally`]
+/// beside every row. The page is cut first and joined back to `sync.item`
+/// for the rest of each row, so the path line is drawn for the page's rows
+/// and no others.
 ///
 /// The tone ranks `err`, `warn`, `info`, `ok`, `muted`, and a row with no
 /// state after all five: the order a reader looking for what needs attention
-/// reads them in (#680, `CONTEXT.md` **Tile**).
+/// reads them in (#680, `CONTEXT.md` **Tile**). The outer `order by` restates
+/// the inner one, because a join keeps no order.
 macro_rules! tile_page {
     () => {
-        r#"
-select d.entity_id, d.source_id, d.kind, d.title, d.item_updated_at, d.synced_at,
-       d.path, d.state,
-       count(*) over () as total,
-       (select jsonb_agg(jsonb_build_object('kind', t.kind, 'tone', t.tone, 'count', t.n))
-          from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally
-  from drawn d
- order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
-          d.item_updated_at desc nulls last, d.entity_id
- limit $4 offset $5
+        concat!(
+            r#"
+select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+       "#,
+            knobas_core::path_line_read!("$8"),
+            r#" as path,
+       p.state, p.total, p.tally
+  from (select d.entity_id, d.item_updated_at, d.state, d.tone,
+               count(*) over () as total,
+               (select jsonb_agg(jsonb_build_object('kind', t.kind, 'tone', t.tone, 'count', t.n))
+                  from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally
+          from drawn d
+         order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
+                  d.item_updated_at desc nulls last, d.entity_id
+         limit $4 offset $5) p
+  join sync.item i on i.entity_id = p.entity_id
+ order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], p.tone), 6),
+          p.item_updated_at desc nulls last, p.entity_id
 "#
+        )
     };
 }
 
 /// [`EntityOrder::Attention`]: the live corpus without its settled rows.
 const LIVE_ATTENTION: &str = concat!(
-    tile_ruled!(""),
+    tile_ruled!(concat!(knobas_core::declared_state!("$8"), " as state")),
     r#",
 drawn as (
-  select r.*, r.state->>'tone' as tone
+  select r.entity_id, r.kind, r.item_updated_at, r.state, r.state->>'tone' as tone
     from ruled r
    where r.state is null or r.state->>'tone' not in ('ok', 'muted')
 )"#,
@@ -412,25 +428,34 @@ drawn as (
 /// that declare a state. `parent_key` is every name of every parent in the
 /// declared chain, in order; `null` -- no grouping -- for a kind that
 /// declares no state and for a record whose parent misses, which then
-/// stands alone under its own id.
+/// stands alone under its own id. The state chip is read for the kept rows
+/// only.
 const LIVE_LATEST: &str = concat!(
     tile_ruled!(concat!(
-        r#",
-         case when "#,
+        r#"case when "#,
         knobas_core::declares_field!("$8", "state"),
         r#" then (select array_agg(pn.name order by pn.pos, pn.name_ord) from "#,
         knobas_core::declared_parent_names!("$8"),
         r#" pn) end as parent_key"#
     )),
     r#",
-drawn as (
+latest as (
   select distinct on (r.source_id, r.kind, r.parent_key,
                       case when r.parent_key is null then r.entity_id end)
-         r.*, r.state->>'tone' as tone
+         r.entity_id
     from ruled r
    order by r.source_id, r.kind, r.parent_key,
             case when r.parent_key is null then r.entity_id end,
             r.item_updated_at desc nulls last, r.entity_id
+),
+drawn as (
+  select k.entity_id, k.kind, k.item_updated_at, k.state, k.state->>'tone' as tone
+    from (select i.entity_id, i.kind, i.item_updated_at,
+                 "#,
+    knobas_core::declared_state!("$8"),
+    r#" as state
+            from latest l
+            join sync.item i on i.entity_id = l.entity_id) k
 )"#,
     tile_page!(),
 );

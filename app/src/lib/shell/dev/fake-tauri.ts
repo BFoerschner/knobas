@@ -2159,12 +2159,13 @@ function listEntities(args: Record<string, unknown>) {
   const limit = Number(args["limit"] ?? 50);
   const offset = Number(args["offset"] ?? 0);
 
+  // The tile orders (#680) count what they drew; the plain orders do not.
+  // Spelled out rather than `tile-count.ts`'s `isTileOrder`: this bridge
+  // stands in for the IPC that `ipc/entity.ts` invokes, and imports only its
+  // types.
+  const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
   // The fixture has no link graph, so a context's membership is honestly
   // empty — the same answer `context_members` gives.
-  // The tile orders (#680) count what they drew; the plain orders do not.
-  // Spelled out rather than `ipc/entity.ts`'s `isTileOrder`: this bridge stands
-  // in for the one that module invokes, and imports only its types.
-  const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
   if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null };
 
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);

@@ -1569,9 +1569,9 @@ async fn the_code_tile_draws_open_pull_requests_first_and_no_settled_one() {
 /// **latest** build, failing first, then running, then succeeded. A newer
 /// success of one configuration does not hide another configuration's
 /// failure, and an older failure of a configuration whose latest build passed
-/// is not drawn. Two configurations that share a name in different projects
-/// are two parents, because a parent is every name it answers to (`name` and
-/// `id`), not the one a path line shows.
+/// is not drawn. Two configurations that share a display name (`Build`)
+/// under different ids are two parents, because a parent is every name it
+/// answers to (`name` and `id`), not the one a path line shows.
 #[tokio::test]
 async fn the_builds_tile_draws_each_configurations_latest_build_failing_first() {
     use knobas_core::tone::Tone;
