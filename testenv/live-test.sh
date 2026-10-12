@@ -137,8 +137,14 @@ check_eq "a Gitea that was up stays up after a TeamCity run" \
   "teamcity" "$(STUB_RUNNING="knobas-gitea" live_to_put_back teamcity)"
 check_eq "a product that was up stays up after its run" \
   "" "$(STUB_RUNNING="knobas-gitea knobas-jira knobas-jira-db" live_to_put_back jira)"
-check_eq "a Gitea run from an empty engine stops Gitea" \
-  "gitea" "$(STUB_RUNNING="" live_to_put_back gitea)"
+check_eq "a Gitea run from an empty engine does not stop Gitea" \
+  "" "$(STUB_RUNNING="" live_to_put_back gitea)"
+check_eq "a Gitea run from an empty engine leaves the Gitea it started up" \
+  "gitea" "$(STUB_RUNNING="" live_left_up gitea)"
+check_eq "a Gitea run leaves nothing up it did not start" \
+  "" "$(STUB_RUNNING="knobas-gitea" live_left_up gitea)"
+check_eq "a Jira run from an empty engine leaves nothing up" \
+  "" "$(STUB_RUNNING="" live_left_up jira)"
 check_eq "a TeamCity run from an empty engine leaves the Gitea it started up" \
   "gitea" "$(STUB_RUNNING="" live_left_up teamcity)"
 check_eq "a TeamCity run leaves nothing up it did not start" \
@@ -210,6 +216,7 @@ chmod +x "$shared/testenv/seed-teamcity.sh"
 : >"$shared/state"
 : >"$shared/docker.log"
 rc=0
+# shellcheck disable=SC2030  # its own subshell on purpose: the exports and traps end with it
 (
   export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
   export KNOBAS_LIVE_LOCK="$shared/jvm.lock" KNOBAS_LIVE_LOCK_WAIT=5 KNOBAS_LIVE_LOCK_POLL=0.1
@@ -238,6 +245,33 @@ for ((i = 0; i < 100; i++)); do
 done
 grep -q 'gitea user: done' "$shared/user.out" 2>/dev/null ||
   fail "the Gitea user let go when told to" "$(cat "$shared/user.out" 2>/dev/null)"
+
+# The same rule for a Gitea run (#698): a `just gitea-live` that started Gitea
+# leaves it up too, since a TeamCity run or a second Gitea run from another
+# worktree may be cloning from it by then. Same stateful stub, from empty.
+: >"$shared/state"
+: >"$shared/docker.log"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-run
+) >"$shared/gitea.out" 2>&1 || rc=$?
+check_eq "a Gitea session from an empty engine runs" "0" "$rc"
+check_eq "a Gitea run that started Gitea leaves it up" "knobas-gitea" "$(cat "$shared/state")"
+check_contains "the Gitea run says it leaves the Gitea it started up" \
+  "$(cat "$shared/gitea.out")" "gitea was started for this run and stays up"
+checks=$((checks + 1))
+case $(cat "$shared/gitea.out") in
+  *"was already up"*) fail "the Gitea run does not claim a Gitea it started was already up" "$(cat "$shared/gitea.out")" ;;
+esac
+checks=$((checks + 1))
+if grep -E '(^| )(stop|down|rm|kill)( .*)? (knobas-)?gitea( |$)' "$shared/docker.log" >/dev/null; then
+  fail "a Gitea run that started Gitea does not stop it" "$(cat "$shared/docker.log")"
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2

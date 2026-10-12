@@ -248,22 +248,23 @@ live_lock_traps() {
 }
 
 # live_to_put_back <product> -- what a run of this one stops again at its end:
-# the product itself, if it was not already up. NEVER what it only needed
-# (#698): Gitea, which a TeamCity run brings up for its VCS roots, is not a
-# JVM and takes no lock, so a `just gitea-live` from another worktree may be
-# using it by the time the TeamCity run ends, and stopping it would pull it
-# out from under that run mid-suite. Gitea is light (~130 MB) and stays up;
-# `just live-down gitea` stops it.
+# the product itself, if it was not already up -- and NEVER Gitea (#698).
+# Gitea is not a JVM and takes no lock, so by the time any run that started it
+# ends -- a TeamCity run that brought it up for its VCS roots, or a
+# `just gitea-live` -- another worktree's run may be using it, and stopping it
+# would pull it out from under that run mid-suite. Gitea is light (~130 MB)
+# and stays up; only `just live-down gitea` stops it.
 live_to_put_back() {
-  live_is_up "$1" || echo "$1"
+  [ "$1" = gitea ] || live_is_up "$1" || echo "$1"
 }
 
 # live_left_up <product> -- the other side of that rule: what a run of this
-# one starts for its needs and leaves up, because it was not up before.
+# one starts and leaves up, because it was not up before and is not put back.
 live_left_up() {
-  local p out=""
+  local p out="" put_back
+  put_back=$(live_to_put_back "$1")
   for p in $(live_needs "$1"); do
-    [ "$p" = "$1" ] || live_is_up "$p" || out="${out:+$out }$p"
+    [ "$p" = "$put_back" ] || live_is_up "$p" || out="${out:+$out }$p"
   done
   echo "$out"
 }
@@ -364,9 +365,9 @@ _live_restore() {
 # the JVM lock (as <recipe>) for the whole run; bring the product up, export what
 # `./seed --env` prints, and arm EXIT, INT and TERM to put the product back as
 # this found it. A product that was already up -- `just live-up jira` before a
-# run of `just jira-live` -- is left up; one this started is stopped. What it
-# only needed and started -- Gitea, for TeamCity -- stays up (#698,
-# `live_to_put_back`).
+# run of `just jira-live` -- is left up; one this started is stopped. Gitea,
+# started by a Gitea run or for a TeamCity one, is the exception: it stays up
+# (#698, `live_to_put_back`).
 #
 # INT and TERM as well as EXIT, the `gitea-live-capped` rule: bash runs no EXIT
 # trap for a signal it is not trapping, and a Ctrl-C'd run is the one that
@@ -391,7 +392,7 @@ live_session() {
   eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
   if [ -n "$LIVE_PUT_BACK" ]; then
     echo "live: $1 is up for this run; $LIVE_PUT_BACK will be stopped at its end"
-  else
+  elif [[ " $kept " != *" $1 "* ]]; then
     echo "live: $1 was already up and stays up"
   fi
   for need in $kept; do

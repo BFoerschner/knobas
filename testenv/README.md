@@ -135,9 +135,10 @@ just gitea-live             # also gitea-live-capped and start-work-live
 
 For a session of several runs, start the product once and the recipes leave
 it up — **a run puts its product back as it found it**: if the run started
-it, it stops it, and if it was already up it stays up. What the run only
-*needed* — Gitea, for a TeamCity run — is never stopped (see *Gitea outlives
-the TeamCity run that started it* below):
+it, it stops it, and if it was already up it stays up. Gitea is the one
+exception: **no run stops Gitea, only `just live-down gitea` does** — not a
+Gitea run that started it, not a TeamCity run that brought it up (see *Gitea
+outlives the run that started it* below):
 
 ```sh
 just live-up jira           # = testenv/live up jira
@@ -194,22 +195,21 @@ starts and seeds — the product then stays up, and the next run of another
 JVM product meets the refusal, as before. A product started by hand with
 `docker compose` takes no lock; that is what the refusal is still for.
 
-**Gitea outlives the TeamCity run that started it (#698).** A TeamCity run
-brings Gitea up when it is down (the VCS roots clone it) and leaves it up at
-its end: it stops only TeamCity's server and agent, and says so in one line
-(`live: gitea was started for this run and stays up after it …`). Gitea is
-not a JVM and takes no lock, so by the time the TeamCity run ends a
-`just gitea-live` from another worktree may be using it, and stopping "what
-the run started" would pull Gitea out from under that run mid-suite. The
-other fix — counting Gitea's users with a marker per run and stopping it when
-the last one leaves — was passed over for the simpler rule, because nothing
-needs Gitea down: it is light (~130 MB, no JVM), the one-JVM rule does not
-count it, and its stopped volume would come back seeded anyway.
-`just live-down gitea` stops it when a person wants it gone. A `just
-gitea-live` that itself started Gitea still stops it at its end, as before;
-Gitea runs are claimed by hand (*One environment, one owner at a time* below), not locked.
+**Gitea outlives the run that started it (#698).** No recipe stops Gitea at
+the end of its run; only `just live-down gitea` does. A run that found Gitea
+down — a `just gitea-live` (or `gitea-live-capped`, `start-work-live`), or a
+TeamCity run, whose VCS roots clone it — starts it and leaves it up, and says
+so in one line (`live: gitea was started for this run and stays up after it
+…`). Gitea is not a JVM and takes no lock, so by the time that run ends a
+TeamCity run or another Gitea run from another worktree may be using it, and
+stopping "what the run started" would pull Gitea out from under that run
+mid-suite. The other fix — counting Gitea's users with a marker per run and
+stopping it when the last one leaves — was passed over for the simpler rule,
+because nothing needs Gitea down: it is light (~130 MB, no JVM), the one-JVM
+rule does not count it, and its stopped volume would come back seeded anyway.
 Held to it by `testenv/live-test.sh`, which runs a whole `live_session
-teamcity` against a stub `docker` while a Gitea session starts beside it.
+teamcity` against a stub `docker` while a Gitea session starts beside it, and
+a whole `live_session gitea` from an empty engine.
 
 **Why `down` differs by product.** TeamCity and Gitea are *stopped*: their
 volumes hold the seeded builds and corpus, and the next start finds them
@@ -256,7 +256,7 @@ variables gate it and where those come from.
 
 | Recipe | Suite | Gated on | From |
 |---|---|---|---|
-| `just gitea-live` | `knobas-source-gitea` / `live_gitea` — the adapter against the shapes interfaces §4.2 fixes | `KNOBAS_GITEA_URL`, `KNOBAS_GITEA_TOKEN` | `live_session gitea`: Gitea started if down, `./seed-gitea.sh`, `eval "$(./seed --env)"`, Gitea stopped again if the run started it |
+| `just gitea-live` | `knobas-source-gitea` / `live_gitea` — the adapter against the shapes interfaces §4.2 fixes | `KNOBAS_GITEA_URL`, `KNOBAS_GITEA_TOKEN` | `live_session gitea`: Gitea started if down, `./seed-gitea.sh`, `eval "$(./seed --env)"`; Gitea stays up afterwards (only `just live-down gitea` stops it) |
 | `just gitea-live-capped` | `live_gitea_capped` — paged walks against a server capped to one record | as above | as above |
 | `just start-work-live` | `knobas-app` / `start_work_live` — the start-work flow over this Gitea: ticket → branch → PR → link → status and back, and then that pull request on the standup digest (M3.3's digest witness for Gitea). Half of it is a mock, so it is **not** M2 exit criterion 1's certificate; the recipe's header says which half | as above | as above |
 | `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
@@ -1813,7 +1813,7 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until every seeded page is in a CQL search. `just jira-live` / `just confluence-live` run the whole window. |
 | `./live` | `up` / `down <gitea\|teamcity\|jira\|confluence>` and `status`: the on-demand products (`live-lib.sh`), one JVM product at a time. `just live-up` / `live-down` / `live-status`. See *Live products, on demand*. |
-| `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that a TeamCity run leaves a Gitea it started up (#698). `just witness-unit`, and part of `just check`. |
+| `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that no run stops a Gitea it started, TeamCity's or Gitea's own (#698). `just witness-unit`, and part of `just check`. |
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
