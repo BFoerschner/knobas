@@ -177,14 +177,20 @@ export function installKeys(router: Router, handlers: KeyHandlers): () => void {
 
 /** Whether a key press is history's back or forward, or neither (#693). */
 function historyStep(event: KeyboardEvent): "back" | "forward" | null {
-  if (event.altKey || event.shiftKey) return null;
+  // A key a focused control already answered is that control's: ⌘← on a
+  // view's tab bar or in the tree walk moves there and must not also go back.
+  if (event.defaultPrevented || event.shiftKey) return null;
   // The brackets with ⌘ or Ctrl, as browsers bind them on every platform; the
-  // arrows with ⌘ alone, because Ctrl+← / → is the Mac's switch-Spaces.
+  // arrows with ⌘ alone, because Ctrl+← / → is the Mac's switch-Spaces. ⌥ is
+  // allowed with ⌘ only, for a Mac layout (German, say) that types `[` with
+  // ⌥; with Ctrl it is AltGr, which types the bracket and means no shortcut.
+  if (event.altKey && !event.metaKey) return null;
+  const arrow = !event.altKey && event.metaKey;
   const bracket = event.metaKey || event.ctrlKey;
   const step =
-    (bracket && event.key === "[") || (event.metaKey && event.key === "ArrowLeft")
+    (bracket && event.key === "[") || (arrow && event.key === "ArrowLeft")
       ? "back"
-      : (bracket && event.key === "]") || (event.metaKey && event.key === "ArrowRight")
+      : (bracket && event.key === "]") || (arrow && event.key === "ArrowRight")
         ? "forward"
         : null;
   if (step === null || inTextField(event.target)) return null;
@@ -195,9 +201,20 @@ function historyStep(event: KeyboardEvent): "back" | "forward" | null {
 function inTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
-  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  )
+    return true;
   if (!(target instanceof HTMLInputElement)) return false;
-  return !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file"].includes(
-    target.type,
-  );
+  return ![
+    "button",
+    "checkbox",
+    "radio",
+    "submit",
+    "reset",
+    "range",
+    "color",
+    "file",
+  ].includes(target.type);
 }

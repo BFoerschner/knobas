@@ -157,7 +157,9 @@ test("a key whose propagation was stopped below window never reaches the ladder"
   document.body.append(dialog);
   dialog.addEventListener("keydown", (event) => event.stopPropagation());
 
-  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  dialog.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
   expect(location.hash).toBe("#/ticket/mock:PAY-231");
 
   dialog.remove();
@@ -231,7 +233,9 @@ test("a Cmd-T whose propagation was stopped below window never reaches the timer
   document.body.append(dialog);
   dialog.addEventListener("keydown", (event) => event.stopPropagation());
 
-  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true }));
+  dialog.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true }),
+  );
   expect(toggleTimer).not.toHaveBeenCalled();
 
   dialog.remove();
@@ -271,7 +275,12 @@ test("inside a text field the history keys are the field's", async () => {
   field.focus();
 
   for (const key of ["[", "ArrowLeft"]) {
-    const event = new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent("keydown", {
+      key,
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     field.dispatchEvent(event);
     expect(event.defaultPrevented, key).toBe(false);
   }
@@ -286,7 +295,11 @@ test("the mouse's back and forward buttons navigate, and nothing else happens", 
   router.go("#/ticket/mock:PAY-231");
 
   const click = (button: number) => {
-    const up = new MouseEvent("mouseup", { button, bubbles: true, cancelable: true });
+    const up = new MouseEvent("mouseup", {
+      button,
+      bubbles: true,
+      cancelable: true,
+    });
     document.body.dispatchEvent(up);
     return up;
   };
@@ -299,4 +312,36 @@ test("the mouse's back and forward buttons navigate, and nothing else happens", 
   // The main and middle buttons are not history's.
   expect(click(0).defaultPrevented).toBe(false);
   expect(click(1).defaultPrevented).toBe(false);
+});
+
+/**
+ * Two keys that look like history's and are not (#697 review): ⌘← that a
+ * focused control already answered (a view's tab bar moves a tab on it), and
+ * AltGr's bracket on a Windows or Linux layout, which arrives as Ctrl+Alt+[.
+ * A Mac layout that types `[` with ⌥ (German) still goes back on ⌘⌥[.
+ */
+test("a key a control answered, or AltGr's bracket, does not step; ⌘⌥[ does", async () => {
+  const { router } = at("#/ctx/all");
+  router.go("#/ticket/mock:PAY-231");
+
+  const tab = document.createElement("button");
+  tab.addEventListener("keydown", (event) => event.preventDefault());
+  document.body.append(tab);
+  tab.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  press("[", { ctrlKey: true, altKey: true });
+  await new Promise((settle) => setTimeout(settle, 20));
+  expect(location.hash).toBe("#/ticket/mock:PAY-231");
+  tab.remove();
+
+  expect(press("[", { metaKey: true, altKey: true }).defaultPrevented).toBe(
+    true,
+  );
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
 });
