@@ -9774,6 +9774,26 @@ From this commit on, each of the following requires an orchestrator decision **a
   assets #600 (a corpus with no declared parent excludes itself from an `under:` query until then,
   as a corpus with no author does from `author:`), and suggestions #601.
 
+- **No frozen surface, and what changed in a ratified one's value — issue #596 (2026-10-12):
+  every row's path line reads the declared parent.** Listed because #284's IPC entry above says
+  `EntityRow.path` "comes from `knobas_core::ancestor_path_read!` and from nowhere else", expanded
+  eight times, and that sentence is no longer true. The field's **shape** is unchanged: no
+  command, event, DTO, module or barrel moves, and no migration. Its **value** now comes from
+  `knobas_core::path_line_read!`, expanded at the same eight places and nowhere else: the parent chain
+  the row's kind declares (`declared_parent_path!`, each parent's first declared name, outermost
+  first, joined by `ANCESTOR_SEPARATOR`), and #284's ancestor read as the fallback where a kind
+  declares none. So a Gitea branch, pull request or commit carries `owner/repo`, and a
+  Confluence page's line is what it was. `declared_parent_path!` is built on
+  `declared_parent_names!`, so the branch on `at`'s two shapes is still only in
+  `declared_parents!` and `resolve_parents` (the deputy's ruling of 2026-10-11 on #594);
+  `payload::parent_path` is its Rust side, and `crates/knobas-core/tests/it/payload_paths.rs`
+  holds the two to one answer. Every read that draws a row now binds the declarations: the
+  search statement once (shared with `under:` when both are present), the board's newest rows
+  and the built-in lists at `$3`, the four room statements at the `$8` they already bound, and
+  the detail statement at a new `$2`, so `get_entity_inner` lists the configured sources first.
+  `ancestor_path_read!` expires into the declaration when Confluence declares its page parent on
+  `ancestors` (#599).
+
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
 Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.

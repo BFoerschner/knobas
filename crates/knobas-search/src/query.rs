@@ -107,9 +107,9 @@ pub struct EffectiveFilters {
     /// The `under:` values, lowercased, OR-ed: the item sits beneath a parent
     /// answering to one of them, or is that parent (ADR-0018).
     pub under: Vec<String>,
-    /// The declarations the `under:` predicate reads the parent through.
-    /// Carried only when [`Self::under`] is set; empty otherwise, since
-    /// nothing else in the statement reads it.
+    /// The declarations the `under:` predicate and every row's path line
+    /// read the parent through (#595, #596). Carried whether or not
+    /// [`Self::under`] is set, since every hit draws its path.
     pub declarations: Declarations,
     /// The usernames **`mine`** resolved to, and nothing else.
     ///
@@ -279,11 +279,9 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             .iter()
             .map(|(_, value)| value.clone())
             .collect(),
-        declarations: if parsed.under.is_empty() {
-            Declarations::empty()
-        } else {
-            parsed.declarations.clone()
-        },
+        // Always: every row's path line reads the parent its kind declares
+        // (#596), not only an `under:` predicate.
+        declarations: parsed.declarations.clone(),
         // `mine` is what puts the identity in play, and only `mine`: a query
         // that named somebody else must not also quietly match the user.
         identity_authors: if mine {

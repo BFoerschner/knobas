@@ -255,9 +255,12 @@ impl Searcher {
     ///
     /// [`SearchError::Db`] if either half cannot be read.
     pub async fn launcher_board(&self) -> Result<LauncherBoard, SearchError> {
+        // One vocabulary for both halves: the lists need its identity, and the
+        // newest rows its declarations, which their path line reads (#596).
+        let vocab = self.vocabulary().await?;
         Ok(LauncherBoard {
-            smart_lists: self.smart_lists().await?,
-            recent: home::recent(&self.pool, home::RECENT_LIMIT).await?,
+            smart_lists: self.smart_lists_of(&vocab).await?,
+            recent: home::recent(&self.pool, home::RECENT_LIMIT, &vocab.declarations).await?,
         })
     }
 
@@ -290,8 +293,16 @@ impl Searcher {
     /// [`SearchError::Db`] if the summary cannot be read.
     pub async fn smart_lists(&self) -> Result<Vec<SmartListSummary>, SearchError> {
         let vocab = self.vocabulary().await?;
+        self.smart_lists_of(&vocab).await
+    }
+
+    /// [`Self::smart_lists`] over a vocabulary the caller already loaded.
+    async fn smart_lists_of(
+        &self,
+        vocab: &Vocabulary,
+    ) -> Result<Vec<SmartListSummary>, SearchError> {
         let mut out = lists::summaries(&self.pool, &vocab.identity).await?;
-        out.extend(saved::summaries(&self.pool, &vocab).await?);
+        out.extend(saved::summaries(&self.pool, vocab).await?);
         Ok(out)
     }
 
@@ -389,7 +400,14 @@ impl Searcher {
     ) -> Result<SearchResponse, SearchError> {
         let limit = limit.clamp(1, MAX_LIMIT);
         if let Some(list) = lists::find(id) {
-            let rows = lists::rows(&self.pool, list, &vocab.identity, limit).await?;
+            let rows = lists::rows(
+                &self.pool,
+                list,
+                &vocab.identity,
+                limit,
+                &vocab.declarations,
+            )
+            .await?;
             let groups = group::group(rows, &vocab.kinds);
             lists::mark_seen(&self.pool, list.id).await?;
             return Ok(SearchResponse {

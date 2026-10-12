@@ -139,11 +139,15 @@ pub struct Corpus {
     ///
     /// 1. **A row mirrored from a source**: the path is a *payload* read, and
     ///    the only spelling allowed is
-    ///    [`ancestor_path_read!`](knobas_core::ancestor_path_read) -- a second
+    ///    [`path_line_read!`](knobas_core::path_line_read) -- a second
     ///    spelling would be a second answer to "where is this", and the
-    ///    launcher row and the detail panel both draw it. ADR-0007: it misses
-    ///    to `null` for every kind whose records carry no `ancestors`, which
-    ///    is every kind but a Confluence page today.
+    ///    launcher row and the detail panel both draw it. Since #596 that is
+    ///    the parent chain the row's kind declares (ADR-0018), `owner/repo` for
+    ///    a Gitea commit, with #284's Confluence ancestors where a kind
+    ///    declares none. ADR-0007: it misses to `null` for every other kind.
+    ///    It reads the declarations from `pd.d`, a relation [`crate::sql`]
+    ///    joins into the detail stage for every corpus, as `ud` is for
+    ///    `under:`.
     /// 2. **A row in a tree knobas owns**: the path is a *column* the store
     ///    maintains on create, rename and move, and the expression reads it.
     ///    [`ASSET`] is the first, over `knobas.asset.path_text`. There is no
@@ -186,7 +190,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
-    path: knobas_core::ancestor_path_read!("i.payload"),
+    path: knobas_core::path_line_read!("pd.d"),
     scope: None,
     under: Some(concat!(
         "(exists (select 1 from ",
@@ -251,7 +255,7 @@ pub const NOTE: Corpus = Corpus {
 /// *not* are worth naming.
 ///
 /// **`path` is a column, not a payload read.** [`Corpus::path`] says the only
-/// expression allowed there is `ancestor_path_read!`, and that rule is about
+/// expression allowed there is `path_line_read!`, and that rule is about
 /// records whose ancestry is buried in an adapter's payload (ADR-0007). An
 /// asset's ancestry is `knobas.asset.parent_id` -- knobas' own tree, kept by
 /// knobas' own store -- so `path_text` *is* the answer that read approximates

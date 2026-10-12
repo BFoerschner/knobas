@@ -1237,6 +1237,69 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
     assert!(d.source.enabled);
 }
 
+/// A room's line and the detail panel draw the path the launcher row draws
+/// (#596): for a Gitea commit, its repo as `owner/repo`, read through the
+/// parent the configured source's adapter declares. One expression for all
+/// three, so the panel cannot say a commit sits nowhere while its row says
+/// which repo it is in.
+#[tokio::test]
+async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
+    let pool = seeded().await;
+    let source = format!("gitea-{}", unique());
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'gitea', 'Gitea', 'http://x', 'Pat')",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let entity = format!("{source}:tidewater/payout-service@c90d11");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'fix typo')")
+        .bind(&entity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, 'commit', 'fix typo', '', $3)",
+    )
+    .bind(&entity)
+    .bind(&source)
+    .bind(serde_json::json!({
+        "sha": "c90d11",
+        "repository": { "full_name": "tidewater/payout-service", "name": "payout-service" }
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let expected = Some("tidewater/payout-service".to_owned());
+    let declarations = knobas_app::sources::paths::declared_paths(
+        &pool,
+        &knobas_app::sources::Registry::builtin(),
+    )
+    .await
+    .unwrap();
+    let room = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![source.clone()],
+            ..all()
+        },
+        10,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap();
+    assert_eq!(room.rows.len(), 1);
+    assert_eq!(room.rows[0].path, expected, "the room's line");
+
+    let detail = get_entity_inner(&pool, &entity).await.unwrap();
+    assert_eq!(detail.row.path, expected, "the detail panel");
+}
+
 // -- the link commands ------------------------------------------------------
 //
 // The seam is the command layer, driven over the migrated test pool: a link is

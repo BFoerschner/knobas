@@ -36,7 +36,8 @@ pub const RECENT_LIMIT: u32 = 20;
 
 /// The newest items of every kind the mirror holds, newest first.
 ///
-/// `$1` is the kinds to read, `$2` the limit. `limit $2` appears twice on
+/// `$1` is the kinds to read, `$2` the limit, `$3` the declarations each
+/// row's path line reads its parent through (#596). `limit $2` appears twice on
 /// purpose: once inside the lateral, so no kind's branch is unbounded, and once
 /// outside, so the merge is too.
 ///
@@ -54,7 +55,7 @@ macro_rules! recent_sql {
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
             "             i.item_updated_at, i.synced_at,\n",
             "             ",
-            knobas_core::ancestor_path_read!("i.payload"),
+            knobas_core::path_line_read!("$3"),
             " as path\n",
             "        from sync.live_item i\n",
             "       where i.kind = k.kind\n",
@@ -152,8 +153,8 @@ struct RecentRow {
     title: String,
     updated_at: Option<DateTime<Utc>>,
     synced_at: DateTime<Utc>,
-    /// Where the row sits inside its source (#284); null for a record with no
-    /// readable `ancestors`.
+    /// Where the row sits inside its source (#284, #596); null for a record
+    /// whose kind declares no parent and that carries no readable `ancestors`.
     path: Option<String>,
 }
 
@@ -162,11 +163,16 @@ struct RecentRow {
 /// # Errors
 ///
 /// [`SearchError::Db`] if either read fails.
-pub async fn recent(pool: &sqlx::PgPool, limit: u32) -> Result<Vec<EntityRow>, SearchError> {
+pub async fn recent(
+    pool: &sqlx::PgPool,
+    limit: u32,
+    declarations: &knobas_core::payload::Declarations,
+) -> Result<Vec<EntityRow>, SearchError> {
     let kinds = kinds(pool).await?;
     let rows = sqlx::query_as::<_, RecentRow>(RECENT_SQL)
         .bind(&kinds)
         .bind(i64::from(limit))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
     Ok(rows
@@ -202,9 +208,12 @@ pub async fn explain_recent(pool: &sqlx::PgPool, limit: u32) -> Result<String, S
         .fetch_all(pool)
         .await?;
     let kinds = kinds(pool).await?;
+    // The declarations are a bound value the path line reads per returned
+    // row, never a table: what they say cannot move the plan's scans.
     let rows_plan: Vec<String> = sqlx::query_scalar(EXPLAIN_RECENT_SQL)
         .bind(&kinds)
         .bind(i64::from(limit))
+        .bind(knobas_core::payload::Declarations::empty().as_param())
         .fetch_all(pool)
         .await?;
     Ok(format!(

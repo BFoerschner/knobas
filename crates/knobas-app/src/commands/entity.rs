@@ -62,10 +62,14 @@ pub struct EntityRow {
     /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
     /// as a contract §10.8 exception under that ticket's criterion 5).
     ///
-    /// `None` for every row whose record carries no readable `ancestors`,
-    /// which is every kind but a page today: the ADR-0007 **miss**. Joined by
-    /// `knobas_core::ancestor_path_read!`, the one statement that spells it,
-    /// so this row and the launcher's cannot disagree about what a path is.
+    /// Since #596 it is the **parent chain** the row's kind declares
+    /// (ADR-0018) -- `owner/repo` for a Gitea branch, pull request or commit --
+    /// and the ancestor path where a kind declares none.
+    ///
+    /// `None` for every row whose kind declares no parent and whose record
+    /// carries no readable `ancestors`: the ADR-0007 **miss**. Joined by
+    /// `knobas_core::path_line_read!`, the one expression that spells it, so
+    /// this row and the launcher's cannot disagree about what a path is.
     ///
     /// This struct and `knobas_search::EntityRow` are pinned to **one wire
     /// shape** by `commands::search`'s own test; the field is on both.
@@ -162,7 +166,7 @@ const LIVE_UPDATED: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-    knobas_core::ancestor_path_read!("i.payload"),
+    knobas_core::path_line_read!("$8"),
     r#" as path,
        count(*) over () as total
   from sync.live_item i
@@ -184,7 +188,7 @@ const LIVE_TITLE: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-    knobas_core::ancestor_path_read!("i.payload"),
+    knobas_core::path_line_read!("$8"),
     r#" as path,
        count(*) over () as total
   from sync.live_item i
@@ -210,7 +214,7 @@ const ALL_UPDATED: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-    knobas_core::ancestor_path_read!("i.payload"),
+    knobas_core::path_line_read!("$8"),
     r#" as path,
        count(*) over () as total
   from sync.item i
@@ -232,7 +236,7 @@ const ALL_TITLE: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-    knobas_core::ancestor_path_read!("i.payload"),
+    knobas_core::path_line_read!("$8"),
     r#" as path,
        count(*) over () as total
   from sync.item i
@@ -462,7 +466,7 @@ const DETAIL: &str = concat!(
 select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        i.item_updated_at, i.synced_at, i.payload, i.web_url,
        "#,
-    knobas_core::ancestor_path_read!("i.payload"),
+    knobas_core::path_line_read!("$2"),
     r#" as path,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
@@ -474,7 +478,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
 "#
 );
 
-/// Everything the slide-over needs for `entity_id`, in three round trips.
+/// Everything the slide-over needs for `entity_id`, in four round trips: the
+/// source listing the declarations come from, the row, its links and its
+/// history.
 ///
 /// # Errors
 ///
@@ -487,8 +493,12 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
     // a missing entity, and the two want different words on screen.
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
 
+    // The declarations the path line reads the parent through (#596), as a
+    // room's line reads them: the panel and the row draw one path.
+    let declarations = declared_paths(pool).await?;
     let row = sqlx::query(DETAIL)
         .bind(entity.to_string())
+        .bind(declarations.as_param())
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the mirror")))?;

@@ -40,12 +40,14 @@
     syncedAt: string;
     /**
      * Where this item sits inside its source — a Confluence page's ancestor
-     * path, `Engineering › Payments` (#284).
+     * path, `Engineering › Payments` (#284), or the parent chain any kind
+     * declares, `tidewater/payout-service` for a Gitea commit (#596). Drawn
+     * even when the title already repeats it.
      *
      * `null` for every row that has none, which is the ADR-0007 **miss**: the
      * row shows no path rather than a wrong one, and the caller does not have
-     * to know what kind it is holding. Joined by one SQL statement
-     * (`knobas_core::ancestor_path_read!`) and carried on `EntityRow.path`, so
+     * to know what kind it is holding. Joined by one SQL expression
+     * (`knobas_core::path_line_read!`) and carried on `EntityRow.path`, so
      * this row and the detail panel cannot disagree about what a path is.
      *
      * Drawn under the title and not beside the key, because a path is prose of

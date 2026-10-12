@@ -159,6 +159,13 @@ pub fn search_sql(
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
     let headline_opts = text.map(|_| builder.param(Bind::Text(crate::snippet::headline_options())));
+    // Every row's path line reads the parent its kind declares (#596), so the
+    // declarations are bound for every search -- once: an `under:` query has
+    // already bound them, and the detail stage reads that same placeholder.
+    let path_declarations = match &bound.under {
+        Some((declarations, _)) => declarations.clone(),
+        None => builder.param(Bind::Json(filters.declarations.as_param())),
+    };
 
     let mut sql = String::from("with\n");
 
@@ -262,6 +269,13 @@ pub fn search_sql(
             let _ = write!(sql, " and {scope}");
         }
         sql.push('\n');
+        // `pd` is the one row a corpus's `path` reads the declarations from,
+        // as `ud` is for `under:` -- so the expression stays a `&'static str`
+        // and the declarations stay a bind.
+        let _ = writeln!(
+            sql,
+            "    cross join (select {path_declarations}::jsonb as d) pd"
+        );
         if text.is_some() {
             sql.push_str("    cross join q\n");
         }
@@ -647,7 +661,7 @@ mod tests {
     /// contains a quoted string not named here is either a new static fragment
     /// nobody reviewed, or -- the case that matters -- user text that reached
     /// the SQL instead of the bind list.
-    /// The last six are `ancestor_path_read!`'s (#284): the payload keys it
+    /// The six after the first four are `ancestor_path_read!`'s (#284): the payload keys it
     /// walks, the three `jsonb_typeof` comparands it guards on, and the
     /// separator it joins a path with. They are `concat!`ed `&'static str`s inside that macro, so
     /// no value can reach them -- and naming them here is what keeps this list
@@ -663,6 +677,13 @@ mod tests {
         "object",
         "string",
         " \u{203a} ",
+        // `path_line_read!`'s declared half (#596): the keys a parent
+        // declaration is read by, and the empty array its guards fall back to.
+        "parent",
+        "kind",
+        "at",
+        "names",
+        "[]",
     ];
 
     fn filters(
@@ -846,7 +867,7 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 8, "{}", built.sql);
+        assert_eq!(built.binds.len(), 9, "{}", built.sql);
         assert_eq!(
             placeholders(&built.sql),
             (1..=built.binds.len()).collect::<Vec<_>>(),
@@ -861,6 +882,13 @@ mod tests {
         assert_eq!(built.binds[4], Bind::Texts(vec!["mara".to_owned()]));
         assert_eq!(built.binds[5], Bind::I64(10));
         assert_eq!(built.binds[6], Bind::I64(50));
+        // The declarations every row's path line reads (#596), last because
+        // the detail stage is the last to read anything.
+        assert!(
+            matches!(built.binds[8], Bind::Json(_)),
+            "{:?}",
+            built.binds[8]
+        );
     }
 
     /// A statement with no filters must number its placeholders densely too --
@@ -876,8 +904,8 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(built.binds.len(), 4);
-        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4], "{}", built.sql);
+        assert_eq!(built.binds.len(), 5);
+        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4, 5], "{}", built.sql);
     }
 
     #[test]
@@ -1193,7 +1221,7 @@ mod tests {
         );
         assert_eq!(built.sql.matches("union all").count(), 2, "{}", built.sql);
         // One bind per filter, shared by both branches -- not one per branch.
-        assert_eq!(built.binds.len(), 6, "{}", built.sql);
+        assert_eq!(built.binds.len(), 7, "{}", built.sql);
         assert_eq!(built.sql.matches("= any($2)").count(), 2, "{}", built.sql);
         // The scope travels with the corpus, into the match *and* the detail.
         assert_eq!(
