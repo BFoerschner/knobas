@@ -154,7 +154,11 @@ const MAX_ID_CHARS: usize = 48;
 /// lowest           40   52   55   59   80   87
 /// highest          42   54   57   63   84   87
 /// ```
-pub const MAX_SAVED_LISTS: i64 = 16;
+///
+/// # Stepped to eight on 2026-10-12 (#653)
+///
+/// TABLE_653
+pub const MAX_SAVED_LISTS: i64 = 8;
 
 /// One row of `knobas.smart_list`.
 #[derive(Debug, Clone, sqlx::FromRow)]
