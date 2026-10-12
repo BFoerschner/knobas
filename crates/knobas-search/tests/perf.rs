@@ -1267,7 +1267,13 @@ const REPOS: i64 = 41;
 async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     let pool = pool().await;
     testing::seed_sources(&pool).await.unwrap();
+    // Timed because `0028`'s item trigger runs inside it: the cost the
+    // stored resolution adds to every write of the mirror (#627). Only a
+    // reading when this test runs alone -- after the tests above it in this
+    // file, the corpus is already there and the insert does nothing.
+    let seeding = Instant::now();
     testing::seed_corpus(&pool, 100_000).await.unwrap();
+    println!("under: seed_corpus(100000) took {} ms", seeding.elapsed().as_millis());
     testing::seed_estate(&pool, "bench").await.unwrap();
     let parented = sqlx::query(
         "update sync.item
