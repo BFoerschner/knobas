@@ -1382,50 +1382,61 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
     )
     .await
     .unwrap();
-    let room = list_entities_inner(
-        &pool,
-        &EntityFilter {
-            sources: vec![gitea.clone(), teamcity.clone(), "mock".to_owned()],
-            ..all()
-        },
-        500,
-        0,
-        &declarations,
-    )
-    .await
-    .unwrap();
-    let state_of = |id: &str| {
-        room.rows
-            .iter()
-            .find(|r| r.entity_id == id)
-            .unwrap_or_else(|| panic!("{id} is in the room"))
-            .state
-            .clone()
-    };
     let chip = |text: &str, tone: Tone| {
         Some(StateChip {
             text: text.to_owned(),
             tone,
         })
     };
-    assert_eq!(
-        state_of(&format!("{gitea}:tidewater/payout-service#7")),
-        chip("merged", Tone::Ok)
-    );
-    assert_eq!(
-        state_of(&format!("{gitea}:tidewater/payout-service#8")),
-        chip("open", Tone::Info)
-    );
-    assert_eq!(
-        state_of(&format!("{teamcity}:4711")),
-        chip("FAILURE", Tone::Err)
-    );
-    let ticket = room
-        .rows
-        .iter()
-        .find(|r| r.kind == "ticket")
-        .expect("the demo corpus has a ticket");
-    assert_eq!(ticket.state, None, "a ticket's adapter declares no state");
+    // All four room statements -- two orders, with and without the
+    // withdrawn -- each expand `declared_state!` on their own.
+    for (order, include_deleted) in [
+        (EntityOrder::UpdatedDesc, false),
+        (EntityOrder::TitleAsc, false),
+        (EntityOrder::UpdatedDesc, true),
+        (EntityOrder::TitleAsc, true),
+    ] {
+        let room = list_entities_inner(
+            &pool,
+            &EntityFilter {
+                sources: vec![gitea.clone(), teamcity.clone(), "mock".to_owned()],
+                order,
+                include_deleted,
+                ..all()
+            },
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap();
+        let state_of = |id: &str| {
+            room.rows
+                .iter()
+                .find(|r| r.entity_id == id)
+                .unwrap_or_else(|| panic!("{id} is in the room"))
+                .state
+                .clone()
+        };
+        assert_eq!(
+            state_of(&format!("{gitea}:tidewater/payout-service#7")),
+            chip("merged", Tone::Ok)
+        );
+        assert_eq!(
+            state_of(&format!("{gitea}:tidewater/payout-service#8")),
+            chip("open", Tone::Info)
+        );
+        assert_eq!(
+            state_of(&format!("{teamcity}:4711")),
+            chip("FAILURE", Tone::Err)
+        );
+        let ticket = room
+            .rows
+            .iter()
+            .find(|r| r.kind == "ticket")
+            .expect("the demo corpus has a ticket");
+        assert_eq!(ticket.state, None, "a ticket's adapter declares no state");
+    }
 
     let detail = get_entity_inner(&pool, &format!("{teamcity}:4711"))
         .await
