@@ -295,15 +295,6 @@ impl Declarations {
         self.0.get(source_id).into_iter().flat_map(BTreeMap::values)
     }
 
-    /// Whether any kind of this source declares a parent -- the question
-    /// `under:`'s coverage asks of a source (#595). A source that declares none
-    /// has nothing the filter can match.
-    #[must_use]
-    pub fn declares_a_parent(&self, source_id: &str) -> bool {
-        self.of_source(source_id)
-            .any(|kind| !kind.parent.is_empty())
-    }
-
     /// The jsonb every path-driven statement binds.
     ///
     /// One parameter for the whole map rather than one per field: a read

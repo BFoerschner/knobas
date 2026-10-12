@@ -86,10 +86,11 @@ test("only the author dimension is read, whatever else is in the list", () => {
 });
 
 /**
- * `under:` (#595): a source that declares no parent is named and explained,
- * one that answered is not, and each dimension is read only by its own reader.
+ * `under:` (#595): a source that has synced nothing naming a parent is named
+ * and explained (measured on its corpus since #642), one that answered is not,
+ * and each dimension is read only by its own reader.
  */
-test("a source that declares no parent is named under its own dimension", () => {
+test("a source whose corpus names no parent is named under its own dimension", () => {
   const author = response([
     { source_id: "teamcity", display_name: "Buildserver", answer: "no_values" },
   ]);
@@ -107,7 +108,7 @@ test("a source that declares no parent is named under its own dimension", () => 
     ],
   };
   expect(underGaps(both)).toEqual([
-    { sourceId: "kuma", name: "Uptime Kuma", reason: "it declares no parent to look under" },
+    { sourceId: "kuma", name: "Uptime Kuma", reason: "nothing it has synced names a parent" },
   ]);
   expect(authorGaps(both).map((gap) => gap.sourceId)).toEqual(["teamcity"]);
   expect(underGaps(author)).toEqual([]);
