@@ -2,8 +2,8 @@
 //!
 //! `flush_all`, whether the real scheduler's tick calls it or a test does by
 //! hand, reaches *every* configured source in the database, not only the
-//! calling test's. Each harness's secret store holds only its own source's
-//! credential, so its builds of the other tests' sources fail, and a failed
+//! calling test's. Each test's secret store holds only its own sources'
+//! credentials, so its builds of the other tests' sources fail, and a failed
 //! build re-reasons each of their due writes `unauthorized`.
 //!
 //! In its own file, deliberately: each test file gets a database of its own
@@ -15,6 +15,7 @@
 //! sibling's flush leaves on the row, and a sibling cannot deliver a write:
 //! it has no credential for any source but its own.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use knobas_core::entity::EntityRef;
@@ -113,9 +114,17 @@ impl Source for Fake {
     }
 }
 
-struct FakeRegistry {
+/// One source's end of the fake: what it answers, and what it received.
+#[derive(Clone)]
+struct Line {
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
+}
+
+/// Builds a fake per source id, each on its own [`Line`], so a write
+/// delivered to one source cannot read back as delivered to another (#619).
+struct FakeRegistry {
+    lines: HashMap<String, Line>,
 }
 
 impl AdapterRegistry for FakeRegistry {
@@ -124,10 +133,15 @@ impl AdapterRegistry for FakeRegistry {
     }
 
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        // A sibling test's source: its build already failed on the
+        // credential, which this registry's secret store does not hold.
+        let line = self.lines.get(&instance.id).ok_or_else(|| {
+            SourceError::protocol(format!("no fake for source {:?}", instance.id))
+        })?;
         Ok(Box::new(Fake {
             id: instance.id,
-            answer: Arc::clone(&self.answer),
-            written: Arc::clone(&self.written),
+            answer: Arc::clone(&line.answer),
+            written: Arc::clone(&line.written),
         }))
     }
 }
@@ -153,9 +167,8 @@ impl SyncEvents for Silent {
 }
 
 struct Harness {
-    deps: SchedulerDeps,
-    answer: Arc<Mutex<Answer>>,
-    written: Arc<Mutex<Vec<WriteOp>>>,
+    deps: Arc<SchedulerDeps>,
+    line: Line,
     source: String,
 }
 
@@ -165,12 +178,13 @@ impl Harness {
     }
 
     fn answer(&self, answer: Answer) {
-        *self.answer.lock().unwrap() = answer;
+        *self.line.answer.lock().unwrap() = answer;
     }
 
     /// The bodies of the comments the fake accepted, in order.
     fn delivered(&self) -> Vec<String> {
-        self.written
+        self.line
+            .written
             .lock()
             .unwrap()
             .iter()
@@ -228,52 +242,68 @@ impl Harness {
 /// source id unique to this test -- the same shape as `write_queue.rs`'s
 /// harness, minus what these tests do not need.
 async fn harness() -> Harness {
+    let source = format!("ws{}", uuid::Uuid::new_v4().simple());
+    sources(&[source]).await.pop().unwrap()
+}
+
+/// One harness per id, all on one [`SchedulerDeps`]: its secret store holds
+/// every one of these sources' credentials and its registry builds each its
+/// own fake, so one `flush_all` can deliver to any of them (#619).
+async fn sources(ids: &[String]) -> Vec<Harness> {
     let connector = knobas_db::test_util::test_connector().await;
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
 
-    let source = format!("ws{}", uuid::Uuid::new_v4().simple());
-    config::insert(
-        &pool,
-        &InsertConfig {
-            id: source.clone(),
-            adapter_kind: "mock".to_owned(),
-            display_name: "Fake".to_owned(),
-            base_url: String::new(),
-            auth_kind: AuthKind::Method(AuthMethod::Pat),
-            config: serde_json::json!({}),
-            sync_interval_secs: 300,
-            enabled: true,
-        },
-    )
-    .await
-    .unwrap();
     let secrets = MemoryStore::new();
-    secrets
-        .put(
-            &knobas_secrets::KeychainAccount::source(&source),
-            &Secret::just(AuthMethod::Pat, "tok"),
+    let mut lines = HashMap::new();
+    for id in ids {
+        config::insert(
+            &pool,
+            &InsertConfig {
+                id: id.clone(),
+                adapter_kind: "mock".to_owned(),
+                display_name: "Fake".to_owned(),
+                base_url: String::new(),
+                auth_kind: AuthKind::Method(AuthMethod::Pat),
+                config: serde_json::json!({}),
+                sync_interval_secs: 300,
+                enabled: true,
+            },
         )
+        .await
         .unwrap();
-
-    let answer = Arc::new(Mutex::new(Answer::Accept));
-    let written = Arc::new(Mutex::new(Vec::new()));
-    Harness {
-        deps: SchedulerDeps {
-            pool,
-            connections: Arc::new(TestConnections(connector)),
-            registry: Arc::new(FakeRegistry {
-                answer: Arc::clone(&answer),
-                written: Arc::clone(&written),
-            }),
-            secrets: Arc::new(secrets),
-            events: Arc::new(Silent) as Arc<dyn SyncEvents>,
-            timing: knobas_sync::scheduler::SchedulerTiming::default(),
-        },
-        answer,
-        written,
-        source,
+        secrets
+            .put(
+                &knobas_secrets::KeychainAccount::source(id),
+                &Secret::just(AuthMethod::Pat, "tok"),
+            )
+            .unwrap();
+        lines.insert(
+            id.clone(),
+            Line {
+                answer: Arc::new(Mutex::new(Answer::Accept)),
+                written: Arc::new(Mutex::new(Vec::new())),
+            },
+        );
     }
+
+    let deps = Arc::new(SchedulerDeps {
+        pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(FakeRegistry {
+            lines: lines.clone(),
+        }),
+        secrets: Arc::new(secrets),
+        events: Arc::new(Silent) as Arc<dyn SyncEvents>,
+        timing: knobas_sync::scheduler::SchedulerTiming::default(),
+    });
+    ids.iter()
+        .map(|id| Harness {
+            deps: Arc::clone(&deps),
+            line: lines[id].clone(),
+            source: id.clone(),
+        })
+        .collect()
 }
 
 /// Story 9: recovery needs no ceremony. A write queued while the source was
@@ -355,17 +385,36 @@ async fn a_held_write_never_flushes_on_its_own() {
 /// Story 21: one source being down does not stop another. `flush_all` is what
 /// the schedule calls, so the isolation has to hold there and not only in a
 /// per-source flush.
+///
+/// Both writes are still owed when `flush_all` starts -- `submit` delivers on
+/// the spot, so `up`'s is queued while `up` is down too -- and both sources
+/// are on one `SchedulerDeps` that can build either. Otherwise `up`'s write
+/// is `Sent` before the flush, and the test passes whether or not the flush
+/// ever reaches `up` (#619).
 #[tokio::test]
 async fn a_source_that_cannot_write_does_not_stop_another_source() {
-    let down = harness().await;
-    let up = harness().await;
+    // `config::list` orders by id and `flush_all` flushes in that order, one
+    // source after another, so `down` ("wsa...") must sort before `up`
+    // ("wsb..."). The other way round, a `flush_all` that gave up after a
+    // failing source would already have flushed `up`, and this test could
+    // not tell it from the real one.
+    let suffix = uuid::Uuid::new_v4().simple();
+    let mut both = sources(&[format!("wsa{suffix}"), format!("wsb{suffix}")]).await;
+    let up = both.pop().unwrap();
+    let down = both.pop().unwrap();
+    assert!(down.source < up.source);
+
     let stuck = down.mirror("PAY-9", "a payout fails").await;
     let fine = up.mirror("PAY-10", "a payout fails").await;
 
     down.answer(Answer::Unreachable);
+    up.answer(Answer::Unreachable);
     let held_back = down.comment(&stuck, "queued").await;
     let goes = up.comment(&fine, "delivered").await;
+    assert_eq!(up.reload(goes.id).await.state, WriteState::Pending);
 
+    // `up` comes back; `down` stays down.
+    up.answer(Answer::Accept);
     flusher::flush_all(&down.deps).await;
 
     assert_eq!(down.reload(held_back.id).await.state, WriteState::Pending);
