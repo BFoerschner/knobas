@@ -638,7 +638,8 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
 /// One recording with two readers cannot disagree about what the server said;
 /// two transcriptions of it can, and the way that goes wrong is invisible --
 /// each suite is green about its own copy. It is `/metrics` as the pinned image
-/// (2.5.3) answered on 2026-09-06, and `crates/knobas-source-kuma/tests/live_kuma.rs`
+/// (2.5.3) answered on 2026-10-12 (re-recorded when #634 changed the seeded
+/// monitors), and `crates/knobas-source-kuma/tests/live_kuma.rs`
 /// is what keeps it current.
 const KUMA_METRICS: &str = include_str!("../../../knobas-source-kuma/tests/it/support/metrics.txt");
 
@@ -709,32 +710,32 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
     let first = knobas_sync::run_once(&pool, real.as_ref(), None)
         .await
         .unwrap();
-    assert_eq!(first.upserted, 8, "the recording holds eight monitors");
+    assert_eq!(first.upserted, 6, "the recording holds six monitors");
 
-    // The recording's own numbers: five monitors up with readings of 16 to
-    // 32.8 ms, and the three tunnel checks down with Kuma's `-1` sentinel,
+    // The recording's own numbers: three monitors up with readings of 0.292 to
+    // 11 ms, and the three product checks down with Kuma's `-1` sentinel,
     // which the adapter carries as an absence and the sample keeps as one.
     let after_first = samples_of(&pool, &id).await;
     assert_eq!(
         after_first.len(),
-        8,
+        6,
         "one sample per monitor: {after_first:?}"
     );
     assert_eq!(
         after_first.get("8").unwrap(),
-        &(Some("up".to_owned()), Some(27)),
+        &(Some("up".to_owned()), Some(11)),
         "the canary, at the ratified 1500 ms threshold"
     );
     assert_eq!(
-        after_first.get("5").unwrap(),
+        after_first.get("146").unwrap(),
         &(Some("down".to_owned()), None),
         "a check that did not answer has a state and no reading"
     );
 
-    // Move the threshold under four of the five readings, and poll again. The
+    // Move the threshold between the readings, and poll again. The
     // corpus is byte-identical, so the adapter emits nothing and hands its
     // cursor straight back -- and every live monitor is sampled all the same.
-    knobas_sync::samples::set_threshold_ms(&pool, 20)
+    knobas_sync::samples::set_threshold_ms(&pool, 8)
         .await
         .unwrap();
     let second = knobas_sync::run_once(&pool, real.as_ref(), Some(first.cursor.clone()))
@@ -746,21 +747,22 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
     let newest = samples_of(&pool, &id).await;
     assert_eq!(
         newest.get("7").unwrap(),
-        &(Some("up".to_owned()), Some(16)),
-        "gitea answered in 16 ms and is still up under a 20 ms threshold"
+        &(Some("up".to_owned()), Some(5)),
+        "gitea answered in 5 ms and is still up under an 8 ms threshold"
     );
     assert_eq!(
         newest.get("8").unwrap(),
-        &(Some("warn".to_owned()), Some(27)),
-        "the canary answered in 27 ms and is now warn"
+        &(Some("warn".to_owned()), Some(11)),
+        "the canary answered in 11 ms and is now warn"
     );
     assert_eq!(
-        newest.get("1").unwrap(),
-        &(Some("warn".to_owned()), Some(33)),
-        "32.8 ms rounds to 33, and the threshold reads the rounded number"
+        newest.get("144").unwrap(),
+        &(Some("up".to_owned()), Some(0)),
+        "the notebook's 0.292 ms ping rounds to 0, and the threshold reads the \
+         rounded number"
     );
     assert_eq!(
-        newest.get("5").unwrap(),
+        newest.get("146").unwrap(),
         &(Some("down".to_owned()), None),
         "a monitor that is down is not softened to warn by a threshold"
     );
@@ -773,7 +775,7 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(rows, 16, "two polls, eight monitors, sixteen rows");
+    assert_eq!(rows, 12, "two polls, six monitors, twelve rows");
 }
 
 /// The newest sample of each of one source's monitors, by the monitor's key in
@@ -843,7 +845,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, real.as_ref())
         .await
         .unwrap();
-    assert_eq!(run.upserted, 8, "the recording holds eight monitors");
+    assert_eq!(run.upserted, 6, "the recording holds six monitors");
 
     // The stored row, every column the adapter decided. `8` is the canary's own
     // monitor id in Kuma, which is the key half of its entity id.
@@ -940,7 +942,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
 ///
 /// So: the real adapter, over real HTTP against the recording, into the
 /// mirror, and then the **real estate file** imported over it -- with the
-/// count asserted as a literal seven rather than counted out of the file,
+/// count asserted as a literal five rather than counted out of the file,
 /// which would agree with the file by construction however wrong the names
 /// were.
 ///
@@ -981,7 +983,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
     let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, real.as_ref())
         .await
         .unwrap();
-    assert_eq!(run.upserted, 8, "the recording holds eight monitors");
+    assert_eq!(run.upserted, 6, "the recording holds six monitors");
 
     let preview = knobas_app::assets::preview_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
         .await
@@ -993,15 +995,13 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
             .map(|link| (link.asset_id.as_str(), link.monitor_name.as_str()))
             .collect::<Vec<_>>(),
         [
-            ("asset:hetzner-confluence", "knobas-confluence"),
-            ("asset:hetzner-jira", "knobas-jira"),
-            ("asset:hetzner-teamcity", "knobas-teamcity"),
-            ("asset:knobas-confluence", "confluence (tunnel)"),
+            ("asset:knobas-confluence", "confluence"),
             ("asset:knobas-gitea", "gitea"),
-            ("asset:knobas-jira", "jira (tunnel)"),
-            ("asset:knobas-teamcity", "teamcity (tunnel)"),
+            ("asset:knobas-jira", "jira"),
+            ("asset:knobas-teamcity", "teamcity"),
+            ("asset:notebook", "notebook"),
         ],
-        "every one of the file's seven monitor names answers to a monitor \
+        "every one of the file's five monitor names answers to a monitor \
          Kuma published"
     );
     assert!(
@@ -1014,7 +1014,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
         .await
         .expect("the import")
         .value;
-    assert_eq!(outcome.monitors_linked, 7);
+    assert_eq!(outcome.monitors_linked, 5);
 
     // ...and out again through the pane the reader looks at, which is the far
     // end of story 33's *monitoring* row: the state Kuma published and the

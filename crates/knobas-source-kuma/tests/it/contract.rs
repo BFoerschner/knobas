@@ -22,7 +22,7 @@ async fn passes_the_contract_battery() {
     .await;
 }
 
-/// The eight monitors `testenv/monitors.json` names, as the mirror holds them.
+/// The six monitors `testenv/monitors.json` names, as the mirror holds them.
 ///
 /// The battery checks that a full sync yields *something* well-formed; this
 /// checks that it yields the estate -- one item per monitor, keyed on Kuma's
@@ -37,19 +37,10 @@ async fn a_full_sync_mirrors_every_monitor_with_its_state() {
     let names: Vec<&str> = sink.0.iter().map(|i| i.title.as_str()).collect();
     assert_eq!(
         names.len(),
-        8,
-        "the recording holds the eight seeded monitors: {names:?}"
+        6,
+        "the recording holds the six seeded monitors: {names:?}"
     );
-    for expected in [
-        "knobas-teamcity",
-        "knobas-jira",
-        "knobas-confluence",
-        "teamcity (tunnel)",
-        "jira (tunnel)",
-        "confluence (tunnel)",
-        "gitea",
-        "canary",
-    ] {
+    for expected in ["notebook", "teamcity", "jira", "confluence", "gitea", "canary"] {
         assert!(
             names.contains(&expected),
             "{expected:?} is missing: {names:?}"
@@ -75,19 +66,19 @@ async fn a_full_sync_mirrors_every_monitor_with_its_state() {
     let ping = sink
         .0
         .iter()
-        .find(|i| i.title == "knobas-teamcity")
-        .expect("the servers are pinged");
+        .find(|i| i.title == "notebook")
+        .expect("the notebook is pinged");
     assert_eq!(ping.payload["type"], "ping");
     assert_eq!(ping.payload["url"], serde_json::Value::Null);
-    assert_eq!(ping.payload["hostname"], "46.224.117.158");
+    assert_eq!(ping.payload["hostname"], "0.250.250.254");
 
     // A monitor whose last check did not answer: `-1` is a sentinel and the
     // mirror carries it as no response time, never as minus one millisecond.
     let down = sink
         .0
         .iter()
-        .find(|i| i.title == "jira (tunnel)")
-        .expect("the tunnel was down when this was recorded");
+        .find(|i| i.title == "jira")
+        .expect("Jira was stopped when this was recorded");
     assert_eq!(down.payload["state"], "down");
     assert_eq!(down.payload["response_time_ms"], serde_json::Value::Null);
 }
@@ -133,9 +124,9 @@ async fn a_monitor_that_stops_being_published_is_tombstoned() {
         tombstones[0].title, "canary",
         "a tombstone renders with the name the last run recorded"
     );
-    // And the seven that are left are re-emitted: every run that emits at all
+    // And the five that are left are re-emitted: every run that emits at all
     // emits the whole roster.
-    assert_eq!(second.0.iter().filter(|i| !i.deleted).count(), 7);
+    assert_eq!(second.0.iter().filter(|i| !i.deleted).count(), 5);
 }
 
 /// A change of any kind re-emits the whole roster, and the cursor moves with
@@ -168,7 +159,7 @@ async fn a_state_change_re_emits_the_roster_and_moves_the_cursor() {
         .unwrap();
 
     assert_ne!(moved, cursor, "a change must move the cursor");
-    assert_eq!(second.0.len(), 8, "every run that emits at all is full");
+    assert_eq!(second.0.len(), 6, "every run that emits at all is full");
     let canary = second.0.iter().find(|i| i.title == "canary").unwrap();
     assert_eq!(canary.payload["state"], "down");
 }
@@ -211,7 +202,7 @@ async fn test_connection_reports_the_version_and_the_roster_size() {
         .await
         .unwrap();
     assert_eq!(info.server_version.as_deref(), Some("2.5.3"));
-    assert_eq!(info.detail.as_deref(), Some("8 monitors"));
+    assert_eq!(info.detail.as_deref(), Some("6 monitors"));
     assert_eq!(info.account, None);
     assert!(info.discovered.is_empty());
 }
