@@ -258,8 +258,9 @@ async fn the_full_name_still_puts_its_repo_first() {
 /// The owner names no repo: only the last segment is a name. `tidewater`
 /// matches `tidewater/ledger` and `tidewater/payout` as it matches the newer
 /// `harbor/tidewater-sync`, whose last segment is not `tidewater` either, so
-/// the three tie and recency orders them as it did before #621. Were every `/` segment
-/// a name, the owner's two repos would be named and jump above the newest.
+/// the three tie and recency orders them as it did before #621. Were every
+/// `/` segment a name, the owner's two repos would be named and jump above
+/// the newest.
 #[tokio::test]
 async fn the_owner_names_none_of_its_repos() {
     let pool = pool("last-segment-owner").await;
