@@ -55,6 +55,65 @@ fn adapter(base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
     }
 }
 
+/// The adapter with its **build configuration view** excused, for
+/// [`passes_the_contract_battery`] only. **Not a witness** of that view.
+///
+/// Battery clause 9 reads the source view of every entity the sync emitted.
+/// A configuration's view reads `GET /app/rest/buildTypes/id:{id}`, which
+/// mockd does not serve -- and will not: mockd is frozen, *nothing new*
+/// (ADR-0013, `docs/agents/working-model.md`), the rule #297 met the same way
+/// for Jira's connection probe. So `view` answers `Ok(None)` for a
+/// `teamcity:buildType:…` entity without a request, and delegates every other
+/// call -- every other kind's view included -- to the real adapter, so
+/// clauses 1–9 still run against it everywhere mockd can answer.
+///
+/// The configuration view is witnessed where a witness can be: against the
+/// real server by `passes_the_contract_battery_against_the_seeded_server` in
+/// `live_teamcity_seeded.rs` (clause 9 included), and for its mapping by the
+/// wiremock tests in `tests/it/view.rs`. Ruling on #664, 2026-10-12.
+struct ConfigViewExcused(Box<dyn Source>);
+
+#[async_trait::async_trait]
+impl Source for ConfigViewExcused {
+    fn descriptor(&self) -> knobas_source::SourceDescriptor {
+        self.0.descriptor()
+    }
+
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        self.0.test_connection().await
+    }
+
+    async fn sync(
+        &self,
+        cursor: Option<knobas_source::Cursor>,
+        sink: &mut (dyn knobas_source::Sink + Send),
+    ) -> Result<knobas_source::Cursor, SourceError> {
+        self.0.sync(cursor, sink).await
+    }
+
+    async fn write(
+        &self,
+        op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
+        self.0.write(op).await
+    }
+
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        self.0.reachable_transitions(entity).await
+    }
+
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        if entity.starts_with("teamcity:buildType:") {
+            return Ok(None);
+        }
+        self.0.view(entity, section).await
+    }
+}
+
 /// A build configuration in the fixture that has **no** build in flight.
 ///
 /// The contract battery requires an incremental sync after no changes to emit
@@ -143,7 +202,9 @@ async fn passes_the_contract_battery() {
             Fault::Unauthorized => denied_url.clone(),
             Fault::Unreachable => dead_url.clone(),
         };
-        adapter(&url, config.clone())
+        // The configuration view is excused here and witnessed elsewhere;
+        // see `ConfigViewExcused`.
+        Box::new(ConfigViewExcused(adapter(&url, config.clone()))) as Box<dyn Source>
     })
     .await;
 
