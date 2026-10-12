@@ -126,14 +126,106 @@ check_eq "TeamCity's run needs Gitea, and Gitea first" \
   "gitea teamcity" "$(live_needs teamcity)"
 check_eq "Jira needs nothing else" "jira" "$(live_needs jira)"
 
-check_eq "from an empty engine a TeamCity run puts back both" \
-  "teamcity gitea" "$(STUB_RUNNING="" live_to_put_back teamcity)"
+check_eq "from an empty engine a TeamCity run puts back TeamCity only" \
+  "teamcity" "$(STUB_RUNNING="" live_to_put_back teamcity)"
 check_eq "a Gitea that was up stays up after a TeamCity run" \
   "teamcity" "$(STUB_RUNNING="knobas-gitea" live_to_put_back teamcity)"
 check_eq "a product that was up stays up after its run" \
   "" "$(STUB_RUNNING="knobas-gitea knobas-jira knobas-jira-db" live_to_put_back jira)"
 check_eq "a Gitea run from an empty engine stops Gitea" \
   "gitea" "$(STUB_RUNNING="" live_to_put_back gitea)"
+
+# --- a shared Gitea outlives the JVM run that started it (#698) -------------
+
+# Gitea is not a JVM and takes no lock, so a `just gitea-live` from another
+# worktree may start using the Gitea a TeamCity run brought up. If the TeamCity
+# run then stopped "what it started", that run would lose Gitea mid-suite. The
+# rule: a run stops only its own product, never one it merely needed.
+#
+# Witnessed whole, through `live_session`: a stateful docker stub whose `ps`
+# answers from what `compose up` started and `compose stop` stopped, a fake
+# `seed-teamcity.sh` that starts a Gitea user (`live_session gitea`, in the
+# background, holding Gitea until told to let go) while the TeamCity run is
+# inside its seed, and a check after the TeamCity run's EXIT trap has run.
+shared=$scratch/shared
+mkdir -p "$shared/bin" "$shared/testenv"
+cat >"$shared/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+# `ps` reads $STUB_STATE; `compose ... up ... <svc>` adds knobas-<svc> to it,
+# `compose ... stop <svc>` removes it; every call but `ps` and `context` is logged.
+case "${1:-} ${2:-}" in
+  "ps "*) cat "$STUB_STATE" 2>/dev/null; exit 0 ;;
+  "context show") echo orbstack; exit 0 ;;
+esac
+echo "docker $*" >>"$STUB_LOG"
+verb="" svc=""
+for a in "$@"; do
+  case $a in
+    up | stop) verb=$a ;;
+    gitea | teamcity | teamcity-agent)
+      [ -n "$verb" ] || continue
+      if [ "$verb" = up ]; then
+        grep -x -- "knobas-$a" "$STUB_STATE" >/dev/null 2>&1 || echo "knobas-$a" >>"$STUB_STATE"
+      else
+        grep -vx -- "knobas-$a" "$STUB_STATE" >"$STUB_STATE.tmp" 2>/dev/null || true
+        mv "$STUB_STATE.tmp" "$STUB_STATE"
+      fi ;;
+  esac
+done
+STUB
+chmod +x "$shared/bin/docker"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed-gitea.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed"
+# The TeamCity seed is where the other worktree's Gitea run turns up.
+cat >"$shared/testenv/seed-teamcity.sh" <<SEED
+#!/usr/bin/env bash
+(
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-user
+  echo "gitea user: using it" >>"$shared/user.out"
+  while [ ! -e "$shared/user.release" ]; do sleep 0.1; done
+  echo "gitea user: done"
+) >>"$shared/user.out" 2>&1 </dev/null &
+for ((i = 0; i < 100; i++)); do
+  grep -q 'using it' "$shared/user.out" 2>/dev/null && exit 0
+  sleep 0.1
+done
+echo "the Gitea user never started" >&2
+exit 1
+SEED
+chmod +x "$shared/testenv/seed-teamcity.sh"
+
+: >"$shared/state"
+: >"$shared/docker.log"
+rc=0
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export KNOBAS_LIVE_LOCK="$shared/jvm.lock" KNOBAS_LIVE_LOCK_WAIT=5 KNOBAS_LIVE_LOCK_POLL=0.1
+  unset KNOBAS_LIVE_LOCK_HOLDER
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session teamcity teamcity-run
+) >"$shared/teamcity.out" 2>&1 || rc=$?
+check_eq "the TeamCity session with a Gitea user beside it runs" "0" "$rc"
+grep -q 'using it' "$shared/user.out" 2>/dev/null ||
+  fail "the Gitea user turned up during the TeamCity run" "$(cat "$shared/user.out" 2>/dev/null)"
+check_eq "the TeamCity run stopped its own server and agent" "knobas-gitea" "$(cat "$shared/state")"
+case $(cat "$shared/teamcity.out") in
+  *"gitea was started for this run and stays up"*) checks=$((checks + 1)) ;;
+  *) checks=$((checks + 1)); fail "the TeamCity run says it leaves the Gitea it started up" "$(cat "$shared/teamcity.out")" ;;
+esac
+checks=$((checks + 1))
+if grep -E 'stop( [a-z-]+)* gitea( |$)' "$shared/docker.log" >/dev/null; then
+  fail "a TeamCity run that started Gitea does not stop it under a Gitea user" "$(cat "$shared/docker.log")"
+fi
+touch "$shared/user.release"
+# Let the user go before the scratch directory goes with this script's exit.
+for ((i = 0; i < 100; i++)); do
+  grep -q 'gitea user: done' "$shared/user.out" 2>/dev/null && break
+  sleep 0.1
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2

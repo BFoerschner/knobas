@@ -247,14 +247,15 @@ live_lock_traps() {
   trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
 }
 
-# live_to_put_back <product> -- the products a run of this one starts and must
-# therefore stop again, last-started first: whatever was not already up.
+# live_to_put_back <product> -- what a run of this one stops again at its end:
+# the product itself, if it was not already up. NEVER what it only needed
+# (#698): Gitea, which a TeamCity run brings up for its VCS roots, is not a
+# JVM and takes no lock, so a `just gitea-live` from another worktree may be
+# using it by the time the TeamCity run ends, and stopping it would pull it
+# out from under that run mid-suite. Gitea is light (~130 MB) and stays up;
+# `just live-down gitea` stops it.
 live_to_put_back() {
-  local p out=""
-  for p in $(live_needs "$1"); do
-    live_is_up "$p" || out="$p${out:+ $out}"
-  done
-  echo "$out"
+  live_is_up "$1" || echo "$1"
 }
 
 _live_compose() {
@@ -372,6 +373,10 @@ live_session() {
   if live_is_jvm "$1"; then live_lock_hold "${2:-live_session-$1}" || exit 1; fi
   live_guard "$1" || exit 1
   LIVE_PUT_BACK=$(live_to_put_back "$1")
+  local need kept=""
+  for need in $(live_needs "$1"); do
+    [ "$need" = "$1" ] || live_is_up "$need" || kept="$kept $need"
+  done
   live_up "$1"
   eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
   if [ -n "$LIVE_PUT_BACK" ]; then
@@ -379,4 +384,7 @@ live_session() {
   else
     echo "live: $1 was already up and stays up"
   fi
+  for need in $kept; do
+    echo "live: $need was started for this run and stays up after it, shared with other worktrees' runs (#698) -- 'just live-down $need' stops it"
+  done
 }
