@@ -1,0 +1,39 @@
+---
+status: accepted
+---
+
+# A source draws the views of its own kinds
+
+The detail panel draws every kind the same way: a header, then every field of the raw payload as a key and a value (spec §3a's generic view). For a Gitea pull request that is forty rows of JSON and no diff. For a TeamCity build configuration it is a name and an id, and none of the parameters, steps or triggers, because the mirror never held them. Björn, 2026-10-12: *"I want to see diffs inside the tool … get into a build configuration and see/change things. Everything right now is too hard to make sense of because there's a lot of useless information and the things I want to see and work with are hidden or not even there."* He delegated the design and said sources may implement their own views.
+
+Decided 2026-10-12 (orchestrator, under that delegation): **an adapter draws the views of its own kinds.** It answers a live read, `Source::view(entity, section)`, with a **source view**: a list of sections, each a list of typed **blocks** from one fixed vocabulary (facts, text, entity list, diff, log, settings). The shell renders the vocabulary and nothing else. It never learns which adapter drew a block. The generic payload projection stays as the fallback for an adapter that draws nothing for a kind, and for a read that fails.
+
+## Why a block vocabulary and not one Svelte view per adapter
+
+- §3a promises that a new source needs no change to the shell. A Svelte component per adapter breaks that promise. A vocabulary keeps it: a GitLab adapter that answers with a diff block gets the diff viewer on day one.
+- ADR-0007 forbids reading a payload outside the adapter that shaped it, except as a named, missable read. Per-adapter views in the shell would be a payload read on every line. With a vocabulary, the read stays in the adapter's crate, where the shape is known.
+- The SPI stays plain serde data, so a later out-of-process adapter (§3a) can draw views too.
+
+## The rules
+
+1. **A view is live, like a [reachable transition](../../CONTEXT.md#reachable-transition).** It is read when the detail opens and never stored. A diff, a build log or a configuration's parameters are not in the mirror, and a view is how the reader sees them without syncing them. The mirror's own fields (title, path, links, history) still come from `get_entity`.
+2. **A failed read falls back, and says so.** The panel draws the generic projection under a line naming the failure (`Showing the mirror: Gitea answered 502`). An adapter with no view for a kind answers `None`, and the panel draws the generic projection with no line. The fallback is never silent about an error, and never noisy about an absence.
+3. **A section can be deferred.** A pull request's files, a build's log and a large diff are expensive. The first read returns every section's title and count. A deferred section's blocks are read when the reader opens its tab, through the same call with the section's id.
+4. **An edit is a write op, and the block names it.** A settings block marks the values it lets a reader change, and each names the `WriteOp` identifier that changes it. The edit goes through the write queue like every other write-back: queued, held if the target moved, and visible in the queue. A view never writes.
+5. **Every string in a block is source text.** The shell interpolates it and never renders it as markup (gotcha 7). A text block holding Markdown is drawn as text, with the same interpolate-never-render rule `NoteBody` follows, never with `{@html}`.
+6. **Size is capped in the adapter.** A diff block carries at most a fixed number of lines per file and per view. A file over the cap carries its counts and `truncated: true`, and the panel offers the source's own page for the rest.
+7. **An entity in a block is an address.** An entity-list row that names a mirrored entity carries its id, and clicking it opens that entity's detail. A row the mirror does not hold (a TeamCity change whose commit is in an unsynced repo) carries no id and is drawn as plain text.
+
+## Considered options
+
+- **One Svelte view per adapter and kind.** Rejected for the three reasons above.
+- **Sync the extra data into the mirror** (diffs, parameters, logs). Rejected: it is large, it changes all the time, and nothing searches it. A diff in the mirror would double the database and still be stale when opened.
+- **A webview of the source's own page.** Rejected: it is the tab knobas exists to close, and it takes the source's login rather than knobas' credential.
+
+## Consequences
+
+- `Source` grows one method, with no default implementation (ADR-0006's forcing function, as for `reachable_transitions`). Every adapter answers. One with nothing to draw answers `Ok(None)` for every kind.
+- The block vocabulary is a frozen surface. Adding a block type is a §10.8 entry, like adding a `WriteOp` variant.
+- One IPC command, `entity_view`, in `commands/entity.rs`, with its §10.8 entry.
+- The unified-diff parser is shared in `knobas-source`, so every git adapter emits the same diff block from the text its server answers.
+- Each adapter's views are witnessed against the real product, in that adapter's live suite (ADR-0013).
