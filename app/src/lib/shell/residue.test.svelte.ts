@@ -347,6 +347,7 @@ const Tile = (await import("./Tile.svelte")).default;
 const AssetsTile = (await import("./AssetsTile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const SourceView = (await import("../detail/view/SourceView.svelte")).default;
+const LogBlock = (await import("../detail/view/LogBlock.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const InboxView = (await import("../inbox/InboxView.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
@@ -667,6 +668,14 @@ const CASES: Case[] = [
           onaction: () => Promise.resolve(false),
         },
       }),
+    }),
+  },
+  {
+    /** Its one effect scrolls its box to the end (#665); it installs nothing. */
+    name: "LogBlock",
+    source: "lib/detail/view/LogBlock.svelte",
+    open: (target) => ({
+      app: mount(LogBlock, { target, props: { text: "line 1\nline 2", truncated: true } }),
     }),
   },
   {
