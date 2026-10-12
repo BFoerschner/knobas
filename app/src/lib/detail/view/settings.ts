@@ -59,9 +59,12 @@ export interface QueuedSetting {
   value: string;
 }
 
-/** The setting `write` changes, or `null` when it is not an edit of `writeOp`. */
+/**
+ * The setting `write` changes, or `null` when it is not an edit of `writeOp`.
+ * The payload's variant is the op (`write.op` names the same thing), so
+ * reading the variant is the check.
+ */
 export function queuedSetting(writeOp: string, write: QueuedWrite): QueuedSetting | null {
-  if (write.op !== writeOp) return null;
   const read = SETS[writeOp]?.(write.payload);
   return read ? { entity: read.entity, name: read.name, value: read.value } : null;
 }
