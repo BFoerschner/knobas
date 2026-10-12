@@ -327,7 +327,10 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// not the same rule: `declared_parents!` takes the first candidate that is an
 /// object, and `coalesce` the first that yields a key, so a keyless
 /// `fields.parent: {}` stops `under:` and falls through to `epic` here. Jira
-/// sends no such record; the order is what the two are held to.
+/// sends no such record; the order is what the two are held to, and
+/// `knobas-source-jira`'s `tests/it/parent_key_pin.rs` holds them to it: the
+/// arms against the descriptor's candidates, and that keyless edge on both
+/// sides (#649).
 ///
 /// **Its failure direction, stated (requirement 3): it misses.** A record
 /// whose payload does not carry this path yields no row, so an epic seeds
