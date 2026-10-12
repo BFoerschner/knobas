@@ -209,6 +209,57 @@ pub struct KindPaths {
     /// order, the first whose `at` resolves winning, like every path here.
     #[serde(default)]
     pub parent: Vec<ParentPath>,
+    /// Where the state a row's chip shows sits, and what each value means
+    /// (#666): a pull request's open / merged / closed, a build's running or
+    /// outcome. Candidates in declaration order; the first whose value its
+    /// own map names wins ([`resolve_state`]). Empty for a kind with no
+    /// state, which draws no chip.
+    #[serde(default)]
+    pub state: Vec<StatePath>,
+}
+
+/// Where a row's **state** sits, and the values it is drawn for (#666).
+///
+/// `at` leads to a string or a boolean, so a merged flag can be a candidate
+/// beside a state word. `values` is the map: a value it does not name is a miss for
+/// this candidate, and the next one is tried. So a TeamCity build declares
+/// its `state` with only `running` and `queued` mapped, and a finished build
+/// falls through to its `status`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatePath {
+    /// Where the value is.
+    pub at: PayloadPath,
+    /// The values this candidate draws a chip for, matched exactly after
+    /// trimming.
+    #[serde(default)]
+    pub values: Vec<StateValue>,
+}
+
+/// One value a [`StatePath`] draws, and how.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateValue {
+    /// The value as the source writes it: a JSON string (`"open"`,
+    /// `"FAILURE"`) or a JSON boolean (`true`). Typed, so a source writing
+    /// the word `"true"` is not taken for a flag (the refusal
+    /// [`resolve_flag`] makes). A string is matched after trimming.
+    pub value: serde_json::Value,
+    /// How loud the chip is.
+    pub tone: crate::tone::Tone,
+    /// What the chip says, where the value itself is not a word a reader
+    /// should see (`merged` for a merged flag's `true`). `None` shows the
+    /// value.
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// The chip a row draws: the resolved [`KindPaths::state`].
+///
+/// `EntityRow.state` on the wire. `text` is source text (or the adapter's
+/// rename of it) and is drawn as text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateChip {
+    pub text: String,
+    pub tone: crate::tone::Tone,
 }
 
 /// The [`KindPaths`] field names, as the SQL macros spell them.
@@ -225,6 +276,7 @@ pub mod field {
     pub const PROJECT_KEY: &str = "project_key";
     pub const PROJECT_NAME: &str = "project_name";
     pub const PARENT: &str = "parent";
+    pub const STATE: &str = "state";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths and `parent`'s parent declarations.
@@ -239,6 +291,7 @@ pub mod field {
         PROJECT_KEY,
         PROJECT_NAME,
         PARENT,
+        STATE,
     ];
 }
 
@@ -447,6 +500,34 @@ pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec
         }
     }
     out
+}
+
+/// The chip a record's declared state draws, if any (#666).
+///
+/// Candidates in declaration order. A candidate's value is the string its
+/// `at` leads to, trimmed and non-blank, or the boolean it leads to; anything
+/// else misses. The value must be one its own `values` names, string for
+/// string and boolean for boolean, or the candidate misses and the next is
+/// tried. The chip's text is the entry's `text`, else the value as text. [`declared_state!`](crate::declared_state) is the
+/// same rule in SQL, held to this one by
+/// `crates/knobas-core/tests/it/payload_paths.rs`.
+#[must_use]
+pub fn resolve_state(payload: &serde_json::Value, candidates: &[StatePath]) -> Option<StateChip> {
+    candidates.iter().find_map(|candidate| {
+        let (value, text) = match at(payload, &candidate.at)? {
+            serde_json::Value::String(text) if !text.trim().is_empty() => {
+                let text = text.trim().to_owned();
+                (serde_json::Value::String(text.clone()), text)
+            }
+            serde_json::Value::Bool(flag) => (serde_json::Value::Bool(*flag), flag.to_string()),
+            _ => return None,
+        };
+        let entry = candidate.values.iter().find(|v| v.value == value)?;
+        Some(StateChip {
+            text: entry.text.clone().unwrap_or(text),
+            tone: entry.tone,
+        })
+    })
 }
 
 /// One parent an item names: its kind, and the names it answers to.
@@ -667,6 +748,43 @@ pub fn parent_path(chain: &[ResolvedParent]) -> Option<String> {
         .filter_map(|parent| parent.names.first().map(String::as_str))
         .collect();
     (!names.is_empty()).then(|| names.join(ANCESTOR_SEPARATOR))
+}
+
+/// SQL for "the chip this record's declared state draws": a jsonb
+/// `{"text", "tone"}`, or `null` (#666). See [`resolve_state`] for the rule,
+/// which this is the SQL side of. `$decl` is where the declarations are
+/// bound, as for [`declared_string!`]; the row's alias must be `i`.
+///
+/// **The one expression every row's `state` is**, expanded beside
+/// [`path_line_read!`] wherever a row is read, so no two rows can disagree
+/// about what a state is. A kind that declares none, a value no map names, a
+/// value that is neither a string nor a boolean: all `null`, the ADR-0007
+/// miss, failing toward no chip rather than a wrong one.
+///
+/// The `order by s.ord, v.vord` is the declaration order, and it is what
+/// makes the first candidate win: a merged pull request's flag comes before
+/// its `closed` state word.
+#[macro_export]
+macro_rules! declared_state {
+    ($decl:literal) => {
+        concat!(
+            "(select jsonb_build_object('text', coalesce(v.e->>'text', s.val #>> '{}'), 'tone', v.e->>'tone') \
+              from (select c.ord, c.vals, case jsonb_typeof(i.payload #> c.segs) \
+                      when 'string' then to_jsonb(nullif(btrim(i.payload #>> c.segs), '')) \
+                      when 'boolean' then i.payload #> c.segs end as val \
+                    from (select ",
+            $crate::declared_segments!("t.p->'at'"),
+            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
+            $crate::declared_array!($decl, "state"),
+            ") with ordinality as t(p, ord)) c) s \
+              cross join lateral jsonb_array_elements(\
+                case when jsonb_typeof(s.vals) = 'array' then s.vals else '[]'::jsonb end) \
+                with ordinality as v(e, vord) \
+             where s.val is not null and v.e->'value' = s.val \
+               and jsonb_typeof(v.e->'tone') = 'string' \
+             order by s.ord, v.vord limit 1)"
+        )
+    };
 }
 
 /// SQL for "the boolean the declared path leads to, or nothing" -- see

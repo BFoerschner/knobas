@@ -19,9 +19,11 @@
 //! nothing, a kind that declares nothing, a field that declares nothing.
 
 use knobas_core::payload::{
-    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, parent_path, resolve_flag,
-    resolve_list, resolve_names_as_parent, resolve_parents, resolve_string,
+    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, StateChip, StatePath, StateValue,
+    parent_path, resolve_flag, resolve_list, resolve_names_as_parent, resolve_parents,
+    resolve_state, resolve_string,
 };
+use knobas_core::tone::Tone;
 use sqlx::{PgPool, Row};
 
 /// A migrated, empty database of this test's own.
@@ -860,4 +862,153 @@ async fn a_path_line_misses_in_both_and_reads_nothing_undeclared() {
         (None, None, None),
         "a page whose kind declares nothing draws no line, ancestors or not"
     );
+}
+
+// -- the state chip (#666) -------------------------------------------------------
+//
+// A row's state chip is the first declared candidate whose value is in that
+// candidate's own value map: the chip's text (the value itself unless the map
+// renames it) and its tone. `declared_state!` is the rule in SQL, and
+// `resolve_state` in Rust; every case goes through both.
+
+/// Gitea's pull request and TeamCity's build, as each adapter declares them:
+/// the merged flag before the state word, and a build's in-flight `state`
+/// before its finished `status`.
+fn state_declarations() -> Declarations {
+    let value = |value: serde_json::Value, tone: Tone, text: Option<&str>| StateValue {
+        value,
+        tone,
+        text: text.map(str::to_owned),
+    };
+    Declarations::empty()
+        .with(
+            "gitea",
+            vec![KindPaths {
+                kind: "pr".to_owned(),
+                state: vec![
+                    StatePath {
+                        at: PayloadPath::of(["merged"]),
+                        values: vec![value(serde_json::json!(true), Tone::Ok, Some("merged"))],
+                    },
+                    StatePath {
+                        at: PayloadPath::of(["state"]),
+                        values: vec![
+                            value(serde_json::json!("open"), Tone::Info, None),
+                            value(serde_json::json!("closed"), Tone::Muted, None),
+                        ],
+                    },
+                ],
+                ..KindPaths::default()
+            }],
+        )
+        .with(
+            "teamcity",
+            vec![KindPaths {
+                kind: "build".to_owned(),
+                state: vec![
+                    StatePath {
+                        at: PayloadPath::of(["state"]),
+                        values: vec![
+                            value(serde_json::json!("running"), Tone::Info, None),
+                            value(serde_json::json!("queued"), Tone::Info, None),
+                        ],
+                    },
+                    StatePath {
+                        at: PayloadPath::of(["status"]),
+                        values: vec![
+                            value(serde_json::json!("SUCCESS"), Tone::Ok, None),
+                            value(serde_json::json!("FAILURE"), Tone::Err, None),
+                        ],
+                    },
+                ],
+                ..KindPaths::default()
+            }],
+        )
+}
+
+/// One item's chip, through the database and in Rust.
+async fn chips(
+    pool: &PgPool,
+    declarations: &Declarations,
+    source: &str,
+    kind: &str,
+    key: &str,
+    payload: serde_json::Value,
+) -> (Option<StateChip>, Option<StateChip>) {
+    const CHIP: &str = concat!(
+        "select ",
+        knobas_core::declared_state!("$1"),
+        " as state from sync.live_item i where i.entity_id = $2"
+    );
+    item(pool, source, kind, key, &payload).await;
+    let row = sqlx::query(CHIP)
+        .bind(declarations.as_param())
+        .bind(format!("{source}:{key}"))
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{key}'s state must resolve: {e}"));
+    let sql: Option<sqlx::types::Json<StateChip>> = row.get("state");
+    let empty = KindPaths::default();
+    let declared = declarations.get(source, kind).unwrap_or(&empty);
+    (sql.map(|j| j.0), resolve_state(&payload, &declared.state))
+}
+
+fn chip(text: &str, tone: Tone) -> Option<StateChip> {
+    Some(StateChip {
+        text: text.to_owned(),
+        tone,
+    })
+}
+
+/// The first candidate whose value its map knows wins, renamed where the map
+/// says so: a merged pull request is `merged` though its `state` is `closed`,
+/// and a finished build falls through `state` to its outcome.
+#[tokio::test]
+async fn a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust() {
+    let pool = scratch().await;
+    let declarations = state_declarations();
+    let cases = [
+        ("gitea", "pr", "r/p#1", serde_json::json!({ "merged": true, "state": "closed" }), chip("merged", Tone::Ok)),
+        ("gitea", "pr", "r/p#2", serde_json::json!({ "merged": false, "state": "open" }), chip("open", Tone::Info)),
+        ("gitea", "pr", "r/p#3", serde_json::json!({ "merged": false, "state": "closed" }), chip("closed", Tone::Muted)),
+        ("teamcity", "build", "1", serde_json::json!({ "state": "running", "status": "SUCCESS" }), chip("running", Tone::Info)),
+        ("teamcity", "build", "2", serde_json::json!({ "state": "finished", "status": "FAILURE" }), chip("FAILURE", Tone::Err)),
+        ("teamcity", "build", "3", serde_json::json!({ "state": "finished", "status": " SUCCESS " }), chip("SUCCESS", Tone::Ok)),
+    ];
+    for (source, kind, key, payload, expected) in cases {
+        let (sql, rust) = chips(&pool, &declarations, source, kind, key, payload).await;
+        assert_eq!(sql, expected, "SQL chip for {key}");
+        assert_eq!(rust, expected, "Rust chip for {key}");
+    }
+}
+
+/// A value no map names, a value that is not a string or a boolean, a kind
+/// that declares no state and a read bound to no declarations: all four miss,
+/// in both, rather than drawing a chip nobody declared.
+#[tokio::test]
+async fn a_state_chip_misses_in_both_and_never_guesses() {
+    let pool = scratch().await;
+    let declarations = state_declarations();
+    let cases = [
+        ("teamcity", "build", "4", serde_json::json!({ "state": "finished", "status": "UNHEARD" }), &declarations),
+        ("teamcity", "build", "5", serde_json::json!({ "state": { "name": "running" }, "status": ["FAILURE"] }), &declarations),
+        ("gitea", "pr", "r/p#4", serde_json::json!({ "merged": "true", "state": "draft" }), &declarations),
+        ("gitea", "pr", "r/p#5", serde_json::json!({ "merged": false, "state": "  " }), &declarations),
+        ("gitea", "commit", "r/p@abc", serde_json::json!({ "merged": true, "state": "open" }), &declarations),
+    ];
+    for (source, kind, key, payload, declared) in cases {
+        let (sql, rust) = chips(&pool, declared, source, kind, key, payload).await;
+        assert_eq!(sql, None, "SQL chip for {key}");
+        assert_eq!(rust, None, "Rust chip for {key}");
+    }
+    let (sql, rust) = chips(
+        &pool,
+        &Declarations::empty(),
+        "gitea",
+        "pr",
+        "r/p#6",
+        serde_json::json!({ "merged": true, "state": "closed" }),
+    )
+    .await;
+    assert_eq!((sql, rust), (None, None), "no declarations, no chip");
 }
