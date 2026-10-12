@@ -43,9 +43,22 @@ gitea_seed_token() {
          return 1 ;;
     esac
   fi
-  _gt_req "$_gt_admin" GET "$_gt_api/users/$_gt_user/tokens" || return 1
-  [ "$_GT_STATUS" = 200 ] || { _gt_die "list access tokens"; return 1; }
-  for _gt_id in $(printf '%s' "$_GT_BODY" | jq -r --arg n "$_gt_name" '.[] | select(.name==$n) | .id'); do
+  # The list is paged (Gitea's default is 30 a page) and grows by one token per
+  # worktree that ever seeded, so this tree's own can sit past the first page.
+  # Every page is read before anything is deleted: deleting shifts the pages.
+  _gt_ids='' _gt_page=1
+  while :; do
+    _gt_req "$_gt_admin" GET "$_gt_api/users/$_gt_user/tokens?limit=50&page=$_gt_page" || return 1
+    [ "$_GT_STATUS" = 200 ] || { _gt_die "list access tokens"; return 1; }
+    _gt_found=$(printf '%s' "$_GT_BODY" | jq -r --arg n "$_gt_name" '.[] | select(.name==$n) | .id') \
+      || { _gt_die "read the access token list"; return 1; }
+    _gt_count=$(printf '%s' "$_GT_BODY" | jq length) \
+      || { _gt_die "read the access token list"; return 1; }
+    _gt_ids="$_gt_ids $_gt_found"
+    [ "$_gt_count" -ge 50 ] || break
+    _gt_page=$((_gt_page + 1))
+  done
+  for _gt_id in $_gt_ids; do
     _gt_req "$_gt_admin" DELETE "$_gt_api/users/$_gt_user/tokens/$_gt_id" || return 1
     [ "$_GT_STATUS" = 204 ] || { _gt_die "delete this worktree's stale token $_gt_id"; return 1; }
   done

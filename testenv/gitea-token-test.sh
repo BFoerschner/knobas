@@ -43,6 +43,9 @@ if [ "${STUB_DOWN:-0}" = 1 ]; then
   exit 7
 fi
 path=${url#*/api/v1}
+query=''
+case $path in *\?*) query=${path#*\?}; path=${path%%\?*} ;; esac
+qarg() { printf '%s\n' "$query" | tr '&' '\n' | sed -n "s/^$1=//p"; }
 status=200 resp=''
 case "$method $path" in
   "GET /user")
@@ -54,7 +57,11 @@ case "$method $path" in
       status=401 resp='{"message":"user does not exist"}'
     fi ;;
   "GET /users/knobas/tokens")
-    resp=$(jq -c 'map({id, name, token_last_eight: .sha1[-8:]})' "$STUB_STORE") ;;
+    # Paged as Gitea pages it: `limit` (default 30, at most 50) and `page`.
+    limit=$(qarg limit); limit=${limit:-30}; [ "$limit" -le 50 ] || limit=50
+    page=$(qarg page); page=${page:-1}
+    resp=$(jq -c --argjson l "$limit" --argjson p "$page" \
+      '.[($p - 1) * $l:$p * $l] | map({id, name, token_last_eight: .sha1[-8:]})' "$STUB_STORE") ;;
   "POST /users/knobas/tokens")
     name=$(printf '%s' "$body" | jq -r .name)
     if jq -e --arg n "$name" 'any(.[]; .name == $n)' "$STUB_STORE" >/dev/null; then
@@ -151,6 +158,19 @@ check_eq "the replacement authenticates" 200 "$(authenticates "$new_a")"
 check_eq "B's token survives A's replacement" 200 "$(authenticates "$tok_b")"
 check_eq "A's own unrecorded token is the one revoked" 401 "$(authenticates "$old_a")"
 check_eq "one token per worktree" 2 "$(jq length "$STUB_STORE")"
+
+# --- this tree's stale token past the list's first page is still found -------
+
+fresh
+# Sixty other trees' tokens listed ahead of A's, so A's sits on the second
+# page however the seed asks for them (30 or 50 a page).
+jq -n '[range(1; 61) | {id: ., name: "knobas-seed-other-\(.)", sha1: "other-\(.)"}]' >"$STUB_STORE"
+echo 60 >"$STUB_STORE.seq"
+old_a=$(seed_token "$API" knobas:pw "" "$name_a")
+new_a=$(seed_token "$API" knobas:pw "dead-token-not-in-gitea" "$name_a") || new_a=''
+check_eq "a stale token past the first page is replaced" 200 "$(authenticates "$new_a")"
+check_eq "and the old one under that name is revoked" 401 "$(authenticates "$old_a")"
+check_eq "and the 60 other trees keep theirs" 61 "$(jq length "$STUB_STORE")"
 
 # --- the pre-#684 shared token is never this seed's to revoke -----------------
 
