@@ -273,7 +273,8 @@ async fn the_owner_names_none_of_its_repos() {
 
 /// The rule names no kind: a branch `feature/payout` is named `payout` by
 /// its last segment and comes first in the branch group, above the newer
-/// `feature/payout-jitter`.
+/// `feature/payout-jitter`. Neither head commit's message says `payout`, so
+/// the two tie on rank and only the name key can order them.
 #[tokio::test]
 async fn a_branch_is_named_by_its_last_segment_too() {
     let pool = pool("last-segment-branch").await;
@@ -282,7 +283,7 @@ async fn a_branch_is_named_by_its_last_segment_too() {
         "branch",
         "tidewater/payout@refs/heads/feature/payout",
         "feature/payout",
-        "feature/payout\n\nAdd payout batching",
+        "feature/payout\n\nBatch the transfers",
         days_ago(30),
     )
     .await;
@@ -298,4 +299,25 @@ async fn a_branch_is_named_by_its_last_segment_too() {
 
     let response = searcher(&pool).search(q("payout")).await.unwrap();
     assert_eq!(group_ids(&response, "branch"), [named, sibling]);
+}
+
+/// A last segment that names the query is still a tiebreak, not a tier
+/// (story 26): an older repo whose description says `payout` five times
+/// outranks the newer `tidewater/payout`, named `payout` by its last segment
+/// and holding the word once. Were the name read before the rank, the named
+/// repo would come first.
+#[tokio::test]
+async fn a_last_segment_name_does_not_beat_a_stronger_match() {
+    let pool = pool("last-segment-tier").await;
+    let strong = repo(
+        &pool,
+        "tidewater/ledger",
+        "Payout in, payout out: payout totals, payout audits, payout reports",
+        days_ago(30),
+    )
+    .await;
+    let named = repo(&pool, "tidewater/payout", "Transfers", days_ago(1)).await;
+
+    let response = searcher(&pool).search(q("payout")).await.unwrap();
+    assert_eq!(group_ids(&response, "repo"), [strong, named]);
 }
