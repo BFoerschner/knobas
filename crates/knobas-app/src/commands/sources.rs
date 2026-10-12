@@ -141,15 +141,18 @@ pub async fn update_source<R: tauri::Runtime>(
 /// does not wait for it (either would change what it promises over IPC, which
 /// contract §10.8 freezes). It hands the purge intent to
 /// [`Scheduler::forget_source`], which applies the purge again once that run
-/// settles. The guarantee is therefore **eventual**: once the last run of a
-/// source deleted with `purge_items` is over, it has no `sync.item` rows and
-/// nothing of it is searchable. What it is not is synchronous -- the mirror
+/// settles. The guarantee is therefore **eventual**, and it covers the runs
+/// the scheduler started -- only those, since only those are in its claims:
+/// once the last such run of a source deleted with `purge_items` is over, it
+/// has no `sync.item` rows and nothing of it is searchable. What it is not is synchronous -- the mirror
 /// can be non-empty for the length of one already-running sync after this
-/// returns.
+/// returns. That covers the rows the run has already *rewritten*, too: the
+/// purge here skips rows a run holds rather than waiting for its commit (#632),
+/// and those are purged with the rest when the run settles.
 ///
-/// **Three residuals, all logged rather than papered over**, and they are what
-/// a reader chasing "I deleted it and it is still in search" should look for
-/// first: the re-applied purge is one statement whose failure is warned about
+/// **Five residuals, written down rather than papered over**, and they are
+/// what a reader chasing "I deleted it and it is still in search" should look
+/// for first: the re-applied purge is one statement whose failure is warned about
 /// and never retried, because by then there is nobody left to raise it to;
 /// a run whose task `shutdown` aborts *after* it committed never reaches
 /// the claim, so its write-back outlives the process; and -- the third, from
@@ -160,9 +163,24 @@ pub async fn update_source<R: tauri::Runtime>(
 /// mirror would be worse than leaving the old one's. It reverses only when
 /// the existence check *itself* fails, which purges as asked -- so a wrong
 /// purge now needs the re-add race **and** a database blip at that instant,
-/// rather than either alone. All three are recorded where they happen --
+/// rather than either alone. Those three are recorded where they happen --
 /// `Claims::pending_purges`, [`Scheduler::forget_source`], and the scheduler's
 /// own log.
+///
+/// The fourth: a source deleted while *Load demo data* is running keeps every
+/// row that load writes, inserted or rewritten. That run is `run_once` called
+/// directly, so the scheduler holds no claim to purge behind it; #636 is the
+/// fix. The fifth: a purge that runs while `sync.parent_declaration`'s trigger
+/// is recomputing items skips the items the recompute has reached, because
+/// the recompute's `sync.item_parent` inserts hold `KEY SHARE` on them, and
+/// with no run of the source in flight nothing purges them again (a
+/// re-applied purge overlapping the recompute skips them the same way).
+/// Bring-up's upgrade recompute cannot meet it: bring-up writes the
+/// declarations before `SourcesState` exists, so this command answers
+/// `not_ready` until that recompute has committed. What remains is a later
+/// command's `searcher()` recomputing because bring-up's write failed, or a
+/// second binary with different declarations on the same database
+/// (ADR-0019's residual). Both are recorded on `PURGE_ITEMS`.
 ///
 /// [`Scheduler::forget_source`]: knobas_sync::scheduler::Scheduler::forget_source
 #[tauri::command]

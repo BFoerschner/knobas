@@ -512,3 +512,18 @@ Append this ruling to `docs/decisions/2026-10-unattended-rulings.md` under #627.
 - **The reviewer's `for key share` scheme instead:** `delete_source` waits for an in-flight run of its source to commit. That reverses #127's "same non-blocking timing" on a frozen command and needs a §10.8 entry of its own. The `adapter_kind` column and the read-time join come out, and the two `kind` gaps go into ADR-0019 as residuals.
 - **Accepting the deadlock instead:** ADR-0019 records that deleting a source while its sync has written a batch aborts either the run or the delete.
 - **After merge:** one migration that drops `adapter_kind` and restores a `source_config` trigger in the locking shape you choose, with a §10.8 entry. The readers lose the join.
+
+## #632 — a purge that skips what a run holds: two paths nobody re-purges
+
+Ruled 2026-10-12. Comment:
+<https://github.com/BFoerschner/knobas/issues/632#issuecomment-6121658405>
+
+**The fork:** PR #635 makes `PURGE_ITEMS` take `for update of i skip locked` / `for no key update of e skip locked` and leaves the skipped rows to the scheduler's re-applied purge. The merge-manager found two paths where nothing re-applies it: (1) *Load demo data* calls `run_once` directly, so the scheduler has no claim on that run; on `main` a delete during it already left the rows it inserted, and with the PR it also leaves the rows it rewrote. (2) Migration `0028`'s recompute inserts `sync.item_parent` rows whose foreign key takes `KEY SHARE` on `sync.item`, which conflicts with `for update of i skip locked`, so a purge during a recompute skips those items, and with no run in flight nothing purges them again. Options: (A) record both as residuals and merge, (B) close the demo case in `demo.rs` in this PR, (C) wait only on the paths nobody re-purges.
+
+**Ruling:** **(A) for this PR, with one follow-up ticket (#636) for path 1.** Path 2 stays a residual with no follow-up; (C) is out.
+
+- `delete_source`'s doc goes from three residuals to five. The fourth: a source deleted during *Load demo data* keeps every row that load writes, inserted or rewritten; #636 is the fix. The fifth: a purge during `sync.parent_declaration`'s recompute skips the items the recompute reached. Bring-up writes the declarations before `SourcesState` exists, so `delete_source` answers `not_ready` through the upgrade recompute; what remains is a later `searcher()` recompute after bring-up's write failed, or a second binary with different declarations (ADR-0019's residual). "Eventual" stays, and covers only runs the scheduler started.
+- `PURGE_ITEMS`'s "`skip locked` skips nothing" sentence is qualified with the fifth residual; its demo paragraph points at #636.
+- No glossary change, no ADR, nothing on §10.8.
+
+**Reasoning, in short:** #154 puts accepted residuals on `delete_source` where the reader meets them. #127 and #632 forbid the purge waiting for a run, which rules out (C). The demo path never had the eventual guarantee (#127's measurement covered the scheduler's `runs` map only), so no run's guarantee changes; the PR widens the demo gap, hence #636 rather than a residual alone. (B) touches `demo.rs`, a second command's destructive path, and needs #154's existence guard and its own witness: a ticket, not a merge-time edit. The cheap close for path 2 (`for no key update of i skip locked`) does not work: the `gone` delete still needs `FOR UPDATE`, which conflicts with `KEY SHARE`, so the purge would wait for the recompute — the wait #632 removes.

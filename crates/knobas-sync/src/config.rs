@@ -332,8 +332,54 @@ pub async fn patch(
 ///
 /// Tombstoned, never deleted, for the reason [`delete`] gives: links, notes and
 /// activity rows point at these entities and `sync.item.entity_id` cascades.
-const PURGE_ITEMS: &str = r#"with gone as (
-     delete from sync.item where source_id = $1 returning entity_id
+///
+/// **It takes only the rows nobody holds (#632).** A run upserts into a
+/// transaction it commits only after its network work (contract §10.6(c)), and
+/// `ITEM_UPSERT`'s `on conflict ... do update` row-locks every existing item it
+/// rewrites until then -- after `ENTITY_UPSERT` has locked the item's entity.
+/// A purge that waited on those rows held `delete_source` for the rest of the
+/// run, against #127's "same non-blocking timing", and deadlocked with it when
+/// the run went on to rewrite a row the purge had already deleted. So `taken`
+/// locks the item *and* its entity, `skip locked`, and the purge acts on those
+/// rows only: an item whose entity the run holds is left whole rather than
+/// deleted and then waited on at its entity. The entity takes `for no key
+/// update`, the lock the tombstone's update needs anyway, so that a link or a
+/// note being written against the entity (`for key share`) is not a reason to
+/// skip it.
+///
+/// The rows skipped are the in-flight run's, and the scheduler re-applies this
+/// statement when that run settles. That is why one statement can serve both
+/// callers with the same locking: after a deleted source's run settles,
+/// no run holds its rows -- only a run of a source writes that source's
+/// items and locks their entities for update -- so in [`purge_items`]
+/// `skip locked` skips nothing -- **except during a recompute**
+/// (`delete_source`'s fifth residual). `sync.parent_declaration`'s trigger
+/// inserts `sync.item_parent` rows, whose foreign key takes `KEY
+/// SHARE` on each `sync.item` it reaches, and `for update` conflicts with
+/// that, so either purge skips those items and, with no run in flight, nobody
+/// purges them again. Bring-up's recompute commits before `delete_source` is
+/// ready; a later `searcher()` recompute after bring-up's write failed, or a
+/// second binary with other declarations (ADR-0019), can still overlap one.
+/// Waiting for it instead is the wait #632 removed.
+///
+/// **Only a run the scheduler started is purged after.** `run_once` called
+/// directly -- *Load demo data* -- is a run nobody re-purges behind, so a
+/// source deleted during one keeps the rows that run rewrote, as it already
+/// kept the rows it inserted. That run reads a fixture compiled into the
+/// binary and is over in milliseconds; waiting for it instead is what this
+/// statement exists not to do. #636 purges behind it.
+const PURGE_ITEMS: &str = r#"with taken as (
+     select i.entity_id
+       from sync.item i
+       join knobas.entity e on e.id = i.entity_id
+      where i.source_id = $1
+        for update of i skip locked
+        for no key update of e skip locked
+   ),
+   gone as (
+     delete from sync.item i using taken
+      where i.entity_id = taken.entity_id
+     returning i.entity_id
    )
    update knobas.entity e
       set deleted_at = coalesce(e.deleted_at, now())
@@ -363,6 +409,12 @@ pub async fn purge_items(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
 ///
 /// The source's `knobas.sync_run` history is deliberately **kept**: there is no
 /// FK, and deleting a source must not rewrite what happened (interfaces §1).
+///
+/// **The purge does not wait for a run in flight (#632).** It takes the rows
+/// nobody holds and skips the ones a run of this source has rewritten and not
+/// yet committed (see [`PURGE_ITEMS`]); rows that run inserts are invisible to
+/// it anyway. Both kinds are the scheduler's to purge when that run settles
+/// (`Scheduler::forget_source`), so until then the mirror can still hold them.
 ///
 /// # Errors
 /// [`sqlx::Error`] if any statement fails; all of them share one transaction.
