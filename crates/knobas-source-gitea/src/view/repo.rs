@@ -280,7 +280,9 @@ async fn branches(
         .map(|b| {
             let tip = b.commit.as_ref();
             // How long ago its tip was committed, as a commit row says it.
-            let age = when(b).map(|t| super::ago(t.with_timezone(&chrono::Utc), now));
+            // Go's zero time is no time, as on a commit row (`map::real_time`).
+            let age = crate::map::real_time(when(b).map(|t| t.with_timezone(&chrono::Utc)))
+                .map(|t| super::ago(t, now));
             let short = tip.map(|c| super::short(&c.id));
             let is_default = b.name == default;
             ViewRow {
