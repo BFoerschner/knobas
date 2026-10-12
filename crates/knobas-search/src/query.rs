@@ -491,8 +491,14 @@ fn apply_key_value(
         // the grammar's to know -- the parent lives in the children's records
         // -- so that is judged after the parse (`crate::under`). A bare
         // `under:` is somebody mid-typing, as a bare `author:` is.
+        //
+        // A name with a space in it -- a page title -- arrives quoted, because
+        // the tokenizer keeps a quoted run together *with* its quotes, and the
+        // name is what is inside them (#601: the box completes such a name
+        // that way). Unlike the search text, no phrase is lost: a parent's
+        // name is matched whole, never as words.
         "under" => {
-            let value = value.trim().to_lowercase();
+            let value = unquote(value.trim()).trim().to_lowercase();
             if !value.is_empty() && !parsed.under.iter().any(|(_, seen)| *seen == value) {
                 parsed.under.push((token.to_owned(), value));
             }
@@ -503,6 +509,15 @@ fn apply_key_value(
         _ => return false,
     }
     true
+}
+
+/// The text inside one pair of double quotes around `value`, or `value` as it
+/// is when it is not quoted on both ends.
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(value)
 }
 
 /// `@me` is the identity filter; anybody else is an author filter (**E-Q1**).

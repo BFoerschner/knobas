@@ -586,3 +586,24 @@ async fn coverage_does_not_name_the_estate_as_unable_to_answer() {
             .any(|s| s.source_id == "kuma" && s.answer == FilterAnswer::NoValues)
     );
 }
+
+/// A parent whose name has a space in it is reached by quoting the name, which
+/// is how the query box completes one it suggests (#601): the tokenizer keeps a
+/// quoted run together with its quotes, and `under:` reads the name inside
+/// them.
+#[tokio::test]
+async fn a_quoted_name_with_a_space_scopes_like_any_other() {
+    let pool = pool().await;
+    let t = token();
+    let name = format!("Payout Service {t}");
+    let ours = repo(&pool, &format!("o{t}"), &name, "first").await;
+
+    let raw = format!("under:\"{name}\"");
+    let response = searcher(&pool).search(q(&raw)).await.unwrap();
+    assert_eq!(ids(&response), sorted(ours));
+    assert!(
+        response.interpreted.unknown_tokens.is_empty(),
+        "{raw} names a parent: {:?}",
+        response.interpreted.unknown_tokens
+    );
+}

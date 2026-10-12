@@ -16,8 +16,9 @@
 use knobas_app::IpcErrorCode;
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::search::{
-    create_smart_list_inner, delete_smart_list_inner, launcher_home_inner, rename_smart_list_inner,
-    search_inner, smart_list_items_inner, smart_lists_inner,
+    create_smart_list_inner, delete_smart_list_inner, filter_suggestions_inner,
+    launcher_home_inner, rename_smart_list_inner, search_inner, smart_list_items_inner,
+    smart_lists_inner,
 };
 use knobas_search::{SearchFilters, SearchQuery};
 
@@ -1939,4 +1940,78 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
         .collect();
     assert_eq!(hits, [id.as_str()]);
     assert!(response.interpreted.unknown_tokens.is_empty());
+}
+
+/// The query box's suggestions cross the bridge in the shape
+/// `app/src/lib/ipc/search.ts` mirrors (#601), and through the searcher the
+/// app builds: the compiled-in adapters' declarations, so a Gitea commit's
+/// repo is offered for `under:` with its kind.
+#[tokio::test]
+async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
+    let pool = pool().await;
+    let t = token("suggest");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('gitea', 'gitea', 'Gitea', 'http://x', 'Pat')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let id = format!("gitea:o/{t}@abc");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'fix')")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, 'gitea', 'commit', 'fix', 'fix', $2)",
+    )
+    .bind(&id)
+    .bind(serde_json::json!({ "sha": "abc", "repository": { "full_name": format!("o/{t}"), "name": t } }))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let v = serde_json::to_value(filter_suggestions_inner(&pool).await.unwrap()).unwrap();
+
+    let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["kinds", "parents", "sources"], "{v}");
+    let kind = v["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["kind"] == "commit")
+        .unwrap_or_else(|| panic!("a commit has a row: {v}"));
+    assert!(kind["label"].is_string(), "{v}");
+    assert!(
+        v["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "gitea" && s["display_name"] == "Gitea"),
+        "{v}"
+    );
+    let mut ours: Vec<(String, String)> = v["parents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["name"].as_str().unwrap().contains(&t))
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().to_owned(),
+                p["kind"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    ours.sort();
+    assert_eq!(
+        ours,
+        [
+            (format!("o/{t}"), "repo".to_owned()),
+            (t.clone(), "repo".to_owned())
+        ]
+    );
 }

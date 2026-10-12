@@ -466,6 +466,21 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // mirror to search. A handler that answered everything with assets would
     // make a QA pass over the launcher look like it worked.
     search: (args) => estateSearch(args),
+    // The query box's suggestions (#601). **Fixture-only**: the kinds the
+    // corpus holds and the configured sources, so `kind:` and `source:` can be
+    // looked at under `?fake-ipc`; no parents, because this corpus declares
+    // none. "Only values that exist" is witnessed over a real PostgreSQL, in
+    // `crates/knobas-search/tests/it/suggest.rs`.
+    filter_suggestions: () => ({
+      kinds: [...new Set(CORPUS.filter((e) => e.deleted_at === null).map((e) => e.kind))]
+        .sort()
+        .map((kind) => ({ kind, label: kind })),
+      sources: FIXTURE_SOURCES.map((source) => ({
+        id: source.id,
+        display_name: source.display_name,
+      })),
+      parents: [],
+    }),
   };
 }
 
