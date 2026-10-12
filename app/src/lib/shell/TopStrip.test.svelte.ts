@@ -773,3 +773,44 @@ test("pressing the slot asks the shell to stop, and the strip stops nothing itse
   expect(asked).toBe(1);
   expect(timer.current, "the strip stopped the timer behind the shell's back").not.toBeNull();
 });
+
+/**
+ * Back and forward, left of the search field (#693): named with their
+ * shortcut, and disabled where history has nowhere to go -- a reader can see
+ * whether back goes anywhere before pressing it.
+ */
+test("back and forward sit before the search field and follow the history", async () => {
+  const { router } = render([]);
+  // The shell starts the router; a traversal is heard through it.
+  const stop = router.start();
+  const back = target.querySelector<HTMLButtonElement>("button[aria-label='Back (⌘[)']")!;
+  const forward = target.querySelector<HTMLButtonElement>("button[aria-label='Forward (⌘])']")!;
+  expect(back).not.toBeNull();
+  expect(forward).not.toBeNull();
+  expect(back.title).toBe("Back (⌘[)");
+  expect(forward.title).toBe("Forward (⌘])");
+  // Before the search field, in reading order.
+  const search = target.querySelector(".searchfield")!;
+  expect(back.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(forward.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect([back.disabled, forward.disabled]).toEqual([true, true]);
+
+  router.go("#/sources");
+  flushSync();
+  expect([back.disabled, forward.disabled]).toEqual([false, true]);
+
+  back.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect([back.disabled, forward.disabled]).toEqual([true, false]);
+  });
+  expect(location.hash).toBe("#/ctx/all");
+
+  forward.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect([back.disabled, forward.disabled]).toEqual([false, true]);
+  });
+  expect(location.hash).toBe("#/sources");
+  stop();
+});

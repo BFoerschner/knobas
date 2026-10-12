@@ -109,6 +109,10 @@ const router = {
   },
   replace() {},
   back() {},
+  canGoBack: false,
+  canGoForward: false,
+  goBack() {},
+  goForward() {},
   start: () => () => {},
 };
 
