@@ -43,9 +43,10 @@ pub fn under(name: &str) -> String {
 /// The order is the app's, and it decides which half of the trigger work a
 /// witness runs: declared first, each synced row's parents are resolved by the
 /// `sync.item` insert trigger as the sync writer's upsert lands; declared
-/// after, by the declaration trigger recomputing every row at once. The app
-/// takes the first path on every sync but its very first launch's, so that is
-/// the one these suites hold. Every builder that wants it calls this between
+/// after, by the declaration trigger recomputing every row at once. Bring-up
+/// stores them before `sources::start` on every launch, so a sync always takes
+/// the first path; the second is a new binary whose declarations changed over
+/// rows already mirrored, and the seam tests in `knobas-search` hold it. Every builder that wants it calls this between
 /// the scratch database and `Scheduler::start` -- a scheduler that is running
 /// may already be syncing.
 pub async fn declare(pool: &sqlx::PgPool) {
