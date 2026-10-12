@@ -9954,7 +9954,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `backup::a_restored_backup_answers_under_as_the_machine_it_came_from` checks a round trip. The
   benchmark `knobas-search/tests/perf.rs`'s
   `under_is_under_the_same_budget_beside_a_hundred_thousand_items` read p50 619 / p90 623 ms
-  before and worst p90 58 ms after. `under.rs`, `suggest.rs` (including
+  before and worst p90 58 ms after. Write cost on the same fixture: `seed_corpus(100_000)` 5.1 s
+  before and 5.36 s after; the update giving 6,667 commits a repository 190 ms before and 460 ms
+  after. `under.rs`, `suggest.rs` (including
   `under_knows_exactly_the_names_the_box_offers`) and `corpus_seam.rs` pass with their seeds still
   raw `insert`s.
 
