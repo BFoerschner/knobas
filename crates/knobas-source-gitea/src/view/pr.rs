@@ -12,7 +12,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::{fact, login, short, when_of};
-use crate::keys;
+use crate::{keys, map};
 use crate::model::{Commit, UserRef};
 use crate::source::GiteaSource;
 
@@ -152,13 +152,15 @@ impl PullView<'_> {
                 break;
             }
         }
+        // Counted before parsing: a record that does not parse was still
+        // read, and is not one the budget left out.
+        let read = records.len();
         let now = Utc::now();
         let rows: Vec<ViewRow> = records
             .into_iter()
             .filter_map(|r| serde_json::from_value::<Commit>(r).ok())
             .map(|c| self.commit_row(&c, now))
             .collect();
-        let read = rows.len();
         let total = total.unwrap_or(read).max(read);
         // Said whenever the walk stopped on its budget: with the server's
         // count, how many it left out; without one, that there may be more.
@@ -192,10 +194,9 @@ impl PullView<'_> {
         let inner = commit.commit.as_ref();
         let title = inner
             .and_then(|c| c.message.as_deref())
-            .and_then(|m| m.lines().next())
-            .map(str::trim)
+            .map(map::subject)
             .filter(|t| !t.is_empty())
-            .map_or_else(|| short(&commit.sha), str::to_owned);
+            .unwrap_or_else(|| short(&commit.sha));
         let author = inner
             .and_then(|c| c.author.as_ref())
             .and_then(|a| a.name.clone())
@@ -347,8 +348,10 @@ fn overview_facts(pull: &Pull) -> Vec<Fact> {
 /// Each reviewer's standing verdict, in the order reviewers first appear.
 ///
 /// A reviewer's latest review is their verdict, with three exceptions: a
-/// draft (`PENDING`) is not yet anyone's verdict, a dismissed review no
-/// longer stands, and a plain comment after a verdict does not take it back.
+/// draft (`PENDING`) is not yet anyone's verdict, a dismissed review leaves
+/// its reviewer none (an earlier verdict does not come back: Gitea counts only
+/// a reviewer's latest review), and a plain comment after a verdict does not
+/// take it back.
 fn verdicts(reviews: &[Review]) -> Vec<Fact> {
     let mut standing: Vec<(String, String)> = Vec::new();
     for review in reviews {
@@ -356,7 +359,11 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
             continue;
         };
         let state = review.state.as_deref().unwrap_or_default();
-        if review.dismissed || state.is_empty() || state == "PENDING" {
+        if review.dismissed {
+            standing.retain(|(name, _)| *name != who);
+            continue;
+        }
+        if state.is_empty() || state == "PENDING" {
             continue;
         }
         match standing.iter_mut().find(|(name, _)| *name == who) {

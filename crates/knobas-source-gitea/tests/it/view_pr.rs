@@ -62,7 +62,9 @@ fn open_pull() -> Value {
 /// Reviews, oldest first, as Gitea lists them. Priya asks for changes and
 /// then approves; Jonas is asked and has not answered; Olu approves and then
 /// comments, which does not take the approval back; a draft review is
-/// nobody's verdict yet; a dismissed one no longer stands.
+/// nobody's verdict yet; Rae's dismissed review takes her earlier approval
+/// with it, as Gitea's dismissal leaves her no standing verdict; Lee's request
+/// for changes stands.
 fn reviews() -> Value {
     json!([
         { "id": 1, "user": { "login": "priya.nair" }, "state": "REQUEST_CHANGES" },
@@ -71,8 +73,10 @@ fn reviews() -> Value {
         { "id": 4, "user": { "login": "olu" }, "state": "APPROVED" },
         { "id": 5, "user": { "login": "olu" }, "state": "COMMENT" },
         { "id": 6, "user": { "login": "kai" }, "state": "PENDING" },
-        { "id": 7, "user": { "login": "rae" }, "state": "REQUEST_CHANGES", "dismissed": true },
-        { "id": 8, "user": { "login": "sam" }, "state": "COMMENT" }
+        { "id": 7, "user": { "login": "rae" }, "state": "APPROVED" },
+        { "id": 8, "user": { "login": "rae" }, "state": "REQUEST_CHANGES", "dismissed": true },
+        { "id": 9, "user": { "login": "sam" }, "state": "COMMENT" },
+        { "id": 10, "user": { "login": "lee" }, "state": "REQUEST_CHANGES" }
     ])
 }
 
@@ -222,6 +226,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("Review", "requested from jonas.becker", Some(Tone::Muted)),
             ("Review", "approved by olu", Some(Tone::Ok)),
             ("Review", "commented by sam", None),
+            ("Review", "changes requested by lee", Some(Tone::Err)),
         ]
     );
     assert_eq!(

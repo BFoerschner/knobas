@@ -70,7 +70,7 @@ pub(crate) fn real_time(value: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
 }
 
 /// The one-line summary of a commit message.
-fn subject(message: &str) -> String {
+pub(crate) fn subject(message: &str) -> String {
     message.lines().next().unwrap_or_default().trim().to_owned()
 }
 
