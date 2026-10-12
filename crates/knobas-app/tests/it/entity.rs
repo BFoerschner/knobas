@@ -1754,15 +1754,9 @@ async fn the_tile_orders_are_never_named_prepared_statements() {
             .unwrap()
     };
     let read = async |order| {
-        list_entities_inner(
-            &pool,
-            &EntityFilter { order, ..all() },
-            5,
-            0,
-            &no_paths(),
-        )
-        .await
-        .unwrap();
+        list_entities_inner(&pool, &EntityFilter { order, ..all() }, 5, 0, &no_paths())
+            .await
+            .unwrap();
     };
 
     // Positive control: a plain order is cached, so it must move the count,
