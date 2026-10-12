@@ -177,7 +177,8 @@ async fn under_an_epic_key_returns_its_tickets_and_the_epic() {
 
 /// An epic outside the synced JQL is still the parent its children name
 /// (`CONTEXT.md` **Parent**): `under:` resolves against what the children
-/// declare, so they come back though the epic has no row.
+/// declare, so they come back though the epic has no row -- a next-gen child
+/// through `fields.parent` and a classic one through the stored `epic` alike.
 #[tokio::test]
 async fn under_an_epic_that_is_not_mirrored_still_returns_its_tickets() {
     let pool = pool().await;
@@ -186,6 +187,7 @@ async fn under_an_epic_that_is_not_mirrored_still_returns_its_tickets() {
     let children = vec![
         ticket(&pool, &format!("{p}-101"), "Retry payouts", Some(&epic)).await,
         ticket(&pool, &format!("{p}-102"), "Cap retries", Some(&epic)).await,
+        classic_ticket(&pool, &format!("{p}-104"), "Jitter retries", &epic).await,
     ];
     ticket(&pool, &format!("{p}-103"), "Unrelated", None).await;
 

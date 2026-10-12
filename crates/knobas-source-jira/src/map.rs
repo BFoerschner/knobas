@@ -69,13 +69,12 @@ pub(crate) fn to_sync_item(
 /// second departure from §3a's verbatim payload, for Gitea's reason
 /// (ADR-0018; the deputy's ruling of 2026-10-12 on #598). Never into
 /// `fields.parent`, which is Jira's own sub-task relation; the custom field
-/// itself stays as Jira sent it. A null, absent, blank or non-string value
-/// adds nothing.
+/// itself stays as Jira sent it, and the key is stored as that string. A null,
+/// absent, empty or non-string value adds nothing.
 fn with_epic(raw: &serde_json::Value, epic_link_field: Option<&str>) -> serde_json::Value {
     let mut payload = raw.clone();
     let epic = epic_link_field
         .and_then(|field| raw.get("fields")?.get(field)?.as_str())
-        .map(str::trim)
         .filter(|key| !key.is_empty());
     if let (Some(key), Some(record)) = (epic, payload.as_object_mut()) {
         record
@@ -220,8 +219,8 @@ mod tests {
     }
 
     /// Nothing to say, nothing stored: an issue with no epic (the field comes
-    /// back null), an issue whose record lacks the field, a value that is not
-    /// a non-empty string, and a source with no Epic Link configured. The
+    /// back null), an issue whose record lacks the field, an empty value, a
+    /// value that is not a string, and a source with no Epic Link configured. The
     /// payload is then the record verbatim.
     #[test]
     fn no_epic_is_stored_without_an_epic_link_value() {
@@ -238,9 +237,9 @@ mod tests {
                 with(serde_json::json!({ "summary": "s", "customfield_10008": null })),
             ),
             (
-                "blank",
+                "empty",
                 Some("customfield_10008"),
-                with(serde_json::json!({ "summary": "s", "customfield_10008": "  " })),
+                with(serde_json::json!({ "summary": "s", "customfield_10008": "" })),
             ),
             (
                 "not a string",
