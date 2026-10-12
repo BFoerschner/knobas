@@ -135,15 +135,16 @@ const MAX_ID_CHARS: usize = 48;
 /// Lowering it stays cheap and raising it is not: the budget does not move, so
 /// a larger rail is a cheaper statement's to earn, not a constant's.
 ///
-/// # Re-read on 2026-10-12 (#629)
+/// # Re-read on 2026-10-12 (#629): not reproduced
 ///
-/// A merge-manager saw `launcher_board` at 96 and then 108 ms at sixteen, on
-/// readings taken without the #533 conditions. Five runs that met them, on
-/// `a4723a7b` (after #605, #606, #608, #618 and #626 had all touched the
-/// statement or the fixture), read **86, 87, 83, 84 and 87 ms**: a spread of
-/// 4 ms against at least 13 ms of clearance, so the ruling's step to eight
-/// does not apply and those readings were load. The rail table of the same
-/// five runs, `launcher_board` p90 in ms, lowest and highest per column:
+/// `launcher_board` at sixteen was reported at 96 and 108 ms from runs taken
+/// without the #533 re-run standard's four conditions
+/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`). Five runs
+/// that met them, on `a4723a7b`, read the gate's asserted figure -- the size
+/// curve's `board, 16 saved` at 100 k -- at **86, 87, 83, 84 and 87 ms**: a
+/// spread of 4 ms against at least 13 ms of clearance, so that ruling's step
+/// to eight does not fire. The rail table is a separate timing of the same
+/// board, and reads 87 at sixteen in all five; lowest and highest per column:
 ///
 /// ```text
 /// saved lists       0    1    2    4    8   16
