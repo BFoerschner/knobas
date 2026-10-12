@@ -2417,7 +2417,7 @@ async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
         let id = format!("{JIRA}:{key}");
         assert!(
             members.contains(&id),
-            "{id} is in the fixture's epic PAY-200, so it is a member of its context: {members:?}"
+            "{id} is the fixture's epic PAY-200 or one of its five children, so it is a member of its context: {members:?}"
         );
         assert!(
             merged.contains(&id),
