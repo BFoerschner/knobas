@@ -97,9 +97,8 @@
 
   /**
    * This entity's own settings, from every tab already read with the view: what
-   * an action whose dialog changes values for one write offers (#669, a
-   * configuration's *Run…*). A settings block of another entity is not this
-   * one's to change.
+   * an action whose dialog changes values for one write offers (#669). A
+   * settings block of another entity is not this one's to change.
    */
   const ownSettings = $derived(
     view.sections
