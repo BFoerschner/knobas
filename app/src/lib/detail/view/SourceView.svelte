@@ -26,7 +26,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import ActionsBlock from "./ActionsBlock.svelte";
   import { offeredActions } from "./actions";
-  import { settingsWritable, type SettingMark } from "./settings";
+  import { settingsWritable, type SettingMark, type SettingsTarget } from "./settings";
   import DiffBlock from "./DiffBlock.svelte";
   import EntitiesBlock from "./EntitiesBlock.svelte";
   import FactsBlock from "./FactsBlock.svelte";
@@ -66,7 +66,7 @@
      */
     settingMarks?: Record<string, SettingMark>;
     /** Queue one setting's new value; answers whether it was queued. */
-    onsetting?: (block: { entity: string; write_op: string }, name: string, value: string) => Promise<boolean>;
+    onsetting?: (block: SettingsTarget, name: string, value: string) => Promise<boolean>;
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */

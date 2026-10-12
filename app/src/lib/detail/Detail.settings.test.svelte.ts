@@ -22,6 +22,10 @@ let submitFails = false;
 /** What `pending_writes` answers next: the open rows. */
 let open: QueuedWrite[] = [];
 let views: SourceView[] = [];
+/** When set, the next `entity_view` waits for this before it answers. */
+let viewGate: Promise<void> | null = null;
+/** The id the next queued write gets. */
+let nextId = 41;
 /** `activity:new` handlers the panel registered, and how many it dropped. */
 const handlers: (() => void)[] = [];
 let unlistened = 0;
@@ -32,7 +36,7 @@ vi.mock("../ipc/entity", () => ({
     calls.push("submit_write");
     if (submitFails) return Promise.reject({ code: "invalid", message: "no such op", source_id: null });
     queued.push(payload);
-    return Promise.resolve(row("pending"));
+    return Promise.resolve({ ...row("pending"), id: nextId++ });
   },
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
@@ -44,10 +48,13 @@ vi.mock("../ipc/entity", () => ({
     calls.push("get_entity");
     return Promise.resolve(config());
   },
-  entityView: () => {
+  entityView: async () => {
     calls.push("entity_view");
     const next = views.length > 1 ? views.shift()! : views[0]!;
-    return Promise.resolve(next);
+    const gate = viewGate;
+    viewGate = null;
+    if (gate) await gate;
+    return next;
   },
 }));
 
@@ -211,6 +218,8 @@ beforeEach(async () => {
   unlistened = 0;
   submitFails = false;
   open = [];
+  viewGate = null;
+  nextId = 41;
   toasts.items = [];
   views = [parameters("5"), parameters("7")];
   await kindRegistry.load();
@@ -282,5 +291,31 @@ test("a secret's toast and mark never carry its value", async () => {
   expect(queued).toEqual([{ SetParameter: { entity: ID, name: "env.SEPA_SANDBOX_KEY", value: "brand-new-secret" } }]);
   expect(screen.target.textContent).not.toContain("brand-new-secret");
   expect(toasts.items.map((t) => t.text).join(" ")).not.toContain("brand-new-secret");
+  screen.done();
+});
+
+test("a row saved again while a settled write re-reads the view keeps its newer mark", async () => {
+  open = [row("pending")];
+  const screen = render();
+  await settle();
+  await screen.edit("env.SEPA_RETRIES", "7");
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
+
+  // The first write goes; its re-read of the view is held open...
+  let release!: () => void;
+  viewGate = new Promise((resolve) => (release = resolve));
+  open = [];
+  handlers[0]!();
+  await settle();
+
+  // ...while the reader saves the same row again, and that write waits.
+  open = [{ ...row("pending"), id: 42 }];
+  await screen.edit("env.SEPA_RETRIES", "8");
+  release();
+  await settle();
+  await settle();
+
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("pending");
+  expect(screen.value("env.SEPA_RETRIES")).toBe("8");
   screen.done();
 });

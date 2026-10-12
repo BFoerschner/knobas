@@ -43,7 +43,7 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { actionName, actionPayload } from "./view/actions";
-  import { settingPayload, type SettingMark } from "./view/settings";
+  import { openState, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
     replaceSectionBody,
@@ -235,11 +235,7 @@
    * Queue `name = value` on the block's entity (#668). Answers whether the
    * write was queued, so the editor stays open on a refusal.
    */
-  async function saveSetting(
-    block: { entity: string; write_op: string },
-    name: string,
-    value: string,
-  ): Promise<boolean> {
+  async function saveSetting(block: SettingsTarget, name: string, value: string): Promise<boolean> {
     const payload = settingPayload(block.write_op, block.entity, name, value);
     if (payload === null) {
       push({ text: `Could not save ${name}: knobas cannot send this change`, tone: "err" });
@@ -257,46 +253,59 @@
     }
     if (mine !== token) return true;
     settingWrites[name] = write.id;
-    const landed = await settleSettings(mine);
-    if (landed.includes(name)) push({ text: `${name} set` });
+    await settleSettings(mine);
+    if (mine !== token) return true;
+    // Settled by this read or by a queue movement that raced it: either way
+    // the write is no longer open, which is what "set" says.
+    if (settingWrites[name] !== write.id && settingMarks[name] === undefined) push({ text: `${name} set` });
     else if (settingMarks[name]?.state === "pending") push({ text: `${name} queued` });
     return true;
+  }
+
+  /** Settles run one after another, so two never re-read the view for one write. */
+  let settling: Promise<void> = Promise.resolve();
+  function settleSettings(mine: number): Promise<void> {
+    settling = settling.then(() => settleOnce(mine));
+    return settling;
   }
 
   /**
    * Ask the queue where this panel's setting writes are. Each still open
    * takes its state as its mark; each gone (sent, or withdrawn in the queue)
-   * loses its mark once the view has been read again. Answers the names that
-   * settled.
+   * loses its mark once the view has been read again -- unless the reader
+   * saved that row again meanwhile, whose newer write keeps its own mark.
    */
-  async function settleSettings(mine: number): Promise<string[]> {
-    if (Object.keys(settingWrites).length === 0) return [];
+  async function settleOnce(mine: number): Promise<void> {
+    if (mine !== token || Object.keys(settingWrites).length === 0) return;
     let open;
     try {
       open = await pendingWrites();
     } catch {
       // The marks stay; the next queue movement asks again.
-      return [];
+      return;
     }
-    if (mine !== token) return [];
-    const landed: string[] = [];
+    if (mine !== token) return;
+    // Each landed name with the mark it had: a save of that row made while
+    // the view is re-read replaces the mark, and the newer one stays.
+    const landed: [string, SettingMark | undefined][] = [];
     for (const [name, id] of Object.entries(settingWrites)) {
       const row = open.find((w) => w.id === id);
-      if (row && (row.state === "pending" || row.state === "held" || row.state === "refused")) {
-        settingMarks[name] = { state: row.state, detail: row.detail, value: settingMarks[name]?.value ?? "" };
+      const state = openState(row);
+      if (state !== null) {
+        settingMarks[name] = { state, detail: row?.detail ?? null, value: settingMarks[name]?.value ?? "" };
       } else {
-        landed.push(name);
+        landed.push([name, settingMarks[name]]);
         delete settingWrites[name];
       }
     }
     watchQueue(Object.keys(settingWrites).length > 0);
-    if (landed.length > 0) {
-      await refresh();
-      await rereadView();
-      if (mine !== token) return landed;
-      for (const name of landed) delete settingMarks[name];
+    if (landed.length === 0) return;
+    await refresh();
+    await rereadView();
+    if (mine !== token) return;
+    for (const [name, mark] of landed) {
+      if (settingMarks[name] === mark) delete settingMarks[name];
     }
-    return landed;
   }
 
   /**

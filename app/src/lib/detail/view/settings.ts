@@ -11,7 +11,11 @@
  * A block whose op has no entry here draws no control, whatever the source
  * declares: an edit this shell cannot queue would fail on Enter.
  */
-import type { WriteOpPayload, WriteState } from "../../ipc/sources";
+import type { ViewBlock } from "../../ipc/entity";
+import type { QueuedWrite, WriteOpPayload, WriteState } from "../../ipc/sources";
+
+/** What a settings block's edit is aimed by: its entity and the op that changes it. */
+export type SettingsTarget = Pick<Extract<ViewBlock, { type: "settings" }>, "entity" | "write_op">;
 
 /** The payload for one op, from the block's entity and the value edited. */
 const PAYLOADS: Record<string, (entity: string, name: string, value: string) => WriteOpPayload> = {
@@ -42,8 +46,17 @@ export function settingsWritable(writeOp: string, declared: string[]): boolean {
  * queued and its first flush runs; then the queue's own open state until it
  * settles, when the mark goes and the view is read again.
  */
+/** The queue states a write is still open in. */
+type OpenState = Extract<WriteState, "pending" | "held" | "refused">;
+
+/** The state `write` is still open in, or `null` once it has left the queue. */
+export function openState(write: QueuedWrite | undefined): OpenState | null {
+  const state = write?.state;
+  return state === "pending" || state === "held" || state === "refused" ? state : null;
+}
+
 export interface SettingMark {
-  state: "saving" | Extract<WriteState, "pending" | "held" | "refused">;
+  state: "saving" | OpenState;
   /** What the queue or the source said, in its own words. Untrusted text. */
   detail: string | null;
   /** The value the write carries. Never drawn for a secret. */

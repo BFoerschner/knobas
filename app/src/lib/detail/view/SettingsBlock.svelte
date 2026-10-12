@@ -97,12 +97,11 @@
   }
 
   function hint(setting: Setting): string {
-    const lead = setting.inherited
-      ? "Overrides the inherited value with one set here. "
-      : setting.secret
-        ? "The current value is not shown. "
-        : "";
-    return `${lead}Enter to save, Esc to cancel.`;
+    const lead = [
+      setting.secret ? "The current value is not shown." : null,
+      setting.inherited ? "Overrides the inherited value with one set here." : null,
+    ].filter((line) => line !== null);
+    return [...lead, "Enter to save, Esc to cancel."].join(" ");
   }
 </script>
 
