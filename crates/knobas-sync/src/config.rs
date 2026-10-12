@@ -321,10 +321,11 @@ pub async fn patch(
 /// Purge one source's mirror: drop its `sync.item` rows and tombstone the
 /// entities they named.
 ///
-/// **One statement, in one place, because two callers apply it and they must
+/// **One statement, in one place, because three callers apply it and they must
 /// not drift.** [`delete`] runs it inside the delete's own transaction, and the
-/// scheduler runs it again when a run that was still in flight at delete time
-/// finally settles -- that run's late commit writes the mirror back, and worse,
+/// scheduler -- or, for its own run, *Load demo data* ([`purge_if_gone`]) --
+/// runs it again when a run that was still in flight at delete time finally
+/// settles -- that run's late commit writes the mirror back, and worse,
 /// its entity upsert sets `deleted_at = excluded.deleted_at`, which un-does the
 /// tombstone and puts the purged entities back in `sync.live_item` for ever
 /// (#127). A second copy of this CTE is a second thing to keep in step with
@@ -348,8 +349,8 @@ pub async fn patch(
 /// skip it.
 ///
 /// The rows skipped are the in-flight run's, and the scheduler re-applies this
-/// statement when that run settles. That is why one statement can serve both
-/// callers with the same locking: after a deleted source's run settles,
+/// statement when that run settles. That is why one statement can serve every
+/// caller with the same locking: after a deleted source's run settles,
 /// no run holds its rows -- only a run of a source writes that source's
 /// items and locks their entities for update -- so in [`purge_items`]
 /// `skip locked` skips nothing -- **except during a recompute**
@@ -362,12 +363,11 @@ pub async fn patch(
 /// second binary with other declarations (ADR-0019), can still overlap one.
 /// Waiting for it instead is the wait #632 removed.
 ///
-/// **Only a run the scheduler started is purged after.** `run_once` called
-/// directly -- *Load demo data* -- is a run nobody re-purges behind, so a
-/// source deleted during one keeps the rows that run rewrote, as it already
-/// kept the rows it inserted. That run reads a fixture compiled into the
-/// binary and is over in milliseconds; waiting for it instead is what this
-/// statement exists not to do. #636 purges behind it.
+/// **A run the scheduler did not start purges behind itself.** `run_once`
+/// called directly -- *Load demo data* -- is a run the scheduler holds no claim
+/// on, so the demo load applies this statement once its run settles, through
+/// [`purge_if_gone`] (#636). The same holds there: after the run, nothing
+/// but a recompute holds the deleted source's rows.
 const PURGE_ITEMS: &str = r#"with taken as (
      select i.entity_id
        from sync.item i
@@ -399,6 +399,31 @@ pub async fn purge_items(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Apply [`PURGE_ITEMS`] if no source holds `id` any more, and say whether it
+/// did.
+///
+/// The purge behind a run nobody else will purge behind: *Load demo data* calls
+/// `run_once` directly, so the scheduler has no claim on that run and
+/// `forget_source` has nothing to arm (#636). The caller runs this once its
+/// run has settled, committed or rolled back, which is when the scheduler
+/// re-applies its own purge.
+///
+/// **A source under the id wins (#154).** If a configuration row exists, the
+/// source was never deleted, or was added back since: the user's newest
+/// instruction about the id is to keep it, so nothing is purged. The read and
+/// the purge are two statements, so an add committing between them is purged
+/// behind anyway. That is a residual, recorded on `delete_source`.
+///
+/// # Errors
+/// [`sqlx::Error`] if the read or the purge fails.
+pub async fn purge_if_gone(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
+    if get(pool, id).await?.is_some() {
+        return Ok(false);
+    }
+    purge_items(pool, id).await?;
+    Ok(true)
+}
+
 /// Delete a source's configuration, optionally purging its synced mirror.
 ///
 /// The entities are **tombstoned, never deleted**: links, notes and activity
@@ -413,8 +438,9 @@ pub async fn purge_items(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
 /// **The purge does not wait for a run in flight (#632).** It takes the rows
 /// nobody holds and skips the ones a run of this source has rewritten and not
 /// yet committed (see [`PURGE_ITEMS`]); rows that run inserts are invisible to
-/// it anyway. Both kinds are the scheduler's to purge when that run settles
-/// (`Scheduler::forget_source`), so until then the mirror can still hold them.
+/// it anyway. Both kinds are purged when that run settles -- by the scheduler
+/// for a run it started (`Scheduler::forget_source`), by the demo load for its
+/// own ([`purge_if_gone`]) -- so until then the mirror can still hold them.
 ///
 /// # Errors
 /// [`sqlx::Error`] if any statement fails; all of them share one transaction.

@@ -130,17 +130,7 @@ impl From<DemoError> for crate::IpcError {
 /// [`DemoError::Db`] if the registration fails, [`DemoError::Sync`] if the run
 /// does, [`DemoError::Estate`] if the estate will not import.
 pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
-    let source = MockSource::new();
-    register(pool, &source.descriptor()).await?;
-    // `None`: demo mode means "give me the whole fixture", regardless of what
-    // a previous run recorded. The run is idempotent, so this costs rows
-    // rewritten, not rows duplicated.
-    let report = knobas_sync::run_once(pool, &source, None)
-        .await
-        .map_err(|error| DemoError::Sync {
-            source_id: source.descriptor().id,
-            error,
-        })?;
+    let report = load_mirror(pool, &MockSource::new()).await?;
 
     let estate =
         crate::assets::apply_import(pool, ESTATE_FILE, crate::assets::ESTATE_FILE_PRODUCER).await?;
@@ -158,6 +148,60 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     );
 
     Ok(report)
+}
+
+/// The work half of a demo load: register `source`, sync it in full, and purge
+/// behind the run if the source was deleted while it ran.
+///
+/// **The purge behind the run (#636).** `delete_source` purges at once and
+/// leaves the rows an in-flight run holds, and the rows it has yet to write, to
+/// the purge the scheduler re-applies when that run settles. This run is
+/// `run_once` called directly, so the scheduler holds no claim on it and that
+/// purge never comes. So the load applies it itself, once its run has settled
+/// either way -- a run that rolled back has put back the rows it held, and
+/// those are the deleted source's too.
+/// [`knobas_sync::config::purge_if_gone`] purges nothing if a source holds the
+/// id by then (#154).
+///
+/// Best-effort, as the scheduler's is: a purge that fails is warned about and
+/// the load still answers with its run. The run did happen, and a deleted
+/// source is not what *Load demo data* was asked about.
+async fn load_mirror(pool: &PgPool, source: &dyn Source) -> Result<SyncReport, DemoError> {
+    let descriptor = source.descriptor();
+    register(pool, &descriptor).await?;
+    // `None`: demo mode means "give me the whole fixture", regardless of what
+    // a previous run recorded. The run is idempotent, so this costs rows
+    // rewritten, not rows duplicated.
+    let result = knobas_sync::run_once(pool, source, None).await;
+    match knobas_sync::config::purge_if_gone(pool, &descriptor.id).await {
+        Ok(false) => {}
+        Ok(true) => tracing::info!(
+            source_id = descriptor.id,
+            "the demo source was deleted while it loaded; purged the mirror the load wrote"
+        ),
+        Err(error) => tracing::warn!(
+            source_id = descriptor.id,
+            %error,
+            "a deleted demo source's mirror could not be purged; its items are still searchable"
+        ),
+    }
+    result.map_err(|error| DemoError::Sync {
+        source_id: descriptor.id,
+        error,
+    })
+}
+
+/// [`load_mirror`] over any source, so a test can drive the demo load's work
+/// half with an adapter that pauses mid-run. **Tests only**, behind
+/// `test-util` for the reason [`super::test_scheduler`] is: the demo profile
+/// loads the mock and nothing else.
+///
+/// # Errors
+///
+/// [`demo_load_inner`]'s, less [`DemoError::Estate`].
+#[cfg(feature = "test-util")]
+pub async fn load_mirror_of(pool: &PgPool, source: &dyn Source) -> Result<SyncReport, DemoError> {
+    load_mirror(pool, source).await
 }
 
 /// [`demo_load_inner`], followed by the `sync:state` its run owes (#240).

@@ -142,9 +142,10 @@ pub async fn update_source<R: tauri::Runtime>(
 /// contract §10.8 freezes). It hands the purge intent to
 /// [`Scheduler::forget_source`], which applies the purge again once that run
 /// settles. The guarantee is therefore **eventual**, and it covers the runs
-/// the scheduler started -- only those, since only those are in its claims:
-/// once the last such run of a source deleted with `purge_items` is over, it
-/// has no `sync.item` rows and nothing of it is searchable. What it is not is synchronous -- the mirror
+/// the scheduler started and the run of *Load demo data*, which purges behind
+/// itself (#636): once the last such run of a source deleted with
+/// `purge_items` is over, it has no `sync.item` rows and nothing of it is
+/// searchable. What it is not is synchronous -- the mirror
 /// can be non-empty for the length of one already-running sync after this
 /// returns. That covers the rows the run has already *rewritten*, too: the
 /// purge here skips rows a run holds rather than waiting for its commit (#632),
@@ -167,14 +168,22 @@ pub async fn update_source<R: tauri::Runtime>(
 /// `Claims::pending_purges`, [`Scheduler::forget_source`], and the scheduler's
 /// own log.
 ///
-/// The fourth: a source deleted while *Load demo data* is running keeps every
-/// row that load writes, inserted or rewritten. That run is `run_once` called
-/// directly, so the scheduler holds no claim to purge behind it; #636 is the
-/// fix. The fifth: a purge that runs while `sync.parent_declaration`'s trigger
+/// The fourth is *Load demo data*'s. That run is `run_once` called directly,
+/// so the scheduler holds no claim on it, and the load purges behind its own
+/// run instead once the run settles, if no source holds the id by then
+/// (`knobas_sync::config::purge_if_gone`, #636). The read and the purge are
+/// two statements: an `add_source` under the id committing between them is
+/// purged behind anyway. Unless the new source's first sync also commits
+/// inside that window, what goes is only the old load's rows, and the new
+/// row's cursor is a fresh row's -- not the cursor advanced past a purged
+/// corpus that made #154 a guard rather than a residual.
+/// A demo purge that fails is warned about and not retried, as the scheduler's
+/// is. The fifth: a purge that runs while `sync.parent_declaration`'s trigger
 /// is recomputing items skips the items the recompute has reached, because
 /// the recompute's `sync.item_parent` inserts hold `KEY SHARE` on them, and
 /// with no run of the source in flight nothing purges them again (a
-/// re-applied purge overlapping the recompute skips them the same way).
+/// re-applied purge, or the demo load's, overlapping the recompute skips them
+/// the same way).
 /// Bring-up's upgrade recompute cannot meet it: bring-up writes the
 /// declarations before `SourcesState` exists, so this command answers
 /// `not_ready` until that recompute has committed. What remains is a later
