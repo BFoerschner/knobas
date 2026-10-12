@@ -108,7 +108,7 @@ impl Source for Drawing {
                 sections: vec![ViewSection {
                     id: "changes".into(),
                     title: "Changes".into(),
-                    count: Some(3),
+                    count: Some(4),
                     deferred: false,
                     blocks: vec![Block::Entities {
                         title: None,
@@ -121,6 +121,10 @@ impl Source for Drawing {
                             hinted(
                                 "by another host",
                                 "http://other.example/tidewater/payout-service.git".to_owned(),
+                            ),
+                            hinted(
+                                "by an undeclared adapter's address",
+                                format!("http://{host}-u:3000/tidewater/payout-service.git"),
                             ),
                         ],
                     }],
@@ -376,60 +380,68 @@ async fn a_commit_named_by_repository_and_sha_opens_the_mirrored_commit() {
     );
 }
 
-/// #683: a source whose config lists `clone_urls` -- the other addresses CI
-/// clones it from -- has a commit hint named by one of them resolve to its
+/// #683: a source whose adapter declares `clone_urls` -- the other addresses
+/// CI clones it from -- has a commit hint named by one of them resolve to its
 /// mirrored commit, by URL or scp-like remote; a hint on any other host with
-/// the same owner/repo stays plain text.
+/// the same owner/repo stays plain text, and so does one named by an address
+/// a source lists whose adapter declares no such key.
 #[tokio::test]
 async fn a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit() {
     let f = fixture().await;
     let sha = format!("{}0000", uuid::Uuid::new_v4().simple());
-    // A host of this test's own: the pool is shared, and an alias is read
+    // A host of this test's own: the pool is shared, and addresses are read
     // from every configured source.
     let host = format!("ci-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    let git = format!("{}-git", f.id);
-    sources::crud::add(
-        &f.pool,
-        &f.secrets,
-        &f.registry,
-        NewSource {
-            id: git.clone(),
-            adapter_kind: "mock".to_owned(),
-            display_name: "Git".to_owned(),
-            base_url: format!("http://{host}.pages.example/"),
-            auth_kind: AuthMethod::Pat,
-            config: serde_json::json!({}),
-            secret: SecretInput::of("pat"),
-            sync_interval_secs: 300,
-            enabled: true,
-        },
-    )
-    .await
-    .unwrap();
-    sqlx::query("update knobas.source_config set config = $2 where id = $1")
-        .bind(&git)
-        .bind(serde_json::json!({ "clone_urls": [format!("http://{host}:3000"), format!("git@{host}:")] }))
+    // The Gitea adapter declares the key; the mock does not, so the same list
+    // in a mock's config is nobody's declaration.
+    let mut mirrored = Vec::new();
+    for (suffix, adapter_kind, ci_host) in [
+        ("git", "gitea", host.clone()),
+        ("undeclared", "mock", format!("{host}-u")),
+    ] {
+        let id = format!("{}-{suffix}", f.id);
+        sources::crud::add(
+            &f.pool,
+            &f.secrets,
+            &f.registry,
+            NewSource {
+                id: id.clone(),
+                adapter_kind: adapter_kind.to_owned(),
+                display_name: "Git".to_owned(),
+                base_url: format!("http://{ci_host}.pages.example/"),
+                auth_kind: AuthMethod::Pat,
+                config: serde_json::json!({
+                    knobas_source::clone_urls::CONFIG_KEY:
+                        [format!("http://{ci_host}:3000"), format!("git@{ci_host}:")]
+                }),
+                secret: SecretInput::of("pat"),
+                sync_interval_secs: 300,
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+        let entity = format!("{id}:tidewater/payout-service@{sha}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'c')")
+            .bind(&entity)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, payload, web_url)
+             values ($1, $2, 'commit', 'c', '{}'::jsonb, $3)",
+        )
+        .bind(&entity)
+        .bind(&id)
+        .bind(format!(
+            "http://{ci_host}.pages.example/tidewater/payout-service/commit/{sha}"
+        ))
         .execute(&f.pool)
         .await
         .unwrap();
-    let mirrored = format!("{git}:tidewater/payout-service@{sha}");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'c')")
-        .bind(&mirrored)
-        .execute(&f.pool)
-        .await
-        .unwrap();
-    sqlx::query(
-        "insert into sync.item (entity_id, source_id, kind, title, payload, web_url)
-         values ($1, $2, 'commit', 'c', '{}'::jsonb, $3)",
-    )
-    .bind(&mirrored)
-    .bind(&git)
-    .bind(format!(
-        "http://{host}.pages.example/tidewater/payout-service/commit/{sha}"
-    ))
-    .execute(&f.pool)
-    .await
-    .unwrap();
+        mirrored.push(entity);
+    }
+    let mirrored = mirrored[0].clone();
 
     let drawn = view(&f, &format!("aliased:{sha}:{host}"), None)
         .await
@@ -448,6 +460,7 @@ async fn a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit() {
             ("by its CI address", Some(mirrored.clone())),
             ("by ssh", Some(mirrored.clone())),
             ("by another host", None),
+            ("by an undeclared adapter's address", None),
         ]
     );
 }

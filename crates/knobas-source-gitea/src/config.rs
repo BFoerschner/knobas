@@ -39,9 +39,10 @@ pub struct GiteaConfig {
     pub rate_limit_per_sec: u32,
     /// Other addresses CI clones this server from (#683): a URL prefix such
     /// as `http://gitea:3000`, or an scp-like remote such as `git@gitea:`.
-    /// Not read by this adapter at all: the app reads it to resolve a commit
-    /// another source names by repository and sha (a TeamCity change) to the
-    /// commit this source mirrors, whose page carries the base URL instead.
+    /// The SPI's [`knobas_source::clone_urls`] key, declared in
+    /// [`config_schema`]: this adapter never reads it, and the app resolves
+    /// with it a commit another source names by repository and sha (a
+    /// TeamCity change) to the commit this source mirrors.
     pub clone_urls: Vec<String>,
 }
 
@@ -89,11 +90,7 @@ impl GiteaConfig {
             }
         }
         for entry in &self.clone_urls {
-            let url = entry.split_once("://").is_some_and(|(scheme, rest)| {
-                !scheme.is_empty() && !rest.trim_matches('/').is_empty()
-            });
-            let scp = entry.len() > 1 && entry.ends_with(':') && !entry.contains('/');
-            if !(url || scp) || entry.trim() != entry {
+            if !knobas_source::clone_urls::is_entry(entry) {
                 return Err(SourceError::protocol(format!(
                     "gitea: clone_urls entry {entry:?} must be a URL such as \"http://gitea:3000\" \
                      or an scp-like remote such as \"git@gitea:\""
@@ -219,6 +216,18 @@ mod tests {
         );
     }
 
+    /// #683: the schema declares the SPI's clone-address key, so the app
+    /// reads this source's `clone_urls` -- the field the config parses.
+    #[test]
+    fn the_schema_declares_its_clone_urls() {
+        assert!(knobas_source::clone_urls::declared(&config_schema()));
+        let cfg = GiteaConfig::from_json(&serde_json::json!({
+            knobas_source::clone_urls::CONFIG_KEY: ["git@gitea:"]
+        }))
+        .unwrap();
+        assert_eq!(cfg.clone_urls, ["git@gitea:"]);
+    }
+
     /// #683: the other addresses CI clones from, as a URL or an scp-like
     /// remote; anything else is refused at save time, not missed later.
     #[test]
@@ -235,6 +244,7 @@ mod tests {
             "http://",
             " git@gitea:",
             "git@gitea:owner/",
+            "http:",
         ] {
             let err =
                 GiteaConfig::from_json(&serde_json::json!({ "clone_urls": [bad] })).unwrap_err();
