@@ -61,7 +61,8 @@ pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<(), SourceEr
     rest.queue_build(&build_type_id).await
 }
 
-/// Set parameter `name` of build configuration `build_type_id` to `value`.
+/// Set parameter `name` of build configuration `build_type_id` to `value`,
+/// unless it changed since the reader's edit.
 ///
 /// `PUT /app/rest/buildTypes/id:{id}/parameters/{name}/value` with the value
 /// as `text/plain`. On a parameter the configuration inherits from a project
@@ -71,19 +72,57 @@ pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<(), SourceEr
 /// view draws it afterwards (both measured on the seeded 2026.1.3 server,
 /// 2026-10-12).
 ///
-/// Idempotent, so a retry after a lost answer sets the same value twice.
+/// # `base` is the concurrency check
+///
+/// The configuration's mirrored record does not carry its parameters, so the
+/// write queue cannot hold this op when a colleague changes the same
+/// parameter, and TeamCity's `PUT` has no version to refuse on. So with a
+/// `base` -- the value the view drew when the reader started editing -- the
+/// parameter is read again just before the `PUT`, drawn by the view's own
+/// rule ([`crate::view::drawn_value`]), and a value that is not `base` any
+/// more is refused with the value it is now. Drawn, never raw: a URL's
+/// credential and a secret stay out of the refusal as they stay out of the
+/// view. A narrower window remains between that read and the `PUT`, as it
+/// does for every read-then-write REST has no condition for. Without a
+/// `base` (a secret, whose value the reader never saw) nothing is read, and
+/// the write is last-write-wins.
+///
+/// Idempotent, so a retry after a lost answer sets the same value twice
+/// (ADR-0012): a parameter that already holds `value` is not a change since
+/// the edit, it is this write having landed, and passes the check.
 ///
 /// # Errors
 ///
 /// As [`trigger`]: a 403 (the account may not edit the project) is
-/// `Unauthorized`, a 404 for a configuration that is gone a refusal carrying
-/// TeamCity's sentence, and an empty, `.` or `..` name is refused before a
-/// request ([`crate::ids::parameter_segment`]).
+/// `Unauthorized`, a 404 for a configuration or parameter that is gone a
+/// refusal carrying TeamCity's sentence, and an empty, `.` or `..` name is
+/// refused before a request ([`crate::ids::parameter_segment`]).
+/// [`SourceError::Protocol`] when the parameter changed since `base`.
 pub(crate) async fn set_parameter(
     rest: &HttpRest,
     build_type_id: &str,
     name: &str,
     value: &str,
+    base: Option<&str>,
 ) -> Result<(), SourceError> {
+    if let Some(base) = base {
+        let now = rest.parameter(build_type_id, name).await?;
+        let (drawn, secret) = crate::view::drawn_value(
+            &now.name,
+            now.value.as_deref(),
+            crate::view::is_password(&now),
+        );
+        if secret {
+            return Err(SourceError::protocol(format!(
+                "teamcity: {name:?} changed since you edited: it is now a secret, whose \
+                 value is not shown"
+            )));
+        }
+        if drawn != base && drawn != value {
+            return Err(SourceError::protocol(format!(
+                "teamcity: {name:?} changed since you edited: now {drawn:?}"
+            )));
+        }
+    }
     rest.put_parameter(build_type_id, name, value).await
 }

@@ -66,7 +66,7 @@
      */
     settingMarks?: Record<string, SettingMark>;
     /** Queue one setting's new value; answers whether it was queued. */
-    onsetting?: (block: SettingsTarget, name: string, value: string) => Promise<boolean>;
+    onsetting?: (block: SettingsTarget, name: string, value: string, base: string | null) => Promise<boolean>;
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */
@@ -230,7 +230,7 @@
                 values={block.values}
                 writable={settingsWritable(block.write_op, writeOps)}
                 marks={block.entity === entityId ? settingMarks : {}}
-                onsave={(name, value) => onsetting(block, name, value)}
+                onsave={(name, value, base) => onsetting(block, name, value, base)}
               />
             {:else if block.type === "actions"}
               <ActionsBlock actions={block.actions} {onaction} />

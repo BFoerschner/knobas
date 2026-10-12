@@ -6,8 +6,9 @@
   marks a value `editable` and the shell can queue the block's op
   (`writable`), the value cell is a button; pressing it swaps the cell for an
   input of the same height, so nothing else on the row moves. Enter saves,
-  Esc cancels. Saving hands the name and value to `onsave`, which queues the
-  write; the row then carries a mark until the queue settles (`marks`, kept
+  Esc cancels. Saving hands the name, the value and the value the edit was
+  made against (`null` for a secret, never drawn) to `onsave`, which queues the
+  write -- the source refuses it if the value changed since; the row then carries a mark until the queue settles (`marks`, kept
   by the detail, which re-reads the view when the write lands).
 
   A secret value is never drawn -- the adapter does not send one -- and says
@@ -33,13 +34,22 @@
     writable?: boolean;
     /** The rows whose edit is on its way through the queue, by name. */
     marks?: Record<string, SettingMark>;
-    /** Queue `name = value`; answers whether it was queued. */
-    onsave?: (name: string, value: string) => Promise<boolean>;
+    /**
+     * Queue `name = value`, edited against `base` (the value drawn when the
+     * edit opened; `null` for a secret); answers whether it was queued.
+     */
+    onsave?: (name: string, value: string, base: string | null) => Promise<boolean>;
   } = $props();
 
   /** The row being edited, by name, and what is typed in it. */
   let editing = $state<string | null>(null);
   let draft = $state("");
+  /**
+   * The value the open edit started from. Kept here, not read off the row at
+   * save: a view re-read while the reader types must not move what the edit
+   * was made against.
+   */
+  let base: string | null = null;
   let saving = $state(false);
   let input = $state<HTMLInputElement | null>(null);
 
@@ -57,7 +67,8 @@
   async function open(setting: Setting) {
     if (saving) return;
     editing = setting.name;
-    draft = setting.secret ? "" : setting.value;
+    base = setting.secret ? null : setting.value;
+    draft = base ?? "";
     await tick();
     input?.focus();
     input?.select();
@@ -66,19 +77,20 @@
   function close() {
     editing = null;
     draft = "";
+    base = null;
   }
 
   async function save(setting: Setting) {
     if (saving) return;
     // Nothing changed: nothing to queue. A secret's old value is unknown, so
     // any value typed into it is a change.
-    if (!setting.secret && draft === setting.value) {
+    if (base !== null && draft === base) {
       close();
       return;
     }
     saving = true;
     try {
-      if (await onsave(setting.name, draft)) close();
+      if (await onsave(setting.name, draft, base)) close();
     } finally {
       saving = false;
     }

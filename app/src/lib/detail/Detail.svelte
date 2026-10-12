@@ -232,11 +232,17 @@
   $effect(() => () => watchQueue(false));
 
   /**
-   * Queue `name = value` on the block's entity (#668). Answers whether the
-   * write was queued, so the editor stays open on a refusal.
+   * Queue `name = value` on the block's entity, edited against `base` (#668).
+   * Answers whether the write was queued, so the editor stays open on a
+   * refusal.
    */
-  async function saveSetting(block: SettingsTarget, name: string, value: string): Promise<boolean> {
-    const payload = settingPayload(block.write_op, block.entity, name, value);
+  async function saveSetting(
+    block: SettingsTarget,
+    name: string,
+    value: string,
+    base: string | null,
+  ): Promise<boolean> {
+    const payload = settingPayload(block.write_op, block.entity, name, value, base);
     if (payload === null) {
       push({ text: `Could not save ${name}: knobas cannot send this change`, tone: "err" });
       return false;
@@ -247,12 +253,17 @@
     try {
       write = await submitWrite(payload);
     } catch (rejection) {
+      // Another item opened meanwhile: its row of this name is not this one.
+      if (mine !== token) return false;
       delete settingMarks[name];
       push({ text: `Could not save ${name}: ${ipcErrorMessage(rejection)}`, tone: "err" });
       return false;
     }
     if (mine !== token) return true;
     settingWrites[name] = write.id;
+    // Watched from here, not from the first answer: if that read fails, a
+    // queue movement is what asks again, and nothing would hear one.
+    watchQueue(true);
     await settleSettings(mine);
     if (mine !== token) return true;
     // Settled by this read or by a queue movement that raced it: either way
@@ -301,6 +312,7 @@
     watchQueue(Object.keys(settingWrites).length > 0);
     if (landed.length === 0) return;
     await refresh();
+    if (mine !== token) return;
     await rereadView();
     if (mine !== token) return;
     for (const [name, mark] of landed) {

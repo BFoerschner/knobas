@@ -13,8 +13,8 @@ use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, RECENT_BUILD_FIELDS,
-    SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
+    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS, Property,
+    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -257,6 +257,31 @@ impl HttpRest {
             )
             .text(value.to_owned());
         self.client.send(request).await.map(|_| ())
+    }
+
+    /// `GET /app/rest/buildTypes/id:{id}/parameters/{name}` -- one parameter
+    /// as the configuration holds it now, own or inherited, with the fields
+    /// the view draws it from (issue #668: `set_parameter`'s check against
+    /// the value the reader edited).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, a 404 for a configuration or parameter
+    /// that is gone included, or a refusal of a name that cannot be one
+    /// segment, before a request.
+    pub(crate) async fn parameter(
+        &self,
+        build_type_id: &str,
+        name: &str,
+    ) -> Result<Property, SourceError> {
+        self.one(
+            &format!(
+                "app/rest/buildTypes/id:{build_type_id}/parameters/{}",
+                crate::ids::parameter_segment(name)?
+            ),
+            &[("fields", PARAMETER_FIELDS)],
+        )
+        .await
     }
 
     /// Which build configuration a build belonged to.

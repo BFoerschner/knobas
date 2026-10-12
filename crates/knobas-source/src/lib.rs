@@ -654,6 +654,18 @@ pub enum WriteOp {
     /// writable, and its value travels here and nowhere else: no view sends
     /// it back.
     ///
+    /// `base` is the value the edit was made **against** -- the value the
+    /// view drew when the reader started typing. Before it writes, the
+    /// adapter reads the parameter again and refuses when the source holds
+    /// anything else, naming what it holds now: the configuration's mirrored
+    /// record does not carry its parameters, so the write queue's hold
+    /// cannot see a colleague changing this one, and this read is what keeps
+    /// that from being a silent last-write-wins (`update_page`'s
+    /// `base_version` answers the same window). `None` skips the read, for a
+    /// value the reader never saw: a parameter that did not exist, or a
+    /// secret, whose value is never drawn. A secret's write is therefore
+    /// knowingly last-write-wins.
+    ///
     /// Hold detection takes the whole mirrored record, as for
     /// [`MergePullRequest`](WriteOp::MergePullRequest): see
     /// `knobas_core::write_queue::project` for what that record can and
@@ -662,6 +674,7 @@ pub enum WriteOp {
         entity: String,
         name: String,
         value: String,
+        base: Option<String>,
     },
 }
 
@@ -1170,6 +1183,7 @@ mod tests {
                 entity: "teamcity:buildType:Payout_Build".into(),
                 name: "env.SEPA_RETRIES".into(),
                 value: "7".into(),
+                base: Some("5".into()),
             },
         ];
         for op in &probes {

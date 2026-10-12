@@ -347,8 +347,10 @@ async fn parameters_mark_the_inherited_and_never_carry_a_passwords_value() {
         .collect();
     assert_eq!(
         drawn,
-        // Every one editable (#668): an own value is changed, an inherited
-        // one gets an own override, a password is written blind.
+        // Editable (#668): an own value is changed, an inherited one gets an
+        // own override, a password is written blind. A URL drawn without its
+        // credential is not: an edit of what was drawn would write the
+        // credential away.
         [
             ("env.SEPA_RETRIES", "5", false, false, true),
             ("env.SEPA_SANDBOX_KEY", "", false, true, true),
@@ -358,7 +360,7 @@ async fn parameters_mark_the_inherited_and_never_carry_a_passwords_value() {
                 "https://git.example/p.git",
                 false,
                 false,
-                true
+                false
             ),
             ("vcs.token", "", false, true, true),
         ]

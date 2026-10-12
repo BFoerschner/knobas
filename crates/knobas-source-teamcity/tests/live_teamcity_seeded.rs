@@ -2237,13 +2237,22 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
             .cloned()
             .unwrap_or_else(|| panic!("no parameter {name}: {values:#?}"))
     };
-    let set = async |name: &str, value: &str| {
+    // Each write is edited against the value the view drew, as the shell's
+    // is: `None` for a secret, whose value it never drew.
+    let set_from = async |name: &str, base: Option<String>, value: &str| {
         source
             .write(WriteOp::SetParameter {
                 entity: entity.clone(),
                 name: name.to_owned(),
                 value: value.to_owned(),
+                base,
             })
+            .await
+    };
+    let set = async |name: &str, value: &str| {
+        let drawn = named(&parameters().await, name);
+        let base = (!drawn.secret).then_some(drawn.value);
+        set_from(name, base, value)
             .await
             .unwrap_or_else(|e| panic!("TeamCity takes {name} = {value:?}: {e:?}"));
     };
@@ -2262,6 +2271,18 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
         (own_after, false),
         "{own:#?}"
     );
+
+    // 1b. The same value edited against what it held before step 1 -- a
+    // colleague's change the reader never saw -- is refused, naming the value
+    // it holds now, and nothing is written.
+    let stale = set_from(OWN, Some(own_before.clone()), "knobas-668 stale edit")
+        .await
+        .expect_err("an edit against a value that has changed since is refused");
+    assert!(
+        format!("{stale:?}").contains(&format!("now {own_after:?}")),
+        "{stale:?}"
+    );
+    assert_eq!(named(&parameters().await, OWN).value, own_after);
 
     // 2. An inherited value: an own override on the configuration, and the
     // project's value where it was.
@@ -2307,7 +2328,7 @@ async fn a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view(
         "the password's value is in the view"
     );
     println!(
-        "SEEDED {config}: {OWN} {own_before:?} -> {own_after:?}, {INHERITED} inherited {:?} -> own \
+        "SEEDED {config}: {OWN} {own_before:?} -> {own_after:?} (a stale edit refused: {stale}), {INHERITED} inherited {:?} -> own \
          {region_after:?} (project still {:?}), {} written and still a password",
         inherited_before["value"], project_value["value"], settings.secret_parameter
     );

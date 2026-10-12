@@ -674,6 +674,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: "teamcity:buildType:Payout_Build".to_owned(),
             name: "env.SEPA_RETRIES".to_owned(),
             value: "7".to_owned(),
+            base: Some("5".to_owned()),
         },
     ];
     for op in &probes {

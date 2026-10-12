@@ -17,19 +17,29 @@ import type { QueuedWrite, WriteOpPayload, WriteState } from "../../ipc/sources"
 /** What a settings block's edit is aimed by: its entity and the op that changes it. */
 export type SettingsTarget = Pick<Extract<ViewBlock, { type: "settings" }>, "entity" | "write_op">;
 
-/** The payload for one op, from the block's entity and the value edited. */
-const PAYLOADS: Record<string, (entity: string, name: string, value: string) => WriteOpPayload> = {
-  set_parameter: (entity, name, value) => ({ SetParameter: { entity, name, value } }),
+/**
+ * The payload for one op, from the block's entity, the value edited and the
+ * value it was edited against (`null` where none was drawn).
+ */
+const PAYLOADS: Record<
+  string,
+  (entity: string, name: string, value: string, base: string | null) => WriteOpPayload
+> = {
+  set_parameter: (entity, name, value, base) => ({ SetParameter: { entity, name, value, base } }),
 };
 
-/** The write that sets `name` to `value` on `entity`, or `null` for an op this shell cannot queue. */
+/**
+ * The write that sets `name` to `value` on `entity`, edited against `base`,
+ * or `null` for an op this shell cannot queue.
+ */
 export function settingPayload(
   writeOp: string,
   entity: string,
   name: string,
   value: string,
+  base: string | null,
 ): WriteOpPayload | null {
-  return PAYLOADS[writeOp]?.(entity, name, value) ?? null;
+  return PAYLOADS[writeOp]?.(entity, name, value, base) ?? null;
 }
 
 /**
@@ -41,11 +51,6 @@ export function settingsWritable(writeOp: string, declared: string[]): boolean {
   return declared.includes(writeOp) && Object.hasOwn(PAYLOADS, writeOp);
 }
 
-/**
- * A row's edit on its way through the queue. `saving` while the write is
- * queued and its first flush runs; then the queue's own open state until it
- * settles, when the mark goes and the view is read again.
- */
 /** The queue states a write is still open in. */
 type OpenState = Extract<WriteState, "pending" | "held" | "refused">;
 
@@ -55,6 +60,11 @@ export function openState(write: QueuedWrite | undefined): OpenState | null {
   return state === "pending" || state === "held" || state === "refused" ? state : null;
 }
 
+/**
+ * A row's edit on its way through the queue. `saving` while the write is
+ * queued and its first flush runs; then the queue's own open state until it
+ * settles, when the mark goes and the view is read again.
+ */
 export interface SettingMark {
   state: "saving" | OpenState;
   /** What the queue or the source said, in its own words. Untrusted text. */

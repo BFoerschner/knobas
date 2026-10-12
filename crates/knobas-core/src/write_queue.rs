@@ -419,7 +419,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   configuration's mirrored record is its id, name, project and description
 ///   (TeamCity's `BUILD_TYPE_FIELDS`), **not its parameters**, so this shape
 ///   cannot see a colleague changing the same parameter between the edit and
-///   the flush: that write is last-wins, as it is in TeamCity's own UI. What
+///   the flush. That window is the op's `base` to close, as `update_page`'s
+///   `base_version` closes its own: the adapter reads the parameter before it
+///   writes and refuses a value that is no longer the one edited against
+///   (only a secret, never drawn, has no `base` and is last-write-wins). What
 ///   it does hold on is the configuration being renamed, moved, re-described
 ///   or deleted -- each a reason to look at what one is about to change. The
 ///   cost is small because the record is quiet: it carries no timestamp

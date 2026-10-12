@@ -358,10 +358,11 @@ fn age(d: chrono::TimeDelta) -> String {
 
 // --- Parameters ---------------------------------------------------------
 
-/// Own and inherited, in TeamCity's order (by name), every one editable
-/// through `set_parameter` (#668), which this adapter declares: an own value
-/// is changed, an inherited one gets an own override, and a password is
-/// written without its old value ever being drawn. Drawn by [`drawn_value`],
+/// Own and inherited, in TeamCity's order (by name), editable through
+/// `set_parameter` (#668), which this adapter declares: an own value is
+/// changed, an inherited one gets an own override, and a password is written
+/// without its old value ever being drawn. A value drawn other than it is
+/// held is not editable. Drawn by [`drawn_value`],
 /// the rule the build view uses too.
 fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
     let values: Vec<Setting> = record
@@ -370,12 +371,16 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
         .iter()
         .map(|p| {
             let (value, secret) = drawn_value(&p.name, p.value.as_deref(), is_password(p));
+            // A value drawn other than it is held -- a URL whose credential
+            // was cut out -- is not offered: an edit of what was drawn would
+            // write the credential away.
+            let editable = secret || p.value.as_deref().unwrap_or_default() == value;
             Setting {
                 name: p.name.clone(),
                 value,
                 inherited: p.inherited,
                 secret,
-                editable: true,
+                editable,
                 description: None,
             }
         })
@@ -1114,7 +1119,7 @@ fn build_parameters(record: &BuildRecord) -> Vec<Setting> {
 /// spec is a password, where the name is one TeamCity stores securely, where
 /// TeamCity masked the value, or where a URL's credential cannot be cut out;
 /// any other URL is drawn without its credential.
-fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) {
+pub(crate) fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) {
     let raw = raw.unwrap_or_default();
     let masked = raw.len() >= 3 && raw.bytes().all(|b| b == b'*');
     let shown = if raw.contains("://") {
@@ -1129,7 +1134,7 @@ fn drawn_value(name: &str, raw: Option<&str>, password: bool) -> (String, bool) 
 }
 
 /// A parameter whose spec says `password`: its value is never drawn.
-fn is_password(p: &crate::rest::Property) -> bool {
+pub(crate) fn is_password(p: &crate::rest::Property) -> bool {
     p.spec
         .as_ref()
         .and_then(|t| t.raw_value.as_deref())

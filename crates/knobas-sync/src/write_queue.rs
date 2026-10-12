@@ -889,6 +889,7 @@ mod tests {
                     entity: "teamcity:buildType:Payout_Build".to_owned(),
                     name: "env.SEPA_RETRIES".to_owned(),
                     value: "7".to_owned(),
+                    base: Some("5".to_owned()),
                 },
                 "teamcity:buildType:Payout_Build",
             ),

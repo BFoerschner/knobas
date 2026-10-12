@@ -83,6 +83,12 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
     "triggered(user(username)))"
 );
 
+/// What one parameter is asked for when `set_parameter` checks it against
+/// the value the reader edited (#668): what the view draws a parameter from,
+/// and nothing else. The same fields as each `property` of
+/// [`BUILD_CONFIG_VIEW_FIELDS`]'s `parameters`.
+pub(crate) const PARAMETER_FIELDS: &str = "name,value,inherited,type(rawValue)";
+
 /// What `GET /app/rest/buildTypes/id:{id}` is asked for when a build
 /// configuration's source view is drawn (#664): the one request that answers
 /// every tab but *Overview*'s recent builds, read by [`ConfigRecord`].

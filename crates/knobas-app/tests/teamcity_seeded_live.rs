@@ -575,12 +575,14 @@ async fn a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_ne
             .value
             .clone()
     };
-    assert_eq!(value_in_view().await, before);
+    let base = value_in_view().await;
+    assert_eq!(base, before);
 
+    // Edited against the value the view drew, as the shell sends it.
     let after = "knobas-668 through the queue";
     let queued = write_queue::submit(
         &state,
-        json!({ "SetParameter": { "entity": entity, "name": NAME, "value": after } }),
+        json!({ "SetParameter": { "entity": entity, "name": NAME, "value": after, "base": base } }),
     )
     .await
     .expect("the queue takes a parameter set for a source that declares it");

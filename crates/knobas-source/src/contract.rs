@@ -159,6 +159,7 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             entity: target,
             name: "contract.battery.probe".into(),
             value: "contract battery probe".into(),
+            base: None,
         },
     ]
     .into_iter()

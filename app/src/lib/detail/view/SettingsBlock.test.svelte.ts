@@ -37,7 +37,7 @@ interface Options {
   title?: string | null;
   writable?: boolean;
   marks?: Record<string, SettingMark>;
-  onsave?: (name: string, value: string) => Promise<boolean>;
+  onsave?: (name: string, value: string, base: string | null) => Promise<boolean>;
 }
 
 function render(values: Setting[], titleOrOptions: string | null | Options = null) {
@@ -126,11 +126,11 @@ test("a non-editable row has no control, and neither has a block the shell canno
 });
 
 test("an editable value opens in place, pre-filled; Enter saves the new value", async () => {
-  const saved: [string, string][] = [];
+  const saved: [string, string, string | null][] = [];
   const view = render([setting({ name: "env.SEPA_RETRIES", value: "5", editable: true })], {
     writable: true,
-    onsave: (name, value) => {
-      saved.push([name, value]);
+    onsave: (name, value, base) => {
+      saved.push([name, value, base]);
       return Promise.resolve(true);
     },
   });
@@ -148,7 +148,8 @@ test("an editable value opens in place, pre-filled; Enter saves the new value", 
   key(input, "Enter");
   await Promise.resolve();
   flushSync();
-  expect(saved).toEqual([["env.SEPA_RETRIES", "7"]]);
+  // With the value the edit started from, which the source checks.
+  expect(saved).toEqual([["env.SEPA_RETRIES", "7", "5"]]);
   expect(view.input()).toBeNull();
   view.done();
 });

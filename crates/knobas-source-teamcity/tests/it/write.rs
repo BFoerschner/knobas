@@ -31,12 +31,48 @@ fn source(server: &MockServer) -> Box<dyn Source> {
     }
 }
 
+/// A set with no `base`, as for a secret: no read before the `PUT`.
 fn set(entity: &str, name: &str, value: &str) -> WriteOp {
     WriteOp::SetParameter {
         entity: entity.to_owned(),
         name: name.to_owned(),
         value: value.to_owned(),
+        base: None,
     }
+}
+
+/// A set edited against `base`, as the view's every drawn value is.
+fn set_from(name: &str, base: &str, value: &str) -> WriteOp {
+    WriteOp::SetParameter {
+        entity: CONFIG.to_owned(),
+        name: name.to_owned(),
+        value: value.to_owned(),
+        base: Some(base.to_owned()),
+    }
+}
+
+/// The parameter resource answering `body`, as the seeded 2026.1.3 server
+/// answers `GET .../parameters/{name}?fields=name,value,inherited,type(rawValue)`.
+async fn holding(server: &MockServer, name: &str, body: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/app/rest/buildTypes/id:Payout_IntegrationTests/parameters/{name}"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+/// The `PUT`s a write made.
+async fn puts(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .map(|r| String::from_utf8(r.body.clone()).unwrap())
+        .collect()
 }
 
 /// The one request a set made: verb, path as sent, content type, accept, body.
@@ -209,4 +245,120 @@ async fn a_target_that_is_no_configuration_is_refused_before_a_request() {
         );
     }
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// The concurrency check (#668): a colleague changed the parameter between
+/// the reader's edit and the flush. The mirror cannot see it -- a
+/// configuration's record holds no parameters -- so the adapter reads the
+/// parameter just before the `PUT` and refuses, naming what it holds now,
+/// rather than overwrite it silently. Nothing is written.
+#[tokio::test]
+async fn a_parameter_changed_since_the_edit_is_refused_with_its_value_now() {
+    let server = MockServer::start().await;
+    holding(
+        &server,
+        "env.SEPA_RETRIES",
+        json!({ "name": "env.SEPA_RETRIES", "value": "9", "inherited": false }),
+    )
+    .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let error = source(&server)
+        .write(set_from("env.SEPA_RETRIES", "5", "7"))
+        .await
+        .expect_err("refused");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message }
+            if message.contains("changed since you edited") && message.contains("\"9\"")),
+        "{error:?}"
+    );
+    assert!(
+        puts(&server).await.is_empty(),
+        "the colleague's value stays"
+    );
+}
+
+/// The other direction: the value is still the one edited against, so the
+/// write goes -- and so it does when it already holds the new value, which
+/// is this write having landed before an answer was lost (ADR-0012).
+#[tokio::test]
+async fn a_parameter_still_as_edited_or_already_set_is_written() {
+    for now in ["5", "7"] {
+        let server = MockServer::start().await;
+        holding(
+            &server,
+            "env.SEPA_RETRIES",
+            json!({ "name": "env.SEPA_RETRIES", "value": now, "inherited": false }),
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        source(&server)
+            .write(set_from("env.SEPA_RETRIES", "5", "7"))
+            .await
+            .unwrap_or_else(|e| panic!("holding {now:?}: {e:?}"));
+        assert_eq!(puts(&server).await, ["7"], "holding {now:?}");
+    }
+}
+
+/// An inherited value is compared too: the edit was against what the
+/// configuration inherits, and a project-level change since is a change.
+#[tokio::test]
+async fn an_inherited_value_changed_above_is_refused() {
+    let server = MockServer::start().await;
+    holding(
+        &server,
+        "tidewater.region",
+        json!({ "name": "tidewater.region", "value": "us-east-1", "inherited": true }),
+    )
+    .await;
+    let error = source(&server)
+        .write(set_from("tidewater.region", "eu-central-1", "eu-west-1"))
+        .await
+        .expect_err("refused");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. } if message.contains("us-east-1")),
+        "{error:?}"
+    );
+    assert!(puts(&server).await.is_empty());
+}
+
+/// The refusal names the value **as the view would draw it**: a secret's
+/// value and a URL's credential stay out of it as they stay out of the view.
+#[tokio::test]
+async fn a_refusal_never_names_what_the_view_would_not_draw() {
+    let server = MockServer::start().await;
+    holding(
+        &server,
+        "vcs.mirror",
+        json!({ "name": "vcs.mirror", "value": "https://ci:mirror-token@git.example/q.git" }),
+    )
+    .await;
+    holding(
+        &server,
+        "env.KEY",
+        json!({ "name": "env.KEY", "value": "now-a-secret-value",
+                "type": { "rawValue": "password display='hidden'" } }),
+    )
+    .await;
+    for (name, base) in [
+        ("vcs.mirror", "https://git.example/p.git"),
+        ("env.KEY", "plain before"),
+    ] {
+        let error = source(&server)
+            .write(set_from(name, base, "x"))
+            .await
+            .expect_err("refused");
+        let text = format!("{error:?}");
+        assert!(text.contains("changed since you edited"), "{text}");
+        assert!(
+            !text.contains("mirror-token") && !text.contains("now-a-secret-value"),
+            "{text}"
+        );
+    }
+    assert!(puts(&server).await.is_empty());
 }

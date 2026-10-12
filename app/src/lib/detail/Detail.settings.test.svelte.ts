@@ -19,6 +19,8 @@ const ID = "teamcity:buildType:Payout_IntegrationTests";
 const calls: string[] = [];
 const queued: WriteOpPayload[] = [];
 let submitFails = false;
+/** When set, `pending_writes` fails once, as an IPC call can. */
+let pendingFailsOnce = false;
 /** What `pending_writes` answers next: the open rows. */
 let open: QueuedWrite[] = [];
 let views: SourceView[] = [];
@@ -77,6 +79,10 @@ vi.mock("../ipc/sources", () => ({
     ]),
   pendingWrites: () => {
     calls.push("pending_writes");
+    if (pendingFailsOnce) {
+      pendingFailsOnce = false;
+      return Promise.reject({ code: "internal", message: "pool timed out", source_id: null });
+    }
     return Promise.resolve(open);
   },
 }));
@@ -108,7 +114,7 @@ function row(state: QueuedWrite["state"], detail: string | null = null): QueuedW
     source_id: "teamcity",
     entity_id: ID,
     op: "set_parameter",
-    payload: { SetParameter: { entity: ID, name: "env.SEPA_RETRIES", value: "7" } },
+    payload: { SetParameter: { entity: ID, name: "env.SEPA_RETRIES", value: "7", base: "5" } },
     target_snapshot: null,
     state,
     wait_reason: state === "pending" ? "unreachable" : null,
@@ -217,6 +223,7 @@ beforeEach(async () => {
   handlers.length = 0;
   unlistened = 0;
   submitFails = false;
+  pendingFailsOnce = false;
   open = [];
   viewGate = null;
   nextId = 41;
@@ -231,7 +238,8 @@ test("an edit queues SetParameter; a write that went re-reads the view at once",
   expect(screen.value("env.SEPA_RETRIES")).toBe("5");
 
   await screen.edit("env.SEPA_RETRIES", "7");
-  expect(queued).toEqual([{ SetParameter: { entity: ID, name: "env.SEPA_RETRIES", value: "7" } }]);
+  // Edited against the value the view drew, which the source checks.
+  expect(queued).toEqual([{ SetParameter: { entity: ID, name: "env.SEPA_RETRIES", value: "7", base: "5" } }]);
   expect(calls.slice(calls.indexOf("submit_write"))).toEqual([
     "submit_write",
     "pending_writes",
@@ -241,7 +249,8 @@ test("an edit queues SetParameter; a write that went re-reads the view at once",
   expect(screen.value("env.SEPA_RETRIES")).toBe("7");
   expect(screen.mark("env.SEPA_RETRIES")).toBe("");
   expect(toasts.items.map((t) => t.text)).toContain("env.SEPA_RETRIES set");
-  expect(handlers).toHaveLength(0);
+  // Nothing left open, so nothing left listening.
+  expect(handlers.length).toBe(unlistened);
   screen.done();
 });
 
@@ -273,6 +282,22 @@ test("a write that waits keeps its mark until the queue lets it go, then the vie
   screen.done();
 });
 
+test("a queue read that fails after the save still settles on the next queue movement", async () => {
+  pendingFailsOnce = true;
+  const screen = render();
+  await settle();
+  await screen.edit("env.SEPA_RETRIES", "7");
+  // The first read failed: where the write is is unknown, so the row says saving.
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("saving…");
+  // Listening already, so the next movement asks again and finds it gone.
+  expect(handlers.length - unlistened).toBe(1);
+  handlers[0]!();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("");
+  expect(screen.value("env.SEPA_RETRIES")).toBe("7");
+  screen.done();
+});
+
 test("a write the queue would not take leaves the editor open and says why", async () => {
   submitFails = true;
   const screen = render();
@@ -288,7 +313,10 @@ test("a secret's toast and mark never carry its value", async () => {
   const screen = render();
   await settle();
   await screen.edit("env.SEPA_SANDBOX_KEY", "brand-new-secret");
-  expect(queued).toEqual([{ SetParameter: { entity: ID, name: "env.SEPA_SANDBOX_KEY", value: "brand-new-secret" } }]);
+  // No base: a secret's value was never drawn, so nothing was edited against.
+  expect(queued).toEqual([
+    { SetParameter: { entity: ID, name: "env.SEPA_SANDBOX_KEY", value: "brand-new-secret", base: null } },
+  ]);
   expect(screen.target.textContent).not.toContain("brand-new-secret");
   expect(toasts.items.map((t) => t.text).join(" ")).not.toContain("brand-new-secret");
   screen.done();
