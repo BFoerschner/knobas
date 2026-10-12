@@ -781,6 +781,259 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     assert!(!facts.iter().any(|f| f.label == "Mergeable"), "{facts:#?}");
 }
 
+/// The seeded feature branch's source view (#663, ADR-0020), read from the
+/// real server: it is ahead of `main` by at least the fixture's commits on
+/// it, its *Commits* tab lists each of them by message, its open pull request
+/// is the seeded one, and its deferred *Diff* -- the compare's
+/// `?output=diff` -- carries a file for every one of those commits (the seed
+/// writes one file per commit, holding the message).
+///
+/// Prints the view's facts, rows and diff summary, which is the output the
+/// PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let source = env.one_repo();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/tidewater/work.json"))
+            .expect("the fixture is JSON");
+    let branch = "feature/PAY-231-sepa-retry";
+    let seeded: Vec<&str> = fixture["commits"]
+        .as_array()
+        .expect("the fixture lists commits")
+        .iter()
+        .filter(|c| c["repo"].as_str() == Some(env.repo.as_str()))
+        .filter(|c| c["branch"].as_str() == Some(branch))
+        .filter_map(|c| c["msg"].as_str())
+        .collect();
+    assert!(!seeded.is_empty(), "the fixture commits to {branch}");
+    let pr_title = fixture["prs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["from"].as_str() == Some(branch))
+        .and_then(|p| p["title"].as_str())
+        .expect("the fixture opens a pull request from the branch");
+
+    let id = format!("gitea:{}@refs/heads/{branch}", env.full_name());
+    let view = source
+        .view(&id, None)
+        .await
+        .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
+        .expect("Gitea draws a branch");
+    let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["overview", "commits", "diff"], "{id}");
+
+    let overview = &view.sections[0];
+    let Block::Facts { facts } = &overview.blocks[0] else {
+        panic!("{overview:#?}");
+    };
+    for f in facts {
+        println!("fact  {:<14} {}", f.label, f.value);
+    }
+    let read = |label: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| f.value.clone())
+            .unwrap_or_else(|| panic!("no {label} fact: {facts:#?}"))
+    };
+    assert_eq!(read("Base"), "main");
+    let ahead: usize = read("Ahead").parse().expect("a count");
+    assert!(
+        ahead >= seeded.len(),
+        "{branch} is ahead by at least its {} seeded commits, read {ahead}",
+        seeded.len()
+    );
+    let entity_rows = |section: &knobas_source::view::ViewSection, title: Option<&str>| {
+        section
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Entities { title: t, rows } if t.as_deref() == title => Some(rows.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let pulls = entity_rows(overview, Some("Pull request"));
+    for row in &pulls {
+        println!("pull  {} {:?} {:?}", row.title, row.meta, row.chip);
+    }
+    assert!(
+        pulls.iter().any(|r| r.title == pr_title
+            && r.chip.as_deref() == Some("open")
+            && r.entity_id.as_deref().is_some_and(|e| e.contains('#'))),
+        "the seeded pull request {pr_title:?} is the branch's: {pulls:#?}"
+    );
+    let last = entity_rows(overview, Some("Last commit"));
+    assert_eq!(last.len(), 1, "{overview:#?}");
+
+    let commits = &view.sections[1];
+    assert_eq!(commits.count, Some(ahead as u64), "the count is ahead");
+    let rows = entity_rows(commits, None);
+    for row in &rows {
+        println!("commit {:<52} {:?}", row.title, row.meta);
+    }
+    for message in &seeded {
+        assert!(
+            rows.iter().any(|r| r.title == *message),
+            "the seeded commit {message:?} is listed: {rows:#?}"
+        );
+    }
+
+    let stub = &view.sections[2];
+    assert!(stub.deferred && stub.blocks.is_empty());
+    let diff = source
+        .view(&id, Some("diff"))
+        .await
+        .expect("the diff tab reads")
+        .expect("drawn");
+    let Block::Diff { files, truncated } = &diff.sections[0].blocks[0] else {
+        panic!("{diff:#?}");
+    };
+    assert!(!truncated);
+    for file in files {
+        println!(
+            "diff  {:?} {} +{} -{}",
+            file.change, file.path, file.additions, file.deletions
+        );
+    }
+    let lines: Vec<&str> = files
+        .iter()
+        .flat_map(|f| &f.hunks)
+        .flat_map(|h| &h.lines)
+        .map(|l| l.text.as_str())
+        .collect();
+    for message in &seeded {
+        assert!(
+            lines.contains(message),
+            "the diff carries the line the seed wrote for {message:?}"
+        );
+    }
+    assert!(
+        stub.count.is_some_and(|n| n >= files.len() as u64),
+        "the stub's count ({:?}) counts every file the diff draws ({})",
+        stub.count,
+        files.len()
+    );
+}
+
+/// The seeded repository's source view (#663), read from the real server:
+/// its open pull requests include the fixture's open ones, its branches the
+/// fixture's with `main` first, its README is the one `auto_init` wrote, and
+/// its *Commits* are `main`'s.
+///
+/// Prints the view, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_seeded_repos_view_lists_its_pull_requests_and_branches() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let source = env.one_repo();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/tidewater/work.json"))
+            .expect("the fixture is JSON");
+    let in_repo = |list: &str| -> Vec<serde_json::Value> {
+        fixture[list]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|x| x["repo"].as_str() == Some(env.repo.as_str()))
+            .cloned()
+            .collect()
+    };
+    let open_titles: Vec<String> = in_repo("prs")
+        .iter()
+        .filter(|p| p["state"].as_str() == Some("open"))
+        .filter_map(|p| p["title"].as_str().map(str::to_owned))
+        .collect();
+    let branch_names: Vec<String> = in_repo("branches")
+        .iter()
+        .filter_map(|b| b["name"].as_str().map(str::to_owned))
+        .collect();
+    assert!(!open_titles.is_empty() && branch_names.len() > 1);
+
+    let id = format!("gitea:{}", env.full_name());
+    let view = source
+        .view(&id, None)
+        .await
+        .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
+        .expect("Gitea draws a repository");
+    let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["overview", "pulls", "branches", "commits"], "{id}");
+    let rows_of = |index: usize| {
+        view.sections[index]
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Entities { rows, .. } => Some(rows.clone()),
+                _ => None,
+            })
+            .expect("a list")
+    };
+
+    let overview = &view.sections[0];
+    let Block::Facts { facts } = &overview.blocks[0] else {
+        panic!("{overview:#?}");
+    };
+    for f in facts {
+        println!("fact   {:<14} {}", f.label, f.value);
+    }
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.label == "Default branch" && f.value == "main")
+    );
+    let Some(Block::Text { text, markdown }) = overview.blocks.get(1) else {
+        panic!("auto_init writes a README.md: {overview:#?}");
+    };
+    println!("readme {text:?} markdown={markdown}");
+    assert!(*markdown);
+    assert!(
+        text.starts_with(&format!("# {}", env.repo)),
+        "auto_init's README is headed by the repository's name: {text:?}"
+    );
+
+    let pulls = rows_of(1);
+    for row in &pulls {
+        println!("pull   {:<40} {:?} {:?}", row.title, row.meta, row.chip);
+    }
+    assert_eq!(view.sections[1].count, Some(pulls.len() as u64));
+    for title in &open_titles {
+        assert!(
+            pulls
+                .iter()
+                .any(|r| &r.title == title && r.chip.as_deref() == Some("open")),
+            "the seeded open pull request {title:?} is listed: {pulls:#?}"
+        );
+    }
+
+    let branches = rows_of(2);
+    for row in &branches {
+        println!("branch {:<40} {:?} {:?}", row.title, row.meta, row.chip);
+    }
+    assert_eq!(view.sections[2].count, Some(branches.len() as u64));
+    assert_eq!(branches[0].title, "main", "the default branch first");
+    assert_eq!(branches[0].chip.as_deref(), Some("default"));
+    for name in &branch_names {
+        assert!(
+            branches.iter().any(|r| &r.title == name
+                && r.entity_id.as_deref() == Some(format!("{id}@refs/heads/{name}").as_str())),
+            "the seeded branch {name:?} is listed under its own address: {branches:#?}"
+        );
+    }
+
+    let commits = rows_of(3);
+    for row in &commits {
+        println!("commit {:<52} {:?}", row.title, row.meta);
+    }
+    assert!(!commits.is_empty() && commits.len() <= 20);
+}
+
 /// Interfaces §4.2's key forms, against ids the *real* server issued.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]

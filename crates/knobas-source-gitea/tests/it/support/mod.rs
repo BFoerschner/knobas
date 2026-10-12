@@ -150,7 +150,10 @@ pub fn commit(sha: &str, message: &str, created: &str) -> Value {
         "commit": {
             "message": message,
             "author": { "name": "Mara Lindqvist", "email": "mara@tidewater.example", "date": created }
-        }
+        },
+        // What a listing asked with `files=false` carries (1.27.3, measured
+        // 2026-10-12): `null`, which a branch's and a repository's views read.
+        "files": null
     })
 }
 

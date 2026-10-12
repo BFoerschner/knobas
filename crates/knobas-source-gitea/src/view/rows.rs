@@ -73,8 +73,10 @@ pub(super) struct ListedCommit {
     #[serde(default)]
     pub commit: Option<ListedInner>,
     /// The files this commit touched; the compare carries them by default.
+    /// `/commits?files=false` answers `null` here (1.27.3, measured), which
+    /// is none, not an unreadable record.
     #[serde(default)]
-    pub files: Vec<TouchedFile>,
+    pub files: Option<Vec<TouchedFile>>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

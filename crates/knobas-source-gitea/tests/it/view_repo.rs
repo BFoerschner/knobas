@@ -61,7 +61,9 @@ fn commit(sha: &str, message: &str, when: &str) -> Value {
     json!({
         "sha": sha, "created": when,
         "html_url": format!("https://gitea.example/tidewater/payout-service/commit/{sha}"),
-        "commit": { "message": message, "author": { "name": "Mara Lindqvist", "date": when } }
+        "commit": { "message": message, "author": { "name": "Mara Lindqvist", "date": when } },
+        // What `files=false` answers on 1.27.3: `null`, not `[]` and not absent.
+        "files": null, "stats": null
     })
 }
 

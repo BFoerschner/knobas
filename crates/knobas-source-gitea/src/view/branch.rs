@@ -50,7 +50,7 @@ impl Compare {
         let touched: BTreeSet<&str> = self
             .commits
             .iter()
-            .flat_map(|c| &c.files)
+            .flat_map(|c| c.files.iter().flatten())
             .map(|f| f.filename.as_str())
             .collect();
         touched.len() as u64
