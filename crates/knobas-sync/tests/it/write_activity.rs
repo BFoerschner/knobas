@@ -9,12 +9,15 @@
 //!
 //! In its own file, deliberately: each test file gets a database of its
 //! own, and this is the one place in the queue's suite that counts
-//! activity lines across several flushes. Inside `write_queue.rs` it would
-//! share a database with `the_scheduler_drains_the_queue_on_its_own`, whose
-//! real scheduler calls `flush_all` and reaches *every* configured source --
-//! its failed builds of the other tests' sources re-reason their rows
-//! (`unauthorized`, no stored credential in *its* secret store), and a count
-//! of "waiting" lines taken in that weather is a count of somebody else's.
+//! activity lines across several flushes. It was split out of
+//! `write_queue.rs` because there it shared a database with
+//! `the_scheduler_drains_the_queue_on_its_own`, whose real scheduler calls
+//! `flush_all` and reaches *every* configured source -- its failed builds of
+//! the other tests' sources re-reason their rows (`unauthorized`, no stored
+//! credential in *its* secret store), and a count of "waiting" lines taken in
+//! that weather is a count of somebody else's. The scheduler test, and every
+//! other test that calls `flush_all`, has since moved to
+//! `write_queue_flush_all.rs` for the same reason (#609).
 
 use std::sync::{Arc, Mutex};
 
