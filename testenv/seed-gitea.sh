@@ -12,8 +12,8 @@
 #
 # AUTHENTICATION is HTTP basic throughout, not tokens. Gitea accepts basic auth
 # on /api/v1, and a token would have to be minted, stored and re-validated on
-# every run for no gain. Exactly one token is minted, at the end, because
-# stream B's live suite needs one: see KNOBAS_GITEA_TOKEN.
+# every run for no gain. One token is minted per worktree, at the end, because
+# stream B's live suite needs one: see KNOBAS_GITEA_TOKEN and section 8.
 #
 # WHAT THIS CANNOT REPRODUCE -- see README.md: git assigns commit shas and
 # Gitea assigns pull request indices, so the fixture's `c90d11` and `#142` are
@@ -32,7 +32,6 @@ PEOPLE_PASS=tidewater-dev
 ORG=tidewater
 FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
 STATE=seed-state.json
-TOKEN_NAME=knobas-seed
 : "${SEED_EXACT_PR_NUMBERS:=1}"
 
 say() { echo "seed-gitea: $*"; }
@@ -384,34 +383,22 @@ for num in $(jqf '.prs[] | .num'); do
 done
 
 # --------------------------------------------------------------------------
-# 8. One access token, for stream B's live suite. Gitea shows a token's value
-#    exactly once, at creation, so a token recorded in seed-state.json is
-#    reused while it still authenticates and replaced when it does not.
+# 8. One access token, for stream B's live suite, ONE PER WORKTREE (#684):
+#    seed-state.json lives in this worktree, the container is everyone's.
+#    Gitea shows a token's value exactly once, at creation, so a token recorded
+#    in seed-state.json is reused while it still authenticates and replaced
+#    when Gitea refuses it -- under this worktree's own name, deleting only
+#    tokens of that name, so no other worktree's token is ever revoked.
+#    gitea-token.sh has the rule; README.md, "The Gitea token is per worktree".
 # --------------------------------------------------------------------------
+# shellcheck source=testenv/gitea-token.sh
+. ./gitea-token.sh
 TOKEN=''
 if [ -r "$STATE" ]; then
   TOKEN=$(jq -r '.gitea.token // empty' "$STATE" 2>/dev/null || echo '')
 fi
-if [ -n "$TOKEN" ]; then
-  if [ "$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: token $TOKEN" "$API/user")" != "200" ]; then
-    say "the recorded access token no longer authenticates; minting a new one"
-    TOKEN=''
-  fi
-fi
-if [ -z "$TOKEN" ]; then
-  api "$ADMIN" GET "/users/$ADMIN_USER/tokens"
-  expect "list access tokens" 200
-  old=$(printf '%s' "$API_BODY" | jq -r --arg n "$TOKEN_NAME" '.[] | select(.name==$n) | .id')
-  for id in $old; do
-    api "$ADMIN" DELETE "/users/$ADMIN_USER/tokens/$id"
-    expect "delete stale token $id" 204
-  done
-  api "$ADMIN" POST "/users/$ADMIN_USER/tokens" \
-      "$(jq -n --arg n "$TOKEN_NAME" '{name:$n, scopes:["write:repository","write:issue","write:user","write:organization"]}')"
-  expect "create access token" 201
-  TOKEN=$(printf '%s' "$API_BODY" | jq -r '.sha1')
-  say "minted access token $TOKEN_NAME"
-fi
+TOKEN=$(gitea_seed_token "$API" "$ADMIN" "$TOKEN" "$(gitea_seed_token_name .)") \
+  || die "no usable access token (above)"
 
 # --------------------------------------------------------------------------
 # 9. seed-state.json -- the bridge between the fixture's ids and reality.
