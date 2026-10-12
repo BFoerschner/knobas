@@ -487,6 +487,17 @@ test("back and forward are available exactly where the history has somewhere to 
   router.go("#/sources");
   expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
 
+  // `replace` in the middle of history keeps what is ahead of it, as a
+  // browser's does: it rewrites one entry and steps nowhere.
+  router.goBack();
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
+  router.replace({ view: "room", ctx: "src:jira", detail: null });
+  expect([router.canGoBack, router.canGoForward]).toEqual([false, true]);
+  router.goForward();
+  await vi.waitFor(() => expect(location.hash).toBe("#/sources"));
+  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
+
   // Nowhere to go is a no-op, not a step out of the session.
   router.goForward();
   expect(location.hash).toBe("#/sources");
