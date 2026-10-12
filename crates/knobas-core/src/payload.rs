@@ -533,8 +533,9 @@ fn parent_names(object: &serde_json::Value, names: &[PayloadPath]) -> Vec<String
 /// ancestor is a page, a Jira `fields.parent` is an issue. That assumption is
 /// an obligation on every adapter, and contract battery clause 6 certifies it
 /// against the adapter's own corpus (the deputy's ruling of 2026-10-11 on
-/// #595). Distinct names, in the order first declared; [`declared_names_as_parent!`](crate::declared_names_as_parent)
-/// is the same rule in SQL, and yields a set.
+/// #595). Distinct names, in the order first declared;
+/// [`declared_names_as_parent!`](crate::declared_names_as_parent) is the same
+/// rule in SQL, and yields a set.
 #[must_use]
 pub fn resolve_names_as_parent<'a>(
     payload: &serde_json::Value,

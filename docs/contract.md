@@ -9709,7 +9709,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   kind it does not emit, `at` onto a string, `at` onto an array of strings, `at` at a key the records
   lack, a name key the parent objects lack, a parent kind's records lacking the name their children
   give them, and that name not being a string there), and by the conforming adapter, which now
-  declares a parent its corpus resolves, on the children and on the parent's own records. Against the real container, `passes_the_contract_battery_against_the_real_container` in
+  declares a parent its corpus resolves, on the children and on the parent's own records. Against
+  the real container, `passes_the_contract_battery_against_the_real_container` in
   `just gitea-live` runs the extended clause on Gitea's own records, a pull request's `base.repo`
   among them.
 

@@ -923,6 +923,11 @@ mod tests {
         /// Its tickets carry `key` on their own records, but as an object
         /// rather than the string a name has to be.
         ParentRecordsNameIsNotAString,
+        /// Declares the parent's names as `key` then `kee`. `key` resolves on
+        /// the epic objects and on the tickets' own records, `kee` on neither:
+        /// the names share their slot, so the battery accepts. Tolerance, not
+        /// a bug: see `accepts_a_parent_name_an_earlier_name_resolves_for`.
+        ASecondParentNameNoRecordCarries,
     }
 
     struct TestSource {
@@ -1095,6 +1100,13 @@ mod tests {
                             parent: vec![parent("ticket", &["fields", "epic"], "kee")],
                             ..good
                         }],
+                        Behavior::ASecondParentNameNoRecordCarries => vec![KindPaths {
+                            parent: vec![ParentPath {
+                                names: vec![PayloadPath::of(["key"]), PayloadPath::of(["kee"])],
+                                ..parent("ticket", &["fields", "epic"], "key")
+                            }],
+                            ..good
+                        }],
                         _ => vec![good],
                     }
                 },
@@ -1182,7 +1194,9 @@ mod tests {
                         });
                         match self.behavior {
                             Behavior::ParentRecordsLackTheirName => {
-                                payload.as_object_mut().map(|o| o.remove("key"));
+                                if let Some(record) = payload.as_object_mut() {
+                                    record.remove("key");
+                                }
                             }
                             Behavior::ParentRecordsNameIsNotAString => {
                                 payload["key"] = serde_json::json!({ "id": 1 });
@@ -1666,6 +1680,20 @@ mod tests {
             "a field's candidates are one adapter's alternative spellings and share one \
                  evidence slot -- a spelling this instance does not use must not fail it",
         );
+    }
+
+    /// The second tolerance as it reaches a parent's names, on the children's
+    /// parent objects and on the parent's own records alike. A parent answers
+    /// to every name that resolves (`resolve_names_as_parent` unions them), so
+    /// a name no record carries is one `under:` can never reach the parent by
+    /// -- but the deputy's ruling of 2026-10-11 on #595 put this rule "under
+    /// the same two #301 tolerances", and per-name slots would be a
+    /// tightening. If that is ever ruled, this test goes red first.
+    #[tokio::test]
+    async fn accepts_a_parent_name_an_earlier_name_resolves_for() {
+        run(Behavior::ASecondParentNameNoRecordCarries)
+            .await
+            .expect("a parent's names share one evidence slot, as a field's candidates do");
     }
 
     // -- clause 7: sink failures ---------------------------------------------

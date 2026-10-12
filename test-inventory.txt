@@ -1593,6 +1593,7 @@ knobas-secrets	test/it	keyring_local::the_keyring_store_honours_the_store_contra
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
+knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
