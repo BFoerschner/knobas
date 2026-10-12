@@ -87,13 +87,28 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// this declaration serves. Declaring the outcome as a `status_name` would put
 /// `FAILURE` on the mini board as a column, which is not a thing anybody can
 /// move a build to.
+///
+/// **A build's parent is its configuration** (ADR-0018, #597), read off the
+/// same nested `buildType` object the project is: it *is* the configuration's
+/// own record shape, so the names declared for it resolve on a
+/// `build_config` record's root too, which is how `under:` returns the
+/// configuration itself. It answers to its `name` first -- the name a path
+/// line shows -- and to its `id`, which is what build parameters and logs
+/// name. Not the composed `<project> / <name>` title the launcher shows: no
+/// record carries that string, and a build's title keeps it anyway. A
+/// configuration has no parent; its project is a project, not a parent.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, PayloadPath};
+    use knobas_source::{KindPaths, ParentPath, PayloadPath};
     vec![
         KindPaths {
             kind: KIND_BUILD.to_owned(),
             project_key: vec![PayloadPath::of(["buildType", "projectId"])],
             project_name: vec![PayloadPath::of(["buildType", "projectName"])],
+            parent: vec![ParentPath {
+                kind: KIND_BUILD_CONFIG.to_owned(),
+                at: PayloadPath::of(["buildType"]),
+                names: vec![PayloadPath::of(["name"]), PayloadPath::of(["id"])],
+            }],
             ..KindPaths::default()
         },
         KindPaths {
@@ -148,6 +163,33 @@ mod tests {
                 kind.id
             );
         }
+    }
+
+    /// A build sits in the configuration it ran (ADR-0018, #597), and reads
+    /// it off the `buildType` object TeamCity nests in every build record. The
+    /// configuration answers to its name first -- the title TeamCity gives it,
+    /// and the name a path line shows -- and to its id, which is what build
+    /// parameters and logs name. A configuration has no parent.
+    #[test]
+    fn a_build_declares_its_configuration_as_parent_by_name_and_id() {
+        use knobas_source::{ParentPath, PayloadPath};
+        let declared = |kind: &str| {
+            descriptor_template()
+                .payload_paths
+                .into_iter()
+                .find(|paths| paths.kind == kind)
+                .map(|paths| paths.parent)
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            declared("build"),
+            vec![ParentPath {
+                kind: "build_config".to_owned(),
+                at: PayloadPath::of(["buildType"]),
+                names: vec![PayloadPath::of(["name"]), PayloadPath::of(["id"])],
+            }]
+        );
+        assert!(declared("build_config").is_empty());
     }
 
     /// The descriptor crosses IPC to the UI (§3a), so it has to survive as
