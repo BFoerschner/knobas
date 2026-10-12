@@ -3994,8 +3994,9 @@ pub const ESTATE_FILE_PRODUCER: &str = "estate_file";
 ///
 /// **Declared by #508 and produced by #509**, a ticket apart: #508 gave the
 /// planner the rule and gave the three checked-in servers their `hcloud_id`
-/// property (decommissioned since, #634), and #509 added [`hcloud`] behind it and the chooser's entry in
-/// `IMPORT_PRODUCERS` (`app/src/lib/ipc/assets.ts`). A producer declared here
+/// property (decommissioned since, #634), and #509 added [`hcloud`] behind it
+/// and the chooser's entry in `IMPORT_PRODUCERS` (`app/src/lib/ipc/assets.ts`).
+/// A producer declared here
 /// with no chooser entry is still the expected state -- Docker is the next one
 /// -- which is why `commands::assets`'
 /// `the_chooser_offers_producers_this_build_knows` reads in one direction

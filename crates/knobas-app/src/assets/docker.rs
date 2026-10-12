@@ -65,8 +65,9 @@
 //!   the image *reference* where the local engine has one (`gitea/gitea` on
 //!   `orbstack`) and the image **id** where it does not -- `e34446c9dbf8`,
 //!   `30267c7f633a`, `fe0737ba566a` on the three Hetzner engines (since
-//!   decommissioned, #634), whose images compose pulled by digest. The estate has carried `image` by hand as
-//!   `jetbrains/teamcity-server` since M4.0, so writing this column would put
+//!   decommissioned, #634), whose images compose pulled by digest. The estate
+//!   has carried `image` by hand as `jetbrains/teamcity-server` since M4.0, so
+//!   writing this column would put
 //!   six containers into *would change* with a hash, on every run.
 //! * **`compose_service` says nothing docker owns.** It is a label of one
 //!   orchestrator, and a container that is not compose's has none; it is the
@@ -161,8 +162,9 @@ pub const PROGRAM: &str = "docker";
 /// **The filter is load-bearing and not a tidiness.** In
 /// `testenv/estate.json` the OrbStack VM carries `docker_context` as well
 /// (and so did the three Hetzner servers until #634) -- a `vm` is where the
-/// engine runs, and the property is on both -- so a producer that read every asset carrying the key
-/// would spawn each context twice and emit two entries with one origin key.
+/// engine runs, and the property is on both -- so a producer that read every
+/// asset carrying the key would spawn each context twice and emit two entries
+/// with one origin key.
 /// The Import refuses that file (*"describes one asset twice"*), which is a
 /// refusal about the file rather than about the read that made it.
 const ENGINE_TYPE_ID: &str = "container_engine";

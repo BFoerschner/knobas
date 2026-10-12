@@ -7,9 +7,12 @@
 //! databases on it -- the on-demand TeamCity, Jira and Confluence among them
 //! (#633) -- and their published ports as routes. Until #634 it also held
 //! three Hetzner servers, which were decommissioned. It is data about a real
-//! estate and the only asset fixture there will be -- the M4 spec (#427) rules out anything
-//! Tidewater-shaped for assets, because a made-up estate proves that the tree
-//! draws and not that a real estate fits it.
+//! estate and the only asset fixture there will be -- the M4 spec (#427) rules
+//! out anything Tidewater-shaped for assets, because a made-up estate proves
+//! that the tree draws and not that a real estate fits it. (Knobas-app's
+//! `tests/it/support/hcloud-estate.json` is not a second one: it is those three
+//! servers as they stood when the hcloud recording was taken, the recording's
+//! counterpart, and describes no estate.)
 //!
 //! It has three readers: the Import, `--demo`, and whoever is trying to
 //! remember what runs where. All three are downstream of it being *true*, and

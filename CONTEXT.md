@@ -231,7 +231,7 @@ _Avoid_: retention cutoff, thirty days ago (both name a date arithmetic can reac
 ## Estate
 
 **Estate**:
-Everything the Assets view holds — the whole tree of [assets](#asset), their [routes](#route) and the [monitors](#monitor) attached to them — the way the [mirror](#mirror) is the whole synced copy. Built by hand and by seed; from M4 it is the real test infrastructure, never a fictional one. (Amended 2026-10-12, #634: that infrastructure is the development notebook, its OrbStack VM and Docker engine, and the containers on it — Gitea, Uptime Kuma, and the TeamCity, Jira and Confluence started on demand. The three Hetzner servers it named until then were decommissioned.)
+Everything the Assets view holds — the whole tree of [assets](#asset), their [routes](#route) and the [monitors](#monitor) attached to them — the way the [mirror](#mirror) is the whole synced copy. Built by hand and by seed; from M4 it is the real test infrastructure (the Hetzner servers, the local Gitea and Uptime Kuma), never a fictional one. (Amended 2026-10-12, #634: that infrastructure is the development notebook, its OrbStack VM and Docker engine, and the containers on it — Gitea, Uptime Kuma, and the TeamCity, Jira and Confluence started on demand. The three Hetzner servers it named until then were decommissioned.)
 _Avoid_: inventory, topology, infrastructure (that is what the estate models, not the model)
 
 **Asset**:
