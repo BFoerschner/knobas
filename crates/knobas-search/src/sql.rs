@@ -670,7 +670,17 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// reading a slice of `fts` would detoast a whole body's vector once more per
 /// match, and it is the name a reader sees whatever else a migration adds to
 /// weight A.
-const NAMED: &str = "tsvector_to_array(to_tsvector('english', {title})) = q.words";
+///
+/// A title that holds a `/` is also named by the text after its last `/`
+/// (#621): the parser reads `tidewater/payout` as one file-path lexeme, so
+/// the whole title names nothing a bare word can type, and `payout` would
+/// leave `tidewater/payout` and `tidewater/payout-service` to recency. The
+/// last segment and not every segment, so `tidewater` names none of the
+/// owner's repos; and no kind is named, so a branch `feature/payout` is named
+/// `payout` by the same rule. The guard is for cost, not meaning: with no `/`,
+/// `split_part` returns the whole title and the second half can only repeat
+/// the first, so a planner that skips the guard changes no answer.
+const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
@@ -742,6 +752,9 @@ mod tests {
         "at",
         "names",
         "[]",
+        // `NAMED`'s last-segment half (#621): the separator a slashed title
+        // is split on.
+        "/",
     ];
 
     fn filters(
