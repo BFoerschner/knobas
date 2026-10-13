@@ -1137,3 +1137,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: `MERGE_PATIENCE` and `patiently` in `crates/knobas-source-gitea/src/write.rs`.
 
 As built (#721): `write::still_checking` matches the 405 status and the sentence together, and `write::patiently` waits with `knobas-http`'s backoff (each wait capped at 2 s) for at most `MERGE_PATIENCE` (15 s) in total. The write queue flushes one source's writes in sequence, so while a merge waits, that source's other writes wait behind it. Each send is already allowed up to `knobas_http::SEND_BUDGET` (45 s), and Gitea answers these 405s at once, so the wait adds about 15 s at most. It happens only in a race, because *Merge…* is disabled while Gitea says `mergeable: false`.
+
+## #715 — macOS without Command Line Tools: guard the working tree read
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #715.
+
+**The fork:** on a Mac without the Command Line Tools, `/usr/bin/git` is Apple's shim, and the working tree read (run on open and on every window focus) opens Apple's install dialog. Options: guard the read, or leave it.
+
+**Ruling:** guard it. When the resolved git is `/usr/bin/git`, run `xcode-select -p` first (it never opens the dialog); if it fails, answer `no_git` without running the shim. The answer is cached for the process.
+
+**Reasoning:** a modal Apple dialog on every window focus is far worse than a missing status line.
+
+**If you disagree, the cost of reversing this is:** low: `read_guarded` and `command_line_tools_installed` in `crates/knobas-app/src/checkout/working_tree.rs`.
+
+As built (#715): the decision seam `read_guarded` takes the shim path and a probe, and is tested with a fake git that leaves a marker when spawned. The dialog itself is unwitnessed: no Mac without the Command Line Tools is available here (ADR-0013).

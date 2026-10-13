@@ -78,9 +78,50 @@ pub async fn read(path: &Path) -> TreeRead {
 /// An argument so "git is not installed" is reachable from a test on a machine
 /// that has git, and for no other reason.
 pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
+    read_guarded(
+        search,
+        path,
+        Path::new(APPLE_SHIM),
+        &command_line_tools_installed,
+    )
+    .await
+}
+
+/// Apple's `git` on a Mac without the Command Line Tools is a shim that opens
+/// an install dialog instead of running (#715).
+const APPLE_SHIM: &str = "/usr/bin/git";
+
+/// Whether the Command Line Tools are installed, asked once per process.
+/// `xcode-select -p` only prints a path and never opens the dialog. Off macOS
+/// there is no shim, so the answer is yes.
+fn command_line_tools_installed() -> bool {
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ANSWER.get_or_init(|| {
+        !cfg!(target_os = "macos")
+            || std::process::Command::new("xcode-select")
+                .arg("-p")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+    })
+}
+
+/// The decision seam: `probe` is asked only when the `git` found is `shim`,
+/// and a failing probe answers [`TreeRead::NoGit`] without spawning it.
+async fn read_guarded(
+    search: &OsStr,
+    path: &Path,
+    shim: &Path,
+    probe: &(dyn Fn() -> bool + Sync),
+) -> TreeRead {
     let Some(git) = find_on(search, "git") else {
         return TreeRead::NoGit;
     };
+    if git == shim && !probe() {
+        return TreeRead::NoGit;
+    }
     if !path.is_dir() {
         return TreeRead::NotARepo;
     }
@@ -261,6 +302,50 @@ mod tests {
                 ..WorkingTreeState::default()
             }
         );
+    }
+
+    /// A `git` that leaves a marker when it is spawned, and the `PATH` that
+    /// finds it. The dialog itself is unwitnessed: a Mac without the Command
+    /// Line Tools is not available here (ADR-0013).
+    #[cfg(unix)]
+    fn marker_git() -> (tempfile::TempDir, std::ffi::OsString, PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = tempfile::tempdir().unwrap();
+        let marker = bin.path().join("spawned");
+        let git = bin.path().join("git");
+        std::fs::write(&git, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let search = bin.path().as_os_str().to_owned();
+        (bin, search, git, marker)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_shim_without_command_line_tools_is_not_spawned() {
+        let (_bin, search, shim, marker) = marker_git();
+        let work = tempfile::tempdir().unwrap();
+        let read = read_guarded(&search, work.path(), &shim, &|| false).await;
+        assert_eq!(read, TreeRead::NoGit);
+        assert!(!marker.exists(), "the shim was spawned");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_shim_with_command_line_tools_runs() {
+        let (_bin, search, shim, marker) = marker_git();
+        let work = tempfile::tempdir().unwrap();
+        read_guarded(&search, work.path(), &shim, &|| true).await;
+        assert!(marker.exists(), "git was not run");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn another_git_is_never_probed() {
+        let (_bin, search, _git, marker) = marker_git();
+        let work = tempfile::tempdir().unwrap();
+        let other = Path::new("/usr/bin/git");
+        read_guarded(&search, work.path(), other, &|| panic!("probed")).await;
+        assert!(marker.exists(), "git was not run");
     }
 
     #[test]
