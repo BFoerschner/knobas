@@ -3830,3 +3830,142 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
     );
     println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated");
 }
+
+/// The statuses a commit carries are drawn as its *Checks* on the real server
+/// (#710): reported on a commit this test makes on a branch of its own (so no
+/// seeded commit gains a status), then read back through the commit's, the
+/// branch's and a pull request's views -- the branch's asking by its name, a
+/// slash and all, the others by sha. Failing first; the branch and its pull
+/// request go with the guard.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_commits_statuses_are_drawn_as_its_checks() {
+    use knobas_source::view::{Block, SourceView, Tone, ViewRow};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    // A `/` in the name, as a feature branch has: the branch's view asks for
+    // its tip's statuses by the escaped name (`%2F`), and only a real server
+    // can say it resolves that to the tip.
+    let branch = format!("knobas-checks/{stamp}");
+    litter.branch_off_main(&branch).await;
+    let sha = push_file(
+        &http,
+        &env,
+        &branch,
+        &format!("checks-{stamp}.txt"),
+        &format!("knobas checks {stamp}"),
+    )
+    .await;
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    for (state, context, description) in [
+        ("success", "ci/build", "Build passed"),
+        ("failure", "ci/tests", "1 test failed"),
+        ("pending", "ci/deploy", "Waiting"),
+    ] {
+        let posted = http
+            .post(format!("{api}/statuses/{sha}"))
+            .header("Authorization", format!("token {}", env.token))
+            .json(&serde_json::json!({
+                "state": state, "context": context, "description": description,
+                "target_url": format!("https://ci.example/{context}"),
+            }))
+            .send()
+            .await
+            .expect("post a status");
+        assert!(
+            posted.status().is_success(),
+            "status: {}",
+            posted.text().await.unwrap_or_default()
+        );
+    }
+    let number = litter
+        .open_pull_as("jonas.becker", &branch, &format!("knobas checks {stamp}"))
+        .await;
+
+    let checks = |view: &SourceView| -> Vec<ViewRow> {
+        let overview = view
+            .sections
+            .iter()
+            .find(|s| s.id == "overview")
+            .expect("an overview");
+        overview
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Entities {
+                    title: Some(t),
+                    rows,
+                } if t == "Checks" => Some(rows.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no Checks in {overview:#?}"))
+    };
+    let full = env.full_name();
+    for id in [
+        format!("gitea:{full}@{sha}"),
+        format!("gitea:{full}@refs/heads/{branch}"),
+        format!("gitea:{full}#{number}"),
+    ] {
+        let view = source.view(&id, None).await.expect("reads").expect("drawn");
+        let rows = checks(&view);
+        println!("LIVE checks of {id}: {rows:?}");
+        let drawn: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.title.as_str(),
+                    r.chip.as_deref(),
+                    r.tone,
+                    r.meta.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            drawn,
+            [
+                (
+                    "ci/tests",
+                    Some("failure"),
+                    Some(Tone::Err),
+                    Some("1 test failed")
+                ),
+                (
+                    "ci/deploy",
+                    Some("pending"),
+                    Some(Tone::Info),
+                    Some("Waiting")
+                ),
+                (
+                    "ci/build",
+                    Some("success"),
+                    Some(Tone::Ok),
+                    Some("Build passed")
+                ),
+            ],
+            "{id}"
+        );
+        assert_eq!(rows[0].url.as_deref(), Some("https://ci.example/ci/tests"));
+    }
+
+    // And a commit nobody reported on draws none: `main`'s seeded tip.
+    let main = source
+        .view(&format!("gitea:{full}@refs/heads/main"), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let overview = &main.sections[0];
+    assert!(
+        !overview
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Entities { title: Some(t), .. } if t == "Checks")),
+        "{overview:#?}"
+    );
+}

@@ -98,6 +98,11 @@ async fn gitea(pages: u32, compare: Value) -> MockServer {
         .respond_with(ok(tip()))
         .mount(&server)
         .await;
+    // The branch's tip has no statuses (#710).
+    get(format!("{REPO}/commits/{FEATURE_WIRE}/status"))
+        .respond_with(ok(json!({ "statuses": [] })))
+        .mount(&server)
+        .await;
     get(format!("{REPO}/compare/main...{FEATURE_WIRE}"))
         .respond_with(ok(compare))
         .mount(&server)

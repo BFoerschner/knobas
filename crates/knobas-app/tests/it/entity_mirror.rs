@@ -645,6 +645,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
         deleted_at: None,
         links: vec![link_entry()],
         activity: vec![activity_row()],
+        builds: vec![row(Some(at()))],
     };
 
     let wire = serde_json::to_value(detail).unwrap();
@@ -655,6 +656,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
             "activity",
             "author",
             "body_text",
+            "builds",
             "deleted_at",
             "kind_info",
             "links",
@@ -672,6 +674,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     assert_shape("LinkRow", &wire["links"][0]["link"], LINK_ROW_FIELDS);
     assert_shape("LinkEnd", &wire["links"][0]["other"], LINK_END_FIELDS);
     assert_shape("ActivityRow", &wire["activity"][0], ACTIVITY_ROW_FIELDS);
+    assert_shape("EntityRow", &wire["builds"][0], ENTITY_ROW_FIELDS);
 
     // The three fields the header and the footer branch on are `null`, not
     // absent: *Open in browser* is drawn from `web_url`, the withdrawn banner

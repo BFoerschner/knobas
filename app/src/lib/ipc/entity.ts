@@ -401,6 +401,14 @@ export interface EntityDetail {
   links: LinkEntry[];
   /** This entity's own history, newest first (spec §12.1). */
   activity: ActivityRow[];
+  /**
+   * The mirrored builds that ran on the commit this entity stands at (#710):
+   * a pull request's head, a branch's tip, a commit itself. Failing first,
+   * then running, then the rest by tone, newest first within one, at most 20;
+   * empty for anything that is not code and for a commit nothing mirrored ran
+   * on.
+   */
+  builds: EntityRow[];
 }
 
 /**

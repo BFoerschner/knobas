@@ -138,6 +138,7 @@ function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown>
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
     ...over,
   };
 }

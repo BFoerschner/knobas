@@ -229,6 +229,19 @@ pub struct KindPaths {
     /// that is not a proposal, and a miss leaves a branch unproposed.
     #[serde(default)]
     pub head: Vec<PayloadPath>,
+    /// The commit a record of code stands at, by its full object id (#710):
+    /// a pull request's head commit, a branch's tip, a commit itself. What
+    /// the detail asks the mirror's builds about: those whose declared
+    /// [`revision`](Self::revision) is this commit. Empty for every kind that
+    /// is not code, and a miss draws no builds.
+    #[serde(default)]
+    pub commit: Vec<PayloadPath>,
+    /// The commits a build ran on, by their full object ids (#710): one per
+    /// VCS root, so a list. TeamCity's `revisions.revision[].version`. Empty
+    /// for every kind that is not a build, and a miss is a build the detail
+    /// of no commit draws.
+    #[serde(default)]
+    pub revision: Vec<ListPath>,
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -310,6 +323,8 @@ pub mod field {
     pub const PARENT: &str = "parent";
     pub const STATE: &str = "state";
     pub const HEAD: &str = "head";
+    pub const COMMIT: &str = "commit";
+    pub const REVISION: &str = "revision";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -327,6 +342,8 @@ pub mod field {
         PARENT,
         STATE,
         HEAD,
+        COMMIT,
+        REVISION,
     ];
 }
 

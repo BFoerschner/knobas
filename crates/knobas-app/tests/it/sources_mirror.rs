@@ -298,6 +298,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         &[
             "assignee",
             "blocked_statuses",
+            "commit",
             "head",
             "kind",
             "merged",
@@ -306,6 +307,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "project_key",
             "project_name",
             "reviewers",
+            "revision",
             "state",
             "status_name",
         ],

@@ -3842,3 +3842,144 @@ async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
         .expect("the descriptor declares the kind its items carry");
     assert_eq!(kind.plural, "Monitors");
 }
+
+// -- the builds of a commit (#710) --------------------------------------------
+
+/// A full object id no other test in this file writes.
+fn unique_sha() -> String {
+    let token = unique();
+    let digits: String = token.chars().filter(char::is_ascii_digit).collect();
+    format!("{digits:0>40}")
+}
+
+/// A pull request's, a branch's and a commit's detail carry the builds the
+/// mirror holds for the commit each stands at (#710): the TeamCity builds
+/// whose declared revision is that sha, found in SQL through the two declared
+/// paths, failing first, then running, then passed. A build that ran on
+/// another commit is not one of them, a build of several VCS roots is found
+/// by any of its revisions, and a build of a source whose adapter declares no
+/// revision contributes nothing though its payload says the same sha.
+#[tokio::test]
+async fn a_commits_detail_carries_the_builds_that_ran_on_it_failing_first() {
+    use knobas_core::tone::Tone;
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let teamcity = configured(&pool, "teamcity").await;
+    let jira = configured(&pool, "jira").await;
+    let sha = unique_sha();
+    let other = unique_sha();
+    assert_ne!(sha, other);
+
+    let pr = "tidewater/payout-service#9";
+    mirrored(
+        &pool,
+        &gitea,
+        "pr",
+        pr,
+        serde_json::json!({ "state": "open", "head": { "ref": "f", "sha": sha } }),
+    )
+    .await;
+    let branch = "tidewater/payout-service@refs/heads/f";
+    mirrored(
+        &pool,
+        &gitea,
+        "branch",
+        branch,
+        serde_json::json!({ "name": "f", "commit": { "id": sha } }),
+    )
+    .await;
+    let commit = format!("tidewater/payout-service@{sha}");
+    mirrored(
+        &pool,
+        &gitea,
+        "commit",
+        &commit,
+        serde_json::json!({ "sha": sha }),
+    )
+    .await;
+
+    let ran_on = |shas: &[&str], state: &str, status: &str| {
+        let revisions: Vec<_> = shas
+            .iter()
+            .map(|s| serde_json::json!({ "version": s }))
+            .collect();
+        serde_json::json!({ "state": state, "status": status, "revisions": { "revision": revisions } })
+    };
+    for (key, payload, minutes) in [
+        ("passed", ran_on(&[&sha], "finished", "SUCCESS"), 1),
+        ("failed", ran_on(&[&other, &sha], "finished", "FAILURE"), 30),
+        ("running", ran_on(&[&sha], "running", "SUCCESS"), 10),
+        ("elsewhere", ran_on(&[&other], "finished", "FAILURE"), 2),
+    ] {
+        mirrored(&pool, &teamcity, "build", key, payload).await;
+        dated(&pool, &format!("{teamcity}:{key}"), minutes).await;
+    }
+    // Jira declares no revision: the same payload under its name is nobody's
+    // build.
+    mirrored(
+        &pool,
+        &jira,
+        "build",
+        "undeclared",
+        ran_on(&[&sha], "finished", "FAILURE"),
+    )
+    .await;
+
+    for entity in [pr.to_owned(), branch.to_owned(), commit.clone()] {
+        let detail = get_entity_inner(&pool, &format!("{gitea}:{entity}"))
+            .await
+            .unwrap();
+        let builds: Vec<(String, Option<Tone>)> = detail
+            .builds
+            .iter()
+            .map(|r| (r.entity_id.clone(), r.state.as_ref().map(|s| s.tone)))
+            .collect();
+        assert_eq!(
+            builds,
+            [
+                (format!("{teamcity}:failed"), Some(Tone::Err)),
+                (format!("{teamcity}:running"), Some(Tone::Info)),
+                (format!("{teamcity}:passed"), Some(Tone::Ok)),
+            ],
+            "{entity}"
+        );
+    }
+
+    // A build is not code: its own detail names no commit, so draws none.
+    let build = get_entity_inner(&pool, &format!("{teamcity}:passed"))
+        .await
+        .unwrap();
+    assert!(build.builds.is_empty(), "{:?}", build.builds);
+}
+
+/// A commit no mirrored build ran on draws no builds, and neither does a
+/// pull request whose record names no head commit.
+#[tokio::test]
+async fn a_commit_no_build_ran_on_carries_none() {
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let sha = unique_sha();
+    let commit = format!("tidewater/payout-service@{sha}");
+    mirrored(
+        &pool,
+        &gitea,
+        "commit",
+        &commit,
+        serde_json::json!({ "sha": sha }),
+    )
+    .await;
+    mirrored(
+        &pool,
+        &gitea,
+        "pr",
+        "tidewater/payout-service#10",
+        serde_json::json!({ "state": "open" }),
+    )
+    .await;
+    for entity in [commit, "tidewater/payout-service#10".to_owned()] {
+        let detail = get_entity_inner(&pool, &format!("{gitea}:{entity}"))
+            .await
+            .unwrap();
+        assert!(detail.builds.is_empty(), "{entity}: {:?}", detail.builds);
+    }
+}

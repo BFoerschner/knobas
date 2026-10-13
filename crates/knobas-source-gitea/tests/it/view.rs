@@ -6,7 +6,7 @@
 //! (`a_seeded_commits_view_carries_the_diff_the_seed_pushed`), and on
 //! disagreement this fake is what is wrong.
 
-use knobas_source::view::{Block, DiffChange, SourceView, ViewRow};
+use knobas_source::view::{Block, DiffChange, SourceView, Tone, ViewRow};
 use knobas_source::{Source, SourceError};
 use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
@@ -54,8 +54,14 @@ fn commit_record() -> serde_json::Value {
     })
 }
 
-/// A Gitea that answers the commit and its diff, `diff` with `status`.
+/// A Gitea that answers the commit and its diff, `diff` with `status`, and
+/// whose combined status for the commit has no statuses in it.
 async fn gitea(diff_status: u16) -> MockServer {
+    gitea_with_statuses(diff_status, json!([])).await
+}
+
+/// [`gitea`], with `statuses` as the commit's combined status (#710).
+async fn gitea_with_statuses(diff_status: u16, statuses: serde_json::Value) -> MockServer {
     let server = MockServer::start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
@@ -75,7 +81,23 @@ async fn gitea(diff_status: u16) -> MockServer {
         .respond_with(diff)
         .mount(&server)
         .await;
+    authed(Mock::given(method("GET")).and(path(format!("{REPO}/commits/{SHA}/status"))))
+        .respond_with(ResponseTemplate::new(200).set_body_json(combined_status(&statuses)))
+        .mount(&server)
+        .await;
     server
+}
+
+/// Gitea's `CombinedStatus` for [`SHA`] around `statuses`, as
+/// `/commits/{ref}/status` answers it.
+fn combined_status(statuses: &serde_json::Value) -> serde_json::Value {
+    let count = statuses.as_array().map_or(0, Vec::len);
+    json!({
+        "state": if count == 0 { "" } else { "failure" },
+        "sha": SHA,
+        "total_count": count,
+        "statuses": statuses,
+    })
 }
 
 fn source(server: &MockServer) -> Box<dyn Source> {
@@ -268,4 +290,129 @@ async fn a_commit_offers_a_new_branch_from_itself() {
         .unwrap()
         .unwrap();
     assert!(one.actions.is_empty());
+}
+
+/// The commit's own statuses (#710): Gitea's combined status drawn as a
+/// *Checks* list right after the facts, the failing first and the passing
+/// last, each its context, its description, its state as a toned chip and
+/// the page it points at.
+#[tokio::test]
+async fn a_commits_statuses_are_its_checks_failing_first() {
+    let status = |state: &str, context: &str, description: &str, url: Option<&str>| {
+        json!({ "id": 1, "status": state, "context": context, "description": description,
+                "target_url": url, "created_at": "2026-08-22T12:00:00Z" })
+    };
+    let server = gitea_with_statuses(
+        200,
+        json!([
+            status(
+                "success",
+                "ci/build",
+                "Build #88 passed",
+                Some("https://ci.example/88")
+            ),
+            status("pending", "ci/deploy", "Waiting for an agent", None),
+            status(
+                "failure",
+                "ci/tests",
+                "Tests failed: 1",
+                Some("https://ci.example/89")
+            ),
+            status("warning", "lint", "", None),
+            status("error", "ci/docs", "Could not start", None),
+        ]),
+    )
+    .await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    let Block::Entities { title, rows } = &overview.blocks[1] else {
+        panic!("the checks come right after the facts: {overview:#?}");
+    };
+    assert_eq!(title.as_deref(), Some("Checks"));
+    let row =
+        |title: &str, meta: Option<&str>, tone: Tone, chip: &str, url: Option<&str>| ViewRow {
+            entity_id: None,
+            title: title.into(),
+            meta: meta.map(Into::into),
+            tone: Some(tone),
+            chip: Some(chip.into()),
+            url: url.map(Into::into),
+            commit: None,
+        };
+    assert_eq!(
+        rows,
+        &[
+            row(
+                "ci/tests",
+                Some("Tests failed: 1"),
+                Tone::Err,
+                "failure",
+                Some("https://ci.example/89")
+            ),
+            row("ci/docs", Some("Could not start"), Tone::Err, "error", None),
+            row("lint", None, Tone::Warn, "warning", None),
+            row(
+                "ci/deploy",
+                Some("Waiting for an agent"),
+                Tone::Info,
+                "pending",
+                None
+            ),
+            row(
+                "ci/build",
+                Some("Build #88 passed"),
+                Tone::Ok,
+                "success",
+                Some("https://ci.example/88")
+            ),
+        ]
+    );
+}
+
+/// A commit nobody reported on draws no *Checks* at all: no title over
+/// nothing, and the parents stay where they were.
+#[tokio::test]
+async fn a_commit_without_statuses_draws_no_checks() {
+    let server = gitea(200).await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    assert!(
+        !overview.blocks.iter().any(|b| matches!(
+            b,
+            Block::Entities { title: Some(t), .. } if t == "Checks"
+        )),
+        "{overview:#?}"
+    );
+}
+
+/// A status read that fails does not fail the commit's view (#710 ruling):
+/// checks are secondary, so the view draws without them and says why in one
+/// muted line in their place, right after the facts.
+#[tokio::test]
+async fn a_commit_whose_statuses_cannot_be_read_still_draws_and_says_so() {
+    let server = gitea(200).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits/{SHA}/status")))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    assert!(
+        matches!(overview.blocks[0], Block::Facts { .. }),
+        "{overview:#?}"
+    );
+    let Block::Entities { title, rows } = &overview.blocks[1] else {
+        panic!("the line sits where the checks would: {overview:#?}");
+    };
+    assert_eq!(title, &None);
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].title.starts_with("Checks could not be read: "),
+        "{:?}",
+        rows[0].title
+    );
+    assert_eq!(rows[0].tone, Some(Tone::Muted));
+    assert_eq!((&rows[0].chip, &rows[0].url), (&None, &None));
 }

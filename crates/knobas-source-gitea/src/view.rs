@@ -19,6 +19,7 @@ use crate::source::GiteaSource;
 
 mod act;
 mod branch;
+mod checks;
 mod files;
 mod pr;
 mod repo;
@@ -115,13 +116,23 @@ async fn commit_overview(
     repo: &str,
     sha: &str,
 ) -> Result<ViewSection, SourceError> {
-    let record = source.client.commit(owner, repo, sha).await?;
+    let (record, checks) = tokio::join!(
+        source.client.commit(owner, repo, sha),
+        checks::block(source, owner, repo, sha),
+    );
+    let record = record?;
+    let mut blocks = overview_blocks(&source.id, owner, repo, &record);
+    // Right after the facts (#710): whether it is green is the next thing
+    // asked of a commit.
+    if let Some(checks) = checks {
+        blocks.insert(1, checks);
+    }
     Ok(ViewSection {
         id: OVERVIEW.to_owned(),
         title: "Overview".to_owned(),
         count: None,
         deferred: false,
-        blocks: overview_blocks(&source.id, owner, repo, &record),
+        blocks,
     })
 }
 

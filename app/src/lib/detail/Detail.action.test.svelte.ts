@@ -103,6 +103,7 @@ function pull(): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
   };
 }
 

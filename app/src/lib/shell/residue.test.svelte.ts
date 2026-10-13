@@ -94,6 +94,7 @@ const DETAIL: EntityDetail = {
   deleted_at: null,
   links: [],
   activity: [],
+  builds: [],
 };
 
 /** What `entity_checkout` answers for the repo the panel case opens (#499). */

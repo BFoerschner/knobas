@@ -729,7 +729,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 7] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 8] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -737,6 +737,13 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::PROJECT_NAME, &paths.project_name, Wanted::Text),
             (field::MERGED, &paths.merged, Wanted::Flag),
             (field::HEAD, &paths.head, Wanted::Text),
+            (field::COMMIT, &paths.commit, Wanted::Text),
+        ];
+        // The two list fields: who a review is asked of, and the commits a
+        // build ran on (#710). One rule for both.
+        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 2] = [
+            (field::REVIEWERS, &paths.reviewers),
+            (field::REVISION, &paths.revision),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants
@@ -778,33 +785,35 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 weigh(seen, name, &item.payload, path, wanted, "on");
             }
         }
-        for candidate in &paths.reviewers {
-            let seen = evidence.entry((&item.kind, field::REVIEWERS)).or_default();
-            // The array itself is weighed against its own evidence slot, so a
-            // list whose array is there and whose entry key is wrong is not
-            // excused by the array having resolved.
-            let mut array = Evidence::default();
-            weigh(
-                &mut array,
-                field::REVIEWERS,
-                &item.payload,
-                &candidate.at,
-                Wanted::List,
-                "on",
-            );
-            seen.names_a_missing_key |= array.names_a_missing_key;
-            for element in at(&item.payload, &candidate.at)
-                .and_then(serde_json::Value::as_array)
-                .map_or(&[][..], Vec::as_slice)
-            {
+        for (name, candidates) in lists {
+            for candidate in candidates {
+                let seen = evidence.entry((&item.kind, name)).or_default();
+                // The array itself is weighed against its own evidence slot, so a
+                // list whose array is there and whose entry key is wrong is not
+                // excused by the array having resolved.
+                let mut array = Evidence::default();
                 weigh(
-                    seen,
-                    field::REVIEWERS,
-                    element,
-                    &candidate.entry,
-                    Wanted::Text,
-                    "in an element of",
+                    &mut array,
+                    name,
+                    &item.payload,
+                    &candidate.at,
+                    Wanted::List,
+                    "on",
                 );
+                seen.names_a_missing_key |= array.names_a_missing_key;
+                for element in at(&item.payload, &candidate.at)
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(&[][..], Vec::as_slice)
+                {
+                    weigh(
+                        seen,
+                        name,
+                        element,
+                        &candidate.entry,
+                        Wanted::Text,
+                        "in an element of",
+                    );
+                }
             }
         }
 
@@ -957,13 +966,15 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 item.entity
             );
         }
-        if paths.reviewers.is_empty() {
-            assert!(
-                resolve_list(&item.payload, &paths.reviewers).is_empty(),
-                "kind {:?} declares no reviewers, so every reader must miss on item {}",
-                item.kind,
-                item.entity
-            );
+        for (name, candidates) in lists {
+            if candidates.is_empty() {
+                assert!(
+                    resolve_list(&item.payload, candidates).is_empty(),
+                    "kind {:?} declares no {name}, so every reader must miss on item {}",
+                    item.kind,
+                    item.entity
+                );
+            }
         }
     }
 

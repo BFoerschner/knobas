@@ -254,6 +254,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   branch. The Code tile reads it to tell a branch nobody has proposed yet
 ///   from one an open pull request already stands for (#712).
 ///
+/// * `commit` is the commit each code record stands at, by full sha (#710):
+///   a pull request's `head.sha`, a branch's tip `commit.id` (the
+///   `/branches` record's own spelling), a commit's `sha`. The detail asks
+///   the mirror for the builds whose declared `revision` is it.
+///
 /// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
 /// in as many words: "Gitea has no such thing here and gets none"), and a
 /// repository is an entity *kind*, not the axis a room is drawn along -- and
@@ -271,6 +276,7 @@ fn payload_paths() -> Vec<KindPaths> {
         KindPaths {
             kind: KIND_BRANCH.to_owned(),
             parent: repo(&["repository"]),
+            commit: vec![PayloadPath::of(["commit", "id"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -283,11 +289,13 @@ fn payload_paths() -> Vec<KindPaths> {
             parent: repo(&["base", "repo"]),
             state: pr_state(),
             head: vec![PayloadPath::of(["head", "ref"])],
+            commit: vec![PayloadPath::of(["head", "sha"])],
             ..KindPaths::default()
         },
         KindPaths {
             kind: KIND_COMMIT.to_owned(),
             parent: repo(&["repository"]),
+            commit: vec![PayloadPath::of(["sha"])],
             ..KindPaths::default()
         },
     ]

@@ -257,6 +257,14 @@ async fn gitea(served: Served) -> MockServer {
         )])))
         .mount(&server)
         .await;
+    // The tip's own statuses (#710), asked by the branch's name so the read
+    // goes beside the others: none, unless a test mounts some over this.
+    for branch in [FEATURE_WIRE, "main"] {
+        authed(Mock::given(method("GET")).and(path(format!("{REPO}/commits/{branch}/status"))))
+            .respond_with(ok(json!({ "state": "", "total_count": 0, "statuses": [] })))
+            .mount(&server)
+            .await;
+    }
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/pulls"))))
         .and(query_param("state", "open"))
         .and(query_param("page", "1"))
@@ -595,8 +603,9 @@ async fn behind_falls_back_to_the_reverse_compare_without_a_count() {
 
 /// A branch's reads are made side by side, not one after another (#703):
 /// once the record is in, its tip, its open pull requests, what it carries
-/// ahead and how far it is behind are in flight together. Read in turn, one
-/// is; with only ahead and behind side by side, two.
+/// ahead and how far it is behind are in flight together, the tip's statuses
+/// (#710) with them. Read in turn, one is; with only ahead and behind side
+/// by side, two.
 #[tokio::test]
 async fn a_branchs_reads_are_made_at_the_same_time() {
     let flight = InFlight::new(Duration::from_millis(300));
@@ -617,7 +626,7 @@ async fn a_branchs_reads_are_made_at_the_same_time() {
     );
     assert_eq!(
         flight.most(),
-        5,
+        6,
         "the branch's reads in flight at once, its repository's branches among them"
     );
 }
@@ -880,4 +889,97 @@ async fn a_section_read_carries_no_toolbar() {
         .unwrap()
         .unwrap();
     assert!(view.actions.is_empty(), "{:#?}", view.actions);
+}
+
+// -- Checks (issue #710) -----------------------------------------------------
+
+/// The branch's tip's statuses are its *Checks*, on *Overview* right after
+/// the facts, failing first; read by the branch's name beside the view's
+/// other reads.
+#[tokio::test]
+async fn a_branchs_tip_statuses_are_its_checks() {
+    let server = gitea(Served::default()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits/{FEATURE_WIRE}/status")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "state": "pending", "sha": TIP, "total_count": 2,
+            "statuses": [
+                { "status": "success", "context": "ci/build", "description": "passed" },
+                { "status": "pending", "context": "ci/deploy", "description": null }
+            ]
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    let at = overview
+        .blocks
+        .iter()
+        .position(|b| matches!(b, Block::Facts { .. }))
+        .expect("the overview has its facts");
+    let Block::Entities { title, rows } = &overview.blocks[at + 1] else {
+        panic!("the checks follow the facts: {overview:#?}");
+    };
+    assert_eq!(title.as_deref(), Some("Checks"));
+    let drawn: Vec<_> = rows
+        .iter()
+        .map(|r| (r.title.as_str(), r.meta.as_deref(), r.tone))
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            ("ci/deploy", None, Some(Tone::Info)),
+            ("ci/build", Some("passed"), Some(Tone::Ok)),
+        ]
+    );
+}
+
+/// A tip nobody reported on draws no *Checks*.
+#[tokio::test]
+async fn a_branch_without_statuses_draws_no_checks() {
+    let server = gitea(Served::default()).await;
+    let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    assert!(
+        !overview
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Entities { title: Some(t), .. } if t == "Checks")),
+        "{overview:#?}"
+    );
+}
+
+/// A tip whose statuses cannot be read does not fail the branch's view
+/// (#710 ruling): one muted line after the facts says so.
+#[tokio::test]
+async fn a_branch_whose_checks_cannot_be_read_still_draws_and_says_so() {
+    let server = gitea(Served::default()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits/{FEATURE_WIRE}/status")))
+        .respond_with(ResponseTemplate::new(404))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    let at = overview
+        .blocks
+        .iter()
+        .position(|b| matches!(b, Block::Facts { .. }))
+        .expect("the overview has its facts");
+    let Block::Entities { title: None, rows } = &overview.blocks[at + 1] else {
+        panic!("the line follows the facts: {overview:#?}");
+    };
+    let drawn: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.title.starts_with("Checks could not be read: "),
+                r.tone,
+                &r.chip,
+            )
+        })
+        .collect();
+    assert_eq!(drawn, [(true, Some(Tone::Muted), &None)], "{rows:#?}");
 }

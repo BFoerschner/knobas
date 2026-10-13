@@ -2398,6 +2398,8 @@ function getEntity(args: Record<string, unknown>) {
     deleted_at: entry.deleted_at,
     links: [],
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
+    // The mock corpus gives no build a commit, so nothing ran on any (#710).
+    builds: [],
   };
 }
 

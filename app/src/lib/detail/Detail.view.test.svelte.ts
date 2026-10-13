@@ -69,6 +69,7 @@ function commit(): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
   };
 }
 

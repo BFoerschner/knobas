@@ -47,13 +47,15 @@ pub(super) async fn draw(
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
-            // on its own pull requests (#705). So do landing's reads (#708).
-            let (reviews, commits, comments, viewer, landing) = tokio::try_join!(
+            // on its own pull requests (#705). So do landing's reads (#708)
+            // and the head commit's statuses (#710).
+            let (reviews, commits, comments, viewer, landing, checks) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
                 at.landing(&pull),
+                at.checks(&pull),
             )?;
             // The order the #701 ruling sets: what a reviewer says first,
             // then the maintenance (#706, *Update branch…* #708), *Merge…*
@@ -62,7 +64,7 @@ pub(super) async fn draw(
             actions.extend(maintain::actions(&pull));
             actions.extend(land::actions(&pull, &reviews, &landing));
             vec![
-                overview(&pull, &reviews, &landing),
+                overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
                 conversation(&reviews, &comments),
@@ -70,8 +72,9 @@ pub(super) async fn draw(
         }
         Some(OVERVIEW) => {
             let pull = at.pull().await?;
-            let (reviews, landing) = tokio::try_join!(at.reviews(), at.landing(&pull))?;
-            vec![overview(&pull, &reviews, &landing)]
+            let (reviews, landing, checks) =
+                tokio::try_join!(at.reviews(), at.landing(&pull), at.checks(&pull))?;
+            vec![overview(&pull, &reviews, &landing, checks)]
         }
         Some(FILES) => vec![at.files().await?],
         Some(COMMITS) => vec![at.commits(None).await?],
@@ -237,6 +240,16 @@ impl PullView<'_> {
             .collect())
     }
 
+    /// The head commit's own statuses (#710), by the sha the record names;
+    /// nothing where it names none. Never an error: a failed read is drawn
+    /// as a line (`checks`), so this sits in the `try_join!` as a success.
+    async fn checks(&self, pull: &Pull) -> Result<Option<Block>, SourceError> {
+        Ok(match pull.head.as_ref().and_then(|h| h.sha.as_deref()) {
+            Some(sha) => super::checks::block(self.source, self.owner, self.repo, sha).await,
+            None => None,
+        })
+    }
+
     /// The login the token belongs to, or `None` where Gitea would not say
     /// ([`GiteaSource::viewer`], read once per token and server).
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
@@ -336,11 +349,18 @@ fn review_verdict(review: &Review) -> Option<(String, Option<Tone>)> {
     Some((word.to_owned(), tone))
 }
 
-/// The facts, each reviewer's standing verdict, and the description.
-fn overview(pull: &Pull, reviews: &[Review], landing: &land::Landing) -> ViewSection {
+/// The facts, each reviewer's standing verdict, the head commit's checks
+/// (#710) and the description.
+fn overview(
+    pull: &Pull,
+    reviews: &[Review],
+    landing: &land::Landing,
+    checks: Option<Block>,
+) -> ViewSection {
     let mut facts = overview_facts(pull, land::mergeable_fact(pull, reviews, landing));
     facts.extend(verdicts(reviews));
     let mut blocks = vec![Block::Facts { facts }];
+    blocks.extend(checks);
     let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
     if !body.trim().is_empty() {
         blocks.push(Block::Text {
@@ -541,7 +561,8 @@ struct Pull {
 struct PullBranch {
     #[serde(default)]
     r#ref: Option<String>,
-    /// The head's tip, which landing asks the base about (#708).
+    /// The head's tip, which landing asks the base about (#708), and whose
+    /// statuses are the checks (#710).
     #[serde(default)]
     sha: Option<String>,
     #[serde(default)]

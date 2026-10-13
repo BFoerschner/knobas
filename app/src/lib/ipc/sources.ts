@@ -98,6 +98,10 @@ export interface KindPaths {
   state: StatePath[];
   /** The branch a pull request is opened from, by its name (#712). */
   head: PayloadPath[];
+  /** The commit a record of code stands at, by full sha (#710). */
+  commit: PayloadPath[];
+  /** The commits a build ran on, one per VCS root (#710). */
+  revision: ListPath[];
 }
 
 /**
