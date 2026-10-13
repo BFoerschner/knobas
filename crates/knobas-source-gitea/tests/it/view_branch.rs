@@ -328,7 +328,7 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
         .expect("Gitea draws a branch");
 
     let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["overview", "commits", "diff"]);
+    assert_eq!(ids, ["overview", "commits", "diff", "files"]);
 
     let overview = section(&view, "overview");
     assert_eq!(
@@ -499,7 +499,11 @@ async fn the_default_branch_shows_no_compare() {
     let server = gitea(Served::default()).await;
     let view = source(&server).view(MAIN, None).await.unwrap().unwrap();
     let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["overview", "commits"], "no diff against itself");
+    assert_eq!(
+        ids,
+        ["overview", "commits", "files"],
+        "no diff against itself"
+    );
     let overview = section(&view, "overview");
     assert_eq!(
         facts(overview)[0],
@@ -603,7 +607,11 @@ async fn a_branchs_reads_are_made_at_the_same_time() {
         .await
         .expect("reads")
         .expect("a branch draws a view");
-    assert_eq!(view.sections.len(), 3);
+    assert_eq!(
+        view.sections.len(),
+        4,
+        "the deferred Files tab reads nothing"
+    );
     assert_eq!(
         flight.most(),
         5,

@@ -15,6 +15,7 @@ mod contract;
 mod sync;
 mod view;
 mod view_branch;
+mod view_files;
 mod view_pr;
 mod view_repo;
 mod view_rows;

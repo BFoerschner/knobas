@@ -19,6 +19,7 @@ use crate::source::GiteaSource;
 
 mod act;
 mod branch;
+mod files;
 mod pr;
 mod repo;
 mod rows;

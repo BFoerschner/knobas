@@ -213,6 +213,67 @@ impl GiteaClient {
         .await
     }
 
+    /// `GET /repos/{o}/{r}/contents/{dir}?ref={at}` -- one directory's
+    /// listing at a ref; `dir` empty is the top one (#711).
+    pub(crate) async fn contents_at_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        dir: &str,
+        at: &str,
+    ) -> Result<Vec<T>, SourceError> {
+        let mut route = format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?);
+        if !dir.is_empty() {
+            route.push('/');
+            route.push_str(&escaped_path(dir)?);
+        }
+        self.get_json(&route, &[("ref", at.to_owned())]).await
+    }
+
+    /// `GET /repos/{o}/{r}/raw/{file}?ref={at}` -- one file's bytes at a ref,
+    /// read no further than `cap` bytes past which it is cut (#711): a file
+    /// many megabytes long costs what is drawn of it, not its whole size.
+    pub(crate) async fn raw_capped(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+    ) -> Result<RawFile, SourceError> {
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/raw/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped_path(file)?
+        );
+        let request = self
+            .http
+            .request(Method::GET, &path)
+            .query(&[("ref", at.to_owned())]);
+        let mut response = self.http.send(request).await?;
+        let length = response.content_length();
+        let mut bytes = Vec::new();
+        let mut cut = false;
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {path} answered an unreadable body: {error}"
+            ))
+        })? {
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() > cap {
+                cut = true;
+                break;
+            }
+        }
+        let size = if cut {
+            length.unwrap_or(bytes.len() as u64)
+        } else {
+            bytes.len() as u64
+        };
+        Ok(RawFile { bytes, cut, size })
+    }
+
     /// `GET <base>/api/v1/<path>?<query>`, its body as text: a `.diff`, a
     /// raw file. A refusal is the error it maps to, never an empty text.
     pub(super) async fn get_text_with(
@@ -242,6 +303,26 @@ fn one_commit_not_in(sha: &str, not: &str) -> [(&'static str, String); 6] {
         ("files", "false".to_owned()),
         ("limit", "1".to_owned()),
     ]
+}
+
+/// A file's bytes as [`GiteaClient::raw_capped`] read them.
+#[derive(Debug)]
+pub(crate) struct RawFile {
+    /// What was read: the whole file, or, where `cut`, more than the cap.
+    pub(crate) bytes: Vec<u8>,
+    /// The file is longer than the cap and was not read to its end.
+    pub(crate) cut: bool,
+    /// The whole file's size: what was read, or where it was cut, what Gitea
+    /// said its length was (what was read where it did not say).
+    pub(crate) size: u64,
+}
+
+/// A path in a tree as path segments, each [`escaped`]: `src/lib` stays two
+/// segments, and an empty, `.` or `..` segment is refused, so the path can
+/// never leave the route it is put in.
+fn escaped_path(value: &str) -> Result<String, SourceError> {
+    let segments: Vec<String> = value.split('/').map(escaped).collect::<Result<_, _>>()?;
+    Ok(segments.join("/"))
 }
 
 /// `/repos/{o}/{r}/compare/{base}...{head}`, both refs escaped.

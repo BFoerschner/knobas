@@ -3,7 +3,7 @@
 //!
 //! A view is a list of [`ViewSection`]s, each a list of typed [`Block`]s from
 //! one fixed vocabulary -- facts, text, an entity list, a diff, a log,
-//! settings, actions. The shell draws the vocabulary and never learns which adapter
+//! settings, actions, a directory and a file. The shell draws the vocabulary and never learns which adapter
 //! drew a block, which is what keeps spec §3a's promise: a GitLab adapter that
 //! answers with a diff block gets the diff viewer on day one.
 //!
@@ -119,6 +119,69 @@ pub enum Block {
     /// declares its `write_op`, and queues it through the write queue against
     /// the entity the view is of. A view never writes.
     Actions { actions: Vec<ViewAction> },
+    /// One directory of a tree of files (issue #711): a repository's at a
+    /// branch. `trail` leads from the tree's top to this directory; each
+    /// entry that can be opened names the section that opens it.
+    ///
+    /// **A section a block names opens in the tab it is drawn in**: the shell
+    /// reads it with `view(entity, section)` as it reads a deferred tab, and
+    /// draws the answer in place of this block's section, under the same tab.
+    /// So walking a tree is one tab whose content changes, and the ids are the
+    /// source's own (`files:src/lib`); the shell never parses them.
+    Tree {
+        trail: Vec<Crumb>,
+        entries: Vec<TreeEntry>,
+    },
+    /// One file of a tree (issue #711), drawn monospace with line numbers.
+    /// `trail` leads from the tree's top to the file, the file last.
+    ///
+    /// `text` is empty for a `binary` file. `truncated` says a cap cut the
+    /// text (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines),
+    /// and `url` is the file's page at the source, where the rest is.
+    /// `language` is a hint from the file's name (`"rust"`, `"markdown"`),
+    /// `None` where the source has none; the shell may draw a `"markdown"`
+    /// file rendered, with the raw text a toggle away, and never highlights.
+    File {
+        trail: Vec<Crumb>,
+        path: String,
+        text: String,
+        language: Option<String>,
+        /// The file's size in bytes, as the source reports it.
+        size: u64,
+        truncated: bool,
+        binary: bool,
+        url: Option<String>,
+    },
+}
+
+/// One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
+/// directory's (or the file's own) name and the section that opens it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Crumb {
+    pub name: String,
+    pub section: String,
+}
+
+/// One entry of a [`Block::Tree`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TreeEntry {
+    pub name: String,
+    pub kind: EntryKind,
+    /// A file's size in bytes; `None` for a directory or a submodule.
+    pub size: Option<u64>,
+    /// The section that opens it in the same tab; `None` for one that cannot
+    /// be opened here (a submodule is another repository).
+    pub section: Option<String>,
+}
+
+/// What a [`TreeEntry`] is, as git records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryKind {
+    Dir,
+    File,
+    Symlink,
+    Submodule,
 }
 
 /// One write a view offers: a toolbar button ([`SourceView::actions`]) or one
@@ -494,6 +557,57 @@ mod tests {
             Block::Actions {
                 actions: every_action(),
             },
+            Block::Tree {
+                trail: vec![
+                    Crumb {
+                        name: "main".into(),
+                        section: "files".into(),
+                    },
+                    Crumb {
+                        name: "src".into(),
+                        section: "files:src".into(),
+                    },
+                ],
+                entries: vec![
+                    TreeEntry {
+                        name: "lib".into(),
+                        kind: EntryKind::Dir,
+                        size: None,
+                        section: Some("files:src/lib".into()),
+                    },
+                    TreeEntry {
+                        name: "main.rs".into(),
+                        kind: EntryKind::File,
+                        size: Some(120),
+                        section: Some("file:src/main.rs".into()),
+                    },
+                    TreeEntry {
+                        name: "current".into(),
+                        kind: EntryKind::Symlink,
+                        size: Some(7),
+                        section: Some("file:src/current".into()),
+                    },
+                    TreeEntry {
+                        name: "vendor".into(),
+                        kind: EntryKind::Submodule,
+                        size: None,
+                        section: None,
+                    },
+                ],
+            },
+            Block::File {
+                trail: vec![Crumb {
+                    name: "README.md".into(),
+                    section: "file:README.md".into(),
+                }],
+                path: "README.md".into(),
+                text: "# hi\n".into(),
+                language: Some("markdown".into()),
+                size: 5,
+                truncated: true,
+                binary: false,
+                url: Some("https://gitea.example/o/r/src/branch/main/README.md".into()),
+            },
         ];
         for block in &probes {
             match block {
@@ -503,7 +617,9 @@ mod tests {
                 | Block::Diff { .. }
                 | Block::Log { .. }
                 | Block::Settings { .. }
-                | Block::Actions { .. } => {}
+                | Block::Actions { .. }
+                | Block::Tree { .. }
+                | Block::File { .. } => {}
             }
         }
         probes
@@ -535,7 +651,63 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
         let back: SourceView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);
-        assert_eq!(view.sections[0].blocks.len(), 7, "a block lost its probe");
+        assert_eq!(view.sections[0].blocks.len(), 9, "a block lost its probe");
+    }
+
+    /// A tree and a file on the wire, as the TypeScript mirror reads them:
+    /// entry kinds are snake_case words, a directory has no size, and an
+    /// entry that cannot be opened has no section.
+    #[test]
+    fn a_tree_and_a_file_have_the_wire_shape_the_shell_reads() {
+        let tree = Block::Tree {
+            trail: vec![Crumb {
+                name: "main".into(),
+                section: "files".into(),
+            }],
+            entries: vec![
+                TreeEntry {
+                    name: "src".into(),
+                    kind: EntryKind::Dir,
+                    size: None,
+                    section: Some("files:src".into()),
+                },
+                TreeEntry {
+                    name: "vendor".into(),
+                    kind: EntryKind::Submodule,
+                    size: None,
+                    section: None,
+                },
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&tree).unwrap(),
+            serde_json::json!({
+                "type": "tree",
+                "trail": [{ "name": "main", "section": "files" }],
+                "entries": [
+                    { "name": "src", "kind": "dir", "size": null, "section": "files:src" },
+                    { "name": "vendor", "kind": "submodule", "size": null, "section": null }
+                ]
+            })
+        );
+        let file = Block::File {
+            trail: vec![],
+            path: "logo.png".into(),
+            text: String::new(),
+            language: None,
+            size: 2048,
+            truncated: false,
+            binary: true,
+            url: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&file).unwrap(),
+            serde_json::json!({
+                "type": "file", "trail": [], "path": "logo.png", "text": "",
+                "language": null, "size": 2048, "truncated": false, "binary": true,
+                "url": null
+            })
+        );
     }
 
     /// The wire shape the TypeScript mirror is written against: blocks are a

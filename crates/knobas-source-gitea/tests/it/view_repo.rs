@@ -297,6 +297,7 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
             ("pulls", "Pull requests", Some(2), false),
             ("branches", "Branches", Some(3), false),
             ("commits", "Commits", None, false),
+            ("files", "Files", None, true),
         ]
     );
 
@@ -454,6 +455,10 @@ async fn an_empty_repo_draws_an_overview_and_no_failure() {
     assert_eq!(section(&view, "pulls").count, Some(0));
     assert_eq!(section(&view, "branches").count, Some(0));
     assert!(rows(section(&view, "commits")).is_empty());
+    assert!(
+        view.sections.iter().all(|s| s.id != "files"),
+        "no commit, no tree: no Files tab"
+    );
     let asked: Vec<String> = server
         .received_requests()
         .await
@@ -524,7 +529,11 @@ async fn a_repo_views_sections_are_read_at_the_same_time() {
         .await
         .expect("reads")
         .expect("a repository draws a view");
-    assert_eq!(view.sections.len(), 4);
+    assert_eq!(
+        view.sections.len(),
+        5,
+        "the deferred Files tab reads nothing"
+    );
     assert_eq!(flight.most(), 4, "the sections' reads in flight at once");
 }
 

@@ -11,6 +11,7 @@
 //!   [`rows::COMMIT_CAP`] of them and then a note saying where the rest is.
 //! * *Diff* (deferred, count = files) -- the same compare as a diff
 //!   (`?output=diff`).
+//! * *Files* (deferred) -- the tree at this branch ([`files`], #711).
 //!
 //! *Behind* is Gitea's count of `/commits?sha={default}&not={branch}`, not
 //! the reverse compare, which would list every commit it counts.
@@ -30,7 +31,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewSection};
 
 use super::rows::{self, BranchRecord, ListedCommit, RepoRecord};
-use super::{act, fact};
+use super::{act, fact, files};
 use crate::map;
 use crate::source::GiteaSource;
 
@@ -82,6 +83,9 @@ pub(super) async fn draw(
     match section {
         Some(DIFF) if !is_default => Ok(SourceView::new(vec![
             diff(source, owner, repo, &base, branch).await?,
+        ])),
+        Some(id) if files::owns(id) => Ok(SourceView::new(vec![
+            files::read(source, &record, owner, repo, branch, id).await?,
         ])),
         Some(OVERVIEW | COMMITS) | None => {
             whole(source, &record, owner, repo, branch, section).await
@@ -240,6 +244,7 @@ async fn whole(
             blocks: Vec::new(),
         });
     }
+    sections.push(files::tab());
     if let Some(only) = only {
         sections.retain(|s| s.id == only);
     }

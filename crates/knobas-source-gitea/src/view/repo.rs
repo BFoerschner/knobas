@@ -7,6 +7,8 @@
 //! * *Branches* (count) -- the default branch first, then by last commit,
 //!   newest first.
 //! * *Commits* -- the default branch's latest twenty.
+//! * *Files* (deferred) -- the tree at the default branch ([`files`], #711);
+//!   none for an empty repository, which has no tree.
 //!
 //! The whole view's toolbar (#707, [`super::act`]): *New branch…* from the
 //! default branch or one picked, and *New pull request…* whose heads are the
@@ -25,7 +27,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, SourceView, Tone, ViewAction, ViewRow, ViewSection};
 
 use super::rows::{self, ListedBranch, ListedCommit, RepoRecord};
-use super::{act, fact};
+use super::{act, fact, files};
 use crate::keys;
 use crate::source::GiteaSource;
 
@@ -83,10 +85,12 @@ pub(super) async fn draw(
                 },
                 commits(source, &record, owner, repo),
             )?;
-            return Ok(SourceView {
-                sections: vec![overview, pulls, branches, commits],
-                actions,
-            });
+            let mut sections = vec![overview, pulls, branches, commits];
+            // No commit, no tree to read.
+            if !record.repo.empty {
+                sections.push(files::tab());
+            }
+            return Ok(SourceView { sections, actions });
         }
         Some(OVERVIEW) => vec![overview(source, &record, owner, repo).await?],
         Some(PULLS) => {
@@ -98,6 +102,9 @@ pub(super) async fn draw(
             vec![branches(source, &record, owner, repo, &listing)]
         }
         Some(COMMITS) => vec![commits(source, &record, owner, repo).await?],
+        Some(id) if files::owns(id) => {
+            vec![files::read(source, &record, owner, repo, record.default_branch(), id).await?]
+        }
         Some(other) => {
             return Err(SourceError::protocol(format!(
                 "gitea: a repository's view has no section {other:?} (asked for {entity:?})"
