@@ -50,6 +50,9 @@ test("a setting's edit draws nothing here: its row has its own mark", () => {
 });
 
 test("the mark says sending until the queue gives a reason it waits", () => {
-  expect(sendingMark({ wait_reason: null })).toBe("sending…");
-  expect(sendingMark({ wait_reason: "unreachable" })).toBe("waiting: source unreachable");
+  expect(sendingMark({ wait_reason: null, source_enabled: true })).toBe("sending…");
+  expect(sendingMark({ wait_reason: "unreachable", source_enabled: true })).toBe("waiting: the server did not answer");
+  expect(sendingMark({ wait_reason: null, source_enabled: false }), "a turned-off source sends nothing").toBe(
+    "waiting: its source is turned off",
+  );
 });

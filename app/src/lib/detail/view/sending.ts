@@ -96,13 +96,19 @@ export function echoesOf(payload: WriteOpPayload): Echo[] {
   }
 }
 
-/** The mark beside an echo: the send under way, or why it is waiting. */
-export function sendingMark(write: Pick<QueuedWrite, "wait_reason">): string {
+/**
+ * The mark beside an echo: the send under way, or why it is waiting -- in the
+ * write-queue panel's own words (`WriteQueue.svelte`'s `waitingBecause`), so
+ * one fact reads one way. A turned-off source first: the queue never sends
+ * for one, and *sending…* there would be a promise nothing keeps (#204).
+ */
+export function sendingMark(write: Pick<QueuedWrite, "wait_reason" | "source_enabled">): string {
+  if (write.source_enabled === false) return "waiting: its source is turned off";
   switch (write.wait_reason) {
     case "unreachable":
-      return "waiting: source unreachable";
+      return "waiting: the server did not answer";
     case "unauthorized":
-      return "waiting: credential refused";
+      return "waiting: the credential was rejected";
     default:
       return "sending…";
   }
