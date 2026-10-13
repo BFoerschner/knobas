@@ -828,7 +828,7 @@
    *
    * Parsed **here** and not in the `{#each}`, the same shape as the body
    * above: a `parseStorageFormat` call in the template re-runs on every
-   * re-render of this panel -- a status board landing, a link being drawn --
+   * re-render of this panel -- a fallback offer landing, a link being drawn --
    * and re-parsing a discussion to answer a question nobody asked is work the
    * derived value is for.
    */
@@ -866,11 +866,12 @@
   // real from a refusal in the write queue. `reachableTransitions` is that
   // read, and the select now offers its answer and nothing else.
   //
-  // **Two reads, and each answers something the other cannot.** The board says
-  // where this ticket *stands* -- the mirrored status, which is what the select
-  // shows and what a move is measured against -- and carries the corpus offer
-  // that is still the fallback when the workflow read fails. The workflow read
-  // says where it can *go*, which no mirror holds and nothing stores.
+  // **Two answers, and each says something the other cannot.** The ticket says
+  // where it *stands* -- the mirrored status (#760: `get_entity` carries it),
+  // which is what the select shows and what a move is measured against -- and
+  // `source_statuses` is the corpus offer that is still the fallback when the
+  // workflow read fails. The workflow read says where it can *go*, which no
+  // mirror holds and nothing stores.
   //
   // The write is unchanged: `Transition` still names the status, the adapter
   // still resolves that name against the source's own answer at flush time, and
@@ -887,11 +888,8 @@
    *
    * A `$derived` and not the comparison written inline below, for two reasons.
    * It changes only when the *answer* flips, so a `refresh()` that re-reads the
-   * same ticket does not re-issue the board read; and it is the effect's gate,
-   * so the read a note or a page can never use is never made. That read brings
-   * back the whole of a source's cards — the cost this select accepts to learn
-   * six statuses — and paying it on a kind with no select at all is paying it
-   * for nothing.
+   * same ticket does not re-issue the fallback read; and it is the effect's gate,
+   * so a read a note or a page can never use is never made.
    */
   const isTicket = $derived(shownKind === "ticket");
 
