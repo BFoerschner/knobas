@@ -23,6 +23,10 @@ _Avoid_: quick note, scratch, jot, inbox (that is the stream of things to answer
 A clone of a [repo](#kind) on this machine, found under the **clones root** — a directory setting knobas scans two levels deep, matching each clone's remote to a repo entity by host and owner/repo — or set by hand per repo as an override. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no clone, no checkout, no fetch (ADR-0016). Where *Open in editor* and *open a terminal here* point. (Ruled 2026-09-07, v1.5 grilling; spec §5)
 _Avoid_: clone (as a noun for the record — the clone is the directory, the checkout is what knobas knows about it), working copy, local path, worktree (a worktree is one more checkout, set by hand)
 
+**Working tree state**:
+Where a [checkout](#checkout)'s working tree stands right now: the branch it is on (or a detached head), its upstream and how many commits it is ahead and behind, and how many paths are changed, untracked or conflicted. Read by read-only `git status` when the checkout panel opens and when the window regains focus; never stored, never polled. The branch name the mirror holds is compared to it, never passed to git (ADR-0021). A branch detail whose repo's checkout is on that branch says *Checked out locally*.
+_Avoid_: git status (the command, not the fact), dirty/clean as the whole state, local branch
+
 ## Sync
 
 **Source**:
