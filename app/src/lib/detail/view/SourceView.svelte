@@ -27,7 +27,7 @@
   either, and ⌘[ still leaves the entity.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import {
     entityView,
     type ViewAction,
@@ -62,6 +62,7 @@
     onaction,
     settingMarks = {},
     onsetting = () => Promise.resolve(false),
+    summary,
   }: {
     entityId: string;
     view: SourceView;
@@ -87,6 +88,11 @@
     settingMarks?: Record<string, SettingMark>;
     /** Queue one setting's new value; answers whether it was queued. */
     onsetting?: (block: SettingsTarget, name: string, value: string, base: string | null) => Promise<boolean>;
+    /**
+     * A line the detail draws between the toolbar and the tabs, on every tab:
+     * the builds of the commit this stands at (#732).
+     */
+    summary?: Snippet;
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */
@@ -384,6 +390,7 @@
         <ActionButtons actions={toolbar} settings={ownSettings} {pending} size="md" {onaction} />
       </div>
     {/if}
+    {@render summary?.()}
     <div class="sv-tabs" role="tablist" aria-label="Views">
       {#each view.sections as section, index (section.id)}
         <button

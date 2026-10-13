@@ -938,24 +938,29 @@ const DETAIL_BUILDS: i64 = 20;
 ///
 /// The commit is the entity's declared `commit`, read by [`DETAIL`] beside
 /// the row ([`declared_string!`](knobas_core::declared_string)); a build ran
-/// on it where its kind's declared `revision` lists it
-/// ([`declared_list!`](knobas_core::declared_list)). No adapter is named
-/// here, no payload key: a kind that declares no revision has no row
-/// [`declares_field!`](knobas_core::declares_field) lets through, so a
-/// source that declares none contributes nothing whatever its payloads say.
-/// Matched exactly: both sides are full object ids as git spells them.
+/// on it where its kind's declared `revision` lists it. That walk is stored
+/// (#732, migration `0030`, ADR-0019's pattern): `sync.item_revision` holds
+/// one row per commit each item declares, filled by the database as items
+/// are written, and this statement asks its index on `revision` and touches
+/// only the builds it names -- under a millisecond at 50,000 builds, where the
+/// walk over every live row took 437-442 ms. No adapter is named here, no
+/// payload key: the rows are matched to the source's configured adapter on
+/// `adapter_kind`, so a source whose adapter declares no revision contributes
+/// nothing whatever its payloads say. Matched exactly: both sides are full
+/// object ids as git spells them.
 ///
-/// **Asked only for an entity that stands at a commit.** The statement scans
-/// the live corpus -- no index answers a declared path -- so the detail of a
-/// ticket or a page, which declares no commit, never sends it: measured
-/// 2026-10-13 over 150 000 rows, the scan alone was about 85 ms, paid on every
-/// detail when the commit was still looked up inside the statement.
+/// **Asked only for an entity that stands at a commit**: the detail of a
+/// ticket or a page declares none, so there is no sha to bind, and skipping
+/// the round trip costs nothing.
 ///
 /// The builds come from `sync.live_item`, so a withdrawn build or a disabled
 /// source's is not drawn as if it stood. Ordered as the Builds tile weighs a
 /// state (#680): `err`, `warn`, `info`, `ok`, `muted`, then none; newest
-/// first within one.
-const DETAIL_BUILDS_AT: &str = concat!(
+/// first within one. `$2` is the declarations, for the path line and the
+/// state chip.
+///
+/// Public so `tests/it/builds_of_a_commit_perf.rs` can read its plan.
+pub const DETAIL_BUILDS_AT: &str = concat!(
     r#"
 select b.* from (
   select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
@@ -965,13 +970,10 @@ select b.* from (
          "#,
     knobas_core::declared_state!("$2"),
     r#" as state
-    from sync.live_item i
-   where "#,
-    knobas_core::declares_field!("$2", "revision"),
-    r#"
-     and exists (select 1 from "#,
-    knobas_core::declared_list!("$2", "revision"),
-    r#" r where r.value = $1)
+    from sync.item_revision r
+    join sync.live_item i on i.entity_id = r.entity_id
+    join knobas.source_config s on s.id = i.source_id and s.kind = r.adapter_kind
+   where r.revision = $1
 ) b
  order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], b.state->>'tone'), 6),
           b.item_updated_at desc nulls last, b.entity_id
