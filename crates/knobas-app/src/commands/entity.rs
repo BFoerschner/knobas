@@ -517,21 +517,25 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// tile drew before.
 ///
 /// Per row, `ruled` adds the §4.1 `author`, the `title` (a branch's name),
-/// whether my username is among the declared reviewers, and the path line --
-/// the declared parent, which for a pull request and a branch of the same
-/// repo is the same `owner/name`. `open_head` is every open pull request's
-/// declared `head` across the live corpus, not the room's: a context that
-/// holds a branch and not its pull request must not call the branch
-/// unproposed. Each is read once, `materialized`, as `ruled` is.
+/// whether my username is among the declared reviewers, a branch's path line
+/// (its declared parent, Gitea's `owner/name`) and whether it is its repo's
+/// declared `default_branch`. A repo's default branch never wants a pull
+/// request, so it is dropped with the settled rows (#718): in no group and
+/// no count, whoever's it is. A miss (no declared default) draws it as any
+/// branch. `open_head` is every open pull request's declared `head` and
+/// `head_repo` across the live corpus, not the room's: a context that holds
+/// a branch and not its pull request must not call the branch unproposed.
+/// Each is read once, `materialized`, as `ruled` is.
 ///
-/// **The repo is matched by the path line**, each side's declared parent
-/// chain by its first names -- Gitea's `owner/name`, unique per instance --
-/// and not by every name it answers to as `sync.item_parent` keeps them: a
-/// repo's bare `name` is shared across owners, so the set would need the
-/// sorted-pairs key [`LIVE_LATEST`] builds, for a match the first name already
-/// makes. A miss on either side (no `head`, no parent) matches nothing, so
-/// the branch stays **unproposed** and drawn: the ADR-0007 miss fails toward
-/// showing a branch, never toward hiding it.
+/// **The repo is matched by the pull request's declared `head_repo`** (#718:
+/// a fork's pull request is opened from the fork, so its base repo's
+/// same-named branch is not the one proposed) against the branch's path
+/// line, the first name of its declared parent -- Gitea's `owner/name`,
+/// unique per instance -- and not by every name it answers to as
+/// `sync.item_parent` keeps them: a repo's bare `name` is shared across
+/// owners. A miss on either side (no `head`, no `head_repo`, no parent)
+/// matches nothing, so the branch stays **unproposed** and drawn: the
+/// ADR-0007 miss fails toward showing a branch, never toward hiding it.
 const LIVE_ATTENTION: &str = concat!(
     tile_ruled!(
         concat!(
@@ -543,7 +547,10 @@ const LIVE_ATTENTION: &str = concat!(
             " v where v.value = me.me limit 1), false) as asked,
          case when i.kind = 'branch' then ",
             knobas_core::path_line_read!("$8"),
-            " end as branch_path"
+            " end as branch_path,
+         i.kind = 'branch' and i.title = ",
+            knobas_core::declared_string!("$8", "default_branch"),
+            " as is_default"
         ),
         "
     left join lateral (select nullif(btrim(s.config->>'username'), '') as me
@@ -555,8 +562,8 @@ open_head as materialized (
     knobas_core::declared_string!("$8", "head"),
     r#" as head,
          "#,
-    knobas_core::path_line_read!("$8"),
-    r#" as path
+    knobas_core::declared_string!("$8", "head_repo"),
+    r#" as head_repo
     from sync.live_item i
    where i.kind = 'pr'
      and i.source_id in (select r.source_id from ruled r where r.kind = 'branch' and r.me is not null)
@@ -574,13 +581,14 @@ drawn as (
              when r.kind = 'branch' and r.author = r.me
                   and not exists (select 1 from open_head h
                                    where h.source_id = r.source_id and h.head = r.title
-                                     and h.path = r.branch_path) then 4
+                                     and h.head_repo = r.branch_path) then 4
              when r.kind = 'branch' and r.me is null then 5
              else 6
            end
          end as grp
     from ruled r
-   where r.state is null or r.state->>'tone' not in ('ok', 'muted')
+   where (r.state is null or r.state->>'tone' not in ('ok', 'muted'))
+     and r.is_default is not true
 )"#,
     tile_page!(),
 );

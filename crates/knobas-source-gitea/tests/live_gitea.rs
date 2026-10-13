@@ -1608,13 +1608,23 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         let (pr_paths, branch_paths) = (paths_of("pr"), paths_of("branch"));
         let sepa_head = resolve_string(&sepa.payload, &pr_paths.head)
             .expect("the SEPA retry pull request declares the branch it is opened from");
-        let sepa_repo = parent_path(&resolve_parents(&sepa.payload, &pr_paths.parent));
+        // The repo the head is in (#718): `head.repo.full_name`, which the
+        // Code tile compares with a branch's path line. Not seeded from a
+        // fork, so here it must name the base repo, spelled the same.
+        let sepa_repo = resolve_string(&sepa.payload, &pr_paths.head_repo)
+            .expect("the SEPA retry pull request declares the repo it is opened from");
+        assert_eq!(
+            Some(&sepa_repo),
+            parent_path(&resolve_parents(&sepa.payload, &pr_paths.parent)).as_ref(),
+            "a same-repo pull request's head repo is spelled as its base repo's path line"
+        );
         let branches = of_kind(&items, "branch");
         let proposed: Vec<String> = branches
             .iter()
             .filter(|b| {
                 b.title == sepa_head
-                    && parent_path(&resolve_parents(&b.payload, &branch_paths.parent)) == sepa_repo
+                    && parent_path(&resolve_parents(&b.payload, &branch_paths.parent)).as_ref()
+                        == Some(&sepa_repo)
             })
             .map(|b| b.entity.to_string())
             .collect();
@@ -1627,6 +1637,27 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         assert!(
             branches.iter().all(|b| b.author.is_some()),
             "every seeded branch has a last committer, which is what `mine` compares"
+        );
+
+        // Every live branch declares its repo's default (#718), and in each
+        // repo exactly one branch is titled so: what keeps a repo's default
+        // branch out of the Code tile's *my branches*.
+        let mut defaults: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for branch in branches.iter().filter(|b| !b.deleted) {
+            let repo = parent_path(&resolve_parents(&branch.payload, &branch_paths.parent))
+                .expect("a live branch names its repo");
+            let default = resolve_string(&branch.payload, &branch_paths.default_branch)
+                .unwrap_or_else(|| panic!("{} declares its repo's default branch", branch.entity));
+            let entry = defaults.entry(repo).or_default();
+            if branch.title == default {
+                entry.push(branch.entity.to_string());
+            }
+        }
+        println!("LIVE default branches per repo: {defaults:?}");
+        assert!(
+            !defaults.is_empty() && defaults.values().all(|d| d.len() == 1),
+            "each repo's declared default names exactly one of its mirrored branches: {defaults:?}"
         );
     }
 

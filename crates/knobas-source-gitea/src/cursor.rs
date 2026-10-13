@@ -23,7 +23,13 @@ use chrono::{DateTime, Utc};
 /// `under:` misses them. That limit comes from the budget (which is why ADR-0003
 /// records `commit` as non-exhaustive), and rewriting those rows would need its
 /// own ruling.
-pub(crate) const CURSOR_VERSION: u32 = 2;
+///
+/// **3** since issue #718 added the repository's `default_branch` to that
+/// `repository` object, which the Code tile reads off a branch, and
+/// [`RepoCursor::default_branch`] beside it. Same upgrade plan: a version-2
+/// cursor stops parsing and the first run is a backfill. A commit beyond the
+/// budget keeps the version-2 object, which nothing reads a default off.
+pub(crate) const CURSOR_VERSION: u32 = 3;
 
 /// Where the next run resumes, per repository.
 ///
@@ -84,6 +90,11 @@ pub(crate) struct RepoCursor {
     /// repository.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branches: BTreeMap<String, String>,
+    /// The repository's default branch as of the last run that walked it
+    /// (#718). Every branch's stored `repository` names it, so when it
+    /// changes every branch is re-emitted, though no head moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
 }
 
 impl GiteaCursor {
@@ -178,6 +189,7 @@ mod tests {
                     "main".to_owned(),
                     "1111111111111111111111111111111111111111".to_owned(),
                 )]),
+                default_branch: Some("trunk".to_owned()),
             },
         );
         cursor
@@ -200,7 +212,7 @@ mod tests {
     fn serialisation_is_stable() {
         assert_eq!(sample().to_json(), sample().to_json());
         let json = sample().to_json();
-        assert!(json.starts_with(r#"{"v":2"#), "{json}");
+        assert!(json.starts_with(r#"{"v":3"#), "{json}");
     }
 
     /// Every watermark field has to survive the trip: a field dropped in
@@ -223,6 +235,7 @@ mod tests {
             repo.branches.get("main").map(String::as_str),
             Some("1111111111111111111111111111111111111111")
         );
+        assert_eq!(repo.default_branch.as_deref(), Some("trunk"));
     }
 
     /// Empty collections are omitted: the cursor is a text column that grows
@@ -249,7 +262,8 @@ mod tests {
     #[test]
     fn an_unusable_cursor_means_full_sync() {
         for raw in [
-            r#"{"v":3,"repos":{}}"#,
+            r#"{"v":4,"repos":{}}"#,
+            r#"{"v":2,"repos":{}}"#,
             "not json",
             "",
             "[]",

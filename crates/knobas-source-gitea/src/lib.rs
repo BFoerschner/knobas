@@ -259,6 +259,16 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   `/branches` record's own spelling), a commit's `sha`. The detail asks
 ///   the mirror for the builds whose declared `revision` is it.
 ///
+/// * `head_repo` is the repository a pull request is opened from, Gitea's
+///   `head.repo.full_name`: a fork's for a fork pull request, which is why
+///   the head is matched there and not on the base repo (#718). A deleted
+///   fork has no `head.repo`, and its pull request proposes no branch.
+///
+/// * `default_branch` is a branch's repository's default branch. Gitea's
+///   branch record does not say, so `map` writes the repository's
+///   `default_branch` into the `repository` object it already writes, and a
+///   branch titled so is the default (#718).
+///
 /// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
 /// in as many words: "Gitea has no such thing here and gets none"), and a
 /// repository is an entity *kind*, not the axis a room is drawn along -- and
@@ -277,6 +287,7 @@ fn payload_paths() -> Vec<KindPaths> {
             kind: KIND_BRANCH.to_owned(),
             parent: repo(&["repository"]),
             commit: vec![PayloadPath::of(["commit", "id"])],
+            default_branch: vec![PayloadPath::of(["repository", "default_branch"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -290,6 +301,7 @@ fn payload_paths() -> Vec<KindPaths> {
             state: pr_state(),
             head: vec![PayloadPath::of(["head", "ref"])],
             commit: vec![PayloadPath::of(["head", "sha"])],
+            head_repo: vec![PayloadPath::of(["head", "repo", "full_name"])],
             ..KindPaths::default()
         },
         KindPaths {

@@ -102,6 +102,10 @@ export interface KindPaths {
   commit: PayloadPath[];
   /** The commits a build ran on, one per VCS root (#710). */
   revision: ListPath[];
+  /** The repo a pull request is opened from, a fork's for a fork (#718). */
+  head_repo: PayloadPath[];
+  /** A branch's repo's default branch, never drawn as wanting a PR (#718). */
+  default_branch: PayloadPath[];
 }
 
 /**

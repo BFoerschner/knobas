@@ -19,6 +19,8 @@ pub(crate) struct RepoRef<'a> {
     pub full_name: &'a str,
     /// The repository's own browser URL, which is what branch links hang off.
     pub html_url: Option<&'a str>,
+    /// The repository's default branch, as its record names it (#718).
+    pub default_branch: Option<&'a str>,
 }
 
 /// Join the non-empty parts into the blob FTS indexes (interfaces §4.1,
@@ -48,8 +50,17 @@ fn non_blank(value: Option<&str>) -> Option<String> {
 /// reads both, and the full name, first, is the one a path line shows. An
 /// object and not a bare `owner/name`, because a parent is an object or a
 /// chain of them (contract battery clause 6).
+///
+/// With the repository's `default_branch`, also a key `base.repo` carries,
+/// where its record names one (#718): Gitea's branch record does not say
+/// whether it is the default, and the Code tile must know, so the
+/// descriptor declares a branch's `default_branch` here.
 fn repository(at: RepoRef<'_>) -> Value {
-    serde_json::json!({ "full_name": at.full_name, "name": at.name })
+    let mut repository = serde_json::json!({ "full_name": at.full_name, "name": at.name });
+    if let Some(default_branch) = at.default_branch {
+        repository["default_branch"] = default_branch.into();
+    }
+    repository
 }
 
 /// The record verbatim, plus the [`repository`] it sits in where the record
@@ -262,6 +273,7 @@ mod tests {
             name: "payout-service",
             full_name: "tidewater/payout-service",
             html_url: Some("https://gitea.example/tidewater/payout-service"),
+            default_branch: Some("main"),
         }
     }
 
@@ -355,13 +367,34 @@ mod tests {
     }
 
     /// The repository a branch or commit sits in, as the stored payload must
-    /// carry it: `full_name` and `name`, the keys a pull request's
-    /// `base.repo` already carries.
+    /// carry it: `full_name`, `name` and `default_branch`, the keys a pull
+    /// request's `base.repo` already carries.
     fn repository_object() -> Value {
         serde_json::json!({
             "full_name": "tidewater/payout-service",
-            "name": "payout-service"
+            "name": "payout-service",
+            "default_branch": "main"
         })
+    }
+
+    /// A repository whose record names no default branch writes none (#718):
+    /// the declared `default_branch` then misses, and the branch is drawn as
+    /// any other rather than taken for a default it may not be.
+    #[test]
+    fn a_repository_naming_no_default_branch_writes_none() {
+        let raw = serde_json::json!({ "name": "main", "commit": { "id": "1" } });
+        let branch: crate::model::Branch = serde_json::from_value(raw.clone()).unwrap();
+        let unnamed = RepoRef {
+            default_branch: None,
+            ..at()
+        };
+        assert_eq!(
+            branch_item(SOURCE, &raw, unnamed, &branch).payload["repository"],
+            serde_json::json!({
+                "full_name": "tidewater/payout-service",
+                "name": "payout-service"
+            })
+        );
     }
 
     /// Gitea leaves `username` empty for a commit whose email matches no

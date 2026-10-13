@@ -521,6 +521,7 @@ knobas-app	test/it	entity::a_commits_room_line_and_detail_carry_its_repo_as_the_
 knobas-app	test/it	entity::a_confluence_space_is_a_project_room_and_a_jira_project_is_another
 knobas-app	test/it	entity::a_disabled_sources_entity_opens_with_the_marker_until_reenabled
 knobas-app	test/it	entity::a_duplicate_pair_and_relation_is_a_conflict
+knobas-app	test/it	entity::a_fork_pull_request_does_not_propose_the_base_repos_branch
 knobas-app	test/it	entity::a_kind_with_no_declared_state_falls_back_to_recency
 knobas-app	test/it	entity::a_kuma_source_has_a_room_of_its_own_and_no_project_rooms
 knobas-app	test/it	entity::a_link_endpoint_that_is_not_in_the_mirror_is_not_found_at_the_command_seam
@@ -541,6 +542,7 @@ knobas-app	test/it	entity::a_project_narrows_the_include_deleted_statements_too
 knobas-app	test/it	entity::a_project_narrows_the_room_within_its_sources
 knobas-app	test/it	entity::a_project_room_shows_a_configuration_only_project
 knobas-app	test/it	entity::a_relations_case_does_not_split_its_group
+knobas-app	test/it	entity::a_repos_default_branch_is_drawn_in_no_group
 knobas-app	test/it	entity::a_rooms_lines_carry_the_state_their_adapter_declares
 knobas-app	test/it	entity::a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room
 knobas-app	test/it	entity::a_tombstoned_entity_is_absent_unless_asked_for
@@ -554,6 +556,7 @@ knobas-app	test/it	entity::deleting_a_note_over_the_seam_is_idempotent_and_a_sta
 knobas-app	test/it	entity::deleting_a_note_writes_one_deleted_line_on_the_address_that_survives
 knobas-app	test/it	entity::each_link_mutation_writes_one_activity_line_on_the_from_end
 knobas-app	test/it	entity::lists_the_newest_first_and_reports_the_unpaged_total
+knobas-app	test/it	entity::my_pull_request_asking_me_is_drawn_once_as_review_requested
 knobas-app	test/it	entity::offset_walks_the_same_ordering_and_total_does_not_move
 knobas-app	test/it	entity::returns_the_row_its_source_and_the_raw_payload
 knobas-app	test/it	entity::saving_a_note_writes_no_activity_line_however_much_it_reconciles
@@ -1959,6 +1962,7 @@ knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_deleted_branch_keeps_i
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_pull_request_indexes_its_discussion
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_pull_request_with_no_update_falls_back_to_when_it_was_opened
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_repository_becomes_a_searchable_item
+knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_repository_naming_no_default_branch_writes_none
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::a_subject_skips_the_blank_lines_a_message_opens_on
 knobas-source-gitea	lib/knobas_source_gitea	map::tests::the_go_zero_time_is_no_timestamp_at_all
 knobas-source-gitea	lib/knobas_source_gitea	model::tests::a_commit_prefers_its_own_timestamp_over_the_authors
@@ -2005,6 +2009,7 @@ knobas-source-gitea	test/it	sync::a_branch_deleted_mid_run_is_skipped_and_the_ru
 knobas-source-gitea	test/it	sync::a_branch_listing_that_would_exceed_the_cap_fails_the_run
 knobas-source-gitea	test/it	sync::a_budget_that_stops_short_keeps_the_boundary_it_was_handed
 knobas-source-gitea	test/it	sync::a_cap_fires_at_exactly_the_boundary_it_names
+knobas-source-gitea	test/it	sync::a_changed_default_branch_re_emits_every_branch_and_walks_no_commit
 knobas-source-gitea	test/it	sync::a_commit_on_two_branches_is_emitted_once
 knobas-source-gitea	test/it	sync::a_credential_revoked_after_the_first_repository_raises
 knobas-source-gitea	test/it	sync::a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits

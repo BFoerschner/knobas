@@ -1611,13 +1611,14 @@ async fn code_room(
         serde_json::json!({
             "state": state,
             "merged": merged,
-            "head": { "ref": head },
+            "head": { "ref": head, "repo": repo("payout-service") },
             "base": { "repo": repo("payout-service") },
             "requested_reviewers": asked.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
         })
     };
     let unbased = |mut payload: serde_json::Value| {
         payload.as_object_mut().unwrap().remove("base");
+        payload["head"].as_object_mut().unwrap().remove("repo");
         payload
     };
     for (n, author, payload, minutes) in [
@@ -1899,6 +1900,281 @@ async fn a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room() {
             group(AttentionGroup::OtherBranches, 1),
         ]),
         "the identity-less source's branches are drawn, not hidden as somebody else's"
+    );
+}
+
+/// One branch of a Code tile room (#718): `branch` in `owner/name`, last
+/// committed to by `author`, its stored `repository` naming the repo's
+/// `default_branch` where given, dated `minutes` ago.
+async fn code_branch(
+    pool: &PgPool,
+    source: &str,
+    repo: &str,
+    default_branch: Option<&str>,
+    branch: &str,
+    author: &str,
+    minutes: i32,
+) -> String {
+    let mut repository = serde_json::json!({
+        "full_name": repo,
+        "name": repo.rsplit('/').next().unwrap(),
+    });
+    if let Some(default_branch) = default_branch {
+        repository["default_branch"] = serde_json::json!(default_branch);
+    }
+    let key = format!("{repo}@refs/heads/{branch}");
+    let entity = format!("{source}:{key}");
+    mirrored(
+        pool,
+        source,
+        "branch",
+        &key,
+        serde_json::json!({ "name": branch, "repository": repository }),
+    )
+    .await;
+    sqlx::query("update sync.item set title = $2 where entity_id = $1")
+        .bind(&entity)
+        .bind(branch)
+        .execute(pool)
+        .await
+        .unwrap();
+    dated(pool, &entity, minutes).await;
+    authored(pool, &entity, author).await;
+    entity
+}
+
+/// One open pull request of a Code tile room (#718), into `base` from the
+/// branch `head` of `head_repo`, opened by `author` and asking `asked`.
+#[allow(clippy::too_many_arguments)]
+async fn code_pull(
+    pool: &PgPool,
+    source: &str,
+    n: u32,
+    base: &str,
+    head_repo: &str,
+    head: &str,
+    author: &str,
+    asked: &[&str],
+) -> String {
+    let repo = |full: &str| serde_json::json!({ "full_name": full, "name": full.rsplit('/').next().unwrap() });
+    let key = format!("{base}#{n}");
+    let entity = format!("{source}:{key}");
+    mirrored(
+        pool,
+        source,
+        "pr",
+        &key,
+        serde_json::json!({
+            "state": "open",
+            "merged": false,
+            "head": { "ref": head, "repo": repo(head_repo) },
+            "base": { "ref": "main", "repo": repo(base) },
+            "requested_reviewers": asked.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
+        }),
+    )
+    .await;
+    dated(pool, &entity, 1).await;
+    authored(pool, &entity, author).await;
+    entity
+}
+
+/// The Code tile's attention page over `sources`' pull requests and branches.
+async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_app::commands::entity::EntityPage {
+    list_entities_inner(
+        pool,
+        &EntityFilter {
+            sources: sources.iter().map(|&s| s.clone()).collect(),
+            kinds: vec!["pr".to_owned(), "branch".to_owned()],
+            order: EntityOrder::Attention,
+            ..all()
+        },
+        50,
+        0,
+        &builtin_declarations(pool).await,
+    )
+    .await
+    .unwrap()
+}
+
+/// A repo's default branch is never a branch that wants a pull request
+/// (#718): when I made its last commit it is not drawn under my branches,
+/// and in a source with no identity not under its branches either. It is in
+/// no group, and the tile draws it nowhere (the repo view still reaches it).
+/// A branch named like another repo's default is still mine.
+#[tokio::test]
+async fn a_repos_default_branch_is_drawn_in_no_group() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let pool = seeded().await;
+    let mine = configured_as(&pool, Some("björn")).await;
+    let anon = configured_as(&pool, None).await;
+
+    let my_main = code_branch(
+        &pool,
+        &mine,
+        "tidewater/payout-service",
+        Some("main"),
+        "main",
+        "björn",
+        10,
+    )
+    .await;
+    let my_spike = code_branch(
+        &pool,
+        &mine,
+        "tidewater/payout-service",
+        Some("main"),
+        "björn/spike",
+        "björn",
+        20,
+    )
+    .await;
+    // `main` here, but this repo's default is `trunk`: an ordinary branch.
+    let ledger_main = code_branch(
+        &pool,
+        &mine,
+        "tidewater/ledger",
+        Some("trunk"),
+        "main",
+        "björn",
+        30,
+    )
+    .await;
+    let ledger_trunk = code_branch(
+        &pool,
+        &mine,
+        "tidewater/ledger",
+        Some("trunk"),
+        "trunk",
+        "ana",
+        40,
+    )
+    .await;
+    let anon_main = code_branch(
+        &pool,
+        &anon,
+        "tidewater/payout-service",
+        Some("main"),
+        "main",
+        "björn",
+        5,
+    )
+    .await;
+    let anon_wip = code_branch(
+        &pool,
+        &anon,
+        "tidewater/payout-service",
+        Some("main"),
+        "ana/wip",
+        "ana",
+        50,
+    )
+    .await;
+
+    let page = code_page(&pool, &[&mine, &anon]).await;
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    assert_eq!(ids, [my_spike, ledger_main, anon_wip]);
+    for default in [&my_main, &ledger_trunk, &anon_main] {
+        assert!(
+            !ids.contains(default),
+            "{default} is a default branch: {ids:?}"
+        );
+    }
+    let group = |group, count| GroupTally { group, count };
+    assert_eq!(
+        page.groups,
+        Some(vec![
+            group(AttentionGroup::MyBranches, 2),
+            group(AttentionGroup::Branches, 1),
+        ]),
+        "no group counts a default branch"
+    );
+    assert_eq!(page.total, 3);
+}
+
+/// A fork's pull request is opened from a branch of the **fork** (#718), so
+/// its `head.ref` names that repo's branch and not the base repo's: a fork
+/// pull request from `main` leaves the base repo's own `main` (not its
+/// default here) unproposed, and mine. A pull request from the base repo's
+/// own branch still proposes it.
+#[tokio::test]
+async fn a_fork_pull_request_does_not_propose_the_base_repos_branch() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let pool = seeded().await;
+    let mine = configured_as(&pool, Some("björn")).await;
+    let base = "tidewater/payout-service";
+
+    let fork_pr = code_pull(
+        &pool,
+        &mine,
+        1,
+        base,
+        "ana/payout-service",
+        "main",
+        "ana",
+        &[],
+    )
+    .await;
+    let own_pr = code_pull(&pool, &mine, 2, base, base, "björn/sepa", "björn", &[]).await;
+    let base_main = code_branch(&pool, &mine, base, Some("trunk"), "main", "björn", 10).await;
+    let sepa = code_branch(&pool, &mine, base, Some("trunk"), "björn/sepa", "björn", 20).await;
+    // The fork's own branch, mirrored too: that is the one the fork proposes.
+    let fork_main = code_branch(
+        &pool,
+        &mine,
+        "ana/payout-service",
+        Some("trunk"),
+        "main",
+        "björn",
+        30,
+    )
+    .await;
+
+    let page = code_page(&pool, &[&mine]).await;
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    assert_eq!(ids, [own_pr, fork_pr, base_main, sepa, fork_main]);
+    let group = |group, count| GroupTally { group, count };
+    assert_eq!(
+        page.groups,
+        Some(vec![
+            group(AttentionGroup::MyPullRequests, 1),
+            group(AttentionGroup::OpenPullRequests, 1),
+            group(AttentionGroup::MyBranches, 1),
+            group(AttentionGroup::OtherBranches, 2),
+        ]),
+        "the base repo's `main` is mine and unproposed; the fork's `main` and `björn/sepa` are proposed"
+    );
+}
+
+/// A pull request I opened that also asks me for review (#718, from the #712
+/// review) is drawn once, under *review requested*: the first group a row
+/// fits is the one it lands in.
+#[tokio::test]
+async fn my_pull_request_asking_me_is_drawn_once_as_review_requested() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let pool = seeded().await;
+    let mine = configured_as(&pool, Some("björn")).await;
+    let base = "tidewater/payout-service";
+    let both = code_pull(
+        &pool,
+        &mine,
+        1,
+        base,
+        base,
+        "björn/sepa",
+        "björn",
+        &["björn"],
+    )
+    .await;
+
+    let page = code_page(&pool, &[&mine]).await;
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    assert_eq!(ids, [both]);
+    assert_eq!(
+        page.groups,
+        Some(vec![GroupTally {
+            group: AttentionGroup::ReviewRequested,
+            count: 1
+        }]),
     );
 }
 
