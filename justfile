@@ -1240,6 +1240,13 @@ _require-live-env SOURCE +NAMES:
 # (testenv/live-lib.sh), so a second run from another worktree waits for the
 # first instead of sweeping its branches. testenv/README.md, "One environment,
 # one owner at a time".
+#
+# AND ONE APP-LEVEL TEST (#752): `a_write_answers_on_queue_and_lands_behind_the_reader`
+# in `crates/knobas-app/tests/start_work_live.rs`, the write queue over this
+# server -- a comment and a merge each answer on the queue insert and land in
+# the background -- and the Submit-to-dialog-closed timings it prints. Its
+# branches and pull requests carry the same `knobas-` prefix and are taken back
+# by that file's `Litter`, never touching the default branch.
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1248,6 +1255,8 @@ gitea-live:
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
+      -- --ignored --nocapture --test-threads=1 --exact a_write_answers_on_queue_and_lands_behind_the_reader
 
 # The same real container, reconfigured to answer FEWER records than the adapter
 # asked for: `testenv/docker-compose.capped.yml` sets Gitea's

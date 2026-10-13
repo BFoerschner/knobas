@@ -1261,3 +1261,197 @@ async fn gitea_app(env: &Env, repos: &[String]) -> SourcesState {
         registry: Arc::new(Registry::builtin()),
     }
 }
+
+// -- a write goes in the background (#752) ----------------------------------
+
+/// Wait for the queue to settle write `id`, and answer the row as settled.
+async fn settled(state: &SourcesState, id: i64) -> knobas_core::write_queue::QueuedWrite {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let row = knobas_core::write_queue::get(&state.pool, id)
+            .await
+            .expect("the queue reads")
+            .expect("the write is on the queue");
+        if row.state != knobas_core::write_queue::WriteState::Pending {
+            return row;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "write {id} was still pending after a minute: {row:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// The source's view of `entity`, as the detail reads it, flattened to text.
+async fn view_text(state: &SourcesState, entity: &str) -> String {
+    let view = knobas_app::sources::crud::view(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        entity,
+        None,
+    )
+    .await
+    .expect("the view reads");
+    serde_json::to_string(&view).expect("a view serializes")
+}
+
+/// **`submit_write` answers on the queue, and the write lands behind it**
+/// (issue #752), against the real Gitea: a comment and a merge each go
+/// through the real queue and adapter, the call answers before the send, and
+/// once the queue settles the comment is in the pull request's
+/// *Conversation* and the merge at the server.
+///
+/// It also measures what the issue asks for, printed with `--nocapture`: the
+/// time from *Submit* to the dialog closing, before and after, for Comment
+/// and Merge. *Before* is the old dialog path -- the submit that waited for
+/// the send, then the panel's two re-reads (`get_entity`, `entity_view`);
+/// *after* is the queue insert alone. Two pull requests so each path merges
+/// one, both into a scratch base branch so the default branch is never
+/// written (#373); both `Litter` guards take everything back.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn a_write_answers_on_queue_and_lands_behind_the_reader() {
+    use std::time::Instant;
+
+    let env = env();
+    let account = env.account().await;
+    // No Jira here: nothing below writes to or reads from it.
+    let state = app(&env, "http://127.0.0.1:9", &account).await;
+
+    let pid = std::process::id();
+    let base = format!("{LITTER}i752-{pid}-base");
+    let heads = [
+        format!("{LITTER}i752-{pid}-a"),
+        format!("{LITTER}i752-{pid}-b"),
+    ];
+    let litter_a = Litter::new(&env, heads[0].clone(), base.clone()).await;
+    let litter_b = Litter::new(&env, heads[1].clone(), base.clone()).await;
+    let repo = env.full_name();
+    env.api(
+        reqwest::Method::POST,
+        &format!("/repos/{repo}/branches"),
+        Some(json!({ "new_branch_name": base, "old_branch_name": litter_a.default_branch })),
+    )
+    .await;
+    let mut entities = Vec::new();
+    for (head, litter) in heads.iter().zip([&litter_a, &litter_b]) {
+        env.api(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/branches"),
+            Some(json!({ "new_branch_name": head, "old_branch_name": base })),
+        )
+        .await;
+        env.api(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/contents/{head}.txt"),
+            Some(json!({ "branch": head, "content": "aTQ0Cg==", "message": format!("{head}: the work") })),
+        )
+        .await;
+        let opened = env
+            .api(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/pulls"),
+                Some(json!({ "head": head, "base": base, "title": format!("knobas i752 {head}") })),
+            )
+            .await;
+        let number = opened["number"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("Gitea opened no pull request from {head}: {opened}"));
+        litter.opened(number);
+        entities.push(format!("{GITEA}:{repo}#{number}"));
+    }
+    sync(&state, GITEA).await;
+    let (before_pr, after_pr) = (&entities[0], &entities[1]);
+
+    // The old dialog path, timed: the send waited for, then the two re-reads.
+    let old_path = |payload: serde_json::Value, entity: String| {
+        let state = &state;
+        async move {
+            let started = Instant::now();
+            knobas_app::sources::write_queue::submit(state, payload)
+                .await
+                .expect("queued and sent");
+            knobas_app::commands::entity::get_entity_inner(&state.pool, &entity)
+                .await
+                .expect("the mirror reads");
+            view_text(state, &entity).await;
+            started.elapsed()
+        }
+    };
+
+    // -- Comment ----------------------------------------------------------
+    let comment_before = old_path(
+        json!({ "Comment": { "entity": before_pr, "body": format!("before #752, {pid}") } }),
+        before_pr.clone(),
+    )
+    .await;
+    // The re-read the landed write set off, finished, so the next write is
+    // not queued against a mirror about to move under it.
+    sync(&state, GITEA).await;
+
+    let words = format!("queued and sent behind the reader, {pid}");
+    let started = Instant::now();
+    let queued = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        json!({ "Comment": { "entity": after_pr, "body": words } }),
+    )
+    .await
+    .expect("the comment is queued");
+    let comment_after = started.elapsed();
+    assert_eq!(
+        queued.state,
+        knobas_core::write_queue::WriteState::Pending,
+        "the answer is the row as queued, before the send"
+    );
+    let row = settled(&state, queued.id).await;
+    assert_eq!(
+        row.state,
+        knobas_core::write_queue::WriteState::Sent,
+        "{row:?}"
+    );
+    assert!(
+        view_text(&state, after_pr).await.contains(&words),
+        "the comment sent in the background is not in the pull request's view"
+    );
+    sync(&state, GITEA).await;
+
+    // -- Merge ------------------------------------------------------------
+    let merge = |entity: &String| json!({ "MergePullRequest": { "entity": entity, "style": "merge", "delete_branch": false } });
+    let merge_before = old_path(merge(before_pr), before_pr.clone()).await;
+    sync(&state, GITEA).await;
+
+    let started = Instant::now();
+    let queued = knobas_app::sources::write_queue::submit_in_background(&state, merge(after_pr))
+        .await
+        .expect("the merge is queued");
+    let merge_after = started.elapsed();
+    let row = settled(&state, queued.id).await;
+    assert_eq!(
+        row.state,
+        knobas_core::write_queue::WriteState::Sent,
+        "{row:?}"
+    );
+    let merged: Vec<bool> = {
+        let pulls = env.pulls().await;
+        entities
+            .iter()
+            .map(|entity| {
+                pulls
+                    .iter()
+                    .any(|(number, _, merged)| *merged && entity.ends_with(&format!("#{number}")))
+            })
+            .collect()
+    };
+    assert_eq!(
+        merged,
+        [true, true],
+        "both pull requests are merged at Gitea"
+    );
+
+    eprintln!(
+        "#752 Submit -> dialog closed: Comment {comment_before:?} before, {comment_after:?} after; \
+         Merge {merge_before:?} before, {merge_after:?} after"
+    );
+}
