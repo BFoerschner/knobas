@@ -200,7 +200,13 @@ async fn fixture(name: &str) -> Fixture {
         registry: Arc::clone(&registry),
         secrets: secrets.clone(),
         events: Arc::new(Heard(tell)),
-        timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        // The tick held off for the whole test: it flushes the queue too, and
+        // a send the tick made would pass these tests with no background send
+        // at all. So whatever delivers below is `submit_in_background`'s.
+        timing: knobas_sync::scheduler::SchedulerTiming {
+            startup_delay: Duration::from_secs(3600),
+            tick: Duration::from_secs(3600),
+        },
     })
     .await
     .expect("a scheduler");
