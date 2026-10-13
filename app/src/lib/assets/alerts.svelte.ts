@@ -33,6 +33,7 @@ import {
   openAlerts as realOpenAlerts,
   type OpenAlert,
 } from "../ipc/assets";
+import { coalesce } from "../shell/coalesce";
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
 export interface AlertPorts {
@@ -162,10 +163,13 @@ export function createAlerts(ports?: Partial<AlertPorts>): Alerts {
       live = true;
       const offs: (() => void)[] = [];
 
+      // Coalesced (#753): a burst of events while a read is in flight makes
+      // one more read after it, not one per event.
+      const reread = coalesce(refresh);
       for (const event of [EVENTS.activityNew, EVENTS.syncState]) {
         void io
           .listen(event, () => {
-            if (live) void refresh();
+            if (live) void reread();
           })
           .then((unlisten) => {
             if (live) offs.push(unlisten);
