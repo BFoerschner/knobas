@@ -10,7 +10,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityDetail, SourceView } from "../ipc/entity";
-import type { SourceDescriptor, WriteOpPayload } from "../ipc/sources";
+import type { QueuedWrite, SourceDescriptor, WriteOpPayload } from "../ipc/sources";
 
 const ID = "gitea:tidewater/payout-service#142";
 
@@ -47,8 +47,11 @@ vi.mock("../ipc/entity", () => ({
 }));
 
 let writeOps: string[] = [];
+/** What `pending_writes` answers: by default the write has already gone. */
+let open: QueuedWrite[] = [];
 
 vi.mock("../ipc/sources", () => ({
+  pendingWrites: () => Promise.resolve(open),
   listAdapters: (): Promise<SourceDescriptor[]> =>
     Promise.resolve([
       {
@@ -180,6 +183,7 @@ beforeEach(async () => {
   calls.length = 0;
   queued.length = 0;
   submitFails = false;
+  open = [];
   toasts.items = [];
   writeOps = ["comment", "approve", "merge_pull_request"];
   views = [overview("open", true), overview("merged", false)];

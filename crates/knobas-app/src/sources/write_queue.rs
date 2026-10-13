@@ -13,7 +13,14 @@ use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
 
 use crate::IpcError;
 
-/// Queue an outbound write and try to deliver it (issue #43).
+/// Queue an outbound write and try to deliver it (issue #43), **waiting for
+/// the attempt**.
+///
+/// Since issue #752 the `submit_write` command does not come here: it calls
+/// [`submit_in_background`], which answers once the row is queued. This stays
+/// for the callers that go looking for what their write made right after it
+/// -- the standup protocol's page, an action item's ticket, start-work's
+/// branch and pull request -- and so need the attempt behind them first.
 ///
 /// `payload` is a serialized `knobas_source::WriteOp` -- the same shape
 /// `pending_writes` hands back and `amend` takes -- rather than a typed
@@ -54,6 +61,50 @@ pub async fn submit(
 ) -> Result<QueuedWrite, IpcError> {
     let (queued, source_id) = queue(state, payload).await?;
     flush(state, &source_id, queued.id).await?;
+    Ok(queued)
+}
+
+/// Queue an outbound write and **answer at once**; the send happens in the
+/// background (issue #752). What the `submit_write` command does.
+///
+/// Everything [`submit`] refuses is refused here too, before the answer: the
+/// checks and the row are local, and they are the only things between the
+/// reader pressing *Comment* and the dialog closing. The send -- the remote
+/// call, a merge's bounded retry (#721), the re-read of the mirror when it
+/// lands -- is [`flush`], spawned onto the runtime with a copy of the state.
+///
+/// **Nothing about the queue changes.** The spawned flush is the same
+/// `flush_source` the scheduler's tick runs: one flush of a source at a time
+/// (its per-source lock), each entity's writes in the order they were queued,
+/// a moved target held, a refusal recorded. Two writes queued back to back
+/// spawn two flushes; the first sends both in order and the second finds
+/// nothing owed. A flush that fails here is logged, and the tick tries again
+/// within seconds -- the row is the record, not this task.
+///
+/// The settle is announced as every queue transition is, on `activity:new`,
+/// with the write's id in `detail.write_id`: that is what the shell waits for
+/// to re-read the view.
+///
+/// # Errors
+///
+/// As [`submit`], all of them before anything is sent.
+pub async fn submit_in_background(
+    state: &crate::sources::SourcesState,
+    payload: serde_json::Value,
+) -> Result<QueuedWrite, IpcError> {
+    let (queued, source_id) = queue(state, payload).await?;
+    let state = state.clone();
+    let id = queued.id;
+    tokio::spawn(async move {
+        if let Err(error) = flush(&state, &source_id, id).await {
+            tracing::warn!(
+                source = %source_id,
+                write_id = id,
+                %error,
+                "the background send of a queued write failed; the scheduler's tick retries it"
+            );
+        }
+    });
     Ok(queued)
 }
 

@@ -13,6 +13,7 @@
 
 mod adapter_to_mirror;
 mod assets_ipc;
+mod background_write;
 mod backup;
 mod backup_ipc;
 mod builds_of_a_commit;

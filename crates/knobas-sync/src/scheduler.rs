@@ -973,7 +973,10 @@ pub enum TriggerError {
 
 /// The running scheduler.
 ///
-/// Held once, by `knobas-app`'s `SourcesState`.
+/// Held once, by `knobas-app`'s `SourcesState`. `Clone` is a second handle
+/// onto the same scheduler, not a second scheduler: the background send a
+/// queued write gets (issue #752) carries one into its task.
+#[derive(Clone)]
 pub struct Scheduler {
     inner: Arc<Inner>,
 }

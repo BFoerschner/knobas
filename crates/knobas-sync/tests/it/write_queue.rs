@@ -638,40 +638,112 @@ async fn a_refused_write_is_reported_and_never_retried() {
 /// Story 11, and the property the whole feature rests on: a target that moved
 /// on produces a held write rather than a silent overwrite. The control is the
 /// same flush against a target that did *not* move.
+///
+/// Since the deputy's ruling on #752 a comment adds rather than overwrites,
+/// so what it holds on is the state its source declares (#666): a pull
+/// request closed while the comment was queued holds it, one that was only
+/// replied to does not -- and on a ticket, whose kind declares no state, a
+/// reply holds nothing either.
 #[tokio::test]
 async fn a_target_that_changed_holds_the_write_and_one_that_did_not_does_not() {
     let h = harness().await;
-    let untouched = h.mirror("PAY-4", "a payout fails").await;
-    let replied_to = h.mirror("PAY-5", "a payout fails").await;
+    let replied_ticket = h.mirror("PAY-5", "a payout fails").await;
+    let replied_pull = mirror_pull(&h, "o/r#5", "Bound the retry jitter", "open").await;
+    let closed_pull = mirror_pull(&h, "o/r#6", "Bound the retry jitter", "open").await;
 
     h.answer(Answer::Unreachable);
-    let control = h.comment(&untouched, "mine").await;
-    let conflicted = h.comment(&replied_to, "mine").await;
+    let on_ticket = h.comment(&replied_ticket, "mine").await;
+    let on_pull = h.comment(&replied_pull, "also mine").await;
+    let conflicted = h.comment(&closed_pull, "too late").await;
+    assert_eq!(conflicted.target_snapshot["text"], "open");
 
-    // Somebody replies to the thread being answered. Contract §4.1 puts a
-    // comment's text into `body_text`, which is what the queued snapshot took.
+    // Somebody replies to the ticket and to one pull request, and closes the
+    // other. Contract §4.1 puts a reply's text into `body_text`.
     h.mirror("PAY-5", "a payout fails\n\njonas: already on it")
         .await;
+    reply_on_pull(&h, &replied_pull, "jonas: already on it").await;
+    mirror_pull(&h, "o/r#6", "Bound the retry jitter", "closed").await;
 
     h.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
 
     assert_eq!(
         h.delivered(),
-        vec!["mine".to_owned()],
-        "only the untouched target's write was sent"
+        vec!["mine".to_owned(), "also mine".to_owned()],
+        "a reply is not what a comment holds on"
     );
-    assert_eq!(h.reload(control.id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(on_ticket.id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(on_pull.id).await.state, WriteState::Sent);
 
     let held = h.reload(conflicted.id).await;
     assert_eq!(held.state, WriteState::Held);
     // Story 12: both versions, side by side.
-    assert_eq!(held.target_snapshot["text"], "a payout fails");
-    assert_eq!(
-        held.held_snapshot.as_ref().unwrap()["text"],
-        "a payout fails\n\njonas: already on it"
-    );
+    assert_eq!(held.target_snapshot["text"], "open");
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "closed");
     assert!(h.verbs().contains(&"held".to_owned()));
+}
+
+/// The deputy's ruling on #752, the case it was made for: two comments typed
+/// back to back on one pull request are both sent, in order, with no hold --
+/// though the first one's re-sync moves the item's text (and its payload)
+/// between the second being queued and being sent.
+#[tokio::test]
+async fn two_comments_back_to_back_on_one_pull_request_both_go_in_order() {
+    let h = harness().await;
+    let pull = mirror_pull(&h, "o/r#9", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Accept);
+    let first = flusher::queue(
+        &h.deps,
+        &h.source,
+        WriteOp::Comment {
+            entity: pull.to_string(),
+            body: "first".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let second = flusher::queue(
+        &h.deps,
+        &h.source,
+        WriteOp::Comment {
+            entity: pull.to_string(),
+            body: "second".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // The first comment's re-sync lands before the second is sent.
+    reply_on_pull(&h, &pull, "first").await;
+
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["first".to_owned(), "second".to_owned()],
+        "both comments go, in the order they were typed"
+    );
+    assert_eq!(h.reload(first.id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(second.id).await.state, WriteState::Sent);
+    assert!(!h.verbs().contains(&"held".to_owned()), "nothing was held");
+}
+
+/// A reply on a mirrored pull request, as a sync writes it: the text into
+/// `body_text` and a payload that moved (a new `updated_at`), the state left
+/// as it was.
+async fn reply_on_pull(h: &Harness, pull: &EntityRef, reply: &str) {
+    sqlx::query(
+        "update sync.item
+            set body_text = body_text || E'\n\n' || $2,
+                payload = payload || jsonb_build_object('updated_at', now()::text)
+          where entity_id = $1",
+    )
+    .bind(pull.to_string())
+    .bind(reply)
+    .execute(h.pool())
+    .await
+    .unwrap();
 }
 
 /// M3.2's version hold (#286): a page whose version moved past the one the
@@ -867,7 +939,7 @@ async fn a_close_holds_on_the_declared_state_and_not_on_a_retitle() {
 #[tokio::test]
 async fn one_entitys_writes_keep_their_order_without_blocking_another() {
     let h = harness().await;
-    let blocked = h.mirror("PAY-7", "a payout fails").await;
+    let blocked = mirror_pull(&h, "o/r#7", "Bound the retry jitter", "open").await;
     let sibling = h.mirror("PAY-8", "another").await;
 
     h.answer(Answer::Unreachable);
@@ -875,9 +947,10 @@ async fn one_entitys_writes_keep_their_order_without_blocking_another() {
     let second = h.comment(&blocked, "second").await;
     h.comment(&sibling, "unrelated").await;
 
-    // The first write is now held: its target moved while the source was down.
-    // Its successor must not overtake it.
-    h.mirror("PAY-7", "a payout fails\n\nsomebody else").await;
+    // The first write is now held: its target moved while the source was down
+    // (somebody closed the pull request; a comment holds on its declared
+    // state, #752). Its successor must not overtake it.
+    mirror_pull(&h, "o/r#7", "Bound the retry jitter", "closed").await;
     h.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
 
@@ -943,11 +1016,11 @@ async fn a_withdrawn_write_is_terminal_and_recorded() {
 #[tokio::test]
 async fn an_edited_held_write_sends_what_the_user_wrote() {
     let h = harness().await;
-    let ticket = h.mirror("PAY-12", "a payout fails").await;
+    let pull = mirror_pull(&h, "o/r#12", "Bound the retry jitter", "open").await;
 
     h.answer(Answer::Unreachable);
-    let write = h.comment(&ticket, "on it").await;
-    h.mirror("PAY-12", "a payout fails\n\njonas: on it").await;
+    let write = h.comment(&pull, "on it").await;
+    mirror_pull(&h, "o/r#12", "Bound the retry jitter", "closed").await;
     h.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);
@@ -956,7 +1029,7 @@ async fn an_edited_held_write_sends_what_the_user_wrote() {
         &h.deps,
         write.id,
         WriteOp::Comment {
-            entity: ticket.to_string(),
+            entity: pull.to_string(),
             body: "thanks jonas -- adding the trace".to_owned(),
         },
     )

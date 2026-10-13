@@ -370,7 +370,13 @@ async fn a_held_write_never_flushes_on_its_own() {
 
     h.answer(Answer::Unreachable);
     let write = h.comment(&ticket, "mine").await;
-    h.mirror("PAY-6", "a payout fails\n\nsomebody else").await;
+    // The ticket is withdrawn upstream: what holds a comment on a kind that
+    // declares no state (#752; a reply no longer does).
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(ticket.to_string())
+        .execute(&h.deps.pool)
+        .await
+        .unwrap();
     h.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);

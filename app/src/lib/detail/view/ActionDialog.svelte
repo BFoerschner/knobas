@@ -26,6 +26,8 @@
     action,
     settings = [],
     pending = [],
+    start = {},
+    startSettings = [],
     onsubmit,
     onclose,
   }: {
@@ -34,6 +36,15 @@
     settings?: Setting[];
     /** The pending line comments that go with this write (#709), listed for the reader. */
     pending?: PendingComment[];
+    /**
+     * What the fields start with instead of their prefill, by name: the
+     * words of a write the queue refused, opened again by *Edit and resend*
+     * (#752). What was *drawn* -- what an op that sends only changes compares
+     * against -- is still the action's own prefill.
+     */
+    start?: ActionValues;
+    /** The settings changed for that write, drawn changed again. */
+    startSettings?: BuildParameter[];
     /** Queue the write; answers whether it was queued, and the dialog closes only then. */
     onsubmit: (values: ActionValues, changed: BuildParameter[]) => Promise<boolean>;
     onclose: () => void;
@@ -43,15 +54,16 @@
   // values start from the action as it was when pressed and never reset
   // under the reader's typing. `untrack` says so to the rune compiler.
   const initial = untrack(() => ({
-    values: initialValues(action),
+    values: { ...initialValues(action), ...start },
     offered: action.with_settings ? settings : [],
+    changed: new Map(startSettings.map((p) => [p.name, p.value])),
   }));
 
   let values = $state<ActionValues>(initial.values);
   /** The settings this dialog offers, as drawn when it opened. */
   const offered: Setting[] = initial.offered;
   let drafts = $state<Record<string, string>>(
-    Object.fromEntries(offered.map((s) => [s.name, s.secret ? "" : s.value])),
+    Object.fromEntries(offered.map((s) => [s.name, initial.changed.get(s.name) ?? (s.secret ? "" : s.value)])),
   );
   const changed = $derived(changedParameters(offered, drafts));
 

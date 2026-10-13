@@ -70,6 +70,11 @@ impl knobas_sync::scheduler::RunConnections for DbConnections {
 ///
 /// Managed by Tauri, and reached through [`state`] rather than declared as a
 /// command argument -- see there.
+///
+/// `Clone` is cheap -- a pool and three handles -- and exists for one caller:
+/// the background send of a queued write (issue #752) takes a copy into its
+/// task, because the command that queued it has already answered.
+#[derive(Clone)]
 pub struct SourcesState {
     /// The application pool -- for reads a command makes on the caller's thread.
     pub pool: PgPool,

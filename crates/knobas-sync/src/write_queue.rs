@@ -524,11 +524,12 @@ pub async fn discard(deps: &SchedulerDeps, id: i64) -> Result<Option<QueuedWrite
 }
 
 /// The state paths the target's source declares for the target's kind
-/// (`KindPaths::state`, #666), for the one op whose hold reads them: an
-/// `edit_pull_request` that closes or reopens holds on the declared state
-/// rather than the whole record (#706). Empty for every other op, for a
-/// target that is gone, and for a source whose adapter is not compiled in or
-/// declares nothing -- which `project` answers with the whole record.
+/// (`KindPaths::state`, #666), for the ops whose hold reads them
+/// ([`store::reads_declared_state`]): an `edit_pull_request` that closes or
+/// reopens holds on the declared state rather than the whole record (#706),
+/// and a comment, an approval or a review holds on nothing else (#752).
+/// Empty for every other op, for a target that is gone, and for a source
+/// whose adapter is not compiled in or declares nothing.
 ///
 /// The **template** descriptor, keyed by the entity's namespace (the source
 /// instance id), as `knobas-app`'s `declared_paths` reads it: where a source
@@ -540,7 +541,7 @@ async fn declared_state(
     op: &str,
     target: Option<&store::Target>,
 ) -> Result<Vec<StatePath>, FlushError> {
-    let Some(target) = target.filter(|_| op == "edit_pull_request") else {
+    let Some(target) = target.filter(|_| store::reads_declared_state(op)) else {
         return Ok(Vec::new());
     };
     let Some(source) = config::get(&deps.pool, &entity.namespace).await? else {

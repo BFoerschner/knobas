@@ -61,22 +61,47 @@ async fn mirror(pool: &sqlx::PgPool, entity: &EntityRef, title: &str, body: &str
 
 /// Queue a comment against `entity`, snapshotting the target as it stands.
 async fn queue_comment(pool: &sqlx::PgPool, entity: &EntityRef, body: &str) -> wq::QueuedWrite {
-    let snapshot = wq::project(
-        "comment",
-        &serde_json::Value::Null,
-        wq::target_of(pool, entity).await.unwrap().as_ref(),
-        &[],
-    );
-    wq::queue(
+    queue_op(
         pool,
-        &entity.namespace,
         entity,
         "comment",
         serde_json::json!({ "Comment": { "entity": entity.to_string(), "body": body } }),
-        snapshot,
     )
     .await
-    .unwrap()
+}
+
+/// Queue a transition against `entity`: an op whose snapshot is the whole
+/// mirrored record, so a reply moves it. (A comment adds, and since #752
+/// holds only on the declared state, which this fixture's ticket has none of.)
+async fn queue_transition(
+    pool: &sqlx::PgPool,
+    entity: &EntityRef,
+    status: &str,
+) -> wq::QueuedWrite {
+    queue_op(
+        pool,
+        entity,
+        "transition",
+        serde_json::json!({ "Transition": { "entity": entity.to_string(), "status": status } }),
+    )
+    .await
+}
+
+async fn queue_op(
+    pool: &sqlx::PgPool,
+    entity: &EntityRef,
+    op: &str,
+    payload: serde_json::Value,
+) -> wq::QueuedWrite {
+    let snapshot = wq::project(
+        op,
+        &payload,
+        wq::target_of(pool, entity).await.unwrap().as_ref(),
+        &[],
+    );
+    wq::queue(pool, &entity.namespace, entity, op, payload, snapshot)
+        .await
+        .unwrap()
 }
 
 /// Story 8: an edit made while a source cannot take it is still there after a
@@ -86,30 +111,30 @@ async fn queue_comment(pool: &sqlx::PgPool, entity: &EntityRef, body: &str) -> w
 async fn a_queued_write_survives_a_restart() {
     let (pool, ticket) = seeded_pool().await;
 
-    let queued = queue_comment(&pool, &ticket, "on it").await;
+    let queued = queue_transition(&pool, &ticket, "In Progress").await;
     assert_eq!(queued.state, WriteState::Pending);
     assert_eq!(queued.entity_id, ticket.to_string());
-    assert_eq!(queued.op, "comment");
+    assert_eq!(queued.op, "transition");
 
     drop(pool);
     let restarted = knobas_db::test_util::test_pool().await;
     let found = wq::get(&restarted, queued.id).await.unwrap().unwrap();
     assert_eq!(found.id, queued.id);
     assert_eq!(found.state, WriteState::Pending);
-    assert_eq!(found.payload["Comment"]["body"], "on it");
+    assert_eq!(found.payload["Transition"]["status"], "In Progress");
     // And the snapshot came back **carrying the target**, not merely matching
     // whatever was stored. Asserting only that the two agree passes just as
     // well when nothing is persisted at all -- and a queue that restarts with
     // an empty snapshot compares against nothing, which is a silent
     // last-write-wins waiting to happen.
     assert_eq!(found.target_snapshot, queued.target_snapshot);
-    assert_eq!(found.target_snapshot["op"], "comment");
+    assert_eq!(found.target_snapshot["op"], "transition");
     assert_eq!(found.target_snapshot["text"], "a payout fails\n\nit does");
     assert_eq!(
         found.target_snapshot,
         wq::project(
-            "comment",
-            &serde_json::Value::Null,
+            "transition",
+            &found.payload,
             wq::target_of(&restarted, &ticket).await.unwrap().as_ref(),
             &[]
         ),
@@ -534,7 +559,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
     let (pool, ticket) = seeded_pool().await;
     configure(&pool, &ticket.namespace, true).await;
 
-    let write = queue_comment(&pool, &ticket, "answering").await;
+    let write = queue_transition(&pool, &ticket, "Done").await;
     mirror(
         &pool,
         &ticket,
@@ -543,8 +568,8 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
     )
     .await;
     let moved = wq::project(
-        "comment",
-        &serde_json::Value::Null,
+        "transition",
+        &write.payload,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
         &[],
     );

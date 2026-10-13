@@ -26,7 +26,7 @@
     type TreeRead,
     type ViewAction,
   } from "../ipc/entity";
-  import { pendingWrites, type BuildParameter } from "../ipc/sources";
+  import { discardWrite, pendingWrites, type BuildParameter, type QueuedWrite, type WriteOpPayload } from "../ipc/sources";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
@@ -35,6 +35,7 @@
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
+  import { openWriteQueue } from "../shell/write-queue.svelte";
   import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
   import BuildsSummary from "./BuildsSummary.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
@@ -46,9 +47,11 @@
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
+  import ActionDialog from "./view/ActionDialog.svelte";
+  import { echoesAt, sendingMark } from "./view/sending";
   import { PLACEHOLDER_MS, sameAnswer, VIEW_PATIENCE_MS, viewMemory, type Loan } from "./view-read";
   import { actionName, actionPayload, answeredAsDrawn, sendsComments, type ActionValues } from "./view/actions";
-  import { asReview, pendingComments } from "./view/pending-comments.svelte";
+  import { asReview, pendingComments, type PendingComment } from "./view/pending-comments.svelte";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
@@ -102,7 +105,11 @@
     viewAnswered = held !== null && held.view !== undefined;
     settingMarks = {};
     settingWrites = {};
+    sending = [];
+    made = {};
+    resending = null;
     watchQueue(false);
+    untrack(() => void adoptSending(id, mine));
     // Untracked: the effect reads back what it just wrote, and tracking that
     // would re-open the panel every time a view landed.
     untrack(() => {
@@ -238,10 +245,12 @@
   /**
    * Read the source's view again without blanking the panel (#667).
    *
-   * What a write from the view needs: `submit_write` flushes before it answers,
-   * so a merge that went is already at the source, and a view that still
-   * offered *Merge…* would be offering what has happened. Kept on `token` like
-   * `refresh()`; a failed re-read keeps the view that was drawn and says so.
+   * What a write from the view needs once it has **settled** (#752):
+   * `submit_write` answers as soon as the write is queued, so the re-read
+   * waits for the queue to say the write went (`settleOnce`) -- a merge that
+   * went is then at the source, and a view that still offered *Merge…* would
+   * be offering what has happened. Kept on `token` like `refresh()`; a failed
+   * re-read keeps the view that was drawn and says so.
    */
   async function rereadView() {
     const mine = token;
@@ -272,6 +281,7 @@
     action: ViewAction,
     values: ActionValues,
     changed: BuildParameter[] = [],
+    replaces: number | null = null,
   ): Promise<boolean> {
     const name = actionName(action.label);
     const entity = entityId;
@@ -287,17 +297,145 @@
       push({ text: `Could not queue the ${name.toLowerCase()}: knobas cannot send it`, tone: "err" });
       return false;
     }
+    const mine = token;
+    let write: QueuedWrite;
     try {
-      await submitWrite(payload);
+      write = await submitWrite(payload);
     } catch (rejection) {
       push({ text: `Could not queue the ${name.toLowerCase()}: ${ipcErrorMessage(rejection)}`, tone: "err" });
       return false;
     }
     pendingComments.settle(entity, taken);
     push({ text: `${name} queued for ${key}` });
-    await refresh();
-    await rereadView();
+    // The dialog closes now (#752): the write is on the queue, and the panel
+    // draws it as on its way until the queue says it settled.
+    track(mine, write, payload, { action, values, changed, name, entity, taken });
+    // *Edit and resend* replaces (the deputy's ruling on #752): the held or
+    // refused original is withdrawn once its successor is queued, so the
+    // queue holds one write per resend. A reader who withdrew it in the queue
+    // meanwhile already did this; the refusal that answers is nothing to tell.
+    if (replaces !== null) await discardWrite(replaces).catch(() => {});
     return true;
+  }
+
+  // -- writes on their way (#752) ----------------------------------------------
+  //
+  // `submit_write` answers once the write is queued; the send happens behind
+  // the reader. Until it settles the panel draws what it will make, muted and
+  // marked (`view/sending.ts`), from the queue's own rows -- those this panel
+  // queued and, on opening, those `pending_writes` still holds for this
+  // entity, so a restart mid-send draws them too. `activity:new` follows every
+  // queue transition; on each, the queue is asked where these writes are
+  // (`settleOnce`). One that went is re-read into the view and its echo
+  // removed in the same step, so the real comment replaces the pending one
+  // with nothing blank between. One held or refused loses its echo and says
+  // why in a toast, with the way to the queue and -- for a write made here --
+  // the dialog again with what the reader typed.
+
+  /** What a write queued from this panel was made of, for *Edit and resend*. */
+  interface Made {
+    action: ViewAction;
+    values: ActionValues;
+    changed: BuildParameter[];
+    name: string;
+    /** The entity its line comments were pending on, and those it took. */
+    entity: string;
+    taken: PendingComment[];
+  }
+
+  /** This panel's writes on their way, oldest first, as the queue answered them. */
+  let sending = $state<QueuedWrite[]>([]);
+  /** By write id: what each write queued from here was made of. A plain map, read on settle. */
+  let made: Record<number, Made> = {};
+  /** The dialog reopened by *Edit and resend*, with what was typed, and the write it replaces. */
+  let resending = $state<(Made & { replaces: number }) | null>(null);
+
+  /** The newest title a write on its way gives this entity, if any. */
+  const newTitle = $derived(echoesAt(sending, "title").at(-1) ?? null);
+
+  /** Words on their way to the discussion, drawn at the end of the view's last tab. */
+  const saidOnTheirWay = $derived(
+    sourceView === null
+      ? []
+      : echoesAt(sending, "said").map(({ write, echo }) => ({
+          id: write.id,
+          verdict: echo.verdict,
+          text: echo.text,
+          mark: sendingMark(write),
+        })),
+  );
+
+  /** Every other echo, and a comment's where no view is drawn, as one line each. */
+  const sendingLines = $derived([
+    ...echoesAt(sending, "line").map(({ write, echo }, i) => ({
+      key: `${write.id}:l${i}`,
+      text: echo.text,
+      mark: sendingMark(write),
+    })),
+    ...(sourceView === null
+      ? echoesAt(sending, "said").map(({ write, echo }) => ({
+          key: `${write.id}:s`,
+          text: echo.verdict ? `Review (${echo.verdict}): ${echo.text}` : `Comment: ${echo.text}`,
+          mark: sendingMark(write),
+        }))
+      : []),
+  ]);
+
+  /** This entity's own settings in the view: what a reopened dialog offers again. */
+  const viewSettings = $derived(
+    (sourceView?.sections ?? [])
+      .flatMap((section) => section.blocks)
+      .flatMap((block) => (block.type === "settings" && block.entity === entityId ? block.values : [])),
+  );
+
+  /**
+   * Draw `write` as on its way and watch the queue for it. The row is the
+   * queue's answer; `payload` stands in only where an answer carries none.
+   * Asks the queue once at once too: a send quick enough to settle before the
+   * watch was listening announced itself to nobody.
+   */
+  function track(mine: number, write: QueuedWrite, payload: WriteOpPayload, from?: Made) {
+    if (mine !== token) return;
+    if (from) made[write.id] = from;
+    if (!sending.some((w) => w.id === write.id)) sending = [...sending, { ...write, payload: write.payload ?? payload }];
+    watchQueue(true);
+    void settleSettings(mine);
+  }
+
+  /** On opening: this entity's writes the queue still sends, drawn as on their way. */
+  async function adoptSending(id: string, mine: number) {
+    let open: QueuedWrite[];
+    try {
+      open = await pendingWrites();
+    } catch {
+      return;
+    }
+    if (mine !== token) return;
+    const mineToDraw = open
+      .filter((w) => w.entity_id === id && w.state === "pending" && !sending.some((s) => s.id === w.id))
+      .sort((a, b) => a.id - b.id);
+    if (mineToDraw.length === 0) return;
+    sending = [...mineToDraw, ...sending];
+    watchQueue(true);
+  }
+
+  /** A write that will not go on its own: its echo goes, and a toast says why. */
+  function stopped(write: QueuedWrite) {
+    const from = made[write.id];
+    delete made[write.id];
+    // Nothing typed is lost: line comments a refused review took are pending again.
+    for (const { path, side, line, body } of from?.taken ?? []) {
+      pendingComments.add(from!.entity, { path, side, line, body });
+    }
+    const name = from?.name ?? write.op.replace(/_/g, " ");
+    const why = write.state === "held" ? "was held" : "was refused";
+    push({
+      text: `${name} ${why}${write.detail ? `: ${write.detail}` : ""}`,
+      tone: "err",
+      ms: 20_000,
+      action: { label: "Open write queue", run: openWriteQueue },
+      more: from ? [{ label: "Edit and resend", run: () => (resending = { ...from, replaces: write.id }) }] : [],
+    });
   }
 
   // -- a setting edited from the view (#668, ADR-0020 rule 4) ----------------
@@ -437,7 +575,7 @@
    * saved that row again meanwhile, whose newer write keeps its own mark.
    */
   async function settleOnce(mine: number): Promise<void> {
-    if (mine !== token || Object.keys(settingWrites).length === 0) return;
+    if (mine !== token || (Object.keys(settingWrites).length === 0 && sending.length === 0)) return;
     let open;
     try {
       open = await pendingWrites();
@@ -459,14 +597,36 @@
         delete settingWrites[name];
       }
     }
-    watchQueue(Object.keys(settingWrites).length > 0);
-    if (landed.length === 0) return;
+    // The writes on their way: still pending keeps its echo (with its newest
+    // reason), held or refused loses it now, gone (sent, or discarded in the
+    // queue) keeps it until the re-read below has drawn what it made.
+    const went: number[] = [];
+    const still: QueuedWrite[] = [];
+    for (const write of sending) {
+      const row = open.find((w) => w.id === write.id);
+      if (row === undefined) {
+        went.push(write.id);
+        still.push(write);
+      } else if (row.state === "pending") {
+        still.push({ ...row, payload: row.payload ?? write.payload });
+      } else {
+        stopped(row);
+      }
+    }
+    if (still.length !== sending.length || still.some((w, i) => w !== sending[i])) sending = still;
+    watchQueue(Object.keys(settingWrites).length > 0 || sending.length > 0);
+    if (landed.length === 0 && went.length === 0) return;
     await refresh();
     if (mine !== token) return;
     await rereadView();
     if (mine !== token) return;
     for (const [name, mark] of landed) {
       if (settingMarks[name] === mark) delete settingMarks[name];
+    }
+    if (went.length > 0) {
+      for (const id of went) delete made[id];
+      sending = sending.filter((w) => !went.includes(w.id));
+      watchQueue(Object.keys(settingWrites).length > 0 || sending.length > 0);
     }
   }
 
@@ -924,8 +1084,10 @@
     select.value = statusBoard?.current ?? "";
     if (!status || status === statusBoard?.current || moving) return;
     moving = true;
+    const mine = token;
     try {
-      await submitWrite({ Transition: { entity: entityId, status } });
+      const payload: WriteOpPayload = { Transition: { entity: entityId, status } };
+      track(mine, await submitWrite(payload), payload);
       push({ text: `Move to ${status} queued for ${key}` });
     } catch (rejection) {
       push({ text: `Could not queue the move: ${ipcErrorMessage(rejection)}`, tone: "err" });
@@ -1010,14 +1172,16 @@
   async function queueSectionEdit(section: PageSection) {
     if (pageStorage === null || pageVersion === null || queueingSection) return;
     queueingSection = true;
+    const mine = token;
     try {
-      await submitWrite({
+      const payload: WriteOpPayload = {
         UpdatePage: {
           entity: entityId,
           base_version: pageVersion,
           body: replaceSectionBody(pageStorage, section, sectionDraft),
         },
-      });
+      };
+      track(mine, await submitWrite(payload), payload);
       push({ text: `Edit to ${section.heading} queued for ${key}` });
       editingSection = null;
       sectionDraft = "";
@@ -1047,8 +1211,10 @@
   async function queueComment() {
     if (commentDraft.trim() === "" || queueingComment) return;
     queueingComment = true;
+    const mine = token;
     try {
-      await submitWrite({ Comment: { entity: entityId, body: commentDraft } });
+      const payload: WriteOpPayload = { Comment: { entity: entityId, body: commentDraft } };
+      track(mine, await submitWrite(payload), payload);
       push({ text: `Comment queued for ${key}` });
       commenting = false;
       commentDraft = "";
@@ -1219,8 +1385,20 @@
           <span class="k">
             <Monogram text={kindMonogram(shownKind, declared)} label={label} />
             {key}
+            <!-- Where a write on its way will leave it (#752): one chip each. -->
+            {#each echoesAt(sending, "state") as { write, echo } (`${write.id}:${echo.to}`)}
+              <span class="sending-chip" title="Queued; knobas is sending it">
+                → {echo.to}<span class="sending-mark">{sendingMark(write)}</span>
+              </span>
+            {/each}
           </span>
-          <h2 id={titleId}>{detail.row.title}</h2>
+          {#if newTitle}
+            <h2 id={titleId} class="sending-title">
+              {newTitle.echo.title}<span class="sending-mark">{sendingMark(newTitle.write)}</span>
+            </h2>
+          {:else}
+            <h2 id={titleId}>{detail.row.title}</h2>
+          {/if}
           {#if shownKind === "branch"}
             <!--
               A branch's title is its name: the Gitea adapter maps it so
@@ -1326,6 +1504,22 @@
         </p>
       {/if}
 
+      {#if sendingLines.length > 0}
+        <!--
+          Writes on their way that change nothing drawn above (#752): one line
+          each, muted, until the queue settles them. A comment goes here only
+          where there is no view to put it at the end of.
+        -->
+        <ul class="sending-lines" aria-label="Writes on their way">
+          {#each sendingLines as line (line.key)}
+            <li>
+              <span class="sending-what">{line.text}</span>
+              <span class="sending-mark">{line.mark}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
       <!--
         The builds of the commit this stands at (#710), as one line (#732):
         between the view's toolbar and its tabs, where whether the code is
@@ -1357,6 +1551,7 @@
           onaction={queueAction}
           {settingMarks}
           onsetting={saveSetting}
+          said={saidOnTheirWay}
         />
       {:else}
         {@render buildsLine()}
@@ -1612,6 +1807,19 @@
       {/if}
     {/if}
   </div>
+{#if resending}
+  {@const again = resending}
+  <!-- *Edit and resend* (#752): the dialog as it was sent, the reader's words in it. -->
+  <ActionDialog
+    action={again.action}
+    start={again.values}
+    startSettings={again.changed}
+    settings={viewSettings}
+    pending={sendsComments(again.action) ? pendingComments.of(again.entity) : []}
+    onsubmit={(values, changed) => queueAction(again.action, values, changed, again.replaces)}
+    onclose={() => (resending = null)}
+  />
+{/if}
 </aside>
 
 <style>
@@ -1645,6 +1853,64 @@
     flex: none;
     border-radius: 50%;
     background: var(--amber);
+  }
+
+  /*
+    Writes on their way (#752). Colour only where something moves: the
+    hairline and the mark are the link blue the settings rows' *saving…*
+    uses; the words themselves step back to muted. A chip says where the
+    entity will stand, a title its new name, a line anything else.
+  */
+  .sending-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-left: 8px;
+    padding: 0 6px;
+    border: 1px solid color-mix(in srgb, var(--link) 45%, transparent);
+    border-radius: 3px;
+    font: 500 11px/18px var(--mono);
+    color: var(--muted);
+  }
+
+  .sending-mark {
+    margin-left: 8px;
+    font: 400 11px var(--mono);
+    color: var(--link);
+  }
+
+  .sending-chip .sending-mark {
+    margin-left: 0;
+  }
+
+  .sending-title {
+    color: var(--muted);
+  }
+
+  .sending-lines {
+    list-style: none;
+    margin: 0;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--hair);
+    font: 400 12px var(--sans);
+    color: var(--muted);
+  }
+
+  .sending-lines li {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    padding: 2px 0 2px 10px;
+    border-left: 1px solid var(--link);
+    overflow-wrap: anywhere;
+  }
+
+  .sending-lines li + li {
+    margin-top: 4px;
+  }
+
+  .sending-what {
+    min-width: 0;
   }
 
   /*

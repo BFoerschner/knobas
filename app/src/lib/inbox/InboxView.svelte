@@ -95,7 +95,9 @@
       push({ text: `${form.label} queued for ${entry.item.title}` });
       commenting = null;
       draft = "";
-      await inbox.refresh();
+      // Not awaited (#752): the write is queued and its send is behind the
+      // reader; the inbox re-reads on the `activity:new` its settle writes.
+      void inbox.refresh();
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     }

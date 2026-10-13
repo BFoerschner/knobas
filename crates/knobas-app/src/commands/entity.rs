@@ -1661,9 +1661,12 @@ pub async fn unlink<R: tauri::Runtime>(
 /// every growth an IPC change.
 ///
 /// **The write is queued, not sent** -- and the row that comes back is the
-/// write *as queued*, before the attempt, because that is what happened. Read
-/// the outcome back with `pending_writes`, or watch `activity:new`: every
-/// queue transition writes a line. A UI that reported "sent" from this return
+/// write *as queued*, before the attempt, because that is what happened.
+/// Since issue #752 the answer comes as soon as the row exists: the send runs
+/// in the background (`sources::write_queue::submit_in_background`), so a
+/// dialog closes on the local insert rather than on a source's round trip.
+/// Read the outcome back with `pending_writes`, or watch `activity:new`: every
+/// queue transition writes a line, its `detail.write_id` naming the write. A UI that reported "sent" from this return
 /// value would be reporting a hope. The queue is what decides send, pend or
 /// hold (issue #42), and there is no path around it.
 ///
@@ -1684,7 +1687,7 @@ pub async fn submit_write<R: tauri::Runtime>(
     payload: serde_json::Value,
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::write_queue::submit(&state, payload).await
+    crate::sources::write_queue::submit_in_background(&state, payload).await
 }
 
 /// The statuses this ticket's workflow offers from where it stands **right

@@ -435,7 +435,11 @@ test("only an open write of this block's op, on its entity, for one of its rows 
 
   expect(screen.mark("env.SEPA_RETRIES")).toBe("");
   expect(screen.value("env.SEPA_RETRIES")).toBe("5");
-  expect(handlers.length - unlistened).toBe(0);
+  // No row is marked. The pending build on this entity is the one write
+  // watched: since #752 a write on its way is drawn as one (its own line),
+  // and it is the queue's settling of it that ends the watch.
+  expect(screen.target.textContent).toContain("Build");
+  expect(handlers.length - unlistened).toBe(1);
   screen.done();
 });
 

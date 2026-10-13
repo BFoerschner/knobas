@@ -12,15 +12,15 @@
   {#each toasts.items as toast (toast.id)}
     <div class="toast {toast.tone === 'err' ? 'err' : ''}">
       <span>{toast.text}</span>
-      {#if toast.action}
+      {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action (action.label)}
         <button
           class="btn sm"
           onclick={() => {
-            toast.action?.run();
+            action.run();
             dismiss(toast.id);
-          }}>{toast.action.label}</button
+          }}>{action.label}</button
         >
-      {/if}
+      {/each}
       <button class="x" aria-label="Dismiss" onclick={() => dismiss(toast.id)}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
       </button>
