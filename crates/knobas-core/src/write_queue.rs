@@ -379,19 +379,28 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// Three shapes, and which one an op gets is a statement about what that op
 /// could *overwrite* -- never about how much work the comparison is.
 ///
-/// **The indexed text** -- `"comment"`. Contract §4.1 makes every adapter build
-/// `body_text` from the item's title, description and comment texts, so *a new
-/// reply necessarily changes it*: that is the "somebody replied to the thread I
-/// was answering" this op is holding against. An edit to the title or the
-/// description changes it too, which is a false hold rather than a missed one
-/// -- the safe direction, and the only one available without teaching this
-/// module every source's payload shape.
+/// **The declared state** -- `"comment"`, `"approve"` and `"submit_review"`
+/// ([`STATE_HELD_OPS`]; the deputy's ruling on #752, for Björn). These add to
+/// a discussion rather than overwrite anything in it, and the reader works at
+/// their own speed: a second comment typed right after the first must not be
+/// held because the first one's re-sync moved the item's text. So what holds
+/// them is only the target's state as its source **declares** it for the kind
+/// (`KindPaths::state`, #666, resolved by [`resolve_state`] -- the read
+/// `"edit_pull_request"`'s *Close* holds on): a pull request merged or closed
+/// while the words were on their way is a reason to look again; a new reply,
+/// a retitle or a push is not. A kind that declares no state (a Jira ticket,
+/// a Gitea issue) holds them only on the target **leaving the mirror**, as a
+/// create is held. A declaration that resolves nothing projects the **whole
+/// record**, so a miss is a false hold, never a missed one (ADR-0007).
 ///
-/// **The whole mirrored record** -- `"transition"`, `"approve"`,
-/// `"merge_pull_request"`, `"submit_review"`, `"delete_branch"` and
-/// `"update_pull_request_branch"`, the ops that put a *judgement* onto a
-/// target whose current state is the whole reason for the judgement, and
-/// `"set_parameter"`, which overwrites a value. Any change to the target at
+/// Until #752 a comment held on `body_text` (a new reply changed it) and an
+/// approval or a review on the whole record; with the send behind the reader,
+/// both made a quick second write hold on the first one's echo.
+///
+/// **The whole mirrored record** -- `"transition"`, `"merge_pull_request"`,
+/// `"delete_branch"` and `"update_pull_request_branch"`, the ops that put a
+/// *judgement* onto a target whose current state is the whole reason for the
+/// judgement, and `"set_parameter"`, which overwrites a value. Any change to the target at
 /// all holds the write. `"edit_pull_request"` takes this shape only when it
 /// changes the pull request's state; see **Per field** below.
 ///
@@ -414,20 +423,12 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   ticket somebody else already moved, silently, which is the one thing
 ///   issue #42 exists to prevent. A false hold shows both versions side by side
 ///   and is one *Apply anyway* away; a missed hold shows nothing.
-/// * `"approve"` for the sharper version of the same reason: an approval is a
-///   signature on a specific state of a pull request, and a force-push, a new
-///   commit and a new review comment are all reasons to look again before it
-///   lands.
-/// * `"merge_pull_request"` for `"approve"`'s reason, and more so (issue
-///   #667): a merge lands whatever the pull request carries *at the flush*, so
+/// * `"merge_pull_request"` because it acts on a specific state of the pull
+///   request (issue #667): a merge lands whatever the pull request carries *at the flush*, so
 ///   a commit pushed after the reader pressed *Merge…* would otherwise go into
 ///   the base unread. Somebody else merging or closing it first changes the
 ///   record too, and holds the write rather than sending a merge Gitea would
 ///   refuse.
-/// * `"submit_review"` for `"approve"`'s reason exactly (issue #705): a
-///   review -- an approval, a request for changes, or words on the change --
-///   is a reading of one state of the pull request, and a push or another
-///   reviewer's verdict after the reader wrote it is a reason to look again.
 /// * `"delete_branch"` for the merge's reason (issue #707): a delete takes
 ///   whatever the branch carries *at the flush* with it, so a commit pushed
 ///   after the reader pressed *Delete branch…* would otherwise be lost unread
@@ -561,8 +562,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// one where that clause has teeth (issue #286).
 ///
 /// **The whole mirrored record, and the version inside it** -- `"update_page"`
-/// joins `"transition"` and `"approve"` in the `other` arm below, and the
-/// reason is the sharpest of the three: this op *replaces a page's body*.
+/// joins `"transition"` and `"merge_pull_request"` in the `other` arm below,
+/// and the reason is the sharpest of them: this op *replaces a page's body*.
 /// Anything at all that happened to the page since the reader started typing
 /// is something their re-assembled body would silently delete.
 ///
@@ -606,7 +607,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// `payload` is the queued write's own (`WriteOp`'s serde form) and `state`
 /// the target kind's declared state paths; only `"edit_pull_request"` reads
-/// either.
+/// the first, and only it and [`STATE_HELD_OPS`] the second
+/// ([`reads_declared_state`]).
 #[must_use]
 pub fn project(
     op: &str,
@@ -620,12 +622,10 @@ pub fn project(
     {
         return serde_json::json!({ "op": op, "live": live, "text": text });
     }
+    if STATE_HELD_OPS.contains(&op) {
+        return added(op, target, state);
+    }
     match op {
-        "comment" => serde_json::json!({
-            "op": "comment",
-            "live": live,
-            "text": target.map(|t| t.body_text.as_str()),
-        }),
         "create_ticket"
         | "create_branch"
         | "create_pull_request"
@@ -640,15 +640,49 @@ pub fn project(
             "op": op,
             "live": live,
         }),
-        other => serde_json::json!({
-            "op": other,
-            "live": live,
-            "title": target.map(|t| t.title.as_str()),
-            "text": target.map(|t| t.body_text.as_str()),
-            "item_updated_at": target.and_then(|t| t.item_updated_at),
-            "payload": target.map(|t| &t.payload),
-        }),
+        other => whole(other, target),
     }
+}
+
+/// The ops that add to a discussion rather than overwrite anything in it,
+/// and so hold only on the target's **declared state** (the deputy's ruling
+/// on #752; see [`project`]'s *The declared state*). The build triggers and
+/// the creates add too, but beside a container rather than to a discussion,
+/// and they hold on liveness alone: a build moving from running to finished
+/// is when a re-run is asked for, not a reason to hold one.
+pub const STATE_HELD_OPS: &[&str] = &["comment", "approve", "submit_review"];
+
+/// Whether `op`'s hold reads the target kind's declared state paths, so the
+/// queue and the flush know when to look them up: [`STATE_HELD_OPS`], and
+/// `"edit_pull_request"` (its *Close* and *Reopen*, #706).
+#[must_use]
+pub fn reads_declared_state(op: &str) -> bool {
+    op == "edit_pull_request" || STATE_HELD_OPS.contains(&op)
+}
+
+/// What a write that adds compares (#752): its target's declared state, or
+/// only whether the target is there when its kind declares none.
+fn added(op: &str, target: Option<&Target>, state: &[StatePath]) -> serde_json::Value {
+    let Some(target) = target.filter(|_| !state.is_empty()) else {
+        return serde_json::json!({ "op": op, "live": target.is_some() });
+    };
+    match resolve_state(&target.payload, state) {
+        Some(chip) => serde_json::json!({ "op": op, "live": true, "text": chip.text }),
+        // A declaration that reads nothing: fail wide (ADR-0007).
+        None => whole(op, Some(target)),
+    }
+}
+
+/// The whole mirrored record: any change to the target at all holds.
+fn whole(op: &str, target: Option<&Target>) -> serde_json::Value {
+    serde_json::json!({
+        "op": op,
+        "live": target.is_some(),
+        "title": target.map(|t| t.title.as_str()),
+        "text": target.map(|t| t.body_text.as_str()),
+        "item_updated_at": target.and_then(|t| t.item_updated_at),
+        "payload": target.map(|t| &t.payload),
+    })
 }
 
 /// Which of a pull request's fields a queued `edit_pull_request` writes.
@@ -1240,41 +1274,100 @@ mod tests {
         );
     }
 
-    /// A comment holds on the target's text and on nothing else: two targets
-    /// differing only in their payload project the same, and a new reply --
-    /// which contract §4.1 puts into `body_text` -- projects differently.
+    /// The deputy's ruling on #752, pinned: a write that adds to a discussion
+    /// -- a comment, an approval, a review -- holds only on the target's
+    /// declared state. A new reply (which contract §4.1 puts into
+    /// `body_text`), a retitle and a push (a payload change) all go; a merge
+    /// or a close holds, and so does the target leaving the mirror. A kind
+    /// that declares no state holds on that last alone.
     #[test]
-    fn a_comments_target_changes_when_its_text_does() {
-        let target = |body: &str, payload: serde_json::Value| Target {
-            entity_id: "jira:PAY-231".to_owned(),
-            kind: "ticket".to_owned(),
-            title: "a payout fails".to_owned(),
-            body_text: body.to_owned(),
+    fn a_write_that_adds_holds_only_on_the_declared_state() {
+        let before = Target {
+            entity_id: "gitea:o/r#1".to_owned(),
+            kind: "pr".to_owned(),
+            title: "Bound the retry jitter".to_owned(),
+            body_text: "Bound the retry jitter\n\nlooks good".to_owned(),
             item_updated_at: None,
-            payload,
+            payload: serde_json::json!({"state": "open", "head": {"sha": "a1"}}),
         };
+        let replied = Target {
+            body_text: "Bound the retry jitter\n\nlooks good\n\nand a second".to_owned(),
+            ..before.clone()
+        };
+        let retitled = Target {
+            title: "Bound the jitter".to_owned(),
+            ..before.clone()
+        };
+        let pushed = Target {
+            payload: serde_json::json!({"state": "open", "head": {"sha": "b2"}}),
+            ..before.clone()
+        };
+        let closed = Target {
+            payload: serde_json::json!({"state": "closed", "head": {"sha": "a1"}}),
+            ..before.clone()
+        };
+        let merged = Target {
+            payload: serde_json::json!({"state": "closed", "merged": true, "head": {"sha": "a1"}}),
+            ..before.clone()
+        };
+        let declared = gitea_pr_state();
+        let none = serde_json::Value::Null;
 
-        let before = target("a payout fails\n\nit does", serde_json::json!({"v": 1}));
-        let noise = target("a payout fails\n\nit does", serde_json::json!({"v": 2}));
-        let replied = target(
-            "a payout fails\n\nit does\n\nlooking now",
-            serde_json::json!({"v": 1}),
-        );
+        for op in STATE_HELD_OPS {
+            assert!(PROJECTED_OPS.contains(op), "{op} must be stated");
+            assert!(reads_declared_state(op), "{op} reads the declared state");
+            let at = |t: Option<&Target>, s: &[StatePath]| project(op, &none, t, s);
+            for (moved, what) in [
+                (&replied, "a reply"),
+                (&retitled, "a retitle"),
+                (&pushed, "a push"),
+            ] {
+                assert_eq!(
+                    at(Some(&before), &declared),
+                    at(Some(moved), &declared),
+                    "{op}: {what} is not what a write that adds holds on"
+                );
+            }
+            for (moved, what) in [(&closed, "a close"), (&merged, "a merge")] {
+                assert_ne!(
+                    at(Some(&before), &declared),
+                    at(Some(moved), &declared),
+                    "{op}: {what} makes the write moot"
+                );
+            }
+            assert_ne!(
+                at(Some(&before), &declared),
+                at(None, &[]),
+                "{op}: a target that is gone has changed"
+            );
+            // A kind that declares no state: a reply still goes, a vanishing
+            // target still holds.
+            assert_eq!(at(Some(&before), &[]), at(Some(&replied), &[]));
+            assert_eq!(at(Some(&before), &[]), at(Some(&closed), &[]));
+            assert_ne!(at(Some(&before), &[]), at(None, &[]));
+        }
+    }
 
-        assert_eq!(
-            project("comment", &serde_json::Value::Null, Some(&before), &[]),
-            project("comment", &serde_json::Value::Null, Some(&noise), &[]),
-            "a change the op does not care about must not hold the write"
+    /// A write that adds, over a declared state that resolves nothing,
+    /// projects the whole record: the miss is a false hold (ADR-0007).
+    #[test]
+    fn a_comment_over_a_state_the_declaration_misses_holds_on_the_whole_record() {
+        let (before, after) = payload_differs();
+        let projected = project(
+            "comment",
+            &serde_json::Value::Null,
+            Some(&before),
+            &gitea_pr_state(),
         );
+        assert_eq!(projected["payload"], before.payload);
         assert_ne!(
-            project("comment", &serde_json::Value::Null, Some(&before), &[]),
-            project("comment", &serde_json::Value::Null, Some(&replied), &[]),
-            "a new reply is exactly what a queued comment holds against"
-        );
-        assert_ne!(
-            project("comment", &serde_json::Value::Null, Some(&before), &[]),
-            project("comment", &serde_json::Value::Null, None, &[]),
-            "a target that is gone has changed"
+            projected,
+            project(
+                "comment",
+                &serde_json::Value::Null,
+                Some(&after),
+                &gitea_pr_state()
+            )
         );
     }
 
@@ -1309,11 +1402,12 @@ mod tests {
         );
     }
 
-    /// Issue #43's decision, pinned rather than left in a doc comment: the two
+    /// Issue #43's decision, pinned rather than left in a doc comment: the
     /// ops that put a judgement onto a target hold on **anything** about that
     /// target moving -- including a change only the raw payload can see, which
     /// is where every source keeps the status a transition is about and the
-    /// head commit an approval is a signature on.
+    /// head commit a merge takes. (An approval and a review left this list
+    /// with #752: they add, and hold on the declared state.)
     #[test]
     fn a_judgement_op_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
@@ -1326,11 +1420,9 @@ mod tests {
         // one the edit was made against" needs no separate check (#286).
         for op in [
             "transition",
-            "approve",
             "update_page",
             "merge_pull_request",
             "set_parameter",
-            "submit_review",
             // A delete takes what the branch carries at the flush with it, so
             // a push after the press is a reason to look again (#707).
             "delete_branch",

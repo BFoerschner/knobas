@@ -17,12 +17,31 @@
   #43 entry's "it returns the write *as queued*, before the attempt" was always the contract; it
   is now also the timing.
 
-  **What does not change.** The queue's semantics (#42, ADR-0012): the spawned flush is the same
+  **What does not change.** The queue's machinery (#42, ADR-0012): the spawned flush is the same
   `knobas_sync::write_queue::flush_source` the scheduler's tick runs, under the same per-source
   lock, so each entity's writes go in queue order, a moved target is held, a refusal is recorded,
-  and delivery is at-least-once. Settlement is announced as before, one `activity:new` line per
+  and delivery is at-least-once: a send cut off by quitting leaves its row `pending`, and the
+  next start's tick sends it again. Settlement is announced as before, one `activity:new` line per
   transition, with the write's id in `detail.write_id`. A background flush that fails is logged,
   and the tick retries within seconds.
+
+  **What a write that adds holds on** (the deputy's ruling on #752, for Björn: "a second comment
+  typed right after the first must never be held because the first one's re-sync changed the
+  item's text"). `comment`, `approve` and `submit_review` (`knobas_core::write_queue::
+  STATE_HELD_OPS`) hold only on the target's **declared state** (`KindPaths::state`, #666, the
+  read #706's *Close* holds on), or on the target leaving the mirror where its kind declares
+  none. Before, a comment held on `body_text` (any reply) and an approval or a review on the
+  whole record. A declared state that resolves nothing still projects the whole record (a false
+  hold, ADR-0007). The creates and the build triggers already held on liveness alone and keep it:
+  a build going from running to finished is when a re-run is asked for. The overwrite ops
+  (`edit_pull_request`, `set_parameter`, `transition`, `merge_pull_request`, `delete_branch`,
+  `update_pull_request_branch`, `update_page`) keep their holds. `knobas_sync`'s `declared_state`
+  looks the paths up for every op `reads_declared_state` names. A comment queued before this
+  change and still pending after it holds once: its stored snapshot has the old shape. Pinned by
+  `write_queue::tests::a_write_that_adds_holds_only_on_the_declared_state` and, through the
+  queue, `two_comments_back_to_back_on_one_pull_request_both_go_in_order`. `CONTEXT.md`'s
+  **Held write** says what *changed* means for each kind of write; ADR-0012 says nothing about
+  holds and is unchanged.
 
   **Callers that still wait.** `sources::write_queue::submit` keeps the queue-then-flush shape for
   the callers that go looking for what their write made right after it: the standup protocol's
@@ -41,6 +60,9 @@
   where its writes are; one that went is re-read into the view and its echo removed in the same
   step, and one held or refused loses its echo and raises a toast with *Open write queue* and, for
   a write made in that panel, *Edit and resend*, which reopens the dialog with what was typed.
+  Sending it again **replaces** the original: once the new write is queued the held or refused
+  one is withdrawn (`discard_write`), so the queue holds one write per resend (the deputy's
+  ruling on #752).
 
   Pinned by `crates/knobas-app/tests/it/background_write.rs` (the answer before a held adapter's
   write; two writes back to back sent in order), `app/src/lib/detail/Detail.sending.test.svelte.ts`,
