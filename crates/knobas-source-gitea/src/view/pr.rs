@@ -585,6 +585,10 @@ struct Review {
     comments_count: u64,
     #[serde(default)]
     user: Option<UserRef>,
+    /// The team a review was requested from, where it was a team's
+    /// (#721: *Merge…* names who it waits for).
+    #[serde(default)]
+    team: Option<TeamRef>,
     #[serde(default)]
     state: Option<String>,
     #[serde(default)]
@@ -601,6 +605,13 @@ struct Review {
     /// As for [`Pull`]'s times, kept as text for [`when_of`].
     #[serde(default)]
     submitted_at: Option<String>,
+}
+
+/// Gitea's `Team`, the field a review request names it by.
+#[derive(Debug, serde::Deserialize)]
+struct TeamRef {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

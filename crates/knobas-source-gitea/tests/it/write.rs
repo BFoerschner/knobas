@@ -492,7 +492,9 @@ async fn merge_142(server: &MockServer) -> Result<(), SourceError> {
 /// `times` times where given.
 async fn merge_refused(server: &MockServer, message: &str, times: Option<u64>) {
     let mock = Mock::given(method("POST"))
-        .and(path("/api/v1/repos/tidewater/payout-service/pulls/142/merge"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
+        ))
         .respond_with(ResponseTemplate::new(405).set_body_json(json!({
             "message": message,
             "url": "https://gitea.example/api/swagger"
@@ -513,7 +515,9 @@ async fn a_merge_gitea_is_still_checking_is_tried_again_until_it_lands() {
     let server = MockServer::start().await;
     merge_refused(&server, "Please try again later", Some(2)).await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/repos/tidewater/payout-service/pulls/142/merge"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
+        ))
         .respond_with(ResponseTemplate::new(200))
         .with_priority(2)
         .mount(&server)
