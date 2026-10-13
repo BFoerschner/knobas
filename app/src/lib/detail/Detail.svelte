@@ -26,7 +26,7 @@
     type TreeRead,
     type ViewAction,
   } from "../ipc/entity";
-  import { pendingWrites, type BuildParameter, type QueuedWrite, type WriteOpPayload } from "../ipc/sources";
+  import { discardWrite, pendingWrites, type BuildParameter, type QueuedWrite, type WriteOpPayload } from "../ipc/sources";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
@@ -281,6 +281,7 @@
     action: ViewAction,
     values: ActionValues,
     changed: BuildParameter[] = [],
+    replaces: number | null = null,
   ): Promise<boolean> {
     const name = actionName(action.label);
     const entity = entityId;
@@ -309,6 +310,11 @@
     // The dialog closes now (#752): the write is on the queue, and the panel
     // draws it as on its way until the queue says it settled.
     track(mine, write, payload, { action, values, changed, name, entity, taken });
+    // *Edit and resend* replaces (the deputy's ruling on #752): the held or
+    // refused original is withdrawn once its successor is queued, so the
+    // queue holds one write per resend. A reader who withdrew it in the queue
+    // meanwhile already did this; the refusal that answers is nothing to tell.
+    if (replaces !== null) await discardWrite(replaces).catch(() => {});
     return true;
   }
 
@@ -341,8 +347,8 @@
   let sending = $state<QueuedWrite[]>([]);
   /** By write id: what each write queued from here was made of. A plain map, read on settle. */
   let made: Record<number, Made> = {};
-  /** The dialog reopened by *Edit and resend*, with what was typed. */
-  let resending = $state<Made | null>(null);
+  /** The dialog reopened by *Edit and resend*, with what was typed, and the write it replaces. */
+  let resending = $state<(Made & { replaces: number }) | null>(null);
 
   /** The newest title a write on its way gives this entity, if any. */
   const newTitle = $derived(echoesAt(sending, "title").at(-1) ?? null);
@@ -428,7 +434,7 @@
       tone: "err",
       ms: 20_000,
       action: { label: "Open write queue", run: openWriteQueue },
-      more: from ? [{ label: "Edit and resend", run: () => (resending = from) }] : [],
+      more: from ? [{ label: "Edit and resend", run: () => (resending = { ...from, replaces: write.id }) }] : [],
     });
   }
 
@@ -1810,7 +1816,7 @@
     startSettings={again.changed}
     settings={viewSettings}
     pending={sendsComments(again.action) ? pendingComments.of(again.entity) : []}
-    onsubmit={(values, changed) => queueAction(again.action, values, changed)}
+    onsubmit={(values, changed) => queueAction(again.action, values, changed, again.replaces)}
     onclose={() => (resending = null)}
   />
 {/if}

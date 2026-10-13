@@ -24,9 +24,17 @@ let views: SourceView[] = [];
 let open: QueuedWrite[] = [];
 const handlers: (() => void)[] = [];
 
-function row(payload: WriteOpPayload, state: QueuedWrite["state"] = "pending", detail: string | null = null): QueuedWrite {
+/** The id the queue gives the next write. */
+let nextId = 7;
+
+function row(
+  payload: WriteOpPayload,
+  state: QueuedWrite["state"] = "pending",
+  detail: string | null = null,
+  id = 7,
+): QueuedWrite {
   return {
-    id: 7,
+    id,
     source_id: "gitea",
     entity_id: ID,
     op: "comment",
@@ -50,8 +58,8 @@ vi.mock("../ipc/entity", () => ({
     calls.push("submit_write");
     queued.push(payload);
     // The queue's answer: the row as queued, before any send.
-    const answer = row(payload);
-    open = [answer];
+    const answer = row(payload, "pending", null, nextId++);
+    open = [...open, answer];
     return Promise.resolve(answer);
   },
   listContexts: () => Promise.resolve([]),
@@ -89,6 +97,11 @@ vi.mock("../ipc/sources", () => ({
       },
     ]),
   pendingWrites: () => Promise.resolve(open),
+  discardWrite: (id: number) => {
+    calls.push(`discard_write ${id}`);
+    open = open.filter((w) => w.id !== id);
+    return Promise.resolve();
+  },
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -248,6 +261,7 @@ beforeEach(async () => {
   queued.length = 0;
   handlers.length = 0;
   open = [];
+  nextId = 7;
   toasts.items = [];
   writeQueuePanel.open = false;
   await kindRegistry.load();
@@ -318,6 +332,39 @@ test("a refused comment loses its pending item and offers Edit and resend with t
   expect(writeQueuePanel.open).toBe(true);
   dialogButton("Cancel").click();
   flushSync();
+  screen.done();
+});
+
+test("Edit and resend replaces the refused write: one write in the queue, not two", async () => {
+  views = [view([])];
+  const screen = render();
+  await comment(screen, "Bound the jitter.");
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+  const refused = open[0]!;
+  open = [{ ...refused, state: "refused", detail: "403 Forbidden" }];
+  await movement();
+  const told = await vi.waitFor(() => {
+    const toast = toasts.items.find((t) => t.tone === "err");
+    expect(toast).toBeDefined();
+    return toast!;
+  });
+
+  told.more![0]!.run();
+  flushSync();
+  const box = dialog()!.querySelector<HTMLTextAreaElement>("textarea")!;
+  box.value = "Bound the jitter, with the trace.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Comment").click();
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+
+  await vi.waitFor(() => expect(calls).toContain(`discard_write ${refused.id}`));
+  expect(calls.indexOf(`discard_write ${refused.id}`), "withdrawn only once its successor is queued").toBeGreaterThan(
+    calls.lastIndexOf("submit_write"),
+  );
+  expect(open.map((w) => [w.state, w.payload])).toEqual([
+    ["pending", { Comment: { entity: ID, body: "Bound the jitter, with the trace." } }],
+  ]);
   screen.done();
 });
 
