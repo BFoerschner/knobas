@@ -84,7 +84,7 @@ pub const WINDOW_LABEL: &str = "capture";
 
 /// The label of the window the *Open in knobas* button brings forward -- the
 /// one `tauri.conf.json` declares.
-pub(crate) const MAIN_LABEL: &str = "main";
+const MAIN_LABEL: &str = "main";
 
 /// The document the capture window loads.
 ///
@@ -400,6 +400,17 @@ pub fn reveal_note<R: Runtime>(app: &tauri::AppHandle<R>, note_id: &str) -> Resu
     main.set_focus().map_err(IpcError::internal)?;
     app.emit_to(MAIN_LABEL, crate::events::CAPTURE_OPEN_NOTE, note_id)
         .map_err(IpcError::internal)
+}
+
+/// Bring the main window forward: what a second launch asks of the first
+/// (#748). Best effort -- a window that is not there has nothing to focus, and
+/// the second launch has already gone.
+pub fn focus_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 #[cfg(test)]
