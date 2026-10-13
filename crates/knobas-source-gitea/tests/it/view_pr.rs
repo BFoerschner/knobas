@@ -24,6 +24,12 @@ const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const PR: &str = "gitea:tidewater/payout-service#142";
 const HEAD_SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
 /// The account the token belongs to: not the pull request's author.
+///
+/// The adapter remembers who a token is for the life of the process, by
+/// instance, base URL and token (#705), and wiremock hands one test's port to
+/// the next. So every test here whose `/user` answers anything but `VIEWER`
+/// to [`TOKEN`] -- another login, a failure -- or counts the `/user` reads,
+/// uses a token of its own.
 const VIEWER: &str = "knobas";
 const FIRST_SHA: &str = "7be0e4c1d2e3f405162738495a6b7c8d9e0f1a2b";
 
@@ -131,18 +137,23 @@ fn comments() -> Value {
 /// A Gitea that answers every read the view makes, with `pull` as the
 /// pull request's record and `reviews` as its reviews.
 async fn gitea(pull: Value, reviews: Value) -> MockServer {
-    slow_gitea(pull, reviews, None).await
+    slow_gitea(pull, reviews, None, TOKEN).await
 }
 
 /// [`gitea`], with `flight` holding every answer and counting the requests in
 /// flight.
-async fn slow_gitea(pull: Value, reviews: Value, flight: Option<&Arc<InFlight>>) -> MockServer {
+async fn slow_gitea(
+    pull: Value,
+    reviews: Value,
+    flight: Option<&Arc<InFlight>>,
+    token: &str,
+) -> MockServer {
     let server = MockServer::start().await;
     if let Some(flight) = flight {
         flight.watch(&server).await;
     }
     let delay = flight.map_or(Duration::ZERO, |f| f.delay());
-    let token = format!("token {TOKEN}");
+    let token = format!("token {token}");
     let get = |p: String| {
         Mock::given(method("GET"))
             .and(path(p))
@@ -760,9 +771,12 @@ async fn a_section_read_carries_no_toolbar() {
 /// token is (#705) are in flight together. Read in turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
+    // A token of its own, so who it is has not been read before (see
+    // `VIEWER`) and that read is in flight with the tabs'.
+    const FRESH: &str = "a-token-read-beside-the-tabs";
     let flight = InFlight::new(Duration::from_millis(300));
-    let server = slow_gitea(open_pull(), reviews(), Some(&flight)).await;
-    let view = source(&server)
+    let server = slow_gitea(open_pull(), reviews(), Some(&flight), FRESH).await;
+    let view = built(&server, FRESH)
         .view(PR, None)
         .await
         .expect("reads")
@@ -890,8 +904,9 @@ async fn a_review_gitea_would_refuse_is_drawn_disabled_saying_why() {
 /// come, is the write queue's to show (ADR-0004).
 #[tokio::test]
 async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
+    const UNREAD: &str = "a-token-gitea-will-not-name";
     let server = MockServer::start().await;
-    let token = format!("token {TOKEN}");
+    let token = format!("token {UNREAD}");
     let get = |p: String| {
         Mock::given(method("GET"))
             .and(path(p))
@@ -914,6 +929,110 @@ async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "gone" })))
         .mount(&server)
         .await;
-    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let view = knobas_source_gitea::build(instance(server.uri(), UNREAD, json!({})))
+        .expect("builds")
+        .view(PR, None)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(labelled(&view, "Approve…"), review_action("approve", None));
+}
+
+/// A server answering a pull request's whole view to any token, and `/user`
+/// to each `(token, login)` with that login.
+async fn gitea_for_viewers(pull: Value, viewers: &[(&str, &str)]) -> MockServer {
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (format!("{REPO}/pulls/142"), pull),
+        (format!("{REPO}/pulls/142/reviews"), json!([])),
+        (format!("{REPO}/pulls/142/commits"), json!([])),
+        (format!("{REPO}/issues/142/comments"), json!([])),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    for (token, login) in viewers {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/user"))
+            .and(header("Authorization", format!("token {token}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": login })))
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
+/// The adapter against `server`, authenticating with `token`.
+fn built(server: &MockServer, token: &str) -> Box<dyn Source> {
+    knobas_source_gitea::build(instance(server.uri(), token, json!({}))).expect("builds")
+}
+
+async fn asked_who(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .expect("wiremock records requests")
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/user")
+        .count()
+}
+
+/// Who the token is does not change between views, and the app builds a
+/// source for every view it reads, read-ahead included: so it is asked once
+/// per token and server, not once per view (#705). Another token on the same
+/// server is another account, and is asked for.
+#[tokio::test]
+async fn who_the_token_is_is_asked_once_per_token_and_server() {
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    const ONCE: &str = "a-token-asked-once";
+    let server = gitea_for_viewers(own, &[(ONCE, VIEWER), ("another-token", "olu")]).await;
+    for _ in 0..3 {
+        let view = built(&server, ONCE).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Approve…").disabled.as_deref(),
+            Some("You opened this pull request: Gitea does not let its author approve it")
+        );
+    }
+    assert_eq!(asked_who(&server).await, 1, "three views, one GET /user");
+
+    let view = built(&server, "another-token")
+        .view(PR, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        labelled(&view, "Approve…").disabled,
+        None,
+        "olu did not open it"
+    );
+    assert_eq!(asked_who(&server).await, 2);
+}
+
+/// A `/user` Gitea did not answer is not remembered: the next view asks
+/// again, and then knows whose pull request it is.
+#[tokio::test]
+async fn who_the_token_is_is_asked_again_after_a_failed_read() {
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    const AGAIN: &str = "a-token-asked-again";
+    let server = gitea_for_viewers(own, &[(AGAIN, VIEWER)]).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "gone" })))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let first = built(&server, AGAIN).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(labelled(&first, "Approve…").disabled, None);
+    let second = built(&server, AGAIN).view(PR, None).await.unwrap().unwrap();
+    assert!(
+        labelled(&second, "Approve…").disabled.is_some(),
+        "{second:#?}"
+    );
+    assert_eq!(asked_who(&server).await, 2);
 }

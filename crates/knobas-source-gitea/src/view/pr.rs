@@ -201,17 +201,10 @@ impl PullView<'_> {
             .collect())
     }
 
-    /// The login the token belongs to, or `None` where Gitea would not say:
-    /// a failed read is not the view's failure, and Gitea's refusal of a
-    /// review is then the write queue's to show (ADR-0004).
+    /// The login the token belongs to, or `None` where Gitea would not say
+    /// ([`GiteaSource::viewer`], read once per token and server).
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
-        Ok(self
-            .source
-            .client
-            .current_user()
-            .await
-            .ok()
-            .and_then(|user| login(Some(&user))))
+        Ok(self.source.viewer().await)
     }
 }
 
