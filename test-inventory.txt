@@ -1993,6 +1993,7 @@ knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_boundary_canno
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_known_record_keeps_its_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_merge_inside_the_second_changes_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_is_fingerprinted_without_the_repositories_it_embeds
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::an_embedded_user_signing_in_does_not_move_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::key_order_does_not_reach_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::a_branch_named_like_a_sha_is_still_a_branch
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::branch_names_may_contain_the_separators
