@@ -27,9 +27,11 @@
 //! # What is fingerprinted
 //!
 //! The **raw listing record**, which is the payload the item stores (spec §3a)
-//! and costs no request. For a pull request that is before its discussion is
-//! read: a new comment moves the listing's `comments` count (and `updated_at`),
-//! and an edit to an existing comment is not this class of change.
+//! and costs no request; for a pull request, less the repository records it
+//! embeds ([`of_pull`] says why). For a pull request that is before its
+//! discussion is read: a new comment moves the listing's `comments` count (and
+//! `updated_at`), and an edit to an existing comment is not this class of
+//! change.
 //!
 //! # The algorithm is spelled out, and is Jira's
 //!
@@ -68,6 +70,28 @@ pub(crate) fn of(raw: &Value) -> String {
     let mut hasher = Fnv(OFFSET_BASIS);
     feed_value(&mut hasher, raw);
     format!("{:016x}", hasher.0)
+}
+
+/// The fingerprint of one pull request, **without the repositories it
+/// embeds**.
+///
+/// Gitea's pull request record carries the whole repository record twice, in
+/// `base.repo` and `head.repo`, with the repository's `updated_at`, size and
+/// counters, which move on any push into the repository. Seen against the live
+/// fixture (2026-10-14) with the whole record fingerprinted: after a push onto
+/// a fresh branch, the idle run following the incremental one re-delivered all
+/// five seeded (closed, untouched) pull requests on the watermark second, the
+/// same churn #140 measured on the repository entity. What the repository says
+/// is the repository item's to report; this fingerprint answers whether *this
+/// pull request* changed.
+pub(crate) fn of_pull(raw: &Value) -> String {
+    let mut own = raw.clone();
+    for side in ["base", "head"] {
+        if let Some(branch) = own.get_mut(side).and_then(Value::as_object_mut) {
+            branch.remove("repo");
+        }
+    }
+    of(&own)
 }
 
 fn feed_value(hasher: &mut Fnv, value: &Value) {
@@ -142,6 +166,25 @@ mod tests {
         merged["state"] = json!("closed");
         merged["merged"] = json!(true);
         assert_ne!(of(&open), of(&merged));
+    }
+
+    /// The pull request's own fields count; the repositories it embeds do not.
+    #[test]
+    fn a_pull_request_is_fingerprinted_without_the_repositories_it_embeds() {
+        let one = json!({ "number": 144, "state": "open",
+                          "base": { "ref": "main", "repo": { "updated_at": "a" } },
+                          "head": { "sha": "c90d", "repo": { "updated_at": "a" } } });
+        let mut repo_moved = one.clone();
+        repo_moved["base"]["repo"]["updated_at"] = json!("b");
+        repo_moved["head"]["repo"]["updated_at"] = json!("b");
+        assert_eq!(of_pull(&one), of_pull(&repo_moved));
+
+        let mut head_moved = one.clone();
+        head_moved["head"]["sha"] = json!("e1f2");
+        assert_ne!(of_pull(&one), of_pull(&head_moved));
+        let mut retargeted = one.clone();
+        retargeted["base"]["ref"] = json!("release");
+        assert_ne!(of_pull(&one), of_pull(&retargeted));
     }
 
     #[test]

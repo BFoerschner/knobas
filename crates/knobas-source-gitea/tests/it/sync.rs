@@ -1185,6 +1185,34 @@ async fn a_pull_request_merged_in_the_watermark_second_is_picked_up() {
     assert_eq!(idle_cursor, moved);
 }
 
+/// The other direction of #764: what a pull request record **embeds** of its
+/// repository (`base.repo`, `head.repo`: the whole repository record on a real
+/// Gitea, with its `updated_at` and counters) moves on every push into the
+/// repository, and is the repository item's to report. A pull request on the
+/// watermark whose own fields stand still is not re-delivered for it. Seen
+/// live with the whole record fingerprinted: after a push onto a fresh branch,
+/// the five seeded pull requests on the watermark second came again.
+#[tokio::test]
+async fn a_pull_request_on_the_watermark_is_not_re_delivered_for_its_repository() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    let csv = state
+        .pulls
+        .get_mut("tidewater/payout-service")
+        .and_then(|pulls| pulls.iter_mut().find(|p| p["number"] == 144))
+        .expect("the fixture has #144");
+    csv["base"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
+    csv["head"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
+    fake.remount(&state).await;
+
+    let (items, next) = again(&*source, &cursor).await;
+    assert!(ids(&items, "pr").is_empty(), "{items:?}");
+    assert_eq!(next, cursor);
+}
+
 /// The same hole on the repository record: an edit inside the second the
 /// previous run read it leaves `updated_at` where it was.
 #[tokio::test]

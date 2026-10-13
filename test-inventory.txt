@@ -1992,6 +1992,7 @@ knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::serialisation_is_stab
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_known_record_keeps_its_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_merge_inside_the_second_changes_the_fingerprint
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_is_fingerprinted_without_the_repositories_it_embeds
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::key_order_does_not_reach_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::a_branch_named_like_a_sha_is_still_a_branch
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::branch_names_may_contain_the_separators
@@ -2082,6 +2083,7 @@ knobas-source-gitea	test/it	sync::a_moved_branch_head_is_re_emitted_and_an_untou
 knobas-source-gitea	test/it	sync::a_new_commit_on_a_moved_branch_is_emitted_once
 knobas-source-gitea	test/it	sync::a_pull_request_deleted_mid_run_is_skipped_and_the_run_succeeds
 knobas-source-gitea	test/it	sync::a_pull_request_merged_in_the_watermark_second_is_picked_up
+knobas-source-gitea	test/it	sync::a_pull_request_on_the_watermark_is_not_re_delivered_for_its_repository
 knobas-source-gitea	test/it	sync::a_pull_request_whose_discussion_is_refused_is_still_indexed
 knobas-source-gitea	test/it	sync::a_refusal_that_ends_a_full_sync_names_the_repository
 knobas-source-gitea	test/it	sync::a_refusal_under_a_listed_repository_is_not_read_as_deleted

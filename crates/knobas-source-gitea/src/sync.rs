@@ -758,7 +758,7 @@ async fn pulls(
             let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
             // Taken from the listing record before the discussion is read, so
             // deciding to skip costs no request.
-            let fingerprint = crate::fingerprint::of(&raw);
+            let fingerprint = crate::fingerprint::of_pull(&raw);
             if let (Some(mark), Some(when)) = (watermark, updated) {
                 if when < mark {
                     break 'paging;

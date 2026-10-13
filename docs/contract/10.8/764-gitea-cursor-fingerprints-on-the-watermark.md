@@ -8,8 +8,9 @@
 
   **The cursor.** `RepoCursor.pulls_at_watermark: Vec<u64>` becomes
   `pulls_seen_at_watermark: BTreeMap<u64, String>`, number to the fingerprint of the listing record
-  as delivered (`fingerprint.rs`, FNV-1a over a canonical encoding, the algorithm Jira's #345
-  persists). `RepoCursor` gains `repo_fingerprint: Option<String>`, the repository record's. The
+  as delivered, less the repository records it embeds in `base.repo` and `head.repo`, which move
+  on any push into the repository (`fingerprint.rs`, FNV-1a over a canonical encoding, the
+  algorithm Jira's #345 persists). `RepoCursor` gains `repo_fingerprint: Option<String>`, the repository record's. The
   walk already re-read the watermark second (it stops only below the mark), so the overlap is the
   exact second, not a window; a pull request on it is skipped only when its fingerprint matches.
   The repository is re-emitted when its `updated_at` **or** its fingerprint differs. Unchanged
@@ -28,7 +29,8 @@
   migration, no setting.
 
   Pinned by: `tests/it/sync.rs`'s `a_pull_request_merged_in_the_watermark_second_is_picked_up`,
-  `a_repository_edited_in_the_second_it_was_read_is_picked_up` and
+  `a_repository_edited_in_the_second_it_was_read_is_picked_up`,
+  `a_pull_request_on_the_watermark_is_not_re_delivered_for_its_repository` and
   `a_cursor_from_before_the_fingerprints_is_still_a_position`; `fingerprint::tests`'s
   `a_known_record_keeps_its_fingerprint` (a literal from an independent implementation); the
   contract battery over the fake. Witnessed live by `just gitea-live`'s
