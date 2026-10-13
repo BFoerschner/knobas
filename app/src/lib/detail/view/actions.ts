@@ -11,7 +11,14 @@
  * button this shell cannot queue would fail on press.
  */
 import type { ViewAction, Setting } from "../../ipc/entity";
-import type { BuildParameter, MergeStyle, PullRequestState, ReviewVerdict, WriteOpPayload } from "../../ipc/sources";
+import type {
+  BuildParameter,
+  MergeStyle,
+  PullRequestState,
+  ReviewComment,
+  ReviewVerdict,
+  WriteOpPayload,
+} from "../../ipc/sources";
 
 /** What a dialog answers: each field's value, by its `name`. A flag is `"true"` or `"false"`. */
 export type ActionValues = Record<string, string>;
@@ -106,13 +113,20 @@ function editPullRequest(entity: string, values: ActionValues, drawn: ActionValu
 /**
  * The payload for one op, from the entity the write targets, the dialog's
  * values, the entity's settings the reader changed for this one write (an
- * action with `with_settings`), and what each field was drawn with (its
- * declared prefill, `initialValues`) for an op that sends only what changed.
+ * action with `with_settings`), what each field was drawn with (its
+ * declared prefill, `initialValues`) for an op that sends only what changed,
+ * and the reader's pending line comments (an action that sends them, #709).
  * `null` where the values cannot make one.
  */
 const PAYLOADS: Record<
   string,
-  (entity: string, values: ActionValues, settings: BuildParameter[], drawn: ActionValues) => WriteOpPayload | null
+  (
+    entity: string,
+    values: ActionValues,
+    settings: BuildParameter[],
+    drawn: ActionValues,
+    comments: ReviewComment[],
+  ) => WriteOpPayload | null
 > = {
   merge_pull_request: (entity, values) =>
     isMergeStyle(values.style) ? { MergePullRequest: { entity, style: values.style } } : null,
@@ -125,11 +139,11 @@ const PAYLOADS: Record<
   // words; a blank body is no reply, whoever builds it.
   comment: (entity, values) => (values.body?.trim() ? { Comment: { entity, body: values.body } } : null),
   // A review (#705). The verdict is the action's fixed value -- *Approve…*
-  // and *Request changes…* are one op -- and never read off the label. No
-  // line comments yet: #709 adds them from the *Files* tab.
-  submit_review: (entity, values) =>
+  // and *Request changes…* are one op -- and never read off the label. The
+  // line comments are the reader's pending ones from the *Files* tab (#709).
+  submit_review: (entity, values, _settings, _drawn, comments) =>
     isReviewVerdict(values.verdict)
-      ? { SubmitReview: { entity, verdict: values.verdict, body: values.body ?? "", comments: [] } }
+      ? { SubmitReview: { entity, verdict: values.verdict, body: values.body ?? "", comments } }
       : null,
   // A branch's life (#707). The two creates target the repository, which a
   // branch's or a commit's view names as the action's own `entity`; the
@@ -158,17 +172,26 @@ const PAYLOADS: Record<
  * op it has no entry for, or values the op cannot carry. It targets the
  * entity the action names where it names one (#707), else `entity`, the one
  * the view is of; the shell never derives one id from another.
+ *
+ * The `pending` line comments go only with an action that says it sends
+ * them (#709); one that is only its line comments (`requires`) with none
+ * pending is `null`.
  */
 export function actionPayload(
   action: ViewAction,
   entity: string,
   values: ActionValues,
   settings: BuildParameter[] = [],
+  pending: ReviewComment[] = [],
 ): WriteOpPayload | null {
+  if (action.line_comments === "requires" && pending.length === 0) return null;
+  const comments = sendsComments(action) ? pending : [];
   // The source's fixed answers lie under the dialog's (#705); a source never
   // fixes a name it also asks for, so the order only matters to a bad one.
   const answered = { ...action.values, ...values };
-  return PAYLOADS[action.write_op]?.(action.entity ?? entity, answered, settings, initialValues(action)) ?? null;
+  return (
+    PAYLOADS[action.write_op]?.(action.entity ?? entity, answered, settings, initialValues(action), comments) ?? null
+  );
 }
 
 /**
@@ -227,12 +250,29 @@ export function changedParameters(values: Setting[], drafts: Record<string, stri
   });
 }
 
+/** Whether `action` sends the reader's pending line comments with it (#709). */
+export function sendsComments(action: ViewAction): boolean {
+  return action.line_comments !== "none";
+}
+
 /**
- * The actions to draw: those whose op the source's descriptor declares
- * (`submit_write` refuses any other) and this shell can queue.
+ * Whether this shell can queue `op` for a source declaring `declared`: the
+ * source declares it (`submit_write` refuses any other) and the payload table
+ * has an entry for it.
  */
-export function offeredActions(actions: ViewAction[], declared: string[]): ViewAction[] {
-  return actions.filter((action) => declared.includes(action.write_op) && action.write_op in PAYLOADS);
+export function queueable(op: string, declared: string[]): boolean {
+  return declared.includes(op) && op in PAYLOADS;
+}
+
+/**
+ * The actions to draw: those this shell can queue ({@link queueable}), less
+ * any that is only the reader's line comments (`requires`, #709) while
+ * `pending` is none.
+ */
+export function offeredActions(actions: ViewAction[], declared: string[], pending = 0): ViewAction[] {
+  return actions.filter(
+    (action) => queueable(action.write_op, declared) && (action.line_comments !== "requires" || pending > 0),
+  );
 }
 
 /** The label without the ellipsis that says a dialog follows: the confirm button's words. */

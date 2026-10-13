@@ -6,14 +6,18 @@
 //! Gitea's own rule (*review event REQUEST_CHANGES requires a body*).
 
 use knobas_source::ReviewVerdict;
-use knobas_source::view::{ActionField, FieldKind, ViewAction};
+use knobas_source::view::{ActionField, Commenting, FieldKind, LineComments, ViewAction};
 
 use super::{Pull, login};
 
 /// The toolbar's conversation actions, first in it: what `viewer` -- the
 /// token's own login, `None` where it could not be read -- may say on `pull`.
 ///
-/// *Comment…* always. The two verdicts only where Gitea could ever take them
+/// *Submit review…* -- the reader's pending line comments as a review that
+/// only comments (#709) -- first and primary on an open pull request, whoever
+/// opened it: Gitea takes a comment-only review from the author too, and the
+/// shell draws it only while there are comments to send. *Comment…* always. The two verdicts
+/// only where Gitea could ever take them
 /// from this account, each a 422 against the real server otherwise: on an
 /// open pull request (*can't submit review for a closed or merged PR*) that
 /// `viewer` did not open (*approve your own pull is not allowed*, *reject your
@@ -24,9 +28,19 @@ use super::{Pull, login};
 /// not be read the verdicts are offered, and Gitea's refusal, should it come,
 /// is the write queue's to show (ADR-0004).
 pub(super) fn actions(pull: &Pull, viewer: Option<&str>) -> Vec<ViewAction> {
-    let mut actions = vec![comment()];
-    let open = !pull.merged && pull.state.as_deref() == Some("open");
+    let open = takes_reviews(pull);
     let own = viewer.is_some() && login(pull.user.as_ref()).as_deref() == viewer;
+    let mut actions = Vec::new();
+    if open {
+        // First and filled: drawn only while comments wait to be sent, and
+        // then sending them is the thing to do next (the #709 ruling).
+        actions.push(ViewAction {
+            line_comments: LineComments::Requires,
+            primary: true,
+            ..review(ReviewVerdict::Comment, "Submit review…", false)
+        });
+    }
+    actions.push(comment());
     if open && !own {
         actions.push(review(ReviewVerdict::Approve, "Approve…", false));
         actions.push(review(
@@ -36,6 +50,20 @@ pub(super) fn actions(pull: &Pull, viewer: Option<&str>) -> Vec<ViewAction> {
         ));
     }
     actions
+}
+
+/// Whether Gitea takes a review of `pull` at all: only while it is open
+/// (*can't submit review for a closed or merged PR*, a 422).
+pub(super) fn takes_reviews(pull: &Pull) -> bool {
+    !pull.merged && pull.state.as_deref() == Some("open")
+}
+
+/// How a reader comments on `pull`'s diff (#709): through `submit_review`,
+/// while Gitea takes a review of it; `None` once it is closed or merged.
+pub(super) fn commenting(pull: &Pull) -> Option<Commenting> {
+    takes_reviews(pull).then(|| Commenting {
+        write_op: crate::WRITE_OP_SUBMIT_REVIEW.to_owned(),
+    })
 }
 
 /// *Comment…*: a reply on the discussion, through the `comment` op, in any
@@ -50,7 +78,9 @@ fn comment() -> ViewAction {
     }
 }
 
-/// A review with `verdict`, labelled `label`, its words `required` or not.
+/// A review with `verdict`, labelled `label`, its words `required` or not,
+/// sending the reader's pending line comments with it when there are some
+/// (#709).
 fn review(verdict: ReviewVerdict, label: &str, required: bool) -> ViewAction {
     // The SPI's own word for the verdict, as the shell's payload reads it
     // (`ReviewVerdict`'s snake_case serde form, pinned in `knobas_source`).
@@ -65,6 +95,7 @@ fn review(verdict: ReviewVerdict, label: &str, required: bool) -> ViewAction {
             ..ActionField::new("body", "Comment", FieldKind::LongText)
         }],
         values: [("verdict".to_owned(), word.to_owned())].into(),
+        line_comments: LineComments::Sends,
         ..ViewAction::new(crate::WRITE_OP_SUBMIT_REVIEW, label)
     }
 }

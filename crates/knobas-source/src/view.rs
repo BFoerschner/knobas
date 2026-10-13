@@ -15,7 +15,9 @@
 //! interpolates it and never renders it as markup (ADR-0020 rule 5).
 
 pub use crate::Tone;
-pub use crate::diff::{DiffChange, DiffFile, DiffLine, DiffLineKind, Hunk};
+pub use crate::diff::{
+    DiffChange, DiffFile, DiffLine, DiffLineKind, FileThread, Hunk, LineComment, LineThread,
+};
 
 /// What [`Source::view`](crate::Source::view) answers for one entity: its
 /// sections, in the order the shell draws them as tabs. The first is the one a
@@ -90,9 +92,24 @@ pub enum Block {
     /// A diff, parsed by [`crate::diff`] and capped there. `truncated` says
     /// the per-view cap cut it: some file after the cut carries its counts and
     /// no lines.
+    ///
+    /// `commentable` says the reader may write line comments on it (issue
+    /// #709): a pull request's diff, while a review can still be given. The
+    /// shell keeps what the reader writes as pending comments of the entity
+    /// the view is of, and they go with the toolbar actions that take them
+    /// ([`ViewAction::line_comments`]). `None` -- a commit's diff, a closed
+    /// pull request's -- draws no way to comment. Absent on the wire reads as
+    /// `None`.
     Diff {
         files: Vec<DiffFile>,
         truncated: bool,
+        #[serde(default)]
+        commentable: Option<Commenting>,
+        /// The threads on files this diff no longer holds (issue #709): each
+        /// outdated, drawn in a list at the end of the diff. Absent on the
+        /// wire reads as empty.
+        #[serde(default)]
+        gone: Vec<FileThread>,
     },
     /// Plain text with meaningful lines, drawn monospace: a build log's tail.
     /// `truncated` says this is the end of something longer.
@@ -252,6 +269,39 @@ pub struct ViewAction {
     /// Absent on the wire reads as `None`.
     #[serde(default)]
     pub entity: Option<String>,
+    /// Whether the action sends the reader's pending line comments on the
+    /// entity's diff (issue #709; [`Block::Diff`]'s `commentable`). Absent on
+    /// the wire reads as [`LineComments::None`].
+    #[serde(default)]
+    pub line_comments: LineComments,
+}
+
+/// What a [`ViewAction`] does with the reader's pending line comments (issue
+/// #709). The comments are the shell's -- written on a commentable
+/// [`Block::Diff`] and kept until sent or discarded -- and the action only
+/// says whether they go with it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineComments {
+    /// The action never sends them (*Comment…*, *Merge…*).
+    #[default]
+    None,
+    /// The action sends them when there are some, and is drawn either way
+    /// (*Approve…*, *Request changes…*): its dialog lists what goes with it.
+    Sends,
+    /// The action sends them and is drawn only while there are some
+    /// (*Submit review…*, a review that is the comments and nothing else).
+    Requires,
+}
+
+/// How a reader comments on a [`Block::Diff`]'s lines (issue #709).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Commenting {
+    /// The [`WriteOp`](crate::WriteOp) identifier the comments are sent
+    /// through (`submit_review`). The shell offers to comment only where the
+    /// source's descriptor declares it and the shell can queue it, as for an
+    /// action.
+    pub write_op: String,
 }
 
 impl ViewAction {
@@ -270,6 +320,7 @@ impl ViewAction {
             with_settings: false,
             values: std::collections::BTreeMap::new(),
             entity: None,
+            line_comments: LineComments::None,
         }
     }
 }
@@ -478,7 +529,13 @@ mod tests {
             },
             ViewAction {
                 values: [("verdict".to_owned(), "approve".to_owned())].into(),
+                line_comments: LineComments::Sends,
                 ..ViewAction::new("submit_review", "Approve…")
+            },
+            ViewAction {
+                values: [("verdict".to_owned(), "comment".to_owned())].into(),
+                line_comments: LineComments::Requires,
+                ..ViewAction::new("submit_review", "Submit review…")
             },
             ViewAction {
                 confirm: Some("Delete feature/x?".into()),
@@ -540,8 +597,38 @@ mod tests {
                 ],
             },
             Block::Diff {
-                files: crate::diff::parse(include_str!("../fixtures/diff/whole-commit.diff")),
+                files: {
+                    let mut files =
+                        crate::diff::parse(include_str!("../fixtures/diff/whole-commit.diff"));
+                    files[0].threads = vec![LineThread {
+                        side: crate::ReviewSide::Old,
+                        line: 3,
+                        outdated: true,
+                        comments: vec![LineComment {
+                            author: "priya.nair".into(),
+                            body: "Bound the `jitter`.".into(),
+                            at: Some("2026-08-22T09:00:00Z".into()),
+                        }],
+                    }];
+                    files
+                },
                 truncated: true,
+                commentable: Some(Commenting {
+                    write_op: "submit_review".into(),
+                }),
+                gone: vec![FileThread {
+                    path: "src/dropped.rs".into(),
+                    thread: LineThread {
+                        side: crate::ReviewSide::New,
+                        line: 7,
+                        outdated: true,
+                        comments: vec![LineComment {
+                            author: "jonas.becker".into(),
+                            body: "Why a second retry loop?".into(),
+                            at: None,
+                        }],
+                    },
+                }],
             },
             Block::Log {
                 text: "[12:00:01] Step 1/3\n[12:00:09] FAILED".into(),
@@ -741,9 +828,36 @@ mod tests {
                 "facts": [{ "label": "Outcome", "value": "failed", "tone": "err" }]
             })
         );
+        let mut files = crate::diff::parse(include_str!("../fixtures/diff/add.diff"));
+        files[0].threads = vec![LineThread {
+            side: crate::ReviewSide::New,
+            line: 2,
+            outdated: false,
+            comments: vec![LineComment {
+                author: "olu".into(),
+                body: "nit".into(),
+                at: None,
+            }],
+        }];
         let diff = serde_json::to_value(Block::Diff {
-            files: crate::diff::parse(include_str!("../fixtures/diff/add.diff")),
+            files,
             truncated: false,
+            commentable: Some(Commenting {
+                write_op: "submit_review".into(),
+            }),
+            gone: vec![FileThread {
+                path: "gone.txt".into(),
+                thread: LineThread {
+                    side: crate::ReviewSide::Old,
+                    line: 4,
+                    outdated: true,
+                    comments: vec![LineComment {
+                        author: "olu".into(),
+                        body: "was".into(),
+                        at: None,
+                    }],
+                },
+            }],
         })
         .unwrap();
         assert_eq!(
@@ -751,6 +865,14 @@ mod tests {
             serde_json::json!({
                 "type": "diff",
                 "truncated": false,
+                "commentable": { "write_op": "submit_review" },
+                "gone": [{
+                    "path": "gone.txt",
+                    "thread": {
+                        "side": "old", "line": 4, "outdated": true,
+                        "comments": [{ "author": "olu", "body": "was", "at": null }]
+                    }
+                }],
                 "files": [{
                     "path": "added.txt",
                     "old_path": null,
@@ -764,10 +886,32 @@ mod tests {
                             { "kind": "add", "old": null, "new": 1, "text": "brand" },
                             { "kind": "add", "old": null, "new": 2, "text": "new" }
                         ]
+                    }],
+                    "threads": [{
+                        "side": "new", "line": 2, "outdated": false,
+                        "comments": [{ "author": "olu", "body": "nit", "at": null }]
                     }]
                 }]
             })
         );
+        // A diff drawn before #709 -- no threads, no `commentable` -- decodes
+        // as one nobody commented on and nobody may.
+        let before: Block = serde_json::from_value(serde_json::json!({
+            "type": "diff", "truncated": false,
+            "files": [{ "path": "a", "old_path": null, "change": "added", "additions": 0,
+                        "deletions": 0, "truncated": false, "hunks": [] }]
+        }))
+        .unwrap();
+        let Block::Diff {
+            files,
+            commentable,
+            gone,
+            ..
+        } = before
+        else {
+            panic!("a diff decodes as a diff");
+        };
+        assert!(files[0].threads.is_empty() && commentable.is_none() && gone.is_empty());
         // A row's commit hint is absent on the wire when it is `None`, so the
         // shell's row keeps the shape #661 froze; one sent without it decodes.
         let row = ViewRow {
@@ -821,7 +965,8 @@ mod tests {
             "disabled": "Not mergeable",
             "with_settings": false,
             "values": {},
-            "entity": null
+            "entity": null,
+            "line_comments": "none"
         });
         let action = ViewAction {
             fields: vec![
@@ -887,6 +1032,22 @@ mod tests {
             serde_json::to_value(&approve).unwrap()["values"],
             serde_json::json!({ "verdict": "approve" })
         );
+        // What an action does with the pending line comments (#709): a
+        // snake_case word, `none` when absent.
+        for (use_, word) in [
+            (LineComments::None, "none"),
+            (LineComments::Sends, "sends"),
+            (LineComments::Requires, "requires"),
+        ] {
+            let action = ViewAction {
+                line_comments: use_,
+                ..ViewAction::new("submit_review", "Submit review…")
+            };
+            assert_eq!(
+                serde_json::to_value(&action).unwrap()["line_comments"],
+                word
+            );
+        }
         assert_eq!(
             serde_json::from_value::<ActionField>(serde_json::json!({
                 "name": "body", "label": "Body", "kind": { "type": "long_text" }

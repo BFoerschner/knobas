@@ -145,6 +145,7 @@ function overview(state: string, mergeable: boolean): SourceView {
         with_settings: false,
         values: {},
         entity: null,
+        line_comments: "none",
       },
     ],
   };
@@ -257,6 +258,7 @@ function reviewable(): SourceView {
         with_settings: false,
         values: { verdict: "request_changes" },
         entity: null,
+        line_comments: "sends",
       },
     ],
   };
@@ -291,7 +293,15 @@ test("Request changes… queues SubmitReview with the fixed verdict and the word
 
 /** The pull request's toolbar with its maintenance: one op, the state fixed. */
 function maintainable(): SourceView {
-  const plain = { primary: false, danger: false, disabled: null, with_settings: false, confirm: null, entity: null };
+  const plain = {
+    primary: false,
+    danger: false,
+    disabled: null,
+    with_settings: false,
+    confirm: null,
+    entity: null,
+    line_comments: "none" as const,
+  };
   return {
     ...overview("closed", false),
     actions: [
@@ -367,5 +377,113 @@ test("Edit… sent back unchanged queues nothing, closes, and says so without an
   expect(toasts.items.map((t) => [t.text, t.tone ?? null])).toEqual([
     ["Nothing changed, so no edit was queued", null],
   ]);
+  screen.done();
+});
+
+// -- the pending line comments (#709) -----------------------------------------
+
+const { pendingComments } = await import("./view/pending-comments.svelte");
+
+/** The toolbar as Gitea draws an open pull request's reviews (#709). */
+function withSubmit(): SourceView {
+  const view = reviewable();
+  return {
+    ...view,
+    actions: [
+      {
+        ...view.actions[0]!,
+        label: "Submit review…",
+        fields: [{ name: "body", label: "Comment", kind: { type: "long_text" }, value: null, required: false, placeholder: null }],
+        values: { verdict: "comment" },
+        line_comments: "requires",
+      },
+      ...view.actions,
+    ],
+  };
+}
+
+function toolbarAction(target: HTMLElement, label: string): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll<HTMLButtonElement>("[role=toolbar] button")].find((b) =>
+    b.textContent!.trim().startsWith(label),
+  );
+}
+
+test("Submit review… is offered only while comments are pending, says how many, and sends them", async () => {
+  writeOps = ["comment", "submit_review"];
+  views = [withSubmit()];
+  const screen = render();
+  await vi.waitFor(() => expect(toolbarAction(screen.target, "Request changes…")).toBeDefined());
+  expect(toolbarAction(screen.target, "Submit review…"), "nothing pending, nothing to submit").toBeUndefined();
+
+  pendingComments.add(ID, { path: "src/retry.rs", side: "old", line: 2, body: "why drop it?" });
+  pendingComments.add(ID, { path: "src/retry.rs", side: "new", line: 3, body: "bound it" });
+  flushSync();
+  const submit = toolbarAction(screen.target, "Submit review…")!;
+  expect(submit.textContent!.replace(/\s+/g, " ")).toContain("2");
+  submit.click();
+  flushSync();
+  const dialog = document.querySelector("[role=dialog]")!.textContent!.replace(/\s+/g, " ");
+  expect(dialog).toContain("2 line comments go with this review");
+  expect(dialog).toContain("src/retry.rs, old line 2");
+  expect(dialog).toContain("bound it");
+  dialogButton("Submit review").click();
+  // Written while the review is on its way: not in it, so still pending after.
+  pendingComments.add(ID, { path: "src/retry.rs", side: "new", line: 4, body: "one more" });
+
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+  expect(queued).toEqual([
+    {
+      SubmitReview: {
+        entity: ID,
+        verdict: "comment",
+        body: "",
+        comments: [
+          { path: "src/retry.rs", side: "old", line: 2, body: "why drop it?" },
+          { path: "src/retry.rs", side: "new", line: 3, body: "bound it" },
+        ],
+      },
+    },
+  ]);
+  // Sent, so no longer pending -- only the one written since is; and with
+  // none pending, no Submit review….
+  await vi.waitFor(() => expect(pendingComments.of(ID).map((d) => d.body)).toEqual(["one more"]));
+  pendingComments.clear(ID);
+  flushSync();
+  expect(toolbarAction(screen.target, "Submit review…")).toBeUndefined();
+  screen.done();
+});
+
+test("Request changes… carries the pending comments too, and a refused review keeps them", async () => {
+  writeOps = ["comment", "submit_review"];
+  views = [withSubmit()];
+  pendingComments.add(ID, { path: "src/retry.rs", side: "new", line: 3, body: "bound it" });
+  submitFails = true;
+  const screen = render();
+  await vi.waitFor(() => expect(toolbarAction(screen.target, "Request changes…")).toBeDefined());
+  toolbarAction(screen.target, "Request changes…")!.click();
+  flushSync();
+  expect(document.querySelector("[role=dialog]")!.textContent!.replace(/\s+/g, " ")).toContain(
+    "1 line comment goes with this review",
+  );
+  const words = document.querySelector<HTMLTextAreaElement>("[role=dialog] textarea")!;
+  words.value = "Bound the jitter.";
+  words.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Request changes").click();
+  await vi.waitFor(() => expect(toasts.items).toHaveLength(1));
+  expect(pendingComments.of(ID), "a review that did not go keeps its comments").toHaveLength(1);
+
+  submitFails = false;
+  dialogButton("Request changes").click();
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+  expect(queued[0]).toEqual({
+    SubmitReview: {
+      entity: ID,
+      verdict: "request_changes",
+      body: "Bound the jitter.",
+      comments: [{ path: "src/retry.rs", side: "new", line: 3, body: "bound it" }],
+    },
+  });
+  await vi.waitFor(() => expect(pendingComments.of(ID)).toEqual([]));
   screen.done();
 });

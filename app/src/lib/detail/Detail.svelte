@@ -46,7 +46,8 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { PLACEHOLDER_MS, sameAnswer, VIEW_PATIENCE_MS, viewMemory, type Loan } from "./view-read";
-  import { actionName, actionPayload, answeredAsDrawn, type ActionValues } from "./view/actions";
+  import { actionName, actionPayload, answeredAsDrawn, sendsComments, type ActionValues } from "./view/actions";
+  import { asReview, pendingComments } from "./view/pending-comments.svelte";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
@@ -259,6 +260,10 @@
    * The payload is `actions.ts`'s to build; this panel only queues it, says
    * so, and reads the mirror and the view again. Answers whether the write was
    * queued, so the action's dialog stays up on a refusal.
+   *
+   * An action that sends the reader's pending line comments (#709) takes them
+   * with it, and once it is queued those it took are no longer pending (one
+   * written or edited while it was queued stays); a refused one keeps them.
    */
   async function queueAction(
     action: ViewAction,
@@ -266,7 +271,9 @@
     changed: BuildParameter[] = [],
   ): Promise<boolean> {
     const name = actionName(action.label);
-    const payload = actionPayload(action, entityId, values, changed);
+    const entity = entityId;
+    const taken = sendsComments(action) ? pendingComments.of(entity) : [];
+    const payload = actionPayload(action, entity, values, changed, asReview(taken));
     // An edit sent back unchanged has nothing to write, and that is no fault
     // (#706): the dialog closes and says so.
     if (payload === null && answeredAsDrawn(action, values)) {
@@ -283,6 +290,7 @@
       push({ text: `Could not queue the ${name.toLowerCase()}: ${ipcErrorMessage(rejection)}`, tone: "err" });
       return false;
     }
+    pendingComments.settle(entity, taken);
     push({ text: `${name} queued for ${key}` });
     await refresh();
     await rereadView();

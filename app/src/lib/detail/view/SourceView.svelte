@@ -39,7 +39,8 @@
   import { PLACEHOLDER_MS } from "../view-read";
   import type { BuildParameter } from "../../ipc/sources";
   import ActionButtons from "./ActionButtons.svelte";
-  import { offeredActions, type ActionValues } from "./actions";
+  import { offeredActions, queueable, type ActionValues } from "./actions";
+  import { pendingComments } from "./pending-comments.svelte";
   import { settingsWritable, type SettingMark, type SettingsTarget } from "./settings";
   import DiffBlock from "./DiffBlock.svelte";
   import EntitiesBlock from "./EntitiesBlock.svelte";
@@ -288,8 +289,14 @@
     return before?.state === "read" ? offered(before.blocks) : null;
   });
 
-  /** The toolbar's actions: those the source declares and the shell can queue. */
-  const toolbar = $derived(offeredActions(view.actions, writeOps));
+  /** The reader's pending line comments on this entity (#709). */
+  const pending = $derived(pendingComments.of(entityId));
+
+  /**
+   * The toolbar's actions: those the source declares and the shell can queue,
+   * and one that is only the pending line comments only while there are some.
+   */
+  const toolbar = $derived(offeredActions(view.actions, writeOps, pending.length));
 
   /**
    * The blocks as drawn: an actions block keeps only the actions the source
@@ -317,7 +324,16 @@
       {:else if block.type === "entities"}
         <EntitiesBlock title={block.title} rows={block.rows} {onnavigate} {onopenurl} />
       {:else if block.type === "diff"}
-        <DiffBlock files={block.files} truncated={block.truncated} {webUrl} {sourceName} {onopenurl} />
+        <DiffBlock
+          files={block.files}
+          truncated={block.truncated}
+          {webUrl}
+          {sourceName}
+          {onopenurl}
+          {entityId}
+          gone={block.gone ?? []}
+          canComment={block.commentable !== null && queueable(block.commentable.write_op, writeOps)}
+        />
       {:else if block.type === "log"}
         <LogBlock text={block.text} truncated={block.truncated} />
       {:else if block.type === "settings"}
@@ -365,7 +381,7 @@
   <div class="sv">
     {#if toolbar.length > 0}
       <div class="sv-bar" role="toolbar" aria-label="Actions">
-        <ActionButtons actions={toolbar} settings={ownSettings} size="md" {onaction} />
+        <ActionButtons actions={toolbar} settings={ownSettings} {pending} size="md" {onaction} />
       </div>
     {/if}
     <div class="sv-tabs" role="tablist" aria-label="Views">

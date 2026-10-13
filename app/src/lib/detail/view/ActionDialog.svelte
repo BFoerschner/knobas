@@ -20,16 +20,20 @@
   import type { BuildParameter } from "../../ipc/sources";
   import Modal from "../../shell/Modal.svelte";
   import { actionName, changedParameters, initialValues, missingFields, type ActionValues } from "./actions";
+  import { lineName, type PendingComment } from "./pending-comments.svelte";
 
   let {
     action,
     settings = [],
+    pending = [],
     onsubmit,
     onclose,
   }: {
     action: ViewAction;
     /** The entity's own settings, offered when the action is `with_settings`. */
     settings?: Setting[];
+    /** The pending line comments that go with this write (#709), listed for the reader. */
+    pending?: PendingComment[];
     /** Queue the write; answers whether it was queued, and the dialog closes only then. */
     onsubmit: (values: ActionValues, changed: BuildParameter[]) => Promise<boolean>;
     onclose: () => void;
@@ -137,6 +141,23 @@
       {:else if action.danger}
         <!-- A danger always asks (spec #701); a source that sent no sentence gets the shell's. -->
         <p class="ad-q danger">This cannot be undone from knobas.</p>
+      {/if}
+      {#if pending.length > 0}
+        <div class="ad-lc">
+          <p class="ad-lch">
+            <span class="ad-dot" aria-hidden="true"></span>
+            {pending.length}
+            {pending.length === 1 ? "line comment goes" : "line comments go"} with this review
+          </p>
+          <ul class="ad-lcs">
+            {#each pending as comment (comment.id)}
+              <li>
+                <span class="ad-lcw k">{comment.path}<span class="faint">, {lineName(comment.side, comment.line)}</span></span>
+                <span class="ad-lcb">{comment.body}</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
       {/if}
       {#each action.fields as field (field.name)}
         {@const bad = missing.includes(field.name)}
@@ -285,6 +306,60 @@
   .ad {
     display: grid;
     gap: 14px;
+  }
+
+  /* The pending line comments going with this write (#709): a quiet list,
+     amber only in its dot -- they are not sent yet. */
+  .ad-lc {
+    display: grid;
+    gap: 6px;
+  }
+
+  .ad-lch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+  }
+
+  .ad-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  .ad-lcs {
+    list-style: none;
+    max-height: 132px;
+    overflow: auto;
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+  }
+
+  .ad-lcs li {
+    display: grid;
+    gap: 1px;
+    padding: 4px 8px;
+    border-left: 2px solid var(--amber);
+  }
+
+  .ad-lcs li + li {
+    border-top: 1px solid var(--hair);
+  }
+
+  .ad-lcw {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .ad-lcb {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ad-q {

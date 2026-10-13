@@ -138,7 +138,12 @@ async fn commit_diff(
         title: "Diff".to_owned(),
         count: Some(files.len() as u64),
         deferred: false,
-        blocks: vec![Block::Diff { files, truncated }],
+        blocks: vec![Block::Diff {
+            files,
+            truncated,
+            commentable: None,
+            gone: Vec::new(),
+        }],
     })
 }
 

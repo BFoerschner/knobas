@@ -19,17 +19,21 @@
   import type { Setting, ViewAction } from "../../ipc/entity";
   import type { BuildParameter } from "../../ipc/sources";
   import ActionDialog from "./ActionDialog.svelte";
-  import { opensDialog, type ActionValues } from "./actions";
+  import { opensDialog, sendsComments, type ActionValues } from "./actions";
+  import type { PendingComment } from "./pending-comments.svelte";
 
   let {
     actions,
     settings = [],
+    pending = [],
     size = "sm",
     onaction,
   }: {
     actions: ViewAction[];
     /** The entity's own settings, for an action `with_settings`. */
     settings?: Setting[];
+    /** The reader's pending line comments, counted on an action that sends them (#709). */
+    pending?: PendingComment[];
     /** `md` in the toolbar, `sm` inside a section. */
     size?: "sm" | "md";
     /** Queue `action` with the dialog's values and changed settings; answers whether it was queued. */
@@ -73,6 +77,11 @@
       onclick={() => void press(action)}
     >
       {action.label}
+      {#if sendsComments(action) && pending.length > 0}
+        <span class="ab-n k" title="{pending.length} pending line {pending.length === 1 ? 'comment goes' : 'comments go'} with it"
+          >{pending.length}</span
+        >
+      {/if}
     </button>
     {#if action.disabled !== null}
       <span class="vh" id="ab-{uid}-{index}">{action.disabled}</span>
@@ -85,6 +94,7 @@
   <ActionDialog
     {action}
     {settings}
+    pending={sendsComments(action) ? pending : []}
     onsubmit={(values, changed) => onaction(action, values, changed)}
     onclose={() => (open = null)}
   />
@@ -95,5 +105,18 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+
+  /* How many pending line comments go with it (#709): amber, as they are. */
+  .ab-n {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--amber) 18%, transparent);
+    color: var(--amber);
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
   }
 </style>

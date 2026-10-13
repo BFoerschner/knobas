@@ -6,6 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { ActionField, Setting, ViewAction } from "../../ipc/entity";
+import type { ReviewComment } from "../../ipc/sources";
 import {
   actionName,
   actionPayload,
@@ -15,6 +16,7 @@ import {
   missingFields,
   offeredActions,
   opensDialog,
+  queueable,
 } from "./actions";
 
 function action(write_op: string, label: string, more: Partial<ViewAction> = {}): ViewAction {
@@ -29,6 +31,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     with_settings: false,
     values: {},
     entity: null,
+    line_comments: "none",
     ...more,
   };
 }
@@ -342,4 +345,50 @@ test("a dialog answered exactly as drawn is told apart from one that cannot be s
   const approve = review("APPROVED", "Approve…", false);
   expect(actionPayload(approve, "gitea:o/r#7", { body: "" })).toBeNull();
   expect(answeredAsDrawn(approve, { body: "" })).toBe(false);
+});
+
+// -- pending line comments (#709) ---------------------------------------------
+
+const PENDING: ReviewComment[] = [
+  { path: "src/retry.rs", line: 2, side: "old", body: "why drop it?" },
+  { path: "src/retry.rs", line: 3, side: "new", body: "bound it" },
+];
+
+test("a review that sends line comments carries the pending ones, both sides", () => {
+  const approve = { ...review("approve", "Approve…", false), line_comments: "sends" as const };
+  expect(actionPayload(approve, "gitea:o/r#7", { body: "" }, [], PENDING)).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "approve", body: "", comments: PENDING },
+  });
+  // With none pending it is the review it was.
+  expect(actionPayload(approve, "gitea:o/r#7", { body: "" }, [], [])).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "approve", body: "", comments: [] },
+  });
+});
+
+test("an action that does not send line comments never carries them", () => {
+  const plain = review("approve", "Approve…", false);
+  expect(actionPayload(plain, "gitea:o/r#7", { body: "" }, [], PENDING)).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "approve", body: "", comments: [] },
+  });
+});
+
+test("Submit review… is drawn only while comments are pending, and sends nothing without them", () => {
+  const submit = action("submit_review", "Submit review…", {
+    fields: [field("body", { type: "long_text" }, {})],
+    values: { verdict: "comment" },
+    line_comments: "requires",
+  });
+  const approve = { ...review("approve", "Approve…", false), line_comments: "sends" as const };
+  expect(offeredActions([submit, approve], ["submit_review"], 0)).toEqual([approve]);
+  expect(offeredActions([submit, approve], ["submit_review"], 2)).toEqual([submit, approve]);
+  expect(actionPayload(submit, "gitea:o/r#7", { body: "" }, [], [])).toBeNull();
+  expect(actionPayload(submit, "gitea:o/r#7", { body: "" }, [], PENDING)).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "comment", body: "", comments: PENDING },
+  });
+});
+
+test("a diff takes comments only through an op the source declares and the shell can queue", () => {
+  expect(queueable("submit_review", ["submit_review"])).toBe(true);
+  expect(queueable("submit_review", ["comment"])).toBe(false);
+  expect(queueable("launch_rocket", ["launch_rocket"])).toBe(false);
 });

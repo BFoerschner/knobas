@@ -538,6 +538,7 @@ function runnable(): SourceView {
         with_settings: true,
         values: {},
         entity: null,
+        line_comments: "none",
       },
     ],
   };

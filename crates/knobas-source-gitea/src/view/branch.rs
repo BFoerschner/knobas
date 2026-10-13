@@ -435,6 +435,11 @@ async fn diff(
         count: Some(files.len() as u64),
         // Its own read is the read the deferral waited for (rule 3).
         deferred: false,
-        blocks: vec![Block::Diff { files, truncated }],
+        blocks: vec![Block::Diff {
+            files,
+            truncated,
+            commentable: None,
+            gone: Vec::new(),
+        }],
     })
 }

@@ -432,7 +432,10 @@ async fn the_diff_tab_reads_the_compares_diff() {
         !diff.deferred,
         "the deferred read answers the blocks it deferred"
     );
-    let Block::Diff { files, truncated } = &diff.blocks[0] else {
+    let Block::Diff {
+        files, truncated, ..
+    } = &diff.blocks[0]
+    else {
         panic!("a diff: {diff:#?}");
     };
     assert!(!truncated);

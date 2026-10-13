@@ -104,6 +104,7 @@ function act(write_op: string, label: string, more: Partial<ViewAction>): ViewAc
     with_settings: false,
     values: {},
     entity: null,
+    line_comments: "none",
     ...more,
   };
 }
