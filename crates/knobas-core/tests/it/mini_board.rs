@@ -838,3 +838,35 @@ async fn a_capped_board_keeps_each_columns_newest_cards_and_counts_them_all() {
     }
     assert_eq!(whole.columns[0].cards.len(), 5);
 }
+
+/// **The board's statements are planned for their parameters every time**
+/// (#753). Kept as prepared statements, PostgreSQL moved them to a generic
+/// plan on their sixth execution, and an All room of 15,000 tickets went from
+/// 0.25 s to 6.6 s, every time after. What is pinned is the mechanism: after
+/// eight board reads on one connection, that connection holds no prepared
+/// statement of the board's.
+#[tokio::test]
+async fn the_boards_statements_are_never_kept_as_prepared_statements() {
+    let connector = knobas_db::test_util::scratch_database("mini_board").await;
+    let pool = connector.pool(1).await.expect("a one-connection pool");
+    ticket(&pool, "PAY-1", Some("To Do"), None).await;
+    for _ in 0..8 {
+        mini_board::read_capped(&pool, None, &[], None, &declarations(), Some(50))
+            .await
+            .unwrap();
+        mini_board::read(&pool, None, &[SOURCE.to_owned()], None, &declarations())
+            .await
+            .unwrap();
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "select count(*) from pg_prepared_statements where statement like '%status_paths%'",
+    )
+    .persistent(false)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept, 0,
+        "a board statement was kept, and goes generic on its sixth run"
+    );
+}

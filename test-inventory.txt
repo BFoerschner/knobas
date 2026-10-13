@@ -1149,6 +1149,7 @@ knobas-core	test/it	mini_board::an_unknown_or_empty_context_is_an_empty_board
 knobas-core	test/it	mini_board::cards_in_a_column_come_newest_first
 knobas-core	test/it	mini_board::identically_spelled_statuses_from_two_sources_share_a_column
 knobas-core	test/it	mini_board::only_the_contexts_live_ticket_members_are_on_a_stored_rooms_board
+knobas-core	test/it	mini_board::the_boards_statements_are_never_kept_as_prepared_statements
 knobas-core	test/it	mini_board::the_columns_are_the_observed_statuses_with_the_four_leading
 knobas-core	test/it	mini_board::the_mock_sources_flat_spelling_reads_as_well_as_jiras
 knobas-core	test/it	mini_board::the_offered_statuses_are_the_sources_corpus_not_the_rooms_columns

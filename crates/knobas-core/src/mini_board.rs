@@ -65,7 +65,36 @@ use crate::entity::EntityRef;
 /// list decides *order*, never wording.
 const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 
-/// A ticket's status, at the path its own source declares (#277).
+/// Every source's declared ticket status candidates (#277), resolved once a
+/// statement (#753): the CTE `status_paths (source_id, segs, ord)`, which
+/// [`status_of_ticket!`] reads per row. Through [`crate::declared_string!`]
+/// each row walked the whole declaration, about 17 µs a ticket on the 15,000
+/// of an All room.
+/// The candidates are [`crate::declared_candidates!`]'s own, over a relation
+/// aliased `i` that carries each declared source and the kind `ticket` -- the
+/// two columns that macro reads -- so the declaration is walked as it always
+/// was, once a source instead of once a row.
+macro_rules! status_paths {
+    ($decl:literal) => {
+        concat!(
+            "status_paths as materialized (
+               select i.source_id, c.segs, c.ord
+                 from (select d.source_id, 'ticket'::text as kind
+                         from jsonb_object_keys(case when jsonb_typeof(",
+            $decl,
+            "::jsonb) = 'object' then ",
+            $decl,
+            "::jsonb else '{}'::jsonb end) as d(source_id)) i
+                 cross join lateral ",
+            $crate::declared_candidates!($decl, "status_name"),
+            " c)"
+        )
+    };
+}
+
+/// A ticket's status, at the path its own source declares (#277), through
+/// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
+/// [`crate::first_string_of!`] being the one spelling both share.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -74,12 +103,11 @@ const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 /// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
-///
-/// `$decl` is where the calling statement binds the declarations; each
-/// statement here binds them at the end of its own parameter list.
-macro_rules! status_read {
-    ($decl:literal) => {
-        $crate::declared_string!($decl, "status_name")
+macro_rules! status_of_ticket {
+    () => {
+        $crate::first_string_of!(
+            "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+        )
     };
 }
 
@@ -124,9 +152,12 @@ macro_rules! priority_read {
 /// priority only for the rows kept: on a room of 15,000 tickets the uncapped
 /// board was 2 MB on the bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
-    "with scoped as materialized (
+    "with ",
+    status_paths!("$4"),
+    ",
+     scoped as materialized (
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
-    status_read!("$4"),
+    status_of_ticket!(),
     " as status
        from sync.live_item i
       where i.kind = 'ticket'
@@ -158,13 +189,19 @@ const CARDS: &str = concat!(
 /// answers for the tickets on it, and a source nothing in this room came from
 /// is not one the detail here can be asked about.
 const OBSERVED_STATUSES: &str = concat!(
-    "select distinct source_id, status
-       from (select i.source_id as source_id, ",
-    status_read!("$2"),
+    "with ",
+    status_paths!("$2"),
+    ",
+     observed as materialized (
+       select i.source_id, ",
+    status_of_ticket!(),
     " as status
-               from sync.live_item i
-              where i.kind = 'ticket'
-                and i.source_id = any($1)) observed
+         from sync.live_item i
+        where i.kind = 'ticket'
+          and i.source_id = any($1)
+     )
+     select distinct source_id, status
+       from observed
       where status is not null"
 );
 
@@ -329,7 +366,11 @@ pub async fn read_capped(
     };
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
+    // Planned for its parameters every time (#753): reused, the statement
+    // went to PostgreSQL's generic plan on its sixth execution and an All room
+    // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
     let rows: Vec<CardRow> = sqlx::query_as(CARDS)
+        .persistent(false)
         .bind(&members)
         .bind(&scope)
         .bind(project)
@@ -386,6 +427,7 @@ async fn observed_statuses(
     }
     let ids: Vec<String> = sources.iter().cloned().collect();
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
+        .persistent(false)
         .bind(&ids)
         .bind(declarations.as_param())
         .fetch_all(pool)
