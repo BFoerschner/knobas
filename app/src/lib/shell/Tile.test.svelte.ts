@@ -562,3 +562,33 @@ test("a Code tile with only other branches says so rather than looking empty", a
 
   screen.done();
 });
+
+/**
+ * The page is a window on the set: a group whose rows all fall past it has
+ * no row on screen, and its header is not drawn over nothing.
+ */
+test("a group past the page's end draws no header", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [codeRow("PR-1", "pr"), codeRow("PR-2", "pr")],
+      total: 5,
+      tally: [
+        { kind: "pr", tone: "info", count: 2 },
+        { kind: "branch", tone: null, count: 3 },
+      ],
+      groups: [
+        { group: "open_pull_requests", count: 2 },
+        { group: "my_branches", count: 3 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(2));
+  flushSync();
+
+  const heads = [...screen.target.querySelectorAll(".tile-g")].map((h) => h.textContent ?? "");
+  expect(heads).toHaveLength(1);
+  expect(heads[0]).toContain("Other open pull requests");
+  expect(screen.count(), "the header still counts the whole set").toBe("2 open · 3 branches");
+
+  screen.done();
+});
