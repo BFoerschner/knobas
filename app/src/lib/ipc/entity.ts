@@ -1710,7 +1710,46 @@ export interface CheckoutView {
   clones_root: string | null;
   /** `git clone <the repo's URL>` — `null` exactly when `repo_url` is. */
   clone_command: string | null;
+  /**
+   * Where the working tree at `path` stands, read by read-only git when the
+   * view was asked for (ADR-0021, #704). `null` exactly when `path` is.
+   */
+  tree: TreeRead | null;
 }
+
+/**
+ * What a checkout's working tree is doing —
+ * `knobas_app::checkout::working_tree::WorkingTreeState` (#704).
+ */
+export interface WorkingTreeState {
+  /** The branch checked out; `null` for a detached head. */
+  branch: string | null;
+  /** The commit checked out; `null` in a repository with no commit yet. */
+  head: string | null;
+  /** The upstream the branch tracks, as git names it (`origin/main`). */
+  upstream: string | null;
+  /** Commits the upstream does not have: *to push*. */
+  ahead: number;
+  /** Commits on the upstream the branch does not have: *to pull*. */
+  behind: number;
+  /** Tracked paths that differ from `HEAD`, staged or not. */
+  changed: number;
+  /** Paths git neither tracks nor ignores. */
+  untracked: number;
+  /** Paths with an unresolved merge conflict. */
+  conflicted: number;
+}
+
+/**
+ * The working tree read, or why there is none —
+ * `knobas_app::checkout::working_tree::TreeRead` (#704). None is an error:
+ * each arm is a sentence the checkout panel says.
+ */
+export type TreeRead =
+  | ({ status: "read" } & WorkingTreeState)
+  | { status: "no_git" }
+  | { status: "not_a_repo" }
+  | { status: "failed"; reason: string };
 
 /** Where knobas looks for clones — `clones_root` (#499). */
 export function clonesRoot(): Promise<string | null> {

@@ -75,6 +75,9 @@ knobas-app	lib/knobas_app	checkout::tests::the_kinds_with_a_checkout_are_the_one
 knobas-app	lib/knobas_app	checkout::tests::the_open_command_serialises_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	checkout::tests::the_setting_key_is_the_one_the_migration_names
 knobas-app	lib/knobas_app	checkout::tests::the_view_serialises_the_keys_the_mirror_declares
+knobas-app	lib/knobas_app	checkout::working_tree::tests::an_empty_path_entry_never_finds_a_program
+knobas-app	lib/knobas_app	checkout::working_tree::tests::the_read_serialises_as_the_mirror_declares
+knobas-app	lib/knobas_app	checkout::working_tree::tests::what_the_reader_does_not_know_is_skipped
 knobas-app	lib/knobas_app	commands::app::tests::a_call_before_the_database_is_up_is_not_ready
 knobas-app	lib/knobas_app	commands::app::tests::a_failed_bring_up_says_why_in_the_refusal
 knobas-app	lib/knobas_app	commands::app::tests::a_retry_is_claimed_once_and_only_out_of_a_failure
@@ -479,6 +482,7 @@ knobas-app	test/it	checkout_ipc::opening_a_checkout_runs_the_template_with_the_s
 knobas-app	test/it	checkout_ipc::purging_the_repo_takes_its_override_with_it
 knobas-app	test/it	checkout_ipc::the_clones_root_is_set_read_back_and_cleared
 knobas-app	test/it	checkout_ipc::the_refusals_carry_the_codes_the_panel_branches_on
+knobas-app	test/it	checkout_ipc::the_view_says_where_the_working_tree_stands
 knobas-app	test/it	config_schema_mirror::a_fixture_that_is_gone_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_literal_that_is_not_as_const_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_name_the_fixture_cannot_resolve_stops_the_test
@@ -894,6 +898,16 @@ knobas-app	test/it	wiring::the_opener_plugin_is_registered
 knobas-app	test/it	wiring::the_stranded_timer_sweep_runs_before_the_database_is_announced_ready
 knobas-app	test/it	wiring::the_window_may_ask_about_permission_and_nothing_else_about_notifications
 knobas-app	test/it	wiring::the_window_may_open_http_urls_and_only_http_urls
+knobas-app	test/it	working_tree::a_clean_tree_names_its_branch_and_head_and_nothing_to_do
+knobas-app	test/it	working_tree::a_detached_head_has_no_branch_and_keeps_its_commit
+knobas-app	test/it	working_tree::a_directory_that_is_not_a_repository_says_so
+knobas-app	test/it	working_tree::a_merge_conflict_is_counted_as_conflicted_and_not_as_changed
+knobas-app	test/it	working_tree::a_rename_is_one_change
+knobas-app	test/it	working_tree::a_repository_with_no_commit_yet_has_a_branch_and_no_head
+knobas-app	test/it	working_tree::ahead_and_behind_are_measured_against_a_local_upstream
+knobas-app	test/it	working_tree::git_missing_from_path_is_a_state_and_not_an_error
+knobas-app	test/it	working_tree::modified_staged_and_untracked_files_are_counted_apart
+knobas-app	test/it	working_tree::the_read_writes_neither_the_index_nor_a_ref
 knobas-app	test/it	worklog_ipc::a_days_blocks_become_one_worklog_and_a_copy_that_names_it
 knobas-app	test/it	worklog_ipc::a_settle_that_beat_the_copy_still_gives_it_the_id
 knobas-app	test/it	worklog_ipc::a_worklog_the_source_never_took_still_has_a_copy_and_still_spends_its_blocks
