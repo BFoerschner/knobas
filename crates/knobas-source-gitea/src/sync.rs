@@ -1016,7 +1016,8 @@ async fn commits(
                 // Listed a moment ago and gone now (#724): a merge with
                 // delete-branch on a busy repository. Gitea answers `404
                 // object does not exist` for the ref, and the branch's own
-                // read -- what decides it, as for a pull request -- 404 too.
+                // read -- what decides it, as for a pull request -- answers
+                // 404 too.
                 // Its row came from the listing; the next run that does not
                 // list it tombstones it. Not a hole, so not a skip of the
                 // repository, and not fatal on a full sync.

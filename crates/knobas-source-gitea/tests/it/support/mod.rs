@@ -86,6 +86,12 @@ pub struct State {
     /// repository the listing offered and that was gone by the time the walk
     /// reached it.
     pub missing: BTreeSet<String>,
+    /// Why a fake witnesses this and the three fields below (ADR-0013, "a
+    /// fault the real instance cannot produce is witnessed by a fake"): the
+    /// window is between two requests inside one `sync` call, and no seed, flag
+    /// or clock opens it on the pinned container. The answers served are the
+    /// ones measured against it; `just gitea-live` stays the certificate.
+    ///
     /// `owner/repo@branch` entries the listing still offers but that are gone
     /// by the time the walk reads them: deleted between the two requests, as a
     /// merge with delete-branch does on a busy repository (issue #724). Their
