@@ -176,7 +176,9 @@ fn forbidden_refusal(body: &str) -> Option<String> {
 /// Whether a failure is about **one repository** rather than about the source.
 ///
 /// Ruling B4: a 403 or 404 on a single repository skips that repository; every
-/// repository refusing us is a fact about the token's scope and raises. The
+/// repository refusing us is a fact about the token or its user and raises --
+/// as `Unauthorized` for Gitea's scope sentence, as a refusal carrying Gitea's
+/// sentence for any other 403 ([`forbidden_refusal`], #722). The
 /// run's identity preflight (`GET /user`) has already proved the credential
 /// itself works, which is what makes that reading available at all.
 ///
