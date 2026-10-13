@@ -10804,7 +10804,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   declared dialog, generic over the field kinds: a text an input with a `datalist`, a long text a
   text area (Cmd/Ctrl+Enter sends), a choice a segmented radio group or a `select` past four
   options, a flag a checkbox; a blank required field stops the write, is marked `aria-invalid`
-  with *Required* beside it, and the first is focused. A disabled action keeps focus
+  with *Required* beside it, and the first is focused. The dialog opens on its first field (a
+  choice on its picked option), or with no fields on its write, or on *Cancel* for a danger; Enter
+  sends from any field but a text area, Escape cancels. A disabled action keeps focus
   (`aria-disabled`, not `disabled`) so its reason is reachable by keyboard. `detail/view/
   actions.ts` keeps **one table**, op id → `(entity, values, settings) => WriteOpPayload | null`;
   `FORMS` and `actionForm` are gone, and `initialValues`, `missingFields` and `opensDialog` are
