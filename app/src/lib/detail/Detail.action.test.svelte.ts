@@ -324,7 +324,9 @@ test("Edit… is drawn prefilled and queues only the title the reader changed", 
   const title = document.querySelector<HTMLInputElement>("[role=dialog] input")!;
   const body = document.querySelector<HTMLTextAreaElement>("[role=dialog] textarea")!;
   expect(title.value).toBe("SEPA retry");
-  // The text area holds `\n` for Gitea's `\r\n`; that is not a change.
+  // A browser's text area gives back `\n` for Gitea's `\r\n` (jsdom may
+  // not); either way the untouched description is not sent. The line-end
+  // comparison itself is pinned in `actions.test.ts`.
   expect(body.value.replace(/\r\n/g, "\n")).toBe("Refs PAY-231\n");
   title.value = "SEPA retry, bounded";
   title.dispatchEvent(new Event("input", { bubbles: true }));
