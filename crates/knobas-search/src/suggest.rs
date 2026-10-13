@@ -96,12 +96,18 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 ///    the fragment `under:`'s own lookup reads -- has the same name and kind,
 ///    up to the limit. So an offered name is one `under:` knows (#615); and
 ///    since step 1's rows are a superset of that fragment's, every name it
-///    knows is ranked, and is offered for a prefix specific enough.
+///    knows is ranked, and is offered for a prefix specific enough. A
+///    `lateral ... limit 1` and not an `exists`: PostgreSQL turns an `exists`
+///    into a semi join that builds the whole fragment (30,890 rows on the
+///    probe, 28-175 ms), while a lateral is a few index probes per candidate,
+///    in rank order, stopped by the outer limit. The outer `order by` is the
+///    subquery's own, so it adds no sort above the loop.
 ///
 /// Joining every row to `sync.live_item` before ranking was 58 ms at the
 /// probe's size with fresh statistics and 306 ms without (the join to
 /// `knobas.source_config` on two columns is underestimated a hundredfold and
-/// the planner picks nested loops); this shape is 40-51 ms either way.
+/// the planner picks nested loops). This shape measured 39 ms for an empty
+/// prefix, 31 ms for `j` and 0.5 ms for `pay`, with statistics and without.
 ///
 /// **What the ranking concedes**: a name is ranked by its newest item, live or
 /// not. A name whose newest item was withdrawn, or sits in a turned-off
@@ -131,9 +137,10 @@ const PARENTS_SQL: &str = concat!(
         group by p.name, p.kind \
         order by top desc nulls last, p.name, p.kind \
        offset 0) g \
-     where exists (select 1 from ",
+     cross join lateral (select 1 from ",
     crate::under::parent_names!(),
-    " k where lower(k.name) = lower(g.name) and k.name = g.name and k.kind = g.kind) \
+    " k where lower(k.name) = lower(g.name) and k.name = g.name and k.kind = g.kind limit 1) known \
+     order by g.top desc nulls last, g.name, g.kind \
      limit $2"
 );
 
