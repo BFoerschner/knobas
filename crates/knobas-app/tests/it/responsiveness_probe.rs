@@ -556,10 +556,17 @@ async fn what_the_reader_waits_on() {
         smart_lists_inner(pool)
     })
     .await;
-    time("type a filter token", "filter_suggestions", runs, || {
-        filter_suggestions_inner(pool)
-    })
-    .await;
+    // The first `under:` keystroke asks with nothing typed yet, and each one
+    // after it with the value so far (#761).
+    for under in ["", "j", "jira0-1", "pay"] {
+        time(
+            "type a filter token",
+            &format!("filter_suggestions (under:{under})"),
+            runs,
+            || filter_suggestions_inner(pool, under),
+        )
+        .await;
+    }
     for raw in [
         "p",
         "pa",

@@ -61,6 +61,7 @@ pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use saved::{Refusal, SavedList};
+pub use suggest::PARENT_SUGGESTIONS;
 pub use types::{
     EntityRow, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion,
     ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
@@ -361,15 +362,16 @@ impl Searcher {
     /// [`FilterSuggestions`].
     ///
     /// Four round trips: the vocabulary every query loads, the kinds with
-    /// rows, the parents, and the enabled sources with rows. Read once per
-    /// launcher opening, and narrowed by the box itself as the reader types.
+    /// rows, the parents, and the enabled sources with rows. The parents are
+    /// the newest [`PARENT_SUGGESTIONS`] whose name starts with `under`,
+    /// ignoring case, and simply the newest for an empty one (#761).
     ///
     /// # Errors
     ///
     /// [`SearchError::Db`] if any read fails.
-    pub async fn filter_suggestions(&self) -> Result<FilterSuggestions, SearchError> {
+    pub async fn filter_suggestions(&self, under: &str) -> Result<FilterSuggestions, SearchError> {
         let vocab = self.vocabulary().await?;
-        suggest::read(&self.pool, &vocab).await
+        suggest::read(&self.pool, &vocab, under).await
     }
 
     /// The plan the board's recency read runs under.

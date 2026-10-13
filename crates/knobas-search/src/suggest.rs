@@ -12,7 +12,8 @@
 //!   resolves (a disabled one is nameable by nothing, #200), that have at
 //!   least one live row: one configured but not synced yet would lead to an
 //!   empty result (the deputy's ruling of 2026-10-12 on #614);
-//! * **parents** -- every name a parent answers to, with its kind: the names
+//! * **parents** -- the newest names a parent answers to that start with the
+//!   prefix being typed (#761), with their kind: the names
 //!   live items declare for their parents and the names mirrored records
 //!   answer to as one, read through the **same two `knobas_core::payload`
 //!   reads** `under:` resolves through (the deputy's ruling of 2026-10-11 on
@@ -21,8 +22,10 @@
 //!   to its name, and `under:` returns the asset itself, so even a leaf leads
 //!   somewhere -- as a mirrored repo nothing sits in yet does).
 //!
-//! One read per launcher opening, never per keystroke: the box narrows the
-//! lists itself as the reader types, so the hot path pays nothing for them.
+//! Read once per launcher opening for the kinds and sources, which are small,
+//! and again per keystroke of an `under:` value for the parents, which are
+//! not: the mirror holds a parent name per ticket key, so the engine answers a
+//! prefix rather than shipping every name to be narrowed in the webview.
 //!
 //! [`KindCatalog`]: crate::KindCatalog
 
@@ -67,17 +70,52 @@ select s.id from unnest($1::text[]) s(id)
    order by i.item_updated_at desc nulls last
    limit 1) l";
 
-/// Every `(name, kind)` a parent answers to: [`crate::under::parent_names!`],
-/// the fragment `under:`'s own lookup reads, so a suggested name is one
-/// `under:` knows and every name it knows is suggested (#615).
+/// How many parents one prefix is answered with (#761): the newest this many
+/// whose name starts with what was typed.
+///
+/// The box draws at most eight of them (`SUGGESTION_LIMIT` in
+/// `app/src/lib/launcher/suggest.ts`) and narrows the last answer itself while
+/// the next one is in flight, so twenty leave it something to narrow without
+/// shipping the mirror.
+pub const PARENT_SUGGESTIONS: i64 = 20;
+
+/// The newest [`PARENT_SUGGESTIONS`] `(name, kind)`s a parent answers to whose
+/// name starts with `$1`, ignoring case: [`crate::under::parent_names!`], the
+/// fragment `under:`'s own lookup reads, so a suggested name is one `under:`
+/// knows and every name it knows is offered for its own prefix (#615).
+///
+/// **By prefix, per keystroke** (#761, the deputy's ruling of 2026-10-14):
+/// before it, every parent name the mirror had was shipped once per opening
+/// and narrowed in the webview -- 274-430 ms and 680 KB on the 22,000-item
+/// responsiveness probe (#753), most of it ticket keys nobody typed.
+///
+/// The range on `~>=~` / `~<~` is the one `item_parent_name_prefix_idx`
+/// (migration `0032`, `text_pattern_ops`) serves, in byte order whatever the
+/// database's collation, and it is a parameter range, so a generic plan keeps
+/// it -- a `like $1 || '%'` would not. The upper bound appends the highest code
+/// point, so a name that continues the prefix with U+10FFFF itself falls
+/// outside it; that is a private-use character no source spells a parent
+/// with. `starts_with` is the exact test, and what the asset arm, which has no
+/// such index, is filtered by. `lower` on both sides, in SQL: the same
+/// lowering `under::KNOWN_SQL` compares with, so what is offered for a prefix
+/// is what `under:` then knows.
+///
+/// One row per `(name, kind)`, dated by its newest row. A name the trim
+/// leaves empty, or a row without a kind, is not offered.
 const PARENTS_SQL: &str = concat!(
-    "select distinct p.name, p.kind from ",
+    "select p.name, p.kind from ",
     crate::under::parent_names!(),
-    " p where nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-     order by p.name, p.kind"
+    " p where lower(p.name) ~>=~ lower($1) \
+        and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
+        and starts_with(lower(p.name), lower($1)) \
+        and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
+      group by p.name, p.kind \
+      order by max(p.at) desc nulls last, p.name, p.kind \
+      limit $2"
 );
 
-/// Read the three lists against `vocab`.
+/// Read the three lists against `vocab`, the parents for the prefix `under`
+/// (empty for none).
 ///
 /// # Errors
 ///
@@ -85,9 +123,14 @@ const PARENTS_SQL: &str = concat!(
 pub(crate) async fn read(
     pool: &PgPool,
     vocab: &Vocabulary,
+    under: &str,
 ) -> Result<FilterSuggestions, SearchError> {
     let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
-    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL).fetch_all(pool).await?;
+    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
+        .bind(under)
+        .bind(PARENT_SUGGESTIONS)
+        .fetch_all(pool)
+        .await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()
