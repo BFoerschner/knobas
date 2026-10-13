@@ -8,14 +8,16 @@
 //!
 //! # A payload read, and which way it fails
 //!
-//! There is no normalized project model and no migration behind any of this.
-//! Contract §4.1 normalizes four fields and a project is not one of them, so
+//! There is no normalized project model. Contract §4.1 normalizes four fields and a project is not one of them, so
 //! the value can only come out of the payload in the source's own shape --
 //! which makes this a **payload read outside an adapter**, governed by
 //! ADR-0007. Since #277 it is a **declared** read: the source says where its
 //! project key and name live ([`crate::payload`]), per entity kind, and
-//! [`project_key_read!`] and [`project_name_read!`] resolve the declaration.
-//! A third source's spelling is one entry on that source's descriptor.
+//! [`project_key_read!`] and the `project_name` read resolve the declaration.
+//! A third source's spelling is one entry on that source's descriptor. Since
+//! #759 the database runs those two reads when an item or a declaration
+//! changes and keeps the answer in `sync.item_project` (migration `0032`,
+//! ADR-0019), so the census reads stored rows rather than walking the mirror.
 //!
 //! **Failure direction (ADR-0007 requirement 3): absence, never a wrong
 //! room.** A record carrying no readable project *key* belongs to no project
@@ -80,17 +82,6 @@ macro_rules! project_key_read {
     };
 }
 
-/// A record's project **name**, at the path its own source declares.
-///
-/// Not exported: a room narrows by the *key*, which is its identity, and the
-/// name is only ever read here, where the census is taken. A reader that
-/// narrowed by a name would be narrowing by a label the source may rewrite.
-macro_rules! project_name_read {
-    ($decl:literal) => {
-        $crate::declared_string!($decl, "project_name")
-    };
-}
-
 /// One project the live corpus shows.
 ///
 /// Flat, and carrying its source rather than being grouped under it: the
@@ -117,9 +108,24 @@ pub struct Project {
 /// Every project the live corpus shows, one row each, ordered by source then
 /// key.
 ///
+/// Read off `sync.item_project` (migration `0032`, #759): the database keeps
+/// what [`project_key_read!`] and the `project_name` read yield per item, per
+/// stored adapter, from `sync.parent_declaration` (ADR-0019). It used to walk
+/// every live item through those two reads on every call: 341-461 ms on the
+/// 22,000-item responsiveness probe (#753), re-read after every finished sync.
+///
+/// Joined to `knobas.source_config` on the row's `adapter_kind`: a stored row
+/// says what one adapter's declarations make of the item, and it counts only
+/// while the item's source is configured with that adapter -- the rule
+/// `knobas_app::sources::declared_paths` applied when the declarations were
+/// bound per read, so a source that is not configured, or whose adapter kind
+/// is not compiled in, still shows no projects.
+///
 /// `sync.live_item` and never `sync.item`, which is what keeps a tombstoned
 /// item -- and, since migration `0012`, every item of a source the user turned
-/// off -- from vouching for a project the live corpus no longer shows.
+/// off -- from vouching for a project the live corpus no longer shows. The
+/// item's time is read there too, at read time, so a re-sync that only moves a
+/// timestamp needs nothing recomputed.
 ///
 /// `distinct on` rather than a `group by` over all three columns: one project
 /// is one row however its items disagree. A project renamed upstream leaves
@@ -127,23 +133,19 @@ pub struct Project {
 /// name at all, and either would otherwise split one project into two rooms
 /// holding the same work. The `order by` decides which name wins -- a readable
 /// one over none, then the newest -- so a rename shows the new name and a
-/// nameless item erases nothing. Its trailing `observed.name` only breaks a
-/// tie between two names recorded at the same instant, and exists so the
-/// answer does not depend on which row PostgreSQL reached first.
-const PROJECTS: &str = concat!(
-    "select distinct on (observed.source_id, observed.key)
-             observed.source_id, observed.key, observed.name
-       from (select i.source_id as source_id, ",
-    project_key_read!("$1"),
-    " as key, ",
-    project_name_read!("$1"),
-    " as name,
-                    coalesce(i.item_updated_at, i.synced_at) as at
-               from sync.live_item i) observed
-      where observed.key is not null
-      order by observed.source_id, observed.key,
-               (observed.name is null), observed.at desc, observed.name"
-);
+/// nameless item erases nothing. Its trailing `p.name` only breaks a tie
+/// between two names recorded at the same instant, and exists so the answer
+/// does not depend on which row PostgreSQL reached first.
+///
+/// `knobas-app`'s `tests/it/project_census.rs` holds this to the walk it
+/// replaced after every change the trigger follows.
+const PROJECTS: &str = "\
+select distinct on (p.source_id, p.key) p.source_id, p.key, p.name
+  from sync.item_project p
+  join sync.live_item i on i.entity_id = p.entity_id
+  join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind
+ order by p.source_id, p.key, (p.name is null),
+          coalesce(i.item_updated_at, i.synced_at) desc, p.name";
 
 /// The projects the live corpus shows, ordered by source then key.
 ///
@@ -151,23 +153,17 @@ const PROJECTS: &str = concat!(
 /// every project every source shows, and a per-source read would be one round
 /// trip per source to assemble the same list.
 ///
-/// `declarations` is what every configured source says about where it keeps a
-/// project (#277), assembled by `knobas_app::sources::declared_paths`. A
-/// source that declares nothing shows no projects, which is this read's stated
-/// failure direction reaching the one case where knobas knows nothing about a
-/// source at all.
+/// The declarations are the database's stored copy (`sync.parent_declaration`,
+/// written by `knobas_search::Searcher::declaring`), so a caller must have
+/// stored them first -- bring-up does, and `knobas_app`'s `list_projects`
+/// does on its way in, as every search command does.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the query fails.
-pub async fn list(
-    pool: &PgPool,
-    declarations: &crate::payload::Declarations,
-) -> Result<Vec<Project>, CoreError> {
-    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(PROJECTS)
-        .bind(declarations.as_param())
-        .fetch_all(pool)
-        .await?;
+pub async fn list(pool: &PgPool) -> Result<Vec<Project>, CoreError> {
+    let rows: Vec<(String, String, Option<String>)> =
+        sqlx::query_as(PROJECTS).fetch_all(pool).await?;
     Ok(rows
         .into_iter()
         .map(|(source_id, key, name)| Project {

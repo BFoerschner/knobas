@@ -398,8 +398,8 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
 /// was this defect reaching a person's window by a different route, and the
 /// repair had to be found from the outside.
 ///
-/// Read through `project::list`, which is what `list_projects` answers with and
-/// therefore what the switcher's project rooms are built from (#209) -- the
+/// Read through `list_projects`, which is what the switcher reads and
+/// therefore what its project rooms are built from (#209) -- the
 /// whole chain from `fixtures/tidewater/work.json` through `MockSource::sync`
 /// and the upsert to the room a reader sees.
 ///
@@ -418,13 +418,9 @@ async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
     // Through the declarations the running binary's adapters make (#277): the
     // demo source is `knobas_source_mock`, and where its records keep a
     // project is that adapter's own declaration, not a path this file spells.
-    let declarations = knobas_app::sources::paths::declared_paths(
-        &pool,
-        &knobas_app::sources::Registry::builtin(),
-    )
-    .await
-    .expect("what the configured sources declare");
-    let census = knobas_core::project::list(&pool, &declarations)
+    // `list_projects` stores them on its way in and reads what the database
+    // resolved from them (#759).
+    let census = knobas_app::commands::entity::list_projects_inner(&pool)
         .await
         .expect("the census the switcher's project rooms are built from");
     let shown: Vec<(String, Option<String>)> = census
