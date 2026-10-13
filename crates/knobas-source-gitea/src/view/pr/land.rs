@@ -11,6 +11,7 @@ use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, Fact, FieldKind, Tone, ViewAction};
 
 use super::super::checks::Status;
+use super::super::login;
 use super::{Pull, PullView, Review};
 use crate::client::is_repo_scoped;
 
@@ -309,9 +310,7 @@ fn official_reviewers(reviews: &[Review], state: &str) -> Vec<String> {
         .iter()
         .filter(|r| r.official && !r.dismissed && r.state.as_deref() == Some(state))
         .map(|r| {
-            r.user
-                .as_ref()
-                .and_then(|u| u.login.clone())
+            login(r.user.as_ref())
                 .or_else(|| r.team.as_ref().and_then(|t| t.name.clone()))
                 .unwrap_or_else(|| "a reviewer".to_owned())
         })
