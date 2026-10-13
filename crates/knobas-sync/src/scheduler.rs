@@ -401,7 +401,8 @@ pub async fn execute_run(
         );
     }
 
-    match attempt(deps, source_id, run_id, mode, progress.as_ref(), started).await {
+    tracing::info!(source_id, run_id, ?mode, "sync started");
+    let result = match attempt(deps, source_id, run_id, mode, progress.as_ref(), started).await {
         Ok(report) => RunResult {
             outcome: SyncOutcome::Ok,
             counts: run_log::RunCounts::of(&report),
@@ -415,7 +416,17 @@ pub async fn execute_run(
                 error: Some(failure.message()),
             }
         }
-    }
+    };
+    // Duration here rather than in `settle`: `started` is the user's wait,
+    // the same clock every progress message uses.
+    tracing::info!(
+        source_id,
+        run_id,
+        outcome = ?result.outcome,
+        duration_ms = elapsed_ms(started),
+        "sync finished"
+    );
+    result
 }
 
 /// Send one progress message.
