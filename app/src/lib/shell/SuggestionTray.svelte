@@ -71,6 +71,14 @@
 
   let page = $state<SuggestionPage | null>(null);
   let error = $state<string | null>(null);
+  /**
+   * Why the last detection pass did not finish, or `null`. A muted line above
+   * the rows rather than `error`: the backend gives up on a pass that runs past
+   * its limit (#745) and the next one carries on from where it stopped, so the
+   * proposals already drawn are still right. The next pass that finishes
+   * clears it.
+   */
+  let passNote = $state<string | null>(null);
   /** Ids being answered right now, so a row cannot be pressed twice. */
   let busy = $state<string[]>([]);
 
@@ -81,8 +89,15 @@
   let token = 0;
 
   async function refresh(detect: boolean, mine: number) {
+    if (detect) {
+      try {
+        await detectSuggestions();
+        if (mine === token) passNote = null;
+      } catch (rejection) {
+        if (mine === token) passNote = ipcErrorMessage(rejection);
+      }
+    }
     try {
-      if (detect) await detectSuggestions();
       const answer = await roomSuggestions(sources, ctx, PAGE);
       if (mine !== token) return;
       page = answer;
@@ -115,6 +130,7 @@
 
     page = null;
     error = null;
+    passNote = null;
     // A read, never a pass: the room changed, the mirror did not (#745).
     void refresh(false, mine);
 
@@ -205,6 +221,9 @@
     <span class="acts"></span>
   </div>
 
+  {#if passNote && !error}
+    <p class="pass-note muted">{passNote}</p>
+  {/if}
   {#if error}
     <!-- Text: an `IpcError.message` can carry whatever a source said. -->
     <div class="empty"><p class="fail">{error}</p></div>
@@ -306,6 +325,12 @@
   */
   .cls.guess {
     color: var(--amber);
+  }
+
+  .pass-note {
+    margin: 0;
+    padding: 4px 10px;
+    font-size: 12px;
   }
 
   .wd {
