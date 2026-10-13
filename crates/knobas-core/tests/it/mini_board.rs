@@ -870,3 +870,66 @@ async fn the_boards_statements_are_never_kept_as_prepared_statements() {
         "a board statement was kept, and goes generic on its sixth run"
     );
 }
+
+/// **One source's offered statuses, without the board** (#760). The ticket
+/// detail's fallback offer used to be `MiniBoard::sources` of a whole read of
+/// the source; `source_statuses` is the same answer from the same statement,
+/// and must stay equal to it: the corpus, in the board's order, no terminal
+/// group, no other source's, and nothing a tombstoned ticket said.
+#[tokio::test]
+async fn a_sources_statuses_are_the_boards_offer_without_the_board() {
+    let pool = scratch().await;
+    ticket(&pool, "PAY-1", Some("Done"), None).await;
+    ticket(&pool, "PAY-2", Some("To Do"), None).await;
+    ticket(&pool, "PAY-3", Some("blocked"), None).await;
+    ticket(&pool, "PAY-4", None, None).await;
+    let gone = ticket(&pool, "PAY-5", Some("Abandoned"), None).await;
+    tombstone(&pool, &gone).await;
+    item(
+        &pool,
+        "gitea",
+        "ticket",
+        "OPS-1",
+        jira(Some("Elsewhere"), None),
+    )
+    .await;
+
+    let statuses = mini_board::source_statuses(&pool, SOURCE, &declarations())
+        .await
+        .unwrap();
+    assert_eq!(statuses, ["To Do", "Done", "blocked"]);
+
+    let board = mini_board::read(&pool, None, &[SOURCE.to_owned()], None, &declarations())
+        .await
+        .unwrap();
+    assert_eq!(statuses, offered(&board, SOURCE));
+
+    assert!(
+        mini_board::source_statuses(&pool, "nowhere", &declarations())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The fallback read is planned per execution too (#753's lesson): a reused
+/// statement goes generic on its sixth run.
+#[tokio::test]
+async fn the_sources_statuses_statement_is_never_kept_as_a_prepared_statement() {
+    let connector = knobas_db::test_util::scratch_database("mini_board").await;
+    let pool = connector.pool(1).await.expect("a one-connection pool");
+    ticket(&pool, "PAY-1", Some("To Do"), None).await;
+    for _ in 0..8 {
+        mini_board::source_statuses(&pool, SOURCE, &declarations())
+            .await
+            .unwrap();
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "select count(*) from pg_prepared_statements where statement like '%status_paths%'",
+    )
+    .persistent(false)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kept, 0);
+}

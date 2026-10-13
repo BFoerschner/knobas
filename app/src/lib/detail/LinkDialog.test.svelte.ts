@@ -38,7 +38,7 @@ vi.mock("../ipc/entity", () => ({
   // The ticket detail's status select (#179) reads the granted board and
   // queues through the write queue. Not what this file is about, so both
   // answer with nothing.
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   createLink: async (fromId: string, toId: string, relation?: string, note?: string) => {
     writes.push({ fromId, toId, relation, note });

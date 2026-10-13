@@ -191,6 +191,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     retry_database: () => null,
     list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
+    source_statuses: (args) => sourceStatuses(args),
     get_entity: (args) => getEntity(args),
     entity_view: (args) => entityView(args),
     resolve_url: (args) => resolveUrl(args),
@@ -2103,6 +2104,16 @@ function miniBoard(args: Record<string, unknown>) {
     })),
     sources: columns.length ? [{ source_id: "mock", statuses: observed }] : [],
   };
+}
+
+/**
+ * `source_statuses` (#760): the statuses the source's live tickets show, in
+ * the board's order -- `miniBoard`'s `sources` entry for one source.
+ */
+function sourceStatuses(args: Record<string, unknown>): string[] {
+  if (args["sourceId"] !== "mock") return [];
+  const board = miniBoard({ sources: ["mock"], ctxId: null, project: null });
+  return board.sources[0]?.statuses ?? [];
 }
 
 /**

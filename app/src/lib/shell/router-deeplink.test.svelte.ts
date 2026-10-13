@@ -47,6 +47,7 @@ const DETAIL: EntityDetail = {
   links: [],
   activity: [],
   builds: [],
+  status: null,
 };
 
 vi.mock("../ipc/entity", () => ({

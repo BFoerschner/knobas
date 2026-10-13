@@ -35,6 +35,7 @@ function branch(): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   };
 }
 
@@ -61,7 +62,7 @@ function checkout(): CheckoutView {
 }
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),

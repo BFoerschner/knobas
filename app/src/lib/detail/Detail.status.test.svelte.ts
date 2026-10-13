@@ -24,15 +24,22 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail, EntityFilter, MiniBoard } from "../ipc/entity";
+import type { EntityDetail } from "../ipc/entity";
 import type { SourceDescriptor } from "../ipc/sources";
 
 /** Plain functions, not `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const queued: unknown[] = [];
-const boardCalls: Pick<EntityFilter, "sources" | "context" | "project">[] = [];
+/**
+ * Every time the panel read a mini board. It must never: since #760 the
+ * current status arrives with `get_entity` and the fallback offer is its own
+ * read, so a card list is not read to open a ticket.
+ */
+let boardCalls = 0;
+/** Every source the fallback offer was asked about, in order (#760). */
+const corpusCalls: string[] = [];
 /** Every entity the workflow read was asked about, in order (#498). */
 const workflowCalls: string[] = [];
-let board: () => Promise<MiniBoard> = () => Promise.resolve(BOARD);
+let corpus: () => Promise<string[]> = () => Promise.resolve(CORPUS);
 /**
  * What the workflow answers. The default is the seeded Jira shape: every other
  * status, **plus the one the ticket is already in** — Jira's simplified
@@ -52,9 +59,13 @@ vi.mock("../ipc/entity", () => ({
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
-    boardCalls.push(filter);
-    return board();
+  miniBoard: () => {
+    boardCalls += 1;
+    return Promise.reject(new Error("a ticket's detail reads no board"));
+  },
+  sourceStatuses: (sourceId: string) => {
+    corpusCalls.push(sourceId);
+    return corpus();
   },
   reachableTransitions: (entityId: string) => {
     workflowCalls.push(entityId);
@@ -114,30 +125,11 @@ const { toasts } = await import("../shell/toasts.svelte");
 const { kindRegistry } = await import("../shell/kind-registry.svelte");
 
 /**
- * `PAY-231` sits *In Progress*, and the board's **columns are narrower than the
- * source's offer** — deliberately. That gap is the whole reason `sources` sits
- * beside `columns` in the granted read (#177): a room where nothing is finished
- * still has to be able to offer *Done*. A fixture where the two agreed would
- * pass just as well against a select that read the offer off the columns, which
- * would then be empty in exactly the room the user needs it in.
+ * The source's corpus shows more than the ticket's workflow reaches, and a
+ * room where nothing is finished still has to be able to offer *Done*: the
+ * fallback offer is the corpus, not whatever a board's columns happen to hold.
  */
-const BOARD: MiniBoard = {
-  columns: [
-    { status: "To Do", cards: [card("PAY-240")], total: 1 },
-    { status: "In Progress", cards: [card("PAY-231")], total: 1 },
-  ],
-  sources: [{ source_id: "mock", statuses: ["To Do", "In Progress", "In Review", "Done"] }],
-};
-
-function card(key: string) {
-  return {
-    entity_id: `mock:${key}`,
-    source_id: "mock",
-    key,
-    title: `Title of ${key}`,
-    priority: null,
-  };
-}
+const CORPUS = ["To Do", "In Progress", "In Review", "Done"];
 
 function detail(over: Partial<EntityDetail> = {}): EntityDetail {
   return {
@@ -161,6 +153,8 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    // `PAY-231` sits *In Progress*, as `get_entity` reads it (#760).
+    status: "In Progress",
     ...over,
   };
 }
@@ -206,12 +200,13 @@ function pick(select: HTMLSelectElement, status: string) {
 
 beforeEach(async () => {
   queued.length = 0;
-  boardCalls.length = 0;
+  boardCalls = 0;
+  corpusCalls.length = 0;
   workflowCalls.length = 0;
   toasts.items = [];
   submitFails = false;
   writeOps = ["comment", "transition"];
-  board = () => Promise.resolve(BOARD);
+  corpus = () => Promise.resolve(CORPUS);
   workflow = () => Promise.resolve(["In Progress", "In Review", "Done"]);
   entity = () => detail();
   await kindRegistry.load();
@@ -243,10 +238,10 @@ test("offers the statuses the workflow reaches, with the current one marked and 
   // the namespace (interfaces §4.1), so there is no second argument to get
   // wrong.
   expect(workflowCalls).toEqual(["mock:PAY-231"]);
-  // The board is still read, and still for what only it can answer — where the
-  // ticket stands, and the corpus offer that is the fallback below. Scoped to
-  // the source and to no context (#177) or project (#208).
-  expect(boardCalls).toEqual([{ sources: ["mock"], context: null, project: null }]);
+  // Opening a ticket reads no card list (#760): where it stands came with
+  // `get_entity`, and the corpus offer is the fallback, asked only on failure.
+  expect(boardCalls).toBe(0);
+  expect(corpusCalls).toEqual([]);
 
   screen.done();
 });
@@ -269,6 +264,10 @@ test("a failed workflow read falls back to the corpus offer and says it is unver
 
   expect(screen.options()).toEqual(["In Progress", "To Do", "In Review", "Done"]);
   expect(screen.select()?.value).toBe("In Progress");
+  // Asked about the ticket's own source, once, and only because the workflow
+  // failed (#760).
+  expect(corpusCalls).toEqual(["mock"]);
+  expect(boardCalls).toBe(0);
   // No toast: one per opened ticket over a source that is down is noise, and
   // the note beside the select is what the reader is owed instead.
   expect(toasts.items).toEqual([]);
@@ -287,10 +286,10 @@ test("a workflow read still in flight offers nothing yet", async () => {
   let land!: (statuses: string[]) => void;
   workflow = () => new Promise<string[]>((resolve) => (land = resolve));
   const screen = render();
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(workflowCalls).toHaveLength(1));
   flushSync();
 
-  expect(screen.select(), "the board has answered and the workflow has not").toBeNull();
+  expect(screen.select(), "the ticket has answered and the workflow has not").toBeNull();
   expect(screen.text()).not.toContain("offer unverified");
 
   land(["In Review"]);
@@ -310,11 +309,11 @@ test("a workflow with nowhere left to go draws no select and no note", async () 
   workflow = () => Promise.resolve([]);
   const screen = render();
   await vi.waitFor(() => expect(workflowCalls).toHaveLength(1));
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
   flushSync();
 
   expect(screen.select()).toBeNull();
   expect(screen.text()).not.toContain("offer unverified");
+  expect(corpusCalls, "an answered workflow needs no fallback").toEqual([]);
 
   screen.done();
 });
@@ -328,7 +327,7 @@ test("a workflow with nowhere left to go draws no select and no note", async () 
 test("no read where the adapter does not declare the transition op", async () => {
   writeOps = ["comment"];
   const screen = render();
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
   flushSync();
 
   expect(screen.select()).toBeNull();
@@ -394,14 +393,7 @@ test("a refused queue submission says so and leaves the select where it was", as
  * that shows where it stands cannot be chosen.
  */
 test("a ticket in the terminal group shows No status, unselectable, and can still move", async () => {
-  board = () =>
-    Promise.resolve({
-      columns: [
-        { status: "To Do", cards: [card("PAY-240")], total: 1 },
-        { status: null, cards: [card("PAY-231")], total: 1 },
-      ],
-      sources: [{ source_id: "mock", statuses: ["To Do"] }],
-    });
+  entity = () => detail({ status: null });
   workflow = () => Promise.resolve(["To Do"]);
   const screen = render();
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
@@ -419,22 +411,13 @@ test("a ticket in the terminal group shows No status, unselectable, and can stil
 });
 
 /**
- * The clearing half of the stale-answer guard, asserted **while the new read is
- * still in flight** — the only window in which the bug exists.
- *
- * A select that kept the previous ticket's status until the new board arrived
- * would be offering a move on one ticket while showing another one's state.
- * Dropping the late answer is not enough on its own and a test that only
- * superseded an in-flight read would never notice: this one lets the first
- * board land, then moves the address.
+ * Opening another ticket shows that ticket's status: the current one is the
+ * open entity's own, so it cannot be the previous ticket's (#760).
  */
-test("opening another ticket never leaves the previous one's status on screen", async () => {
+test("opening another ticket shows that ticket's status", async () => {
   const screen = render();
   await vi.waitFor(() => expect(screen.select()?.value).toBe("In Progress"));
 
-  // The second ticket's board has not answered yet.
-  let land!: (board: MiniBoard) => void;
-  board = () => new Promise<MiniBoard>((resolve) => (land = resolve));
   entity = () =>
     detail({
       row: {
@@ -447,65 +430,58 @@ test("opening another ticket never leaves the previous one's status on screen", 
         path: null,
         state: null,
       },
+      status: "To Do",
     });
   screen.reopen("mock:PAY-240");
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(2));
-  flushSync();
-
-  expect(screen.select(), "the previous ticket's select is still on screen").toBeNull();
-
-  land({
-    columns: [{ status: "To Do", cards: [card("PAY-240")], total: 1 }],
-    sources: [{ source_id: "mock", statuses: ["To Do", "In Progress"] }],
-  });
-  await vi.waitFor(() => expect(screen.select()).not.toBeNull());
-  expect(screen.select()?.value).toBe("To Do");
+  await vi.waitFor(() => expect(screen.select()?.value).toBe("To Do"));
+  expect(boardCalls).toBe(0);
 
   screen.done();
 });
 
 /**
- * The dropping half of the same guard: two reads in flight, answered
- * **oldest last**. Without the generation check the first ticket's board would
- * land on the second ticket's panel and offer a move against the wrong status.
+ * The dropping half of the guard on the fallback read: the previous ticket's
+ * corpus answer lands after the next ticket's, and must lose. The source
+ * changes with the ticket here, so the two answers differ.
  */
-test("a slow board answer from the previous ticket is discarded, not shown", async () => {
-  workflow = () => Promise.resolve(["In Progress"]);
-  let first!: (board: MiniBoard) => void;
-  board = () => new Promise<MiniBoard>((resolve) => (first = resolve));
+test("a slow corpus answer from the previous ticket is discarded, not shown", async () => {
+  workflow = () => Promise.reject({ code: "unreachable", message: "no route", source_id: "mock" });
+  let first!: (statuses: string[]) => void;
+  corpus = () => new Promise<string[]>((resolve) => (first = resolve));
   const screen = render();
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(corpusCalls).toHaveLength(1));
 
-  let second!: (board: MiniBoard) => void;
-  board = () => new Promise<MiniBoard>((resolve) => (second = resolve));
+  let second!: (statuses: string[]) => void;
+  corpus = () => new Promise<string[]>((resolve) => (second = resolve));
   entity = () =>
     detail({
       row: {
-        entity_id: "mock:PAY-240",
+        entity_id: "other:PAY-240",
         kind: "ticket",
-        source_id: "mock",
+        source_id: "other",
         title: "Payout dashboard latency",
         updated_at: null,
         synced_at: "2026-08-22T14:30:00Z",
         path: null,
         state: null,
       },
+      source: { id: "other", display_name: "Other", adapter_kind: "mock", enabled: true },
+      status: "To Do",
     });
-  screen.reopen("mock:PAY-240");
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(2));
+  screen.reopen("other:PAY-240");
+  await vi.waitFor(() => expect(corpusCalls).toEqual(["mock", "other"]));
 
-  second({
-    columns: [{ status: "To Do", cards: [card("PAY-240")], total: 1 }],
-    sources: [{ source_id: "mock", statuses: ["To Do", "In Progress"] }],
-  });
+  second(["To Do", "Blocked"]);
   await vi.waitFor(() => expect(screen.select()?.value).toBe("To Do"));
 
   // The ticket that is no longer on screen answers last, and loses.
-  first(BOARD);
+  first(CORPUS);
   await Promise.resolve();
   flushSync();
-  expect(screen.select()?.value, "the previous ticket's board overwrote this one").toBe("To Do");
-  expect(screen.options()).toEqual(["To Do", "In Progress"]);
+  expect(screen.options(), "the previous ticket's corpus overwrote this one").toEqual([
+    "To Do",
+    "Blocked",
+  ]);
 
   screen.done();
 });
@@ -517,7 +493,8 @@ test("a slow board answer from the previous ticket is discarded, not shown", asy
  * was the corpus. The workflow knows better, and now it is asked.
  */
 test("the workflow's offer stands where the corpus shows nothing", async () => {
-  board = () => Promise.resolve({ columns: [], sources: [] });
+  corpus = () => Promise.resolve([]);
+  entity = () => detail({ status: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   flushSync();
@@ -534,11 +511,11 @@ test("the workflow's offer stands where the corpus shows nothing", async () => {
  * absence is honest and a disabled control claims there is something to do.
  */
 test("no select where neither the workflow nor the corpus offers anything", async () => {
-  board = () => Promise.resolve({ columns: [], sources: [] });
+  corpus = () => Promise.resolve([]);
   workflow = () => Promise.reject({ code: "unreachable", message: "no route", source_id: "mock" });
   const screen = render();
   await vi.waitFor(() => expect(workflowCalls).toHaveLength(1));
-  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+  await vi.waitFor(() => expect(corpusCalls).toHaveLength(1));
   flushSync();
 
   expect(screen.select()).toBeNull();
@@ -583,7 +560,8 @@ test.each([
   flushSync();
 
   expect(screen.select()).toBeNull();
-  expect(boardCalls, "a kind with no select must not read the board").toEqual([]);
+  expect(boardCalls, "a kind with no select must not read the board").toBe(0);
+  expect(corpusCalls, "a kind with no select must not read the corpus").toEqual([]);
   expect(workflowCalls, "a kind with no select must not read the workflow").toEqual([]);
 
   screen.done();

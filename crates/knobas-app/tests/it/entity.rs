@@ -1002,6 +1002,27 @@ async fn returns_the_row_its_source_and_the_raw_payload() {
     );
 }
 
+/// **A ticket's detail carries its own status** (#760): the select's current
+/// one, read beside the row by the rule the board reads it by, so opening a
+/// ticket reads no card list. The board draws live tickets only, so the
+/// withdrawn `PAY-198` -- whose payload still says `Deleted` -- reads none.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_declared_status() {
+    let pool = seeded().await;
+    let live = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    let said = live.payload["status"]
+        .as_str()
+        .expect("the mock record says its status flat");
+    assert_eq!(live.status.as_deref(), Some(said));
+
+    let withdrawn = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    assert_eq!(withdrawn.payload["status"], "Deleted");
+    assert_eq!(
+        withdrawn.status, None,
+        "the board does not draw a withdrawn ticket, so it has no current status"
+    );
+}
+
 /// P5's *Open in browser*: the URL is the adapter's, persisted by `0002`.
 #[tokio::test]
 async fn the_web_url_the_adapter_reported_survives_the_mirror() {

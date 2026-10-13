@@ -40,7 +40,7 @@ vi.mock("../ipc/entity", () => ({
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  miniBoard: () => Promise.reject(new Error("a page has no board")),
+  sourceStatuses: () => Promise.reject(new Error("a page has no corpus offer")),
   submitWrite: (payload: unknown) => {
     queued.push(payload);
     return Promise.resolve({});
@@ -139,6 +139,7 @@ function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown>
     links: [],
     activity: [],
     builds: [],
+    status: null,
     ...over,
   };
 }

@@ -22,7 +22,7 @@ let submitFails = false;
 let views: SourceView[] = [];
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: (payload: WriteOpPayload) => {
     calls.push("submit_write");
     if (submitFails) return Promise.reject({ code: "invalid", message: "no such style", source_id: null });
@@ -107,6 +107,7 @@ function pull(): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   };
 }
 

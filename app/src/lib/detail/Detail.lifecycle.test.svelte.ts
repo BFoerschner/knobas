@@ -28,7 +28,7 @@ let views: Record<string, () => Promise<SourceView | null>> = {};
 let rowDelay = 0;
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   reachableTransitions: () => Promise.resolve([]),
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   listContexts: () => Promise.resolve([]),
@@ -90,6 +90,7 @@ function entity(id: string): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   };
 }
 

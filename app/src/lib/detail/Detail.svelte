@@ -15,7 +15,7 @@
   import {
     entityView,
     getEntity,
-    miniBoard,
+    sourceStatuses,
     promoteContext,
     reachableTransitions,
     submitWrite,
@@ -828,7 +828,7 @@
    *
    * Parsed **here** and not in the `{#each}`, the same shape as the body
    * above: a `parseStorageFormat` call in the template re-runs on every
-   * re-render of this panel -- a status board landing, a link being drawn --
+   * re-render of this panel -- a fallback offer landing, a link being drawn --
    * and re-parsing a discussion to answer a question nobody asked is work the
    * derived value is for.
    */
@@ -866,11 +866,12 @@
   // real from a refusal in the write queue. `reachableTransitions` is that
   // read, and the select now offers its answer and nothing else.
   //
-  // **Two reads, and each answers something the other cannot.** The board says
-  // where this ticket *stands* -- the mirrored status, which is what the select
-  // shows and what a move is measured against -- and carries the corpus offer
-  // that is still the fallback when the workflow read fails. The workflow read
-  // says where it can *go*, which no mirror holds and nothing stores.
+  // **Two answers, and each says something the other cannot.** The ticket says
+  // where it *stands* -- the mirrored status (#760: `get_entity` carries it),
+  // which is what the select shows and what a move is measured against -- and
+  // `source_statuses` is the corpus offer that is still the fallback when the
+  // workflow read fails. The workflow read says where it can *go*, which no
+  // mirror holds and nothing stores.
   //
   // The write is unchanged: `Transition` still names the status, the adapter
   // still resolves that name against the source's own answer at flush time, and
@@ -887,11 +888,8 @@
    *
    * A `$derived` and not the comparison written inline below, for two reasons.
    * It changes only when the *answer* flips, so a `refresh()` that re-reads the
-   * same ticket does not re-issue the board read; and it is the effect's gate,
-   * so the read a note or a page can never use is never made. That read brings
-   * back the whole of a source's cards — the cost this select accepts to learn
-   * six statuses — and paying it on a kind with no select at all is paying it
-   * for nothing.
+   * same ticket does not re-issue the fallback read; and it is the effect's gate,
+   * so a read a note or a page can never use is never made.
    */
   const isTicket = $derived(shownKind === "ticket");
 
@@ -914,58 +912,14 @@
   let localTree = $state<{ entityId: string; tree: TreeRead | null } | null>(null);
 
   /**
-   * The granted read (#177), for this ticket's source.
-   *
-   * Both halves of the select come out of it and nothing else: `sources` is the
-   * statuses that source's corpus shows -- the offer -- and the column this
-   * ticket's card sits in is its **mirrored** status. Reading the status out of
+   * The ticket's current status: its **mirrored** one, read by `get_entity`
+   * beside the row (#760) by the rule the board reads it by. Reading it out of
    * `detail.payload` here instead would be a second payload read, in the shell,
    * spelling `fields.status.name` a second time; ADR-0007 exists to stop
-   * exactly that, and the command already did the work.
+   * exactly that. Before #760 it was found among the cards of a whole read of
+   * the source's board, 725 KB per open at 5,000 tickets.
    */
-  let statusBoard = $state<{
-    offered: string[];
-    current: string | null;
-  } | null>(null);
-
-  /**
-   * The board read's own generation.
-   *
-   * **Not `token`.** That one belongs to `get_entity`, and bumping it here
-   * would make this effect invalidate the panel's own read: both effects run
-   * on mount, this one second, so the entity's answer would arrive stale and
-   * be dropped and the panel would say "Reading…" for ever.
-   */
-  let boardToken = 0;
-
-  $effect(() => {
-    const id = entityId;
-    const source = sourceId;
-    const mine = ++boardToken;
-    statusBoard = null;
-    if (!source || !isTicket) return;
-    // Scoped to the ticket's own source and to nothing else — no context, no
-    // project (#177, #208): what this reads is `board.sources`, the statuses
-    // that *source corpus* shows, and narrowing it by the room would offer a
-    // move only where it had already been made.
-    void miniBoard({ sources: [source], context: null, project: null })
-      .then((board) => {
-        if (mine !== boardToken) return;
-        statusBoard = {
-          offered: board.sources.find((entry) => entry.source_id === source)?.statuses ?? [],
-          current:
-            board.columns.find((column) =>
-              column.cards.some((card) => card.entity_id === id),
-            )?.status ?? null,
-        };
-      })
-      .catch(() => {
-        // Swallowed on purpose, and the only swallowed read in this panel: the
-        // select is an extra a ticket detail can do without, and a toast about
-        // a board nobody asked to see would be noise over the item they did.
-        // A `null` board renders no select at all.
-      });
-  });
+  const currentStatus = $derived(detail?.status ?? null);
 
   /**
    * Whether this source can move a ticket at all.
@@ -1000,7 +954,14 @@
    * before the answer lands, and a note that flickered on during every open
    * would be telling the reader something untrue about a read still in flight.
    */
-  let offerUnverified = $state(false);
+  let unverifiedFor = $state<string | null>(null);
+
+  /**
+   * Keyed by the entity whose read failed (#760), so it is `false` the moment
+   * another ticket opens, whatever order the effects below run in: the
+   * fallback read never sees the previous ticket's `true`.
+   */
+  const offerUnverified = $derived(unverifiedFor === entityId);
 
   /** The workflow read's own generation -- `boardToken`'s reason, twice over. */
   let workflowToken = 0;
@@ -1009,7 +970,7 @@
     const id = entityId;
     const mine = ++workflowToken;
     reachable = null;
-    offerUnverified = false;
+    unverifiedFor = null;
     if (!isTicket || !declaresTransition) return;
     void reachableTransitions(id)
       .then((statuses) => {
@@ -1022,7 +983,42 @@
         // opened ticket would be noise. What the reader is owed is that the
         // offer on screen is then the old optimistic one, which is what the
         // note beside the select says.
-        if (mine === workflowToken) offerUnverified = true;
+        if (mine === workflowToken) unverifiedFor = id;
+      });
+  });
+
+  /**
+   * The statuses this source's corpus shows -- the offer's fallback (#179) --
+   * read only once the workflow read has failed and the fallback is wanted
+   * (#760), and `null` until it lands.
+   */
+  let corpusOffer = $state<string[] | null>(null);
+
+  /**
+   * The corpus read's own generation.
+   *
+   * **Not `token`.** That one belongs to `get_entity`, and bumping it here
+   * would make this effect invalidate the panel's own read.
+   */
+  let boardToken = 0;
+
+  $effect(() => {
+    const source = sourceId;
+    const wanted = offerUnverified;
+    const mine = ++boardToken;
+    corpusOffer = null;
+    if (!source || !isTicket || !wanted) return;
+    // Scoped to the ticket's own source and to nothing else: what this reads
+    // is the statuses that *source corpus* shows, and narrowing it by the room
+    // would offer a move only where it had already been made.
+    void sourceStatuses(source)
+      .then((statuses) => {
+        if (mine === boardToken) corpusOffer = statuses;
+      })
+      .catch(() => {
+        // Swallowed on purpose: the fallback is an extra a ticket detail can
+        // do without, and a toast about a list nobody asked to see would be
+        // noise over the item they did. No offer, so no select.
       });
   });
 
@@ -1045,8 +1041,8 @@
    *   the note that says so has not been earned.
    */
   const offered = $derived.by(() => {
-    const offer = reachable ?? (offerUnverified ? (statusBoard?.offered ?? []) : []);
-    return offer.filter((status) => status !== statusBoard?.current);
+    const offer = reachable ?? (offerUnverified ? (corpusOffer ?? []) : []);
+    return offer.filter((status) => status !== currentStatus);
   });
 
   /**
@@ -1081,8 +1077,8 @@
     const status = select.value;
     // Put the control back where the mirror has it, before the await: the
     // reader must never be left looking at a status nothing has recorded.
-    select.value = statusBoard?.current ?? "";
-    if (!status || status === statusBoard?.current || moving) return;
+    select.value = currentStatus ?? "";
+    if (!status || status === currentStatus || moving) return;
     moving = true;
     const mine = token;
     try {
@@ -1424,7 +1420,7 @@
           is not possible, the rule *Start work* and *Open in browser* follow:
           a disabled control claims there is something here to do.
         -->
-        {#if canTransition && statusBoard}
+        {#if canTransition && detail}
           <div>
             <div class="l">Status</div>
             <div class="v">
@@ -1432,7 +1428,7 @@
                 class="sel-inline"
                 aria-label="Change status"
                 disabled={moving}
-                value={statusBoard.current ?? ""}
+                value={currentStatus ?? ""}
                 onchange={(event) => void move(event)}
               >
                 <!--
@@ -1444,10 +1440,10 @@
                   simplified workflow does) is offering a move that changes
                   nothing.
                 -->
-                {#if statusBoard.current === null}
+                {#if currentStatus === null}
                   <option value="" disabled>No status</option>
                 {:else}
-                  <option value={statusBoard.current} disabled>{statusBoard.current}</option>
+                  <option value={currentStatus} disabled>{currentStatus}</option>
                 {/if}
                 {#each offered as status (status)}
                   <option value={status}>{status}</option>

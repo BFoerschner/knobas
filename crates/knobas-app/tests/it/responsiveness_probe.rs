@@ -530,13 +530,19 @@ async fn what_the_reader_waits_on() {
         })
         .await;
         if kind == "ticket" {
-            let source = vec!["jira0".to_owned()];
+            let source = ["jira0".to_owned()];
             let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
                 .await
                 .unwrap();
-            time(what, "mini_board (the ticket's source)", runs, || {
-                knobas_core::mini_board::read(pool, None, &source, None, &declarations)
-            })
+            // Opening a ticket reads no board since #760 (it was 725 KB here):
+            // `get_entity` above carries the status, and this is the offer's
+            // fallback, asked only when the workflow read fails.
+            time(
+                what,
+                "source_statuses (workflow-failure fallback)",
+                runs,
+                || knobas_core::mini_board::source_statuses(pool, &source[0], &declarations),
+            )
             .await;
         }
     }

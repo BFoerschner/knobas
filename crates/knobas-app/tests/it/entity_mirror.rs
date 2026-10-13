@@ -646,6 +646,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
         links: vec![link_entry()],
         activity: vec![activity_row()],
         builds: vec![row(Some(at()))],
+        status: None,
     };
 
     let wire = serde_json::to_value(detail).unwrap();
@@ -663,6 +664,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
             "payload",
             "row",
             "source",
+            "status",
             "web_url",
         ],
     );
@@ -679,7 +681,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     // The three fields the header and the footer branch on are `null`, not
     // absent: *Open in browser* is drawn from `web_url`, the withdrawn banner
     // from `deleted_at`, and both read the key.
-    for field in ["author", "web_url", "deleted_at"] {
+    for field in ["author", "web_url", "deleted_at", "status"] {
         assert_eq!(wire[field], serde_json::Value::Null, "{field} lost its key");
     }
 }
