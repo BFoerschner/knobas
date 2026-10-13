@@ -96,6 +96,8 @@ export interface KindPaths {
   parent: ParentPath[];
   /** Where a row's state chip is read, and what each value means (#666). */
   state: StatePath[];
+  /** The branch a pull request is opened from, by its name (#712). */
+  head: PayloadPath[];
 }
 
 /**

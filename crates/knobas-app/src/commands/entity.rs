@@ -222,6 +222,39 @@ pub struct KindTally {
     pub count: i64,
 }
 
+/// Which of the Code tile's groups a row is drawn under (#712): what needs
+/// me first. Under [`EntityOrder::Attention`], in this order.
+///
+/// "Me" is the row's **own source's** configured username, compared
+/// case-sensitively as the inbox and the standup compare it. A pull request
+/// and a branch are knobas' own words (`0001_init.sql`), and the inbox's
+/// review rule names `pr` the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionGroup {
+    /// Open pull requests whose declared reviewers include me. Gitea keeps a
+    /// reviewer in that list until they review; whether they reviewed since
+    /// the last push is not in the mirror, so it is not asked.
+    ReviewRequested,
+    /// Open pull requests I opened.
+    MyPullRequests,
+    /// Every other open pull request.
+    OpenPullRequests,
+    /// Branches whose last commit is mine and that no open pull request of
+    /// the same repo is opened from (its declared `head`).
+    MyBranches,
+    /// Every other branch: somebody else's, or one an open pull request
+    /// already stands for. The tile draws these only maximised.
+    OtherBranches,
+}
+
+/// How many rows of the set one [`AttentionGroup`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GroupTally {
+    pub group: AttentionGroup,
+    pub count: i64,
+}
+
 /// One page of a room, plus the size of the set it was cut from.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EntityPage {
@@ -233,6 +266,13 @@ pub struct EntityPage {
     /// in no particular order; `None` under the plain orders, whose header
     /// is `total` alone (#680).
     pub tally: Option<Vec<KindTally>>,
+    /// Under [`EntityOrder::Attention`] in a room where some row's source has
+    /// a configured identity, the set's non-empty [`AttentionGroup`]s in draw
+    /// order, each with its count (#712). The rows arrive group by group, so
+    /// a page read from offset 0 is cut into its groups by these counts.
+    /// `None` under every other order and in a room nobody is "me" in, which
+    /// draws as it did before.
+    pub groups: Option<Vec<GroupTally>>,
 }
 
 /// The live corpus, newest first.
@@ -347,7 +387,8 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// [`LIVE_UPDATED`], as the CTE `ruled`, with the four columns every tile
 /// order reads and `$rule`, the one more column its rule needs, led by its
 /// comma. [`EntityOrder::LatestPerParent`] needs none: it reads its parent
-/// key from `sync.item_parent` (#688).
+/// key from `sync.item_parent` (#688). `$join`, where given, joins what the
+/// rule reads beside the row (#712: its source's identity).
 ///
 /// **Only what the rule needs is computed here, per row of the room.** A
 /// declared read is a walk of the declarations per row: on a room of 20,000
@@ -368,13 +409,18 @@ macro_rules! tile_ruled {
         tile_ruled!("")
     };
     ($rule:expr) => {
+        tile_ruled!($rule, "")
+    };
+    ($rule:expr, $join:expr) => {
         concat!(
             r#"
 with ruled as materialized (
   select i.entity_id, i.source_id, i.kind, i.item_updated_at"#,
             $rule,
             r#"
-    from sync.live_item i
+    from sync.live_item i"#,
+            $join,
+            r#"
    where ($1::text[] is null or i.source_id = any($1))
      and ($2::text[] is null or i.kind      = any($2))
      and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
@@ -388,9 +434,11 @@ with ruled as materialized (
 }
 
 /// A tile order's page, over the CTE `drawn` (the ordered set: `entity_id`,
-/// `kind`, `item_updated_at`, `state` and its `tone`): the rows loudest tone
-/// first, then newest first, with the set's total and its [`KindTally`]
-/// beside every row. The page is cut first and joined back to `sync.item`
+/// `kind`, `item_updated_at`, `state` and its `tone`, and `grp`, the
+/// 1-based [`AttentionGroup`] or `null`): the rows by group, then loudest
+/// tone first, then newest first, with the set's total, its [`KindTally`]
+/// and its [`GroupTally`]s beside every row. `null` groups are the whole set
+/// of an ungrouped read, which then orders exactly as before #712. The page is cut first and joined back to `sync.item`
 /// for the rest of each row, so the path line is drawn for the page's rows
 /// and no others.
 ///
@@ -406,33 +454,93 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
        "#,
             knobas_core::path_line_read!("$8"),
             r#" as path,
-       p.state, p.total, p.tally
-  from (select d.entity_id, d.item_updated_at, d.state, d.tone,
+       p.state, p.total, p.tally, p.groups
+  from (select d.entity_id, d.item_updated_at, d.state, d.tone, d.grp,
                count(*) over () as total,
                (select jsonb_agg(jsonb_build_object('kind', t.kind, 'tone', t.tone, 'count', t.n))
-                  from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally
+                  from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally,
+               (select jsonb_agg(jsonb_build_object(
+                         'group', (array['review_requested', 'my_pull_requests', 'open_pull_requests',
+                                         'my_branches', 'other_branches'])[g.grp],
+                         'count', g.n) order by g.grp)
+                  from (select grp, count(*) as n from drawn where grp is not null group by grp) g) as groups
           from drawn d
-         order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
+         order by d.grp nulls first,
+                  coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
                   d.item_updated_at desc nulls last, d.entity_id
          limit $4 offset $5) p
   join sync.item i on i.entity_id = p.entity_id
- order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], p.tone), 6),
+ order by p.grp nulls first,
+          coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], p.tone), 6),
           p.item_updated_at desc nulls last, p.entity_id
 "#
         )
     };
 }
 
-/// [`EntityOrder::Attention`]: the live corpus without its settled rows.
+/// [`EntityOrder::Attention`]: the live corpus without its settled rows,
+/// grouped by what needs me first (#712, [`AttentionGroup`]).
+///
+/// `me` is each row's own source's configured username (`config.username`,
+/// the one [`identity_of`] unions for the inbox), blank read as none. A row
+/// whose source has none can be nobody's: its pull requests are other open
+/// ones and its branches other branches. A room where **no** row has one is
+/// not grouped at all (`grp` is `null` throughout), which is the order the
+/// tile drew before.
+///
+/// Per row, `ruled` adds the §4.1 `author`, the `title` (a branch's name),
+/// whether my username is among the declared reviewers, and the path line --
+/// the declared parent, which for a pull request and a branch of the same
+/// repo is the same `owner/name`. `open_head` is every open pull request's
+/// declared `head` across the live corpus, not the room's: a context that
+/// holds a branch and not its pull request must not call the branch
+/// unproposed. Each is read once, `materialized`, as `ruled` is.
 const LIVE_ATTENTION: &str = concat!(
-    tile_ruled!(concat!(
-        ",\n         ",
-        knobas_core::declared_state!("$8"),
-        " as state"
-    )),
+    tile_ruled!(
+        concat!(
+            ",\n         ",
+            knobas_core::declared_state!("$8"),
+            " as state, i.author, i.title, me.me,
+         coalesce((select true from ",
+            knobas_core::declared_list!("$8", "reviewers"),
+            " v where v.value = me.me limit 1), false) as asked,
+         case when i.kind = 'branch' then ",
+            knobas_core::path_line_read!("$8"),
+            " end as branch_path"
+        ),
+        "
+    left join lateral (select nullif(btrim(s.config->>'username'), '') as me
+                         from knobas.source_config s where s.id = i.source_id) me on true"
+    ),
     r#",
+open_head as materialized (
+  select i.source_id, "#,
+    knobas_core::declared_string!("$8", "head"),
+    r#" as head,
+         "#,
+    knobas_core::path_line_read!("$8"),
+    r#" as path
+    from sync.live_item i
+   where i.kind = 'pr'
+     and i.source_id in (select r.source_id from ruled r where r.kind = 'branch' and r.me is not null)
+     and coalesce("#,
+    knobas_core::declared_state!("$8"),
+    r#"->>'tone', '') not in ('ok', 'muted')
+),
 drawn as (
-  select r.entity_id, r.kind, r.item_updated_at, r.state, r.state->>'tone' as tone
+  select r.entity_id, r.kind, r.item_updated_at, r.state, r.state->>'tone' as tone,
+         case when bool_or(r.me is not null) over () then
+           case
+             when r.kind = 'pr' and r.me is not null and r.asked then 1
+             when r.kind = 'pr' and r.author = r.me then 2
+             when r.kind = 'pr' then 3
+             when r.kind = 'branch' and r.author = r.me
+                  and not exists (select 1 from open_head h
+                                   where h.source_id = r.source_id and h.head = r.title
+                                     and h.path is not distinct from r.branch_path) then 4
+             else 5
+           end
+         end as grp
     from ruled r
    where r.state is null or r.state->>'tone' not in ('ok', 'muted')
 )"#,
@@ -520,7 +628,8 @@ latest as (
    order by g.grp, g.item_updated_at desc nulls last, g.entity_id
 ),
 drawn as (
-  select k.entity_id, k.kind, k.item_updated_at, k.state, k.state->>'tone' as tone
+  select k.entity_id, k.kind, k.item_updated_at, k.state, k.state->>'tone' as tone,
+         null::int as grp
     from (select i.entity_id, i.kind, i.item_updated_at,
                  "#,
     knobas_core::declared_state!("$8"),
@@ -638,6 +747,14 @@ pub async fn list_entities_inner(
         None
     };
 
+    // Under `attention` alone, and off the first row like the tally.
+    let groups = match (filter.order, rows.first()) {
+        (EntityOrder::Attention, Some(row)) => row
+            .try_get::<Option<sqlx::types::Json<Vec<GroupTally>>>, _>("groups")?
+            .map(|groups| groups.0),
+        _ => None,
+    };
+
     Ok(EntityPage {
         rows: rows
             .iter()
@@ -656,6 +773,7 @@ pub async fn list_entities_inner(
             .collect::<Result<_, _>>()?,
         total,
         tally,
+        groups,
     })
 }
 

@@ -232,6 +232,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   `map` writes one into the stored payload at `repository`, spelled the
 ///   way `base.repo` is. A repository has no parent.
 ///
+/// * `head` is the branch a pull request is opened from, Gitea's `head.ref`:
+///   the bare branch name, which is the title `map::branch_item` gives a
+///   branch. The Code tile reads it to tell a branch nobody has proposed yet
+///   from one an open pull request already stands for (#712).
+///
 /// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
 /// in as many words: "Gitea has no such thing here and gets none"), and a
 /// repository is an entity *kind*, not the axis a room is drawn along -- and
@@ -260,6 +265,7 @@ fn payload_paths() -> Vec<KindPaths> {
             merged: vec![PayloadPath::of(["merged"])],
             parent: repo(&["base", "repo"]),
             state: pr_state(),
+            head: vec![PayloadPath::of(["head", "ref"])],
             ..KindPaths::default()
         },
         KindPaths {

@@ -29,8 +29,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, NoteLinkInput,
-    SourceRef, SuggestionPage, UrlMatch,
+    AttentionGroup, EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, GroupTally,
+    KindTally, NoteLinkInput, SourceRef, SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
@@ -188,9 +188,10 @@ fn the_entity_page_shape_matches_its_typescript_mirror() {
         rows: vec![row(Some(at()))],
         total: 42,
         tally: None,
+        groups: None,
     };
     let wire = serde_json::to_value(page).unwrap();
-    assert_shape("EntityPage", &wire, &["rows", "tally", "total"]);
+    assert_shape("EntityPage", &wire, &["groups", "rows", "tally", "total"]);
     assert_shape("EntityRow", &wire["rows"][0], ENTITY_ROW_FIELDS);
     assert_eq!(
         wire["tally"],
@@ -215,13 +216,29 @@ fn the_entity_page_shape_matches_its_typescript_mirror() {
                 count: 1,
             },
         ]),
+        // The Code tile's groups (#712), each on the wire in its own word.
+        groups: Some(vec![
+            GroupTally {
+                group: AttentionGroup::ReviewRequested,
+                count: 2,
+            },
+            GroupTally {
+                group: AttentionGroup::MyBranches,
+                count: 1,
+            },
+        ]),
     };
     let wire = serde_json::to_value(tile).unwrap();
-    assert_shape("EntityPage", &wire, &["rows", "tally", "total"]);
+    assert_shape("EntityPage", &wire, &["groups", "rows", "tally", "total"]);
     for line in wire["tally"].as_array().unwrap() {
         assert_shape("KindTally", line, &["count", "kind", "tone"]);
     }
     assert_eq!(wire["tally"][1]["tone"], serde_json::Value::Null);
+    for group in wire["groups"].as_array().unwrap() {
+        assert_shape("GroupTally", group, &["count", "group"]);
+    }
+    assert_eq!(wire["groups"][0]["group"], "review_requested");
+    assert_eq!(wire["groups"][1]["group"], "my_branches");
 }
 
 /// The filter is an *input* DTO, so it is pinned through a round trip: the

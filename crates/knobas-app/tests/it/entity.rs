@@ -1569,6 +1569,199 @@ async fn the_code_tile_draws_open_pull_requests_first_and_no_settled_one() {
     assert_eq!(tally.len(), 2, "nothing else is counted: {tally:?}");
 }
 
+/// A Gitea source whose configured username is `username`, or none: the
+/// identity the Code tile's groups compare against (#712).
+async fn configured_as(pool: &PgPool, username: Option<&str>) -> String {
+    let source = configured(pool, "gitea").await;
+    sqlx::query("update knobas.source_config set config = $2 where id = $1")
+        .bind(&source)
+        .bind(username.map_or_else(
+            || serde_json::json!({}),
+            |name| serde_json::json!({ "username": name }),
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+    source
+}
+
+/// The §4.1 `author` a mirrored item carries: a pull request's opener, a
+/// branch's last committer.
+async fn authored(pool: &PgPool, entity: &str, author: &str) {
+    sqlx::query("update sync.item set author = $2 where entity_id = $1")
+        .bind(entity)
+        .bind(author)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A repo of pull requests and branches by `björn` and by others, each dated
+/// so that recency alone would draw them in another order than the groups
+/// do. Returns the source and the Code tile's page of it.
+async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::entity::EntityPage) {
+    let pool = seeded().await;
+    let gitea = configured_as(&pool, username).await;
+    let repo =
+        |name: &str| serde_json::json!({ "full_name": format!("tidewater/{name}"), "name": name });
+    let pr = |state: &str, merged: bool, head: &str, asked: &[&str]| {
+        serde_json::json!({
+            "state": state,
+            "merged": merged,
+            "head": { "ref": head },
+            "base": { "repo": repo("payout-service") },
+            "requested_reviewers": asked.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
+        })
+    };
+    for (n, author, payload, minutes) in [
+        // Others', asking somebody else: the newest pull request of all.
+        (1, "ana", pr("open", false, "ana/retry", &["cleo"]), 1),
+        // Others', asking me.
+        (2, "ana", pr("open", false, "ana/ledger", &["björn"]), 40),
+        // Mine, open.
+        (3, "björn", pr("open", false, "björn/sepa", &[]), 20),
+        // Mine, merged; and others' asking me, closed: neither is drawn.
+        (4, "björn", pr("closed", true, "björn/old", &[]), 2),
+        (5, "ana", pr("closed", false, "ana/gone", &["björn"]), 3),
+    ] {
+        let key = format!("tidewater/payout-service#{n}");
+        mirrored(&pool, &gitea, "pr", &key, payload).await;
+        dated(&pool, &format!("{gitea}:{key}"), minutes).await;
+        authored(&pool, &format!("{gitea}:{key}"), author).await;
+    }
+    for (repo_name, branch, author, minutes) in [
+        // Mine, with an open pull request: drawn as that pull request.
+        ("payout-service", "björn/sepa", "björn", 5),
+        // Mine, whose only pull request was merged: no open one.
+        ("payout-service", "björn/old", "björn", 60),
+        // Mine, never proposed.
+        ("payout-service", "björn/spike", "björn", 70),
+        // Mine, named like my open pull request's head but in another repo.
+        ("ledger", "björn/sepa", "björn", 80),
+        // Somebody else's.
+        ("payout-service", "ana/wip", "ana", 4),
+    ] {
+        let key = format!("tidewater/{repo_name}@refs/heads/{branch}");
+        mirrored(
+            &pool,
+            &gitea,
+            "branch",
+            &key,
+            serde_json::json!({ "repository": repo(repo_name) }),
+        )
+        .await;
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(format!("{gitea}:{key}"))
+            .bind(branch)
+            .execute(&pool)
+            .await
+            .unwrap();
+        dated(&pool, &format!("{gitea}:{key}"), minutes).await;
+        authored(&pool, &format!("{gitea}:{key}"), author).await;
+    }
+
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![gitea.clone()],
+            kinds: vec!["pr".to_owned(), "branch".to_owned()],
+            order: EntityOrder::Attention,
+            ..all()
+        },
+        50,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+    (gitea, page)
+}
+
+/// The Code tile answers "what needs me" first (#712): pull requests asking
+/// for my review, then mine, then the other open ones, then my branches that
+/// no open pull request is opened from, then every other branch -- each run
+/// in the order the tile always drew (loudest tone, then newest). "Me" is the
+/// row's own source's configured username, compared as the inbox compares it.
+/// A branch is matched to a pull request by the head the pull request
+/// declares and the repo both declare as parent, so a same-named branch in
+/// another repo is still unproposed, and a merged pull request proposes
+/// nothing any more.
+#[tokio::test]
+async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let (gitea, page) = code_room(Some("björn")).await;
+
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    let pr = |n: u32| format!("{gitea}:tidewater/payout-service#{n}");
+    let branch = |repo: &str, name: &str| format!("{gitea}:tidewater/{repo}@refs/heads/{name}");
+    assert_eq!(
+        ids,
+        [
+            pr(2),
+            pr(3),
+            pr(1),
+            branch("payout-service", "björn/old"),
+            branch("payout-service", "björn/spike"),
+            branch("ledger", "björn/sepa"),
+            branch("payout-service", "ana/wip"),
+            branch("payout-service", "björn/sepa"),
+        ],
+    );
+    assert_eq!(
+        page.groups,
+        Some(vec![
+            GroupTally {
+                group: AttentionGroup::ReviewRequested,
+                count: 1
+            },
+            GroupTally {
+                group: AttentionGroup::MyPullRequests,
+                count: 1
+            },
+            GroupTally {
+                group: AttentionGroup::OpenPullRequests,
+                count: 1
+            },
+            GroupTally {
+                group: AttentionGroup::MyBranches,
+                count: 3
+            },
+            GroupTally {
+                group: AttentionGroup::OtherBranches,
+                count: 2
+            },
+        ]),
+        "every drawn row in exactly one group, the groups in draw order"
+    );
+    assert_eq!(page.total, 8);
+}
+
+/// A source with no configured identity draws the Code tile as it always
+/// did (#680): open pull requests first, newest first, then branches by
+/// recency, and no groups at all.
+#[tokio::test]
+async fn a_code_tile_with_no_identity_draws_todays_order() {
+    let (gitea, page) = code_room(None).await;
+
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    let pr = |n: u32| format!("{gitea}:tidewater/payout-service#{n}");
+    let branch = |repo: &str, name: &str| format!("{gitea}:tidewater/{repo}@refs/heads/{name}");
+    assert_eq!(
+        ids,
+        [
+            pr(1),
+            pr(3),
+            pr(2),
+            branch("payout-service", "ana/wip"),
+            branch("payout-service", "björn/sepa"),
+            branch("payout-service", "björn/old"),
+            branch("payout-service", "björn/spike"),
+            branch("ledger", "björn/sepa"),
+        ],
+    );
+    assert_eq!(page.groups, None, "nobody to group for");
+}
+
 /// The Builds tile's read (#680): one row per build configuration, its
 /// **latest** build, failing first, then running, then succeeded. A newer
 /// success of one configuration does not hide another configuration's
