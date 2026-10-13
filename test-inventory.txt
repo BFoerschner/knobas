@@ -1996,6 +1996,7 @@ knobas-source-gitea	test/it	client::an_unsupported_auth_method_is_refused_at_bui
 knobas-source-gitea	test/it	client::an_unusable_instance_id_is_refused_at_build_time
 knobas-source-gitea	test/it	client::test_connection_reports_the_account_and_the_server_version
 knobas-source-gitea	test/it	contract::passes_the_contract_battery
+knobas-source-gitea	test/it	sync::a_branch_deleted_mid_run_is_skipped_and_the_run_succeeds
 knobas-source-gitea	test/it	sync::a_branch_listing_that_would_exceed_the_cap_fails_the_run
 knobas-source-gitea	test/it	sync::a_budget_that_stops_short_keeps_the_boundary_it_was_handed
 knobas-source-gitea	test/it	sync::a_cap_fires_at_exactly_the_boundary_it_names
@@ -2005,14 +2006,17 @@ knobas-source-gitea	test/it	sync::a_cursor_from_before_the_repository_payload_re
 knobas-source-gitea	test/it	sync::a_dead_token_against_a_publicly_readable_instance_still_fails
 knobas-source-gitea	test/it	sync::a_discussion_refused_by_a_dead_credential_fails_the_run
 knobas-source-gitea	test/it	sync::a_discussion_the_server_did_not_send_whole_ends_the_run
+knobas-source-gitea	test/it	sync::a_failed_discussion_read_of_a_pull_request_still_there_ends_the_run
 knobas-source-gitea	test/it	sync::a_forbidden_repository_is_fatal_during_a_full_sync
 knobas-source-gitea	test/it	sync::a_forbidden_repository_is_skipped_on_an_incremental_run
 knobas-source-gitea	test/it	sync::a_full_sync_emits_commits_under_their_object_ids
 knobas-source-gitea	test/it	sync::a_full_sync_emits_pull_requests_with_their_discussion
 knobas-source-gitea	test/it	sync::a_full_sync_emits_the_repository_and_every_branch
 knobas-source-gitea	test/it	sync::a_long_discussion_reaches_the_indexed_text_whole
+knobas-source-gitea	test/it	sync::a_moved_branch_deleted_mid_run_does_not_cost_the_rest_of_the_repository
 knobas-source-gitea	test/it	sync::a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not
 knobas-source-gitea	test/it	sync::a_new_commit_on_a_moved_branch_is_emitted_once
+knobas-source-gitea	test/it	sync::a_pull_request_deleted_mid_run_is_skipped_and_the_run_succeeds
 knobas-source-gitea	test/it	sync::a_pull_request_whose_discussion_is_refused_is_still_indexed
 knobas-source-gitea	test/it	sync::a_refusal_that_ends_a_full_sync_names_the_repository
 knobas-source-gitea	test/it	sync::a_refused_repository_keeps_its_position_on_either_selection_path

@@ -1244,7 +1244,145 @@ async fn a_discussion_refused_by_a_dead_credential_fails_the_run() {
     assert_eq!(error.status(), Some(401), "{error:?}");
 }
 
+/// A pull request deleted between the listing and its discussion read is gone,
+/// not a failure (issue #724). Gitea 1.27.3 answers that read **500** `issue
+/// does not exist`, so the adapter asks for the pull request itself, and its
+/// 404 is what makes the 500 mean "deleted": the pull request is skipped and
+/// the run -- a full one, where a hole would be fatal -- goes on and succeeds.
+#[tokio::test]
+async fn a_pull_request_deleted_mid_run_is_skipped_and_the_run_succeeds() {
+    let mut state = State::tidewater();
+    state
+        .vanished_pulls
+        .insert("tidewater/payout-service#142".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, _) = full(&*source).await;
+    assert!(
+        !items.iter().any(|i| i.entity.key.ends_with("#142")),
+        "a deleted pull request is not mirrored: {items:?}"
+    );
+    assert!(
+        items.iter().any(|i| i.entity.key.ends_with("#144")),
+        "{items:?}"
+    );
+    // The walk went on past it, to the commits.
+    assert_eq!(ids(&items, "commit").len(), 3, "{items:?}");
+}
+
+/// The control: the same 500 on a pull request that is still there is a
+/// server fault, and ends the run -- the re-read is what tells the two apart,
+/// not the status.
+#[tokio::test]
+async fn a_failed_discussion_read_of_a_pull_request_still_there_ends_the_run() {
+    let mut state = State::tidewater();
+    state
+        .discussion_status
+        .insert("tidewater/payout-service#142".to_owned(), 500);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert_eq!(error.status(), Some(500), "{error:?}");
+}
+
 // --------------------------------------------------------------- commits ----
+
+/// A branch deleted between the listing and its commit read is gone, not a
+/// hole (issue #724): merge with delete-branch on a busy repository does it
+/// every day. Gitea answers the read 404; the run skips the branch's commits
+/// and succeeds, even a full one. The branch row is still the listing's, and
+/// the next run that does not list it tombstones it.
+#[tokio::test]
+async fn a_branch_deleted_mid_run_is_skipped_and_the_run_succeeds() {
+    let mut state = State::tidewater();
+    state
+        .vanished_branches
+        .insert("tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, cursor) = full(&*source).await;
+    assert_eq!(
+        ids(&items, "commit"),
+        vec!["gitea:tidewater/payout-service@1111111111111111111111111111111111111111"],
+        "main's history is still walked; the vanished branch's is not"
+    );
+    assert_eq!(ids(&items, "pr").len(), 2, "{items:?}");
+
+    // The next run no longer sees it listed, and retires it.
+    state
+        .branches
+        .get_mut("tidewater/payout-service")
+        .unwrap()
+        .retain(|b| b["name"] == "main");
+    state.vanished_branches.clear();
+    fake.remount(&state).await;
+    let (items, _) = again(&*source, &cursor).await;
+    let gone: Vec<String> = items
+        .iter()
+        .filter(|i| i.deleted)
+        .map(|i| i.entity.to_string())
+        .collect();
+    assert_eq!(
+        gone,
+        vec!["gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"]
+    );
+}
+
+/// The same race on an incremental run: the branch moved, then vanished before
+/// its new commits were read. The run succeeds and the rest of the repository
+/// is not given up for it -- before #724 the 404 skipped the whole repository.
+#[tokio::test]
+async fn a_moved_branch_deleted_mid_run_does_not_cost_the_rest_of_the_repository() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    state.branches.get_mut("tidewater/payout-service").unwrap()[1] = branch(
+        "feature/PAY-231-sepa-retry",
+        "4444444444444444444444444444444444444444",
+        "PAY-231: bound the jitter",
+        "2026-08-22T16:20:00Z",
+    );
+    state
+        .vanished_branches
+        .insert("tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned());
+    state
+        .pulls
+        .get_mut("tidewater/payout-service")
+        .unwrap()
+        .insert(
+            0,
+            support::pull(146, "Fresh one", "", "2026-08-22T16:30:00Z", 0),
+        );
+    fake.remount(&state).await;
+
+    let (items, next) = again(&*source, &cursor).await;
+    assert!(
+        items.iter().any(|i| i.entity.key.ends_with("#146")),
+        "{items:?}"
+    );
+
+    // The position moved past #146: a skipped repository would have kept the
+    // old one and delivered #146 again here.
+    state
+        .branches
+        .get_mut("tidewater/payout-service")
+        .unwrap()
+        .retain(|b| b["name"] == "main");
+    state.vanished_branches.clear();
+    fake.remount(&state).await;
+    let (items, _) = again(&*source, &next).await;
+    assert!(
+        !items.iter().any(|i| i.entity.key.ends_with("#146")),
+        "delivered twice: {items:?}"
+    );
+    assert_eq!(items.len(), 1, "only the branch's tombstone: {items:?}");
+}
 
 #[tokio::test]
 async fn a_full_sync_emits_commits_under_their_object_ids() {
