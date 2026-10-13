@@ -638,7 +638,7 @@ async fn a_parent_is_offered_by_the_prefix_typed_newest_first() {
         "a parent typed by prefix is still offered"
     );
     assert!(
-        offered(format!("-r03"))
+        offered("-r03".to_owned())
             .await
             .iter()
             .all(|n| !n.contains(&t)),
