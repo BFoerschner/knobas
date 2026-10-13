@@ -665,3 +665,34 @@ async fn a_guard_over_a_clean_repository_deletes_nothing_at_all() {
 
     drop(guard);
 }
+
+/// **A pull request whose head branch is gone is still removed (#738).** A
+/// merge with *delete branch* leaves the pull request listed under the head
+/// `refs/pull/{n}/head`, which names no branch the guard owns, so matching by
+/// head ref alone left every landing check's merged pull request on the
+/// fixture. A guard told the number deletes it by number; a seeded pull
+/// request, and a number the server no longer lists, are not touched.
+#[tokio::test]
+async fn a_pull_request_whose_head_was_deleted_is_removed_by_its_number() {
+    let gitea = Gitea::holding({
+        let mut repository = Repository::seeded();
+        repository
+            .pulls
+            .push((320, "refs/pull/320/head".to_owned()));
+        repository
+    })
+    .await;
+
+    let mut guard = Litter::new(&gitea.env()).await;
+    guard.will_open_pull(320);
+    guard.will_open_pull(321); // already gone: must not be deleted blind
+    drop(guard);
+
+    let after = gitea.repository();
+    assert_eq!(
+        after.pulls,
+        Repository::seeded().pulls,
+        "the merged pull request with a deleted head must go, the seeded ones stay"
+    );
+    assert_eq!(after.deleted, ["issues/320"], "{:?}", after.deleted);
+}

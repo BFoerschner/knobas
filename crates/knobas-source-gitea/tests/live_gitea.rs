@@ -3165,6 +3165,9 @@ async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_bran
     let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
         .as_u64()
         .expect("Gitea answers with the new pull request's number");
+    // Merged with its head deleted, Gitea lists it as `refs/pull/{n}/head`, so
+    // only its number finds it again (#738).
+    litter.will_open_pull(number);
     let id = format!("gitea:{}#{number}", env.full_name());
 
     // 1. The base moves on: a commit on it, through the contents API.

@@ -205,7 +205,10 @@ pub const LITTER: &str = "knobas-";
 ///    ([`remove`]). One tracked thing, and everything hanging off it recovered
 ///    through that thing -- which is why nothing has to be registered twice,
 ///    and why a pull request opened from an *untracked* branch is invisible
-///    here.
+///    here. The one exception is a pull request whose head the test deletes
+///    itself (a merge with *delete branch*): Gitea lists it under
+///    `refs/pull/{n}/head` afterwards, so the test registers its number with
+///    [`Litter::will_open_pull`] and the guard deletes it by that (#738).
 /// 2. **Cleanup runs from [`Drop`], so the failure path is the success path.**
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
@@ -247,6 +250,9 @@ pub struct Litter {
     /// only one this guard ever touches.
     api: String,
     branches: Vec<String>,
+    /// Pull requests the test told the guard about by number ([`Litter::will_open_pull`]),
+    /// removed by that number whatever head ref Gitea lists them under.
+    pulls: Vec<u64>,
     /// How long [`Drop`] waits for the cleanup before it gives up and says so.
     budget: Duration,
     /// What [`client`] was given, carried so [`Drop`]'s own client is bounded
@@ -334,6 +340,7 @@ impl Litter {
             auth: format!("token {}", env.token),
             api: format!("{}/api/v1/repos/{}", env.url, env.full_name()),
             branches: Vec::new(),
+            pulls: Vec::new(),
             budget: CLEANUP_BUDGET,
             request_budget,
         };
@@ -377,7 +384,7 @@ impl Litter {
              failed: {left:?}",
             left.len()
         );
-        let failures = remove(&self.http, &self.auth, &self.api, &left).await;
+        let failures = remove(&self.http, &self.auth, &self.api, &left, &[]).await;
         assert!(
             failures.is_empty(),
             "the leftovers of an earlier run could not be cleared, so this run would add to them \
@@ -401,6 +408,18 @@ impl Litter {
              Litter::new can recognise it: {name:?}"
         );
         self.branches.push(name.to_owned());
+    }
+
+    /// Own the removal of a pull request **by its number**, from this line on.
+    ///
+    /// For a pull request whose head branch the test itself deletes (a merge
+    /// with *delete branch*, issue #738): Gitea then lists it under the head
+    /// `refs/pull/{n}/head`, which no longer names the branch the guard finds it
+    /// by, so the by-branch match in [`remove`] misses it and the merged pull
+    /// request stays on the fixture for good. Call it as soon as the number is
+    /// known; a number already gone costs nothing.
+    pub fn will_open_pull(&mut self, number: u64) {
+        self.pulls.push(number);
     }
 
     /// Open a pull request **as somebody else**, through Gitea's `Sudo`
@@ -539,7 +558,8 @@ impl Litter {
 impl Drop for Litter {
     fn drop(&mut self) {
         let branches = std::mem::take(&mut self.branches);
-        if branches.is_empty() {
+        let pulls = std::mem::take(&mut self.pulls);
+        if branches.is_empty() && pulls.is_empty() {
             return;
         }
         let (auth, api, budget) = (self.auth.clone(), self.api.clone(), self.budget);
@@ -547,7 +567,7 @@ impl Drop for Litter {
         // Kept back for the timeout's message: `branches` itself is moved into
         // the thread, and a report that could not name what it abandoned would
         // leave the reader with nothing to look for.
-        let abandoned = branches.clone();
+        let abandoned = (branches.clone(), pulls.clone());
         // `Drop` cannot await, and this one runs on a tokio worker thread, so
         // it cannot block on the current runtime either. A thread with a
         // runtime of its own can do both; waiting for it keeps the cleanup
@@ -576,9 +596,9 @@ impl Drop for Litter {
                 .enable_all()
                 .build()
                 .expect("a runtime for the cleanup")
-                .block_on(
-                    async move { remove(&client(request_budget), &auth, &api, &branches).await },
-                );
+                .block_on(async move {
+                    remove(&client(request_budget), &auth, &api, &branches, &pulls).await
+                });
             // The receiver is gone only if the waiter already gave up.
             let _ = done.send(failures);
         });
@@ -590,7 +610,7 @@ impl Drop for Litter {
             // because only this side knows what is now left standing.
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => vec![format!(
                 "the cleanup thread panicked (its own message is on stderr, naming the request), \
-                 so {abandoned:?} may still be standing; the next guard's leftover sweep removes \
+                 so {abandoned:?} (branches, pull requests) may still be standing; the next guard's leftover sweep removes \
                  whatever is left"
             )],
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
@@ -641,10 +661,18 @@ impl Drop for Litter {
 /// against `live_gitea_capped`'s `HEADROOM` forever. This way round, an
 /// interruption at the same point leaves the branch standing, which is exactly
 /// the thing the next run looks for. `tests/litter_guard.rs` pins the order.
-async fn remove(http: &reqwest::Client, auth: &str, api: &str, branches: &[String]) -> Vec<String> {
+async fn remove(
+    http: &reqwest::Client,
+    auth: &str,
+    api: &str,
+    branches: &[String],
+    numbers: &[u64],
+) -> Vec<String> {
+    // Owned if opened from an owned branch, or registered by number (#738).
+    let owned = |number: &u64, head: &String| branches.contains(head) || numbers.contains(number);
     let mut tried = Vec::new();
     for (number, head) in pulls(http, auth, api).await {
-        if branches.contains(&head) {
+        if owned(&number, &head) {
             tried.push(format!(
                 "DELETE issues/{number} (from {head}) -> {}",
                 delete(http, auth, &format!("{api}/issues/{number}")).await
@@ -671,7 +699,7 @@ async fn remove(http: &reqwest::Client, auth: &str, api: &str, branches: &[Strin
     let left: Vec<u64> = pulls(http, auth, api)
         .await
         .into_iter()
-        .filter(|(_, head)| branches.contains(head))
+        .filter(|(number, head)| owned(number, head))
         .map(|(number, _)| number)
         .collect();
     if !left.is_empty() {
