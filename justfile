@@ -891,6 +891,54 @@ search-perf:
     echo "search-perf: docs/decisions/2026-09-v1-5-unattended-rulings.md, '## #533'."
     exit "$status"
 
+# Like `search-perf` it takes a gate slot (it starts a postmaster), prints the
+# head and the load average before and after, and goes red when the harness
+# ran other than the one pinned test -- a renamed or un-ignored test is a green
+# over nothing measured otherwise.
+#
+# The builds-of-a-commit reading (#732): `knobas-app`'s one ignored test in
+# `tests/it/builds_of_a_commit_perf.rs`, 50,000 builds seeded into a scratch
+# database, the lookup's plan checked and the fastest of ten `explain analyze`
+# runs held to 5 ms. Ignored, and so here rather than in `check`, for the
+# reason `search-perf` is: a wall-clock budget inside the gate measures the
+# machine. The gate keeps the plan assertion, at 3,000 builds.
+# Take the builds-of-a-commit reading at 50,000 builds.
+builds-perf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    expected=1
+    log=
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
+    hold_gate_slot builds-perf
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-builds-perf.XXXXXX")
+    mark() {
+        local when=$1 tree=clean
+        [ -z "$(git status --porcelain)" ] || tree=dirty
+        echo "builds-perf: $when head=$(git rev-parse HEAD) tree=$tree" \
+             "load1=$(uptime | sed -E 's/.*load averages?:[[:space:]]*//; s/[,[:space:]].*//')" \
+             "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+    mark before
+    status=0
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test it builds_of_a_commit_perf \
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
+    mark after
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "builds-perf: cargo exited $status; $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected is pinned." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
+    exit "$status"
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
