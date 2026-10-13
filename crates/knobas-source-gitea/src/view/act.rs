@@ -48,8 +48,8 @@ pub(super) fn default_first<'a>(
 }
 
 /// Why a mirror's branch actions are drawn disabled: Gitea refuses a branch
-/// write on a pull mirror with a 403, which the shared fault mapping reads as
-/// a dead credential, so the view must not offer one. A mirror can be turned
+/// write on a pull mirror (a 403, `Git Repository is a mirror.`), so the view
+/// must not offer one it knows will be refused. A mirror can be turned
 /// into a plain repository, so the actions stay, disabled (the #701 ruling).
 pub(super) const MIRRORED: &str = "A mirror: its branches come from upstream";
 

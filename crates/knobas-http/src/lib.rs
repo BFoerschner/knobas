@@ -18,7 +18,9 @@
 //! * **One fault mapping** ([`classify`]), because `Unauthorized` is the fault
 //!   the user is asked to act on -- carrying the **status** it came from, so an
 //!   adapter can tell a dead credential (401) from one object it may not read
-//!   (403) without a second request (ADR-0004).
+//!   (403) without a second request (ADR-0004). An adapter whose 403 can also
+//!   refuse the *request* rather than the credential says which through its
+//!   [`ForbiddenReading`](classify::ForbiddenReading) (issue #722).
 //! * **One place a failing body is read**: the caller's
 //!   [`BodyMessage`](classify::BodyMessage), consulted inside [`HttpClient::send`]
 //!   where the body still exists.
@@ -38,7 +40,7 @@ use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 
-pub use classify::{BodyMessage, reqwest_error, status_error};
+pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
 // `knobas-http` and on nothing else for its transport. Otherwise all three
@@ -156,6 +158,10 @@ pub struct HttpConfig {
     /// failure of all, a mistyped filter, is a 400 whose body is the exact
     /// sentence the user needs.
     pub body_message: Option<classify::BodyMessage>,
+    /// How this adapter tells a 403 that refuses the request from one that
+    /// refuses the credential, or `None` to read every 403 as the credential's
+    /// ([`classify::ForbiddenReading`], issue #722). Gitea's only.
+    pub forbidden: Option<classify::ForbiddenReading>,
 }
 
 impl Default for HttpConfig {
@@ -170,6 +176,7 @@ impl Default for HttpConfig {
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
             body_message: None,
+            forbidden: None,
         }
     }
 }
@@ -187,6 +194,8 @@ pub struct HttpClient {
     /// The adapter's reading of a failing response body; see
     /// [`HttpConfig::body_message`].
     body_message: Option<classify::BodyMessage>,
+    /// The adapter's reading of a 403; see [`HttpConfig::forbidden`].
+    forbidden: Option<classify::ForbiddenReading>,
 }
 
 impl std::fmt::Debug for HttpClient {
@@ -262,6 +271,7 @@ impl HttpClient {
             auth: config.auth,
             limiter: Arc::new(RateLimiter::direct(quota)),
             body_message: config.body_message,
+            forbidden: config.forbidden,
         })
     }
 
@@ -348,8 +358,12 @@ impl HttpClient {
                     let transient = retry::status_is_transient(status.as_u16());
                     // Read before the body is consumed to build the message.
                     let asked_for = classify::parse_retry_after(response.headers());
-                    let error =
-                        classify::status_error(status, &body_of(response).await, self.body_message);
+                    let error = classify::response_error(
+                        status,
+                        &body_of(response).await,
+                        self.body_message,
+                        self.forbidden,
+                    );
                     if last || !transient {
                         return Err(error);
                     }

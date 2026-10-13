@@ -130,6 +130,7 @@ pub(crate) fn client(
         connect_timeout: CONNECT_TIMEOUT,
         request_timeout: REQUEST_TIMEOUT,
         body_message: Some(error_message),
+        forbidden: None,
     })
 }
 

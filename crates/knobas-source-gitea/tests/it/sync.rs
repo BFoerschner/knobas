@@ -296,6 +296,11 @@ async fn a_forbidden_repository_is_skipped_on_an_incremental_run() {
 /// Ruling B4, the other half: every repository refusing us is a fact about the
 /// token's scope, and a green source over an empty mirror is worse than an
 /// error.
+///
+/// The run raises the 403 it was refused with; whether that reads as the
+/// token's fault or a refusal is the body's to say since #722 (Gitea's scope
+/// sentence is `Unauthorized`, any other 403 a refusal), and is pinned in
+/// `write.rs` and `client.rs`, not here.
 #[tokio::test]
 async fn every_repository_refusing_us_raises() {
     let mut state = State::tidewater();
@@ -310,10 +315,7 @@ async fn every_repository_refusing_us_raises() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(Some(cursor), &mut sink).await.unwrap_err();
-    assert!(
-        matches!(error, SourceError::Unauthorized { .. }),
-        "{error:?}"
-    );
+    assert!(error.status() == Some(403), "{error:?}");
     assert!(sink.0.is_empty());
 }
 
@@ -331,10 +333,7 @@ async fn a_forbidden_repository_is_fatal_during_a_full_sync() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
-    assert!(
-        matches!(error, SourceError::Unauthorized { .. }),
-        "{error:?}"
-    );
+    assert!(error.status() == Some(403), "{error:?}");
 
     // The same fixture without the refusal syncs both repositories, so the
     // assertion above is about the refusal and not about the fixture.
@@ -382,10 +381,7 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
             .await
             .map(|c| format!("Ok({c})"))
             .unwrap_err();
-        assert!(
-            matches!(error, SourceError::Unauthorized { .. }),
-            "{label}: {error:?}"
-        );
+        assert!(error.status() == Some(403), "{label}: {error:?}");
     }
 
     // And the position the run actually wrote is still an incremental run, so

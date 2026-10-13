@@ -106,6 +106,7 @@ impl KumaHttp {
                 // own HTML. Keeping the bounded excerpt is the honest reading of
                 // a body this adapter cannot parse.
                 body_message: None,
+                forbidden: None,
             })?,
         })
     }
