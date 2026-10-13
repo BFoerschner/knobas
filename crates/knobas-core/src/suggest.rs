@@ -649,6 +649,28 @@ macro_rules! title_query {
     };
 }
 
+/// Every lexeme an item's [`title_query!`] can match on, for the GIN index
+/// that finds the settled anchors whose query a changed item might satisfy.
+///
+/// Each title lexeme is put through `to_tsvector` again because that is what
+/// `to_tsquery` does to it: a lexeme the parser splits further (`foo-bar`,
+/// a URL) becomes a phrase of the parts, and every part is a lexeme the query
+/// can match on. The index only *finds* candidates; `@@` against the stored
+/// query still decides, so this set has to contain the query's lexemes and
+/// may contain more. The oracle test's corpus carries hyphenated words,
+/// versions, paths and host names to hold it to that.
+macro_rules! title_lexemes {
+    ($title:expr) => {
+        concat!(
+            "array(select distinct l
+                     from unnest(tsvector_to_array(to_tsvector('english', ",
+            $title,
+            "))) w,
+                          unnest(tsvector_to_array(to_tsvector('english', w))) l)"
+        )
+    };
+}
+
 /// What `sync.similar_text_seen.digest` holds for an item (`0031`): the two
 /// things the rule reads of it, the title its query is built from and the
 /// `fts` its lexemes are counted in.
@@ -687,7 +709,14 @@ macro_rules! digest_of {
 /// **settled** corpus: the live prose items `sync.similar_text_seen` (`0031`)
 /// says were compared with the text they have now. Three joins cover every
 /// such pair once, the smaller id always the anchor: batch with batch, a batch
-/// anchor with a settled item, a settled anchor with a batch item. A pair of
+/// anchor with a settled item, a settled anchor with a batch item. The second
+/// finds its candidates through `item_fts_idx`, the anchor's query probing it;
+/// the third through `similar_text_seen_lex_idx` (`0031`), the changed item's
+/// lexemes probing the settled anchors' title lexemes, with `@@` against the
+/// stored query deciding. Each probe sits in a `lateral ... offset 0`, which
+/// keeps the planner from flattening it into a join that tests every batch item
+/// against every settled one -- measured on the perf corpus, that plan cost
+/// 450 ms and 9.6 s a batch where the probes cost 130 ms and 37 ms. A pair of
 /// two settled items was judged by the pass that settled the later of them, so
 /// a pass with nothing new judges nothing. [`detect_rule`] feeds the batches
 /// and marks each one settled in the same transaction; before #745 the
@@ -714,15 +743,34 @@ const SIMILAR_TEXT: &str = detection!(concat!(
     prose_kinds!(),
     " and p.entity_id <> all($5)
      ),
+     reach as materialized (
+         select x.entity_id as from_id, o.entity_id as to_id
+           from batch o
+           cross join lateral (
+                  select x.entity_id
+                    from sync.similar_text_seen x
+                   where x.title_lex && tsvector_to_array(o.fts)
+                     and x.entity_id < o.entity_id
+                  offset 0) x
+     ),
      judged as (
          select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts
            from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
          union all
          select a.entity_id, o.entity_id, a.fts, o.fts
-           from batch a join settled o on o.entity_id > a.entity_id and o.fts @@ a.q
+           from batch a
+           cross join lateral (
+                  select i.entity_id
+                    from sync.item i
+                   where i.fts @@ a.q and i.entity_id > a.entity_id
+                  offset 0) i
+           join settled o on o.entity_id = i.entity_id
          union all
          select a.entity_id, o.entity_id, a.fts, o.fts
-           from settled a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
+           from reach r
+           join batch o on o.entity_id = r.to_id
+           join settled a on a.entity_id = r.from_id
+          where o.fts @@ a.q
      ),
      pair as (
          select from_id, to_id,
@@ -775,18 +823,21 @@ const PRUNE_SEEN: &str = concat!(
 /// Mark a batch settled: its items were compared with the text they have in
 /// this snapshot.
 const MARK_SEEN: &str = concat!(
-    "insert into sync.similar_text_seen (entity_id, digest, title_q)
+    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex)
      select p.entity_id, ",
     digest_of!("p"),
     ", ",
     title_query!("p.title"),
+    ", ",
+    title_lexemes!("p.title"),
     "
        from sync.live_item p
       where p.entity_id = any($1) and p.kind in ",
     prose_kinds!(),
     "
      on conflict (entity_id) do update
-        set digest = excluded.digest, title_q = excluded.title_q"
+        set digest = excluded.digest, title_q = excluded.title_q,
+            title_lex = excluded.title_lex"
 );
 
 /// How many changed items one [`SIMILAR_TEXT`] statement compares.

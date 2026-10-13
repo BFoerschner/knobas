@@ -61,7 +61,11 @@ const WHOLE_CORPUS: &str = "insert into knobas.link
          on conflict do nothing";
 
 /// Few enough words that about half the pairs clear the floor of five shared
-/// stems and half do not.
+/// stems and half do not. The last six are tokens the parser splits or keeps
+/// whole in ways a plain word does not -- a hyphenated word, a version, a
+/// path, a URL, a host, an address. A title query built from them holds
+/// phrases, and the index that finds a changed item's settled anchors must
+/// still find every anchor whose query the item matches.
 const WORDS: &[&str] = &[
     "payout",
     "ledger",
@@ -88,6 +92,12 @@ const WORDS: &[&str] = &[
     "dashboard",
     "alert",
     "monitor",
+    "foo-bar",
+    "v1.2.3",
+    "ci/cd",
+    "http://x.example.com/a/b?c=d",
+    "x.example.com",
+    "mara@example.com",
 ];
 
 struct Rng(u64);

@@ -16,6 +16,7 @@ mod notes;
 mod payload_paths;
 mod projects;
 mod similar_text_incremental;
+mod similar_text_perf;
 mod stores;
 mod suggestions;
 mod web_url;

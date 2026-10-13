@@ -31,6 +31,9 @@
 -- OR query the rule matches other documents against, stored so a pass does
 -- not rebuild it for every unchanged item it compares a changed one with;
 -- `null` for a title with no lexemes, which matches nothing, as before.
+-- `title_lex` is every lexeme that query can match on, indexed, so a changed
+-- item finds the settled anchors that might match it without testing them
+-- all; the stored query still decides.
 --
 -- A row is removed by the pass when its item leaves the live prose corpus
 -- (tombstoned, its source disabled, its kind no longer prose), so an item that
@@ -47,5 +50,11 @@
 create table sync.similar_text_seen (
   entity_id text primary key references sync.item (entity_id) on delete cascade,
   digest    text not null,
-  title_q   tsquery
+  title_q   tsquery,
+  title_lex text[] not null default '{}'
 );
+
+-- A changed item finds the settled anchors whose title query it might match
+-- through this: `title_lex && tsvector_to_array(<the item's fts>)`. The item
+-- finds the documents its own title query matches through `item_fts_idx`.
+create index similar_text_seen_lex_idx on sync.similar_text_seen using gin (title_lex);
