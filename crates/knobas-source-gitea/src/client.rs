@@ -182,6 +182,12 @@ fn forbidden_refusal(body: &str) -> Option<String> {
 /// run's identity preflight (`GET /user`) has already proved the credential
 /// itself works, which is what makes that reading available at all.
 ///
+/// **Amended by #728:** a repository from the run's own listing whose read
+/// answers 404, and whose `GET /repos/{owner}/{repo}` then answers 404 as
+/// well, was deleted since the listing and is skipped even on a full sync; a
+/// repository the user configured keeps B4 as written. The sync module docs
+/// carry the reasoning.
+///
 /// **A 401 is not repository-scoped, and never was**: a credential the server
 /// rejected is a fact about the run, not about the object it was asked for.
 /// Until ADR-0004 this could not be said here -- `knobas-http` mapped 401 and

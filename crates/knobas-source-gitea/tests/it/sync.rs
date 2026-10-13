@@ -1825,15 +1825,72 @@ async fn an_empty_repository_is_mirrored_on_a_full_sync() {
     assert_eq!(same, cursor);
 }
 
-/// A refusal that ends a run has to say where it happened. Gitea's 404 body is
-/// `not found` for a missing repository and for a missing endpoint alike, so
-/// the bare server sentence is a message nobody can act on.
+/// A repository the listing offered and that was deleted before its own read
+/// is gone, not a hole (issue #728, amending ruling B4 for listed repositories):
+/// every read under it answers 404, the repository's own read confirms it, and
+/// even a full sync skips it and succeeds, as #724 skips a deleted branch. The
+/// rest of the corpus is walked.
 #[tokio::test]
-async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
+async fn a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds() {
     let mut state = State::tidewater().with_elsewhere();
     state.missing.insert("elsewhere/unrelated".to_owned());
     let fake = Fake::start(&state).await;
     let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, cursor) = full(&*source).await;
+    assert!(
+        !items
+            .iter()
+            .any(|i| i.kind == "branch" && i.entity.key.starts_with("elsewhere/")),
+        "nothing under the deleted repository is mirrored: {items:?}"
+    );
+    assert_eq!(ids(&items, "commit").len(), 3, "{items:?}");
+    assert!(
+        !cursor.contains("elsewhere/unrelated"),
+        "a repository confirmed gone holds no position: {cursor}"
+    );
+}
+
+/// The control: a 5xx on the repository's own read -- the one that decides
+/// "deleted" -- is not "deleted", so the 404 under it stays a hole and a full
+/// sync ends on it, naming the repository.
+#[tokio::test]
+async fn a_fault_on_the_confirming_read_never_skips_a_repository() {
+    let mut state = State::tidewater().with_elsewhere();
+    state.missing.insert("elsewhere/unrelated".to_owned());
+    state
+        .confirm_status
+        .insert("elsewhere/unrelated".to_owned(), 503);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert!(
+        matches!(error, SourceError::Protocol { status: Some(404), message: ref m }
+            if m.contains("elsewhere/unrelated")),
+        "{error:?}"
+    );
+}
+
+/// A refusal that ends a run has to say where it happened. Gitea's 404 body is
+/// `not found` for a missing repository and for a missing endpoint alike, so
+/// the bare server sentence is a message nobody can act on.
+///
+/// The repository is one the user **configured**, deleted after selection read
+/// it: ruling B4 stands for those even as amended by #728 -- a 404 on a name
+/// the user wrote down is a misconfiguration worth failing on, and its own
+/// read answering 404 too does not make it a skip.
+#[tokio::test]
+async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
+    let mut state = State::tidewater().with_elsewhere();
+    state.missing.insert("elsewhere/unrelated".to_owned());
+    state.read_once.insert("elsewhere/unrelated".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(
+        fake.base_url(),
+        serde_json::json!({ "repos": ["tidewater/payout-service", "elsewhere/unrelated"] }),
+    );
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();

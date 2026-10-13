@@ -49,8 +49,18 @@
 //!   what an *incremental* run does -- the repository's watermarks are kept, so
 //!   the next run picks up where this one left off. A run holding no position
 //!   has no such state to fall back on: the skip would be the only record that
-//!   the repository was ever in scope. A repository genuinely deleted upstream
-//!   never takes this path -- it simply stops appearing in the listing.
+//!   the repository was ever in scope. A repository deleted upstream before
+//!   the listing never takes this path -- it simply stops appearing in it.
+//!
+//!   **Amended by #728 (deputy for Björn, 2026-10-13): B4 stands for a
+//!   repository the user configured.** A 404 on a name in `repos[]` is a
+//!   misconfiguration worth failing on. A repository that came from *this
+//!   run's listing* and then answers 404 under it is the one case above that
+//!   does take this path: deleted between the listing and its read. When the
+//!   repository's own read (`GET /repos/{owner}/{repo}`) answers 404 too, it is
+//!   skipped on either kind of run, as #724 skips a deleted branch, and the next
+//!   sweep retires it. Any other answer to that read, a 5xx included, leaves
+//!   the 404 a hole.
 //!
 //!   **"Full sync" here is about the position, not the argument.** `cursor:
 //!   None` is one way to arrive with nothing; an unreadable cursor, a cursor
@@ -183,6 +193,9 @@ pub(crate) struct Selected {
     full_name: String,
     raw: Value,
     repo: model::Repo,
+    /// From the listing, not named in `repos[]`: whether a 404 under it may be
+    /// read as "deleted since the listing" (issue #728).
+    listed: bool,
 }
 
 /// What `select_repos` decided: what to walk, and what was refused while
@@ -367,6 +380,23 @@ pub(crate) async fn run(
                 next.repos.insert(selected.full_name.clone(), after);
             }
             Err(RepoError::Fatal(error)) => return Err(in_repository(&selected.full_name, error)),
+            // Listed a moment ago and deleted since (#728): not a hole, on
+            // either kind of run, once its own read says 404 as well. Ruling
+            // B4 as amended: a repository the user *configured* keeps the arms
+            // below, because a 404 there is a misconfiguration worth failing
+            // on. Its row, if step 1 emitted one, is the next sweep's to retire,
+            // as a deleted branch's is (#724); it holds no position here.
+            Err(RepoError::Skip(error))
+                if selected.listed
+                    && error.status() == Some(404)
+                    && repo_is_gone(source, selected).await =>
+            {
+                tracing::info!(
+                    repository = %selected.full_name,
+                    %error,
+                    "gitea: repository deleted since the listing; skipping it"
+                );
+            }
             // A cursor-less run may not report success over a hole: see the
             // module docs.
             Err(RepoError::Skip(error)) if full_sync => {
@@ -430,7 +460,7 @@ async fn select_repos(
             let last = last_page(&batch);
             seen += batch.len();
             for raw in batch {
-                push_selected(&mut out, raw, config);
+                push_selected(&mut out, raw, config, true);
             }
             if last {
                 break;
@@ -447,7 +477,7 @@ async fn select_repos(
                 continue;
             };
             match source.client.get_repo(owner, name).await {
-                Ok(raw) => push_selected(&mut out, raw, config),
+                Ok(raw) => push_selected(&mut out, raw, config, false),
                 Err(error) if is_repo_scoped(&error) && !full_sync => {
                     // Again a 403 or a 404 only. A dead credential answers 401
                     // and raises through the `Err(error) => return` arm below,
@@ -477,7 +507,12 @@ async fn select_repos(
     })
 }
 
-fn push_selected(out: &mut Vec<Selected>, raw: Value, config: &crate::config::GiteaConfig) {
+fn push_selected(
+    out: &mut Vec<Selected>,
+    raw: Value,
+    config: &crate::config::GiteaConfig,
+    listed: bool,
+) {
     let repo: model::Repo = match serde_json::from_value(raw.clone()) {
         Ok(repo) => repo,
         Err(error) => {
@@ -515,6 +550,7 @@ fn push_selected(out: &mut Vec<Selected>, raw: Value, config: &crate::config::Gi
         full_name: repo.full_name.clone(),
         raw,
         repo,
+        listed,
     });
 }
 
@@ -944,6 +980,18 @@ async fn fetch_comments(
             .filter_map(|c| serde_json::from_value(c).ok())
             .collect(),
     ))
+}
+
+/// Whether the repository itself now answers 404. As [`pull_is_gone`]:
+/// anything else is "not shown to be gone".
+async fn repo_is_gone(source: &crate::GiteaSource, selected: &Selected) -> bool {
+    let Some((owner, name)) = selected.repo.owner_repo() else {
+        return false;
+    };
+    matches!(
+        source.client.get_repo(owner, name).await,
+        Err(error) if error.status() == Some(404)
+    )
 }
 
 /// Whether the branch itself now answers 404. As [`pull_is_gone`]: anything

@@ -1109,3 +1109,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** one SQL condition (`and r.is_default is not true` in `LIVE_ATTENTION`, narrowed to the groups (a) names).
 
 As built (#718): `is_default` in `LIVE_ATTENTION` (`crates/knobas-app/src/commands/entity.rs`), pinned by `a_repos_default_branch_is_drawn_in_no_group` and `an_ungrouped_room_draws_no_default_branch_either`.
+
+## #728 — a listed repository deleted mid-run is skipped; ruling B4 stands for configured ones
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted in the body of #728.
+
+**The fork:** with no `repos[]` configured, the Gitea sync lists repositories and then reads each one. A repository deleted in that window answers 404, and ruling B4's full-sync extension made that fatal, failing the whole run over a repository that no longer exists. #724 had already fixed the same race for branches and pull requests. B4 could either stand for every repository or be narrowed.
+
+**Ruling:** B4 stands for a repository the **user configured** by name: a 404 there is a misconfiguration worth failing on. A repository that came from the **listing** in the same run and then answers 404 on its own read is skipped exactly as #724 skips a branch. That 404 confirms it is gone, and the next sweep retires it. Recorded as an amendment where B4 is written.
+
+**Reasoning:** B4's full-sync extension exists so that a skip is never the only record of a repository in scope. A repository whose own read answers 404 straight after the listing named it is not in scope any more. The user did not write it down, and the next listing will not offer it. A name the user typed is different: a 404 on it means the configuration is wrong, and a green run would hide that.
+
+**If you disagree, the cost of reversing this is:** low. Drop the `selected.listed` arm in `sync::run` and the listed-then-404 repository fails a full sync again. Its test, `a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds`, would then assert the opposite.
+
+As built (#728): `Selected.listed` marks a repository that came from the listing. In `sync::run`, a `RepoError::Skip` with status 404 on a listed repository is followed by one `GET /repos/{owner}/{repo}`, and only that read's 404 (`repo_is_gone`) skips it, on either kind of run. A skipped repository holds no cursor position. Any other answer falls through to B4 as before. The amendment is written in the `sync.rs` module docs, on `client::is_repo_scoped`, and as a note under B4 in `docs/contract.md` §9.
