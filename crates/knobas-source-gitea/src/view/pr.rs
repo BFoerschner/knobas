@@ -473,6 +473,34 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
         .collect()
 }
 
+impl Pull {
+    /// Open and not merged: what reviews, the maintenance's *Close* and
+    /// landing all ask first.
+    fn is_open(&self) -> bool {
+        !self.merged && self.state.as_deref() == Some("open")
+    }
+
+    /// The head branch's name.
+    fn head_ref(&self) -> Option<&str> {
+        self.head.as_ref().and_then(|b| b.r#ref.as_deref())
+    }
+
+    /// The base branch's name.
+    fn base_ref(&self) -> Option<&str> {
+        self.base.as_ref().and_then(|b| b.r#ref.as_deref())
+    }
+
+    /// The head lives in the base's repository, not a fork's.
+    fn head_in_base_repo(&self) -> bool {
+        let repo = |b: &Option<PullBranch>| {
+            b.as_ref()
+                .and_then(|b| b.repo.as_ref())
+                .and_then(|r| r.full_name.clone())
+        };
+        repo(&self.head) == repo(&self.base)
+    }
+}
+
 /// The fields of Gitea's `PullRequest` this view reads.
 #[derive(Debug, serde::Deserialize)]
 struct Pull {

@@ -65,25 +65,16 @@ impl PullView<'_> {
     /// closed or merged, which neither action is offered on and the overview
     /// draws no *Mergeable* for.
     pub(super) async fn landing(&self, pull: &Pull) -> Result<Landing, SourceError> {
-        if !is_open(pull) {
+        if !pull.is_open() {
             return Ok(Landing::default());
         }
-        let (Some(base), Some(head)) = (base_ref(pull), head_ref(pull)) else {
+        let (Some(base), Some(head)) = (pull.base_ref(), pull.head_ref()) else {
             return Ok(Landing::default());
         };
         let client = &self.source.client;
         // The head's branch is this repository's only where the head is not
         // a fork's; a fork's is not read here, nor deleted by default.
-        let same_repo = pull
-            .head
-            .as_ref()
-            .and_then(|b| b.repo.as_ref())
-            .and_then(|r| r.full_name.as_deref())
-            == pull
-                .base
-                .as_ref()
-                .and_then(|b| b.repo.as_ref())
-                .and_then(|r| r.full_name.as_deref());
+        let same_repo = pull.head_in_base_repo();
         // A fork's head commit is in the base repository too (Gitea keeps it
         // under the pull request's own ref), so the SHA asks the base about
         // either; the name is the fallback where Gitea sent none.
@@ -227,6 +218,18 @@ fn official_approvals(reviews: &[Review]) -> u64 {
         .count() as u64
 }
 
+/// [`blockers`], each with its phrase about `pull`'s base.
+fn phrased(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<(Blocker, String)> {
+    let base = pull.base_ref().unwrap_or("its base");
+    blockers(pull, reviews, landing)
+        .into_iter()
+        .map(|b| {
+            let phrase = b.phrase(base);
+            (b, phrase)
+        })
+        .collect()
+}
+
 /// The sentence the phrases make, its first letter raised.
 fn sentence(phrases: &[String]) -> String {
     let mut text = phrases.join("; ");
@@ -241,14 +244,14 @@ fn sentence(phrases: &[String]) -> String {
 /// the way, toned warn. Nothing where the only thing known is that Gitea has
 /// not said: the toolbar says why it waits.
 pub(super) fn mergeable_fact(pull: &Pull, reviews: &[Review], landing: &Landing) -> Option<Fact> {
-    if !is_open(pull) {
+    if !pull.is_open() {
         return None;
     }
-    let base = base_ref(pull).unwrap_or("its base");
-    let phrases: Vec<String> = blockers(pull, reviews, landing)
-        .iter()
-        .filter(|b| **b != Blocker::Unknown)
-        .map(|b| b.phrase(base))
+    let base = pull.base_ref().unwrap_or("its base");
+    let phrases: Vec<String> = phrased(pull, reviews, landing)
+        .into_iter()
+        .filter(|(b, _)| *b != Blocker::Unknown)
+        .map(|(_, phrase)| phrase)
         .collect();
     if pull.mergeable.is_none() && phrases.is_empty() {
         return None;
@@ -276,7 +279,7 @@ pub(super) fn mergeable_fact(pull: &Pull, reviews: &[Review], landing: &Landing)
 /// for makes them apply again, and a closed one merges only after *Reopen*,
 /// which is its own action.
 pub(super) fn actions(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<ViewAction> {
-    if !is_open(pull) {
+    if !pull.is_open() {
         return Vec::new();
     }
     let mut actions = Vec::new();
@@ -292,8 +295,8 @@ pub(super) fn actions(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec
 /// nothing. A conflict, or a style the repository turned off, is Gitea's
 /// refusal with its sentence (ADR-0004).
 fn update(pull: &Pull) -> ViewAction {
-    let base = base_ref(pull).unwrap_or("its base");
-    let confirm = match head_ref(pull) {
+    let base = pull.base_ref().unwrap_or("its base");
+    let confirm = match pull.head_ref() {
         Some(head) => format!("Bring {head} up to date with {base}?"),
         None => format!("Bring this pull request up to date with {base}?"),
     };
@@ -325,14 +328,14 @@ fn update(pull: &Pull) -> ViewAction {
 /// account may merge is not asked: that is a refusal the write queue shows
 /// with Gitea's sentence (ADR-0004).
 fn merge(pull: &Pull, reviews: &[Review], landing: &Landing) -> ViewAction {
-    let base = base_ref(pull).unwrap_or("its base");
-    let confirm = match head_ref(pull) {
+    let base = pull.base_ref().unwrap_or("its base");
+    let confirm = match pull.head_ref() {
         Some(head) => format!("Merge {head} into {base}?"),
         None => "Merge this pull request?".to_owned(),
     };
-    let phrases: Vec<String> = blockers(pull, reviews, landing)
-        .iter()
-        .map(|b| b.phrase(base))
+    let phrases: Vec<String> = phrased(pull, reviews, landing)
+        .into_iter()
+        .map(|(_, phrase)| phrase)
         .collect();
     let disabled = (!phrases.is_empty()).then(|| sentence(&phrases));
     let options = knobas_source::MergeStyle::ALL
@@ -366,16 +369,4 @@ fn merge(pull: &Pull, reviews: &[Review], landing: &Landing) -> ViewAction {
         disabled,
         ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
     }
-}
-
-fn is_open(pull: &Pull) -> bool {
-    !pull.merged && pull.state.as_deref() == Some("open")
-}
-
-fn base_ref(pull: &Pull) -> Option<&str> {
-    pull.base.as_ref().and_then(|b| b.r#ref.as_deref())
-}
-
-fn head_ref(pull: &Pull) -> Option<&str> {
-    pull.head.as_ref().and_then(|b| b.r#ref.as_deref())
 }

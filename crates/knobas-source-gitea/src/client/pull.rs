@@ -1,8 +1,9 @@
 //! The reads a pull request's source view makes (#662), beside the ones the
-//! sync makes. Each is one request; none is stored (ADR-0020 rule 1).
+//! sync makes, each one request and none stored (ADR-0020 rule 1); and the
+//! branch update a pull request's toolbar writes (#708).
 
 use knobas_http::Method;
-use knobas_source::SourceError;
+use knobas_source::{SourceError, UpdateStyle};
 use serde_json::Value;
 
 use super::{API_ROOT, GiteaClient, page_params, segment};
@@ -113,13 +114,13 @@ impl GiteaClient {
         owner: &str,
         repo: &str,
         number: u64,
-        style: &str,
+        style: UpdateStyle,
     ) -> Result<(), SourceError> {
         let path = format!("{API_ROOT}{}/update", pulls_path(owner, repo, number)?);
         let request = self
             .http
             .request(Method::POST, &path)
-            .query(&[("style", style.to_owned())]);
+            .query(&[("style", style.as_str().to_owned())]);
         self.http.send(request).await.map(|_| ())
     }
 }

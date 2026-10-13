@@ -203,7 +203,7 @@ pub(crate) async fn update_branch(
     index: u64,
     style: UpdateStyle,
 ) -> Result<(), SourceError> {
-    client.update_pull(owner, repo, index, style.as_str()).await
+    client.update_pull(owner, repo, index, style).await
 }
 
 // -- submit_review (issue #705) ----------------------------------------------

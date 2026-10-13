@@ -55,7 +55,7 @@ pub(super) fn actions(pull: &Pull, viewer: Option<&str>) -> Vec<ViewAction> {
 /// Whether Gitea takes a review of `pull` at all: only while it is open
 /// (*can't submit review for a closed or merged PR*, a 422).
 pub(super) fn takes_reviews(pull: &Pull) -> bool {
-    !pull.merged && pull.state.as_deref() == Some("open")
+    pull.is_open()
 }
 
 /// How a reader comments on `pull`'s diff (#709): through `submit_review`,
