@@ -1197,3 +1197,16 @@ Ruled 2026-10-14 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: `EntityDetail.status` and the `source_statuses` command, and the two effects in `app/src/lib/detail/Detail.svelte`.
 
 As built (#760): the corpus offer is asked only when the workflow read has failed, since that is the only time it is shown (#498). `status` is `None` for a withdrawn ticket and a disabled source's, as the board draws neither. `source_statuses` is `OBSERVED_STATUSES` for one source, planned per execution like the board's.
+## #764 — Gitea incremental sync misses a change made in the same second as the last read
+
+Ruled 2026-10-14 by the deputy for Björn, under the #701 delegation. Posted in the body of #764.
+
+**The fork:** Gitea stamps `updated_at` to the second, and the incremental cursor skipped a pull request on the watermark second whose number it already held, so a merge inside that second was never mirrored. Options: overlap the watermark second, or a wider fixed overlap window; and whether the other adapters share the hole.
+
+**Ruling:** the incremental read overlaps the watermark second and re-reads what sits on it; an unchanged re-read writes nothing. The same rule for every Gitea cursor that watermarks on a second-resolution timestamp, and TeamCity and Jira checked for the pattern. No new setting.
+
+**Reasoning:** Björn acts on a pull request right after a sync (merge, close, comment) as a matter of course; a change lost until the next backfill is a mirror that lies.
+
+**If you disagree, the cost of reversing this is:** low: `pulls` and step 1 of `sync_repo` in `crates/knobas-source-gitea/src/sync.rs`, and two cursor fields.
+
+As built (#764): the exact second, not a window — the walk already re-read it (it stops only below the mark); what was wrong was the identity it compared. The sink does **not** skip identical payloads (it rewrites every item, and battery clause 2 asks the adapter for an empty idle run), so the no-op is the adapter's: the cursor holds number → fingerprint of the listing record for the pull requests on the watermark (`pulls_seen_at_watermark`), and a fingerprint for the repository record (`repo_fingerprint`). Renamed rather than retyped, so no cursor version bump; a cursor from before re-emits the repository and the watermark's pull requests once. Commits (immutable, keyed by object id) and branches (head ids) were not affected. TeamCity's watermark is a build id, not a timestamp: not affected. Jira already fingerprints a two-minute overlap (#345), which also covers JQL's minute resolution: not affected. §10.8 entry: `docs/contract/10.8/764-gitea-cursor-fingerprints-on-the-watermark.md`.

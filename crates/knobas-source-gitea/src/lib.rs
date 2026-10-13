@@ -71,6 +71,7 @@ pub mod keys;
 
 mod client;
 mod cursor;
+mod fingerprint;
 mod map;
 mod model;
 mod source;

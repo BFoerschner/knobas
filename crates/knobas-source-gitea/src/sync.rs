@@ -571,9 +571,15 @@ async fn sync_repo(
         default_branch: selected.repo.default_branch.as_deref(),
     };
 
-    // 1. The repository itself.
+    // 1. The repository itself. Its `updated_at` is to the second, so an edit
+    //    inside the second the previous run read it would not move it (#764):
+    //    the record's fingerprint is what decides, and the timestamp stays
+    //    beside it for the cursor's reader.
     let updated_at = map::real_time(selected.repo.updated_at);
-    if before.repo_updated_at != updated_at {
+    let fingerprint = crate::fingerprint::of(&selected.raw);
+    if before.repo_updated_at != updated_at
+        || before.repo_fingerprint.as_deref() != Some(fingerprint.as_str())
+    {
         push(
             sink,
             map::repo_item(&source.id, &selected.raw, &selected.repo, at),
@@ -582,6 +588,7 @@ async fn sync_repo(
         .await?;
     }
     after.repo_updated_at = updated_at;
+    after.repo_fingerprint = Some(fingerprint);
 
     // 2. Branches, and the ones that vanished. Step 4 walks commits for
     //    exactly the branches this reports as moved.
@@ -718,7 +725,7 @@ async fn pulls(
     // Carried first, so every early return below leaves the position it came
     // in with rather than a blank one.
     after.pulls_updated_to = before.pulls_updated_to;
-    after.pulls_at_watermark = before.pulls_at_watermark.clone();
+    after.pulls_seen_at_watermark = before.pulls_seen_at_watermark.clone();
     if source.config.prs_per_repo == 0 || !repo.can_have_pulls() {
         return Ok(());
     }
@@ -729,6 +736,9 @@ async fn pulls(
     // already delivered. The new watermark is computed from this, so a pull
     // request skipped as already-delivered still holds the boundary open.
     let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
+    // What each examined pull request fingerprinted as this run, which is what
+    // the closing position records for the ones on the new mark.
+    let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
 
     'paging: for page in 1..=MAX_PR_PAGES {
         let batch = source.client.pulls(at.owner, at.name, page).await?;
@@ -746,12 +756,22 @@ async fn pulls(
                 }
             };
             let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
+            // Taken from the listing record before the discussion is read, so
+            // deciding to skip costs no request.
+            let fingerprint = crate::fingerprint::of_pull(&raw);
             if let (Some(mark), Some(when)) = (watermark, updated) {
                 if when < mark {
                     break 'paging;
                 }
-                if when == mark && before.pulls_at_watermark.contains(&pr.number) {
+                // The watermark second is re-read on every run; a pull request
+                // on it is skipped only if it is the record already delivered.
+                // By number alone, a merge inside that second was skipped for
+                // good (#764).
+                if when == mark
+                    && before.pulls_seen_at_watermark.get(&pr.number) == Some(&fingerprint)
+                {
                     examined.push((pr.number, updated));
+                    fingerprints.insert(pr.number, fingerprint);
                     continue;
                 }
             }
@@ -761,6 +781,7 @@ async fn pulls(
                 continue;
             };
             examined.push((pr.number, updated));
+            fingerprints.insert(pr.number, fingerprint);
             push(
                 sink,
                 map::pr_item(&source.id, &raw, at, &pr, &comments),
@@ -777,8 +798,20 @@ async fn pulls(
         }
     }
 
-    (after.pulls_updated_to, after.pulls_at_watermark) =
-        close_watermark(&examined, watermark, &before.pulls_at_watermark);
+    let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
+    let (mark, on_mark) = close_watermark(&examined, watermark, &carried);
+    after.pulls_updated_to = mark;
+    // This run's fingerprint where it read the pull request, the previous
+    // run's where the budget stopped before re-reading it.
+    after.pulls_seen_at_watermark = on_mark
+        .into_iter()
+        .filter_map(|number| {
+            fingerprints
+                .get(&number)
+                .or_else(|| before.pulls_seen_at_watermark.get(&number))
+                .map(|fingerprint| (number, fingerprint.clone()))
+        })
+        .collect();
     Ok(())
 }
 
@@ -1016,7 +1049,10 @@ async fn pull_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64)
 /// Gitea's `since=` is inclusive and server-side, so the boundary commits come
 /// back on every run; `commits_at_watermark` is what keeps them from being
 /// re-delivered. Commits are immutable, so a delivered object id is delivered
-/// for good.
+/// for good -- which is why this boundary, unlike the pull requests', needs no
+/// fingerprint (#764): nothing about a commit can change inside its second,
+/// and a new commit in that second has an object id the set does not hold.
+/// Branches have no timestamp watermark at all; they compare head object ids.
 ///
 /// **A branch that did not move is not walked at all**, which is what the
 /// per-branch head object ids in the cursor are for (`cursor::RepoCursor`): an

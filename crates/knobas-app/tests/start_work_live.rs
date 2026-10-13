@@ -1662,13 +1662,12 @@ async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_th
         .next()
         .and_then(|n| n.parse().ok())
         .expect("a pull request number");
-    // A second's pause first. Gitea stamps `updated_at` to the second and the
-    // adapter's incremental run keeps a pull request it already read at the
-    // watermark second out of the next read; a merge landing in that same
-    // second is not mirrored by any later incremental run (measured: the
-    // mirror still said "open" after five seconds of re-syncs, 3 runs in 4).
-    // That is the sync's to witness, not this test's -- filed as #764.
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    // No pause before the merge, on purpose (#764). Gitea stamps `updated_at`
+    // to the second, so the merge usually lands in the second the sync above
+    // read this pull request at; the adapter's incremental run re-reads that
+    // second and must see the merge by the record's fingerprint. With the
+    // number-only boundary it did not, 3 runs in 4, and #758 had a 1.1 s pause
+    // here to step around it.
     // Gitea computes mergeability on its own time, and a loaded machine can
     // outlast one call's five seconds: a few calls, and then say so if the
     // pull request is still open, rather than blame the mirror for it.

@@ -68,17 +68,34 @@ pub(crate) struct RepoCursor {
     /// The `updated_at` the repository entity was last emitted with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_updated_at: Option<DateTime<Utc>>,
+    /// [`crate::fingerprint`] of the repository record last emitted (#764):
+    /// an edit inside the second the previous run read it leaves
+    /// `repo_updated_at` where it was, and this is what still sees it.
+    /// Absent in a cursor from before #764, which re-emits the repository
+    /// once rather than costing a version bump.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_fingerprint: Option<String>,
     /// The newest pull-request `updated_at` delivered so far.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pulls_updated_to: Option<DateTime<Utc>>,
-    /// The pull requests sitting exactly on that instant, already delivered.
+    /// The pull requests sitting exactly on that instant, already delivered:
+    /// number -> [`crate::fingerprint`] of the record as delivered.
     ///
     /// Gitea's timestamps have one-second resolution, so a strict `>` boundary
-    /// would drop a pull request updated in the same second as the newest one;
-    /// remembering the handful of numbers at the boundary closes that hole
-    /// without re-delivering them on every idle run.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pulls_at_watermark: Vec<u64>,
+    /// would drop a pull request updated in the same second as the newest one.
+    /// The walk therefore re-reads the watermark second, and this map is what
+    /// keeps that re-read from re-delivering them on every idle run.
+    ///
+    /// **Keyed by number, valued by fingerprint (#764).** Until #764 this was
+    /// `pulls_at_watermark`, a list of numbers, and a pull request merged in
+    /// the same second the previous run read it matched its number and was
+    /// never mirrored as merged. Renamed rather than retyped so that no version
+    /// bump is needed: a stored cursor's `pulls_at_watermark` is an unknown
+    /// field now and is ignored, so the run after the upgrade re-delivers the
+    /// handful of pull requests on each watermark once, and every other
+    /// position in the cursor stands.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pulls_seen_at_watermark: BTreeMap<u64, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits_since: Option<DateTime<Utc>>,
     /// The object ids on that instant, already delivered -- the same boundary
@@ -181,8 +198,9 @@ mod tests {
             "tidewater/payout-service".to_owned(),
             RepoCursor {
                 repo_updated_at: Some(at("2026-08-22T11:42:00Z")),
+                repo_fingerprint: Some("00000000000000aa".to_owned()),
                 pulls_updated_to: Some(at("2026-08-22T13:50:00Z")),
-                pulls_at_watermark: vec![144],
+                pulls_seen_at_watermark: BTreeMap::from([(144, "00000000000000bb".to_owned())]),
                 commits_since: Some(at("2026-08-22T11:42:00Z")),
                 commits_at_watermark: vec!["c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192".to_owned()],
                 branches: BTreeMap::from([(
@@ -225,7 +243,11 @@ mod tests {
         let repo = back.repo("tidewater/payout-service");
         assert_eq!(repo.repo_updated_at, Some(at("2026-08-22T11:42:00Z")));
         assert_eq!(repo.pulls_updated_to, Some(at("2026-08-22T13:50:00Z")));
-        assert_eq!(repo.pulls_at_watermark, vec![144]);
+        assert_eq!(repo.repo_fingerprint.as_deref(), Some("00000000000000aa"));
+        assert_eq!(
+            repo.pulls_seen_at_watermark,
+            BTreeMap::from([(144, "00000000000000bb".to_owned())])
+        );
         assert_eq!(repo.commits_since, Some(at("2026-08-22T11:42:00Z")));
         assert_eq!(
             repo.commits_at_watermark,
@@ -248,7 +270,8 @@ mod tests {
             .repos
             .insert("tidewater/ops-runbooks".to_owned(), RepoCursor::default());
         let json = cursor.to_json();
-        assert!(!json.contains("pulls_at_watermark"), "{json}");
+        assert!(!json.contains("pulls_seen_at_watermark"), "{json}");
+        assert!(!json.contains("repo_fingerprint"), "{json}");
         assert!(!json.contains("branches"), "{json}");
         assert!(!json.contains("repos_listed_at"), "{json}");
     }
