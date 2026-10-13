@@ -670,6 +670,8 @@ knobas-app	test/it	ipc::the_optional_channel_is_not_a_decodable_argument
 knobas-app	test/it	ipc::the_same_command_gets_through_once_the_database_is_up
 knobas-app	test/it	ipc::the_two_argument_shapes_decode_as_the_split_needs
 knobas-app	test/it	ipc::unlinking_announces_its_line_and_an_already_withdrawn_link_announces_nothing
+knobas-app	test/it	project_census::the_census_is_the_walk_after_every_change
+knobas-app	test/it	project_census::the_stored_resolver_is_the_macros_expansion
 knobas-app	test/it	protocol_ipc::a_new_protocol_starts_from_the_template
 knobas-app	test/it	protocol_ipc::a_page_of_this_title_in_another_wiki_is_not_this_publication
 knobas-app	test/it	protocol_ipc::a_page_the_mirror_has_not_seen_yet_is_named_but_not_linked
@@ -1690,9 +1692,11 @@ knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
 knobas-search	test/it	state_chip::a_built_in_lists_rows_carry_their_state_chip
 knobas-search	test/it	state_chip::a_search_hit_carries_its_state_chip
 knobas-search	test/it	state_chip::the_boards_newest_rows_carry_their_state_chip
+knobas-search	test/it	suggest::a_parent_is_offered_by_the_prefix_typed_newest_first
 knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
 knobas-search	test/it	suggest::a_source_is_offered_only_once_it_has_a_live_row
 knobas-search	test/it	suggest::every_asset_is_offered_by_its_name_and_leads_somewhere
+knobas-search	test/it	suggest::the_parents_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
 knobas-search	test/it	suggest::under_knows_exactly_the_names_the_box_offers
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
