@@ -35,19 +35,21 @@ case "${1:-} ${2:-}" in
   "ps "*) for n in ${STUB_RUNNING:-}; do echo "$n"; done ;;
   "context show") echo orbstack ;;
   *) if [ -L "$KNOBAS_LIVE_LOCK" ]; then l=held; else l=free; fi
-     echo "docker $* [lock $l]" >>"$STUB_LOG" ;;
+     if [ -L "$KNOBAS_LIVE_GITEA_LOCK" ]; then g=held; else g=free; fi
+     echo "docker $* [lock $l] [gitea lock $g]" >>"$STUB_LOG" ;;
 esac
 STUB
 chmod +x "$scratch/bin/docker"
 
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
 export KNOBAS_LIVE_LOCK="$scratch/knobas-live-jvm.lock"
+export KNOBAS_LIVE_GITEA_LOCK="$scratch/knobas-live-gitea.lock"
 export KNOBAS_LIVE_LOCK_POLL=0.1
 # Short, so a mutant that never lets a waiter through fails in seconds instead
 # of hanging the gate for the real 45 minutes; cases that test the wait itself
 # set their own.
 export KNOBAS_LIVE_LOCK_WAIT=5
-unset KNOBAS_LIVE_LOCK_HOLDER
+unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
 
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
 fake=$scratch/tree/testenv
@@ -84,18 +86,18 @@ wait_for() {
   return 1
 }
 
-# holder <name> -- a background shell in a tree of its own that takes the lock
-# as recipe <name>, says so in $scratch/<name>.out, and lets it go when
-# $scratch/<name>.release appears.
+# holder <name> [<jvm|gitea>] -- a background shell in a tree of its own that
+# takes the lock (the JVM one unless named) as recipe <name>, says so in
+# $scratch/<name>.out, and lets it go when $scratch/<name>.release appears.
 holder() {
-  local name=$1
+  local name=$1 lock=${2:-jvm}
   mkdir -p "$scratch/$name/testenv"
   (
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
     LIVE_TESTENV=$scratch/$name/testenv
     trap 'live_lock_release' EXIT
-    live_lock_hold "$name"
+    live_lock_hold "$name" "$lock"
     echo "holding" >>"$scratch/$name.out"
     while [ ! -e "$scratch/$name.release" ]; do sleep 0.1; done
   ) >>"$scratch/$name.out" 2>&1 &
@@ -303,6 +305,43 @@ rc=$(session giteaonly gitea STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
 check "a Gitea session does not wait on the JVM lock" "$rc" "0"
 check "the Gitea session's own calls ran" "$(cat "$STUB_LOG")" "up -d --wait gitea"
 touch "$scratch/gitearun.release"
+for ((i = 0; i < 100; i++)); do [ -L "$KNOBAS_LIVE_LOCK" ] || break; sleep 0.1; done
+
+# --- the Gitea lock (issue #724): Gitea runs queue behind each other ----------
+
+# Two `just gitea-live` from two worktrees broke each other: one run's cleanup
+# deleted its branch under the other's full sync. So a Gitea session takes the
+# Gitea lock -- the same mechanism under another path -- and a second one waits.
+holder giteaholder gitea
+: >"$STUB_LOG"
+rc=$(session giteaqueued gitea STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
+out=$(cat "$scratch/giteaqueued.out")
+check_not "a Gitea session behind a Gitea run is refused only after the wait" "$rc" "0"
+check "the queued Gitea session says it waits for the Gitea lock" "$out" "the Gitea lock is held by"
+check "and names the Gitea run that holds it" "$out" "'giteaholder' in $scratch/giteaholder"
+checks=$((checks + 1))
+[ ! -s "$STUB_LOG" ] || fail "a queued Gitea session touches nothing while it waits" "$(cat "$STUB_LOG")"
+
+# The other side: once the holder lets go, the waiter goes on and runs.
+(session giteawaiter gitea STUB_RUNNING="" >"$scratch/giteawaiter.rc") &
+pids+=($!)
+wait_for "$scratch/giteawaiter.out" "waiting" || fail "the second Gitea session never waited" "$(cat "$scratch/giteawaiter.out")"
+touch "$scratch/giteaholder.release"
+rc=$(wait_rc giteawaiter)
+out=$(cat "$scratch/giteawaiter.out")
+check "the waiting Gitea session goes on once the first lets go" "$rc" "0"
+check "and says how long it waited" "$out" "took the Gitea lock after"
+check "it starts Gitea holding the Gitea lock" "$(cat "$STUB_LOG")" "up -d --wait gitea [lock free] [gitea lock held]"
+check_not "and, as every run, leaves Gitea up (#698)" "$(cat "$STUB_LOG")" "stop gitea"
+checks=$((checks + 1))
+[ ! -L "$KNOBAS_LIVE_GITEA_LOCK" ] || fail "the Gitea session releases its lock at its end" "$(readlink "$KNOBAS_LIVE_GITEA_LOCK")"
+
+# The two locks are two: a JVM run does not wait on a Gitea run.
+holder giteaonlyholder gitea
+: >"$STUB_LOG"
+rc=$(session jvmbesidegitea teamcity STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
+check "a TeamCity session does not wait on the Gitea lock" "$rc" "0"
+touch "$scratch/giteaonlyholder.release"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2

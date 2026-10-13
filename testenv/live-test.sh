@@ -33,6 +33,11 @@ esac
 STUB
 chmod +x "$scratch/bin/docker"
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
+# Never the real locks a live run on this machine may be holding (#690, #724):
+# a `live_session gitea` below would otherwise queue behind a real `just
+# gitea-live`, or take the lock out from under one.
+export KNOBAS_LIVE_LOCK="$scratch/jvm.lock" KNOBAS_LIVE_GITEA_LOCK="$scratch/gitea.lock"
+unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
 
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$here/live-lib.sh"
@@ -152,8 +157,9 @@ check_eq "a TeamCity run leaves nothing up it did not start" \
 
 # --- a shared Gitea outlives the JVM run that started it (#698) -------------
 
-# Gitea is not a JVM and takes no lock, so a `just gitea-live` from another
-# worktree may start using the Gitea a TeamCity run brought up. If the TeamCity
+# A TeamCity run takes no Gitea lock (that one serialises Gitea runs, #724), so
+# a `just gitea-live` from another worktree may start using the Gitea a
+# TeamCity run brought up. If the TeamCity
 # run then stopped "what it started", that run would lose Gitea mid-suite. The
 # rule: a run stops only its own product, never one it merely needed.
 #
