@@ -46,7 +46,7 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { sameAnswer, VIEW_PATIENCE_MS, viewMemory } from "./view-read";
-  import { actionName, actionPayload } from "./view/actions";
+  import { actionName, actionPayload, type ActionValues } from "./view/actions";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
@@ -242,11 +242,11 @@
    */
   async function queueAction(
     action: ViewAction,
-    option: string | null,
+    values: ActionValues,
     changed: BuildParameter[] = [],
   ): Promise<boolean> {
     const name = actionName(action.label);
-    const payload = actionPayload(action, entityId, option, changed);
+    const payload = actionPayload(action, entityId, values, changed);
     if (payload === null) {
       push({ text: `Could not queue the ${name.toLowerCase()}: knobas cannot send it`, tone: "err" });
       return false;

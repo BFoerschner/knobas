@@ -1,77 +1,99 @@
 /**
- * What a view's action becomes on the write queue (#667, ADR-0020 rule 4).
+ * What a view's action becomes on the write queue (#667, #702, ADR-0020 rule 4).
  *
- * An actions block names a `WriteOp` identifier and the choices its dialog
- * offers; the queue takes a serialized `WriteOp`. This table is the one place
- * the two meet, one entry per op, as `inbox/actions.ts` is for the inbox's
- * buttons. `ActionsBlock` stays generic: it knows labels, options and a
- * sentence, and never which op it is drawing.
+ * The source declares an action's dialog -- its fields, sentence and tone --
+ * and the shell draws it without knowing which op it is (`ActionDialog`).
+ * What the reader answers comes back as text by field name, and this table
+ * is the one place it meets a serialized `WriteOp`: one entry per op, as
+ * `inbox/actions.ts` is for the inbox's buttons.
  *
  * An op with no entry here is not drawn, whatever the source declares: a
  * button this shell cannot queue would fail on press.
  */
-import type { Setting, ViewAction } from "../../ipc/entity";
+import type { ViewAction, Setting } from "../../ipc/entity";
 import type { BuildParameter, MergeStyle, WriteOpPayload } from "../../ipc/sources";
+
+/** What a dialog answers: each field's value, by its `name`. A flag is `"true"` or `"false"`. */
+export type ActionValues = Record<string, string>;
 
 /** Keyed by the union, so a style added to `MergeStyle` and missed here fails to compile. */
 const MERGE_STYLES: Record<MergeStyle, true> = { merge: true, rebase: true, squash: true };
 
-function isMergeStyle(option: string | null): option is MergeStyle {
-  return option !== null && Object.hasOwn(MERGE_STYLES, option);
+function isMergeStyle(option: string | undefined): option is MergeStyle {
+  return option !== undefined && Object.hasOwn(MERGE_STYLES, option);
 }
 
 /**
- * The payload for one op, from the entity the view is of, the option picked
- * or typed, and the values the dialog changed.
+ * The payload for one op, from the entity the view is of, the dialog's
+ * values, and the entity's settings the reader changed for this one write
+ * (an action with `with_settings`). `null` where the values cannot make one.
  */
 const PAYLOADS: Record<
   string,
-  (entity: string, option: string | null, parameters: BuildParameter[]) => WriteOpPayload | null
+  (entity: string, values: ActionValues, settings: BuildParameter[]) => WriteOpPayload | null
 > = {
-  merge_pull_request: (entity, option) =>
-    isMergeStyle(option) ? { MergePullRequest: { entity, style: option } } : null,
+  merge_pull_request: (entity, values) =>
+    isMergeStyle(values.style) ? { MergePullRequest: { entity, style: values.style } } : null,
   // A blank branch is the default branch, which is no branch at all: TeamCity
   // reads an explicit default branch's name as another branch (#669).
-  run_build: (entity, option, parameters) => ({
-    RunBuild: { entity, branch: option?.trim() || null, parameters },
+  run_build: (entity, values, settings) => ({
+    RunBuild: { entity, branch: values.branch?.trim() || null, parameters: settings },
   }),
 };
 
 /**
- * How an op's dialog asks for its input. `pick`: one of the options, the
- * first picked. `suggest`: free text in a field called `label`, the options
- * offered as suggestions and none picked, `empty` saying what an empty field
- * means. `parameters`: the dialog also offers the entity's own settings to
- * change for this one write, and sends only what changed.
- *
- * The words are the op's, so they live here with its payload and the dialog
- * names nothing.
- */
-export type ActionForm =
-  | { choice: "pick"; parameters: boolean }
-  | { choice: "suggest"; label: string; empty: string; parameters: boolean };
-
-const FORMS: Record<string, ActionForm> = {
-  run_build: { choice: "suggest", label: "Branch", empty: "default branch", parameters: true },
-};
-
-/** The dialog `action` draws; an op with no entry picks one of its options. */
-export function actionForm(action: ViewAction): ActionForm {
-  return FORMS[action.write_op] ?? { choice: "pick", parameters: false };
-}
-
-/**
- * The write `action` queues against `entity` with `option` picked (or typed)
- * and `parameters` changed, or `null` when this shell cannot build it: an op
- * it has no entry for, or an option the op cannot carry.
+ * The write `action` queues against `entity` with the dialog's `values` and
+ * the `settings` changed, or `null` when this shell cannot build it: an op it
+ * has no entry for, or values the op cannot carry.
  */
 export function actionPayload(
   action: ViewAction,
   entity: string,
-  option: string | null,
-  parameters: BuildParameter[] = [],
+  values: ActionValues,
+  settings: BuildParameter[] = [],
 ): WriteOpPayload | null {
-  return PAYLOADS[action.write_op]?.(entity, option, parameters) ?? null;
+  return PAYLOADS[action.write_op]?.(entity, values, settings) ?? null;
+}
+
+/**
+ * What the dialog's fields start with, as declared: a text its prefill, a
+ * choice the option it names (the first when it names none, or one it does
+ * not offer), a flag checked only for `"true"`.
+ */
+export function initialValues(action: ViewAction): ActionValues {
+  return Object.fromEntries(
+    action.fields.map((field) => {
+      const kind = field.kind;
+      if (kind.type === "flag") return [field.name, field.value === "true" ? "true" : "false"];
+      if (kind.type === "choice") {
+        const named = kind.options.find((option) => option.value === field.value);
+        return [field.name, (named ?? kind.options[0])?.value ?? ""];
+      }
+      return [field.name, field.value ?? ""];
+    }),
+  );
+}
+
+/**
+ * The names of the required fields `values` leaves unanswered, in the order
+ * drawn: a text of blanks, a choice with nothing picked, a flag unchecked.
+ */
+export function missingFields(action: ViewAction, values: ActionValues): string[] {
+  return action.fields
+    .filter((field) => {
+      if (!field.required) return false;
+      const value = values[field.name] ?? "";
+      return field.kind.type === "flag" ? value !== "true" : value.trim() === "";
+    })
+    .map((field) => field.name);
+}
+
+/**
+ * Whether pressing `action` opens its dialog. Only an action with nothing to
+ * ask, no sentence and no danger queues on the button: a danger always asks.
+ */
+export function opensDialog(action: ViewAction): boolean {
+  return action.fields.length > 0 || action.confirm !== null || action.danger || action.with_settings;
 }
 
 /**

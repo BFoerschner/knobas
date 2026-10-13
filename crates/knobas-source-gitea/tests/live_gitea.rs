@@ -2442,12 +2442,21 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
     let id = format!("gitea:{}#{number}", env.full_name());
     let (_, cursor) = full(&*source).await;
 
-    // 1. The view offers *Merge…*, once Gitea has computed that it can.
-    let actions_of = |view: &knobas_source::view::SourceView| {
-        view.sections[0].blocks.iter().find_map(|b| match b {
-            Block::Actions { actions } => Some(actions.clone()),
-            _ => None,
-        })
+    // 1. The view's toolbar offers *Merge…*, enabled once Gitea has computed
+    //    that it can merge (#702: until then it is drawn disabled, saying why).
+    let merge_of = |view: &knobas_source::view::SourceView| {
+        assert!(
+            !view
+                .sections
+                .iter()
+                .flat_map(|s| &s.blocks)
+                .any(|b| matches!(b, Block::Actions { .. })),
+            "the merge is the toolbar's, never a section's too: {view:#?}"
+        );
+        view.actions
+            .iter()
+            .find(|a| a.write_op == "merge_pull_request")
+            .cloned()
     };
     let mut offered = None;
     for _ in 0..40 {
@@ -2456,18 +2465,32 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             .await
             .expect("the view reads")
             .expect("Gitea draws a pull request");
-        offered = actions_of(&view);
-        if offered.is_some() {
+        offered = merge_of(&view);
+        if offered.as_ref().is_some_and(|a| a.disabled.is_none()) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
-    let offered = offered.expect("Gitea never said the fresh pull request was mergeable");
-    assert_eq!(offered.len(), 1, "{offered:?}");
-    assert_eq!(offered[0].write_op, "merge_pull_request");
-    assert_eq!(offered[0].options, ["merge", "rebase", "squash"]);
+    let offered = offered.expect("the pull request's toolbar has no Merge…");
+    println!("LIVE Merge… action: {offered:?}");
     assert_eq!(
-        offered[0].confirm.as_deref(),
+        offered.disabled, None,
+        "Gitea never said the fresh pull request was mergeable"
+    );
+    assert!(offered.primary, "{offered:?}");
+    let [field] = offered.fields.as_slice() else {
+        panic!("one field, the style: {offered:?}")
+    };
+    let knobas_source::view::FieldKind::Choice { options } = &field.kind else {
+        panic!("the style is a choice: {field:?}")
+    };
+    assert_eq!(field.name, "style");
+    assert_eq!(
+        options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>(),
+        ["merge", "rebase", "squash"]
+    );
+    assert_eq!(
+        offered.confirm.as_deref(),
         Some(format!("Merge {head} into {base}?").as_str())
     );
 
@@ -2506,9 +2529,15 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         .unwrap_or_else(|| panic!("the merged pull request did not come back with the next sync"));
     assert_eq!(pr.payload["merged"], true, "{}", pr.payload);
 
-    // 4. And the view stops offering what has happened.
+    // 4. And the view stops offering what has happened: *Merge…* stays in the
+    //    toolbar, disabled, saying why.
     let view = source.view(&id, None).await.unwrap().unwrap();
-    assert!(actions_of(&view).is_none(), "{view:#?}");
+    let after = merge_of(&view).expect("the merged pull request's toolbar keeps Merge…");
+    assert_eq!(
+        after.disabled.as_deref(),
+        Some("Already merged"),
+        "{after:?}"
+    );
     let Block::Facts { facts } = &view.sections[0].blocks[0] else {
         panic!("the overview opens on facts: {view:#?}");
     };

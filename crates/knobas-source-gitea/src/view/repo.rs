@@ -75,7 +75,7 @@ pub(super) async fn draw(
             )));
         }
     };
-    Ok(SourceView { sections })
+    Ok(SourceView::new(sections))
 }
 
 async fn overview(

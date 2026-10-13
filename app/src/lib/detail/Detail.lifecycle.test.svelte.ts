@@ -88,6 +88,7 @@ function entity(id: string): EntityDetail {
 
 function drawn(label: string): SourceView {
   return {
+    actions: [],
     sections: [
       {
         id: "overview",

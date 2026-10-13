@@ -91,7 +91,7 @@ async fn commit(
             )));
         }
     };
-    Ok(SourceView { sections })
+    Ok(SourceView::new(sections))
 }
 
 async fn commit_overview(

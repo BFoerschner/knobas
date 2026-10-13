@@ -105,6 +105,7 @@ impl Source for Drawing {
                 ..row(None, title)
             };
             return Ok(Some(SourceView {
+                actions: vec![],
                 sections: vec![ViewSection {
                     id: "changes".into(),
                     title: "Changes".into(),
@@ -140,6 +141,7 @@ impl Source for Drawing {
                 ..row(None, title)
             };
             return Ok(Some(SourceView {
+                actions: vec![],
                 sections: vec![ViewSection {
                     id: "changes".into(),
                     title: "Changes".into(),
@@ -168,6 +170,7 @@ impl Source for Drawing {
             "plain" => Ok(None),
             "down" => Err(SourceError::Unreachable("connection refused".to_owned())),
             _ => Ok(Some(SourceView {
+                actions: vec![],
                 sections: vec![ViewSection {
                     id: "overview".into(),
                     title: "Overview".into(),

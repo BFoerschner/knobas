@@ -239,6 +239,8 @@ a{color:var(--link);text-decoration:none}
 .btn.ghost:hover{color:var(--text);background:var(--raised)}
 .btn.danger{color:var(--fail);border-color:var(--fail)}
 .btn:disabled{opacity:.4;cursor:default}
+.btn[aria-disabled="true"]{opacity:.4;cursor:default}
+.btn[aria-disabled="true"]:hover{background:transparent}
 .btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .btn .k{font-size:11px}
 .sel-inline{height:22px;padding:0 4px;border:1px solid var(--hair2);border-radius:2px;background:var(--panel);font:500 12px var(--mono);color:var(--text)}
