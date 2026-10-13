@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
+use tracing_subscriber::filter::FilterExt;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
@@ -284,8 +285,10 @@ fn scrub_keyed(text: &str) -> String {
             .filter_map(|k| lower[pos..].find(k).map(|i| (pos + i, k.len())))
             .min_by_key(|(i, _)| *i);
         let Some((at, klen)) = next else { break };
+        // The word ends the key (`access_token`, `credentials`), so
+        // `KNOBAS_SECRET_STORE=memory` is not a secret.
         let mut i = at + klen;
-        while i < bytes.len() && is_ident(bytes[i]) {
+        if bytes.get(i) == Some(&b's') {
             i += 1;
         }
         // `"key":` / `key=` / `key: `
@@ -482,17 +485,21 @@ pub fn subscriber(
     threshold: Duration,
 ) -> impl Subscriber + Send + Sync {
     let env = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter));
+    // No spans in the printed lines: Tauri's `tracing` feature wraps setup in a
+    // span whose field is the whole `App` (its config, its state), which the
+    // default format would print in front of every line inside it.
+    let events_only = || tracing_subscriber::filter::filter_fn(|meta| !meta.is_span());
     let stderr_layer = stderr.then(|| {
         tracing_subscriber::fmt::layer()
             .with_target(false)
             .with_writer(StderrMaker)
-            .with_filter(env())
+            .with_filter(env().and(events_only()))
     });
     let file_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_ansi(false)
         .with_writer(sink.clone())
-        .with_filter(env());
+        .with_filter(env().and(events_only()));
     let ipc_layer = CommandLog::new(threshold)
         .with_filter(tracing_subscriber::filter::filter_fn(CommandLog::enabled));
     tracing_subscriber::registry()
@@ -607,6 +614,7 @@ mod tests {
             );
             tracing::warn!("GET /x?api_key=abc123&page=2 failed");
             tracing::info!(header = "Authorization: Bearer eyJhbGciOi", "sent");
+            tracing::info!("KNOBAS_SECRET_STORE=memory is set");
             tracing::info!(config = ?("a", "password: \"s3cret\""), "config");
         });
         let log = read_all(dir.path());
@@ -615,6 +623,7 @@ mod tests {
         }
         assert!(log.contains("jira.example.com"), "{log}");
         assert!(log.contains("page=2"), "{log}");
+        assert!(log.contains("KNOBAS_SECRET_STORE=memory"), "{log}");
     }
 
     #[test]
