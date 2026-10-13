@@ -7,6 +7,7 @@
 #
 # docs/contract.md is deliberately NOT here: only §10.8 is appended to; the
 # other sections are edited in place, and a union merge of an edited line keeps
-# both versions. Its §10.8 stays a conflict a human resolves.
+# both versions. Its §10.8 stays a conflict a human resolves; splitting it into
+# one file per entry is ticket #737.
 test-inventory.txt merge=union
 docs/decisions/2026-10-unattended-rulings.md merge=union
