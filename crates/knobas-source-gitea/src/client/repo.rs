@@ -179,21 +179,6 @@ impl GiteaClient {
         }
     }
 
-    /// `GET /repos/{o}/{r}/contents` -- the default branch's top directory.
-    /// Gitea 1.27 has no `/readme` route (it answers 404 *page not found*),
-    /// so this is how a README is found.
-    pub(crate) async fn root_contents_as<T: serde::de::DeserializeOwned>(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Vec<T>, SourceError> {
-        self.get_json(
-            &format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?),
-            &[],
-        )
-        .await
-    }
-
     /// `GET /repos/{o}/{r}/raw/{file}` -- one top-level file, as text.
     pub(crate) async fn raw_file(
         &self,
@@ -211,6 +196,85 @@ impl GiteaClient {
             &[],
         )
         .await
+    }
+
+    /// `GET /repos/{o}/{r}/contents/{dir}?ref={at}` -- one directory's
+    /// listing at a ref; `dir` empty is the top one (#711), where a README
+    /// is found too: Gitea 1.27 has no `/readme` route (it answers 404 *page
+    /// not found*).
+    pub(crate) async fn contents_at_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        dir: &str,
+        at: &str,
+    ) -> Result<Vec<T>, SourceError> {
+        self.get_json(&contents_path(owner, repo, dir)?, &[("ref", at.to_owned())])
+            .await
+    }
+
+    /// `GET /repos/{o}/{r}/contents/{file}?ref={at}` -- one file's own entry
+    /// at a ref (its size, among others): what a cut [`Self::raw_capped`]
+    /// read asks when Gitea's answer did not say how long the file is.
+    pub(crate) async fn contents_entry_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &contents_path(owner, repo, file)?,
+            &[("ref", at.to_owned())],
+        )
+        .await
+    }
+
+    /// `GET /repos/{o}/{r}/raw/{file}?ref={at}` -- one file's bytes at a ref,
+    /// read no further than `cap` bytes past which it is cut (#711): a file
+    /// many megabytes long costs what is drawn of it, not its whole size.
+    pub(crate) async fn raw_capped(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+    ) -> Result<RawFile, SourceError> {
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/raw/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped_path(file)?
+        );
+        let request = self
+            .http
+            .request(Method::GET, &path)
+            .query(&[("ref", at.to_owned())]);
+        let mut response = self.http.send(request).await?;
+        let length = response.content_length();
+        let mut bytes = Vec::new();
+        let mut cut = false;
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {path} answered an unreadable body: {error}"
+            ))
+        })? {
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() > cap {
+                cut = true;
+                break;
+            }
+        }
+        // Only where the body is not compressed: `reqwest` undoes a gzip
+        // answer and then has no length to give, so a cut read without one
+        // leaves the size to its caller.
+        let size = if cut {
+            length
+        } else {
+            Some(bytes.len() as u64)
+        };
+        Ok(RawFile { bytes, cut, size })
     }
 
     /// `GET <base>/api/v1/<path>?<query>`, its body as text: a `.diff`, a
@@ -242,6 +306,36 @@ fn one_commit_not_in(sha: &str, not: &str) -> [(&'static str, String); 6] {
         ("files", "false".to_owned()),
         ("limit", "1".to_owned()),
     ]
+}
+
+/// A file's bytes as [`GiteaClient::raw_capped`] read them.
+#[derive(Debug)]
+pub(crate) struct RawFile {
+    /// What was read: the whole file, or, where `cut`, more than the cap.
+    pub(crate) bytes: Vec<u8>,
+    /// The file is longer than the cap and was not read to its end.
+    pub(crate) cut: bool,
+    /// The whole file's size: what was read, or where it was cut, what Gitea
+    /// said its length was; `None` for a cut read whose answer did not say.
+    pub(crate) size: Option<u64>,
+}
+
+/// `/repos/{o}/{r}/contents[/{path}]`, `path` empty for the top directory.
+fn contents_path(owner: &str, repo: &str, path: &str) -> Result<String, SourceError> {
+    let mut route = format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?);
+    if !path.is_empty() {
+        route.push('/');
+        route.push_str(&escaped_path(path)?);
+    }
+    Ok(route)
+}
+
+/// A path in a tree as path segments, each [`escaped`]: `src/lib` stays two
+/// segments, and an empty, `.` or `..` segment is refused, so the path can
+/// never leave the route it is put in.
+fn escaped_path(value: &str) -> Result<String, SourceError> {
+    let segments: Vec<String> = value.split('/').map(escaped).collect::<Result<_, _>>()?;
+    Ok(segments.join("/"))
 }
 
 /// `/repos/{o}/{r}/compare/{base}...{head}`, both refs escaped.

@@ -865,7 +865,7 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
         .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
         .expect("Gitea draws a branch");
     let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["overview", "commits", "diff"], "{id}");
+    assert_eq!(ids, ["overview", "commits", "diff", "files"], "{id}");
 
     let overview = &view.sections[0];
     // Its open pull request leads the overview (#707), so the facts are the
@@ -1051,7 +1051,11 @@ async fn the_seeded_repos_view_lists_its_pull_requests_and_branches() {
         .unwrap_or_else(|error| panic!("the view of {id} failed: {error:?}"))
         .expect("Gitea draws a repository");
     let ids: Vec<_> = view.sections.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["overview", "pulls", "branches", "commits"], "{id}");
+    assert_eq!(
+        ids,
+        ["overview", "pulls", "branches", "commits", "files"],
+        "{id}"
+    );
     let rows_of = |index: usize| {
         view.sections[index]
             .blocks
@@ -1119,6 +1123,146 @@ async fn the_seeded_repos_view_lists_its_pull_requests_and_branches() {
         println!("commit {:<52} {:?}", row.title, row.meta);
     }
     assert!(!commits.is_empty() && commits.len() <= 20);
+}
+
+/// Reading code (#711): the seeded repository's *Files* tab at `main` lists
+/// the README `auto_init` wrote and draws it; the SEPA branch's tab walks
+/// down its seeded directories, one section id at a time, to a file the seed
+/// committed, whose text is that commit's message. A path that is not there
+/// is Gitea's 404, not an empty listing.
+///
+/// Prints every listing and the file, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
+    use knobas_source::view::{Block, EntryKind};
+
+    let env = env();
+    let source = env.one_repo();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/tidewater/work.json"))
+            .expect("the fixture is JSON");
+    let messages: Vec<String> = fixture["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["repo"].as_str() == Some(env.repo.as_str()))
+        .filter_map(|c| c["msg"].as_str().map(str::to_owned))
+        .collect();
+
+    let read = |entity: String, section: String| {
+        let source = &source;
+        async move {
+            let view = source
+                .view(&entity, Some(&section))
+                .await
+                .unwrap_or_else(|error| panic!("{entity} {section}: {error:?}"))
+                .expect("drawn");
+            assert_eq!(view.sections.len(), 1);
+            assert_eq!(view.sections[0].id, section);
+            view.sections[0].blocks[0].clone()
+        }
+    };
+
+    // The repository, at its default branch.
+    let repo = format!("gitea:{}", env.full_name());
+    let Block::Tree { trail, entries, .. } = read(repo.clone(), "files".into()).await else {
+        panic!("a listing");
+    };
+    for e in &entries {
+        println!(
+            "main  {:<10?} {:<24} {:?} {:?}",
+            e.kind, e.name, e.size, e.section
+        );
+    }
+    assert_eq!(trail[0].name, "main");
+    let readme = entries
+        .iter()
+        .find(|e| e.name == "README.md")
+        .expect("auto_init's README is listed");
+    let Block::File {
+        text,
+        language,
+        size,
+        truncated,
+        binary,
+        url,
+        trail,
+        ..
+    } = read(repo.clone(), readme.section.clone().expect("a file opens")).await
+    else {
+        panic!("a file");
+    };
+    println!("file  README.md {size} bytes, {language:?}, url {url:?}");
+    println!("{text}");
+    assert!(text.starts_with(&format!("# {}", env.repo)), "{text:?}");
+    assert_eq!(language.as_deref(), Some("markdown"));
+    assert_eq!(size, text.len() as u64);
+    assert!(!truncated && !binary);
+    assert!(url.is_some_and(|u| u.ends_with("/src/branch/main/README.md")));
+    assert_eq!(
+        trail.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["main", "README.md"]
+    );
+
+    // A branch, walked down one directory at a time to a seeded file.
+    let branch = "feature/PAY-231-sepa-retry";
+    let entity = format!("gitea:{}@refs/heads/{branch}", env.full_name());
+    let mut at = "files".to_owned();
+    let mut depth = 0;
+    let file = loop {
+        let Block::Tree { trail, entries, .. } = read(entity.clone(), at.clone()).await else {
+            panic!("a listing at {at}");
+        };
+        let names: Vec<_> = trail.iter().map(|c| c.name.as_str()).collect();
+        println!("{}", names.join(" / "));
+        for e in &entries {
+            println!(
+                "      {:<10?} {:<24} {:?} {:?}",
+                e.kind, e.name, e.size, e.section
+            );
+        }
+        assert_eq!(trail.len(), depth + 1, "one step per directory");
+        assert_eq!(trail[0].name, branch);
+        let dirs = entries
+            .iter()
+            .take_while(|e| e.kind == EntryKind::Dir)
+            .count();
+        assert!(
+            entries[dirs..].iter().all(|e| e.kind != EntryKind::Dir),
+            "directories first: {entries:#?}"
+        );
+        // Down the first directory while there is one, then the first file
+        // that is not the README.
+        if let Some(dir) = entries.iter().find(|e| e.kind == EntryKind::Dir) {
+            at = dir.section.clone().unwrap();
+            depth += 1;
+            continue;
+        }
+        break entries
+            .iter()
+            .find(|e| e.kind == EntryKind::File && e.name != "README.md")
+            .unwrap_or_else(|| panic!("a seeded file at {at}: {entries:#?}"))
+            .section
+            .clone()
+            .unwrap();
+    };
+    assert!(depth >= 1, "the seed commits below the top directory");
+    let Block::File { path, text, .. } = read(entity.clone(), file.clone()).await else {
+        panic!("a file");
+    };
+    println!("file  {path}: {text:?}");
+    assert!(
+        messages.iter().any(|m| text == format!("{m}\n")),
+        "{path} holds the message of the commit that wrote it: {text:?}"
+    );
+
+    let missing = source
+        .view(&entity, Some("files:no/such/dir"))
+        .await
+        .expect_err("a path that is not there");
+    println!("missing  {missing:?}");
+    assert_eq!(missing.status(), Some(404));
 }
 
 /// Interfaces §4.2's key forms, against ids the *real* server issued.

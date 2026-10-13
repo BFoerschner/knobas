@@ -17,6 +17,14 @@
   count come with the view, its blocks with `entityView(entity, section)`. The
   answer is kept for as long as the detail is open; a failed read says why and
   offers to try again rather than leaving an empty tab.
+
+  **A section a block names opens in the tab it is drawn in** (#711): a tree's
+  entry or a trail's step names a section, read the same way and drawn in
+  place of the tab's own, under the same tab. Each tab keeps where it is and
+  the steps that led there, so *Back* walks them, switching tabs keeps the
+  place, and every place is read once. These steps are the tab's, not the
+  app's history: a tab is not an address (#697), so a step inside one is not
+  either, and ⌘[ still leaves the entity.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -28,6 +36,7 @@
     type ViewSection,
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
+  import { PLACEHOLDER_MS } from "../view-read";
   import type { BuildParameter } from "../../ipc/sources";
   import ActionButtons from "./ActionButtons.svelte";
   import { offeredActions, type ActionValues } from "./actions";
@@ -38,6 +47,8 @@
   import LogBlock from "./LogBlock.svelte";
   import SettingsBlock from "./SettingsBlock.svelte";
   import TextBlock from "./TextBlock.svelte";
+  import FileBlock from "./FileBlock.svelte";
+  import TreeBlock from "./TreeBlock.svelte";
 
   let {
     entityId,
@@ -83,9 +94,48 @@
     view.sections.find((section) => section.id === picked) ?? view.sections[0] ?? null,
   );
 
-  /** A deferred section's own read, by id: in flight, failed, or answered. */
+  /**
+   * Where each tab is, by tab id, and the places it was before, newest last
+   * (#711). A tab absent here is at its own section.
+   */
+  let at = $state<Record<string, string>>({});
+  let steps = $state<Record<string, string[]>>({});
+  /** The place each tab last left, drawn (dimmed) while the next is read. */
+  let leftFrom = $state<Record<string, string>>({});
+
+  /** The section a tab draws: its own, or the one the reader walked to. */
+  function placeOf(tab: ViewSection): string {
+    return at[tab.id] ?? tab.id;
+  }
+
+  /** Another entity's view starts every tab at its own section. */
+  let seenEntity = untrack(() => entityId);
+  $effect(() => {
+    const now = entityId;
+    if (now === seenEntity) return;
+    seenEntity = now;
+    generation++;
+    untrack(() => {
+      at = {};
+      steps = {};
+      leftFrom = {};
+      kept = {};
+    });
+  });
+
+  /** A section's own read, by id: in flight, failed, or answered. */
   type Read = { state: "reading" } | { state: "failed"; message: string } | { state: "read"; blocks: ViewBlock[] };
   let reads = $state<Record<string, Read>>({});
+  /**
+   * The reads of the view that was, kept only to be drawn (dimmed) while the
+   * same places are read again, so a write's re-read does not blank a tab.
+   */
+  let kept = $state<Record<string, Read>>({});
+  /**
+   * Bumped whenever the reads are dropped (another view, another entity): a
+   * read answered for the generation before is not this one's to land.
+   */
+  let generation = 0;
 
   /**
    * A view read again (after a write, #667) drops the deferred tabs it read
@@ -98,7 +148,11 @@
     const before = seenView;
     seenView = now;
     if (before === null || before === now) return;
-    untrack(() => (reads = {}));
+    generation++;
+    untrack(() => {
+      kept = reads;
+      reads = {};
+    });
   });
 
   /**
@@ -115,21 +169,22 @@
   /** Unique per instance, so tab and panel ids cannot collide. */
   const uid = Math.random().toString(36).slice(2, 9);
 
-  function read(section: ViewSection) {
+  function read(id: string) {
     const entity = entityId;
-    reads[section.id] = { state: "reading" };
-    entityView(entity, section.id)
+    const mine = generation;
+    reads[id] = { state: "reading" };
+    entityView(entity, id)
       .then((answer) => {
-        if (entity !== entityId) return;
-        const blocks = answer?.sections.find((s) => s.id === section.id)?.blocks;
-        reads[section.id] =
+        if (entity !== entityId || mine !== generation) return;
+        const blocks = answer?.sections.find((s) => s.id === id)?.blocks;
+        reads[id] =
           blocks === undefined
             ? { state: "failed", message: "the source answered without this section" }
             : { state: "read", blocks };
       })
       .catch((rejection: unknown) => {
-        if (entity !== entityId) return;
-        reads[section.id] = { state: "failed", message: ipcErrorMessage(rejection) };
+        if (entity !== entityId || mine !== generation) return;
+        reads[id] = { state: "failed", message: ipcErrorMessage(rejection) };
       });
   }
 
@@ -137,12 +192,48 @@
     picked = section.id;
   }
 
-  // The shown tab's deferred read, on its first showing -- a click, a key,
-  // or the view opening on a first section that is itself deferred.
+  /** Whether `tab` draws a section it has to read: deferred, or walked to. */
+  function readsFor(tab: ViewSection): string | null {
+    const place = placeOf(tab);
+    return tab.deferred || place !== tab.id ? place : null;
+  }
+
+  /** Walk the open tab to `section`, remembering where it was. */
+  function walk(section: string) {
+    const tab = current;
+    if (!tab) return;
+    const from = placeOf(tab);
+    if (from === section) return;
+    // A step taken from a place still being read (the reader clicked in the
+    // place held on screen) leaves one never shown: not a step to go back to,
+    // and not what stays drawn while the next is read.
+    if (shown?.state === "read") {
+      steps[tab.id] = [...(steps[tab.id] ?? []), from];
+      leftFrom[tab.id] = from;
+    }
+    at[tab.id] = section;
+  }
+
+  /** The open tab back one step. */
+  function back() {
+    const tab = current;
+    const trail = tab ? steps[tab.id] : undefined;
+    if (!tab || !trail?.length) return;
+    leftFrom[tab.id] = placeOf(tab);
+    at[tab.id] = trail[trail.length - 1]!;
+    steps[tab.id] = trail.slice(0, -1);
+  }
+
+  // The shown place's read, on its first showing -- a click, a key, a step
+  // inside the tab, or the view opening on a first section that is deferred.
   $effect(() => {
     const section = current;
-    if (section?.deferred && reads[section.id] === undefined) untrack(() => read(section));
+    const id = section ? readsFor(section) : null;
+    if (id !== null && reads[id] === undefined) untrack(() => read(id));
   });
+
+  /** *Back* for the open tab's blocks, where it has been somewhere before. */
+  const onback = $derived(current && (steps[current.id]?.length ?? 0) > 0 ? back : undefined);
 
   let tabs = $state<(HTMLButtonElement | null)[]>([]);
 
@@ -169,11 +260,32 @@
 
   const shown = $derived.by((): Read | null => {
     if (!current) return null;
-    const read: Read = current.deferred
-      ? (reads[current.id] ?? { state: "reading" })
-      : { state: "read", blocks: current.blocks };
+    const id = readsFor(current);
+    const read: Read =
+      id !== null ? (reads[id] ?? { state: "reading" }) : { state: "read", blocks: current.blocks };
     if (read.state !== "read") return read;
     return { state: "read", blocks: offered(read.blocks) };
+  });
+
+  /**
+   * While a place is read, what the tab drew before stays drawn: the place it
+   * left for this one, or this same place as the view before a re-read had
+   * it. So a quick read swaps one listing for the next with no line between
+   * them; a slow one dims it (`.busy`, after {@link PLACEHOLDER_MS}, the
+   * panel's one rule for when waiting is worth saying, #703) rather than
+   * blanking the tab.
+   */
+  const held = $derived.by((): ViewBlock[] | null => {
+    if (!current || shown?.state !== "reading") return null;
+    const from = leftFrom[current.id];
+    const place = readsFor(current);
+    const candidates = [
+      from === undefined ? undefined : reads[from],
+      place === null ? undefined : kept[place],
+      from === undefined ? undefined : kept[from],
+    ];
+    const before = candidates.find((read) => read?.state === "read");
+    return before?.state === "read" ? offered(before.blocks) : null;
   });
 
   /** The toolbar's actions: those the source declares and the shell can queue. */
@@ -194,6 +306,60 @@
     });
   }
 </script>
+
+{#snippet blocks(list: ViewBlock[])}
+  {#each list as block, index (index)}
+    <div class="sv-block">
+      {#if block.type === "facts"}
+        <FactsBlock facts={block.facts} />
+      {:else if block.type === "text"}
+        <TextBlock text={block.text} markdown={block.markdown} {onopenurl} />
+      {:else if block.type === "entities"}
+        <EntitiesBlock title={block.title} rows={block.rows} {onnavigate} {onopenurl} />
+      {:else if block.type === "diff"}
+        <DiffBlock files={block.files} truncated={block.truncated} {webUrl} {sourceName} {onopenurl} />
+      {:else if block.type === "log"}
+        <LogBlock text={block.text} truncated={block.truncated} />
+      {:else if block.type === "settings"}
+        <SettingsBlock
+          title={block.title}
+          values={block.values}
+          writable={settingsWritable(block.write_op, writeOps)}
+          marks={block.entity === entityId ? settingMarks : {}}
+          onsave={(name, value, base) => onsetting(block, name, value, base)}
+        />
+      {:else if block.type === "actions"}
+        <ActionButtons actions={block.actions} settings={ownSettings} {onaction} />
+      {:else if block.type === "tree"}
+        <TreeBlock
+          trail={block.trail}
+          entries={block.entries}
+          truncated={block.truncated}
+          url={block.url}
+          {sourceName}
+          onopen={walk}
+          {onback}
+          {onopenurl}
+        />
+      {:else if block.type === "file"}
+        <FileBlock
+          trail={block.trail}
+          path={block.path}
+          text={block.text}
+          language={block.language}
+          size={block.size}
+          truncated={block.truncated}
+          binary={block.binary}
+          url={block.url}
+          {sourceName}
+          onopen={walk}
+          {onback}
+          {onopenurl}
+        />
+      {/if}
+    </div>
+  {/each}
+{/snippet}
 
 {#if current}
   <div class="sv">
@@ -229,43 +395,26 @@
       role="tabpanel"
       id="sv-panel-{uid}"
       aria-labelledby="sv-tab-{uid}-{view.sections.indexOf(current)}"
+      style:--sv-wait="{PLACEHOLDER_MS}ms"
     >
-      {#if shown?.state === "reading"}
-        <p class="sv-note">Reading from {sourceName}…</p>
+      {#if held}
+        <div class="sv-held busy" aria-busy="true">
+          {@render blocks(held)}
+        </div>
+      {:else if shown?.state === "reading"}
+        <p class="sv-note sv-wait">Reading from {sourceName}…</p>
       {:else if shown?.state === "failed"}
         <p class="sv-note fail">
           Could not read this tab: {shown.message}
-          <button class="btn sm" onclick={() => read(current)}>Try again</button>
+          <button class="btn sm" onclick={() => read(placeOf(current))}>Try again</button>
         </p>
       {:else if shown?.state === "read"}
         {#if shown.blocks.length === 0}
           <p class="sv-note">Nothing here.</p>
         {/if}
-        {#each shown.blocks as block, index (index)}
-          <div class="sv-block">
-            {#if block.type === "facts"}
-              <FactsBlock facts={block.facts} />
-            {:else if block.type === "text"}
-              <TextBlock text={block.text} markdown={block.markdown} {onopenurl} />
-            {:else if block.type === "entities"}
-              <EntitiesBlock title={block.title} rows={block.rows} {onnavigate} {onopenurl} />
-            {:else if block.type === "diff"}
-              <DiffBlock files={block.files} truncated={block.truncated} {webUrl} {sourceName} {onopenurl} />
-            {:else if block.type === "log"}
-              <LogBlock text={block.text} truncated={block.truncated} />
-            {:else if block.type === "settings"}
-              <SettingsBlock
-                title={block.title}
-                values={block.values}
-                writable={settingsWritable(block.write_op, writeOps)}
-                marks={block.entity === entityId ? settingMarks : {}}
-                onsave={(name, value, base) => onsetting(block, name, value, base)}
-              />
-            {:else if block.type === "actions"}
-              <ActionButtons actions={block.actions} settings={ownSettings} {onaction} />
-            {/if}
-          </div>
-        {/each}
+        {#key placeOf(current)}
+          {@render blocks(shown.blocks)}
+        {/key}
       {/if}
     </div>
   </div>
@@ -329,6 +478,36 @@
   .sv-panel {
     padding: 10px 14px 12px;
     border-bottom: 1px solid var(--hair);
+  }
+
+  /*
+    Dimmed, or said, only once a read takes long enough to notice: the
+    panel's placeholder threshold (#703), so a 150 ms read flickers nothing.
+  */
+  .sv-held.busy {
+    animation: sv-dim 0.12s var(--sv-wait) both;
+  }
+
+  .sv-wait {
+    animation: sv-show 0s var(--sv-wait) both;
+  }
+
+  @keyframes sv-show {
+    from {
+      visibility: hidden;
+    }
+    to {
+      visibility: visible;
+    }
+  }
+
+  @keyframes sv-dim {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.55;
+    }
   }
 
   .sv-block + .sv-block {

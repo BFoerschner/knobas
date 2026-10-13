@@ -27,6 +27,9 @@ tokio.workspace = true
 # against the real pinned container -- if the two disagree, this one is wrong.
 # It brings no `reqwest` of its own; `cargo tree -i reqwest` must stay at one.
 wiremock = "0.6"
+# Only `view_files`, to answer a compressed raw file as a proxy would (#711).
+# Already in the tree through `reqwest`'s `gzip`.
+flate2 = "1.1.9"
 # Only `tests/live_gitea.rs` uses this, to create a branch and open a pull
 # request through Gitea's own API -- the adapter is read-only and its own
 # transport is `knobas-http`'s. Inherited from the workspace so `cargo tree -i
