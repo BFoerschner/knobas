@@ -1123,3 +1123,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted in 
 **If you disagree, the cost of reversing this is:** low. Drop the `selected.listed` arm in `sync::run` and the listed-then-404 repository fails a full sync again. Its test, `a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds`, would then assert the opposite.
 
 As built (#728): `Selected.listed` marks a repository that came from the listing. In `sync::run`, a `RepoError::Skip` with status 404 on a listed repository is followed by one `GET /repos/{owner}/{repo}`, and only that read's 404 (`repo_is_gone`) skips it, on either kind of run. A skipped repository holds no cursor position and does not count towards "every repository refused". On an incremental run this is a change too: before #728 the repository kept its position and counted as a refusal (`a_listed_repository_deleted_mid_run_drops_out_of_an_incremental_cursor`). Any other answer falls through to B4 as before. The amendment is written in the `sync.rs` module docs, on `client::is_repo_scoped`, and as a note under B4 in `docs/contract.md` §9.
+
+## #721 — Gitea's "405 Please try again later": a bounded retry inside the adapter's merge
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #721.
+
+**The fork:** Gitea answers a merge 405 *"Please try again later"* for any pull request whose recorded state is not *mergeable* (`ErrNotMergeableState`): *checking* for a second or two after it opens or its head moves, but also *conflict* or *error* for good, and the sentence cannot tell them apart. Options: (a) retry it inside the adapter's merge, bounded at about 15 s, then return it as the refusal; (b) classify it as a queue-level transient, retried without bound and labelled *unreachable*.
+
+**Ruling:** (a).
+
+**Reasoning:** an unbounded retry would hide a real conflict forever as an outage (story 19). The bounded retry covers the 1–2.5 s check window measured live (10 of 10 immediate merges landed).
+
+**If you disagree, the cost of reversing this is:** low: `MERGE_PATIENCE` and `patiently` in `crates/knobas-source-gitea/src/write.rs`.
+
+As built (#721): `write::still_checking` matches the 405 status and the sentence together, and `write::patiently` waits with `knobas-http`'s backoff (each wait capped at 2 s) for at most `MERGE_PATIENCE` (15 s) in total. The write queue flushes one source's writes in sequence, so while a merge waits, that source's other writes wait behind it. That stays inside what one write may already take (`knobas_http::SEND_BUDGET`, 45 s), and it happens only in a race, because *Merge…* is disabled while Gitea says `mergeable: false`.
