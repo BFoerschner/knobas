@@ -178,6 +178,11 @@ knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_int
 knobas-app	lib/knobas_app	inbox::tests::every_inbox_category_has_a_toggle_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
 knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
+knobas-app	lib/knobas_app	logging::tests::a_pool_timeout_is_logged_with_the_running_command
+knobas-app	lib/knobas_app	logging::tests::a_slow_command_is_logged_with_its_name
+knobas-app	lib/knobas_app	logging::tests::redact_leaves_ordinary_text_alone
+knobas-app	lib/knobas_app	logging::tests::secrets_are_redacted_before_they_reach_the_file
+knobas-app	lib/knobas_app	logging::tests::the_file_rotates_at_the_cap_and_keeps_the_newest
 knobas-app	lib/knobas_app	notify::tests::a_click_reaches_the_events_with_its_address_and_a_clear_does_not
 knobas-app	lib/knobas_app	notify::tests::a_completed_wait_frees_its_slot_for_the_next_send
 knobas-app	lib/knobas_app	notify::tests::a_refused_show_is_an_error_and_holds_no_slot
@@ -646,6 +651,7 @@ knobas-app	test/it	inbox_ipc::the_action_an_item_offers_reaches_the_source_and_i
 knobas-app	test/it	inbox_ipc::unticking_the_last_box_stores_the_empty_set
 knobas-app	test/it	inbox_ipc::what_comes_back_is_the_stored_set_deduplicated_and_in_one_order
 knobas-app	test/it	ipc::a_command_that_beats_the_database_is_told_to_try_again
+knobas-app	test/it	ipc::a_command_through_the_real_pipeline_is_timed_by_name
 knobas-app	test/it	ipc::a_submitted_write_is_queued_delivered_and_followed_by_a_re_read
 knobas-app	test/it	ipc::app_status_answers_before_the_database_does
 knobas-app	test/it	ipc::both_link_commands_are_registered_and_their_arguments_decode
