@@ -86,6 +86,11 @@ tauri-plugin-notification = "=2.4.0"
 # gains nothing and `capabilities/default.json` grants no
 # `global-shortcut:*` permission. See `crate::capture`.
 tauri-plugin-global-shortcut = "=2.3.2"
+# The single-instance guard (#748): a second launch hands its arguments to the
+# first, which focuses its window, and exits before the database or scheduler
+# starts. Rust-only (no npm half, no capability). Pinned exactly, the discipline
+# of the plugins above; 2.4.5 is the newest release older than two weeks.
+tauri-plugin-single-instance = "=2.4.5"
 # The click (#339). The plugin's desktop `notify` drops the `notify-rust` handle,
 # so knobas sends through the crate itself and waits on the handle (`notify.rs`).
 # Pinned exactly to the version `Cargo.lock` already carried for the plugin, so

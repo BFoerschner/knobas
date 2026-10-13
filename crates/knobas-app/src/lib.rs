@@ -153,7 +153,27 @@ pub fn run() {
     init_tracing();
     install_panic_hook();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The single-instance guard (#748), registered **first**: its setup runs
+    // before the builder's `setup` closure, so a second launch exits before it
+    // can start the database or the scheduler (whose startup closes every
+    // unfinished run row, the first instance's live runs included). The demo
+    // profile (`--demo`, its own data dir and database) is left out: the
+    // plugin keys its lock by the bundle identifier, which cannot differ per
+    // profile without moving `app_data_dir`, so guarding it would stop a demo
+    // from running beside a real instance, which it does today.
+    let builder = if std::env::args().any(|arg| arg == DEMO_FLAG) {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window(capture::MAIN_LABEL) {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+    };
+    builder
         // *Open in browser*. Its permission is granted in
         // `capabilities/default.json`; without that entry the command is
         // registered and every call is denied at run time.

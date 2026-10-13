@@ -84,7 +84,7 @@ pub const WINDOW_LABEL: &str = "capture";
 
 /// The label of the window the *Open in knobas* button brings forward -- the
 /// one `tauri.conf.json` declares.
-const MAIN_LABEL: &str = "main";
+pub(crate) const MAIN_LABEL: &str = "main";
 
 /// The document the capture window loads.
 ///
