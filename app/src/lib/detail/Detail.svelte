@@ -36,6 +36,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
+  import BuildsPanel from "./BuildsPanel.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
@@ -1547,6 +1548,13 @@
           <PayloadView {fields} />
         </div>
       {/if}
+
+      <!--
+        The builds of the commit this stands at (#710), first of the panels:
+        whether it is green is the next thing asked of code. The mirror's rows,
+        drawn whatever the view did; absent where nothing ran on the commit.
+      -->
+      <BuildsPanel builds={detail.builds} onopen={onnavigate} />
 
       <!--
         Where this repo's clone is on this disk (#499). Above the links because

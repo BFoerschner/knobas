@@ -1619,6 +1619,89 @@ async fn a_synced_build_carries_its_state_chip() {
     }
 }
 
+/// A synced build carries the commits it ran on (#710): the declared
+/// `revision` resolves on the seeded 1187's record to full shas, read by the
+/// sync's own builds request, so the mirror can find a commit's builds in SQL.
+/// What asking costs is printed: the same builds page read with and without
+/// `revisions(revision(version))`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_synced_build_carries_the_revisions_it_ran_on() {
+    use knobas_core::payload::resolve_list;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let declared = knobas_source_teamcity::descriptor_template()
+        .payload_paths
+        .into_iter()
+        .find(|paths| paths.kind == "build")
+        .expect("a build declares its paths")
+        .revision;
+    let revisions_of = |real_id: i64| {
+        let build = of_kind(&items, "build")
+            .into_iter()
+            .find(|i| i.entity.key == format!("build:{real_id}"))
+            .unwrap_or_else(|| panic!("build id {real_id} missing; got {:?}", keys(&items)));
+        resolve_list(&build.payload, &declared)
+    };
+    let failed = revisions_of(seeded.fixture_build(1187).real_id);
+    println!("SEEDED 1187 revisions: {failed:?}");
+    assert!(!failed.is_empty(), "the seeded 1187 ran on a commit");
+    for sha in &failed {
+        assert!(
+            sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "a revision is a full object id: {sha:?}"
+        );
+    }
+    let with_revision = of_kind(&items, "build")
+        .into_iter()
+        .filter(|b| !resolve_list(&b.payload, &declared).is_empty())
+        .count();
+    println!(
+        "SEEDED builds with a revision: {with_revision} of {}",
+        of_kind(&items, "build").len()
+    );
+
+    // The cost of asking, measured: one page of the builds the sync reads,
+    // each selector three times, the fastest kept.
+    let without = "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,\
+                   queuedDate,startDate,finishDate,buildType(id,name,projectId,projectName),\
+                   running-info(percentageComplete,currentStageText),triggered(user(username)))";
+    // The same, with the revisions asked inside `build(...)`.
+    let with = format!(
+        "{},revisions(revision(version)))",
+        &without[..without.len() - 1]
+    );
+    for (name, fields) in [("without", without.to_owned()), ("with", with)] {
+        let mut best = std::time::Duration::MAX;
+        let mut bytes = 0;
+        for _ in 0..3 {
+            let started = std::time::Instant::now();
+            let body = seeded
+                .http
+                .get(format!("{}/app/rest/builds", seeded.url))
+                .query(&[
+                    ("locator", "defaultFilter:false,count:100"),
+                    ("fields", fields.as_str()),
+                ])
+                .header("Authorization", format!("Bearer {}", seeded.token))
+                .header("Accept", "application/json")
+                .send()
+                .await
+                .expect("the builds read")
+                .error_for_status()
+                .expect("answered")
+                .bytes()
+                .await
+                .expect("a body");
+            best = best.min(started.elapsed());
+            bytes = body.len();
+        }
+        println!("SEEDED builds page {name} revisions: {bytes} bytes, best of 3 {best:?}");
+    }
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides, over the configurations nothing in this file queues
 /// on while it runs.

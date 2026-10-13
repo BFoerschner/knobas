@@ -102,6 +102,22 @@ fn state_of(
         .map(|chip| chip.0))
 }
 
+/// One row of a statement that selects a row's columns: `entity_id`,
+/// `source_id`, `kind`, `title`, `item_updated_at`, `synced_at`, `path` and
+/// `state`.
+fn entity_row(row: &sqlx::postgres::PgRow) -> Result<EntityRow, sqlx::Error> {
+    Ok(EntityRow {
+        entity_id: row.get("entity_id"),
+        kind: row.get("kind"),
+        source_id: row.get("source_id"),
+        title: row.get("title"),
+        updated_at: row.get("item_updated_at"),
+        synced_at: row.get("synced_at"),
+        path: row.get("path"),
+        state: state_of(row)?,
+    })
+}
+
 /// Which slice of the corpus a room wants.
 ///
 /// Both lists are *unfiltered when empty*, which is why they are bound as
@@ -778,21 +794,7 @@ pub async fn list_entities_inner(
     };
 
     Ok(EntityPage {
-        rows: rows
-            .iter()
-            .map(|row| -> Result<EntityRow, sqlx::Error> {
-                Ok(EntityRow {
-                    entity_id: row.get("entity_id"),
-                    kind: row.get("kind"),
-                    source_id: row.get("source_id"),
-                    title: row.get("title"),
-                    updated_at: row.get("item_updated_at"),
-                    synced_at: row.get("synced_at"),
-                    path: row.get("path"),
-                    state: state_of(row)?,
-                })
-            })
-            .collect::<Result<_, _>>()?,
+        rows: rows.iter().map(entity_row).collect::<Result<_, _>>()?,
         total,
         tally,
         groups,
@@ -903,6 +905,14 @@ pub struct EntityDetail {
     pub links: Vec<LinkEntry>,
     /// This entity's own history, newest first (spec §12.1).
     pub activity: Vec<ActivityRow>,
+    /// The mirrored builds that ran on the commit this entity stands at
+    /// (#710): for a pull request its head commit, for a branch its tip, for
+    /// a commit itself -- whatever its kind declares as `commit` -- the rows
+    /// whose declared `revision` names that sha. Failing first, then running,
+    /// then the rest by tone, newest first within one; at most
+    /// [`DETAIL_BUILDS`]. Empty for a kind that declares no commit, which is
+    /// every kind but code, and for a commit nothing mirrored ran on.
+    pub builds: Vec<EntityRow>,
 }
 
 /// How many history lines the detail view is given up front.
@@ -910,6 +920,56 @@ pub struct EntityDetail {
 /// Enough to fill the panel without a second round trip; the full history is a
 /// later milestone's view, not a scroll in a slide-over.
 const DETAIL_ACTIVITY: i64 = 20;
+
+/// How many builds the detail draws for a commit (#710): enough for every
+/// configuration a commit is commonly built by, failing first, so a cut
+/// leaves out passed ones.
+const DETAIL_BUILDS: i64 = 20;
+
+/// The builds that ran on the commit `$1` (#710), a full object id.
+///
+/// The commit is the entity's declared `commit`, read by [`DETAIL`] beside
+/// the row ([`declared_string!`](knobas_core::declared_string)); a build ran
+/// on it where its kind's declared `revision` lists it
+/// ([`declared_list!`](knobas_core::declared_list)). No adapter is named
+/// here, no payload key: a kind that declares no revision has no row
+/// [`declares_field!`](knobas_core::declares_field) lets through, so a
+/// source that declares none contributes nothing whatever its payloads say.
+/// Matched exactly: both sides are full object ids as git spells them.
+///
+/// **Asked only for an entity that stands at a commit.** The statement scans
+/// the live corpus -- no index answers a declared path -- so the detail of a
+/// ticket or a page, which declares no commit, never sends it: measured
+/// 2026-10-13 over 150 000 rows, the scan alone was about 85 ms, paid on every
+/// detail when the commit was still looked up inside the statement.
+///
+/// The builds come from `sync.live_item`, so a withdrawn build or a disabled
+/// source's is not drawn as if it stood. Ordered as the Builds tile weighs a
+/// state (#680): `err`, `warn`, `info`, `ok`, `muted`, then none; newest
+/// first within one.
+const DETAIL_BUILDS_AT: &str = concat!(
+    r#"
+select b.* from (
+  select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+         "#,
+    knobas_core::path_line_read!("$2"),
+    r#" as path,
+         "#,
+    knobas_core::declared_state!("$2"),
+    r#" as state
+    from sync.live_item i
+   where "#,
+    knobas_core::declares_field!("$2", "revision"),
+    r#"
+     and exists (select 1 from "#,
+    knobas_core::declared_list!("$2", "revision"),
+    r#" r where r.value = $1)
+) b
+ order by coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], b.state->>'tone'), 6),
+          b.item_updated_at desc nulls last, b.entity_id
+ limit $3
+"#
+);
 
 /// One entity, deleted or not.
 ///
@@ -930,6 +990,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        "#,
     knobas_core::declared_state!("$2"),
     r#" as state,
+       "#,
+    knobas_core::declared_string!("$2", "commit"),
+    r#" as commit,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -940,9 +1003,10 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
 "#
 );
 
-/// Everything the slide-over needs for `entity_id`, in four round trips: the
-/// source listing the declarations come from, the row, its links and its
-/// history.
+/// Everything the slide-over needs for `entity_id`, in four round trips and,
+/// for an entity that stands at a commit, a fifth: the source listing the
+/// declarations come from, the row (with its declared commit), its links, its
+/// history and the builds of that commit (#710).
 ///
 /// # Errors
 ///
@@ -971,6 +1035,22 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
 
     let kind: String = row.get("kind");
     let kind_info = kind_info_for(adapter_kind.as_deref(), &kind);
+
+    // The builds of the commit this entity stands at, asked only when it
+    // stands at one (see [`DETAIL_BUILDS_AT`] for why).
+    let commit: Option<String> = row.get("commit");
+    let builds = match commit {
+        Some(sha) => sqlx::query(DETAIL_BUILDS_AT)
+            .bind(sha)
+            .bind(declarations.as_param())
+            .bind(DETAIL_BUILDS)
+            .fetch_all(pool)
+            .await?
+            .iter()
+            .map(entity_row)
+            .collect::<Result<_, _>>()?,
+        None => Vec::new(),
+    };
 
     Ok(EntityDetail {
         row: EntityRow {
@@ -1001,6 +1081,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         deleted_at: row.get("deleted_at"),
         links: knobas_core::link::entries_of(pool, &entity).await?,
         activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
+        builds,
     })
 }
 

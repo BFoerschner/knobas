@@ -206,6 +206,17 @@ async fn slow_gitea(
         )
         .mount(&server)
         .await;
+    // The head commit's own statuses (#710): none, unless a test mounts some
+    // over this.
+    get(format!("{REPO}/commits/{HEAD_SHA}/status"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "state": "", "sha": HEAD_SHA, "total_count": 0,
+                                       "statuses": [] }))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
     get(format!("{REPO}/pulls/142.diff"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -1505,9 +1516,9 @@ async fn a_section_read_carries_no_toolbar() {
 
 /// A pull request's tabs are read side by side over its one record (#703):
 /// once the record is in, the reviews, the commits, the comments, who the
-/// token is (#705) and landing's three -- the base branch, the head branch,
-/// whether the head is behind (#708) -- are in flight together. Read in
-/// turn, one is.
+/// token is (#705), landing's three -- the base branch, the head branch,
+/// whether the head is behind (#708) -- and the head commit's statuses
+/// (#710) are in flight together. Read in turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1521,7 +1532,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 7, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 8, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -1673,6 +1684,10 @@ async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
         (format!("{REPO}/pulls/142/reviews"), json!([])),
         (format!("{REPO}/pulls/142/commits"), json!([])),
         (format!("{REPO}/issues/142/comments"), json!([])),
+        (
+            format!("{REPO}/commits/{HEAD_SHA}/status"),
+            json!({ "statuses": [] }),
+        ),
     ] {
         get(p)
             .respond_with(ResponseTemplate::new(200).set_body_json(body))
@@ -1701,6 +1716,10 @@ async fn gitea_for_viewers(pull: Value, viewers: &[(&str, &str)]) -> MockServer 
         (format!("{REPO}/pulls/142/reviews"), json!([])),
         (format!("{REPO}/pulls/142/commits"), json!([])),
         (format!("{REPO}/issues/142/comments"), json!([])),
+        (
+            format!("{REPO}/commits/{HEAD_SHA}/status"),
+            json!({ "statuses": [] }),
+        ),
     ] {
         Mock::given(method("GET"))
             .and(path(p))
@@ -2015,4 +2034,100 @@ async fn a_comment_past_a_files_cut_is_not_called_outdated() {
         .map(|t| (t.line, t.outdated))
         .collect();
     assert_eq!(threads, [(3, false), (lines as u32, false)]);
+}
+
+// -- Checks (issue #710) -----------------------------------------------------
+
+/// The pull request's head commit's statuses are its *Checks*, on *Overview*
+/// right after the facts and before the description, failing first. Asked
+/// by the head's sha, which the pull request's record names.
+#[tokio::test]
+async fn a_pull_requests_head_commit_statuses_are_its_checks() {
+    let server = gitea(open_pull(), json!([])).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits/{HEAD_SHA}/status")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "state": "failure", "sha": HEAD_SHA, "total_count": 2,
+            "statuses": [
+                { "status": "success", "context": "ci/build", "description": "passed",
+                  "target_url": "https://ci.example/1" },
+                { "status": "failure", "context": "ci/tests", "description": "1 failed",
+                  "target_url": "https://ci.example/2" }
+            ]
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    for asked in [None, Some("overview")] {
+        let view = source(&server).view(PR, asked).await.unwrap().unwrap();
+        let overview = section(&view, "overview");
+        let Block::Entities { title, rows } = &overview.blocks[1] else {
+            panic!("the checks follow the facts: {overview:#?}");
+        };
+        assert_eq!(title.as_deref(), Some("Checks"));
+        let drawn: Vec<_> = rows
+            .iter()
+            .map(|r| (r.title.as_str(), r.chip.as_deref(), r.tone))
+            .collect();
+        assert_eq!(
+            drawn,
+            [
+                ("ci/tests", Some("failure"), Some(Tone::Err)),
+                ("ci/build", Some("success"), Some(Tone::Ok)),
+            ],
+            "asked for {asked:?}"
+        );
+        assert!(
+            matches!(overview.blocks[2], Block::Text { .. }),
+            "the description after them: {overview:#?}"
+        );
+    }
+}
+
+/// A head commit nobody reported on draws no *Checks*: the description
+/// follows the facts as it did before.
+#[tokio::test]
+async fn a_pull_request_without_statuses_draws_no_checks() {
+    let server = gitea(open_pull(), json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let overview = section(&view, "overview");
+    assert_eq!(overview.blocks.len(), 2, "{overview:#?}");
+    assert!(matches!(overview.blocks[1], Block::Text { .. }));
+}
+
+/// A head commit whose statuses cannot be read does not fail the pull
+/// request's view (#710 ruling): its *Overview* draws one muted line where
+/// the checks would be, and the description still follows, whole or asked
+/// for alone.
+#[tokio::test]
+async fn a_pull_request_whose_checks_cannot_be_read_still_draws_and_says_so() {
+    let server = gitea(open_pull(), json!([])).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits/{HEAD_SHA}/status")))
+        .respond_with(ResponseTemplate::new(403))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    for asked in [None, Some("overview")] {
+        let view = source(&server).view(PR, asked).await.unwrap().unwrap();
+        let overview = section(&view, "overview");
+        let Block::Entities { title: None, rows } = &overview.blocks[1] else {
+            panic!("the line follows the facts: {overview:#?}");
+        };
+        let drawn: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.title.starts_with("Checks could not be read: "),
+                    r.tone,
+                    &r.chip,
+                )
+            })
+            .collect();
+        assert_eq!(drawn, [(true, Some(Tone::Muted), &None)], "{rows:#?}");
+        assert!(
+            matches!(overview.blocks[2], Block::Text { .. }),
+            "the description after it: {overview:#?}"
+        );
+    }
 }

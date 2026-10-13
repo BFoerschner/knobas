@@ -160,6 +160,7 @@ function config(): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
   } as EntityDetail;
 }
 

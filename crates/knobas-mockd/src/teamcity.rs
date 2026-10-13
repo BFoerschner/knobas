@@ -404,6 +404,10 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
             .find(|t| t.id == b.build_type_id)
             .map(|t| build_type_json(t, base)),
         "running-info": running_info,
+        // The commits a build ran on (#710), none: the dataset gives no build
+        // a commit, and a sha invented here would match no mirrored commit
+        // anyway. An empty list, the shape of a build with no VCS root.
+        "revisions": { "revision": [] },
         // `triggered` is the only place TeamCity names the person who started
         // a build, and it is what `knobas-source-teamcity` reads for
         // `SyncItem::author`.

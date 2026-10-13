@@ -112,7 +112,7 @@ async fn whole(
     // one -- the repository's branches are each their own reads, so they are
     // read side by side (#703); the first to fail fails the view, as it did
     // in turn.
-    let (tip, open, carried, listed) = tokio::try_join!(
+    let (tip, open, carried, listed, checks) = tokio::try_join!(
         source.client.branch_as::<BranchRecord>(owner, repo, branch),
         async {
             // A mirror's `/pulls` is a bare 404: it has none, which is not a failure.
@@ -129,6 +129,17 @@ async fn whole(
             } else {
                 Ok(rows::Paged::default())
             }
+        },
+        // The tip's own statuses (#710), by the branch's name so this need
+        // not wait for the read that learns the tip. Only *Overview* draws
+        // them, and a failed read is drawn as a line rather than failing the
+        // view (`checks`).
+        async {
+            Ok(if only == Some(COMMITS) {
+                None
+            } else {
+                super::checks::block(source, owner, repo, branch).await
+            })
         },
     )?;
     let pulls: Vec<_> = open
@@ -174,6 +185,7 @@ async fn whole(
         });
     }
     blocks.push(Block::Facts { facts });
+    blocks.extend(checks);
     if let Some(commit) = &tip.commit {
         blocks.push(Block::Entities {
             title: Some("Last commit".to_owned()),

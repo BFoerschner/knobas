@@ -1041,3 +1041,29 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: one optional field on `Block::Diff` and the list in `DiffBlock.svelte`.
 
 As built (#709, merge-manager fix on PR #726): `Block::Diff.gone: Vec<FileThread { path, thread }>` (`#[serde(default)]`, in the §10.8 entry), filled by `threads::place` in `crates/knobas-source-gitea/src/view/pr/threads.rs`; `DiffBlock.svelte` draws it after the last file, together with any pending comment on such a file, closed unless one is pending.
+
+## #710 — a failed commit-status read draws one muted line, not a failed view
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #710.
+
+**The fork:** the implementer put Gitea's `GET /repos/{o}/{r}/commits/{ref}/status` in the commit, pull request and branch views' `try_join!`, so a 403, 404 or 500 from it failed the whole view (the detail fell back to *Showing the mirror*). The PR left the choice to the reviewer.
+
+**Ruling:** a failed status read does **not** fail the view. The view draws without *Checks* and with one muted line in their place: *Checks could not be read: <reason>*.
+
+**Reasoning:** checks are secondary to the record they are drawn on; losing the pull request's facts, description and toolbar over them costs more than it tells. ADR-0020 rule 2 (never silent about an error) is kept by the line.
+
+**If you disagree, the cost of reversing this is:** trivial: `checks::block` in `crates/knobas-source-gitea/src/view/checks.rs` returns the error again, and the three views put it back in their `try_join!`.
+
+As built (#710, merge-manager fix on PR #729): `checks::block` returns `Option<Block>`, and a failed read becomes `unread(&error)`, an untitled `Entities` block of one muted row with no chip or address (the shape a list's own muted note has, #678), so nothing new crosses to the shell. Witnessed by wiremock in `tests/it/view.rs`, `view_pr.rs` and `view_branch.rs` (`…_cannot_be_read_still_draws_and_says_so`).
+
+## #710 — the builds-of-a-commit scan merges now; the index is a follow-up
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #710.
+
+**The fork:** the merge-manager measured `DETAIL_BUILDS_AT` with EXPLAIN ANALYZE. No index answers a declared path, so a commit's detail runs a sequential scan of the live corpus and walks each build's revisions: about 80 ms at 5,000 builds and 430 ms at 50,000. The fix is an indexed side table, which needs a migration the ticket did not name. Options: (A) merge now and file a follow-up; (B) hold the PR until the table exists.
+
+**Ruling:** **(A)**. The indexed side table, and moving the Builds summary above the view's tabs, are filed as #732.
+
+**Reasoning:** the cost lands only on the details of code (a ticket's or a page's detail never sends the statement, merge-manager fix d6726256), today's mirrors are well below the slow range, and the fix is a migration of its own (ADR-0019 pattern, like `sync.item_parent`).
+
+**If you disagree, the cost of reversing this is:** none: #732 replaces the statement's lookup, and nothing else depends on the scan.

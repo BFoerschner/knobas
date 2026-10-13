@@ -18,6 +18,9 @@
       "number": "1188",
       "percentageComplete": 60,
       "queuedDate": "20260822T114500+0000",
+      "revisions": {
+        "revision": []
+      },
       "running": true,
       "running-info": {
         "currentStageText": "step 3/5 `cargo test`",
@@ -56,6 +59,9 @@
       "id": 1187,
       "number": "1187",
       "queuedDate": "20260822T101000+0000",
+      "revisions": {
+        "revision": []
+      },
       "startDate": "20260822T101000+0000",
       "state": "finished",
       "status": "FAILURE",
@@ -84,6 +90,9 @@
       "id": 412,
       "number": "412",
       "queuedDate": "20260821T162000+0000",
+      "revisions": {
+        "revision": []
+      },
       "startDate": "20260821T162000+0000",
       "state": "finished",
       "status": "SUCCESS",

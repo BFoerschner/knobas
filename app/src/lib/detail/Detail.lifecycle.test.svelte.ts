@@ -89,6 +89,7 @@ function entity(id: string): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
   };
 }
 

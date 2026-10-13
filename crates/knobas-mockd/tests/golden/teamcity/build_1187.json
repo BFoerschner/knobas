@@ -16,6 +16,9 @@
   "id": 1187,
   "number": "1187",
   "queuedDate": "20260822T101000+0000",
+  "revisions": {
+    "revision": []
+  },
   "startDate": "20260822T101000+0000",
   "state": "finished",
   "status": "FAILURE",

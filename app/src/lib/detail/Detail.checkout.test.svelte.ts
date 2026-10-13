@@ -34,6 +34,7 @@ function branch(): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
   };
 }
 

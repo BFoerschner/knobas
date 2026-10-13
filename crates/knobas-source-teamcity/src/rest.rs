@@ -75,12 +75,19 @@ pub(crate) const BUILD_TYPE_FIELDS: &str =
 /// `buildType(webUrl)` goes with it; nothing has ever read that one, and since
 /// issue #516 a configuration's URL is composed too, so `BUILD_TYPE_FIELDS`
 /// asks for no `webUrl` either.
+///
+/// **`revisions(revision(version))`** (#710): the sha each VCS root was built
+/// at, and nothing else of it -- no branch, no root instance -- because the
+/// only reader is the declared `revision` path (`descriptor.rs`), which the
+/// detail of a commit finds its builds by. The build's own view asks for the
+/// rest live (`BUILD_VIEW_FIELDS`).
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectId,projectName),",
     "running-info(percentageComplete,currentStageText),",
-    "triggered(user(username)))"
+    "triggered(user(username)),",
+    "revisions(revision(version)))"
 );
 
 /// What one parameter is asked for when `set_parameter` checks it against
@@ -1082,6 +1089,9 @@ mod tests {
             "buildType(",
             "running-info(",
             "triggered(",
+            // The declared `revision` (#710): without it every build's
+            // revision is a miss, and no commit's detail draws a build.
+            "revisions(revision(version))",
         ] {
             assert!(
                 BUILD_FIELDS.contains(needed),

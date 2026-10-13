@@ -160,6 +160,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
     deleted_at: null,
     links: [],
     activity: [],
+    builds: [],
     ...over,
   };
 }

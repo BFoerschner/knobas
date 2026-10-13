@@ -87,6 +87,29 @@ impl GiteaClient {
             .map(|_| ())
     }
 
+    /// `GET /repos/{o}/{r}/commits/{ref}/status` (#710) -- the combined
+    /// status: the latest status of each context reported on the commit
+    /// `reference` names, a sha or a branch name (one escaped segment, as
+    /// for [`Self::branch_as`]). A branch's view asks by its name so the read
+    /// goes beside the one that learns its tip.
+    pub(crate) async fn combined_status_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        reference: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/commits/{}/status",
+                segment(owner)?,
+                segment(repo)?,
+                escaped(reference)?
+            ),
+            &[],
+        )
+        .await
+    }
+
     /// `GET /repos/{o}/{r}/compare/{base}...{head}` -- the commits `head`
     /// carries that `base` does not, and how many.
     pub(crate) async fn compare_as<T: serde::de::DeserializeOwned>(

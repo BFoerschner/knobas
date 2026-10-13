@@ -100,8 +100,12 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// name. Not the composed `<project> / <name>` title the launcher shows: no
 /// record carries that string, and a build's title keeps it anyway. A
 /// configuration has no parent; its project is a project, not a parent.
+///
+/// **A build ran on its revisions** (#710): `revisions.revision[].version`,
+/// one full sha per VCS root, which is what the detail of a pull request, a
+/// branch or a commit finds the builds of its commit by.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, ParentPath, PayloadPath};
+    use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
     vec![
         KindPaths {
             kind: KIND_BUILD.to_owned(),
@@ -112,6 +116,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 kind: KIND_BUILD_CONFIG.to_owned(),
                 at: PayloadPath::of(["buildType"]),
                 names: vec![PayloadPath::of(["name"]), PayloadPath::of(["id"])],
+            }],
+            revision: vec![ListPath {
+                at: PayloadPath::of(["revisions", "revision"]),
+                entry: PayloadPath::of(["version"]),
             }],
             ..KindPaths::default()
         },
@@ -286,5 +294,37 @@ mod tests {
             json["write_ops"],
             serde_json::json!(["trigger_build", "rerun_build", "set_parameter", "run_build"])
         );
+    }
+
+    /// A build ran on every revision it lists (#710): one sha per VCS root,
+    /// read as `BUILD_FIELDS` asks for them; a build with no revision ran on
+    /// none, and a configuration declares none.
+    #[test]
+    fn a_build_ran_on_each_of_its_revisions() {
+        let declared = descriptor_template().payload_paths;
+        let of = |kind: &str| {
+            declared
+                .iter()
+                .find(|p| p.kind == kind)
+                .map(|p| p.revision.clone())
+                .unwrap_or_default()
+        };
+        let build = serde_json::json!({
+            "id": 7,
+            "revisions": { "revision": [
+                { "version": "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192" },
+                { "version": "1111111111111111111111111111111111111111" }
+            ] }
+        });
+        assert_eq!(
+            knobas_core::payload::resolve_list(&build, &of(KIND_BUILD)),
+            [
+                "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192",
+                "1111111111111111111111111111111111111111"
+            ]
+        );
+        let bare = serde_json::json!({ "id": 8, "revisions": { "count": 0 } });
+        assert!(knobas_core::payload::resolve_list(&bare, &of(KIND_BUILD)).is_empty());
+        assert!(of(KIND_BUILD_CONFIG).is_empty());
     }
 }
