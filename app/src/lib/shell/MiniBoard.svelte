@@ -60,7 +60,7 @@
     <div class="col">
       <div class="col-h">
         <span>{column.status ?? NO_STATUS}</span>
-        <span>{column.cards.length}</span>
+        <span>{column.total}</span>
       </div>
       <div class="tile-b">
         {#each column.cards as card (card.entity_id)}
@@ -76,7 +76,12 @@
             <span class="s">{card.title}</span>
           </button>
         {/each}
+        {#if column.total > column.cards.length}
+          <!-- The newest are drawn (#753); the header counts them all. -->
+          <p class="more">{column.total - column.cards.length} more</p>
+        {/if}
       </div>
     </div>
   {/each}
 </div>
+

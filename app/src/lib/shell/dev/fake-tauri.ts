@@ -2093,8 +2093,14 @@ function miniBoard(args: Record<string, unknown>) {
       return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
     });
 
+  // The command's cap (#753): each column's newest `per_column`, and its total.
+  const perColumn = args["perColumn"] as number | null | undefined;
   return {
-    columns,
+    columns: columns.map((column) => ({
+      status: column.status,
+      cards: perColumn == null ? column.cards : column.cards.slice(0, perColumn),
+      total: column.cards.length,
+    })),
     sources: columns.length ? [{ source_id: "mock", statuses: observed }] : [],
   };
 }

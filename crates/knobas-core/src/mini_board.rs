@@ -117,12 +117,17 @@ macro_rules! priority_read {
 /// the predicate rather than matching some other room's -- absence, never a
 /// wrong room, which is [`crate::project`]'s stated failure direction reaching
 /// the board.
+///
+/// `$5` is the per-column cap (#753), `null` for none: each column keeps its
+/// newest `$5` cards, and every row carries `total`, how many its column holds
+/// before the cut. The status is read once a row (`materialized`) and the
+/// priority only for the rows kept: on a room of 15,000 tickets the uncapped
+/// board was 2 MB on the bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
-    "select i.entity_id, i.source_id, i.title, ",
+    "with scoped as materialized (
+       select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
     status_read!("$4"),
-    " as status, ",
-    priority_read!("$4"),
-    " as priority
+    " as status
        from sync.live_item i
       where i.kind = 'ticket'
         and ($1::text[] is null or i.entity_id = any($1))
@@ -130,7 +135,20 @@ const CARDS: &str = concat!(
         and ($3::text is null or ",
     crate::project_key_read!("$4"),
     " = $3)
-      order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
+     ),
+     ranked as (
+       select s.entity_id, s.at, s.status,
+              row_number() over (partition by s.status order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by s.status) as total
+         from scoped s
+     )
+     select i.entity_id, i.source_id, i.title, r.status, ",
+    priority_read!("$4"),
+    " as priority, r.total
+       from ranked r
+       join sync.item i on i.entity_id = r.entity_id
+      where $5::bigint is null or r.rn <= $5
+      order by r.at desc, r.entity_id"
 );
 
 /// Every status these sources' live ticket corpora show -- the select's
@@ -176,8 +194,12 @@ pub struct MiniBoardColumn {
     /// recognizes. The words on screen for that group are the shell's ("No
     /// status"); what crosses the bridge is the absence itself.
     pub status: Option<String>,
-    /// Newest first.
+    /// Newest first: all of them, or the newest of them where the read was
+    /// capped ([`read_capped`]).
     pub cards: Vec<MiniBoardCard>,
+    /// How many tickets stand in this column, `cards` or not (#753). Equal to
+    /// `cards.len()` on an uncapped read; the header draws this one.
+    pub total: u32,
 }
 
 /// One ticket on the board.
@@ -214,6 +236,7 @@ struct CardRow {
     title: String,
     status: Option<String>,
     priority: Option<String>,
+    total: i64,
 }
 
 /// Which band of the board a column belongs to. **Declaration order is the
@@ -279,6 +302,27 @@ pub async fn read(
     project: Option<&str>,
     declarations: &crate::payload::Declarations,
 ) -> Result<MiniBoard, CoreError> {
+    read_capped(pool, ctx_id, sources, project, declarations, None).await
+}
+
+/// [`read`], with each column cut to its newest `per_column` cards (#753).
+///
+/// What the Tickets tile draws: a column header says how many tickets stand
+/// in it ([`MiniBoardColumn::total`]) and the column scrolls through the
+/// newest of them. The statuses offered ([`MiniBoard::sources`]) are the
+/// sources' whole corpora either way. `None` is [`read`].
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn read_capped(
+    pool: &PgPool,
+    ctx_id: Option<&str>,
+    sources: &[String],
+    project: Option<&str>,
+    declarations: &crate::payload::Declarations,
+    per_column: Option<u32>,
+) -> Result<MiniBoard, CoreError> {
     let members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
         None => None,
@@ -290,6 +334,7 @@ pub async fn read(
         .bind(&scope)
         .bind(project)
         .bind(&declared)
+        .bind(per_column.map(i64::from))
         .fetch_all(pool)
         .await?;
 
@@ -305,6 +350,7 @@ pub async fn read(
             columns.push(MiniBoardColumn {
                 status: row.status.clone(),
                 cards: Vec::new(),
+                total: u32::try_from(row.total).unwrap_or(u32::MAX),
             });
             columns.len() - 1
         });

@@ -785,3 +785,56 @@ async fn the_status_select_still_offers_the_whole_sources_corpus() {
         "a room with nothing finished can still move a ticket to Done"
     );
 }
+
+/// **A capped board draws each column's newest cards and counts them all**
+/// (#753). The All room of a mirror with 15,000 tickets answered 2 MB and drew
+/// every card; the tile asks for the newest `per_column` of each column, and
+/// the column's `total` is what its header says. Three columns of different
+/// depths, so a cap applied to the board rather than per column, or a total
+/// counted after the cut, gives a different answer than this one.
+#[tokio::test]
+async fn a_capped_board_keeps_each_columns_newest_cards_and_counts_them_all() {
+    let pool = scratch().await;
+    for n in 0..5 {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some("To Do"), None).await;
+        touched(&pool, &id, &format!("2026-10-0{}T09:00:00Z", n + 1)).await;
+    }
+    ticket(&pool, "PAY-10", Some("In Progress"), None).await;
+    for n in 20..23 {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some("Done"), None).await;
+        touched(&pool, &id, &format!("2026-09-0{}T09:00:00Z", n - 19)).await;
+    }
+
+    let board = mini_board::read_capped(&pool, None, &[], None, &declarations(), Some(2))
+        .await
+        .unwrap();
+    let shape: Vec<(Option<&str>, Vec<&str>, u32)> = board
+        .columns
+        .iter()
+        .map(|c| {
+            (
+                c.status.as_deref(),
+                c.cards.iter().map(|card| card.key.as_str()).collect(),
+                c.total,
+            )
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            (Some("To Do"), vec!["PAY-4", "PAY-3"], 5),
+            (Some("In Progress"), vec!["PAY-10"], 1),
+            (Some("Done"), vec!["PAY-22", "PAY-21"], 3),
+        ]
+    );
+
+    // Uncapped, it is the board it always was: every card, and the total is
+    // the count of them.
+    let whole = mini_board::read(&pool, None, &[], None, &declarations())
+        .await
+        .unwrap();
+    for column in &whole.columns {
+        assert_eq!(column.total as usize, column.cards.len());
+    }
+    assert_eq!(whole.columns[0].cards.len(), 5);
+}

@@ -205,6 +205,8 @@ a{color:var(--link);text-decoration:none}
 .card .k{display:flex;justify-content:space-between;color:var(--text);font-size:12px}
 .card .k .pr{color:var(--faint);font-size:10px}
 .card .s{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+/* A capped mini board column's foot (#753): how many of its tickets are not drawn. */
+.col .more{margin:0;padding:6px 8px;font:10px var(--mono);color:var(--faint)}
 .card .bl{display:block;color:var(--fail);font:400 11px var(--mono);margin-top:3px}
 .card .bl:hover{text-decoration:underline}
 

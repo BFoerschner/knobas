@@ -167,23 +167,26 @@
       order: spec.order,
       include_deleted: false,
     };
-    // The board is never paged, so only a list reads `maximised`.
-    const limit = !isMiniBoard && maximised ? MAX_PAGE : PAGE;
+    // A list's page and the board's per-column cap (#753) are the same two
+    // numbers: a board of thousands of tickets draws each column's newest.
+    const limit = maximised ? MAX_PAGE : PAGE;
     // Cleared before the request, not after it: a tile showing the previous
     // room's rows while the new ones load is showing rows that are not in this
     // room at all. Maximising (#680) asks the same read for more rows, so the
     // rows on screen are still this room's and stay until the longer page
     // lands.
     const key = JSON.stringify(filter);
-    if (key !== shownFilterKey) page = null;
+    if (key !== shownFilterKey) {
+      page = null;
+      board = null;
+    }
     shownFilterKey = key;
-    board = null;
     error = null;
     // The board asks for the room's narrowing dimensions and nothing else: it
-    // is tickets by construction, it is never paged, and its order is the
-    // command's (#177).
+    // is tickets by construction and its order is the command's (#177). It is
+    // not paged; each column is cut to its newest `limit` (#753).
     const read = isMiniBoard
-      ? miniBoard({ sources, context: ctx, project }).then((answer) => {
+      ? miniBoard({ sources, context: ctx, project }, limit).then((answer) => {
           if (mine === token) board = answer;
         })
       : listEntities(filter, limit, 0).then((answer) => {
@@ -241,13 +244,13 @@
    * The header's count.
    *
    * For a list it is the whole filtered set, which is wider than the page on
-   * screen. For the board it is every card drawn — the board is not paged, so
-   * the two are the same number, and summing the columns keeps the header and
-   * the columns under it one fact rather than two reads that could disagree.
+   * screen. For the board it is every ticket on it, drawn or not (#753): the
+   * columns' own totals, summed, so the header and the columns under it are
+   * one fact rather than two reads that could disagree.
    */
   const count = $derived.by(() => {
     if (isMiniBoard) {
-      return board ? board.columns.reduce((all, column) => all + column.cards.length, 0) : null;
+      return board ? board.columns.reduce((all, column) => all + column.total, 0) : null;
     }
     // A tile order says what it counts (#680): *3 open pull requests · 5
     // branches*, *2 failing · 7 build configurations*. The words are the

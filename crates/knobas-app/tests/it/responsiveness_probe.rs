@@ -293,8 +293,13 @@ async fn room(
         .await;
     }
     let owned: Vec<String> = sources.iter().map(|s| (*s).to_owned()).collect();
-    time(name, "mini_board (tickets tile)", runs, || {
+    // Whole, as the tile read it before #753, and capped as it reads it now.
+    time(name, "mini_board (tickets tile, whole)", runs, || {
         knobas_core::mini_board::read(pool, ctx, &owned, project, &declarations)
+    })
+    .await;
+    time(name, "mini_board (tickets tile, 50 a column)", runs, || {
+        knobas_core::mini_board::read_capped(pool, ctx, &owned, project, &declarations, Some(50))
     })
     .await;
     time(name, "room_suggestions (20)", runs, || {

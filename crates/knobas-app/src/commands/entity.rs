@@ -3402,21 +3402,27 @@ fn announce_context<R: tauri::Runtime>(
 /// for a query failure. An unknown context is an empty board, not a
 /// `not_found`: the room's other tiles answer that way too, and a tile that
 /// errored would say "this broke" where the truth is "nothing here".
+///
+/// `per_column` cuts each column to its newest cards (#753), the Tickets
+/// tile's read; omitted, the board is whole, which is what the ticket detail's
+/// status select reads.
 #[tauri::command]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
     ctx_id: Option<String>,
     sources: Vec<String>,
     project: Option<String>,
+    per_column: Option<u32>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
     let declarations = declared_paths(&pool).await?;
-    Ok(knobas_core::mini_board::read(
+    Ok(knobas_core::mini_board::read_capped(
         &pool,
         ctx_id.as_deref(),
         &sources,
         project.as_deref(),
         &declarations,
+        per_column,
     )
     .await?)
 }

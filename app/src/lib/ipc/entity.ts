@@ -1452,8 +1452,13 @@ export interface MiniBoardColumn {
    * bridge is the absence.
    */
   status: string | null;
-  /** Newest first. The column header's count is `cards.length`. */
+  /** Newest first: all of them, or the newest `perColumn` of a capped read. */
   cards: MiniBoardCard[];
+  /**
+   * How many tickets stand in this column, drawn or not (#753) — the column
+   * header's count. `cards.length` on an uncapped read.
+   */
+  total: number;
 }
 
 /** What one source's corpus shows — `SourceStatuses` (#177). */
@@ -1494,16 +1499,22 @@ export interface MiniBoard {
  * board draws the live tickets, so a ticket the source deleted is off it.
  * Grouping and column order happen in the command, not here.
  *
+ * `perColumn` cuts each column to its newest cards (#753): what the tile asks
+ * for, so a room of thousands of tickets is not thousands of cards. Omitted,
+ * the board is whole.
+ *
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "sources" | "context" | "project">,
+  perColumn?: number,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
     sources: filter.sources,
     project: filter.project,
+    perColumn: perColumn ?? null,
   });
 }
 
