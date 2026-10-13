@@ -954,7 +954,14 @@
    * before the answer lands, and a note that flickered on during every open
    * would be telling the reader something untrue about a read still in flight.
    */
-  let offerUnverified = $state(false);
+  let unverifiedFor = $state<string | null>(null);
+
+  /**
+   * Keyed by the entity whose read failed (#760), so it is `false` the moment
+   * another ticket opens, whatever order the effects below run in: the
+   * fallback read never sees the previous ticket's `true`.
+   */
+  const offerUnverified = $derived(unverifiedFor === entityId);
 
   /** The workflow read's own generation -- `boardToken`'s reason, twice over. */
   let workflowToken = 0;
@@ -963,7 +970,7 @@
     const id = entityId;
     const mine = ++workflowToken;
     reachable = null;
-    offerUnverified = false;
+    unverifiedFor = null;
     if (!isTicket || !declaresTransition) return;
     void reachableTransitions(id)
       .then((statuses) => {
@@ -976,7 +983,7 @@
         // opened ticket would be noise. What the reader is owed is that the
         // offer on screen is then the old optimistic one, which is what the
         // note beside the select says.
-        if (mine === workflowToken) offerUnverified = true;
+        if (mine === workflowToken) unverifiedFor = id;
       });
   });
 
@@ -995,9 +1002,6 @@
    */
   let boardToken = 0;
 
-  // After the workflow effect above, deliberately: opening another ticket
-  // resets `offerUnverified` there, and this one must read the reset and not
-  // the previous ticket's `true`, or it would ask for a fallback nobody needs.
   $effect(() => {
     const source = sourceId;
     const wanted = offerUnverified;
