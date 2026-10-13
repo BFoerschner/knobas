@@ -403,7 +403,7 @@ impl SourceError {
 /// | [`MergePullRequest`](Self::MergePullRequest) | `"merge_pull_request"` | source views (Gitea, #667) |
 /// | [`SetParameter`](Self::SetParameter) | `"set_parameter"` | source views (TeamCity, #668) |
 /// | [`RunBuild`](Self::RunBuild) | `"run_build"` | source views (TeamCity, #669) |
-/// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workstation (Gitea, #705) |
+/// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workflows, spec #701 (Gitea, #705) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare

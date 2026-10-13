@@ -161,9 +161,6 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             value: "contract battery probe".into(),
             base: None,
         },
-        // A run would be a real build on somebody's agent. The target is no
-        // build configuration's address, so an adapter that attempted it
-        // anyway is refused on the id's shape before a request leaves.
         // A review would be a verdict on somebody's pull request. The target
         // is no pull request's address -- it has no `#<number>` -- so an
         // adapter that attempted it anyway is refused on the id's shape.
@@ -173,6 +170,9 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             body: "contract battery probe".into(),
             comments: vec![],
         },
+        // A run would be a real build on somebody's agent. The target is no
+        // build configuration's address, so an adapter that attempted it
+        // anyway is refused on the id's shape before a request leaves.
         crate::WriteOp::RunBuild {
             entity: target,
             branch: Some("contract-battery".into()),

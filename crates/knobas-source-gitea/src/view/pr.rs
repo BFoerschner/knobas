@@ -4,9 +4,8 @@
 //! The overview reads the pull request and its reviews; *Commits* its commit
 //! listing; *Conversation* the discussion Gitea keeps on the issue of the same
 //! index (the read the sync makes), with the reviews among it in time order
-//! (#705). *Files* is the one expensive read -- the
-//! whole `.diff` -- so it is a stub with a count until its tab is opened
-//! (ADR-0020 rule 3).
+//! (#705). *Files* is the one expensive read -- the whole `.diff` -- so it is
+//! a stub with a count until its tab is opened (ADR-0020 rule 3).
 
 use knobas_source::SourceError;
 use knobas_source::view::{
@@ -15,11 +14,11 @@ use knobas_source::view::{
 };
 
 use super::rows::{self, ListedCommit};
-
-mod review;
 use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
+
+mod review;
 
 const OVERVIEW: &str = "overview";
 const FILES: &str = "files";
