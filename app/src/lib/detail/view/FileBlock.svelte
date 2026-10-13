@@ -69,7 +69,8 @@
 
   {#if truncated}
     <p class="fb-cut">
-      knobas shows the first {count.toLocaleString("en")} lines of this file.
+      knobas shows the start of this file: {count.toLocaleString("en")}
+      {count === 1 ? "line" : "lines"} of {sizeOf(size)}.
       {#if url}
         {@const page = url}
         <button class="btn sm" onclick={() => onopenurl(page)}>Open in {sourceName}</button>

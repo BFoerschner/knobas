@@ -1166,7 +1166,7 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
 
     // The repository, at its default branch.
     let repo = format!("gitea:{}", env.full_name());
-    let Block::Tree { trail, entries } = read(repo.clone(), "files".into()).await else {
+    let Block::Tree { trail, entries, .. } = read(repo.clone(), "files".into()).await else {
         panic!("a listing");
     };
     for e in &entries {
@@ -1211,7 +1211,7 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
     let mut at = "files".to_owned();
     let mut depth = 0;
     let file = loop {
-        let Block::Tree { trail, entries } = read(entity.clone(), at.clone()).await else {
+        let Block::Tree { trail, entries, .. } = read(entity.clone(), at.clone()).await else {
             panic!("a listing at {at}");
         };
         let names: Vec<_> = trail.iter().map(|c| c.name.as_str()).collect();

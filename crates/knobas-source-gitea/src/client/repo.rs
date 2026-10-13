@@ -179,21 +179,6 @@ impl GiteaClient {
         }
     }
 
-    /// `GET /repos/{o}/{r}/contents` -- the default branch's top directory.
-    /// Gitea 1.27 has no `/readme` route (it answers 404 *page not found*),
-    /// so this is how a README is found.
-    pub(crate) async fn root_contents_as<T: serde::de::DeserializeOwned>(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Vec<T>, SourceError> {
-        self.get_json(
-            &format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?),
-            &[],
-        )
-        .await
-    }
-
     /// `GET /repos/{o}/{r}/raw/{file}` -- one top-level file, as text.
     pub(crate) async fn raw_file(
         &self,
@@ -214,7 +199,9 @@ impl GiteaClient {
     }
 
     /// `GET /repos/{o}/{r}/contents/{dir}?ref={at}` -- one directory's
-    /// listing at a ref; `dir` empty is the top one (#711).
+    /// listing at a ref; `dir` empty is the top one (#711), where a README
+    /// is found too: Gitea 1.27 has no `/readme` route (it answers 404 *page
+    /// not found*).
     pub(crate) async fn contents_at_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,

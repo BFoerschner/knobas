@@ -10,9 +10,11 @@
 //! * `files:{dir}` -- a directory below it (`files:src/lib`);
 //! * `file:{path}` -- a file (`file:src/lib.rs`), read raw.
 //!
-//! A file keeps [`BYTE_CAP`] bytes and [`LINE_CAP`] lines, cut at a line and
-//! said to be cut; one with a NUL byte in its first [`SNIFF`] bytes is binary
-//! (git's own test) and is drawn as its size and a link.
+//! A directory keeps its first [`ENTRY_CAP`] entries in order, and a file
+//! [`BYTE_CAP`] bytes and [`LINE_CAP`] lines, cut at a line; either says it
+//! was cut and where the rest is (ADR-0020 rule 6). A file with a NUL byte in
+//! its first [`SNIFF`] bytes is binary (git's own test) and is drawn as its
+//! size and a link.
 
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Crumb, EntryKind, TreeEntry, ViewSection};
@@ -28,6 +30,8 @@ const DIR_PREFIX: &str = "files:";
 /// A file: `file:{path}`.
 const FILE_PREFIX: &str = "file:";
 
+/// The most entries of one directory a view carries.
+const ENTRY_CAP: usize = 1_000;
 /// The most of a file a view carries, in bytes.
 const BYTE_CAP: usize = 1_000_000;
 /// The most of a file a view carries, in lines.
@@ -35,10 +39,40 @@ const LINE_CAP: usize = 10_000;
 /// How far into a file a NUL byte makes it binary, as git looks.
 const SNIFF: usize = 8_000;
 
+/// A place in the tree a section id names: a directory (`""` the top) or a
+/// file. The one place an id is taken apart; [`Place::id`] builds them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place<'a> {
+    Dir(&'a str),
+    File(&'a str),
+}
+
+impl<'a> Place<'a> {
+    /// The place `id` names, or `None` for an id that is not this tab's.
+    fn parse(id: &'a str) -> Option<Self> {
+        if id == FILES {
+            return Some(Self::Dir(""));
+        }
+        if let Some(dir) = id.strip_prefix(DIR_PREFIX) {
+            return Some(Self::Dir(dir));
+        }
+        id.strip_prefix(FILE_PREFIX).map(Self::File)
+    }
+
+    /// The section id that opens this place.
+    fn id(self) -> String {
+        match self {
+            Self::Dir("") => FILES.to_owned(),
+            Self::Dir(dir) => format!("{DIR_PREFIX}{dir}"),
+            Self::File(path) => format!("{FILE_PREFIX}{path}"),
+        }
+    }
+}
+
 /// Whether `section` is one of this tab's: the tab itself, a directory or a
 /// file.
 pub(super) fn owns(section: &str) -> bool {
-    section == FILES || section.starts_with(DIR_PREFIX) || section.starts_with(FILE_PREFIX)
+    Place::parse(section).is_some()
 }
 
 /// The deferred stub the whole view carries.
@@ -61,16 +95,17 @@ pub(super) async fn read(
     at: &str,
     id: &str,
 ) -> Result<ViewSection, SourceError> {
-    let block = if let Some(path) = id.strip_prefix(FILE_PREFIX) {
-        file(source, record, owner, repo, at, path).await?
-    } else {
-        let dir = id.strip_prefix(DIR_PREFIX).unwrap_or_default();
-        if id != FILES && dir.is_empty() {
+    let block = match Place::parse(id) {
+        Some(Place::File(path)) => file(source, record, owner, repo, at, path).await?,
+        // `files:` with nothing after it is not the top's spelling.
+        Some(Place::Dir(dir)) if id == FILES || !dir.is_empty() => {
+            directory(source, record, owner, repo, at, dir).await?
+        }
+        _ => {
             return Err(SourceError::protocol(format!(
-                "gitea: {id:?} names no directory"
+                "gitea: {id:?} names no place in the tree"
             )));
         }
-        directory(source, owner, repo, at, dir).await?
     };
     Ok(ViewSection {
         id: id.to_owned(),
@@ -94,6 +129,7 @@ struct Listed {
 
 async fn directory(
     source: &GiteaSource,
+    record: &RepoRecord,
     owner: &str,
     repo: &str,
     at: &str,
@@ -115,10 +151,10 @@ async fn directory(
                 _ => EntryKind::File,
             };
             let (size, section) = match kind {
-                EntryKind::Dir => (None, Some(format!("{DIR_PREFIX}{path}"))),
+                EntryKind::Dir => (None, Some(Place::Dir(&path).id())),
                 EntryKind::Submodule => (None, None),
                 EntryKind::File | EntryKind::Symlink => {
-                    (Some(listed.size), Some(format!("{FILE_PREFIX}{path}")))
+                    (Some(listed.size), Some(Place::File(&path).id()))
                 }
             };
             TreeEntry {
@@ -135,9 +171,13 @@ async fn directory(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             .then_with(|| a.name.cmp(&b.name))
     });
+    let truncated = entries.len() > ENTRY_CAP;
+    entries.truncate(ENTRY_CAP);
     Ok(Block::Tree {
         trail: trail(at, dir, false),
         entries,
+        truncated,
+        url: page(record, at, dir),
     })
 }
 
@@ -159,11 +199,7 @@ async fn file(
     } else {
         capped(&raw.bytes, raw.cut)
     };
-    let url = record.web(&format!(
-        "/src/branch/{}/{}",
-        map::url_path(at),
-        map::url_path(path)
-    ));
+    let url = page(record, at, path);
     Ok(Block::File {
         trail: trail(at, path, true),
         path: path.to_owned(),
@@ -174,6 +210,16 @@ async fn file(
         binary,
         url,
     })
+}
+
+/// The Gitea page of `path` (a directory or a file; `""` the top) at `at`.
+fn page(record: &RepoRecord, at: &str, path: &str) -> Option<String> {
+    let mut tail = format!("/src/branch/{}", map::url_path(at));
+    if !path.is_empty() {
+        tail.push('/');
+        tail.push_str(&map::url_path(path));
+    }
+    record.web(&tail)
 }
 
 /// A file's text within both caps, and whether either cut it. `cut` says the
@@ -220,14 +266,14 @@ fn trail(at: &str, path: &str, is_file: bool) -> Vec<Crumb> {
             so_far.push('/');
         }
         so_far.push_str(segment);
-        let prefix = if is_file && index + 1 == segments.len() {
-            FILE_PREFIX
+        let place = if is_file && index + 1 == segments.len() {
+            Place::File(&so_far)
         } else {
-            DIR_PREFIX
+            Place::Dir(&so_far)
         };
         crumbs.push(Crumb {
             name: (*segment).to_owned(),
-            section: format!("{prefix}{so_far}"),
+            section: place.id(),
         });
     }
     crumbs

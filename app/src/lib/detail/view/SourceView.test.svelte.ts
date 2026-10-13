@@ -891,6 +891,8 @@ function tree(section: string | null): Promise<View | null> {
           { name: "src", kind: "dir", size: null, section: "files:src" },
           { name: "README.md", kind: "file", size: 9, section: "file:README.md" },
         ],
+        truncated: false,
+        url: null,
       },
     ],
     "files:src": [
@@ -898,6 +900,8 @@ function tree(section: string | null): Promise<View | null> {
         type: "tree",
         trail: [top, { name: "src", section: "files:src" }],
         entries: [{ name: "main.rs", kind: "file", size: 12, section: "file:src/main.rs" }],
+        truncated: false,
+        url: null,
       },
     ],
     "file:src/main.rs": [

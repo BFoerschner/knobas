@@ -152,7 +152,7 @@ async fn overview(
 
     let mut blocks = vec![Block::Facts { facts }];
     if !record.repo.empty {
-        blocks.extend(readme(source, owner, repo).await?);
+        blocks.extend(readme(source, owner, repo, record.default_branch()).await?);
     }
     Ok(ViewSection {
         id: OVERVIEW.to_owned(),
@@ -165,8 +165,13 @@ async fn overview(
 
 /// The README's text block, and a line saying it was cut where it was; none
 /// for a repository whose top directory has no README.
-async fn readme(source: &GiteaSource, owner: &str, repo: &str) -> Result<Vec<Block>, SourceError> {
-    let listing: Vec<Entry> = match source.client.root_contents_as(owner, repo).await {
+async fn readme(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    at: &str,
+) -> Result<Vec<Block>, SourceError> {
+    let listing: Vec<Entry> = match source.client.contents_at_as(owner, repo, "", at).await {
         Ok(listing) => listing,
         // No tree at the default branch: nothing to read a README from.
         Err(error) if error.status() == Some(404) => return Ok(Vec::new()),

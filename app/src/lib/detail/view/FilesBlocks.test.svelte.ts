@@ -35,6 +35,17 @@ const TRAIL: Crumb[] = [
   { name: "lib", section: "files:src/lib" },
 ];
 
+/** A listing's props, less its entries. */
+const TREE = {
+  trail: TRAIL,
+  entries: [] as TreeEntry[],
+  truncated: false,
+  url: "https://gitea.example/o/r/src/branch/main/src/lib",
+  sourceName: "Tidewater Git",
+  onopen: (_: string) => {},
+  onopenurl: (_: string) => {},
+};
+
 const ENTRIES: TreeEntry[] = [
   { name: "diff", kind: "dir", size: null, section: "files:src/lib/diff" },
   { name: "view.rs", kind: "file", size: 12_800, section: "file:src/lib/view.rs" },
@@ -71,7 +82,7 @@ test("a trail offers Back only when the tab has somewhere to go back to", () => 
 test("a listing draws each entry with its size, and opens what can be opened", () => {
   const opened: string[] = [];
   const target = render(TreeBlock, {
-    trail: TRAIL,
+    ...TREE,
     entries: ENTRIES,
     onopen: (s: string) => opened.push(s),
   });
@@ -89,8 +100,23 @@ test("a listing draws each entry with its size, and opens what can be opened", (
 });
 
 test("an empty directory says so", () => {
-  const target = render(TreeBlock, { trail: TRAIL, entries: [], onopen: () => {} });
+  const target = render(TreeBlock, { ...TREE, entries: [] });
   expect(target.textContent).toContain("This directory is empty.");
+  expect(target.querySelector(".tb-cut")).toBeNull();
+});
+
+test("a cut listing says so and opens the directory at its source", () => {
+  const urls: string[] = [];
+  const target = render(TreeBlock, {
+    ...TREE,
+    entries: ENTRIES,
+    truncated: true,
+    onopenurl: (u: string) => urls.push(u),
+  });
+  const note = target.querySelector(".tb-cut")!;
+  expect(note.textContent).toContain("knobas shows the first 4 entries of this directory.");
+  note.querySelector("button")!.click();
+  expect(urls).toEqual(["https://gitea.example/o/r/src/branch/main/src/lib"]);
 });
 
 function file(over: Partial<Record<string, unknown>> = {}) {
@@ -127,7 +153,7 @@ test("a file is drawn monospace with a number for each line, its text as text", 
 test("a cut file says where the rest is, and opens it", () => {
   const { target, urls } = file({ truncated: true, size: 3_200_000 });
   const note = target.querySelector(".fb-cut")!;
-  expect(note.textContent).toContain("knobas shows the first 3 lines of this file");
+  expect(note.textContent!.replace(/\s+/g, " ")).toContain("knobas shows the start of this file: 3 lines of 3.1 MB.");
   note.querySelector("button")!.click();
   expect(urls).toEqual(["https://gitea.example/o/r/src/branch/main/src/main.rs"]);
 });

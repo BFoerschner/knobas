@@ -2,7 +2,7 @@
   One directory of a tree (#711): its trail, then one row per entry --
   directories first, as the source ordered them -- each opening the section
   it names in this tab. A submodule is another repository and is named, not
-  opened. Rows are the diff index's: a hairline box of 24px mono lines.
+  opened. A listing the source's cap cut says so, as a cut file does. Rows are the diff index's: a hairline box of 24px mono lines.
 -->
 <script lang="ts">
   import type { Crumb, TreeEntry } from "../../ipc/entity";
@@ -12,18 +12,35 @@
   let {
     trail,
     entries,
+    truncated,
+    url,
+    sourceName,
     onopen,
     onback,
+    onopenurl,
   }: {
     trail: Crumb[];
     entries: TreeEntry[];
+    truncated: boolean;
+    url: string | null;
+    sourceName: string;
     onopen: (section: string) => void;
     onback?: (() => void) | undefined;
+    onopenurl: (url: string) => void;
   } = $props();
 </script>
 
 <div class="tb">
   <Trail {trail} {onopen} {onback} />
+  {#if truncated}
+    <p class="tb-cut">
+      knobas shows the first {entries.length.toLocaleString("en")} entries of this directory.
+      {#if url}
+        {@const page = url}
+        <button class="btn sm" onclick={() => onopenurl(page)}>Open in {sourceName}</button>
+      {/if}
+    </p>
+  {/if}
   {#if entries.length === 0}
     <p class="tb-empty">This directory is empty.</p>
   {:else}
@@ -66,6 +83,15 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .tb-cut {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--amber);
+    font-size: 12px;
   }
 
   .tb-empty {

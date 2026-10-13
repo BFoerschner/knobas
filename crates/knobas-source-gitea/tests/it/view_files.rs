@@ -105,7 +105,7 @@ fn crumbs(pairs: &[(&str, &str)]) -> Vec<Crumb> {
 
 fn tree(section: &ViewSection) -> (&[Crumb], &[TreeEntry]) {
     match section.blocks.as_slice() {
-        [Block::Tree { trail, entries }] => (trail, entries),
+        [Block::Tree { trail, entries, .. }] => (trail, entries),
         other => panic!("one tree block, not {other:#?}"),
     }
 }
@@ -173,13 +173,23 @@ async fn a_repo_view_has_a_deferred_files_tab() {
         ("files", "Files", None, true)
     );
     assert!(files.blocks.is_empty());
-    let asked_ref = server
+    // The overview lists the top directory once, for its README; nothing
+    // below it is listed and no file is read until the tab is opened.
+    let tree_reads: Vec<String> = server
         .received_requests()
         .await
         .unwrap()
         .iter()
-        .any(|r| r.url.query_pairs().any(|(k, _)| k == "ref"));
-    assert!(!asked_ref, "the whole view lists no tree at a ref");
+        .map(|r| r.url.path().to_owned())
+        .filter(|p| {
+            p.starts_with(&format!("{REPO}/contents")) || p.starts_with(&format!("{REPO}/raw"))
+        })
+        .collect();
+    assert_eq!(
+        tree_reads,
+        [format!("{REPO}/contents")],
+        "the overview's README lookup only"
+    );
 }
 
 /// The top directory at the default branch: directories first, then the
@@ -265,6 +275,60 @@ async fn a_nested_directory_is_read_by_the_section_its_entry_names() {
         opens,
         [Some("files:src/lib/diff"), Some("file:src/lib/view.rs")]
     );
+}
+
+/// A directory past 1,000 entries keeps the first 1,000 in order, says it
+/// was cut, and names its page on Gitea, where the rest is.
+#[tokio::test]
+async fn a_directory_over_the_entry_cap_is_cut_at_it() {
+    let server = gitea().await;
+    let many: Vec<Value> = (0..1_001)
+        .map(|n| {
+            entry(
+                &format!("f{n:04}.txt"),
+                &format!("gen/f{n:04}.txt"),
+                "file",
+                1,
+            )
+        })
+        .collect();
+    listing(&server, "gen", "main", Value::Array(many)).await;
+    let section = read(&server, ENTITY, "files:gen").await;
+    let [
+        Block::Tree {
+            entries,
+            truncated,
+            url,
+            ..
+        },
+    ] = section.blocks.as_slice()
+    else {
+        panic!("one tree block");
+    };
+    assert!(*truncated);
+    assert_eq!(entries.len(), 1_000);
+    assert_eq!(entries.last().map(|e| e.name.as_str()), Some("f0999.txt"));
+    assert_eq!(
+        url.as_deref(),
+        Some(format!("{WEB}/src/branch/main/gen").as_str())
+    );
+
+    // Exactly at the cap is not cut.
+    let at: Vec<Value> = (0..1_000)
+        .map(|n| entry(&format!("g{n:04}"), &format!("all/g{n:04}"), "file", 1))
+        .collect();
+    listing(&server, "all", "main", Value::Array(at)).await;
+    let section = read(&server, ENTITY, "files:all").await;
+    let [
+        Block::Tree {
+            entries, truncated, ..
+        },
+    ] = section.blocks.as_slice()
+    else {
+        panic!("one tree block");
+    };
+    assert!(!*truncated);
+    assert_eq!(entries.len(), 1_000);
 }
 
 /// A branch's tab is the same tree at that branch.

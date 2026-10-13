@@ -100,7 +100,7 @@
   let at = $state<Record<string, string>>({});
   let steps = $state<Record<string, string[]>>({});
   /** The place each tab last left, drawn (dimmed) while the next is read. */
-  let left = $state<Record<string, string>>({});
+  let leftFrom = $state<Record<string, string>>({});
 
   /** The section a tab draws: its own, or the one the reader walked to. */
   function placeOf(tab: ViewSection): string {
@@ -116,7 +116,7 @@
     untrack(() => {
       at = {};
       steps = {};
-      left = {};
+      leftFrom = {};
     });
   });
 
@@ -187,7 +187,7 @@
     const from = placeOf(tab);
     if (from === section) return;
     steps[tab.id] = [...(steps[tab.id] ?? []), from];
-    left[tab.id] = from;
+    leftFrom[tab.id] = from;
     at[tab.id] = section;
   }
 
@@ -196,7 +196,7 @@
     const tab = current;
     const trail = tab ? steps[tab.id] : undefined;
     if (!tab || !trail?.length) return;
-    left[tab.id] = placeOf(tab);
+    leftFrom[tab.id] = placeOf(tab);
     at[tab.id] = trail[trail.length - 1]!;
     steps[tab.id] = trail.slice(0, -1);
   }
@@ -251,7 +251,7 @@
    */
   const held = $derived.by((): ViewBlock[] | null => {
     if (!current || shown?.state !== "reading") return null;
-    const from = left[current.id];
+    const from = leftFrom[current.id];
     const before = from === undefined ? undefined : reads[from];
     return before?.state === "read" ? offered(before.blocks) : null;
   });
@@ -299,7 +299,16 @@
       {:else if block.type === "actions"}
         <ActionButtons actions={block.actions} settings={ownSettings} {onaction} />
       {:else if block.type === "tree"}
-        <TreeBlock trail={block.trail} entries={block.entries} onopen={walk} {onback} />
+        <TreeBlock
+          trail={block.trail}
+          entries={block.entries}
+          truncated={block.truncated}
+          url={block.url}
+          {sourceName}
+          onopen={walk}
+          {onback}
+          {onopenurl}
+        />
       {:else if block.type === "file"}
         <FileBlock
           trail={block.trail}

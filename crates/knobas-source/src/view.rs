@@ -128,9 +128,15 @@ pub enum Block {
     /// draws the answer in place of this block's section, under the same tab.
     /// So walking a tree is one tab whose content changes, and the ids are the
     /// source's own (`files:src/lib`); the shell never parses them.
+    ///
+    /// `truncated` says the source's cap cut the listing (Gitea's adapter
+    /// keeps 1,000 entries), and `url` is the directory's page at the
+    /// source, where the rest is.
     Tree {
         trail: Vec<Crumb>,
         entries: Vec<TreeEntry>,
+        truncated: bool,
+        url: Option<String>,
     },
     /// One file of a tree (issue #711), drawn monospace with line numbers.
     /// `trail` leads from the tree's top to the file, the file last.
@@ -594,6 +600,8 @@ mod tests {
                         section: None,
                     },
                 ],
+                truncated: true,
+                url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
             },
             Block::File {
                 trail: vec![Crumb {
@@ -678,6 +686,8 @@ mod tests {
                     section: None,
                 },
             ],
+            truncated: false,
+            url: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),
@@ -687,7 +697,9 @@ mod tests {
                 "entries": [
                     { "name": "src", "kind": "dir", "size": null, "section": "files:src" },
                     { "name": "vendor", "kind": "submodule", "size": null, "section": null }
-                ]
+                ],
+                "truncated": false,
+                "url": null
             })
         );
         let file = Block::File {

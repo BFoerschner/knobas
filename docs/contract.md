@@ -11078,8 +11078,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   carries the matching amendment. No command, no DTO outside the view vocabulary, no migration,
   no `WriteOp`.
 
-  1. `Block::Tree { trail: Vec<Crumb>, entries: Vec<TreeEntry> }` (wire `"type": "tree"`): one
-     directory. `TreeEntry { name, kind: EntryKind, size: Option<u64>, section: Option<String> }`,
+  1. `Block::Tree { trail: Vec<Crumb>, entries: Vec<TreeEntry>, truncated: bool, url:
+     Option<String> }` (wire `"type": "tree"`): one directory; `truncated` says the source's
+     cap cut the listing, and `url` is the directory's page at the source, where the rest is. `TreeEntry { name, kind: EntryKind, size: Option<u64>, section: Option<String> }`,
      `EntryKind` one of `dir`, `file`, `symlink`, `submodule` (snake case); `size` is a file's
      bytes and `None` for a directory or a submodule; `section` is the section that opens the
      entry, `None` for one that cannot be opened here (a submodule is another repository).
@@ -11106,7 +11107,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   none for an empty repository, which has no tree) and on a branch's (at that branch). Its ids
   are `files` (the top), `files:{dir}` and `file:{path}`. A listing is `GET
   /repos/{o}/{r}/contents/{dir}?ref=`, directories first, then the rest, each by name ignoring
-  case. A file is `GET /repos/{o}/{r}/raw/{path}?ref=`, read in chunks and abandoned past
+  case, its first 1,000 entries kept (`truncated` past them; Gitea's `contents` does not page).
+  The overview's README lookup now reads the same route at the default branch. A file is `GET /repos/{o}/{r}/raw/{path}?ref=`, read in chunks and abandoned past
   1,000,000 bytes, kept to whole lines within 1 MB and 10,000 lines (`truncated` past either),
   `binary` for a NUL in its first 8,000 bytes (git's test), `size` the bytes read or, where it
   was cut, Gitea's `Content-Length`. Paths go into the route one escaped segment at a time, and

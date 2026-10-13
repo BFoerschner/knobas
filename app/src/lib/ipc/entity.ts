@@ -937,7 +937,15 @@ export type ViewBlock =
       values: Setting[];
     }
   | { type: "actions"; actions: ViewAction[] }
-  | { type: "tree"; trail: Crumb[]; entries: TreeEntry[] }
+  | {
+      type: "tree";
+      trail: Crumb[];
+      entries: TreeEntry[];
+      /** The source's cap cut the listing; the rest is at `url`. */
+      truncated: boolean;
+      /** The directory's page at its source. */
+      url: string | null;
+    }
   | {
       type: "file";
       trail: Crumb[];
