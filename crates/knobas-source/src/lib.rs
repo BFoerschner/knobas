@@ -405,6 +405,7 @@ impl SourceError {
 /// | [`RunBuild`](Self::RunBuild) | `"run_build"` | source views (TeamCity, #669) |
 /// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workflows, spec #701 (Gitea, #705) |
 /// | [`DeleteBranch`](Self::DeleteBranch) | `"delete_branch"` | source views (Gitea, #707) |
+/// | [`EditPullRequest`](Self::EditPullRequest) | `"edit_pull_request"` | git workflows, spec #701 (Gitea, #706) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -753,6 +754,43 @@ pub enum WriteOp {
     /// flight leaves no unclaimed write: what is left is the branch gone,
     /// which the next sync reads back.
     DeleteBranch { entity: String },
+    /// Identifier `"edit_pull_request"`. Edit a pull request's title and
+    /// description, close it or reopen it (spec #701 workflow 8, issue #706).
+    /// `entity` is the **pull request**.
+    ///
+    /// **Only the fields that are `Some` are written**, so an edit of the
+    /// title never sends a stale copy of a description somebody else changed
+    /// since the view was read (the deputy's ruling on #706). Each is `null`
+    /// on the wire when left alone, and absent reads the same. An edit with
+    /// nothing in it is refused before a request leaves.
+    ///
+    /// A merged pull request cannot be closed or reopened: that is the
+    /// source's refusal, with its sentence (Gitea's 412, *cannot change state
+    /// of this pull request, it was already merged*), never retried
+    /// (ADR-0004). Merging is [`MergePullRequest`](WriteOp::MergePullRequest)'s,
+    /// which is why [`PullRequestState`] has no `merged`.
+    ///
+    /// Hold detection takes the whole mirrored record: the op overwrites what
+    /// the reader saw, and a close is a judgement on the state they saw.
+    EditPullRequest {
+        entity: String,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        state: Option<PullRequestState>,
+    },
+}
+
+/// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
+/// request in. Serialized as the lowercase word (`"closed"`), which is also
+/// Gitea's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestState {
+    Open,
+    Closed,
 }
 
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
@@ -894,6 +932,7 @@ impl WriteOp {
             WriteOp::RunBuild { .. } => "run_build",
             WriteOp::SubmitReview { .. } => "submit_review",
             WriteOp::DeleteBranch { .. } => "delete_branch",
+            WriteOp::EditPullRequest { .. } => "edit_pull_request",
         }
     }
 }
@@ -1332,6 +1371,12 @@ mod tests {
                 entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
                     .into(),
             },
+            WriteOp::EditPullRequest {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                title: Some("Bound the retry jitter".into()),
+                body: Some("as discussed".into()),
+                state: Some(PullRequestState::Closed),
+            },
         ];
         for op in &probes {
             match op {
@@ -1353,7 +1398,8 @@ mod tests {
                 | WriteOp::SetParameter { .. }
                 | WriteOp::RunBuild { .. }
                 | WriteOp::SubmitReview { .. }
-                | WriteOp::DeleteBranch { .. } => {}
+                | WriteOp::DeleteBranch { .. }
+                | WriteOp::EditPullRequest { .. } => {}
             }
         }
         probes
@@ -1502,6 +1548,49 @@ mod tests {
         assert!(
             odd.is_err(),
             "Gitea's spelling is the adapter's, not the SPI's: {odd:?}"
+        );
+    }
+
+    /// An edit's wire shape (issue #706), pinned: the frontend builds it by
+    /// hand (`app/src/lib/detail/view/actions.ts`). A field left alone is
+    /// `null` -- and absent reads the same -- so the adapter sends only what
+    /// was given; the state is the lowercase word.
+    #[test]
+    fn an_edit_crosses_as_only_the_fields_it_changes() {
+        let op = WriteOp::EditPullRequest {
+            entity: "gitea:o/r#1".into(),
+            title: Some("t".into()),
+            body: None,
+            state: Some(PullRequestState::Closed),
+        };
+        assert_eq!(
+            serde_json::to_value(&op).unwrap(),
+            serde_json::json!({ "EditPullRequest": {
+                "entity": "gitea:o/r#1", "title": "t", "body": null, "state": "closed"
+            } })
+        );
+        let back: WriteOp = serde_json::from_value(serde_json::json!({ "EditPullRequest": {
+            "entity": "gitea:o/r#1", "state": "open"
+        } }))
+        .unwrap();
+        assert!(
+            matches!(
+                &back,
+                WriteOp::EditPullRequest {
+                    title: None,
+                    body: None,
+                    state: Some(PullRequestState::Open),
+                    ..
+                }
+            ),
+            "{back:?}"
+        );
+        let merged = serde_json::from_value::<WriteOp>(serde_json::json!({ "EditPullRequest": {
+            "entity": "gitea:o/r#1", "state": "merged"
+        } }));
+        assert!(
+            merged.is_err(),
+            "merging is merge_pull_request's, never an edit's: {merged:?}"
         );
     }
 

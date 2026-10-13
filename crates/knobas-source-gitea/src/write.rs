@@ -1,7 +1,7 @@
 //! The four writes M2 ratified for Gitea -- branch, pull request, comment,
 //! approval -- the merge the source views added (issue #667), the review a
 //! pull request's toolbar writes (issue #705) and the branch delete (issue
-//! #707).
+//! #707), and a pull request's edit, close and reopen (issue #706).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the Jira adapter's is:
 //! knobas has one outbound write path, and
@@ -22,6 +22,7 @@
 //! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…}` |
 //! | review | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":…,"body":…,"comments":[…]}` |
 //! | branch delete | `DELETE /repos/{o}/{r}/branches/{name}` | none |
+//! | edit | `PATCH /repos/{o}/{r}/pulls/{index}` | only the given of `{"title":…,"body":…,"state":…}` |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -30,7 +31,9 @@
 
 use serde_json::json;
 
-use knobas_source::{MergeStyle, ReviewComment, ReviewSide, ReviewVerdict, SourceError};
+use knobas_source::{
+    MergeStyle, PullRequestState, ReviewComment, ReviewSide, ReviewVerdict, SourceError,
+};
 
 use crate::client::GiteaClient;
 
@@ -317,4 +320,59 @@ pub(crate) async fn delete_branch(
         )));
     }
     client.delete_branch(owner, repo, name).await
+}
+
+// -- edit_pull_request (issue #706) ------------------------------------------
+
+/// Edit a pull request's title or description, close it or reopen it (spec
+/// #701 workflow 8): one `PATCH` carrying **only the fields given**, so a
+/// changed title never sends back a description somebody else edited since
+/// the view was read (the deputy's ruling on #706). An edit with none is
+/// refused before a request: a `PATCH {}` would change nothing.
+///
+/// Gitea answers **412** *cannot change state of this pull request, it was
+/// already merged* for a close or reopen of a merged pull request (measured on
+/// 1.27.3; a title or description on one is still taken), which arrives as a
+/// `Protocol` refusal carrying its sentence, never retried (ADR-0004).
+///
+/// # Errors
+///
+/// As [`create_branch`], and [`SourceError::Protocol`] for an empty edit.
+pub(crate) async fn edit_pull_request(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    title: Option<&str>,
+    body: Option<&str>,
+    state: Option<PullRequestState>,
+) -> Result<(), SourceError> {
+    let path = format!(
+        "/repos/{}/{}/pulls/{index}",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?
+    );
+    let mut fields = serde_json::Map::new();
+    if let Some(title) = title {
+        fields.insert("title".to_owned(), json!(title));
+    }
+    if let Some(body) = body {
+        fields.insert("body".to_owned(), json!(body));
+    }
+    if let Some(state) = state {
+        let word = match state {
+            PullRequestState::Open => "open",
+            PullRequestState::Closed => "closed",
+        };
+        fields.insert("state".to_owned(), json!(word));
+    }
+    if fields.is_empty() {
+        return Err(SourceError::protocol(format!(
+            "gitea: an edit of {owner}/{repo}#{index} with nothing to change"
+        )));
+    }
+    client
+        .patch(&path, &serde_json::Value::Object(fields))
+        .await
+        .map(|_| ())
 }

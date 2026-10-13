@@ -57,6 +57,13 @@ async fn accepting() -> MockServer {
     )
     .mount(&server)
     .await;
+    // An edit (#706): Gitea answers 201 with the pull request, as measured.
+    authed(
+        Mock::given(method("PATCH")).and(path("/api/v1/repos/tidewater/payout-service/pulls/142")),
+    )
+    .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "number": 142 })))
+    .mount(&server)
+    .await;
     server
 }
 
@@ -682,4 +689,132 @@ async fn a_branch_of_a_mirror_is_refused_before_a_delete() {
         "{error:?}"
     );
     assert!(writes_received(&server).await.is_empty());
+}
+
+// -- edit_pull_request (issue #706) ------------------------------------------
+
+/// Workflow 8 of spec #701 (issue #706): an edit is one `PATCH` on the pull
+/// request carrying **only the fields given** -- an edit of the title must not
+/// send a description, which would overwrite one somebody else changed since
+/// the view was read (the deputy's ruling on #706). Close and reopen are the
+/// same `PATCH` with only `state`.
+#[tokio::test]
+async fn an_edit_patches_only_the_fields_it_was_given() {
+    use knobas_source::PullRequestState;
+    for (title, body, state, sent) in [
+        (
+            Some("Bound the jitter"),
+            None,
+            None,
+            json!({ "title": "Bound the jitter" }),
+        ),
+        (None, Some(""), None, json!({ "body": "" })),
+        (
+            Some("t"),
+            Some("b"),
+            None,
+            json!({ "title": "t", "body": "b" }),
+        ),
+        (
+            None,
+            None,
+            Some(PullRequestState::Closed),
+            json!({ "state": "closed" }),
+        ),
+        (
+            None,
+            None,
+            Some(PullRequestState::Open),
+            json!({ "state": "open" }),
+        ),
+    ] {
+        let server = accepting().await;
+        source(&server)
+            .write(WriteOp::EditPullRequest {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                title: title.map(str::to_owned),
+                body: body.map(str::to_owned),
+                state,
+            })
+            .await
+            .expect("a declared op is performed");
+
+        let (verb, path, received) = only_request(&server).await;
+        assert_eq!(verb, "PATCH");
+        assert_eq!(path, "/api/v1/repos/tidewater/payout-service/pulls/142");
+        assert_eq!(received, sent);
+    }
+}
+
+/// An edit with nothing in it would be a `PATCH {}` that changes nothing and
+/// still bumps nothing worth a request: refused before one leaves.
+#[tokio::test]
+async fn an_edit_with_nothing_in_it_is_refused_before_a_request() {
+    let server = accepting().await;
+    let error = source(&server)
+        .write(WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            title: None,
+            body: None,
+            state: None,
+        })
+        .await
+        .expect_err("nothing to edit");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A merged pull request cannot be closed or reopened: Gitea answers **412**
+/// *cannot change state of this pull request, it was already merged*
+/// (measured on the live 1.27.3), and that reaches the queue as a `Protocol`
+/// refusal with the sentence, never retried (ADR-0004).
+#[tokio::test]
+async fn reopening_a_merged_pull_request_is_refused_with_gitea_sentence() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(412).set_body_json(json!({
+            "message": "cannot change state of this pull request, it was already merged",
+            "url": "https://gitea.example/api/swagger"
+        })))
+        .mount(&server)
+        .await;
+    let error = source(&server)
+        .write(WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            title: None,
+            body: None,
+            state: Some(knobas_source::PullRequestState::Open),
+        })
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(412), "{error:?}");
+    assert!(
+        matches!(&error, SourceError::Protocol { message: m, .. }
+            if m.contains("it was already merged")),
+        "{error:?}"
+    );
+}
+
+/// An edit is made to a **pull request**: a repository's id is refused before
+/// a request leaves.
+#[tokio::test]
+async fn an_edit_aimed_at_a_repository_is_refused_before_a_request() {
+    let server = refusing(500, "must not be reached").await;
+    let error = source(&server)
+        .write(WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            title: Some("x".to_owned()),
+            body: None,
+            state: None,
+        })
+        .await
+        .expect_err("a repository is not a pull request");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

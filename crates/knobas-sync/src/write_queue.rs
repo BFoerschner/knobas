@@ -205,7 +205,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::SetParameter { entity, .. }
         | WriteOp::RunBuild { entity, .. }
         | WriteOp::SubmitReview { entity, .. }
-        | WriteOp::DeleteBranch { entity } => entity,
+        | WriteOp::DeleteBranch { entity }
+        | WriteOp::EditPullRequest { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -919,6 +920,15 @@ mod tests {
                         .to_owned(),
                 },
                 "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
+            ),
+            (
+                WriteOp::EditPullRequest {
+                    entity: "gitea:tidewater/ledger#144".to_owned(),
+                    title: None,
+                    body: None,
+                    state: Some(knobas_source::PullRequestState::Closed),
+                },
+                "gitea:tidewater/ledger#144",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

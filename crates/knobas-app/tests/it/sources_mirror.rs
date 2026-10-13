@@ -695,6 +695,12 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
                 .to_owned(),
         },
+        knobas_source::WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            title: Some("Bound the retry jitter".to_owned()),
+            body: None,
+            state: Some(knobas_source::PullRequestState::Closed),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -717,6 +723,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::RunBuild { .. } => "RunBuild",
             knobas_source::WriteOp::SubmitReview { .. } => "SubmitReview",
             knobas_source::WriteOp::DeleteBranch { .. } => "DeleteBranch",
+            knobas_source::WriteOp::EditPullRequest { .. } => "EditPullRequest",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

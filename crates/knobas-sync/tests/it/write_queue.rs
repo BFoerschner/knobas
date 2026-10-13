@@ -947,6 +947,12 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
                 .to_owned(),
         },
+        WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            title: Some("Bound the retry jitter".to_owned()),
+            body: None,
+            state: Some(knobas_source::PullRequestState::Closed),
+        },
     ]
 }
 
@@ -980,7 +986,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
             | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. } => op.identifier(),
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::EditPullRequest { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1189,6 +1196,10 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // nothing new, and the next sync reads the branch gone (#707).
             // Like a merge it is not taken back once sent.
             | WriteOp::DeleteBranch { .. }
+            // An edit, a close or a reopen changes a pull request the mirror
+            // holds: what is left is that pull request as edited, which the
+            // next sync reads back.
+            | WriteOp::EditPullRequest { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.

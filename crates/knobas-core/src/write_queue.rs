@@ -354,6 +354,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "run_build",
     "submit_review",
     "delete_branch",
+    "edit_pull_request",
 ];
 
 /// What `op` counts as its target having changed.
@@ -384,8 +385,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// **The whole mirrored record** -- `"transition"`, `"approve"`,
 /// `"merge_pull_request"`, `"submit_review"` and `"delete_branch"`, the ops
 /// that put a *judgement* onto a target whose current state is the whole
-/// reason for the judgement, and `"set_parameter"`, which overwrites a value.
-/// Any change to the target at all holds the write.
+/// reason for the judgement, and `"set_parameter"` and `"edit_pull_request"`,
+/// which overwrite a value. Any change to the target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -425,6 +426,11 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   after the reader pressed *Delete branch…* would otherwise be lost unread
 ///   to anyone but its SHA. The branch's mirrored record carries its tip, so
 ///   a push moves it and holds the write.
+/// * `"edit_pull_request"` because it overwrites what the reader saw (issue
+///   #706): a new title or description replaces whatever the pull request
+///   says at the flush, and a close or reopen is a judgement on its state.
+///   The shell sends only the fields the reader changed, which narrows the
+///   overwrite; a change to the record since still holds it.
 /// * `"set_parameter"` by analogy with `"merge_pull_request"`, and with a
 ///   limit worth stating (issue #668). The op **overwrites** a build
 ///   configuration's parameter, so it belongs with the ops that replace
@@ -1215,6 +1221,7 @@ mod tests {
             // A delete takes what the branch carries at the flush with it, so
             // a push after the press is a reason to look again (#707).
             "delete_branch",
+            "edit_pull_request",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
