@@ -350,14 +350,14 @@ async fn a_file_over_the_line_cap_is_cut_at_it() {
 #[tokio::test]
 async fn a_file_over_the_byte_cap_is_cut_at_a_line_within_it() {
     let server = gitea().await;
-    // 2,000 lines of 1,000 bytes: 2 MB, well under the line cap.
-    let line = format!("{}\n", "x".repeat(999));
+    // 2,000 lines of 997 bytes: 2 MB, well under the line cap, and the
+    // cap falls inside line 1,004, so only whole lines survive the cut.
+    let line = format!("{}\n", "x".repeat(996));
     let text = line.repeat(2_000);
     raw(&server, "wide.txt", "main", text.clone().into_bytes()).await;
     let drawn = file(read(&server, ENTITY, "file:wide.txt").await);
     assert!(drawn.truncated);
-    assert!(drawn.text.len() <= 1_000_000, "{}", drawn.text.len());
-    assert_eq!(drawn.text.lines().count(), 1_000, "whole lines only");
+    assert_eq!(drawn.text, line.repeat(1_003), "whole lines within 1 MB");
     assert_eq!(drawn.size, text.len() as u64);
     assert!(drawn.url.is_some(), "the rest is on Gitea");
 }
