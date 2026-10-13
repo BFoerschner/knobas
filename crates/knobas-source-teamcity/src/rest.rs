@@ -129,14 +129,18 @@ pub(crate) const RECENT_BUILD_FIELDS: &str = concat!(
 /// view is drawn (#665), read by [`BuildRecord`]: the overview's facts, the
 /// failed-test count *Tests* shows before it is read, and the parameters the
 /// build ran with -- beside its configuration's parameter specs, which is
-/// where TeamCity says `password` (a build's own parameter carries no spec).
-/// Measured on the seeded 2026.1.3 server, 2026-10-12.
+/// where TeamCity says `password` (a build's own parameter carries no spec)
+/// -- and the revisions it ran on, each with its VCS root instance's name and
+/// `url` (#683). Measured on the seeded 2026.1.3 server, 2026-10-12 and
+/// 2026-10-13.
 pub(crate) const BUILD_VIEW_FIELDS: &str = concat!(
     "number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectName,parameters(property(name,type(rawValue)))),",
     "triggered(type,user(username)),agent(name),running-info(currentStageText),",
-    "testOccurrences(failed),properties(property(name,value))"
+    "testOccurrences(failed),properties(property(name,value)),",
+    "revisions(revision(version,vcsBranchName,",
+    "vcs-root-instance(name,properties(property(name,value)))))"
 );
 
 /// What `/app/rest/changes?locator=build:(id:N)` is asked for (#665): a
@@ -178,6 +182,26 @@ pub(crate) struct BuildRecord {
     pub test_occurrences: Option<TestCounts>,
     #[serde(default)]
     pub properties: Properties,
+    #[serde(default)]
+    pub revisions: Revisions,
+}
+
+/// `revisions`: the VCS revision a build ran on, one per VCS root (#683).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct Revisions {
+    #[serde(default)]
+    pub revision: Vec<Revision>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Revision {
+    /// The commit's sha.
+    pub version: Option<String>,
+    /// The full ref, `refs/heads/main`.
+    pub vcs_branch_name: Option<String>,
+    #[serde(rename = "vcs-root-instance")]
+    pub vcs_root_instance: Option<RootInstance>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -231,6 +255,8 @@ pub(crate) struct Change {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct RootInstance {
+    /// Asked for on a build's revisions (#683), not on a change.
+    pub name: Option<String>,
     #[serde(default)]
     pub properties: Properties,
 }

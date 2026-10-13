@@ -808,3 +808,28 @@ Ruled 2026-10-12. Comment:
 **If you disagree, the cost of reversing this is:** low, and the same in either direction. Going to A means restoring the 58-line route from this branch's history, removing the wrapper, and replacing this decisions entry with a dated ruling from Björn that amends ADR-0013's "nothing new". That amendment is the real cost, because it is the first route added to mockd since it was frozen, and every later "just one route" ruling would cite it. Going to B means deleting one test and the wrapper. Nothing is stored, migrated or frozen either way.
 
 As built (#664): `ConfigViewExcused` in `crates/knobas-source-teamcity/tests/it/mockd.rs`, used by `passes_the_contract_battery` alone. `git diff a41b6dfd...HEAD -- crates/knobas-mockd` is empty, and the line the branch had added to `docs/contract.md` §5 for the route is gone with it.
+
+## #683 — a commit named by CI's clone address: `clone_urls` on the Gitea source, not a rewritten fixture
+
+Ruled 2026-10-13 by the orchestrator, the author of #683, under Björn's #660 delegation. Sent to the implementer, not posted as a comment.
+
+**The fork:** the live witness asks a TeamCity change and revision to open the mirrored Gitea commit. The seeded VCS roots clone `http://gitea:3000`, the compose network's name. Every mirrored commit's page starts with Gitea's `ROOT_URL`, `http://127.0.0.1:3000`. #665's resolver matches the page as written, so the hint misses. The implementer first pointed the roots at `127.0.0.1:3000` and added a forward container in TeamCity's network namespace (option A). That changed the shared TeamCity volume into a state main's code could not use: another agent's seeded run failed 12/14 with "Unable to collect changes". The implementer stopped and listed three options. (A) keeps that environment change. (B) adds a configured alias on the Gitea source. (C) matches owner/repo when the host differs. The implementer leaned to B.
+
+**Ruling:** **(B).**
+
+1. Add an optional Gitea config field listing the other base URLs at which CI reaches the same server. Name it for what it is, `clone_urls`, and give it a description a person understands, because the Add-source form is generated from the schema.
+2. Accept URL prefixes and the scp-like SSH form (`git@host:` → `owner/repo(.git)`). Real TeamCity roots are often SSH. Strip a trailing `.git`.
+3. The commit-hint resolution rewrites a matching prefix to the source's own base URL before `RESOLVE_URL`. Otherwise it stays exact: no owner/repo guessing across hosts, per #665.
+4. Write the §10.8 entry if the config schema is a frozen surface.
+5. Remove the forward, the agent network change, the root rewrite and the `teamcity-gitea` compose service. Keep the change-witness commit and branch. Every run leaves the volume exactly as main's seed expects, verified at the end of the run.
+6. Rebase onto origin/main (`9f47e073`, with #690's lock) before the next live run.
+
+**Reasoning:**
+
+- **The shared fixture must stay usable by code on main while a branch is unmerged.** A forces every other worktree's TeamCity runs onto this branch's compose file, and it failed the first time another agent ran.
+- **B models a real deployment shape, not a test rule.** CI commonly clones over an internal hostname or an SSH remote while the server's pages carry its public URL. The alias is explicit configuration by the reader. The resolver stays exact for everyone who configures nothing.
+- **C was refused in #665's own entry.** The resolver "does not guess that two hosts are one". The same owner/repo on two hosts is two repositories.
+
+**If you disagree, the cost of reversing this is:** low before release. Removing `clone_urls` is one optional config field, one query and a pure function in `sources/crud.rs`, and its tests. A stored config that carries the key would then be refused by `deny_unknown_fields`, so a reversal after users configure it needs a tolerant parse for one release. Going to A again means re-landing the forward and agent change in step with main, as one merge.
+
+As built (#683): `GiteaConfig::clone_urls`, declared through the SPI's `knobas_source::clone_urls` (the key, its grammar and `canonical_repo_url`, moved there in review so the app reads only what an adapter's `config_schema` declares), and `crud::clone_addresses`. The §10.8 entry and the §4.2 table cell are in `docs/contract.md`. `teamcity_seeded_live.rs` configures `clone_urls: ["http://gitea:3000"]`.

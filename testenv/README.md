@@ -503,7 +503,24 @@ code. A server seeded before #665 is brought up to date by the next `./seed
 --teamcity`: the step's script is rewritten in place, and a finished 1187
 that reports no failed test is deleted and run again under the same number
 (its id changes; `seed-state.json` records the new one). TeamCity lists no
-change for 1187, because it is its configuration's first build.
+change for 1187, because it is its configuration's first build; its build
+view's *Revision* row is what leads to its commit (#683).
+
+**A build that lists a change (#683).** TeamCity lists a change only for a
+commit it has never seen on any branch, and never for a configuration's first
+build on a branch -- re-pointing a branch at a commit another branch already
+holds lists nothing (measured). So the seed keeps a branch of its own,
+`seed/change-witness` in `ledger-api`: cut at `main`'s head, built by
+`Ledger_Deploy_Staging`, given one commit (the file
+`seed-change-witness.txt`, through Gitea's contents API) and built again. The
+second build lists that commit as its change. This is the one write the
+TeamCity seed makes to Gitea; `ledger-api`'s default branch is untouched and
+no capped suite budgets that repository. `seed-state.json`'s
+`teamcity.changes` records the configuration, the commit and both build ids,
+and the seeded TeamCity suite counts both builds as seeded. A re-run that
+finds both builds, the change and the branch head as recorded writes
+nothing; otherwise it deletes the branch's builds, cuts the branch again and
+makes a new commit.
 
 **The default branch is queued as `<default>`.** The VCS root's branch
 specification names `main` along with the feature branches, and a build
@@ -520,7 +537,14 @@ fixture means. 1187 and 1188 are queued on their feature branch by name.
 (`Payout_PayoutService`, `Ledger_LedgerApi`) pointing at the seeded Gitea over
 the compose network (`http://gitea:3000/tidewater/<repo>.git`, authenticated
 with the seed's Gitea token from `seed-state.json`), with a branch
-specification naming every branch the Gitea seed created in that repository.
+specification naming every branch the Gitea seed created in that repository,
+and the change witness's. A mirrored commit's page carries Gitea's own
+`ROOT_URL`, `http://127.0.0.1:3000`, so a change named by the root's URL
+opens it only through a Gitea source whose `clone_urls` lists
+`http://gitea:3000` (#683) -- what `teamcity_seeded_live.rs` configures, and
+what a real deployment whose CI clones over an internal hostname would. A
+finished fixture build that ran from any other root URL is run again under its
+number.
 The agent clones the repository and runs a command-line step, and the
 server reports the fixture's branch as the build's `branchName`. Nothing
 here fell back to a parameter-only build. #265's brief said "a VCS root per

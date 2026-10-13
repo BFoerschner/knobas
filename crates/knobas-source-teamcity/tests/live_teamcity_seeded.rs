@@ -146,6 +146,19 @@ struct Seed {
     /// Optional so the suites that predate it still read an older
     /// seed-state.json; the view's test asks for it by name.
     settings: Option<SeededSettings>,
+    /// The change witness's two builds (#683): seeded builds like the
+    /// fixture's, so the exact sets here count them and the leftover
+    /// clearing keeps them. Optional for the reason `settings` is.
+    changes: Option<SeededChanges>,
+}
+
+/// `teamcity.changes` in seed-state.json: a configuration built twice on a
+/// branch that moved between, so the second build lists a change.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededChanges {
+    build_type: String,
+    before_id: i64,
+    after_id: i64,
 }
 
 /// `teamcity.settings` in seed-state.json: the configuration that carries the
@@ -339,6 +352,33 @@ impl Seeded {
     /// The ids the seed recorded, ascending.
     fn seeded_ids(&self) -> Vec<i64> {
         let mut ids: Vec<i64> = self.seed.builds.iter().map(|b| b.real_id).collect();
+        ids.extend(
+            self.seed
+                .changes
+                .iter()
+                .flat_map(|c| [c.before_id, c.after_id]),
+        );
+        ids.sort_unstable();
+        ids
+    }
+
+    /// The seeded ids of one configuration, ascending: its fixture builds
+    /// and, on the change witness's configuration, the witness's two.
+    fn seeded_ids_of(&self, build_type: &str) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .seed
+            .builds
+            .iter()
+            .filter(|b| b.build_type == build_type)
+            .map(|b| b.real_id)
+            .collect();
+        ids.extend(
+            self.seed
+                .changes
+                .iter()
+                .filter(|c| c.build_type == build_type)
+                .flat_map(|c| [c.before_id, c.after_id]),
+        );
         ids.sort_unstable();
         ids
     }
@@ -1073,10 +1113,15 @@ async fn a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_2
     println!("SEEDED connected as {:?}", connected.account);
     let (items, _) = full(&*source).await;
     let builds = of_kind(&items, "build");
+    let quiet: usize = QUIET_CONFIGURATIONS
+        .iter()
+        .map(|c| seeded.seeded_ids_of(c).len())
+        .sum();
     assert_eq!(
         builds.len(),
-        QUIET_CONFIGURATIONS.len(),
-        "one finished build per quiet configuration: {:?}",
+        quiet,
+        "every seeded build of the quiet configurations (one fixture build each, and the \
+         change witness's two): {:?}",
         keys(&items)
     );
 
@@ -1382,14 +1427,13 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
 
     // The incremental locator, as `sync::since` sends it.
     let incremental = "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any";
-    let mut both = vec![on_feature, on_main];
-    both.sort_unstable_by(|a, b| b.cmp(a));
     assert_eq!(
         seeded
             .build_ids(&format!("{incremental},branch:default:any,count:100"))
             .await,
-        both,
-        "both seeded builds, newest first"
+        seeded.seeded_ids_newest_first(),
+        "every seeded build, newest first: both fixture builds and the change witness's, \
+         which are on its own branch"
     );
     assert_eq!(
         seeded.build_ids(&format!("{incremental},count:100")).await,
@@ -1622,7 +1666,12 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     let seeded = seeded();
     let mut guard = Queued::new(&seeded).await;
     let source = seeded.scoped_to(&[QUICK_CONFIGURATION]);
-    let baseline = seeded.fixture_build(412).real_id;
+    // 412, or the change witness's second build where the seed made one on
+    // this configuration (#683): the newest seeded build either way.
+    let baseline = *seeded
+        .seeded_ids_of(QUICK_CONFIGURATION)
+        .last()
+        .expect("a seeded build");
 
     let (_, cursor) = full(&*source).await;
     assert_eq!(
@@ -1912,9 +1961,18 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
     // The other seeded configuration's build, which passed.
     let ledger = view_of("Ledger_Deploy_Staging").await;
     let ledger_overview = section(&ledger, "overview");
+    // 412, or the change witness's second build, which also passed (#683).
+    let newest = *seeded
+        .seeded_ids_of("Ledger_Deploy_Staging")
+        .last()
+        .expect("a seeded build");
+    let number = seeded.build(newest).await["number"]
+        .as_str()
+        .expect("a number")
+        .to_owned();
     assert_eq!(
         value(&facts(&ledger_overview.blocks[0]), "Last build"),
-        ("#412 success".to_owned(), Some(Tone::Ok))
+        (format!("#{number} success"), Some(Tone::Ok))
     );
     let passed = seeded.fixture_build(412).real_id;
     assert!(

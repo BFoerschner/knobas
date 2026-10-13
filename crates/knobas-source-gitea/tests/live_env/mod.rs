@@ -115,9 +115,12 @@ impl Env {
     /// The seeded repositories **no live test writes to** -- the scope for an
     /// assertion whose antecedent is "when nothing changed" (issue #146).
     ///
-    /// Only [`Env::repo`] is ever mutated: the three tests that create a
-    /// branch, a pull request or a commit all do it there. So these two are
-    /// quiescent by construction from the end of the seed onwards, and an
+    /// Only [`Env::repo`] is mutated by a test: the three tests that create a
+    /// branch, a pull request or a commit all do it there. The one other
+    /// writer is a seed: `seed-teamcity-builds.sh`'s change witness (#683)
+    /// cuts `seed/change-witness` in `ledger-api` and commits to it, before
+    /// any suite syncs. So these two are quiescent by construction from the
+    /// end of the seeds onwards, and an
     /// idle run against them is idle for a structural reason rather than a
     /// timing one. Both of the other seeded repositories are named rather than
     /// one, deliberately: `ledger-api` carries the fixture's merged pull

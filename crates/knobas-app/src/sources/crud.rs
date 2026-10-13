@@ -752,7 +752,7 @@ pub async fn view(
     let Some(mut view) = source.view(entity_id, section).await? else {
         return Ok(None);
     };
-    resolve_commit_hints(pool, &mut view).await?;
+    resolve_commit_hints(pool, registry, &mut view).await?;
     let named: Vec<String> = view
         .sections
         .iter()
@@ -793,8 +793,18 @@ pub async fn view(
 /// A resolved id is the mirror's own, so the rule-7 check after this keeps it.
 async fn resolve_commit_hints(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     view: &mut knobas_source::view::SourceView,
 ) -> Result<(), SourcesError> {
+    let hinted = view
+        .sections
+        .iter()
+        .flat_map(|s| &s.blocks)
+        .any(|b| matches!(b, knobas_source::view::Block::Entities { rows, .. } if rows.iter().any(|r| r.commit.is_some())));
+    if !hinted {
+        return Ok(());
+    }
+    let addresses = clone_addresses(pool, registry).await?;
     for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
         let knobas_source::view::Block::Entities { rows, .. } = block else {
             continue;
@@ -806,7 +816,9 @@ async fn resolve_commit_hints(
             if row.entity_id.is_some() {
                 continue;
             }
-            let Some(page) = commit_page(&hint.repo_url, &hint.sha) else {
+            let repo_url =
+                knobas_source::clone_urls::canonical_repo_url(&hint.repo_url, &addresses);
+            let Some(page) = commit_page(&repo_url, &hint.sha) else {
                 continue;
             };
             let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
@@ -817,6 +829,42 @@ async fn resolve_commit_hints(
         }
     }
     Ok(())
+}
+
+/// Every configured source's other clone addresses (#683), from the sources
+/// whose adapter declares [`knobas_source::clone_urls::CONFIG_KEY`] in its
+/// `config_schema`. The template descriptor, as `paths::declared_paths`
+/// reads it: whether an adapter keeps the key is a property of its kind. The
+/// app reads the key the SPI spells and names no adapter; a source whose
+/// adapter does not declare it contributes nothing, whatever its config holds.
+async fn clone_addresses(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<Vec<knobas_source::clone_urls::CloneAddress>, SourcesError> {
+    let kinds: Vec<String> = registry
+        .descriptors()
+        .into_iter()
+        .filter(|d| knobas_source::clone_urls::declared(&d.config_schema))
+        .map(|d| d.adapter_kind)
+        .collect();
+    if kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "select s.base_url, a.address
+           from knobas.source_config s,
+                jsonb_array_elements_text(s.config->$2) as a(address)
+          where s.kind = any($1) and jsonb_typeof(s.config->$2) = 'array'
+          order by s.id",
+    )
+    .bind(&kinds)
+    .bind(knobas_source::clone_urls::CONFIG_KEY)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(base_url, address)| knobas_source::clone_urls::CloneAddress { base_url, address })
+        .collect())
 }
 
 /// The web page of commit `sha` in the repository a git remote URL names:

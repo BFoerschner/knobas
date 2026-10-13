@@ -37,6 +37,13 @@ pub struct GiteaConfig {
     pub include_pr_comments: bool,
     /// Per-instance request rate. Interfaces §4.1 default: 10 req/s.
     pub rate_limit_per_sec: u32,
+    /// Other addresses CI clones this server from (#683): a URL prefix such
+    /// as `http://gitea:3000`, or an scp-like remote such as `git@gitea:`.
+    /// The SPI's [`knobas_source::clone_urls`] key, declared in
+    /// [`config_schema`]: this adapter never reads it, and the app resolves
+    /// with it a commit another source names by repository and sha (a
+    /// TeamCity change) to the commit this source mirrors.
+    pub clone_urls: Vec<String>,
 }
 
 impl Default for GiteaConfig {
@@ -49,6 +56,7 @@ impl Default for GiteaConfig {
             prs_per_repo: 200,
             include_pr_comments: true,
             rate_limit_per_sec: 10,
+            clone_urls: Vec::new(),
         }
     }
 }
@@ -79,6 +87,14 @@ impl GiteaConfig {
             let (owner, name) = entry.split_once('/').ok_or_else(bad)?;
             if owner.is_empty() || name.is_empty() || name.contains('/') {
                 return Err(bad());
+            }
+        }
+        for entry in &self.clone_urls {
+            if !knobas_source::clone_urls::is_entry(entry) {
+                return Err(SourceError::protocol(format!(
+                    "gitea: clone_urls entry {entry:?} must be a URL such as \"http://gitea:3000\" \
+                     or an scp-like remote such as \"git@gitea:\""
+                )));
             }
         }
         if self.rate_limit_per_sec == 0 {
@@ -140,6 +156,11 @@ pub fn config_schema() -> serde_json::Value {
                 "type": "integer", "minimum": 1, "maximum": 100, "default": 10,
                 "title": "Requests per second",
                 "description": "Per-source request rate."
+            },
+            "clone_urls": {
+                "type": "array", "items": { "type": "string" }, "default": [],
+                "title": "Clone addresses",
+                "description": "Other addresses CI clones this server from, e.g. http://gitea:3000 or git@gitea:. A build's commits named by one of them open the commit knobas mirrors."
             }
         }
     })
@@ -193,6 +214,45 @@ mod tests {
             matches!(err, SourceError::Protocol { message: ref m, .. } if m.contains("owner")),
             "{err:?}"
         );
+    }
+
+    /// #683: the schema declares the SPI's clone-address key, so the app
+    /// reads this source's `clone_urls` -- the field the config parses.
+    #[test]
+    fn the_schema_declares_its_clone_urls() {
+        assert!(knobas_source::clone_urls::declared(&config_schema()));
+        let cfg = GiteaConfig::from_json(&serde_json::json!({
+            knobas_source::clone_urls::CONFIG_KEY: ["git@gitea:"]
+        }))
+        .unwrap();
+        assert_eq!(cfg.clone_urls, ["git@gitea:"]);
+    }
+
+    /// #683: the other addresses CI clones from, as a URL or an scp-like
+    /// remote; anything else is refused at save time, not missed later.
+    #[test]
+    fn a_clone_url_is_a_url_or_an_scp_like_remote() {
+        let cfg = GiteaConfig::from_json(&serde_json::json!({
+            "clone_urls": ["http://gitea:3000", "ssh://git@gitea:2222/", "git@gitea:"]
+        }))
+        .unwrap();
+        assert_eq!(cfg.clone_urls.len(), 3);
+        for bad in [
+            "gitea",
+            "",
+            ":",
+            "http://",
+            " git@gitea:",
+            "git@gitea:owner/",
+            "http:",
+        ] {
+            let err =
+                GiteaConfig::from_json(&serde_json::json!({ "clone_urls": [bad] })).unwrap_err();
+            assert!(
+                matches!(err, SourceError::Protocol { ref message, .. } if message.contains("clone_urls")),
+                "{bad:?} -> {err:?}"
+            );
+        }
     }
 
     #[test]

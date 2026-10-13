@@ -24,6 +24,7 @@
 //! Adapters prove they honour the contract by running [`contract::battery`]
 //! against themselves in their own test suite.
 
+pub mod clone_urls;
 pub mod contract;
 pub mod diff;
 pub mod instance;

@@ -1410,7 +1410,9 @@ teamcity-live:
 # -- in the adapter's crate -- cannot make that assertion, and a live suite with
 # no recipe is one nothing runs (testenv/README.md). It is strictly read-only
 # and runs second, so it disturbs neither the exact-set assertions nor the
-# leftover clearing of the suite above it.
+# leftover clearing of the suite above it. Since #683 it also syncs the seeded
+# Gitea this recipe already brought up, so a build's change and revision are
+# witnessed opening the mirrored commit.
 #
 # Serial and unparallelised for the same reason as `gitea-live`: one server,
 # and one test that mutates it. One owner at a time: testenv/README.md, "One

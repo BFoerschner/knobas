@@ -350,6 +350,17 @@ where
     //    priority, assignee, reviewers, merged flag and project live, and this
     //    is what holds the declaration to the adapter's own corpus.
     check_payload_paths(&d, &sink.0);
+    //    And where its config keeps its host's other clone addresses (#683):
+    //    a schema that names the key declares it as an array of strings, or
+    //    the app would read a shape the adapter never promised.
+    assert!(
+        d.config_schema
+            .pointer(&format!("/properties/{}", crate::clone_urls::CONFIG_KEY))
+            .is_none()
+            || crate::clone_urls::declared(&d.config_schema),
+        "config_schema property {:?} must be an array of strings",
+        crate::clone_urls::CONFIG_KEY
+    );
     // 7. A sink failure aborts the sync instead of being swallowed.
     let aborted = s.sync(None, &mut FailingSink).await;
     assert!(
