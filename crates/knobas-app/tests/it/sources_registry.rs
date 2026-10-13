@@ -176,7 +176,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // `submit_review` the git workstation's (#705), a review written
             // from the pull request's toolbar; `delete_branch` the git
             // workstation's too (#707), on a branch's; `edit_pull_request` the
-            // pull request's edit, close and reopen (#706).
+            // pull request's edit, close and reopen (#706);
+            // `update_pull_request_branch` the landing's (#708), *Update
+            // branch…* on a pull request whose head is behind its base.
             vec![
                 "create_branch",
                 "create_pull_request",
@@ -186,6 +188,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "submit_review",
                 "delete_branch",
                 "edit_pull_request",
+                "update_pull_request_branch",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,

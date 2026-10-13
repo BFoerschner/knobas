@@ -1,10 +1,11 @@
 //! The reads a pull request's source view makes (#662), beside the ones the
 //! sync makes. Each is one request; none is stored (ADR-0020 rule 1).
 
+use knobas_http::Method;
 use knobas_source::SourceError;
 use serde_json::Value;
 
-use super::{GiteaClient, page_params, segment};
+use super::{API_ROOT, GiteaClient, page_params, segment};
 
 impl GiteaClient {
     /// `GET /repos/{o}/{r}/pulls/{n}` -- one pull request, whole.
@@ -94,6 +95,32 @@ impl GiteaClient {
     ) -> Result<String, SourceError> {
         self.get_text(&format!("{}.diff", pulls_path(owner, repo, number)?))
             .await
+    }
+}
+
+impl GiteaClient {
+    /// `POST /repos/{o}/{r}/pulls/{n}/update?style=` (#708): the base merged
+    /// into the head, or the head rebased onto it. No body; Gitea answers an
+    /// empty 200.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, Gitea's sentence in it: a
+    /// **409** for a conflict, a **403** where the account may not push to
+    /// the head.
+    pub(crate) async fn update_pull(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        style: &str,
+    ) -> Result<(), SourceError> {
+        let path = format!("{API_ROOT}{}/update", pulls_path(owner, repo, number)?);
+        let request = self
+            .http
+            .request(Method::POST, &path)
+            .query(&[("style", style.to_owned())]);
+        self.http.send(request).await.map(|_| ())
     }
 }
 

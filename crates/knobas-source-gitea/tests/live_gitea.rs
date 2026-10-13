@@ -2738,6 +2738,7 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         .write(knobas_source::WriteOp::MergePullRequest {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
         })
         .await
         .expect("Gitea merges a pull request it said it could");

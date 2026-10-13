@@ -241,8 +241,8 @@ impl Source for GiteaSource {
 
     /// Perform one of the four writes M2 ratified for Gitea, the merge the
     /// source views added (#667), the review the pull request's toolbar
-    /// writes (#705), its edit, close and reopen (#706), or the branch delete
-    /// (#707), or refuse.
+    /// writes (#705), its edit, close and reopen (#706), the branch delete
+    /// (#707) or the branch update (#708), or refuse.
     ///
     /// The match unpacks and hands values to [`crate::write`], which never
     /// names `WriteOp`: knobas has one outbound write path and
@@ -287,9 +287,18 @@ impl Source for GiteaSource {
                 write::approve(&self.client, &owner, &repo, index, body).await?;
                 Ok(WriteReceipt::none())
             }
-            WriteOp::MergePullRequest { entity, style } => {
+            WriteOp::MergePullRequest {
+                entity,
+                style,
+                delete_branch,
+            } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
-                write::merge(&self.client, &owner, &repo, index, *style).await?;
+                write::merge(&self.client, &owner, &repo, index, *style, *delete_branch).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::UpdatePullRequestBranch { entity, style } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::update_branch(&self.client, &owner, &repo, index, *style).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::SubmitReview {
@@ -427,7 +436,8 @@ mod tests {
                 "merge_pull_request",
                 "submit_review",
                 "delete_branch",
-                "edit_pull_request"
+                "edit_pull_request",
+                "update_pull_request_branch"
             ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly

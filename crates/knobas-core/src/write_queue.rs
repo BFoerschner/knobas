@@ -359,6 +359,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "submit_review",
     "delete_branch",
     "edit_pull_request",
+    "update_pull_request_branch",
 ];
 
 /// What `op` counts as its target having changed.
@@ -387,12 +388,12 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// module every source's payload shape.
 ///
 /// **The whole mirrored record** -- `"transition"`, `"approve"`,
-/// `"merge_pull_request"`, `"submit_review"` and `"delete_branch"`, the ops
-/// that put a *judgement* onto a target whose current state is the whole
-/// reason for the judgement, and `"set_parameter"`, which overwrites a value.
-/// Any change to the target at all holds the write. `"edit_pull_request"`
-/// takes this shape only when it changes the pull request's state; see
-/// **Per field** below.
+/// `"merge_pull_request"`, `"submit_review"`, `"delete_branch"` and
+/// `"update_pull_request_branch"`, the ops that put a *judgement* onto a
+/// target whose current state is the whole reason for the judgement, and
+/// `"set_parameter"`, which overwrites a value. Any change to the target at
+/// all holds the write. `"edit_pull_request"` takes this shape only when it
+/// changes the pull request's state; see **Per field** below.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -432,6 +433,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   after the reader pressed *Delete branch…* would otherwise be lost unread
 ///   to anyone but its SHA. The branch's mirrored record carries its tip, so
 ///   a push moves it and holds the write.
+/// * `"update_pull_request_branch"` for the merge's reason (issue #708): an
+///   update merges the base into the head, or rebases the head onto it, as
+///   the head stands *at the flush*; a push after the reader pressed *Update
+///   branch…* is a head they have not seen being rewritten or extended.
 /// * `"set_parameter"` by analogy with `"merge_pull_request"`, and with a
 ///   limit worth stating (issue #668). The op **overwrites** a build
 ///   configuration's parameter, so it belongs with the ops that replace
@@ -1329,6 +1334,9 @@ mod tests {
             // A delete takes what the branch carries at the flush with it, so
             // a push after the press is a reason to look again (#707).
             "delete_branch",
+            // An update rewrites or extends the head as it stands at the
+            // flush, so a push after the press holds it (#708).
+            "update_pull_request_branch",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(

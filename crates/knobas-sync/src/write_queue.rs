@@ -207,7 +207,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::RunBuild { entity, .. }
         | WriteOp::SubmitReview { entity, .. }
         | WriteOp::DeleteBranch { entity }
-        | WriteOp::EditPullRequest { entity, .. } => entity,
+        | WriteOp::EditPullRequest { entity, .. }
+        | WriteOp::UpdatePullRequestBranch { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -921,8 +922,16 @@ mod tests {
                 WriteOp::MergePullRequest {
                     entity: "gitea:tidewater/ledger#142".to_owned(),
                     style: knobas_source::MergeStyle::Merge,
+                    delete_branch: true,
                 },
                 "gitea:tidewater/ledger#142",
+            ),
+            (
+                WriteOp::UpdatePullRequestBranch {
+                    entity: "gitea:tidewater/ledger#144".to_owned(),
+                    style: knobas_source::UpdateStyle::Rebase,
+                },
+                "gitea:tidewater/ledger#144",
             ),
             (
                 WriteOp::SetParameter {
