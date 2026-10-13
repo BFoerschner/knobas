@@ -555,7 +555,14 @@ mod tests {
         let log = read_all(dir.path());
         assert_eq!(log.matches("slow ipc command").count(), 1, "{log}");
         assert!(log.contains("list_entities"), "{log}");
-        assert!(log.contains("duration_ms"), "{log}");
+        // The slow span is the one logged, not the instant one.
+        let ms: u64 = log
+            .split("duration_ms=")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        assert!(ms >= 50, "{log}");
     }
 
     #[test]
