@@ -114,24 +114,35 @@ function overview(state: string, mergeable: boolean): SourceView {
         title: "Overview",
         count: null,
         deferred: false,
-        blocks: [
-          { type: "facts", facts: [{ label: "State", value: state, tone: null }] },
-          ...(mergeable
-            ? [
-                {
-                  type: "actions" as const,
-                  actions: [
-                    {
-                      write_op: "merge_pull_request",
-                      label: "Merge…",
-                      options: ["merge", "rebase", "squash"],
-                      confirm: "Merge feature/x into main?",
-                    },
-                  ],
-                },
-              ]
-            : []),
+        blocks: [{ type: "facts", facts: [{ label: "State", value: state, tone: null }] }],
+      },
+    ],
+    actions: [
+      {
+        write_op: "merge_pull_request",
+        label: "Merge…",
+        fields: [
+          {
+            name: "style",
+            label: "Style",
+            kind: {
+              type: "choice",
+              options: [
+                { value: "merge", label: "Merge commit" },
+                { value: "rebase", label: "Rebase" },
+                { value: "squash", label: "Squash" },
+              ],
+            },
+            value: null,
+            required: true,
+            placeholder: null,
+          },
         ],
+        confirm: "Merge feature/x into main?",
+        primary: true,
+        danger: false,
+        disabled: mergeable ? null : "Already merged",
+        with_settings: false,
       },
     ],
   };
@@ -190,7 +201,10 @@ test("Merge… queues MergePullRequest with the style picked, then the view is r
     "get_entity",
     "entity_view null",
   ]);
-  expect(screen.merge(), "a merged pull request offers nothing").toBeUndefined();
+  expect(screen.merge()!.getAttribute("aria-disabled"), "a merged pull request's Merge… says why it is off").toBe(
+    "true",
+  );
+  expect(screen.merge()!.title).toBe("Already merged");
   expect(document.querySelector("[role=dialog]")).toBeNull();
   expect(toasts.items.map((t) => t.text)).toEqual(["Merge queued for tidewater/payout-service#142"]);
   screen.done();

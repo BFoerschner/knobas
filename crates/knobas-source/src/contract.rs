@@ -1465,15 +1465,19 @@ mod tests {
                 (Behavior::DrawsNoView, _) => Ok(None),
                 (Behavior::FailsTheView, _) => Err(SourceError::protocol("no view today")),
                 (Behavior::RepeatsASectionId, _) => Ok(Some(SourceView {
+                    actions: vec![],
                     sections: vec![overview("overview"), overview("overview")],
                 })),
                 (Behavior::DefersASectionItCannotRead, Some(_)) => Ok(Some(SourceView {
+                    actions: vec![],
                     sections: vec![overview("overview")],
                 })),
                 (_, None) => Ok(Some(SourceView {
+                    actions: vec![],
                     sections: vec![overview("overview"), log(true)],
                 })),
                 (_, Some("log")) => Ok(Some(SourceView {
+                    actions: vec![],
                     sections: vec![log(false)],
                 })),
                 (_, Some(other)) => Err(SourceError::protocol(format!("no section {other:?}"))),

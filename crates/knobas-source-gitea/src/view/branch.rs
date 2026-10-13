@@ -82,7 +82,10 @@ pub(super) async fn draw(
             )));
         }
     };
-    Ok(SourceView { sections })
+    Ok(SourceView {
+        sections,
+        actions: Vec::new(),
+    })
 }
 
 /// The whole view, or one of its two eager sections.

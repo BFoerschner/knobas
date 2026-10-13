@@ -6,14 +6,15 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { SourceView as View, ViewAction, ViewSection } from "../../ipc/entity";
+import type { ActionField, SourceView as View, ViewAction, ViewSection } from "../../ipc/entity";
 import type { BuildParameter } from "../../ipc/sources";
+import type { ActionValues } from "./actions";
 import type { SettingMark } from "./settings";
 
 /** Every deferred read, as `[entity, section]`. */
 const reads: [string, string | null][] = [];
 let answer: (section: string | null) => Promise<View | null> = (section) =>
-  Promise.resolve({ sections: [log(section ?? "log", false)] });
+  Promise.resolve({ sections: [log(section ?? "log", false)], actions: [] });
 
 vi.mock("../../ipc/entity", () => ({
   entityView: (entityId: string, section: string | null) => {
@@ -80,10 +81,11 @@ const VIEW: View = {
     { id: "diff", title: "Diff", count: 2, deferred: false, blocks: [{ type: "diff", files: [], truncated: false }] },
     log("log", true),
   ],
+  actions: [],
 };
 
-/** Every action the view asked to queue, as `[write_op, option]`. */
-const queued: [string, string | null][] = [];
+/** Every action the view asked to queue, as `[write_op, values]`. */
+const queued: [string, ActionValues][] = [];
 /** The values each queued action carried (#669), in the order queued. */
 const carried: BuildParameter[][] = [];
 /** What the next `onaction` answers: whether the write was queued. */
@@ -110,8 +112,8 @@ function render(
       writeOps,
       onnavigate: (hash: string) => navigated.push(hash),
       onopenurl: () => {},
-      onaction: (action: ViewAction, option: string | null, parameters: BuildParameter[] = []) => {
-        queued.push([action.write_op, option]);
+      onaction: (action: ViewAction, values: ActionValues, parameters: BuildParameter[] = []) => {
+        queued.push([action.write_op, values]);
         carried.push(parameters);
         return queues();
       },
@@ -143,7 +145,7 @@ beforeEach(() => {
   saved.length = 0;
   queues = () => Promise.resolve(true);
   document.body.replaceChildren();
-  answer = (section) => Promise.resolve({ sections: [log(section ?? "log", false)] });
+  answer = (section) => Promise.resolve({ sections: [log(section ?? "log", false)], actions: [] });
 });
 
 test("sections are tabs, the first is open, and a count sits by its title", () => {
@@ -182,7 +184,7 @@ test("a deferred tab is read once, on its first opening", async () => {
 });
 
 test("a view that opens on a deferred section reads it, once", async () => {
-  const screen = render({ sections: [log("log", true), log("tail", false)] });
+  const screen = render({ sections: [log("log", true), log("tail", false)], actions: [] });
   expect(reads).toEqual([["gitea:tidewater/payout-service@c90d11", "log"]]);
   await vi.waitFor(() => expect(screen.panel().textContent).toContain("step 3 failed"));
   screen.tabs()[1]!.click();
@@ -198,7 +200,7 @@ test("a deferred tab that fails says why and can be read again", async () => {
   answer = (section) =>
     fail
       ? Promise.reject({ code: "unreachable", message: "Gitea answered 502", source_id: null })
-      : Promise.resolve({ sections: [log(section ?? "log", false)] });
+      : Promise.resolve({ sections: [log(section ?? "log", false)], actions: [] });
   const screen = render();
   screen.tabs()[2]!.click();
   flushSync();
@@ -246,14 +248,51 @@ test("arrow keys move between tabs", () => {
   screen.done();
 });
 
-const MERGE: ViewAction = {
-  write_op: "merge_pull_request",
-  label: "Merge…",
-  options: ["merge", "rebase", "squash"],
-  confirm: "Merge <b>feature/x</b> into main?",
-};
+function action(write_op: string, label: string, more: Partial<ViewAction> = {}): ViewAction {
+  return {
+    write_op,
+    label,
+    fields: [],
+    confirm: null,
+    primary: false,
+    danger: false,
+    disabled: null,
+    with_settings: false,
+    ...more,
+  };
+}
 
-function withActions(...actions: ViewAction[]): View {
+function formField(name: string, label: string, kind: ActionField["kind"], more: Partial<ActionField> = {}): ActionField {
+  return { name, label, kind, value: null, required: false, placeholder: null, ...more };
+}
+
+const MERGE = action("merge_pull_request", "Merge…", {
+  fields: [
+    formField(
+      "style",
+      "Style",
+      {
+        type: "choice",
+        options: [
+          { value: "merge", label: "Merge commit" },
+          { value: "rebase", label: "Rebase" },
+          { value: "squash", label: "<b>Squash</b>" },
+        ],
+      },
+      { required: true },
+    ),
+  ],
+  confirm: "Merge <b>feature/x</b> into main?",
+  primary: true,
+});
+
+/** A view of three tabs, `actions` in its toolbar. */
+function withToolbar(...actions: ViewAction[]): View {
+  return { ...VIEW, actions };
+}
+
+/** A view whose overview carries `actions` as a block of its own. */
+function withActionsBlock(...actions: ViewAction[]): View {
   return {
     sections: [
       {
@@ -267,6 +306,7 @@ function withActions(...actions: ViewAction[]): View {
         ],
       },
     ],
+    actions: [],
   };
 }
 
@@ -278,68 +318,256 @@ function button(root: ParentNode, text: string): HTMLButtonElement | undefined {
   return buttons(root).find((b) => b.textContent!.replace(/\s+/g, " ").trim() === text);
 }
 
-test("an action is drawn only where the source declares its op", () => {
-  const undeclared = render(withActions(MERGE), ["comment", "approve"]);
-  expect(button(undeclared.panel(), "Merge…")).toBeUndefined();
-  expect(undeclared.panel().querySelector(".ab"), "no empty strip either").toBeNull();
+function toolbar(target: HTMLElement): HTMLElement | null {
+  return target.querySelector<HTMLElement>("[role=toolbar]");
+}
+
+/** The open dialog's control labelled `label`. */
+function control<T extends HTMLElement = HTMLInputElement>(label: string): T {
+  const tag = [...dialog().querySelectorAll("label")].find((l) => l.textContent!.trim() === label);
+  if (!tag) throw new Error(`no field labelled ${label}`);
+  return (tag.htmlFor ? document.getElementById(tag.htmlFor) : tag.querySelector("input")) as T;
+}
+
+test("the toolbar sits above the tabs and stays on every tab; a view without actions draws none", () => {
+  const screen = render(withToolbar(MERGE), ["merge_pull_request"]);
+  const bar = toolbar(screen.target)!;
+  expect(bar).not.toBeNull();
+  expect(bar.compareDocumentPosition(screen.target.querySelector("[role=tablist]")!)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  for (const tab of screen.tabs()) {
+    tab.click();
+    flushSync();
+    expect(button(toolbar(screen.target)!, "Merge…"), tab.textContent!).toBeDefined();
+  }
+  expect(button(screen.panel(), "Merge…"), "the toolbar is not inside a tab").toBeUndefined();
+  screen.done();
+
+  const bare = render(VIEW, ["merge_pull_request"]);
+  expect(toolbar(bare.target)).toBeNull();
+  bare.done();
+});
+
+test("an action is drawn only where the source declares its op; a toolbar left with none is not drawn", () => {
+  const undeclared = render(withToolbar(MERGE), ["comment", "approve"]);
+  expect(toolbar(undeclared.target), "no empty strip").toBeNull();
   undeclared.done();
 
-  const declared = render(withActions(MERGE), ["comment", "merge_pull_request"]);
-  expect(button(declared.panel(), "Merge…")).toBeDefined();
+  const unknown = render(withToolbar(action("launch_rocket", "Launch")), ["launch_rocket"]);
+  expect(toolbar(unknown.target), "an op the shell cannot queue is not drawn").toBeNull();
+  unknown.done();
+
+  const declared = render(withToolbar(MERGE), ["comment", "merge_pull_request"]);
+  expect(button(toolbar(declared.target)!, "Merge…")).toBeDefined();
   declared.done();
 });
 
-test("an action opens its dialog, the first option picked, and queues the one chosen", async () => {
-  const screen = render(withActions(MERGE), ["merge_pull_request"]);
-  button(screen.panel(), "Merge…")!.click();
+test("a primary action is filled and a danger one in the error tone", () => {
+  const screen = render(withToolbar(MERGE, action("run_build", "Delete…", { danger: true })), [
+    "merge_pull_request",
+    "run_build",
+  ]);
+  const bar = toolbar(screen.target)!;
+  expect(button(bar, "Merge…")!.classList.contains("pri")).toBe(true);
+  expect(button(bar, "Delete…")!.classList.contains("danger")).toBe(true);
+  expect(button(bar, "Delete…")!.classList.contains("pri")).toBe(false);
+  screen.done();
+});
+
+test("a choice opens on its first option and queues the one chosen; labels and sentence are text", async () => {
+  const screen = render(withToolbar(MERGE), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Merge…")!.click();
   flushSync();
 
-  const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
-  expect(dialog).not.toBeNull();
-  // The sentence is source text: drawn, never rendered.
-  expect(dialog.textContent).toContain("Merge <b>feature/x</b> into main?");
-  expect(dialog.querySelector("b")).toBeNull();
-  const radios = [...dialog.querySelectorAll<HTMLButtonElement>("[role=radio]")];
-  expect(radios.map((r) => r.textContent!.trim())).toEqual(["merge", "rebase", "squash"]);
+  expect(dialog()).not.toBeNull();
+  // The sentence and the labels are source text: drawn, never rendered.
+  expect(dialog().textContent).toContain("Merge <b>feature/x</b> into main?");
+  expect(dialog().querySelector("b")).toBeNull();
+  const radios = [...dialog().querySelectorAll<HTMLButtonElement>("[role=radio]")];
+  expect(radios.map((r) => r.textContent!.trim())).toEqual(["Merge commit", "Rebase", "<b>Squash</b>"]);
   expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+  expect(dialog().querySelector("[role=radiogroup]")!.getAttribute("aria-label")).toBe("Style");
   expect(queued, "nothing is queued by opening the dialog").toEqual([]);
 
   radios[2]!.click();
   flushSync();
   expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
-  button(dialog, "Merge")!.click();
+  button(dialog(), "Merge")!.click();
   flushSync();
-  expect(queued).toEqual([["merge_pull_request", "squash"]]);
+  expect(queued).toEqual([["merge_pull_request", { style: "squash" }]]);
   await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
   screen.done();
 });
 
 test("a write that could not be queued keeps the dialog open; cancelling queues nothing", async () => {
   queues = () => Promise.resolve(false);
-  const screen = render(withActions(MERGE), ["merge_pull_request"]);
-  button(screen.panel(), "Merge…")!.click();
+  const screen = render(withToolbar(MERGE), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Merge…")!.click();
   flushSync();
-  button(document.querySelector("[role=dialog]")!, "Merge")!.click();
+  button(dialog(), "Merge")!.click();
   await new Promise((settle) => setTimeout(settle, 0));
   flushSync();
-  expect(queued).toEqual([["merge_pull_request", "merge"]]);
+  expect(queued).toEqual([["merge_pull_request", { style: "merge" }]]);
   expect(document.querySelector("[role=dialog]"), "still open to try again").not.toBeNull();
 
-  button(document.querySelector("[role=dialog]")!, "Cancel")!.click();
+  button(dialog(), "Cancel")!.click();
   flushSync();
   expect(document.querySelector("[role=dialog]")).toBeNull();
   expect(queued).toHaveLength(1);
   screen.done();
 });
 
-test("an action with no options and no sentence queues on the button", () => {
-  const run: ViewAction = { write_op: "merge_pull_request", label: "Merge", options: [], confirm: null };
-  const screen = render(withActions(run), ["merge_pull_request"]);
-  button(screen.panel(), "Merge")!.click();
+test("an action with nothing to ask, no sentence and no danger queues on the button", () => {
+  const screen = render(withToolbar(action("merge_pull_request", "Merge")), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Merge")!.click();
   flushSync();
   expect(document.querySelector("[role=dialog]")).toBeNull();
-  expect(queued).toEqual([["merge_pull_request", null]]);
+  expect(queued).toEqual([["merge_pull_request", {}]]);
   screen.done();
+});
+
+/** Every field kind at once, each with its declared start. */
+const EVERY_KIND = action("merge_pull_request", "Open pull request…", {
+  fields: [
+    formField("title", "Title", { type: "text", suggestions: ["PAY-231: retry"] }, { value: "PAY-231", placeholder: "One line" }),
+    formField("body", "Description", { type: "long_text" }, { value: "Refs <b>PAY-231</b>" }),
+    formField("base", "Base", {
+      type: "choice",
+      options: ["main", "develop", "release/1", "release/2", "release/3"].map((b) => ({ value: b, label: b })),
+    }, { value: "develop" }),
+    formField("delete_branch", "Delete the branch", { type: "flag" }, { value: "true" }),
+    formField("draft", "Draft", { type: "flag" }),
+  ],
+});
+
+test("each field kind is drawn as declared and handed up by name", () => {
+  const screen = render(withToolbar(EVERY_KIND), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Open pull request…")!.click();
+  flushSync();
+
+  const title = control("Title");
+  expect(title.tagName).toBe("INPUT");
+  expect(title.value).toBe("PAY-231");
+  expect(title.placeholder).toBe("One line");
+  const list = document.getElementById(title.getAttribute("list")!)!;
+  expect([...list.querySelectorAll("option")].map((o) => o.value)).toEqual(["PAY-231: retry"]);
+
+  const body = control<HTMLTextAreaElement>("Description");
+  expect(body.tagName, "Markdown is a text area, drawn as typed").toBe("TEXTAREA");
+  expect(body.value).toBe("Refs <b>PAY-231</b>");
+  expect(dialog().querySelector("b")).toBeNull();
+
+  const base = control<HTMLSelectElement>("Base");
+  expect(base.tagName, "past four options a choice is a list").toBe("SELECT");
+  expect(base.value).toBe("develop");
+
+  const remove = control("Delete the branch");
+  expect(remove.type).toBe("checkbox");
+  expect(remove.checked).toBe(true);
+  const draft = control("Draft");
+  expect(draft.checked).toBe(false);
+
+  type(title, "PAY-231: retry SEPA");
+  body.value = "line one\nline two";
+  body.dispatchEvent(new Event("input", { bubbles: true }));
+  base.value = "release/2";
+  base.dispatchEvent(new Event("change", { bubbles: true }));
+  remove.click();
+  draft.click();
+  flushSync();
+  button(dialog(), "Open pull request")!.click();
+  flushSync();
+  expect(queued).toEqual([
+    [
+      "merge_pull_request",
+      { title: "PAY-231: retry SEPA", body: "line one\nline two", base: "release/2", delete_branch: "false", draft: "true" },
+    ],
+  ]);
+  screen.done();
+});
+
+test("a required field left blank stops the write and says so beside it", () => {
+  const form = action("merge_pull_request", "Comment…", {
+    fields: [
+      formField("body", "Comment", { type: "long_text" }, { required: true }),
+      formField("sure", "I mean it", { type: "flag" }, { required: true }),
+    ],
+  });
+  const screen = render(withToolbar(form), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Comment…")!.click();
+  flushSync();
+  expect(dialog().textContent, "nothing is flagged before a try").not.toContain("Required");
+
+  const body = control<HTMLTextAreaElement>("Comment");
+  body.value = "   ";
+  body.dispatchEvent(new Event("input", { bubbles: true }));
+  button(dialog(), "Comment")!.click();
+  flushSync();
+  expect(queued, "blanks are not an answer").toEqual([]);
+  expect(body.getAttribute("aria-invalid")).toBe("true");
+  expect(control("I mean it").getAttribute("aria-invalid")).toBe("true");
+  expect(document.activeElement, "the first blank is focused").toBe(body);
+
+  body.value = "LGTM";
+  body.dispatchEvent(new Event("input", { bubbles: true }));
+  control("I mean it").click();
+  flushSync();
+  expect(body.getAttribute("aria-invalid")).toBeNull();
+  button(dialog(), "Comment")!.click();
+  flushSync();
+  expect(queued).toEqual([["merge_pull_request", { body: "LGTM", sure: "true" }]]);
+  screen.done();
+});
+
+test("a disabled action stays in place with its reason as tooltip and description, and does nothing", () => {
+  const reason = "Not mergeable into main: a conflict";
+  const screen = render(withToolbar({ ...MERGE, disabled: reason }), ["merge_pull_request"]);
+  const merge = button(toolbar(screen.target)!, "Merge…")!;
+  expect(merge.getAttribute("aria-disabled")).toBe("true");
+  expect(merge.title).toBe(reason);
+  const described = document.getElementById(merge.getAttribute("aria-describedby")!)!;
+  expect(described.textContent).toBe(reason);
+  expect(merge.classList.contains("pri"), "a disabled primary is not filled").toBe(false);
+
+  merge.click();
+  flushSync();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(queued).toEqual([]);
+  screen.done();
+});
+
+test("a danger action always asks, with its sentence and its write in the error tone", async () => {
+  const remove = action("merge_pull_request", "Delete branch…", {
+    danger: true,
+    confirm: "Delete feature/x? Its commits stay only where they are merged.",
+  });
+  const screen = render(withToolbar(remove), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Delete branch…")!.click();
+  flushSync();
+  expect(queued, "never on the button").toEqual([]);
+  expect(dialog().textContent).toContain("Delete feature/x? Its commits stay only where they are merged.");
+  const go = button(dialog(), "Delete branch")!;
+  expect(go.classList.contains("danger")).toBe(true);
+  expect(go.classList.contains("pri")).toBe(false);
+  go.click();
+  flushSync();
+  expect(queued).toEqual([["merge_pull_request", {}]]);
+  await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
+  screen.done();
+});
+
+test("an actions block still draws in its own section, and never repeats a toolbar action", () => {
+  const block = render(withActionsBlock(MERGE), ["merge_pull_request"]);
+  expect(button(block.panel(), "Merge…")).toBeDefined();
+  expect(toolbar(block.target)).toBeNull();
+  block.done();
+
+  const both = render({ ...withActionsBlock(MERGE), actions: [MERGE] }, ["merge_pull_request"]);
+  const drawn = buttons(both.target).filter((b) => b.textContent!.trim() === "Merge…");
+  expect(drawn, "once, in the toolbar").toHaveLength(1);
+  expect(toolbar(both.target)!.contains(drawn[0]!)).toBe(true);
+  both.done();
 });
 
 test("a view read again drops the deferred tabs it had read, and reads the open one afresh", async () => {
@@ -347,7 +575,7 @@ test("a view read again drops the deferred tabs it had read, and reads the open 
   document.body.append(target);
   const props = $state({
     entityId: "gitea:tidewater/payout-service#142",
-    view: { sections: [log("log", true)] } as View,
+    view: { sections: [log("log", true)], actions: [] },
     webUrl: null,
     sourceName: "Tidewater Git",
     writeOps: [] as string[],
@@ -360,7 +588,7 @@ test("a view read again drops the deferred tabs it had read, and reads the open 
   await vi.waitFor(() => expect(target.textContent).toContain("step 3 failed"));
   expect(reads).toHaveLength(1);
 
-  props.view = { sections: [log("log", true)] };
+  props.view = { sections: [log("log", true)], actions: [] };
   flushSync();
   await vi.waitFor(() => expect(reads).toHaveLength(2));
   unmount(app);
@@ -421,17 +649,6 @@ const RUN_VIEW: View = {
       deferred: false,
       blocks: [
         { type: "facts", facts: [{ label: "Project", value: "Payout", tone: null }] },
-        {
-          type: "actions",
-          actions: [
-            {
-              write_op: "run_build",
-              label: "Run…",
-              options: ["feature/PAY-231-sepa-retry", "fix/<b>PAY-228</b>"],
-              confirm: "Queue one build of this configuration.",
-            },
-          ],
-        },
       ],
     },
     {
@@ -455,6 +672,21 @@ const RUN_VIEW: View = {
       ],
     },
   ],
+  actions: [
+    action("run_build", "Run…", {
+      fields: [
+        formField(
+          "branch",
+          "Branch",
+          { type: "text", suggestions: ["feature/PAY-231-sepa-retry", "fix/<b>PAY-228</b>"] },
+          { placeholder: "default branch" },
+        ),
+      ],
+      confirm: "Queue one build of this configuration.",
+      primary: true,
+      with_settings: true,
+    }),
+  ],
 };
 
 function dialog(): HTMLElement {
@@ -473,10 +705,10 @@ function type(input: HTMLInputElement, value: string) {
 
 test("Run… offers a branch with its suggestions and the parameters as they stand; untouched, it sends neither", async () => {
   const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
-  button(screen.panel(), "Run…")!.click();
+  button(toolbar(screen.target)!, "Run…")!.click();
   flushSync();
 
-  const branch = field("Branch")!;
+  const branch = control("Branch");
   expect(branch.value, "the default branch is the empty field").toBe("");
   expect(branch.placeholder).toBe("default branch");
   const list = document.getElementById(branch.getAttribute("list")!)!;
@@ -497,7 +729,7 @@ test("Run… offers a branch with its suggestions and the parameters as they sta
 
   button(dialog(), "Run")!.click();
   flushSync();
-  expect(queued).toEqual([["run_build", ""]]);
+  expect(queued).toEqual([["run_build", { branch: "" }]]);
   expect(carried).toEqual([[]]);
   await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
   screen.done();
@@ -505,10 +737,10 @@ test("Run… offers a branch with its suggestions and the parameters as they sta
 
 test("Run… sends the branch typed and only the values changed, a secret only when typed", () => {
   const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
-  button(screen.panel(), "Run…")!.click();
+  button(toolbar(screen.target)!, "Run…")!.click();
   flushSync();
 
-  type(field("Branch")!, "fix/PAY-228-partial-refund-drift");
+  type(control("Branch"), "fix/PAY-228-partial-refund-drift");
   type(field("tidewater.region")!, "eu-west-1");
   type(field("env.SEPA_RETRIES")!, "5");
   expect(dialog().textContent).toContain("1 changed");
@@ -517,7 +749,7 @@ test("Run… sends the branch typed and only the values changed, a secret only w
 
   button(dialog(), "Run")!.click();
   flushSync();
-  expect(queued).toEqual([["run_build", "fix/PAY-228-partial-refund-drift"]]);
+  expect(queued).toEqual([["run_build", { branch: "fix/PAY-228-partial-refund-drift" }]]);
   expect(carried).toEqual([
     [
       { name: "env.SEPA_SANDBOX_KEY", value: "typed-key" },
@@ -529,22 +761,22 @@ test("Run… sends the branch typed and only the values changed, a secret only w
 
 test("a run offers only this entity's own settings, and a dialog opened again starts afresh", () => {
   const other = render(RUN_VIEW, ["run_build"], {}, "teamcity:buildType:Ledger_Deploy_Staging");
-  button(other.panel(), "Run…")!.click();
+  button(toolbar(other.target)!, "Run…")!.click();
   flushSync();
   expect(field("env.SEPA_RETRIES")).toBeNull();
   other.done();
 
   queues = () => Promise.resolve(true);
   const screen = render(RUN_VIEW, ["run_build"], {}, CONFIG);
-  button(screen.panel(), "Run…")!.click();
+  button(toolbar(screen.target)!, "Run…")!.click();
   flushSync();
   type(field("env.SEPA_RETRIES")!, "9");
-  type(field("Branch")!, "feature/x");
+  type(control("Branch"), "feature/x");
   button(dialog(), "Cancel")!.click();
   flushSync();
-  button(screen.panel(), "Run…")!.click();
+  button(toolbar(screen.target)!, "Run…")!.click();
   flushSync();
   expect(field("env.SEPA_RETRIES")!.value).toBe("5");
-  expect(field("Branch")!.value).toBe("");
+  expect(control("Branch").value).toBe("");
   screen.done();
 });

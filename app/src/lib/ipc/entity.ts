@@ -788,25 +788,58 @@ export interface ViewRow {
 }
 
 /**
- * One write a view offers from here (#667) — `knobas_source::view::ViewAction`.
+ * One write a view offers (#667, #702) — `knobas_source::view::ViewAction`: a
+ * toolbar button (`SourceView.actions`) or one in an actions block.
  *
- * The adapter draws it only while the source offers the write right now; the
- * shell draws it only where the source's descriptor declares `write_op`, and
- * queues it against the entity the view is of.
+ * The source declares its dialog: the fields, the sentence, the tone. The
+ * shell draws it only where the source's descriptor declares `write_op` and
+ * `detail/view/actions.ts` can build its payload, and queues it against the
+ * entity the view is of.
  */
 export interface ViewAction {
   /** The `WriteOp` identifier it queues. */
   write_op: string;
   /** The button's words (`Merge…`). */
   label: string;
-  /**
-   * The dialog's choices, in the op's own words; the first is the default.
-   * For an op whose choice is typed (`run_build`'s branch, #669) they are
-   * suggestions and none is picked: `actionForm` in `detail/view/actions.ts`.
-   */
-  options: string[];
-  /** The dialog's sentence. `null` queues on the button, with no dialog. */
+  /** What the dialog asks for, in order. */
+  fields: ActionField[];
+  /** The dialog's sentence. */
   confirm: string | null;
+  /** The entity's main write: drawn filled. */
+  primary: boolean;
+  /** A write that destroys something: the error tone, always through its dialog. */
+  danger: boolean;
+  /** Why it cannot be taken now: drawn disabled, this as tooltip and description. */
+  disabled: string | null;
+  /** The dialog also offers this entity's own settings to change for this one write (#669). */
+  with_settings: boolean;
+}
+
+/** One input of an action's dialog — `knobas_source::view::ActionField`. */
+export interface ActionField {
+  /** The key its value is handed on under. */
+  name: string;
+  label: string;
+  kind: FieldKind;
+  /** A text's prefill, a choice's preselected value (`null`: the first), a flag's `"true"`. */
+  value: string | null;
+  /** Not sent without: text other than blanks, a choice picked, a flag checked. */
+  required: boolean;
+  placeholder: string | null;
+}
+
+/** How a field asks — `knobas_source::view::FieldKind`, a union on `type`. */
+export type FieldKind =
+  | { type: "text"; suggestions: string[] }
+  | { type: "long_text" }
+  | { type: "choice"; options: ChoiceOption[] }
+  | { type: "flag" };
+
+export interface ChoiceOption {
+  /** What the op takes. */
+  value: string;
+  /** What the reader sees. */
+  label: string;
 }
 
 export interface Setting {
@@ -880,6 +913,11 @@ export interface ViewSection {
 
 export interface SourceView {
   sections: ViewSection[];
+  /**
+   * The entity's actions, drawn as a toolbar above the tabs on every tab
+   * (#702). Empty draws none.
+   */
+  actions: ViewAction[];
 }
 
 /**

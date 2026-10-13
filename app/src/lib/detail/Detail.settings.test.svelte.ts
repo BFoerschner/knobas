@@ -165,6 +165,7 @@ function config(): EntityDetail {
 
 function parameters(retries: string): SourceView {
   return {
+    actions: [],
     sections: [
       {
         id: "parameters",
@@ -512,21 +513,30 @@ function runnable(): SourceView {
         title: "Overview",
         count: null,
         deferred: false,
-        blocks: [
-          {
-            type: "actions",
-            actions: [
-              {
-                write_op: "run_build",
-                label: "Run…",
-                options: ["feature/PAY-231-sepa-retry"],
-                confirm: "Queue one build of this configuration.",
-              },
-            ],
-          },
-        ],
+        blocks: [],
       },
       ...parameters("5").sections,
+    ],
+    actions: [
+      {
+        write_op: "run_build",
+        label: "Run…",
+        fields: [
+          {
+            name: "branch",
+            label: "Branch",
+            kind: { type: "text", suggestions: ["feature/PAY-231-sepa-retry"] },
+            value: null,
+            required: false,
+            placeholder: "default branch",
+          },
+        ],
+        confirm: "Queue one build of this configuration.",
+        primary: true,
+        danger: false,
+        disabled: null,
+        with_settings: true,
+      },
     ],
   };
 }

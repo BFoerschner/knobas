@@ -8,7 +8,10 @@
 //! (ADR-0020 rule 3).
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewRow, ViewSection};
+use knobas_source::view::{
+    ActionField, Block, ChoiceOption, Fact, FieldKind, SourceView, Tone, ViewAction, ViewRow,
+    ViewSection,
+};
 
 use super::rows::{self, ListedCommit};
 use super::{fact, login, when_of};
@@ -35,9 +38,11 @@ pub(super) async fn draw(
         repo,
         number,
     };
+    let mut actions = Vec::new();
     let sections = match section {
         None => {
             let pull = at.pull().await?;
+            actions.push(merge_action(&pull));
             vec![
                 at.overview(&pull).await?,
                 files_stub(&pull),
@@ -55,7 +60,7 @@ pub(super) async fn draw(
             )));
         }
     };
-    Ok(SourceView { sections })
+    Ok(SourceView { sections, actions })
 }
 
 /// The pull request one view is about.
@@ -94,7 +99,6 @@ impl PullView<'_> {
         let mut facts = overview_facts(pull);
         facts.extend(verdicts(&reviews));
         let mut blocks = vec![Block::Facts { facts }];
-        blocks.extend(merge_action(pull));
         let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
         if !body.trim().is_empty() {
             blocks.push(Block::Text {
@@ -238,37 +242,61 @@ fn files_stub(pull: &Pull) -> ViewSection {
     }
 }
 
-/// *Merge…*, when Gitea would merge this pull request now (issue #667): it is
-/// open, not merged, and Gitea answered `mergeable: true`.
+/// *Merge…*, the pull request's main write, in the toolbar (issues #667,
+/// #702): enabled when Gitea would merge it now -- open, not merged, and
+/// Gitea answered `mergeable: true` -- and otherwise disabled with the reason,
+/// so the reader learns why rather than looking for the button.
 ///
 /// Gitea's flag already says *no* for a conflict, a work-in-progress title and
 /// a mergeability check still running, which are the 405s a merge would get;
-/// an absent flag is not a yes. The styles are the SPI's
-/// [`MergeStyle`](knobas_source::MergeStyle) words, `merge` first because it
-/// is Gitea's own default. Whether the account may merge is not asked: that is
-/// a refusal the write queue shows with Gitea's sentence (ADR-0004).
-fn merge_action(pull: &Pull) -> Option<Block> {
-    let open = !pull.merged && pull.state.as_deref() == Some("open");
-    if !(open && pull.mergeable == Some(true)) {
-        return None;
-    }
+/// it does not say which, so the reason names all three. An absent flag is not
+/// a yes. The styles are the SPI's [`MergeStyle`](knobas_source::MergeStyle)
+/// words, `merge` first because it is Gitea's own default. Whether the account
+/// may merge is not asked: that is a refusal the write queue shows with
+/// Gitea's sentence (ADR-0004).
+fn merge_action(pull: &Pull) -> ViewAction {
     let head = pull.head.as_ref().and_then(|b| b.r#ref.as_deref());
     let base = pull.base.as_ref().and_then(|b| b.r#ref.as_deref());
     let confirm = match (head, base) {
         (Some(head), Some(base)) => format!("Merge {head} into {base}?"),
         _ => "Merge this pull request?".to_owned(),
     };
-    Some(Block::Actions {
-        actions: vec![ViewAction {
-            write_op: crate::WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
-            label: "Merge…".to_owned(),
-            options: knobas_source::MergeStyle::ALL
-                .iter()
-                .map(|style| style.as_str().to_owned())
-                .collect(),
-            confirm: Some(confirm),
+    let disabled = if pull.merged {
+        Some("Already merged".to_owned())
+    } else if pull.state.as_deref() != Some("open") {
+        Some("Closed: reopen it to merge".to_owned())
+    } else {
+        match pull.mergeable {
+            Some(true) => None,
+            Some(false) => Some(format!(
+                "Not mergeable into {}: a conflict, a work-in-progress title or a check still \
+                 running",
+                base.unwrap_or("its base")
+            )),
+            None => Some("Gitea has not said yet whether this can be merged".to_owned()),
+        }
+    };
+    let options = knobas_source::MergeStyle::ALL
+        .iter()
+        .map(|style| {
+            let label = match style {
+                knobas_source::MergeStyle::Merge => "Merge commit",
+                knobas_source::MergeStyle::Rebase => "Rebase",
+                knobas_source::MergeStyle::Squash => "Squash",
+            };
+            ChoiceOption::new(style.as_str(), label)
+        })
+        .collect();
+    ViewAction {
+        fields: vec![ActionField {
+            required: true,
+            ..ActionField::new("style", "Style", FieldKind::Choice { options })
         }],
-    })
+        confirm: Some(confirm),
+        primary: true,
+        disabled,
+        ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
+    }
 }
 
 /// State, author, `head → base`, whether it can be merged, its times.

@@ -26,7 +26,8 @@
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{
-    Block, CommitHint, Fact, Setting, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+    ActionField, Block, CommitHint, Fact, FieldKind, Setting, SourceView, Tone, ViewAction, ViewRow,
+    ViewSection,
 };
 
 use crate::client::{FAILED_TESTS, HttpRest};
@@ -151,7 +152,13 @@ async fn build_config(
             Tab::VcsRoots => vcs_roots(&record),
         })
         .collect();
-    Ok(SourceView { sections })
+    // The toolbar comes with the whole view; a section read answers its section.
+    let actions = if wanted.is_none() {
+        vec![run_action(&builds)]
+    } else {
+        Vec::new()
+    };
+    Ok(SourceView { sections, actions })
 }
 
 fn tab(tab: Tab, title: &str, count: Option<usize>, blocks: Vec<Block>) -> ViewSection {
@@ -217,7 +224,7 @@ fn overview(
         ));
     }
 
-    let mut blocks = vec![Block::Facts { facts }, run_action(builds)];
+    let mut blocks = vec![Block::Facts { facts }];
     if let Some(description) = nonblank(record.description.as_deref()) {
         blocks.push(Block::Text {
             text: description.to_owned(),
@@ -236,37 +243,41 @@ fn overview(
     tab(Tab::Overview, "Overview", None, blocks)
 }
 
-/// *Run…* (#669): a [`run_build`](crate::WRITE_OP_RUN_BUILD) whose choices
-/// are the branches the recent builds ran on, newest first and each once, for
-/// the dialog to suggest. The dialog's branch starts empty, which is the
-/// default branch; the parameters it offers are the *Parameters* tab's.
+/// *Run…* (#669), the configuration's main write, in the toolbar (#702): a
+/// [`run_build`](crate::WRITE_OP_RUN_BUILD) asking for a branch, typed, with
+/// the branches the recent builds ran on -- newest first and each once -- as
+/// suggestions. The branch starts empty, which is the default branch; the
+/// dialog also offers the *Parameters* tab's values to override for this run
+/// (`with_settings`).
 ///
 /// **Never the default branch by name.** TeamCity resolves an explicit
 /// `branchName: main` against the branch specification to a logical branch
 /// that is *not* `<default>` (testenv/README.md), so suggesting it would
-/// offer a run of the default branch that is not one. Always drawn: a paused
+/// offer a run of the default branch that is not one. Always enabled: a paused
 /// configuration still runs on request, and a refusal is TeamCity's to give.
-fn run_action(builds: &[Build]) -> Block {
-    let mut options: Vec<String> = Vec::new();
+fn run_action(builds: &[Build]) -> ViewAction {
+    let mut suggestions: Vec<String> = Vec::new();
     for build in builds {
         let Some(branch) = nonblank(build.branch_name.as_deref()) else {
             continue;
         };
-        if build.default_branch != Some(true) && !options.iter().any(|o| o == branch) {
-            options.push(branch.to_owned());
+        if build.default_branch != Some(true) && !suggestions.iter().any(|o| o == branch) {
+            suggestions.push(branch.to_owned());
         }
     }
-    Block::Actions {
-        actions: vec![ViewAction {
-            write_op: crate::WRITE_OP_RUN_BUILD.to_owned(),
-            label: "Run…".to_owned(),
-            options,
-            confirm: Some(
-                "Queue one build of this configuration. Leave the branch empty for the default \
-                 branch; only the values you change are sent, for this build alone."
-                    .to_owned(),
-            ),
+    ViewAction {
+        fields: vec![ActionField {
+            placeholder: Some("default branch".to_owned()),
+            ..ActionField::new("branch", "Branch", FieldKind::Text { suggestions })
         }],
+        confirm: Some(
+            "Queue one build of this configuration. Leave the branch empty for the default \
+             branch; only the values you change are sent, for this build alone."
+                .to_owned(),
+        ),
+        primary: true,
+        with_settings: true,
+        ..ViewAction::new(crate::WRITE_OP_RUN_BUILD, "Run…")
     }
 }
 
@@ -887,7 +898,10 @@ async fn build(
             blocks,
         });
     }
-    Ok(SourceView { sections })
+    Ok(SourceView {
+        sections,
+        actions: Vec::new(),
+    })
 }
 
 fn build_type_id(record: &BuildRecord) -> Option<&str> {

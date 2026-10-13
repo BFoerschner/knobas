@@ -13,7 +13,9 @@
 //! never draw it.
 
 use knobas_source::instance::SourceInstance;
-use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewSection};
+use knobas_source::view::{
+    ActionField, Block, Fact, FieldKind, SourceView, Tone, ViewAction, ViewSection,
+};
 use knobas_source::{AuthMethod, Source, SourceError};
 use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param, query_param_contains};
@@ -350,25 +352,40 @@ async fn the_overview_offers_a_run_suggesting_its_recent_builds_branches() {
         .mount(&server)
         .await;
     let view = whole_view(&server).await;
-    let overview = section(&view, "overview");
-    let Block::Actions { actions } = &overview.blocks[1] else {
-        panic!("the action follows the facts: {overview:#?}");
-    };
     assert_eq!(
-        actions,
-        &[ViewAction {
-            write_op: "run_build".to_owned(),
-            label: "Run…".to_owned(),
-            options: vec![
-                "fix/PAY-228-partial-refund-drift".to_owned(),
-                "feature/PAY-231-sepa-retry".to_owned(),
-            ],
+        view.actions,
+        [ViewAction {
+            fields: vec![ActionField {
+                placeholder: Some("default branch".to_owned()),
+                ..ActionField::new(
+                    "branch",
+                    "Branch",
+                    FieldKind::Text {
+                        suggestions: vec![
+                            "fix/PAY-228-partial-refund-drift".to_owned(),
+                            "feature/PAY-231-sepa-retry".to_owned(),
+                        ],
+                    },
+                )
+            }],
             confirm: Some(
                 "Queue one build of this configuration. Leave the branch empty for the default \
                  branch; only the values you change are sent, for this build alone."
                     .to_owned()
             ),
+            primary: true,
+            with_settings: true,
+            ..ViewAction::new("run_build", "Run…")
         }]
+    );
+    // The run is the toolbar's (#702): no section draws it again.
+    assert!(
+        !view
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .any(|b| matches!(b, Block::Actions { .. })),
+        "{view:#?}"
     );
 }
 
@@ -388,17 +405,21 @@ async fn a_configuration_with_no_builds_still_offers_a_run() {
         .mount(&server)
         .await;
     let view = whole_view(&server).await;
-    let actions: Vec<_> = section(&view, "overview")
-        .blocks
+    let actions: Vec<_> = view
+        .actions
         .iter()
-        .filter_map(|b| match b {
-            Block::Actions { actions } => Some(actions),
-            _ => None,
-        })
-        .flatten()
-        .map(|a| (a.write_op.as_str(), a.options.len()))
+        .map(|a| (a.write_op.as_str(), &a.fields[0].kind, a.disabled.as_deref()))
         .collect();
-    assert_eq!(actions, [("run_build", 0)]);
+    assert_eq!(
+        actions,
+        [(
+            "run_build",
+            &FieldKind::Text {
+                suggestions: vec![]
+            },
+            None
+        )]
+    );
 }
 
 #[tokio::test]

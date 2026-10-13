@@ -73,6 +73,7 @@ function commit(): EntityDetail {
 }
 
 const DRAWN: SourceView = {
+  actions: [],
   sections: [
     {
       id: "overview",

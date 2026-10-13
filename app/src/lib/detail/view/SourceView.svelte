@@ -3,11 +3,14 @@
   for one of its kinds, as tabs over the detail.
 
   The shell draws the vocabulary and never learns which adapter drew it -- so
-  nothing here names a source, a kind or a field. An actions block draws only
-  the actions whose op the source declares (#667), and a settings block is
-  editable only where it does (#668). An action's dialog may offer this
-  entity's own settings to change for one write (#669). One component per block, in
-  this folder; a block this file does not know is not drawn (the vocabulary is
+  nothing here names a source, a kind or a field. The view's actions are a
+  toolbar between the header and the tabs, on every tab (#702); an actions
+  block draws one section's own. Either draws only the actions whose op the
+  source declares and the shell can queue (#667), and a block never repeats
+  one the toolbar has. A settings block is editable only where the source
+  declares its op (#668). An action's dialog may offer this entity's own
+  settings to change for one write (#669). One component per block, in this
+  folder; a block this file does not know is not drawn (the vocabulary is
   frozen, and a new block arrives with its component in the same change).
 
   **A deferred tab is read once, on its first opening** (rule 3): its title and
@@ -26,8 +29,8 @@
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import type { BuildParameter } from "../../ipc/sources";
-  import ActionsBlock from "./ActionsBlock.svelte";
-  import { offeredActions } from "./actions";
+  import ActionButtons from "./ActionButtons.svelte";
+  import { offeredActions, type ActionValues } from "./actions";
   import { settingsWritable, type SettingMark, type SettingsTarget } from "./settings";
   import DiffBlock from "./DiffBlock.svelte";
   import EntitiesBlock from "./EntitiesBlock.svelte";
@@ -60,8 +63,11 @@
     writeOps: string[];
     onnavigate: (hash: string) => void;
     onopenurl: (url: string) => void;
-    /** Queue an action's write with the values its dialog changed; answers whether it was queued. */
-    onaction: (action: ViewAction, option: string | null, changed: BuildParameter[]) => Promise<boolean>;
+    /**
+     * Queue an action's write with its dialog's values and the settings it
+     * changed; answers whether it was queued.
+     */
+    onaction: (action: ViewAction, values: ActionValues, changed: BuildParameter[]) => Promise<boolean>;
     /**
      * The edits of this entity's settings on their way through the queue, by
      * name (#668). Drawn only on a settings block that is of this entity.
@@ -170,15 +176,20 @@
     return { state: "read", blocks: offered(read.blocks) };
   });
 
+  /** The toolbar's actions: those the source declares and the shell can queue. */
+  const toolbar = $derived(offeredActions(view.actions, writeOps));
+
   /**
    * The blocks as drawn: an actions block keeps only the actions the source
-   * declares, and goes when none is left -- an action is absent, not
-   * disabled, where it cannot be taken.
+   * declares and the shell can queue, less any the toolbar already draws, and
+   * goes when none is left.
    */
   function offered(blocks: ViewBlock[]): ViewBlock[] {
     return blocks.flatMap((block): ViewBlock[] => {
       if (block.type !== "actions") return [block];
-      const actions = offeredActions(block.actions, writeOps);
+      const actions = offeredActions(block.actions, writeOps).filter(
+        (action) => !toolbar.some((t) => t.write_op === action.write_op && t.label === action.label),
+      );
       return actions.length === 0 ? [] : [{ type: "actions", actions }];
     });
   }
@@ -186,6 +197,11 @@
 
 {#if current}
   <div class="sv">
+    {#if toolbar.length > 0}
+      <div class="sv-bar" role="toolbar" aria-label="Actions">
+        <ActionButtons actions={toolbar} settings={ownSettings} size="md" {onaction} />
+      </div>
+    {/if}
     <div class="sv-tabs" role="tablist" aria-label="Views">
       {#each view.sections as section, index (section.id)}
         <button
@@ -246,7 +262,7 @@
                 onsave={(name, value, base) => onsetting(block, name, value, base)}
               />
             {:else if block.type === "actions"}
-              <ActionsBlock actions={block.actions} parameters={ownSettings} {onaction} />
+              <ActionButtons actions={block.actions} settings={ownSettings} {onaction} />
             {/if}
           </div>
         {/each}
@@ -256,6 +272,16 @@
 {/if}
 
 <style>
+  /*
+    The toolbar: the entity's writes, on one hairline-bounded strip between
+    the header's meta grid and the tabs, at the meta grid's own inset. Quiet
+    until something is primary (filled) or dangerous (the error tone).
+  */
+  .sv-bar {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+
   /*
     The tab strip sits flush under the meta grid, the room bar's `.tab`
     treatment at the panel's scale: mono, muted, the open one underlined in

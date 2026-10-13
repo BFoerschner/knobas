@@ -2481,19 +2481,31 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
         .await
         .expect("the view reads")
         .expect("TeamCity draws a build configuration");
-    let run = view.sections[0]
-        .blocks
+    let run = view
+        .actions
         .iter()
-        .find_map(|b| match b {
-            Block::Actions { actions } => actions.iter().find(|a| a.write_op == "run_build"),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("no Run… on the overview: {:#?}", view.sections[0]));
+        .find(|a| a.write_op == "run_build")
+        .unwrap_or_else(|| panic!("no Run… in the toolbar: {:#?}", view.actions));
     println!("SEEDED Run… action: {run:?}");
     assert!(
-        run.options.iter().any(|o| o == BRANCH),
+        !view
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .any(|b| matches!(b, Block::Actions { .. })),
+        "the run is the toolbar's, never a section's too: {view:#?}"
+    );
+    let suggested = run.fields.iter().find_map(|f| match &f.kind {
+        knobas_source::view::FieldKind::Text { suggestions } if f.name == "branch" => {
+            Some(suggestions)
+        }
+        _ => None,
+    });
+    assert!(
+        suggested.is_some_and(|s| s.iter().any(|o| o == BRANCH)),
         "1187's branch is suggested: {run:?}"
     );
+    assert!(run.with_settings, "the run offers its overrides: {run:?}");
 
     let receipt = source
         .write(WriteOp::RunBuild {

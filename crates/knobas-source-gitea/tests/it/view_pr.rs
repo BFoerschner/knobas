@@ -6,7 +6,10 @@
 //! (`a_seeded_pull_requests_view_carries_its_files_commits_and_discussion`),
 //! and on disagreement this fake is what is wrong.
 
-use knobas_source::view::{Block, DiffChange, Fact, SourceView, Tone, ViewRow, ViewSection};
+use knobas_source::view::{
+    ActionField, Block, ChoiceOption, DiffChange, Fact, FieldKind, SourceView, Tone, ViewAction,
+    ViewRow, ViewSection,
+};
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
@@ -498,53 +501,72 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
     }
 }
 
-/// The overview's actions block, when it has one.
-fn actions_of(section: &ViewSection) -> Option<&[knobas_source::view::ViewAction]> {
-    section.blocks.iter().find_map(|b| match b {
-        Block::Actions { actions } => Some(actions.as_slice()),
-        _ => None,
-    })
+/// Whether any section carries an actions block: the pull request's actions
+/// are the toolbar's (issue #702), and nothing draws one twice.
+fn has_actions_block(view: &SourceView) -> bool {
+    view.sections
+        .iter()
+        .flat_map(|s| &s.blocks)
+        .any(|b| matches!(b, Block::Actions { .. }))
 }
 
-/// Story 10 (issue #667): an open pull request Gitea says it can merge offers
-/// *Merge…*, right under its facts, with the three styles and `merge` first;
-/// its dialog names what goes where.
+/// *Merge…* as the toolbar draws it: the entity's main write, a choice of the
+/// SPI's three styles with `merge` (Gitea's own default) first, the sentence
+/// naming what goes where; `disabled` is the one part that varies.
+fn merge(disabled: Option<&str>) -> ViewAction {
+    ViewAction {
+        fields: vec![ActionField {
+            required: true,
+            ..ActionField::new(
+                "style",
+                "Style",
+                FieldKind::Choice {
+                    options: vec![
+                        ChoiceOption::new("merge", "Merge commit"),
+                        ChoiceOption::new("rebase", "Rebase"),
+                        ChoiceOption::new("squash", "Squash"),
+                    ],
+                },
+            )
+        }],
+        confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
+        primary: true,
+        disabled: disabled.map(str::to_owned),
+        ..ViewAction::new("merge_pull_request", "Merge…")
+    }
+}
+
+/// Story 10 (issue #667), moved to the toolbar (#702): an open pull request
+/// Gitea says it can merge offers *Merge…*, enabled, and no section repeats it.
 #[tokio::test]
-async fn an_open_mergeable_pull_request_offers_a_merge() {
+async fn an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar() {
     let mut pull = open_pull();
     pull["mergeable"] = json!(true);
     let server = gitea(pull, json!([])).await;
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
-    let overview = section(&view, "overview");
-    assert_eq!(
-        overview.blocks[1],
-        Block::Actions {
-            actions: vec![knobas_source::view::ViewAction {
-                write_op: "merge_pull_request".into(),
-                label: "Merge…".into(),
-                options: vec!["merge".into(), "rebase".into(), "squash".into()],
-                confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
-            }],
-        },
-        "{overview:#?}"
-    );
-    // The description still follows.
-    assert!(matches!(overview.blocks[2], Block::Text { .. }));
+    assert_eq!(view.actions, [merge(None)], "{view:#?}");
+    assert!(!has_actions_block(&view), "{view:#?}");
+    // The description still follows the facts.
+    assert!(matches!(
+        section(&view, "overview").blocks[1],
+        Block::Text { .. }
+    ));
     // Every style offered is one the SPI can carry.
-    let Block::Actions { actions } = &overview.blocks[1] else {
+    let FieldKind::Choice { options } = &view.actions[0].fields[0].kind else {
         unreachable!()
     };
-    for option in &actions[0].options {
-        serde_json::from_value::<knobas_source::MergeStyle>(json!(option))
+    for option in options {
+        serde_json::from_value::<knobas_source::MergeStyle>(json!(option.value))
             .unwrap_or_else(|e| panic!("{option:?} is not a MergeStyle: {e}"));
     }
 }
 
-/// Nothing to offer where Gitea would refuse: an open pull request it says it
-/// cannot merge (a conflict, a work-in-progress title, a check still running),
-/// one it has not answered for, a closed one and a merged one.
+/// Where Gitea would refuse, *Merge…* is still there, disabled, saying why
+/// (#702): an open pull request it says it cannot merge (a conflict, a
+/// work-in-progress title, a check still running), one it has not answered
+/// for, a closed one and a merged one.
 #[tokio::test]
-async fn a_pull_request_gitea_would_not_merge_offers_nothing() {
+async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why() {
     let not_mergeable = open_pull();
     let mut unknown = open_pull();
     unknown.as_object_mut().unwrap().remove("mergeable");
@@ -555,15 +577,34 @@ async fn a_pull_request_gitea_would_not_merge_offers_nothing() {
     merged["state"] = json!("closed");
     merged["merged"] = json!(true);
     merged["mergeable"] = json!(true);
-    for (name, pull) in [
-        ("not mergeable", not_mergeable),
-        ("unanswered", unknown),
-        ("closed", closed),
-        ("merged", merged),
+    for (pull, reason) in [
+        (
+            not_mergeable,
+            "Not mergeable into main: a conflict, a work-in-progress title or a check still \
+             running",
+        ),
+        (unknown, "Gitea has not said yet whether this can be merged"),
+        (closed, "Closed: reopen it to merge"),
+        (merged, "Already merged"),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
-        let overview = section(&view, "overview");
-        assert!(actions_of(overview).is_none(), "{name}: {overview:#?}");
+        assert_eq!(view.actions, [merge(Some(reason))], "{view:#?}");
+        assert!(!has_actions_block(&view), "{view:#?}");
     }
+}
+
+/// A section read answers that section alone: the toolbar comes with the
+/// whole view.
+#[tokio::test]
+async fn a_section_read_carries_no_toolbar() {
+    let mut pull = open_pull();
+    pull["mergeable"] = json!(true);
+    let server = gitea(pull, json!([])).await;
+    let view = source(&server)
+        .view(PR, Some("overview"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(view.actions.is_empty(), "{view:#?}");
 }

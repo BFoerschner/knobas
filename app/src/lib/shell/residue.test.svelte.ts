@@ -660,7 +660,7 @@ const CASES: Case[] = [
         target,
         props: {
           entityId: "mock:PAY-231",
-          view: { sections: [{ id: "log", title: "Log", count: null, deferred: true, blocks: [] }] },
+          view: { sections: [{ id: "log", title: "Log", count: null, deferred: true, blocks: [] }], actions: [] },
           webUrl: null,
           sourceName: "Mock",
           writeOps: [],
