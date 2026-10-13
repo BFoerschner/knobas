@@ -296,6 +296,10 @@ async fn a_forbidden_repository_is_skipped_on_an_incremental_run() {
 /// Ruling B4, the other half: every repository refusing us is a fact about the
 /// token's scope, and a green source over an empty mirror is worse than an
 /// error.
+///
+/// The run raises the 403 it was refused with. Since #722 the body says which
+/// fault it is: the fake's *user does not have permission* is not Gitea's
+/// scope sentence, so it is a refusal (`Protocol`), not `Unauthorized`.
 #[tokio::test]
 async fn every_repository_refusing_us_raises() {
     let mut state = State::tidewater();
@@ -311,7 +315,13 @@ async fn every_repository_refusing_us_raises() {
     let mut sink = VecSink(Vec::new());
     let error = source.sync(Some(cursor), &mut sink).await.unwrap_err();
     assert!(
-        matches!(error, SourceError::Unauthorized { .. }),
+        matches!(
+            error,
+            SourceError::Protocol {
+                status: Some(403),
+                ..
+            }
+        ),
         "{error:?}"
     );
     assert!(sink.0.is_empty());
@@ -332,7 +342,13 @@ async fn a_forbidden_repository_is_fatal_during_a_full_sync() {
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
     assert!(
-        matches!(error, SourceError::Unauthorized { .. }),
+        matches!(
+            error,
+            SourceError::Protocol {
+                status: Some(403),
+                ..
+            }
+        ),
         "{error:?}"
     );
 
@@ -383,7 +399,13 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
             .map(|c| format!("Ok({c})"))
             .unwrap_err();
         assert!(
-            matches!(error, SourceError::Unauthorized { .. }),
+            matches!(
+                error,
+                SourceError::Protocol {
+                    status: Some(403),
+                    ..
+                }
+            ),
             "{label}: {error:?}"
         );
     }

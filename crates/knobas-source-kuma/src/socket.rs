@@ -180,6 +180,7 @@ impl KumaSocket {
                 // a refused login inside a `200`; there is no error envelope
                 // to lift, and the bounded excerpt is the honest reading.
                 body_message: None,
+                forbidden: None,
             })?,
             account,
             budget: CALL_BUDGET,

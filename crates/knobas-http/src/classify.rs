@@ -3,6 +3,10 @@
 //! One mapping, shared by every adapter (interfaces §4.1): 401 **and** 403 →
 //! [`SourceError::Unauthorized`]; connect, DNS, TLS and timeout →
 //! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`].
+//! One exception, and it is the caller's to claim: a 403 its
+//! [`ForbiddenReading`] recognises as a refusal of the *request* -- Gitea's
+//! answer for a write to a mirror -- is a `Protocol` refusal carrying that
+//! sentence (issue #722).
 //! The distinction is user-visible -- `Unauthorized` is what makes the sources
 //! view offer *Re-enter password* -- so three adapters classifying a 403 three
 //! different ways is three different behaviours for one problem.
@@ -76,6 +80,43 @@ pub fn status_error(
             message: format!("HTTP {status}: {}", message_of(body, body_message)),
         },
     }
+}
+
+/// How a caller reads a **403** body for a refusal of the request rather than
+/// of the credential (issue #722).
+///
+/// `Some(message)` says the source refused *this request* -- Gitea answers 403
+/// for a write to a mirror or a delete of a protected branch with a token that
+/// is fine -- and makes the 403 a [`SourceError::Protocol`] carrying that
+/// message, which the write queue records as a refusal. `None` keeps
+/// [`SourceError::Unauthorized`], and that is what a reader must answer for
+/// anything it does not recognise as a refusal: a 403 about the token waits
+/// for a new one, and a refusal misread as the token's waits one needless
+/// tick, while the reverse would drop a write a new token would have sent.
+///
+/// A plain `fn` for the reason [`BodyMessage`] is one. Whatever it returns is
+/// excerpted, as a [`BodyMessage`]'s is.
+pub type ForbiddenReading = fn(body: &str) -> Option<String>;
+
+/// [`status_error`], with the caller's [`ForbiddenReading`] consulted on a
+/// 403 first. `forbidden` of `None` is exactly [`status_error`] -- every
+/// adapter but Gitea's.
+#[must_use]
+pub fn response_error(
+    status: StatusCode,
+    body: &str,
+    body_message: Option<BodyMessage>,
+    forbidden: Option<ForbiddenReading>,
+) -> SourceError {
+    if status == StatusCode::FORBIDDEN
+        && let Some(message) = forbidden.and_then(|read| read(body))
+    {
+        return SourceError::Protocol {
+            status: Some(status.as_u16()),
+            message: format!("HTTP {status}: {}", excerpt(&message)),
+        };
+    }
+    status_error(status, body, body_message)
 }
 
 /// The body as the message should carry it: the caller's reading of it where
@@ -268,6 +309,48 @@ mod tests {
                 "{status}"
             );
         }
+    }
+
+    /// The 403 reader (#722): what it recognises as a refusal of the request
+    /// becomes a `Protocol` refusal carrying its message and the 403; what it
+    /// does not stays `Unauthorized`. It is asked about a 403 and nothing
+    /// else, and without one a 403 is what it always was.
+    #[test]
+    fn a_403_the_caller_reads_as_a_refusal_is_a_protocol_fault() {
+        use reqwest::StatusCode;
+        fn mirror_only(body: &str) -> Option<String> {
+            body.contains("mirror")
+                .then(|| "Git Repository is a mirror.".to_owned())
+        }
+        let error = response_error(StatusCode::FORBIDDEN, "mirror", None, Some(mirror_only));
+        assert!(
+            matches!(&error, SourceError::Protocol { status: Some(403), message }
+                     if message == "HTTP 403 Forbidden: Git Repository is a mirror."),
+            "{error:?}"
+        );
+        assert!(matches!(
+            response_error(StatusCode::FORBIDDEN, "scope", None, Some(mirror_only)),
+            SourceError::Unauthorized { status: Some(403) }
+        ));
+        assert!(matches!(
+            response_error(StatusCode::FORBIDDEN, "mirror", None, None),
+            SourceError::Unauthorized { status: Some(403) }
+        ));
+        // A 401 is the credential, whatever its body says.
+        assert!(matches!(
+            response_error(StatusCode::UNAUTHORIZED, "mirror", None, Some(mirror_only)),
+            SourceError::Unauthorized { status: Some(401) }
+        ));
+        // Bounded like every other message.
+        fn firehose(_: &str) -> Option<String> {
+            Some("x".repeat(10_000))
+        }
+        let SourceError::Protocol { message, .. } =
+            response_error(StatusCode::FORBIDDEN, "", None, Some(firehose))
+        else {
+            panic!("a read refusal is a protocol fault");
+        };
+        assert!(message.len() < BODY_EXCERPT + 100, "{}", message.len());
     }
 
     /// An error message goes in a log line and on screen; a 4 MB HTML error

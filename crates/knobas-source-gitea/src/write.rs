@@ -284,16 +284,13 @@ struct BranchGuard {
 ///
 /// The repository's default branch, a protected branch and a branch of a
 /// mirror are **refused here, before the delete**, with a sentence naming
-/// why. Gitea refuses all three itself, but with a 403, which the shared fault
-/// mapping reads as a dead credential (`knobas_http`'s 401-and-403 rule): the
-/// write would wait for a token that is fine instead of saying what is wrong.
-/// The view offers none of them, so these reads only answer a payload that
-/// names one anyway, or a branch protected between the view and the flush.
-///
-/// A protection set in the milliseconds between these reads and the delete
-/// still comes back as that 403. The write then waits as unauthorized for one
-/// scheduler tick, and the next flush makes these reads again and refuses it
-/// with the sentence: a short wrong wait, never a lost or a wrong delete.
+/// why and what to do. Gitea refuses all three itself with a 403, which since
+/// #722 arrives as a refusal carrying Gitea's own sentence
+/// (`client::forbidden_refusal`) -- but *branch protected* says less than
+/// these do, so the reads stay. The view offers none of them, so they only
+/// answer a payload that names one anyway, or a branch protected between the
+/// view and the flush; a protection set in the milliseconds between these
+/// reads and the delete comes back as Gitea's 403 refusal.
 ///
 /// Gitea answers a delete with 204, and 404 for a branch that is already gone
 /// -- a refusal carrying its sentence (ADR-0004).

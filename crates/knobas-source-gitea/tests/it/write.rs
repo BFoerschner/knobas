@@ -243,7 +243,9 @@ async fn a_refusal_and_a_blip_arrive_as_different_faults() {
     for (status, message) in [
         (409, "branch already exists"),
         (404, "the base branch does not exist"),
-        (403, "token has no write scope"),
+        // Gitea's refusal of a branch on a mirror (#722): a refusal of the
+        // write, not of the token, so it carries its sentence like the rest.
+        (403, "Git Repository is a mirror."),
         (503, "gitea is restarting"),
     ] {
         let server = refusing(status, message).await;
@@ -258,9 +260,6 @@ async fn a_refusal_and_a_blip_arrive_as_different_faults() {
 
         assert_eq!(error.status(), Some(status), "{status}: {error:?}");
         match (status, &error) {
-            // 403 is `Unauthorized` -- both halves of the pair the user is
-            // asked to act on -- so it has no message to carry.
-            (403, SourceError::Unauthorized { .. }) => {}
             (_, SourceError::Protocol { message: m, .. }) => {
                 assert!(m.contains(message), "{status}: {m}");
                 assert!(
@@ -271,6 +270,62 @@ async fn a_refusal_and_a_blip_arrive_as_different_faults() {
             _ => panic!("{status} arrived as {error:?}"),
         }
     }
+}
+
+/// A 403 is two different answers on Gitea (#722), told apart by its body
+/// alone (measured on 1.27.3, 2026-10-13): a token lacking the scope a write
+/// needs is the credential's fault, and waits for a new one as `Unauthorized`;
+/// every other 403 refuses *this write* -- a mirror, a protected branch, the
+/// default branch -- and arrives as a refusal carrying Gitea's sentence, so
+/// the queue records why instead of asking for a token that is fine. A bad
+/// token is a 401 on Gitea, never a 403.
+#[tokio::test]
+async fn a_403_refusing_the_write_and_a_403_refusing_the_token_are_different_faults() {
+    let write = || WriteOp::CreateBranch {
+        entity: "gitea:tidewater/payout-service".to_owned(),
+        name: "feature/x".to_owned(),
+        from_ref: "main".to_owned(),
+    };
+
+    for sentence in [
+        "Git Repository is a mirror.",
+        "branch protected",
+        "can not delete default or pull request target branch",
+    ] {
+        let server = refusing(403, sentence).await;
+        let error = source(&server).write(write()).await.unwrap_err();
+        assert!(
+            matches!(&error, SourceError::Protocol { status: Some(403), message }
+                     if message.contains(sentence) && !message.contains("swagger")),
+            "{sentence}: {error:?}"
+        );
+    }
+
+    let server = refusing(
+        403,
+        "token does not have at least one of required scope(s), required=[write:repository], \
+         token scope=read:repository,read:user",
+    )
+    .await;
+    let error = source(&server).write(write()).await.unwrap_err();
+    assert!(
+        matches!(error, SourceError::Unauthorized { status: Some(403) }),
+        "{error:?}"
+    );
+
+    // A 403 that is not Gitea's envelope at all -- a proxy's page -- is not
+    // read as a refusal: what it refuses is unknown, and the token is the
+    // conservative guess.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("<html>Forbidden</html>"))
+        .mount(&server)
+        .await;
+    let error = source(&server).write(write()).await.unwrap_err();
+    assert!(
+        matches!(error, SourceError::Unauthorized { status: Some(403) }),
+        "{error:?}"
+    );
 }
 
 /// Story 10 (spec #660, issue #667): a merge goes to the pull request's

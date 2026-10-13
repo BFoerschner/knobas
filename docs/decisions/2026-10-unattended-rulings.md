@@ -1067,3 +1067,31 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **Reasoning:** the cost lands only on the details of code (a ticket's or a page's detail never sends the statement, merge-manager fix d6726256), today's mirrors are well below the slow range, and the fix is a migration of its own (ADR-0019 pattern, like `sync.item_parent`).
 
 **If you disagree, the cost of reversing this is:** none: #732 replaces the statement's lookup, and nothing else depends on the scan.
+
+## #722 — a Gitea 403's signal: the body, through an optional reader in `knobas-http`
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #722.
+
+**The fork:** Gitea answers 403 both for writes no token can fix (a mirror, a protected or the default branch) and for a token without the write scope, and knobas read every 403 as a dead credential. Measured on 1.27.3: a bad token is a 401; the scope 403 comes from a token whose `GET /user` still answers 200. Options: (a) an additive, optional 403 reader in `knobas-http`'s `HttpConfig` (a frozen surface outside #701's list), so the adapter reads the body; (b) adapter-only, a `GET /user` after a write's 403, no Gitea sentence.
+
+**Ruling:** (a). `HttpConfig` gains an optional per-adapter 403 reader; a message turns the 403 into `Protocol { status: 403, message }`, otherwise it stays `Unauthorized`. Additive; every other adapter passes `None`. Gitea treats every 403 as a refusal except its scope message (*token does not have at least one of required scope(s)*), each witnessed live. §10.8 entry. #707's pre-reads in `delete_branch` stay for their better messages.
+
+**Reasoning:** a bad token is a 401 and the 403's body is the only honest signal; (b) would drop a read-only token's writes as refusals instead of asking for a new token.
+
+**If you disagree, the cost of reversing this is:** low: additive, one adapter (`forbidden: None` in `crates/knobas-source-gitea/src/client.rs` restores the old reading).
+
+As built (#722): `classify::ForbiddenReading`, `classify::response_error` and `HttpConfig.forbidden` in `crates/knobas-http`; `client::forbidden_refusal` in the Gitea adapter.
+
+## #722 — the mirror fixture: a same-instance mirror, no internet
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #722.
+
+**The fork:** Gitea refuses a migration from its own address (*You can not import from disallowed hosts.*). Options: (i) the live test mirrors a public GitHub repository itself; (ii) `ALLOW_LOCALNETWORKS` in `testenv/docker-compose.yml` and a seeded mirror of `tidewater/ops-runbooks`, at the cost of one container recreate.
+
+**Ruling:** (ii). The live tests must not depend on the internet (a GitHub outage would fail the suite for reasons outside knobas). The one recreate happens inside the Gitea live lock (#724); if the OrbStack port forward dies after it, `stop` + `up` heals it (known since 2026-09-06): the recipe does that and verifies `:3000` answers.
+
+**Reasoning:** a suite that fails for someone else's outage is noise; the recreate is a one-off.
+
+**If you disagree, the cost of reversing this is:** low: one environment line, seed section 4b, and the live test's mirror half.
+
+As built (#722): `GITEA__migrations__ALLOW_LOCALNETWORKS` in `testenv/docker-compose.yml`; seed section 4b creates `knobas/ops-runbooks-mirror`; `_live_gitea_up` in `testenv/live-lib.sh` probes the host's `:3000` and heals with `stop` + `up` only while holding the Gitea lock (outside it, it fails naming `just gitea-live` and stops nothing), pinned by `testenv/live-test.sh`. The first `just gitea-live` on this branch recreated the container inside the lock and the forward survived.

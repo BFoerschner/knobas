@@ -57,6 +57,13 @@ services:
       # 50 is also `knobas_source_gitea::client::PAGE_SIZE`, the `limit` every
       # listing in that adapter asks for.
       GITEA__api__MAX_RESPONSE_ITEMS: "50"
+      # The seed's pull mirror (#722) mirrors tidewater/ops-runbooks from this
+      # same Gitea, and Gitea refuses a migration from a loopback or private
+      # address ("You can not import from disallowed hosts.") unless told
+      # otherwise. A same-instance mirror keeps the live suites off the
+      # internet. Changing this recreates the container on the next `up`;
+      # `live-lib.sh`'s `_live_gitea_up` heals the port forward that can kill.
+      GITEA__migrations__ALLOW_LOCALNETWORKS: "true"
       GITEA__log__LEVEL: warn
     ports:
       - "127.0.0.1:3000:3000"

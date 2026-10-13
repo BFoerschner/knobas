@@ -128,6 +128,7 @@ impl ConfluenceHttp {
             connect_timeout: std::time::Duration::from_secs(cfg.connect_timeout_secs),
             request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
             body_message: Some(error_envelope),
+            forbidden: None,
         })?;
         Ok(Self { client })
     }

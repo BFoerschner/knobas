@@ -85,17 +85,20 @@ async fn commit(
     let sections = match section {
         None => {
             // The whole view's toolbar (#707): a branch from this commit, in
-            // its repository.
+            // its repository -- disabled on a mirror, which Gitea refuses a
+            // branch on (#722), as the branch and repository views have it.
+            let (record, overview, diff) = tokio::try_join!(
+                source.client.repo_as::<rows::RepoRecord>(owner, repo),
+                commit_overview(source, owner, repo, sha),
+                commit_diff(source, owner, repo, sha),
+            )?;
             let new_branch = act::new_branch(
                 Some(act::repo_id(source, owner, repo)),
                 vec![knobas_source::view::ChoiceOption::new(sha, short(sha))],
-                None,
+                record.repo.mirror.then(|| act::MIRRORED.to_owned()),
             );
             return Ok(SourceView {
-                sections: vec![
-                    commit_overview(source, owner, repo, sha).await?,
-                    commit_diff(source, owner, repo, sha).await?,
-                ],
+                sections: vec![overview, diff],
                 actions: vec![new_branch],
             });
         }

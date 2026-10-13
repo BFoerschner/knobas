@@ -10,7 +10,9 @@
 //! orchestrator (interfaces §8 P8, §10.8): rustls with the platform's root
 //! store, the retry budget, `Retry-After`, the per-instance rate limiter, the
 //! `User-Agent`, and the one fault mapping every adapter must agree on (401
-//! **and** 403 → [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
+//! **and** 403 → [`SourceError::Unauthorized`], except a 403 this adapter's
+//! [`forbidden_refusal`] reads as a refusal of the request (#722);
+//! connect/DNS/TLS/timeout →
 //! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]),
 //! each carrying the status it came from ([`SourceError::status`], ADR-0004) --
 //! which is what lets this crate tell a dead credential from a repository it
@@ -143,10 +145,40 @@ fn error_message(body: &str) -> Option<String> {
     (!message.is_empty()).then(|| message.to_owned())
 }
 
+/// The one 403 Gitea answers about the **token** rather than the request: a
+/// token lacking the scope the endpoint needs (`token does not have at least
+/// one of required scope(s), required=[…], token scope=…`, measured on 1.27.3,
+/// 2026-10-13). A new token with that scope is what fixes it.
+const SCOPE_REFUSAL: &str = "token does not have at least one of required scope(s)";
+
+/// How Gitea's 403 is read ([`knobas_http::ForbiddenReading`], issue #722):
+/// **a refusal of the request, carrying Gitea's sentence**, unless it is the
+/// scope refusal.
+///
+/// Gitea refuses a bad token with **401** (`invalid username, password or
+/// token`), never 403, and answers 403 for things no token can fix: a write to
+/// a mirror (`Git Repository is a mirror.`), a delete of a protected branch
+/// (`branch protected`) or of the default one (`can not delete default or pull
+/// request target branch`), each measured on 1.27.3 and witnessed by
+/// `tests/live_gitea.rs`. Read as `Unauthorized`, such a write waited for a new
+/// token that would have been refused the same way, and the source was shown
+/// needing one. So the exception is the one 403 about the token, not a list of
+/// refusals: a refusal Gitea adds tomorrow is read right without a release.
+///
+/// A body that is not Gitea's envelope -- a proxy's page -- is not read at
+/// all: what it refuses is unknown, and the token is the conservative guess
+/// (a needless wait, never a dropped write).
+fn forbidden_refusal(body: &str) -> Option<String> {
+    let message = error_message(body)?;
+    (!message.contains(SCOPE_REFUSAL)).then_some(message)
+}
+
 /// Whether a failure is about **one repository** rather than about the source.
 ///
 /// Ruling B4: a 403 or 404 on a single repository skips that repository; every
-/// repository refusing us is a fact about the token's scope and raises. The
+/// repository refusing us is a fact about the token or its user and raises --
+/// as `Unauthorized` for Gitea's scope sentence, as a refusal carrying Gitea's
+/// sentence for any other 403 ([`forbidden_refusal`], #722). The
 /// run's identity preflight (`GET /user`) has already proved the credential
 /// itself works, which is what makes that reading available at all.
 ///
@@ -196,6 +228,7 @@ impl GiteaClient {
             connect_timeout: CONNECT_TIMEOUT,
             request_timeout: REQUEST_TIMEOUT,
             body_message: Some(error_message),
+            forbidden: Some(forbidden_refusal),
         })?;
         Ok(Self { http })
     }
