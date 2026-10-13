@@ -244,3 +244,38 @@ async fn the_read_writes_neither_the_index_nor_a_ref() {
     assert_eq!(index_of(dir.path()), index_before, ".git/index was written");
     assert_eq!(refs(dir.path()), refs_before, "a ref moved");
 }
+
+/// A git that does not answer is abandoned at the timeout, and the panel says
+/// so rather than waiting with it.
+///
+/// The one stand-in in this file, and for the reason ADR-0013's 2026-09-07
+/// consequence gives (*"A fault the real instance cannot produce is witnessed
+/// by a fake, and only that"*): a real git hangs on a stalled network mount or
+/// a held lock, neither of which a temp dir can be made to do on demand. The
+/// stand-in is a shell script named `git` on the searched `PATH`.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_git_that_does_not_answer_is_abandoned_at_the_timeout() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = repo();
+    let bin = tempfile::tempdir().unwrap();
+    let stand_in = bin.path().join("git");
+    fs::write(&stand_in, "#!/bin/sh\nsleep 10\n").unwrap();
+    fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let started = std::time::Instant::now();
+    let answer = read_with(bin.path().as_os_str(), dir.path()).await;
+    let took = started.elapsed();
+
+    assert_eq!(
+        answer,
+        TreeRead::Failed {
+            reason: "git did not answer within 2 s".to_owned()
+        }
+    );
+    assert!(
+        took < std::time::Duration::from_secs(5),
+        "the read waited {took:?} for a git that never answers"
+    );
+}

@@ -22,13 +22,13 @@
 //! 3. **Nothing**, which is not a failure: the repo detail then shows *no
 //!    checkout* and the clone command to copy.
 //!
-//! # Nothing here writes git, and nothing it runs comes from the mirror (ADR-0016)
+//! # Nothing here writes to a repository, and nothing it runs comes from the mirror (ADR-0016)
 //!
 //! No clone, no checkout, no fetch. `clone_command` produces a **string a
 //! person copies**; it is never spawned, and nothing here writes to a working
 //! tree. The one git command knobas runs is [`working_tree`]'s read-only
-//! `status` at the checkout path (ADR-0021, #704). [`open`] does start a process -- that is the whole of #501 -- and the
-//! rule it keeps is the other half of the ADR: the *program* is a template a
+//! `status` at the checkout path (ADR-0021, #704). [`open`] does start a
+//! process -- that is the whole of #501 -- and the rule it keeps is the other half of the ADR: the *program* is a template a
 //! person set in settings, and the only value substituted into it is the
 //! checkout [`view`] resolved off this disk. No field of the mirrored repo
 //! reaches it, which the one-`&Path` signature of

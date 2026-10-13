@@ -17,12 +17,17 @@
 </script>
 
 {#if note}
-  <div class="d-local k {note.tone}">{note.text}</div>
+  <!--
+    Not `.k`: inside `.d-title` that class carries the key's size and a muted
+    colour that would outrank the tone.
+  -->
+  <div class="d-local {note.tone}">{note.text}</div>
 {/if}
 
 <style>
   .d-local {
-    font-size: 12px;
+    font: 12px/1.5 var(--mono);
+    font-variant-numeric: tabular-nums;
     margin-top: 4px;
   }
 </style>

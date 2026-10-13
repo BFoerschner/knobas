@@ -43,7 +43,8 @@ pub struct WorkingTreeState {
     pub behind: u32,
     /// Tracked paths that differ from `HEAD`, staged or not, renames as one.
     pub changed: u32,
-    /// Paths git does not track and does not ignore.
+    /// Paths git does not track and does not ignore. A new directory counts
+    /// once, however many files it holds (`--untracked-files=normal`).
     pub untracked: u32,
     /// Paths with an unresolved merge conflict.
     pub conflicted: u32,
@@ -99,11 +100,18 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
         ])
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
+        // git's own words, untranslated: `not a git repository` below is
+        // matched in English.
+        .env("LC_ALL", "C")
         // A repository is named by `-C` and nothing else: an inherited
-        // `GIT_DIR` would point the read somewhere the path does not.
+        // `GIT_DIR` (or one of its parts) would point the read somewhere the
+        // path does not.
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
