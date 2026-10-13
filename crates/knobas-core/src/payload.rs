@@ -242,6 +242,22 @@ pub struct KindPaths {
     /// of no commit draws.
     #[serde(default)]
     pub revision: Vec<ListPath>,
+    /// The repo a pull request is opened **from**, by the name a branch's
+    /// path line draws it with (#718): Gitea's `head.repo.full_name`, which
+    /// is a fork's and not the base repo's when the pull request comes from
+    /// a fork. With [`head`](Self::head), what names the one branch a pull
+    /// request stands for. Empty for every kind that is not a proposal, and
+    /// a miss (a deleted fork) proposes no branch.
+    #[serde(default)]
+    pub head_repo: Vec<PayloadPath>,
+    /// The name of the default branch of the repo a branch sits in (#718):
+    /// for Gitea, `repository.default_branch` as `map` writes it into a
+    /// branch's payload. A branch titled so is its repo's default, which
+    /// the Code tile never draws as one wanting a pull request. Empty for
+    /// every kind that is not a branch, and a miss draws the branch as any
+    /// other.
+    #[serde(default)]
+    pub default_branch: Vec<PayloadPath>,
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -325,6 +341,8 @@ pub mod field {
     pub const HEAD: &str = "head";
     pub const COMMIT: &str = "commit";
     pub const REVISION: &str = "revision";
+    pub const HEAD_REPO: &str = "head_repo";
+    pub const DEFAULT_BRANCH: &str = "default_branch";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -344,6 +362,8 @@ pub mod field {
         HEAD,
         COMMIT,
         REVISION,
+        HEAD_REPO,
+        DEFAULT_BRANCH,
     ];
 }
 

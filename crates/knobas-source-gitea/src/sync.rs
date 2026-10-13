@@ -535,6 +535,7 @@ async fn sync_repo(
         name,
         full_name: &selected.full_name,
         html_url: selected.repo.html_url.as_deref(),
+        default_branch: selected.repo.default_branch.as_deref(),
     };
 
     // 1. The repository itself.
@@ -587,6 +588,10 @@ async fn branches(
 ) -> Result<Vec<String>, RepoError> {
     let mut heads: BTreeMap<String, String> = BTreeMap::new();
     let mut moved = Vec::new();
+    // Every branch's stored `repository` names the default (#718), so a
+    // switched default is a change to every branch, moved or not.
+    let default_changed = before.default_branch.as_deref() != at.default_branch;
+    after.default_branch = at.default_branch.map(str::to_owned);
 
     let mut page = 1;
     let mut seen = 0usize;
@@ -611,13 +616,18 @@ async fn branches(
                 .as_ref()
                 .and_then(|c| c.id.clone())
                 .unwrap_or_default();
-            if before.branches.get(&branch.name) != Some(&head) {
+            let head_moved = before.branches.get(&branch.name) != Some(&head);
+            // An unmoved branch under a switched default is re-emitted for
+            // its `repository` (#718), and no commit is walked for it.
+            if head_moved || default_changed {
                 push(
                     sink,
                     map::branch_item(&source.id, &raw, at, &branch),
                     emitted,
                 )
                 .await?;
+            }
+            if head_moved {
                 moved.push(branch.name.clone());
             }
             heads.insert(branch.name, head);

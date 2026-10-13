@@ -157,8 +157,16 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
         // `sha` is the head commit, where the descriptor declares a pull
         // request's commit (#710).
-        "head": { "label": "feature/PAY-231-sepa-retry", "ref": "feature/PAY-231-sepa-retry",
-                  "sha": "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192" },
+        "head": {
+            "label": "feature/PAY-231-sepa-retry", "ref": "feature/PAY-231-sepa-retry",
+            "sha": "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192",
+            // The repository the branch is in, which for a fork's pull
+            // request is the fork's (#718): where `head_repo` is declared.
+            "repo": {
+                "id": 1, "name": "payout-service", "full_name": "tidewater/payout-service",
+                "owner": { "login": "tidewater", "id": 7 }
+            }
+        },
         "base": {
             "label": "main", "ref": "main",
             // Gitea's `PRBranchInfo` carries the repository it is in, and the

@@ -47,7 +47,7 @@ async fn a_full_sync_emits_the_repository_and_every_branch() {
     // The position records what was seen, so the next run has something to
     // compare against.
     let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
-    assert_eq!(position["v"], 2);
+    assert_eq!(position["v"], 3);
     let repo = &position["repos"]["tidewater/payout-service"];
     assert_eq!(repo["repo_updated_at"], "2026-08-22T11:42:00Z");
     assert_eq!(
@@ -389,7 +389,7 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
         ("an unreadable cursor", Some("not json".to_owned())),
         (
             "a cursor naming no repository",
-            Some(r#"{"v":2,"repos":{}}"#.into()),
+            Some(r#"{"v":3,"repos":{}}"#.into()),
         ),
     ] {
         let mut sink = VecSink(Vec::new());
@@ -1649,15 +1649,16 @@ async fn a_budget_that_stops_short_keeps_the_boundary_it_was_handed() {
     assert_eq!(same, moved);
 }
 
-/// Issue #610, the upgrade path for #595's payload change. An install that
-/// synced before #595 holds a version-1 cursor whose branch heads still match
-/// the server, so an incremental run under it would re-emit nothing and every
-/// mirrored branch and commit would keep the payload without a `repository`
-/// object. The version bump makes that cursor unusable, which turns the first
-/// run after the upgrade into a full sync.
+/// Issue #610, the upgrade path for a payload change, last made by #718. An
+/// install that synced before #718 holds a version-2 cursor whose branch
+/// heads still match the server, so an incremental run under it would
+/// re-emit nothing and every mirrored branch would keep a `repository`
+/// object without the `default_branch` the Code tile reads (as #595's
+/// version 1 kept none at all). The version bump makes that cursor unusable,
+/// which turns the first run after the upgrade into a full sync.
 ///
-/// Both halves on one fixture: the same position at version 1 re-emits, and at
-/// version 2 it is idle (battery clause 2). Without the second half this would
+/// Both halves on one fixture: the same position at version 2 re-emits, and at
+/// version 3 it is idle (battery clause 2). Without the second half this would
 /// pass on an adapter that ignored its cursor altogether.
 #[tokio::test]
 async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits() {
@@ -1671,10 +1672,10 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
     let (first, current) = full(&*source).await;
     assert_eq!(ids(&first, "commit").len(), 2, "{first:?}");
 
-    // The same position, as a knobas from before #595 stored it.
+    // The same position, as a knobas from before #718 stored it.
     let mut old: serde_json::Value = serde_json::from_str(&current).expect("the cursor is JSON");
-    assert_eq!(old["v"], 2, "{current}");
-    old["v"] = 1.into();
+    assert_eq!(old["v"], 3, "{current}");
+    old["v"] = 2.into();
     let old = old.to_string();
 
     let (items, upgraded) = again(&*source, &old).await;
@@ -1695,6 +1696,7 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
             serde_json::json!({
                 "full_name": "tidewater/payout-service",
                 "name": "payout-service",
+                "default_branch": "main",
             }),
             "{}",
             item.entity
@@ -1706,12 +1708,52 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
             item.body_text
         );
     }
-    assert!(upgraded.starts_with(r#"{"v":2"#), "{upgraded}");
+    assert!(upgraded.starts_with(r#"{"v":3"#), "{upgraded}");
 
-    // The same heads at version 2: nothing moved, nothing is emitted.
+    // The same heads at version 3: nothing moved, nothing is emitted.
     let (idle, same) = again(&*source, &current).await;
     assert!(idle.is_empty(), "idle run emitted {idle:?}");
     assert_eq!(same, current);
+}
+
+/// A repository whose default branch changes re-emits every branch (#718),
+/// though no head moved: each branch's stored `repository` names the default,
+/// which the Code tile reads to keep it out of *my branches*, so a branch
+/// left holding the old default would be hidden from it. Nothing moved, so
+/// no commit is walked; the run after it is idle.
+#[tokio::test]
+async fn a_changed_default_branch_re_emits_every_branch_and_walks_no_commit() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    // What Gitea answers once the default is switched in the settings: the
+    // record names the new default and its `updated_at` moves.
+    state.repos[0]["default_branch"] = "feature/PAY-231-sepa-retry".into();
+    state.repos[0]["updated_at"] = "2026-08-23T08:00:00Z".into();
+    fake.remount(&state).await;
+
+    let (items, next) = again(&*source, &cursor).await;
+    assert_eq!(
+        ids(&items, "branch"),
+        vec![
+            "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
+            "gitea:tidewater/payout-service@refs/heads/main",
+        ]
+    );
+    for branch in items.iter().filter(|i| i.kind == "branch") {
+        assert_eq!(
+            branch.payload["repository"]["default_branch"], "feature/PAY-231-sepa-retry",
+            "{}",
+            branch.entity
+        );
+    }
+    assert!(ids(&items, "commit").is_empty(), "no head moved: {items:?}");
+
+    let (idle, same) = again(&*source, &next).await;
+    assert!(idle.is_empty(), "idle run emitted {idle:?}");
+    assert_eq!(same, next);
 }
 
 /// Gitea answers `/pulls` with a bare `404 {"message":"not found"}` for a

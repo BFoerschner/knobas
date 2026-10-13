@@ -1095,3 +1095,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: one environment line, seed section 4b, and the live test's mirror half.
 
 As built (#722): `GITEA__migrations__ALLOW_LOCALNETWORKS` in `testenv/docker-compose.yml`; seed section 4b creates `knobas/ops-runbooks-mirror`; `_live_gitea_up` in `testenv/live-lib.sh` probes the host's `:3000` and heals with `stop` + `up` only while holding the Gitea lock (outside it, it fails naming `just gitea-live` and stops nothing), pinned by `testenv/live-test.sh`. The first `just gitea-live` on this branch recreated the container inside the lock and the forward survived.
+
+## #718 — the default branch is excluded from every Code-tile group, ungrouped rooms too
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #718.
+
+**The fork:** #718 says to exclude a repo's default branch "from both *mine* and *branches* groups". Read literally, somebody else's default would still be drawn under the maximised tile's other branches, and a room where no source has an identity (which #712 ruled draws as before) would still draw every default. Options: (a) exclude it only from *mine* and the identity-less *branches* group; (b) exclude it from every group and count, in every room.
+
+**Ruling:** **(b)**. The default branch is in no Code-tile group and no count (`total`, `tally`, `groups`), whoever's it is, and in a room with no configured identity too. This narrows #712's "no identity draws as before" ruling for this one branch.
+
+**Reasoning:** a default branch never wants a pull request, so in an attention tile it is noise wherever it appears, and under (a) the same branch would appear or disappear depending on another source's configuration. It stays one click away in the repo view.
+
+**If you disagree, the cost of reversing this is:** one SQL condition (`and r.is_default is not true` in `LIVE_ATTENTION`, narrowed to the groups (a) names).
+
+As built (#718): `is_default` in `LIVE_ATTENTION` (`crates/knobas-app/src/commands/entity.rs`), pinned by `a_repos_default_branch_is_drawn_in_no_group` and `an_ungrouped_room_draws_no_default_branch_either`.

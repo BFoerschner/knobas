@@ -729,7 +729,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 8] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 10] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -738,6 +738,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::MERGED, &paths.merged, Wanted::Flag),
             (field::HEAD, &paths.head, Wanted::Text),
             (field::COMMIT, &paths.commit, Wanted::Text),
+            (field::HEAD_REPO, &paths.head_repo, Wanted::Text),
+            (field::DEFAULT_BRANCH, &paths.default_branch, Wanted::Text),
         ];
         // The two list fields: who a review is asked of, and the commits a
         // build ran on (#710). One rule for both.
