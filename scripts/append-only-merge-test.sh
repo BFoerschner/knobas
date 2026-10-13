@@ -80,7 +80,7 @@ if grep -Eq '^[^#]*contract\.md.*merge=union' "$attrs"; then
     fail "docs/contract.md must not be merge=union (sections are edited in place)"
 fi
 for f in test-inventory.txt docs/decisions/2026-10-unattended-rulings.md; do
-    grep -Eq "^$f[[:space:]]+merge=union" "$attrs" || fail "$f is not merge=union in .gitattributes"
+    grep -Eq "^${f}[[:space:]]+merge=union" "$attrs" || fail "$f is not merge=union in .gitattributes"
 done
 
 if [ "$failures" -ne 0 ]; then echo "append-only-merge-test: $failures failure(s)" >&2; exit 1; fi
