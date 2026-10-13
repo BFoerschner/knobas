@@ -64,6 +64,7 @@
   } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import { addressOf as assetAddress, routeAddressOf as routeAddress } from "../assets/tree";
+  import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { hashFor } from "../shell/router.svelte";
   import { canBeTarget } from "../shell/timer";
@@ -74,7 +75,6 @@
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import type { LauncherRow } from "./rows";
-  import type { HealthPhase } from "../shell/health.svelte";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
 
