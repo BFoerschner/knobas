@@ -311,6 +311,16 @@ pub struct SyncRunRow {
     pub cursor_after: Option<String>,
 }
 
+impl SyncRunRow {
+    /// Whether this run wrote anything to the mirror: upserted, deleted or
+    /// swept a row -- what [`SourceSyncStatus::last_changed`] says about it
+    /// (#759). `scheduler`'s `STATUS` statement spells the same sum in SQL.
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        self.upserted + self.deleted + self.swept > 0
+    }
+}
+
 /// Parse a stored `trigger`.
 ///
 /// Anything unrecognised reads as [`SyncTrigger::Schedule`]: a row written by

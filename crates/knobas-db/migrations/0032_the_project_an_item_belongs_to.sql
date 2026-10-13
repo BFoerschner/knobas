@@ -30,12 +30,12 @@
 -- For each item and **each stored adapter that declares a `project_key` for
 -- the item's kind**, at most one `(adapter_kind, key, name)` row: `key` is
 -- what `knobas_core::project_key_read!` yields and `name` what
--- `project_name_read!` yields (null where no name is readable), with `$decl`
--- bound per adapter as `{<the item's source_id>: <that adapter's kinds>}` --
--- the binding `sync.resolve_item_parents` uses (`0028`). Both macros are
--- pasted below as their expansion with `$decl` = `dd.decl`, and
+-- `knobas_core::declared_string!(…, "project_name")` yields (null where no
+-- name is readable), with `$decl` bound per adapter as `{<the item's
+-- source_id>: <that adapter's kinds>}` -- the binding
+-- `sync.resolve_item_parents` uses (`0028`). Both reads are pasted below as their expansion with `$decl` = `dd.decl`, and
 -- `knobas-app`'s `tests/it/project_census.rs` holds the stored text to the
--- macros' current expansion: a change to either fails that test until a
+-- reads' current expansion: a change to either fails that test until a
 -- migration restates the function. `source_id` is the item's, copied, as
 -- `0029` copied it into `sync.item_parent`; the trigger recomputes an item
 -- whose `source_id` changes, so the copy cannot go stale.

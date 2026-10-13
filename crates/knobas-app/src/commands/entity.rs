@@ -3518,7 +3518,7 @@ pub async fn list_projects(
 /// # Errors
 ///
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
-/// failure or a source listing that fails.
+/// failure or a declaration write that fails.
 pub async fn list_projects_inner(
     pool: &PgPool,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {

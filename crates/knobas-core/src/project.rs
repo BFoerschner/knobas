@@ -13,7 +13,8 @@
 //! which makes this a **payload read outside an adapter**, governed by
 //! ADR-0007. Since #277 it is a **declared** read: the source says where its
 //! project key and name live ([`crate::payload`]), per entity kind, and
-//! [`project_key_read!`] and the `project_name` read resolve the declaration.
+//! [`project_key_read!`] and `declared_string!(…, "project_name")` resolve the
+//! declaration.
 //! A third source's spelling is one entry on that source's descriptor. Since
 //! #759 the database runs those two reads when an item or a declaration
 //! changes and keeps the answer in `sync.item_project` (migration `0032`,
@@ -58,8 +59,10 @@ use crate::CoreError;
 /// draw a room -- [`crate::mini_board`]'s here and
 /// `knobas_app::commands::entity`'s across the bridge -- and a second copy of
 /// this read is how one of them starts disagreeing with the census about what
-/// a project is. `$decl` is where the calling statement binds the
-/// declarations.
+/// a project is. The census's own copy is the one exception, and it is held
+/// to this: migration `0032` stores this read's expansion as text, and
+/// `knobas-app`'s `the_stored_resolver_is_the_macros_expansion` fails when the
+/// two differ. `$decl` is where the calling statement binds the declarations.
 ///
 /// **The kind guard is now the declaration itself.** A TeamCity build names
 /// its project on the `buildType` it ran; a build *configuration*'s record
@@ -109,7 +112,7 @@ pub struct Project {
 /// key.
 ///
 /// Read off `sync.item_project` (migration `0032`, #759): the database keeps
-/// what [`project_key_read!`] and the `project_name` read yield per item, per
+/// what [`project_key_read!`] and `declared_string!(…, "project_name")` yield per item, per
 /// stored adapter, from `sync.parent_declaration` (ADR-0019). It used to walk
 /// every live item through those two reads on every call: 341-461 ms on the
 /// 22,000-item responsiveness probe (#753), re-read after every finished sync.
@@ -136,8 +139,8 @@ pub struct Project {
 /// instant, and exists so the answer does not depend on which row PostgreSQL
 /// reached first.
 ///
-/// **Shaped so it cannot grow with the mirror** (#759): the distinct projects
-/// first, then for each one a `limit 1` walk of `item_project_census_idx` in
+/// **Shaped so the mirror's size costs one narrow scan** (#759): the distinct
+/// projects first, a hash over `sync.item_project`'s few columns, then for each one a `limit 1` walk of `item_project_census_idx` in
 /// exactly that order, which stops at the project's first live row. Joining
 /// every row to `sync.live_item` and sorting was 57 ms at 22,000 items with
 /// fresh statistics and 220 ms without. The outer `coalesce(s.enabled,

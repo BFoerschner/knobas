@@ -161,7 +161,8 @@ select c.id as source_id,
        f.finished_at as last_finished_at,
        f.outcome     as last_outcome,
        c.backoff_until,
-       -- Whether that finished run wrote anything (#759); null with no run.
+       -- Whether that finished run wrote anything (#759; `SyncRunRow::changed`
+       -- is the same sum); null with no run.
        (f.upserted + f.deleted + f.swept) > 0 as last_changed,
        case
          when r.id is not null then null
@@ -883,7 +884,7 @@ fn state_of_run(
                 last_finished_at: row.and_then(|r| r.finished_at).or(base.last_finished_at),
                 // This run's own counts. Without its row the event cannot say,
                 // and `None` is what a listener treats as "maybe" (#759).
-                last_changed: row.map(|r| r.upserted + r.deleted + r.swept > 0),
+                last_changed: row.map(run_log::SyncRunRow::changed),
                 // Source-level, and both need `source_config`: when the next
                 // run is due, and how long a failing source is held off for.
                 next_run_at: source.next_run_at,
