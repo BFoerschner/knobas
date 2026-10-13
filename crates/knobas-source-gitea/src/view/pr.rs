@@ -18,6 +18,7 @@ use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
+mod maintain;
 mod review;
 
 const OVERVIEW: &str = "overview";
@@ -55,8 +56,9 @@ pub(super) async fn draw(
                 at.viewer(),
             )?;
             // The order the #701 ruling sets: what a reviewer says first,
-            // *Merge…* last.
+            // then the maintenance (#706), *Merge…* last.
             actions.extend(review::actions(&pull, viewer.as_deref()));
+            actions.extend(maintain::actions(&pull));
             actions.extend(merge_action(&pull));
             vec![
                 overview(&pull, &reviews),
@@ -509,6 +511,9 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
 /// The fields of Gitea's `PullRequest` this view reads.
 #[derive(Debug, serde::Deserialize)]
 struct Pull {
+    /// What *Edit…* prefills (#706).
+    #[serde(default)]
+    title: Option<String>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
