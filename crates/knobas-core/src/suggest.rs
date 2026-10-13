@@ -1048,7 +1048,15 @@ async fn compare_batch_once(
         .execute(&mut *tx)
         .await?;
     sqlx::query(PRUNE_SEEN).execute(&mut *tx).await?;
+    // Not a prepared statement: planned afresh for every batch, with the
+    // batch's own ids and the settled corpus as it stands. A cached generic
+    // plan, which PostgreSQL switches to after five executions, is costed for
+    // a batch it cannot see and against `sync.similar_text_seen` statistics
+    // taken while it was still empty; measured on the perf corpus it grew 4 s
+    // per 100 settled items, where the batch's own plan stays under 2 s at
+    // 4,000 (the #745 perf reading took 20 minutes before this).
     let written = sqlx::query(rule.sql)
+        .persistent(false)
         .bind(rule.origin.as_str())
         .bind(DETECTOR)
         .bind(rule.name)
