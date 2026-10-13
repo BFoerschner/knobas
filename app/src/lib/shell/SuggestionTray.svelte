@@ -8,14 +8,15 @@
 
   It owns its read the way a `Tile` does, and for the same reason — the tray is
   the thing that knows what it draws. What it also owns, and a tile does not, is
-  running **detection**: #41's story 22 is "detection runs without me asking",
-  and the honest reading of that is that a surface triggers it rather than the
-  user. Two triggers, both here: opening a room, and a sync run finishing.
-
-  A pass is idempotent and a pass over an unchanged mirror writes nothing, which
-  is what makes running one on every room switch affordable. On a corpus large
-  enough for that to stop being true, the pass belongs on the sync scheduler's
-  own completion — a backend change, not a change to this file's contract.
+  asking for **detection**: #41's story 22 is "detection runs without me
+  asking", and the honest reading of that is that a surface triggers it rather
+  than the user. **One trigger: a sync run finishing**, the only moment the
+  mirror has new material. Opening a room, switching rooms and a link changing
+  elsewhere only *read* (#745): before that, every room switch ran a pass too,
+  and with five sources syncing the passes held every UI connection for
+  minutes. The backend runs one pass at a time on a connection of its own and
+  answers a request made during a pass with the next one, so a burst of
+  finished runs costs two passes, whoever asks.
 
   The room scope is the `sources` list for a derived room, and — since #47 —
   the context's one-hop membership (ADR-0008) for a stored room, resolved
@@ -114,7 +115,8 @@
 
     page = null;
     error = null;
-    void refresh(true, mine);
+    // A read, never a pass: the room changed, the mirror did not (#745).
+    void refresh(false, mine);
 
     // A run that just finished is new material. `running: false` is the
     // transition, and the payload is coarse by rule, so this is the only
@@ -137,7 +139,9 @@
     hold(
       listen<ActivityRow>(EVENTS.activityNew, (event) => {
         if (dead || !TRAY_VERBS.includes(event.payload.verb)) return;
-        void refresh(true, mine);
+        // A read: a link written or answered changes which proposals are
+        // open, never what the mirror can propose.
+        void refresh(false, mine);
       }),
     );
 

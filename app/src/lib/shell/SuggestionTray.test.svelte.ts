@@ -139,13 +139,14 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-test("runs a detection pass before its first read, scoped to the room", async () => {
+test("opening the tray reads the room and starts no detection pass", async () => {
   reads = [() => Promise.resolve(page([entry()]))];
   const { target, app } = render(["gitea"]);
   await settle();
 
-  expect(calls[0]).toBe("detect");
-  expect(calls[1]).toBe('read ["gitea"] null 50');
+  // #745: a pass on every room switch held the UI's connections for minutes
+  // while five sources synced. The room changed; the mirror did not.
+  expect(calls).toEqual(['read ["gitea"] null 50']);
   unmount(app);
   target.remove();
 });
@@ -251,7 +252,6 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
   await settle();
 
   expect(calls).toEqual([
-    "detect",
     "read [] null 50",
     "accept 00000000-0000-0000-0000-000000000001",
     "read [] null 50",
@@ -259,7 +259,7 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
   expect(
     calls.filter((call) => call === "detect").length,
     "answering a proposal must not re-scan the mirror",
-  ).toBe(1);
+  ).toBe(0);
   expect(target.querySelectorAll(".row.sug").length).toBe(0);
 
   unmount(app);
@@ -380,10 +380,54 @@ test("a link mutation elsewhere re-reads the tray; an unrelated line does not", 
   emit("activity:new", { verb: "linked", entity_id: "mock:PAY-231" });
   await settle();
   expect(calls.filter((c) => c.startsWith("read")).length).toBe(readsSoFar + 1);
+  expect(calls, "a link written elsewhere is a read, not a pass").not.toContain("detect");
   expect(
     target.querySelector(".row.sug"),
     "the withdrawn proposal must not still be drawn",
   ).toBeNull();
+
+  unmount(app);
+  target.remove();
+});
+
+test("switching rooms re-reads and starts no detection pass", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  let sources = $state(["gitea"]);
+  const app = mount(SuggestionTray, {
+    target,
+    props: {
+      get sources() {
+        return sources;
+      },
+      onopen: () => {},
+    },
+  });
+  flushSync();
+  await settle();
+
+  sources = ["jira"];
+  flushSync();
+  await settle();
+
+  expect(calls).toEqual(['read ["gitea"] null 50', 'read ["jira"] null 50']);
+  unmount(app);
+  target.remove();
+});
+
+test("a finished sync run asks for a pass and then reads what it proposed", async () => {
+  const { target, app } = render();
+  await settle();
+  calls.length = 0;
+
+  // A run starting is no new material; one finishing is.
+  emit("sync:state", { source_id: "jira", running: true });
+  await settle();
+  expect(calls).toEqual([]);
+
+  emit("sync:state", { source_id: "jira", running: false });
+  await settle();
+  expect(calls).toEqual(["detect", "read [] null 50"]);
 
   unmount(app);
   target.remove();
