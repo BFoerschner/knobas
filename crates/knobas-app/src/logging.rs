@@ -232,10 +232,6 @@ const SECRET_KEYS: [&str; 9] = [
 
 const MASK: &str = "***";
 
-fn is_ident(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
-}
-
 fn ends_value(b: u8) -> bool {
     b.is_ascii_whitespace() || matches!(b, b'"' | b'\'' | b'&' | b',' | b';' | b'}' | b')' | b'\\')
 }
