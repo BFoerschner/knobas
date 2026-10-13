@@ -84,6 +84,15 @@ test("hovering a row again while its read is in flight, or after, reads nothing 
   expect(views).toEqual(["gitea:a/b#1"]);
 });
 
+test("a row losing focus does not cancel the dwell another row has since started", () => {
+  const hover = intent();
+  hover.enter("gitea:a/b#1");
+  hover.enter("gitea:a/b#2");
+  hover.leave("gitea:a/b#1");
+  vi.advanceTimersByTime(DWELL_MS);
+  expect(rows).toEqual(["gitea:a/b#2"]);
+});
+
 test("the panel opened while the hover's read is in flight borrows it", () => {
   const hover = intent();
   hover.enter("gitea:a/b#1");

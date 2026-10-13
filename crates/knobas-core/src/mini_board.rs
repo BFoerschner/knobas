@@ -70,6 +70,7 @@ const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 /// [`status_of_ticket!`] reads per row. Through [`crate::declared_string!`]
 /// each row walked the whole declaration, about 17 µs a ticket on the 15,000
 /// of an All room.
+///
 /// The candidates are [`crate::declared_candidates!`]'s own, over a relation
 /// aliased `i` that carries each declared source and the kind `ticket` -- the
 /// two columns that macro reads -- so the declaration is walked as it always

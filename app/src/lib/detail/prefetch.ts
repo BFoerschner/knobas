@@ -29,33 +29,44 @@ const OWN_VIEWS = new Set(["note", "asset", "route", "ctx"]);
 
 /** Whether a row's detail is the panel {@link readAhead} reads for. */
 export function prefetchable(entityId: string, kind: string): boolean {
-  const namespace = entityId.slice(0, entityId.indexOf(":")).toLowerCase();
+  const colon = entityId.indexOf(":");
+  const namespace = colon === -1 ? "" : entityId.slice(0, colon).toLowerCase();
   return !OWN_VIEWS.has(namespace) && !OWN_VIEWS.has(kind);
 }
 
 export interface Intent {
   /** The pointer or focus arrived on this entity's row. */
   enter(entityId: string): void;
-  /** It left before the dwell, or the row went away. */
-  leave(): void;
+  /**
+   * It left before the dwell, or the row went away. With an id, only that
+   * entity's dwell is disarmed: a row losing focus must not cancel the dwell
+   * the pointer has since started on another.
+   */
+  leave(entityId?: string): void;
 }
 
 /** One reader's intent: at most one dwell armed at a time. */
 export function createIntent(read: (entityId: string) => unknown, dwellMs = DWELL_MS): Intent {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const leave = () => {
+  let armedFor: string | undefined;
+  const disarm = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+    armedFor = undefined;
   };
   return {
     enter(entityId) {
-      leave();
+      disarm();
+      armedFor = entityId;
       timer = setTimeout(() => {
         timer = undefined;
+        armedFor = undefined;
         void read(entityId);
       }, dwellMs);
     },
-    leave,
+    leave(entityId) {
+      if (entityId === undefined || entityId === armedFor) disarm();
+    },
   };
 }
 
@@ -68,18 +79,11 @@ const intent = createIntent((entityId) => readAhead(entityId, getEntity, entityV
  */
 export function prefetch(node: HTMLElement, target: { entityId: string; kind: string }) {
   let current = target;
-  // Whether the armed dwell is this row's, so a row unmounting while another
-  // is hovered does not disarm that one.
-  let armed = false;
   const enter = () => {
-    if (!prefetchable(current.entityId, current.kind)) return;
-    armed = true;
-    intent.enter(current.entityId);
+    if (prefetchable(current.entityId, current.kind)) intent.enter(current.entityId);
   };
-  const leave = () => {
-    if (armed) intent.leave();
-    armed = false;
-  };
+  // Only this row's dwell: another row's is not this row's to cancel.
+  const leave = () => intent.leave(current.entityId);
   node.addEventListener("pointerenter", enter);
   node.addEventListener("focus", enter);
   node.addEventListener("pointerleave", leave);
