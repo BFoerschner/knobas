@@ -15,7 +15,7 @@
   behind.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { ActionField, Setting, ViewAction } from "../../ipc/entity";
   import type { BuildParameter } from "../../ipc/sources";
   import Modal from "../../shell/Modal.svelte";
@@ -79,7 +79,29 @@
     }
   }
 
-  /** Enter in a one-line field sends, as the button would; in a text area it takes Cmd/Ctrl. */
+  /**
+   * Where the reader starts: the first field (a choice on its picked option).
+   * With nothing to fill in, the write itself -- or Cancel for a danger, so an
+   * Enter on arrival never destroys anything. After the Modal has moved focus
+   * in and noted the opener to give it back to, hence the tick.
+   */
+  $effect(() => {
+    void tick().then(() => {
+      const dlg = form?.closest<HTMLElement>("[role=dialog]");
+      const first = action.fields[0];
+      const target = first
+        ? (form?.querySelector<HTMLElement>(`[data-field="${CSS.escape(first.name)}"] [aria-checked=true]`) ??
+          form?.querySelector<HTMLElement>(`[data-field="${CSS.escape(first.name)}"]`))
+        : dlg?.querySelector<HTMLElement>(action.danger ? "[data-cancel]" : "[data-send]");
+      target?.focus();
+    });
+  });
+
+  /**
+   * Enter sends, as the button would, from a one-line field, a choice's
+   * option or a checkbox (as a native form does); in a text area it takes
+   * Cmd/Ctrl.
+   */
   function sendOnEnter(event: KeyboardEvent, multiline = false) {
     if (event.key !== "Enter" || (multiline && !(event.metaKey || event.ctrlKey))) return;
     event.preventDefault();
@@ -96,7 +118,10 @@
         : event.key === "ArrowLeft" || event.key === "ArrowUp"
           ? (index - 1 + options.length) % options.length
           : null;
-    if (to === null) return;
+    if (to === null) {
+      sendOnEnter(event);
+      return;
+    }
     event.preventDefault();
     values[field.name] = options[to]?.value ?? values[field.name]!;
     const group = (event.currentTarget as HTMLElement).parentElement;
@@ -124,6 +149,7 @@
                 aria-invalid={bad || undefined}
                 checked={values[field.name] === "true"}
                 onchange={(event) => (values[field.name] = String(event.currentTarget.checked))}
+                onkeydown={(event) => sendOnEnter(event)}
               />
               <span>{field.label}</span>
             </label>
@@ -167,6 +193,7 @@
                 data-field={field.name}
                 aria-invalid={bad || undefined}
                 bind:value={values[field.name]}
+                onkeydown={(event) => sendOnEnter(event)}
               >
                 {#each field.kind.options as option (option.value)}
                   <option value={option.value}>{option.label}</option>
@@ -239,12 +266,13 @@
       <span class="l">{changed.length === 0 ? "as configured" : `${changed.length} changed`}</span>
     {/if}
     <span class="spacer"></span>
-    <button class="btn ghost" type="button" onclick={onclose}>Cancel</button>
+    <button class="btn ghost" type="button" data-cancel onclick={onclose}>Cancel</button>
     <button
       class="btn"
       class:pri={!action.danger}
       class:danger={action.danger}
       type="button"
+      data-send
       disabled={sending}
       onclick={() => void send()}
     >

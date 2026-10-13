@@ -7,9 +7,10 @@
   not declare or the shell cannot queue, and `onaction` (the detail) turns the
   dialog's values into a write and queues it. A view never writes.
 
-  A `primary` action is filled, a `danger` one in the error tone. One the
-  source says cannot be taken now stays in its place, disabled, with the
-  source's reason as its tooltip and its accessible description; it stays
+  A `primary` action is filled, a `danger` one in the error tone, while it can
+  be taken. One the source says cannot be taken now stays in its place,
+  disabled and untoned, with the source's reason as its tooltip and its
+  accessible description; it stays
   focusable (`aria-disabled`) so the reason can be reached by keyboard too.
   Pressing an action opens its declared dialog (`ActionDialog`); one with
   nothing to ask, no sentence and no danger queues on the button.
@@ -64,7 +65,7 @@
       class="btn"
       class:sm={size === "sm"}
       class:pri={action.primary && !action.danger && action.disabled === null}
-      class:danger={action.danger}
+      class:danger={action.danger && action.disabled === null}
       type="button"
       aria-disabled={action.disabled !== null || sending || undefined}
       aria-describedby={action.disabled !== null ? `ab-${uid}-${index}` : undefined}

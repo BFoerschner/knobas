@@ -520,6 +520,73 @@ test("a required field left blank stops the write and says so beside it", () => 
   screen.done();
 });
 
+/** A keydown on `el`, as the reader's keyboard would send it. */
+function press(el: Element, key: string, init: KeyboardEventInit = {}) {
+  el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+  flushSync();
+}
+
+test("a dialog opens on its first field, and the keyboard alone can send or cancel it", async () => {
+  // A choice-only form: focus on the picked option, Enter sends it.
+  const merge = render(withToolbar(MERGE), ["merge_pull_request"]);
+  button(toolbar(merge.target)!, "Merge…")!.click();
+  flushSync();
+  const picked = dialog().querySelector("[role=radio][aria-checked=true]")!;
+  await vi.waitFor(() => expect(document.activeElement, "the picked option, not the close button").toBe(picked));
+  press(picked, "Enter");
+  expect(queued).toEqual([["merge_pull_request", { style: "merge" }]]);
+  merge.done();
+  queued.length = 0;
+
+  // A long text takes Cmd+Enter; a bare Enter is a new line.
+  const comment = render(
+    withToolbar(
+      action("merge_pull_request", "Comment…", {
+        fields: [formField("body", "Comment", { type: "long_text" }, { required: true })],
+      }),
+    ),
+    ["merge_pull_request"],
+  );
+  button(toolbar(comment.target)!, "Comment…")!.click();
+  flushSync();
+  const body = control<HTMLTextAreaElement>("Comment");
+  await vi.waitFor(() => expect(document.activeElement).toBe(body));
+  body.value = "LGTM";
+  body.dispatchEvent(new Event("input", { bubbles: true }));
+  press(body, "Enter");
+  expect(queued).toEqual([]);
+  press(body, "Enter", { metaKey: true });
+  expect(queued).toEqual([["merge_pull_request", { body: "LGTM" }]]);
+  comment.done();
+  queued.length = 0;
+
+  // A flag sends on Enter too; Escape closes without a write.
+  const flag = render(
+    withToolbar(action("merge_pull_request", "Prune…", { fields: [formField("all", "All of them", { type: "flag" })] })),
+    ["merge_pull_request"],
+  );
+  button(toolbar(flag.target)!, "Prune…")!.click();
+  flushSync();
+  const all = control("All of them");
+  await vi.waitFor(() => expect(document.activeElement).toBe(all));
+  press(dialog(), "Escape");
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(queued).toEqual([]);
+  button(toolbar(flag.target)!, "Prune…")!.click();
+  flushSync();
+  press(control("All of them"), "Enter");
+  expect(queued).toEqual([["merge_pull_request", { all: "false" }]]);
+  flag.done();
+  queued.length = 0;
+
+  // Nothing to fill in: a danger lands on Cancel, so an Enter on arrival destroys nothing.
+  const close = render(withToolbar(action("merge_pull_request", "Close…", { danger: true })), ["merge_pull_request"]);
+  button(toolbar(close.target)!, "Close…")!.click();
+  flushSync();
+  await vi.waitFor(() => expect(document.activeElement).toBe(button(dialog(), "Cancel")));
+  close.done();
+});
+
 test("a disabled action stays in place with its reason as tooltip and description, and does nothing", () => {
   const reason = "Not mergeable into main: a conflict";
   const screen = render(withToolbar({ ...MERGE, disabled: reason }), ["merge_pull_request"]);
@@ -535,6 +602,14 @@ test("a disabled action stays in place with its reason as tooltip and descriptio
   expect(document.querySelector("[role=dialog]")).toBeNull();
   expect(queued).toEqual([]);
   screen.done();
+
+  const protectedBranch = render(
+    withToolbar(action("merge_pull_request", "Delete branch…", { danger: true, disabled: "Protected branch" })),
+    ["merge_pull_request"],
+  );
+  const remove = button(toolbar(protectedBranch.target)!, "Delete branch…")!;
+  expect(remove.classList.contains("danger"), "a danger that cannot be taken is quiet").toBe(false);
+  protectedBranch.done();
 });
 
 test("a danger action always asks, with its sentence and its write in the error tone", async () => {
