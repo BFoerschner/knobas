@@ -392,7 +392,8 @@ shell:
 # against a stub `curl` playing Gitea's token API. And the JVM lock's (issue
 # #690): a second live run waits for the first and goes on when it lets go, a
 # dead holder's lock is taken over, the wait ends in a refusal naming the
-# holder -- against a stub `docker` and a scratch lock path.
+# holder -- against a stub `docker` and a scratch lock path; and the Gitea
+# lock's (issue #724), the same mechanism, which Gitea sessions queue on.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
@@ -1057,13 +1058,16 @@ _require-live-env SOURCE +NAMES:
 # the suite's branch sweep cannot tell a sibling's live branch from a corpse.
 # The token is no longer one of the collisions: since #684 each worktree's
 # seed keeps its own (`testenv/gitea-token.sh`), and never revokes another's.
-# Claim it before you run this. testenv/README.md, "One environment, one owner
-# at a time".
+# Nor are two runs of the Gitea recipes, since #724: `live_session gitea`
+# holds the machine-wide Gitea lock for the whole run, the JVM lock's mechanism
+# (testenv/live-lib.sh), so a second run from another worktree waits for the
+# first instead of sweeping its branches. testenv/README.md, "One environment,
+# one owner at a time".
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
     . testenv/live-lib.sh
-    live_session gitea
+    live_session gitea gitea-live
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
@@ -1103,14 +1107,16 @@ gitea-live:
 #
 # ONE ENVIRONMENT, ONE OWNER -- and this recipe is the harder of the two to
 # share. It recreates the shared container capped to one record and back again,
-# so a concurrent `just gitea-live` reads a server answering short pages and
-# fails for a reason that is not in its own tree. Claim the environment before
-# you run this. testenv/README.md, "One environment, one owner at a time".
+# so a concurrent `just gitea-live` would read a server answering short pages
+# and fail for a reason that is not in its own tree. The Gitea lock (#724)
+# makes the other Gitea recipes wait; a TeamCity run, which takes no Gitea
+# lock, still sees the capped server. testenv/README.md, "One environment, one
+# owner at a time".
 gitea-live-capped:
     #!/usr/bin/env bash
     set -euo pipefail
     . testenv/live-lib.sh
-    live_session gitea
+    live_session gitea gitea-live-capped
     # Before the overlay, not after: a run refused for a missing variable must
     # not be one that left the shared container capped on its way out.
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
@@ -1197,13 +1203,14 @@ gitea-live-capped:
 # Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
 # that writes to it. ONE ENVIRONMENT, ONE OWNER -- it writes branches and
 # pull requests a concurrent run's sweep can take (the token is per worktree
-# since #684, so seeding no longer 401s anyone). Claim it first.
+# since #684, so seeding no longer 401s anyone), which is why it holds the Gitea
+# lock (#724) through `live_session` and a concurrent Gitea run waits.
 # testenv/README.md, "One environment, one owner at a time".
 start-work-live:
     #!/usr/bin/env bash
     set -euo pipefail
     . testenv/live-lib.sh
-    live_session gitea
+    live_session gitea start-work-live
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1

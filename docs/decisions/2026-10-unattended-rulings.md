@@ -986,3 +986,17 @@ As built (#706, merge review): `project` also takes the queued payload and the k
 - a state change uses the state the source **declares** for the kind (`KindPaths::state`, #666; Gitea's merged flag, then its `state` word).
 
 The declared state is the read ADR-0007 sends a payload read to, not a guess at a shape. So a retitle does not hold a queued Close, and somebody else closing, reopening or merging the pull request does. A declaration that resolves nothing falls back to the whole record, so a miss is a false hold. `knobas-sync` reads the paths from the registry's template descriptor by the entity's namespace, at the queue and at the flush alike. Pinned by `knobas-core`'s `an_edit_holds_only_on_what_it_would_overwrite`, `an_edit_read_that_misses_holds_on_the_whole_record` and `a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record`, and `knobas-sync`'s `a_title_edit_holds_on_a_retitle_and_not_on_a_close` and `a_close_holds_on_the_declared_state_and_not_on_a_retitle`.
+
+## #724 — the Gitea runs queue on a lock of their own, not on the JVM lock
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #724.
+
+**The fork:** the issue says to give `gitea-live` "the same queueing lock as #696 (reuse its mechanism)". That could mean the JVM lock itself, so a Gitea run would queue behind any JVM run, or the same mechanism under a second lock name, so Gitea runs queue only behind each other. The implementer chose a second lock.
+
+**Ruling:** **a separate Gitea lock**, the same mechanism under another name (`$TMPDIR/knobas-live-gitea.lock`, holder in `KNOBAS_LIVE_GITEA_LOCK_HOLDER`).
+
+**Reasoning:** a Gitea run uses none of the JVM memory the JVM lock guards. Queueing a two-minute Gitea suite behind a 20-minute Atlassian run would serialise runs that never collided. There is one implementation (`_live_lock_select` in `testenv/live-lib.sh`), so nothing is duplicated.
+
+**If you disagree, the cost of reversing this is:** low. Point `_live_lock_select gitea` at the JVM lock's path; the recipes do not change.
+
+As built (#724): `live_lock_hold <recipe> [jvm|gitea]` and `live_session gitea` in `testenv/live-lib.sh`; `gitea-live`, `gitea-live-capped` and `start-work-live` take it. A TeamCity run, which brings Gitea up for its VCS roots, takes no Gitea lock, so `gitea-live-capped` still caps Gitea under a TeamCity run.

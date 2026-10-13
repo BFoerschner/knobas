@@ -712,7 +712,11 @@ async fn pulls(
                     continue;
                 }
             }
-            let comments = fetch_comments(source, at, &pr).await?;
+            let Some(comments) = fetch_comments(source, at, &pr).await? else {
+                // Deleted since the listing (#724): nothing to mirror, and
+                // nothing to hold the watermark open either.
+                continue;
+            };
             examined.push((pr.number, updated));
             push(
                 sink,
@@ -854,13 +858,23 @@ fn close_watermark<K: Ord + Clone>(
 /// read the shorter `body_text` as a deletion. What is lost is search text on
 /// one item, and it is restored the next time that pull request is updated, or
 /// by the next full sync.
+///
+/// # A pull request deleted since the listing (issue #724)
+///
+/// `None` is that answer: the pull request was listed, then deleted before its
+/// discussion was read, and the caller skips it. Gitea 1.27.3 does not say so
+/// directly -- the discussion read of a deleted index answers **500** `issue
+/// does not exist`, the same status as any server fault (measured 2026-10-13).
+/// So a 404 or a 5xx here is followed by one read of the pull request itself,
+/// and only *its* 404 means "deleted". A pull request that is still there
+/// keeps the treatment above: a 404 costs its discussion, a 5xx ends the run.
 async fn fetch_comments(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
     pr: &model::PullRequest,
-) -> Result<Vec<model::Comment>, RepoError> {
+) -> Result<Option<Vec<model::Comment>>, RepoError> {
     if !source.config.include_pr_comments || pr.comments == 0 {
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     }
     let discussion = match source
         .client
@@ -868,6 +882,18 @@ async fn fetch_comments(
         .await
     {
         Ok(discussion) => discussion,
+        Err(error)
+            if matches!(error.status(), Some(404 | 500..=599))
+                && pull_is_gone(source, at, pr.number).await =>
+        {
+            tracing::info!(
+                repository = %at.full_name,
+                number = pr.number,
+                %error,
+                "gitea: pull request deleted since the listing; skipping it"
+            );
+            return Ok(None);
+        }
         Err(error) if is_repo_scoped(&error) => {
             tracing::warn!(
                 repository = %at.full_name,
@@ -876,7 +902,7 @@ async fn fetch_comments(
                 "gitea: indexing this pull request without its discussion; \
                  set include_pr_comments to false to stop asking"
             );
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         }
         Err(error) => return Err(RepoError::from(error)),
     };
@@ -901,11 +927,32 @@ async fn fetch_comments(
     }
     // A single unreadable comment is dropped rather than failing the
     // pull request: the rest of the discussion is still worth indexing.
-    Ok(discussion
-        .raw
-        .into_iter()
-        .filter_map(|c| serde_json::from_value(c).ok())
-        .collect())
+    Ok(Some(
+        discussion
+            .raw
+            .into_iter()
+            .filter_map(|c| serde_json::from_value(c).ok())
+            .collect(),
+    ))
+}
+
+/// Whether the branch itself now answers 404. As [`pull_is_gone`]: anything
+/// else is "not shown to be gone".
+async fn branch_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, branch: &str) -> bool {
+    matches!(
+        source.client.branch_as::<Value>(at.owner, at.name, branch).await,
+        Err(error) if error.status() == Some(404)
+    )
+}
+
+/// Whether the pull request itself now answers 404. Any other answer, failures
+/// included, is "not shown to be gone": the caller then treats the read that
+/// failed as it would have without asking.
+async fn pull_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64) -> bool {
+    matches!(
+        source.client.pull(at.owner, at.name, number).await,
+        Err(error) if error.status() == Some(404)
+    )
 }
 
 /// New commits on the branches whose heads moved this run.
@@ -960,10 +1007,33 @@ async fn commits(
 
     'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
         for page in 1..=MAX_COMMIT_PAGES {
-            let batch = source
+            let batch = match source
                 .client
                 .commits(at.owner, at.name, &branch, since, page)
-                .await?;
+                .await
+            {
+                Ok(batch) => batch,
+                // Listed a moment ago and gone now (#724): a merge with
+                // delete-branch on a busy repository. Gitea answers `404
+                // object does not exist` for the ref, and the branch's own
+                // read -- what decides it, as for a pull request -- answers
+                // 404 too.
+                // Its row came from the listing; the next run that does not
+                // list it tombstones it. Not a hole, so not a skip of the
+                // repository, and not fatal on a full sync.
+                Err(error)
+                    if error.status() == Some(404) && branch_is_gone(source, at, &branch).await =>
+                {
+                    tracing::info!(
+                        repository = %at.full_name,
+                        %branch,
+                        %error,
+                        "gitea: branch deleted since the listing; skipping its commits"
+                    );
+                    continue 'branches;
+                }
+                Err(error) => return Err(RepoError::from(error)),
+            };
             let last = last_page(&batch);
             let mut fresh = 0usize;
             for raw in batch {

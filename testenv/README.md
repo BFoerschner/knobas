@@ -195,12 +195,27 @@ starts and seeds — the product then stays up, and the next run of another
 JVM product meets the refusal, as before. A product started by hand with
 `docker compose` takes no lock; that is what the refusal is still for.
 
+**Gitea runs take turns on a lock of their own (#724).** Two `just
+gitea-live` runs from two worktrees broke each other: one run's cleanup
+deleted its own `knobas-edit-…` branch while the other run's full sync was
+walking the repository, and the suites that sweep the whole fixture assert on
+counts and states another run is changing. So `gitea-live`,
+`gitea-live-capped` and `start-work-live` hold `$TMPDIR/knobas-live-gitea.lock`
+for their whole run, through `live_session gitea`: the same mechanism as the
+JVM lock (one implementation in `live-lib.sh`, `live_lock_hold <recipe>
+gitea`), the same waiting line with "Gitea lock" in it, the same stale-holder
+takeover and 45-minute refusal. It is a separate lock on purpose: a Gitea run
+needs none of the VM's memory, and queueing a two-minute Gitea suite behind an
+Atlassian run would serialise what never collided. A TeamCity run starts and
+seeds Gitea without it (the seed writes nothing to a seeded Gitea), and so
+does `live-up gitea`.
+
 **Gitea outlives the run that started it (#698).** No recipe stops Gitea at
 the end of its run; only `just live-down gitea` does. A run that found Gitea
 down — a `just gitea-live` (or `gitea-live-capped`, `start-work-live`), or a
 TeamCity run, whose VCS roots clone it — starts it and leaves it up, and says
 so in one line (`live: gitea was started for this run and stays up after it
-…`). Gitea is not a JVM and takes no lock, so by the time that run ends a
+…`). A TeamCity run takes no Gitea lock, so by the time that run ends a
 TeamCity run or another Gitea run from another worktree may be using it, and
 stopping "what the run started" would pull Gitea out from under that run
 mid-suite. The other fix — counting Gitea's users with a marker per run and
@@ -242,7 +257,8 @@ agent and no recipe does (the deputy's ruling on #634).
 against a stub `docker`, and `testenv/live-lock-test.sh` the lock — a second
 run waits and goes on, a dead holder's lock is taken over, the wait ends in
 a refusal naming the holder, `live_session` takes the lock before the guard
-and lets it go after the put-back — both in `just witness-unit` and so in
+and lets it go after the put-back, and a Gitea session queues on the Gitea
+lock and never on the JVM one — both in `just witness-unit` and so in
 `just check`.
 
 ## The live recipes
@@ -353,15 +369,16 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   sweep above matters: a killed run's leftovers are removed by the next
   `./seed-kuma.sh`.
 
-So: **claim the environment before running `./seed`, `just gitea-live`,
-`just gitea-live-capped`, `just start-work-live` or `just kuma-live`, and say
-when you release it.** `start-work-live` seeds too, and its branches carry the same `knobas-`
-prefix `live_gitea.rs` sweeps, so a concurrent `just gitea-live` deletes the
-branch out from under it. The failure mode is a
+So: **claim the environment before running `./seed` or `just kuma-live`, and
+say when you release it.** `start-work-live` seeds too, and its branches carry
+the same `knobas-` prefix `live_gitea.rs` sweeps, so a concurrent `just
+gitea-live` would delete the branch out from under it. The failure mode is a
 mid-run 401 or a vanished branch, neither of which reads as "somebody else is
-in here". Nothing in the tooling enforces this for Gitea and Kuma, and closing it
-properly would mean a lock like the one the JVM runs have had since #690
-(*Live products, on demand*), which these recipes do not take.
+in here". For the three Gitea recipes the tooling enforces it since #724: they
+queue on the Gitea lock (*Live products, on demand*). Kuma and a bare `./seed`
+take no lock, and neither does a TeamCity run -- so **`just gitea-live-capped`
+still wants the environment claimed** while a TeamCity run may be cloning from
+the Gitea it caps.
 
 ## What the seed **cannot** reproduce — read this before writing assertions
 

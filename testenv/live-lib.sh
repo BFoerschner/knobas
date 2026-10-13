@@ -135,7 +135,20 @@ live_is_jvm() {
 # A run started by a holder -- `just atlassian-live` running `just jira-live`
 # -- finds its parent's lock in `KNOBAS_LIVE_LOCK_HOLDER` and goes on under it
 # without taking or releasing anything.
-LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
+#
+# THE GITEA LOCK (issue #724) is the same mechanism under another name. Two
+# `just gitea-live` runs from two worktrees broke each other: one run's
+# cleanup deleted its branch while the other's full sync walked the repo, and
+# the suites that sweep the whole fixture assert on counts another run is
+# changing. So every run that writes to the shared Gitea or reconfigures it --
+# `gitea-live`, `gitea-live-capped`, `start-work-live`, all through
+# `live_session gitea` -- holds `$TMPDIR/knobas-live-gitea.lock`
+# (`KNOBAS_LIVE_GITEA_LOCK` moves it; the holder is passed down in
+# `KNOBAS_LIVE_GITEA_LOCK_HOLDER`). A separate lock, not the JVM one: a Gitea
+# run does not need TeamCity's memory, and queueing a two-minute Gitea suite
+# behind a 20-minute Atlassian run would serialise what never collided. A
+# TeamCity run starts and seeds Gitea without it; the seed writes nothing to a
+# seeded Gitea. One shell holds at most one of the two.
 LIVE_LOCK_MINE=""
 # Set while this shell is inside a reclaim, so an interrupt there removes the
 # reclaim lock itself instead of leaving it to the minute-old sweep.
@@ -153,11 +166,34 @@ _live_lock_pid_alive() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-# live_lock_hold <recipe> -- return once this shell holds the lock (or runs
-# under a parent that does); return 1, naming the holder, after the wait.
-# Arm `live_lock_release` in the EXIT, INT and TERM traps before calling it.
+# _live_lock_select <jvm|gitea> -- point LIVE_LOCK and its label and holder
+# variable at one of the two locks.
+_live_lock_select() {
+  case $1 in
+    jvm)
+      LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
+      LIVE_LOCK_LABEL="JVM lock"
+      LIVE_LOCK_HOLDER_VAR=KNOBAS_LIVE_LOCK_HOLDER ;;
+    gitea)
+      LIVE_LOCK=${KNOBAS_LIVE_GITEA_LOCK:-${TMPDIR:-/tmp}/knobas-live-gitea.lock}
+      LIVE_LOCK_LABEL="Gitea lock"
+      LIVE_LOCK_HOLDER_VAR=KNOBAS_LIVE_GITEA_LOCK_HOLDER ;;
+    *) echo "live: no lock named '$1' (jvm or gitea)" >&2; return 1 ;;
+  esac
+}
+_live_lock_select jvm
+
+# live_lock_hold <recipe> [<jvm|gitea>] -- return once this shell holds the
+# lock (the JVM one unless named; or runs under a parent that does); return 1,
+# naming the holder, after the wait. Arm `live_lock_release` in the EXIT, INT
+# and TERM traps before calling it.
 live_lock_hold() {
   local recipe=$1 me target waited announced='' last_report=0 wait_s poll from=$SECONDS
+  if [ -n "$LIVE_LOCK_MINE" ]; then
+    echo "live: $recipe: this shell already holds the $LIVE_LOCK_LABEL; one lock per shell" >&2
+    return 1
+  fi
+  _live_lock_select "${2:-jvm}" || return 1
   # This (sub)shell's own pid: `$$` is the script's in a subshell, and bash
   # 3.2 has no BASHPID. The exec'd sh's parent is the shell that runs this.
   me=$(exec sh -c 'echo $PPID')
@@ -170,9 +206,9 @@ live_lock_hold() {
     echo "live: KNOBAS_LIVE_LOCK_POLL must be a number of seconds, not '$poll'" >&2; return 1 ;;
   esac
   target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
-  if [ -n "${KNOBAS_LIVE_LOCK_HOLDER:-}" ] && [ "$target" = "$KNOBAS_LIVE_LOCK_HOLDER" ] &&
+  if [ -n "${!LIVE_LOCK_HOLDER_VAR:-}" ] && [ "$target" = "${!LIVE_LOCK_HOLDER_VAR}" ] &&
     _live_lock_pid_alive "$target"; then
-    echo "live: $recipe runs under the JVM lock its caller holds"
+    echo "live: $recipe runs under the $LIVE_LOCK_LABEL its caller holds"
     return 0
   fi
   while :; do
@@ -181,7 +217,7 @@ live_lock_hold() {
     # and would create its link INSIDE a directory and report success.
     if [ -e "$LIVE_LOCK" ] && [ ! -L "$LIVE_LOCK" ]; then
       LIVE_LOCK_MINE=""
-      echo "live: $recipe: $LIVE_LOCK is not the JVM lock's symlink; remove it" >&2
+      echo "live: $recipe: $LIVE_LOCK is not the $LIVE_LOCK_LABEL's symlink; remove it" >&2
       return 1
     fi
     # Stamped at each try, so the epoch says when the lock was TAKEN -- a run
@@ -189,9 +225,9 @@ live_lock_hold() {
     # One word for the recipe field, so the worktree path after it may hold spaces.
     LIVE_LOCK_MINE="$me $(date +%s) ${recipe// /_} ${LIVE_TESTENV%/testenv}"
     if ln -s "$LIVE_LOCK_MINE" "$LIVE_LOCK" 2>/dev/null; then
-      export KNOBAS_LIVE_LOCK_HOLDER=$LIVE_LOCK_MINE
+      export "$LIVE_LOCK_HOLDER_VAR=$LIVE_LOCK_MINE"
       waited=$((SECONDS - from))
-      [ -z "$announced" ] || echo "live: $recipe: took the JVM lock after ${waited}s"
+      [ -z "$announced" ] || echo "live: $recipe: took the $LIVE_LOCK_LABEL after ${waited}s"
       return 0
     fi
     target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
@@ -202,7 +238,7 @@ live_lock_hold() {
         LIVE_LOCK_RECLAIMING=1
         if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ]; then
           rm -f "$LIVE_LOCK"
-          echo "live: $recipe: the JVM lock was stale -- its holder $(_live_lock_describe "$target") is gone; taking it over"
+          echo "live: $recipe: the $LIVE_LOCK_LABEL was stale -- its holder $(_live_lock_describe "$target") is gone; taking it over"
         fi
         rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
         LIVE_LOCK_RECLAIMING=""
@@ -215,14 +251,14 @@ live_lock_hold() {
     waited=$((SECONDS - from))
     if [ "$target" != "$announced" ]; then
       announced=$target
-      echo "live: $recipe: the JVM lock is held by $(_live_lock_describe "$target"); waiting up to ${wait_s}s"
+      echo "live: $recipe: the $LIVE_LOCK_LABEL is held by $(_live_lock_describe "$target"); waiting up to ${wait_s}s"
     elif [ $((waited - last_report)) -ge 300 ]; then
       last_report=$waited
-      echo "live: $recipe: still waiting for the JVM lock, ${waited}s so far"
+      echo "live: $recipe: still waiting for the $LIVE_LOCK_LABEL, ${waited}s so far"
     fi
     if [ "$waited" -ge "$wait_s" ]; then
       LIVE_LOCK_MINE=""
-      echo "live: $recipe: the JVM lock is still held by $(_live_lock_describe "$target") after ${waited}s; giving up" >&2
+      echo "live: $recipe: the $LIVE_LOCK_LABEL is still held by $(_live_lock_describe "$target") after ${waited}s; giving up" >&2
       return 1
     fi
     sleep "$poll"
@@ -249,11 +285,12 @@ live_lock_traps() {
 
 # live_to_put_back <product> -- what a run of this one stops again at its end:
 # the product itself, if it was not already up -- and NEVER Gitea (#698).
-# Gitea is not a JVM and takes no lock, so by the time any run that started it
-# ends -- a TeamCity run that brought it up for its VCS roots, or a
-# `just gitea-live` -- another worktree's run may be using it, and stopping it
-# would pull it out from under that run mid-suite. Gitea is light (~130 MB)
-# and stays up; only `just live-down gitea` stops it.
+# The Gitea lock (#724) serialises the Gitea runs, not Gitea's users: by the
+# time any run that started it ends -- a TeamCity run that brought it up for
+# its VCS roots, which takes no Gitea lock, or a `just gitea-live` -- another
+# worktree's run may be using it, and stopping it would pull it out from under
+# that run mid-suite. Gitea is light (~130 MB) and stays up; only `just
+# live-down gitea` stops it.
 live_to_put_back() {
   [ "$1" = gitea ] || live_is_up "$1" || echo "$1"
 }
@@ -361,11 +398,12 @@ _live_restore() {
   for p in $put_back; do live_down "$p" || true; done
 }
 
-# live_session <product> [<recipe>] -- for a recipe: for a JVM product, hold
-# the JVM lock (as <recipe>) for the whole run; bring the product up, export what
-# `./seed --env` prints, and arm EXIT, INT and TERM to put the product back as
-# this found it. A product that was already up -- `just live-up jira` before a
-# run of `just jira-live` -- is left up; one this started is stopped. Gitea,
+# live_session <product> [<recipe>] -- for a recipe: hold the JVM lock (as
+# <recipe>) for the whole run of a JVM product, the Gitea lock for a Gitea one
+# (#724); bring the product up, export what `./seed --env` prints, and arm
+# EXIT, INT and TERM to put the product back as this found it. A product that
+# was already up -- `just live-up jira` before a run of `just jira-live` -- is
+# left up; one this started is stopped. Gitea,
 # started by a Gitea run or for a TeamCity one, is the exception: it stays up
 # (#698, `live_to_put_back`).
 #
@@ -383,7 +421,11 @@ live_session() {
   _live_main "$1" >/dev/null || { live_guard "$1"; exit 1; }
   # The lock BEFORE the guard: a run queued behind another JVM run must wait
   # for it, not meet the refusal that run's product causes.
-  if live_is_jvm "$1"; then live_lock_hold "${2:-live_session-$1}" || exit 1; fi
+  if live_is_jvm "$1"; then
+    live_lock_hold "${2:-live_session-$1}" || exit 1
+  elif [ "$1" = gitea ]; then
+    live_lock_hold "${2:-live_session-$1}" gitea || exit 1
+  fi
   live_guard "$1" || exit 1
   LIVE_PUT_BACK=$(live_to_put_back "$1")
   local need kept

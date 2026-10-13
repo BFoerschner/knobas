@@ -86,6 +86,34 @@ pub struct State {
     /// repository the listing offered and that was gone by the time the walk
     /// reached it.
     pub missing: BTreeSet<String>,
+    /// Why a fake witnesses this and the three fields below (ADR-0013, "a
+    /// fault the real instance cannot produce is witnessed by a fake"): the
+    /// window is between two requests inside one `sync` call, and no seed, flag
+    /// or clock opens it on the pinned container. The answers served are the
+    /// ones measured against it; `just gitea-live` stays the certificate.
+    ///
+    /// `owner/repo@branch` entries the listing still offers but that are gone
+    /// by the time the walk reads them: deleted between the two requests, as a
+    /// merge with delete-branch does on a busy repository (issue #724). Their
+    /// commit read answers what Gitea 1.27.3 answers for a ref that no longer
+    /// exists, measured 2026-10-13: `404 object does not exist [id: <branch>]`,
+    /// and so does the branch's own read, `GET /branches/{name}`: `404 not
+    /// found`.
+    pub vanished_branches: BTreeSet<String>,
+    /// `owner/repo@branch` entries whose commit read answers that same 404
+    /// while the branch itself still reads: the control for
+    /// `vanished_branches`, a 404 that is not "the branch is gone".
+    pub history_missing: BTreeSet<String>,
+    /// `owner/repo#index` pull requests the listing still offers but that were
+    /// deleted before their discussion was read (issue #724). Measured on
+    /// Gitea 1.27.3, 2026-10-13: the discussion read answers **500** `issue
+    /// does not exist` -- not a 404 -- and `GET /pulls/{index}` answers 404.
+    pub vanished_pulls: BTreeSet<String>,
+    /// `owner/repo#index` or `owner/repo@branch` -> the status the confirming
+    /// read (`GET /pulls/{index}`, `GET /branches/{name}`) answers instead of
+    /// what the rest of the state implies: a transient server fault on the one
+    /// read that decides "deleted" (issue #724). Only a 404 there may skip.
+    pub confirm_status: BTreeMap<String, u16>,
 }
 
 pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
@@ -242,6 +270,10 @@ impl State {
             forbidden: BTreeSet::new(),
             revoked: BTreeSet::new(),
             missing: BTreeSet::new(),
+            vanished_branches: BTreeSet::new(),
+            history_missing: BTreeSet::new(),
+            vanished_pulls: BTreeSet::new(),
+            confirm_status: BTreeMap::new(),
             discussion_status: BTreeMap::new(),
             discussion_total: BTreeMap::new(),
         }
@@ -511,6 +543,81 @@ impl Fake {
                 .mount(&self.server)
                 .await;
             }
+        }
+        // Ahead of the vanished items' own 404s, so a fault wins over them.
+        for (key, status) in &state.confirm_status {
+            let route = match (key.split_once('#'), key.split_once('@')) {
+                (Some((full_name, index)), _) => format!("/api/v1/repos/{full_name}/pulls/{index}"),
+                (None, Some((full_name, branch))) => format!(
+                    "/api/v1/repos/{full_name}/branches/{}",
+                    branch.replace('/', "%2F")
+                ),
+                _ => panic!("confirm key is owner/repo#index or owner/repo@branch"),
+            };
+            authed(Mock::given(method("GET")).and(path(route)))
+                .respond_with(
+                    ResponseTemplate::new(*status)
+                        .set_body_json(json!({ "message": "internal server error" })),
+                )
+                .with_priority(FORBIDDEN_PRIORITY - 1)
+                .mount(&self.server)
+                .await;
+        }
+        for key in &state.vanished_pulls {
+            let (full_name, index) = key
+                .split_once('#')
+                .expect("vanished pull key is owner/repo#index");
+            authed(Mock::given(method("GET")).and(path(format!(
+                "/api/v1/repos/{full_name}/issues/{index}/comments"
+            ))))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "message": format!("issue does not exist [id: 0, repo_id: 1, index: {index}]")
+            })))
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/pulls/{index}"))),
+            )
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })),
+            )
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
+        }
+        for key in &state.vanished_branches {
+            let (full_name, branch) = key
+                .split_once('@')
+                .expect("vanished branch key is owner/repo@branch");
+            let wire = branch.replace('/', "%2F");
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/branches/{wire}"))),
+            )
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })),
+            )
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
+        }
+        for key in state.vanished_branches.iter().chain(&state.history_missing) {
+            let (full_name, branch) = key
+                .split_once('@')
+                .expect("vanished branch key is owner/repo@branch");
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/commits")))
+                    .and(query_param("sha", branch)),
+            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+                "message": format!("object does not exist [id: {branch}, rel_path: ]")
+            })))
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
         }
         // Mounted before the discussions themselves so a refusal wins over
         // the records it stands in for -- the same trick `forbidden` uses.
