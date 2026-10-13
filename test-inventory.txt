@@ -75,6 +75,7 @@ knobas-app	lib/knobas_app	checkout::tests::the_kinds_with_a_checkout_are_the_one
 knobas-app	lib/knobas_app	checkout::tests::the_open_command_serialises_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	checkout::tests::the_setting_key_is_the_one_the_migration_names
 knobas-app	lib/knobas_app	checkout::tests::the_view_serialises_the_keys_the_mirror_declares
+knobas-app	lib/knobas_app	checkout::working_tree::tests::a_probe_that_hangs_does_not_hang_the_read
 knobas-app	lib/knobas_app	checkout::working_tree::tests::an_empty_path_entry_never_finds_a_program
 knobas-app	lib/knobas_app	checkout::working_tree::tests::another_git_is_never_probed
 knobas-app	lib/knobas_app	checkout::working_tree::tests::the_read_serialises_as_the_mirror_declares
