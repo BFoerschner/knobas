@@ -2058,6 +2058,7 @@ knobas-source-gitea	test/it	view::a_commit_without_statuses_draws_no_checks
 knobas-source-gitea	test/it	view::a_commits_statuses_are_its_checks_failing_first
 knobas-source-gitea	test/it	view::a_diff_gitea_refuses_is_an_error_and_not_an_empty_diff
 knobas-source-gitea	test/it	view::a_foreign_id_is_refused
+knobas-source-gitea	test/it	view::a_mirrors_commit_offers_a_new_branch_disabled
 knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view_branch::a_branch_ahead_with_no_pull_request_offers_one_prefilled_from_its_commits
 knobas-source-gitea	test/it	view_branch::a_branch_gitea_does_not_have_is_an_error

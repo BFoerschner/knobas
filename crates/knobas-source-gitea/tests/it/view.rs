@@ -62,9 +62,29 @@ async fn gitea(diff_status: u16) -> MockServer {
 
 /// [`gitea`], with `statuses` as the commit's combined status (#710).
 async fn gitea_with_statuses(diff_status: u16, statuses: serde_json::Value) -> MockServer {
+    gitea_full(diff_status, statuses, false).await
+}
+
+/// [`gitea`], the repository a pull mirror where `mirror` (#722).
+async fn gitea_of(diff_status: u16, mirror: bool) -> MockServer {
+    gitea_full(diff_status, json!([]), mirror).await
+}
+
+/// [`gitea_with_statuses`] and [`gitea_of`] in one.
+async fn gitea_full(diff_status: u16, statuses: serde_json::Value, mirror: bool) -> MockServer {
     let server = MockServer::start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
+    authed(Mock::given(method("GET")).and(path(REPO)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "payout-service",
+            "full_name": "tidewater/payout-service",
+            "owner": { "login": "tidewater" },
+            "default_branch": "main",
+            "mirror": mirror,
+        })))
+        .mount(&server)
+        .await;
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/git/commits/{SHA}"))))
         // The listing projections Gitea defaults to on are turned off here as
         // they are for `/commits`: a view reads its diff from `.diff`.
@@ -415,4 +435,27 @@ async fn a_commit_whose_statuses_cannot_be_read_still_draws_and_says_so() {
     );
     assert_eq!(rows[0].tone, Some(Tone::Muted));
     assert_eq!((&rows[0].chip, &rows[0].url), (&None, &None));
+}
+
+/// A mirror's commit offers *New branch…* disabled, with the reason its branch
+/// and repository views give (#722): Gitea refuses a branch on a mirror, so
+/// the view must not offer one it will refuse. A plain repository's commit
+/// offers it enabled.
+#[tokio::test]
+async fn a_mirrors_commit_offers_a_new_branch_disabled() {
+    let server = gitea_of(200, true).await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    let new = view
+        .actions
+        .iter()
+        .find(|a| a.write_op == "create_branch")
+        .expect("a mirror's commit still shows New branch…");
+    assert_eq!(
+        new.disabled.as_deref(),
+        Some("A mirror: its branches come from upstream")
+    );
+
+    let server = gitea_of(200, false).await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    assert_eq!(view.actions[0].disabled, None);
 }
