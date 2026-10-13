@@ -40,10 +40,14 @@
 //! away from insertion order). The value is persisted inside a cursor, so it
 //! has to mean the same thing in the next build; `DefaultHasher` does not
 //! promise that, and a crate's hash could change under a version bump. It is
-//! a copy of Jira's rather than a shared helper because the only crate both
-//! adapters share is the SPI, and a hashing helper is not part of the source
-//! contract. `a_known_record_keeps_its_fingerprint` pins the output to a
-//! literal so a drift between builds fails here first.
+//! a copy of Jira's rather than a shared helper on purpose: the crates both
+//! adapters depend on are `knobas-core`, `knobas-http` and the SPI, the first
+//! and last are frozen surfaces under §10.8 (a new export needs its own
+//! entry), and moving Jira's persisted value there would also touch the Jira
+//! adapter's cursor for a Gitea fix. Folding the two copies into one is a
+//! follow-up for whoever next needs a third.
+//! `a_known_record_keeps_its_fingerprint` pins the output to a literal so a
+//! drift between builds fails here first.
 
 use serde_json::Value;
 

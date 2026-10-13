@@ -1160,13 +1160,13 @@ async fn a_pull_request_merged_in_the_watermark_second_is_picked_up() {
         .pulls
         .get_mut("tidewater/payout-service")
         .expect("the fixture has pull requests");
-    let csv = pulls
+    let pr = pulls
         .iter_mut()
         .find(|p| p["number"] == 144)
         .expect("the fixture has #144");
-    assert_eq!(csv["updated_at"], "2026-08-22T13:50:00Z");
-    csv["state"] = serde_json::json!("closed");
-    csv["merged"] = serde_json::json!(true);
+    assert_eq!(pr["updated_at"], "2026-08-22T13:50:00Z");
+    pr["state"] = serde_json::json!("closed");
+    pr["merged"] = serde_json::json!(true);
     fake.remount(&state).await;
 
     let (items, moved) = again(&*source, &cursor).await;
@@ -1199,13 +1199,13 @@ async fn a_pull_request_on_the_watermark_is_not_re_delivered_for_its_repository(
     let source = source(fake.base_url(), serde_json::json!({}));
     let (_, cursor) = full(&*source).await;
 
-    let csv = state
+    let pr = state
         .pulls
         .get_mut("tidewater/payout-service")
         .and_then(|pulls| pulls.iter_mut().find(|p| p["number"] == 144))
         .expect("the fixture has #144");
-    csv["base"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
-    csv["head"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
+    pr["base"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
+    pr["head"]["repo"]["updated_at"] = serde_json::json!("2026-08-22T14:05:00Z");
     fake.remount(&state).await;
 
     let (items, next) = again(&*source, &cursor).await;
