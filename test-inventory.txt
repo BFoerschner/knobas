@@ -2035,6 +2035,7 @@ knobas-source-gitea	test/it	sync::a_new_commit_on_a_moved_branch_is_emitted_once
 knobas-source-gitea	test/it	sync::a_pull_request_deleted_mid_run_is_skipped_and_the_run_succeeds
 knobas-source-gitea	test/it	sync::a_pull_request_whose_discussion_is_refused_is_still_indexed
 knobas-source-gitea	test/it	sync::a_refusal_that_ends_a_full_sync_names_the_repository
+knobas-source-gitea	test/it	sync::a_refusal_under_a_listed_repository_is_not_read_as_deleted
 knobas-source-gitea	test/it	sync::a_refused_repository_keeps_its_position_on_either_selection_path
 knobas-source-gitea	test/it	sync::a_repository_listing_that_would_exceed_the_cap_fails_the_run
 knobas-source-gitea	test/it	sync::a_repository_that_cannot_have_pull_requests_is_walked_without_asking_for_them

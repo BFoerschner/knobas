@@ -1873,6 +1873,24 @@ async fn a_fault_on_the_confirming_read_never_skips_a_repository() {
     );
 }
 
+/// Only a 404 under a listed repository is read as "maybe deleted". A 403 is
+/// a refusal and stays ruling B4's, fatal on a full sync, even when the
+/// repository's own read answers 404 by the time it would be asked.
+#[tokio::test]
+async fn a_refusal_under_a_listed_repository_is_not_read_as_deleted() {
+    let mut state = State::tidewater().with_elsewhere();
+    state.forbidden.insert("elsewhere/unrelated".to_owned());
+    state
+        .confirm_status
+        .insert("elsewhere/unrelated".to_owned(), 404);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert_eq!(error.status(), Some(403), "{error:?}");
+}
+
 /// A refusal that ends a run has to say where it happened. Gitea's 404 body is
 /// `not found` for a missing repository and for a missing endpoint alike, so
 /// the bare server sentence is a message nobody can act on.
