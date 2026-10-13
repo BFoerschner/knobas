@@ -80,7 +80,7 @@ fn the_window_may_open_the_log_folder_and_no_other_path() {
         .iter()
         .filter_map(|entry| entry["path"].as_str())
         .collect();
-    assert_eq!(allowed, vec!["$APPLOG", "$APPLOG/**"]);
+    assert_eq!(allowed, vec!["$APPLOG"]);
 }
 
 /// `opener:default` is deliberately *not* used.

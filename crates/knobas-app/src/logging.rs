@@ -301,16 +301,39 @@ fn scrub_keyed(text: &str) -> String {
             continue;
         }
         j += 1;
-        while j < bytes.len() && (bytes[j] == b' ' || matches!(bytes[j], b'"' | b'\'' | b'\\')) {
+        while j < bytes.len() && bytes[j] == b' ' {
+            j += 1;
+        }
+        // `password: Some("...")`: an `Option` in `Debug` output.
+        if lower[j..].starts_with("some(") {
+            j += "some(".len();
+        }
+        let mut quote = None;
+        while j < bytes.len() && matches!(bytes[j], b'"' | b'\'' | b'\\') {
+            if bytes[j] != b'\\' {
+                quote = Some(bytes[j]);
+            }
             j += 1;
         }
         let mut end = j;
-        while end < bytes.len() && !ends_value(bytes[end]) {
-            end += 1;
+        match quote {
+            // A quoted value runs to its closing quote (or the escape before
+            // it), spaces and all: `"password": "correct horse"`.
+            Some(q) => {
+                while end < bytes.len() && bytes[end] != q && bytes[end] != b'\\' {
+                    end += 1;
+                }
+            }
+            None => {
+                while end < bytes.len() && !ends_value(bytes[end]) {
+                    end += 1;
+                }
+            }
         }
-        // `Bearer <value>` / `Basic <value>`: the word is not the secret.
+        // `Bearer <value>` / `Basic <value>` / Gitea's `token <value>`: the
+        // scheme word is not the secret.
         let word = lower[j..end].to_owned();
-        if (word == "bearer" || word == "basic") && bytes.get(end) == Some(&b' ') {
+        if matches!(word.as_str(), "bearer" | "basic" | "token") && bytes.get(end) == Some(&b' ') {
             end += 1;
             while end < bytes.len() && !ends_value(bytes[end]) {
                 end += 1;
@@ -488,12 +511,17 @@ pub fn subscriber(
     let stderr_layer = stderr.then(|| {
         tracing_subscriber::fmt::layer()
             .with_target(false)
+            .log_internal_errors(false)
             .with_writer(StderrMaker)
             .with_filter(env().and(events_only()))
     });
+    // A write that fails (a full disk, a closed stderr) drops the line. The
+    // default would report it with `eprintln!`, which panics when stderr is
+    // the thing that is broken.
     let file_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_ansi(false)
+        .log_internal_errors(false)
         .with_writer(sink.clone())
         .with_filter(env().and(events_only()));
     let ipc_layer = CommandLog::new(threshold)
@@ -627,6 +655,25 @@ mod tests {
         assert!(log.contains("jira.example.com"), "{log}");
         assert!(log.contains("page=2"), "{log}");
         assert!(log.contains("KNOBAS_SECRET_STORE=memory"), "{log}");
+    }
+
+    /// Shapes the first cut let through: Gitea's own `Authorization` scheme
+    /// word, a quoted value with a space in it, and an `Option` in `Debug`.
+    #[test]
+    fn redact_masks_scheme_words_quoted_values_and_options() {
+        for (line, secret) in [
+            ("Authorization: token 9f8e7d6c", "9f8e7d6c"),
+            (r#"{"password": "correct horse"}"#, "horse"),
+            (r#"Basic { username: "b", password: Some("pw1") }"#, "pw1"),
+            (r#"err: "{\"token\":\"tk 77\"}""#, "77"),
+        ] {
+            let out = redact(line);
+            assert!(!out.contains(secret), "{secret} leaked: {out}");
+        }
+        assert_eq!(
+            redact(r#"{"password": "a b", "user": "c"}"#),
+            r#"{"password": "***", "user": "c"}"#
+        );
     }
 
     #[test]
