@@ -30,8 +30,14 @@ function isReviewVerdict(word: string | undefined): word is ReviewVerdict {
   return word !== undefined && Object.hasOwn(REVIEW_VERDICTS, word);
 }
 
+/** A text value with its blanks trimmed, or `null` when nothing is left. */
+function filled(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+
 /**
- * The payload for one op, from the entity the view is of, the dialog's
+ * The payload for one op, from the entity the write targets, the dialog's
  * values, and the entity's settings the reader changed for this one write
  * (an action with `with_settings`). `null` where the values cannot make one.
  */
@@ -56,12 +62,31 @@ const PAYLOADS: Record<
     isReviewVerdict(values.verdict)
       ? { SubmitReview: { entity, verdict: values.verdict, body: values.body ?? "", comments: [] } }
       : null,
+  // A branch's life (#707). The two creates target the repository, which a
+  // branch's or a commit's view names as the action's own `entity`; the
+  // refs come from the dialog, a one-option pick where the view fixes them.
+  create_branch: (entity, values) => {
+    const name = filled(values.name);
+    const from = filled(values.from_ref);
+    return name && from ? { CreateBranch: { entity, name, from_ref: from } } : null;
+  },
+  create_pull_request: (entity, values) => {
+    const title = filled(values.title);
+    const head = filled(values.head);
+    const base = filled(values.base);
+    return title && head && base
+      ? { CreatePullRequest: { entity, title, body: values.body ?? "", head, base } }
+      : null;
+  },
+  delete_branch: (entity) => ({ DeleteBranch: { entity } }),
 };
 
 /**
- * The write `action` queues against `entity` with its fixed values and the
- * dialog's `values`, and the `settings` changed, or `null` when this shell
- * cannot build it: an op it has no entry for, or values the op cannot carry.
+ * The write `action` queues with its fixed values and the dialog's `values`,
+ * and the `settings` changed, or `null` when this shell cannot build it: an
+ * op it has no entry for, or values the op cannot carry. It targets the
+ * entity the action names where it names one (#707), else `entity`, the one
+ * the view is of; the shell never derives one id from another.
  */
 export function actionPayload(
   action: ViewAction,
@@ -72,7 +97,7 @@ export function actionPayload(
   // The source's fixed answers lie under the dialog's (#705); a source never
   // fixes a name it also asks for, so the order only matters to a bad one.
   const answered = { ...action.values, ...values };
-  return PAYLOADS[action.write_op]?.(entity, answered, settings) ?? null;
+  return PAYLOADS[action.write_op]?.(action.entity ?? entity, answered, settings) ?? null;
 }
 
 /**

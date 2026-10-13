@@ -144,6 +144,7 @@ function overview(state: string, mergeable: boolean): SourceView {
         disabled: mergeable ? null : "Already merged",
         with_settings: false,
         values: {},
+        entity: null,
       },
     ],
   };
@@ -255,6 +256,7 @@ function reviewable(): SourceView {
         disabled: null,
         with_settings: false,
         values: { verdict: "request_changes" },
+        entity: null,
       },
     ],
   };

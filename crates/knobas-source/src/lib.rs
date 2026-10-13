@@ -404,6 +404,7 @@ impl SourceError {
 /// | [`SetParameter`](Self::SetParameter) | `"set_parameter"` | source views (TeamCity, #668) |
 /// | [`RunBuild`](Self::RunBuild) | `"run_build"` | source views (TeamCity, #669) |
 /// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workflows, spec #701 (Gitea, #705) |
+/// | [`DeleteBranch`](Self::DeleteBranch) | `"delete_branch"` | source views (Gitea, #707) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -734,6 +735,24 @@ pub enum WriteOp {
         #[serde(default)]
         comments: Vec<ReviewComment>,
     },
+    /// Identifier `"delete_branch"`. Delete a branch at the source (spec #701
+    /// workflow 10, issue #707). `entity` is the **branch**.
+    ///
+    /// The adapter refuses the repository's default branch and a protected
+    /// branch with [`SourceError::Protocol`] naming why, before a request
+    /// leaves: the view offers neither, and a payload that names one anyway
+    /// is refused rather than tried. Whether the branch is merged is the
+    /// view's sentence to say, not the op's to check: deleting an unmerged
+    /// branch is a thing a reader may mean.
+    ///
+    /// Hold detection takes the whole mirrored record, as for
+    /// [`MergePullRequest`](WriteOp::MergePullRequest): a delete is a
+    /// judgement on one state of the branch, and a commit pushed to it after
+    /// the reader pressed *Delete branch…* would otherwise go with it unread.
+    /// Like a merge it leaves nothing new at the source, so a withdrawal in
+    /// flight leaves no unclaimed write: what is left is the branch gone,
+    /// which the next sync reads back.
+    DeleteBranch { entity: String },
 }
 
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
@@ -874,6 +893,7 @@ impl WriteOp {
             WriteOp::SetParameter { .. } => "set_parameter",
             WriteOp::RunBuild { .. } => "run_build",
             WriteOp::SubmitReview { .. } => "submit_review",
+            WriteOp::DeleteBranch { .. } => "delete_branch",
         }
     }
 }
@@ -1308,6 +1328,10 @@ mod tests {
                     body: "bound this".into(),
                 }],
             },
+            WriteOp::DeleteBranch {
+                entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
+                    .into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -1328,7 +1352,8 @@ mod tests {
                 | WriteOp::MergePullRequest { .. }
                 | WriteOp::SetParameter { .. }
                 | WriteOp::RunBuild { .. }
-                | WriteOp::SubmitReview { .. } => {}
+                | WriteOp::SubmitReview { .. }
+                | WriteOp::DeleteBranch { .. } => {}
             }
         }
         probes
@@ -1498,7 +1523,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 18, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 19, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

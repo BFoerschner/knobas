@@ -687,6 +687,12 @@ export type WriteOpPayload =
    * with it, empty for a review of the whole change.
    */
   | { SubmitReview: { entity: string; verdict: ReviewVerdict; body: string; comments: ReviewComment[] } }
+  /**
+   * Delete a branch (#707). `entity` is the **branch**; the source refuses
+   * the default branch and a protected one. Mirrors
+   * `knobas_source::WriteOp::DeleteBranch`.
+   */
+  | { DeleteBranch: { entity: string } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

@@ -1046,6 +1046,7 @@ const CASES: Case[] = [
             disabled: null,
             with_settings: false,
             values: {},
+            entity: null,
           },
           onsubmit: () => Promise.resolve(true),
           onclose: () => {},

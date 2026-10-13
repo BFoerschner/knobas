@@ -88,11 +88,48 @@ pub(super) struct TouchedFile {
     pub filename: String,
 }
 
-/// A branch's tip as `/branches` answers it (`PayloadCommit`).
+/// A branch's tip as `/branches` answers it (`PayloadCommit`), and whether
+/// it is protected (#707: a protected branch is not offered for deletion).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct BranchRecord {
     #[serde(default)]
     pub commit: Option<TipCommit>,
+    #[serde(default)]
+    pub protected: bool,
+}
+
+/// One branch of a repository's listing.
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct ListedBranch {
+    pub name: String,
+    #[serde(default)]
+    pub commit: Option<TipCommit>,
+}
+
+/// How many pages of fifty branches a view reads at most.
+const BRANCH_PAGES: u32 = 20;
+
+/// Every branch of a repository, page by page until an empty one, at most
+/// [`BRANCH_PAGES`] pages, in Gitea's own order.
+pub(super) async fn all_branches(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+) -> Result<Paged<ListedBranch>, SourceError> {
+    let mut items = Vec::new();
+    for page in 1..=BRANCH_PAGES {
+        let batch = source.client.branches(owner, repo, page).await?;
+        if batch.is_empty() {
+            return Ok(Paged { items, cut: false });
+        }
+        for raw in batch {
+            let branch: ListedBranch = serde_json::from_value(raw).map_err(|error| {
+                SourceError::protocol(format!("gitea: an unreadable branch record: {error}"))
+            })?;
+            items.push(branch);
+        }
+    }
+    Ok(Paged { items, cut: true })
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -355,5 +392,66 @@ pub(super) fn pull_row(source_id: &str, owner: &str, repo: &str, pull: &OpenPull
         chip: Some("open".to_owned()),
         url: pull.html_url.clone(),
         commit: None,
+    }
+}
+
+/// Every future to its end, side by side, in the order given; the first
+/// failure fails the lot, as `try_join!` does for a fixed few. For the
+/// per-branch reads a repository's *New pull request…* makes, whose number
+/// is the listing's.
+pub(super) async fn all_of<T, E, F>(futures: Vec<F>) -> Result<Vec<T>, E>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    let mut pending: Vec<_> = futures.into_iter().map(Box::pin).collect();
+    let mut done: Vec<Option<T>> = std::iter::repeat_with(|| None)
+        .take(pending.len())
+        .collect();
+    std::future::poll_fn(|cx| {
+        let mut waiting = false;
+        for (future, slot) in pending.iter_mut().zip(done.iter_mut()) {
+            if slot.is_some() {
+                continue;
+            }
+            match future.as_mut().poll(cx) {
+                std::task::Poll::Ready(Ok(value)) => *slot = Some(value),
+                std::task::Poll::Ready(Err(error)) => return std::task::Poll::Ready(Err(error)),
+                std::task::Poll::Pending => waiting = true,
+            }
+        }
+        if waiting {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(Ok(()))
+        }
+    })
+    .await?;
+    Ok(done.into_iter().flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One boxed probe future, so a list of differently-timed ones has one type.
+    type Probe = std::pin::Pin<Box<dyn std::future::Future<Output = Result<u8, &'static str>>>>;
+
+    #[tokio::test]
+    async fn all_of_keeps_the_order_and_fails_on_the_first_failure() {
+        let ok: Vec<Probe> = vec![
+            Box::pin(async { Ok(1) }),
+            Box::pin(async {
+                tokio::task::yield_now().await;
+                Ok(2)
+            }),
+            Box::pin(async { Ok(3) }),
+        ];
+        assert_eq!(all_of(ok).await, Ok(vec![1, 2, 3]));
+        let failing: Vec<Probe> = vec![Box::pin(async { Ok(1) }), Box::pin(async { Err("no") })];
+        assert_eq!(all_of(failing).await, Err("no"));
+        assert_eq!(
+            all_of::<u8, &str, std::future::Ready<_>>(Vec::new()).await,
+            Ok(vec![])
+        );
     }
 }

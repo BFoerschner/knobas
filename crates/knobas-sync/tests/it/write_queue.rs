@@ -943,6 +943,10 @@ fn write_op_probes() -> Vec<WriteOp> {
             body: "bound the jitter".to_owned(),
             comments: vec![],
         },
+        WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
+                .to_owned(),
+        },
     ]
 }
 
@@ -975,7 +979,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::MergePullRequest { .. }
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
-            | WriteOp::SubmitReview { .. } => op.identifier(),
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::DeleteBranch { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1180,6 +1185,10 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // A review lands on a pull request the mirror holds: what is left
             // is the review on it, which the next sync and the view read back.
             | WriteOp::SubmitReview { .. }
+            // A delete removes a branch the mirror holds: what is left is
+            // nothing new, and the next sync reads the branch gone (#707).
+            // Like a merge it is not taken back once sent.
+            | WriteOp::DeleteBranch { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.

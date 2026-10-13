@@ -11,7 +11,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use knobas_source::view::{Block, DiffChange, Fact, SourceView, Tone, ViewRow, ViewSection};
+use knobas_source::view::{
+    Block, DiffChange, Fact, FieldKind, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+};
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
@@ -94,6 +96,10 @@ struct Served {
     pulls: Vec<Value>,
     /// Holds every answer and counts the requests in flight; none by default.
     flight: Option<Arc<InFlight>>,
+    /// Whether Gitea says the feature branch is protected.
+    protected: bool,
+    /// Whether the repository is a pull mirror.
+    mirror: bool,
 }
 
 impl Default for Served {
@@ -112,6 +118,8 @@ impl Default for Served {
                 ),
             ],
             flight: None,
+            protected: false,
+            mirror: false,
         }
     }
 }
@@ -130,17 +138,52 @@ async fn gitea(served: Served) -> MockServer {
             .set_delay(delay)
     };
 
+    let mut record = repo_record();
+    record["mirror"] = json!(served.mirror);
     authed(Mock::given(method("GET")).and(path(REPO)))
-        .respond_with(ok(repo_record()))
+        .respond_with(ok(record))
         .mount(&server)
         .await;
+    let mut feature = branch_record(
+        "feature/PAY-231-sepa-retry",
+        TIP,
+        "PAY-231: jitter in backoff, cap at 5 attempts",
+        "2026-08-22T11:42:00Z",
+    );
+    feature["protected"] = json!(served.protected);
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/branches/{FEATURE_WIRE}"))))
-        .respond_with(ok(branch_record(
-            "feature/PAY-231-sepa-retry",
-            TIP,
-            "PAY-231: jitter in backoff, cap at 5 attempts",
-            "2026-08-22T11:42:00Z",
-        )))
+        .respond_with(ok(feature))
+        .mount(&server)
+        .await;
+    // The repository's branches, for a pull request's base: main and two
+    // features, the listing in Gitea's own (name) order.
+    authed(Mock::given(method("GET")).and(path(format!("{REPO}/branches"))))
+        .and(query_param("page", "1"))
+        .respond_with(ok(json!([
+            branch_record(
+                "feature/PAY-231-sepa-retry",
+                TIP,
+                "PAY-231: jitter",
+                "2026-08-22T11:42:00Z"
+            ),
+            branch_record(
+                "feature/PAY-236-payout-csv-export",
+                FIRST,
+                "PAY-236: csv",
+                "2026-08-20T09:00:00Z"
+            ),
+            branch_record(
+                "main",
+                MAIN_TIP,
+                "PAY-228 partial refund drift",
+                "2026-08-21T16:00:00Z"
+            ),
+        ])))
+        .mount(&server)
+        .await;
+    authed(Mock::given(method("GET")).and(path(format!("{REPO}/branches"))))
+        .and(query_param("page", "2"))
+        .respond_with(ok(json!([])))
         .mount(&server)
         .await;
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/branches/main"))))
@@ -241,8 +284,11 @@ fn section<'v>(view: &'v SourceView, id: &str) -> &'v ViewSection {
 }
 
 fn facts(section: &ViewSection) -> Vec<(String, String)> {
-    let Some(Block::Facts { facts }) = section.blocks.first() else {
-        panic!("the section opens on facts: {section:#?}");
+    let Some(facts) = section.blocks.iter().find_map(|b| match b {
+        Block::Facts { facts } => Some(facts),
+        _ => None,
+    }) else {
+        panic!("the section has facts: {section:#?}");
     };
     facts
         .iter()
@@ -428,7 +474,7 @@ async fn a_branch_with_no_pull_request_says_so() {
     let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
     let overview = section(&view, "overview");
     let Some(Block::Facts { facts }) = overview.blocks.first() else {
-        panic!("{overview:#?}");
+        panic!("with no pull request the overview opens on its facts: {overview:#?}");
     };
     assert_eq!(
         facts.last(),
@@ -558,5 +604,269 @@ async fn a_branchs_reads_are_made_at_the_same_time() {
         .expect("reads")
         .expect("a branch draws a view");
     assert_eq!(view.sections.len(), 3);
-    assert_eq!(flight.most(), 4, "the branch's reads in flight at once");
+    assert_eq!(
+        flight.most(),
+        5,
+        "the branch's reads in flight at once, its repository's branches among them"
+    );
+}
+
+// -- a branch's life from its view (#707) ------------------------------------
+
+/// The pull requests the default fake serves, without the feature's own.
+fn without_its_pull() -> Served {
+    Served {
+        pulls: vec![pull(
+            144,
+            "Add payout CSV export",
+            "feature/PAY-236-payout-csv-export",
+        )],
+        ..Served::default()
+    }
+}
+
+async fn view_of(served: Served, entity: &str) -> SourceView {
+    let server = gitea(served).await;
+    source(&server)
+        .view(entity, None)
+        .await
+        .expect("the read succeeds")
+        .expect("Gitea draws a branch")
+}
+
+fn toolbar(view: &SourceView) -> Vec<&str> {
+    view.actions.iter().map(|a| a.write_op.as_str()).collect()
+}
+
+fn action<'v>(view: &'v SourceView, op: &str) -> &'v ViewAction {
+    view.actions
+        .iter()
+        .find(|a| a.write_op == op)
+        .unwrap_or_else(|| panic!("no {op} in {:#?}", view.actions))
+}
+
+fn choice(action: &ViewAction, name: &str) -> Vec<String> {
+    let field = action
+        .fields
+        .iter()
+        .find(|f| f.name == name)
+        .unwrap_or_else(|| panic!("no field {name} in {action:#?}"));
+    let FieldKind::Choice { options } = &field.kind else {
+        panic!("{name} is a choice: {field:#?}");
+    };
+    options.iter().map(|o| o.value.clone()).collect()
+}
+
+fn prefill<'a>(action: &'a ViewAction, name: &str) -> Option<&'a str> {
+    action
+        .fields
+        .iter()
+        .find(|f| f.name == name)
+        .and_then(|f| f.value.as_deref())
+}
+
+/// The ruling on #707: a branch with an open pull request opens its overview
+/// on that pull request, and its toolbar offers no second one.
+#[tokio::test]
+async fn a_branch_with_an_open_pull_request_opens_on_it_and_offers_none() {
+    let view = view_of(Served::default(), FEATURE).await;
+    let overview = section(&view, "overview");
+    let Some(Block::Entities { title, rows }) = overview.blocks.first() else {
+        panic!("the first block is the pull request: {overview:#?}");
+    };
+    assert_eq!(title.as_deref(), Some("Pull request"));
+    let row: Vec<_> = rows
+        .iter()
+        .map(|r| (r.entity_id.as_deref(), r.chip.as_deref(), r.title.as_str()))
+        .collect();
+    assert_eq!(
+        row,
+        [(
+            Some("gitea:tidewater/payout-service#142"),
+            Some("open"),
+            "SEPA retry with exponential backoff"
+        )]
+    );
+    assert_eq!(toolbar(&view), ["create_branch", "delete_branch"]);
+}
+
+/// *New branch…* on a branch: created in its repository, from this branch.
+#[tokio::test]
+async fn a_new_branch_from_a_branch_starts_at_it_in_its_repository() {
+    let view = view_of(Served::default(), FEATURE).await;
+    let new = action(&view, "create_branch");
+    assert_eq!(new.label, "New branch…");
+    assert_eq!(
+        new.entity.as_deref(),
+        Some("gitea:tidewater/payout-service")
+    );
+    let name = &new.fields[0];
+    assert_eq!(
+        (name.name.as_str(), name.required, &name.kind),
+        (
+            "name",
+            true,
+            &FieldKind::Text {
+                suggestions: vec![]
+            }
+        )
+    );
+    assert_eq!(choice(new, "from_ref"), ["feature/PAY-231-sepa-retry"]);
+    assert!(new.disabled.is_none() && !new.danger);
+}
+
+/// *Open pull request…* on a branch with no pull request that is ahead:
+/// prefilled from its commits, its head fixed, the default branch first
+/// among the bases and the branch itself not among them.
+#[tokio::test]
+async fn a_branch_ahead_with_no_pull_request_offers_one_prefilled_from_its_commits() {
+    let view = view_of(without_its_pull(), FEATURE).await;
+    assert_eq!(
+        toolbar(&view),
+        ["create_pull_request", "create_branch", "delete_branch"]
+    );
+    let open = action(&view, "create_pull_request");
+    assert_eq!(open.label, "Open pull request…");
+    assert!(open.primary && open.disabled.is_none());
+    assert_eq!(
+        open.entity.as_deref(),
+        Some("gitea:tidewater/payout-service")
+    );
+    // Two commits: the title is the branch's name, made readable.
+    assert_eq!(prefill(open, "title"), Some("PAY-231 sepa retry"));
+    assert_eq!(
+        prefill(open, "body"),
+        Some("- PAY-231: jitter in backoff, cap at 5 attempts\n- PAY-231: retry SEPA payouts")
+    );
+    assert_eq!(choice(open, "head"), ["feature/PAY-231-sepa-retry"]);
+    assert_eq!(
+        choice(open, "base"),
+        ["main", "feature/PAY-236-payout-csv-export"]
+    );
+    let names: Vec<_> = open.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["title", "body", "head", "base"]);
+}
+
+/// One commit ahead: the title is that commit's subject.
+#[tokio::test]
+async fn a_branch_one_commit_ahead_titles_its_pull_request_by_that_commit() {
+    let server = gitea(without_its_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/compare/main...{FEATURE_WIRE}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_commits": 1,
+            "commits": [listed(TIP, "PAY-231: jitter in backoff", "2026-08-22T11:42:00Z", &["src/retry.rs"])]
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
+    let open = action(&view, "create_pull_request");
+    assert_eq!(prefill(open, "title"), Some("PAY-231: jitter in backoff"));
+    assert_eq!(prefill(open, "body"), Some("- PAY-231: jitter in backoff"));
+}
+
+/// Nothing ahead: nothing to propose, and the delete says it loses nothing.
+#[tokio::test]
+async fn a_branch_with_nothing_ahead_has_nothing_to_propose_and_is_merged() {
+    let server = gitea(without_its_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/compare/main...{FEATURE_WIRE}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "total_commits": 0, "commits": [] })),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
+    assert_eq!(
+        action(&view, "create_pull_request").disabled.as_deref(),
+        Some("No commits ahead of main")
+    );
+    let delete = action(&view, "delete_branch");
+    assert_eq!(
+        delete.confirm.as_deref(),
+        Some("Delete feature/PAY-231-sepa-retry? It is merged into main: nothing on it is lost.")
+    );
+}
+
+/// *Delete branch…*: a danger, its sentence saying what an unmerged branch
+/// loses, and targeting the view's own entity.
+#[tokio::test]
+async fn deleting_an_unmerged_branch_says_what_only_its_sha_will_reach() {
+    let view = view_of(Served::default(), FEATURE).await;
+    let delete = action(&view, "delete_branch");
+    assert_eq!(delete.label, "Delete branch…");
+    assert!(delete.danger && delete.fields.is_empty() && delete.entity.is_none());
+    assert_eq!(
+        delete.confirm.as_deref(),
+        Some(
+            "Delete feature/PAY-231-sepa-retry? Not merged into main: 2 commits will only be \
+             reachable by SHA."
+        )
+    );
+    assert_eq!(delete.disabled, None);
+}
+
+/// The default branch never can be deleted, so it offers no delete (the
+/// #701 ruling); a protected one can be, once its protection is lifted, so
+/// it offers the delete disabled and says how.
+#[tokio::test]
+async fn the_default_branch_offers_no_delete_and_a_protected_one_says_why_not_yet() {
+    let main = view_of(Served::default(), MAIN).await;
+    assert_eq!(
+        toolbar(&main),
+        ["create_branch"],
+        "nothing to propose from the default branch, and nothing to delete"
+    );
+    assert_eq!(choice(action(&main, "create_branch"), "from_ref"), ["main"]);
+
+    let protected = view_of(
+        Served {
+            protected: true,
+            ..Served::default()
+        },
+        FEATURE,
+    )
+    .await;
+    assert_eq!(
+        action(&protected, "delete_branch").disabled.as_deref(),
+        Some("Protected branch: lift its protection on Gitea to delete it")
+    );
+}
+
+/// A branch of a pull mirror proposes nothing (the mirror takes no pull
+/// requests) and draws its branch writes disabled: Gitea answers both 403,
+/// and a mirror can be turned into a plain repository.
+#[tokio::test]
+async fn a_mirrors_branch_proposes_nothing_and_says_why_it_takes_no_branch_writes() {
+    let view = view_of(
+        Served {
+            pulls: Vec::new(),
+            mirror: true,
+            ..Served::default()
+        },
+        FEATURE,
+    )
+    .await;
+    assert_eq!(toolbar(&view), ["create_branch", "delete_branch"]);
+    for op in ["create_branch", "delete_branch"] {
+        assert_eq!(
+            action(&view, op).disabled.as_deref(),
+            Some("A mirror: its branches come from upstream"),
+            "{op}"
+        );
+    }
+}
+
+/// A section read carries no toolbar: the toolbar is the whole view's.
+#[tokio::test]
+async fn a_section_read_carries_no_toolbar() {
+    let server = gitea(Served::default()).await;
+    let view = source(&server)
+        .view(FEATURE, Some("commits"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(view.actions.is_empty(), "{:#?}", view.actions);
 }

@@ -2,8 +2,10 @@
 //! repository's default branch, what it carries, and whether a pull request
 //! is open from it.
 //!
-//! * *Overview* -- facts (the base, ahead and behind), the last commit, and
-//!   the open pull request whose head is this branch, or `none`.
+//! * *Overview* -- the open pull request whose head is this branch first
+//!   (the #707 ruling: where a reader looks for it, and the link to it), then
+//!   facts (the base, ahead and behind, or *Pull request: none*) and the last
+//!   commit.
 //! * *Commits* (count = listed) -- what the branch carries over the default
 //!   branch, from `compare/{default}...{branch}`, at most
 //!   [`rows::COMMIT_CAP`] of them and then a note saying where the rest is.
@@ -15,14 +17,20 @@
 //!
 //! The default branch itself is measured against nothing: it says *default
 //! branch*, its *Commits* are its latest twenty, and it has no *Diff*.
+//!
+//! The whole view's toolbar (#707, [`super::act`]): *Open pull request…*
+//! where no pull request is open from the branch (disabled with nothing
+//! ahead; absent on the default branch), *New branch…* from this branch, and
+//! *Delete branch…*, absent on the default branch (it can never be deleted)
+//! and disabled, saying how, on a protected one.
 
 use std::collections::BTreeSet;
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Fact, SourceView, Tone, ViewSection};
+use knobas_source::view::{Block, Fact, SourceView, Tone, ViewAction, ViewSection};
 
-use super::fact;
 use super::rows::{self, BranchRecord, ListedCommit, RepoRecord};
+use super::{act, fact};
 use crate::map;
 use crate::source::GiteaSource;
 
@@ -71,21 +79,20 @@ pub(super) async fn draw(
     let base = record.default_branch().to_owned();
     let is_default = branch == base;
 
-    let sections = match section {
-        Some(DIFF) if !is_default => vec![diff(source, owner, repo, &base, branch).await?],
+    match section {
+        Some(DIFF) if !is_default => Ok(SourceView::new(vec![
+            diff(source, owner, repo, &base, branch).await?,
+        ])),
         Some(OVERVIEW | COMMITS) | None => {
-            whole(source, &record, owner, repo, branch, section).await?
+            whole(source, &record, owner, repo, branch, section).await
         }
-        Some(other) => {
-            return Err(SourceError::protocol(format!(
-                "gitea: a branch's view has no section {other:?} (asked for {entity:?})"
-            )));
-        }
-    };
-    Ok(SourceView::new(sections))
+        Some(other) => Err(SourceError::protocol(format!(
+            "gitea: a branch's view has no section {other:?} (asked for {entity:?})"
+        ))),
+    }
 }
 
-/// The whole view, or one of its two eager sections.
+/// The whole view with its toolbar, or one of its two eager sections.
 async fn whole(
     source: &GiteaSource,
     record: &RepoRecord,
@@ -93,12 +100,15 @@ async fn whole(
     repo: &str,
     branch: &str,
     only: Option<&str>,
-) -> Result<Vec<ViewSection>, SourceError> {
+) -> Result<SourceView, SourceError> {
     let id = &source.id;
-    // The tip, the open pull requests and what the branch carries are each
-    // their own reads, so they are read side by side (#703); the first to
-    // fail fails the view, as it did in turn.
-    let (tip, open, carried) = tokio::try_join!(
+    let is_default = branch == record.default_branch();
+    // The tip, the open pull requests, what the branch carries and -- for a
+    // pull request's bases, on the whole view of a branch that may propose
+    // one -- the repository's branches are each their own reads, so they are
+    // read side by side (#703); the first to fail fails the view, as it did
+    // in turn.
+    let (tip, open, carried, listed) = tokio::try_join!(
         source.client.branch_as::<BranchRecord>(owner, repo, branch),
         async {
             // A mirror's `/pulls` is a bare 404: it has none, which is not a failure.
@@ -109,6 +119,13 @@ async fn whole(
             }
         },
         read_carried(source, record, owner, repo, branch),
+        async {
+            if only.is_none() && !is_default {
+                rows::all_branches(source, owner, repo).await
+            } else {
+                Ok(rows::Paged::default())
+            }
+        },
     )?;
     let pulls: Vec<_> = open
         .items
@@ -119,6 +136,7 @@ async fn whole(
         mut facts,
         commits,
         count,
+        ahead,
         files,
         note,
     } = carried;
@@ -135,13 +153,9 @@ async fn whole(
         });
     }
 
-    let mut blocks = vec![Block::Facts { facts }];
-    if let Some(commit) = &tip.commit {
-        blocks.push(Block::Entities {
-            title: Some("Last commit".to_owned()),
-            rows: vec![rows::commit_row(id, owner, repo, commit)],
-        });
-    }
+    let mut blocks = Vec::new();
+    // The open pull request first: the overview is where a reader looks for
+    // it, and its row is the way there (the #707 ruling).
     if !pulls.is_empty() {
         blocks.push(Block::Entities {
             title: Some(if pulls.len() == 1 {
@@ -155,6 +169,43 @@ async fn whole(
                 .collect(),
         });
     }
+    blocks.push(Block::Facts { facts });
+    if let Some(commit) = &tip.commit {
+        blocks.push(Block::Entities {
+            title: Some("Last commit".to_owned()),
+            rows: vec![rows::commit_row(id, owner, repo, commit)],
+        });
+    }
+    let actions = if only.is_none() {
+        let subjects: Vec<String> = commits
+            .iter()
+            .map(|c| {
+                crate::map::subject(
+                    c.record
+                        .commit
+                        .as_ref()
+                        .and_then(|i| i.message.as_deref())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        toolbar(
+            source,
+            record,
+            owner,
+            repo,
+            branch,
+            &Standing {
+                has_pull: !pulls.is_empty(),
+                protected: tip.protected,
+                ahead,
+                subjects: &subjects,
+                branches: &listed.items,
+            },
+        )
+    } else {
+        Vec::new()
+    };
 
     let mut commit_rows: Vec<_> = commits
         .iter()
@@ -192,7 +243,80 @@ async fn whole(
     if let Some(only) = only {
         sections.retain(|s| s.id == only);
     }
-    Ok(sections)
+    Ok(SourceView { sections, actions })
+}
+
+/// What the toolbar is decided on: what the view read of the branch.
+struct Standing<'a> {
+    /// A pull request is open from it.
+    has_pull: bool,
+    protected: bool,
+    /// Commits it carries over the default branch; `None` for that branch
+    /// itself, which offers neither a pull request nor a delete.
+    ahead: Option<u64>,
+    /// The subjects of those it lists, as listed.
+    subjects: &'a [String],
+    /// The repository's branches, for a pull request's bases.
+    branches: &'a [rows::ListedBranch],
+}
+
+/// The branch's toolbar (#707): *Open pull request…*, *New branch…*,
+/// *Delete branch…*, in that order.
+fn toolbar(
+    source: &GiteaSource,
+    record: &RepoRecord,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    standing: &Standing<'_>,
+) -> Vec<ViewAction> {
+    let default = record.default_branch();
+    let repository = act::repo_id(source, owner, repo);
+    let mirrored = record.repo.mirror.then(|| act::MIRRORED.to_owned());
+    let mut actions = Vec::new();
+    // A branch with an open pull request links to it from the overview and
+    // offers no second one; the default branch has nothing to propose, and
+    // neither has a repository that takes no pull requests (a mirror, or one
+    // with them switched off), as on the repository's own toolbar.
+    if let Some(ahead) = standing.ahead
+        && !standing.has_pull
+        && record.repo.can_have_pulls()
+    {
+        let disabled = (ahead == 0).then(|| format!("No commits ahead of {default}"));
+        actions.push(ViewAction {
+            primary: true,
+            ..act::pull_request(
+                "Open pull request…",
+                Some(repository.clone()),
+                act::proposal(branch, standing.subjects, ahead),
+                vec![act::branch_option(branch)],
+                act::default_first(
+                    default,
+                    standing.branches.iter().map(|b| b.name.as_str()),
+                    Some(branch),
+                ),
+                disabled,
+            )
+        });
+    }
+    actions.push(act::new_branch(
+        Some(repository),
+        vec![act::branch_option(branch)],
+        mirrored.clone(),
+    ));
+    // The default branch can never be deleted, so it offers no delete at all
+    // (the #701 ruling: disabled-with-reason only where the action can still
+    // become possible); a protection can be lifted, so a protected branch
+    // keeps it, disabled, saying how.
+    if let Some(ahead) = standing.ahead {
+        let disabled = mirrored.or_else(|| {
+            standing
+                .protected
+                .then(|| "Protected branch: lift its protection on Gitea to delete it".to_owned())
+        });
+        actions.push(act::delete_branch(branch, default, ahead, disabled));
+    }
+    actions
 }
 
 /// What a branch carries: its facts about the base, the commits its tab
@@ -202,6 +326,9 @@ struct Carried {
     facts: Vec<Fact>,
     commits: Vec<ListedCommit>,
     count: Option<u64>,
+    /// How many commits it carries over the default branch; `None` for that
+    /// branch itself.
+    ahead: Option<u64>,
     files: Option<u64>,
     note: Option<knobas_source::view::ViewRow>,
 }
@@ -225,6 +352,7 @@ async fn read_carried(
             facts: vec![fact("Branch", "default branch".to_owned())],
             commits: latest,
             count: None,
+            ahead: None,
             files: None,
             note: None,
         });
@@ -256,7 +384,8 @@ async fn read_carried(
         fact("Behind", behind.to_string()),
     ];
     let files = ahead.files();
-    let total = usize::try_from(ahead.commit_count()).unwrap_or(usize::MAX);
+    let ahead_by = ahead.commit_count();
+    let total = usize::try_from(ahead_by).unwrap_or(usize::MAX);
     let mut commits = ahead.commits;
     let read = commits.len();
     commits.truncate(rows::COMMIT_CAP);
@@ -276,6 +405,7 @@ async fn read_carried(
         facts,
         commits,
         count: Some(listed as u64),
+        ahead: Some(ahead_by),
         files: Some(files),
         note,
     })

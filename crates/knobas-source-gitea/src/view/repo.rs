@@ -8,6 +8,12 @@
 //!   newest first.
 //! * *Commits* -- the default branch's latest twenty.
 //!
+//! The whole view's toolbar (#707, [`super::act`]): *New branch…* from the
+//! default branch or one picked, and *New pull request…* whose heads are the
+//! branches ahead of the default branch that no open pull request is from --
+//! asked of the [`AHEAD_CHECKS`] most recently committed candidates, side by
+//! side, after the two lists they are drawn from.
+//!
 //! Both lists stop after twenty pages; one that did keeps its count as what
 //! it read and ends on a muted row naming Gitea's page for the rest (#678).
 //!
@@ -16,10 +22,10 @@
 //! a bare 404 and its `/commits` 409, and none of those is a failure.
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, SourceView, Tone, ViewRow, ViewSection};
+use knobas_source::view::{Block, SourceView, Tone, ViewAction, ViewRow, ViewSection};
 
-use super::fact;
-use super::rows::{self, ListedCommit, RepoRecord, TipCommit};
+use super::rows::{self, ListedBranch, ListedCommit, RepoRecord};
+use super::{act, fact};
 use crate::keys;
 use crate::source::GiteaSource;
 
@@ -28,8 +34,13 @@ const PULLS: &str = "pulls";
 const BRANCHES: &str = "branches";
 const COMMITS: &str = "commits";
 
-/// How many pages of fifty branches a view reads at most.
-const BRANCH_PAGES: u32 = 20;
+/// How many branches a *New pull request…* asks whether they are ahead, the
+/// most recently committed first: one request each, on every opening of the
+/// view. Ten, so that with the view's own half-dozen reads one opening stays
+/// inside the client's burst of twenty (§4.1) and the toolbar, which the
+/// whole view waits for, adds one round trip rather than a queue at ten a
+/// second.
+const AHEAD_CHECKS: usize = 10;
 /// The longest README a view carries, in characters. A longer one is cut at
 /// a line and says so.
 const README_CAP: usize = 100_000;
@@ -40,14 +51,6 @@ struct Entry {
     name: String,
     #[serde(rename = "type", default)]
     kind: String,
-}
-
-/// One branch of the listing.
-#[derive(Debug, serde::Deserialize)]
-struct ListedBranch {
-    name: String,
-    #[serde(default)]
-    commit: Option<TipCommit>,
 }
 
 pub(super) async fn draw(
@@ -61,19 +64,39 @@ pub(super) async fn draw(
     let sections = match section {
         // Side by side over the one record (#703): each section is its own
         // reads, and one after another they were most of the wait. The first
-        // to fail fails the view, as it did in turn.
+        // to fail fails the view, as it did in turn. The toolbar is drawn from
+        // the two lists, so it follows them while the rest is read.
         None => {
-            let (overview, pulls, branches, commits) = tokio::try_join!(
+            let (overview, (pulls, branches, actions), commits) = tokio::try_join!(
                 overview(source, &record, owner, repo),
-                pulls(source, &record, owner, repo),
-                branches(source, &record, owner, repo),
+                async {
+                    let (open, listing) = tokio::try_join!(
+                        read_pulls(source, &record, owner, repo),
+                        read_branches(source, &record, owner, repo),
+                    )?;
+                    let actions = toolbar(source, &record, owner, repo, &open, &listing).await?;
+                    Ok((
+                        pulls(source, &record, owner, repo, &open),
+                        branches(source, &record, owner, repo, &listing),
+                        actions,
+                    ))
+                },
                 commits(source, &record, owner, repo),
             )?;
-            vec![overview, pulls, branches, commits]
+            return Ok(SourceView {
+                sections: vec![overview, pulls, branches, commits],
+                actions,
+            });
         }
         Some(OVERVIEW) => vec![overview(source, &record, owner, repo).await?],
-        Some(PULLS) => vec![pulls(source, &record, owner, repo).await?],
-        Some(BRANCHES) => vec![branches(source, &record, owner, repo).await?],
+        Some(PULLS) => {
+            let open = read_pulls(source, &record, owner, repo).await?;
+            vec![pulls(source, &record, owner, repo, &open)]
+        }
+        Some(BRANCHES) => {
+            let listing = read_branches(source, &record, owner, repo).await?;
+            vec![branches(source, &record, owner, repo, &listing)]
+        }
         Some(COMMITS) => vec![commits(source, &record, owner, repo).await?],
         Some(other) => {
             return Err(SourceError::protocol(format!(
@@ -220,17 +243,27 @@ fn size_of(kib: u64) -> String {
     }
 }
 
-async fn pulls(
+/// The open pull requests; none for a repository that cannot have any.
+async fn read_pulls(
     source: &GiteaSource,
     record: &RepoRecord,
     owner: &str,
     repo: &str,
-) -> Result<ViewSection, SourceError> {
-    let open = if record.repo.can_have_pulls() {
-        rows::open_pulls(source, owner, repo).await?
+) -> Result<rows::Paged<rows::OpenPull>, SourceError> {
+    if record.repo.can_have_pulls() {
+        rows::open_pulls(source, owner, repo).await
     } else {
-        rows::Paged::default()
-    };
+        Ok(rows::Paged::default())
+    }
+}
+
+fn pulls(
+    source: &GiteaSource,
+    record: &RepoRecord,
+    owner: &str,
+    repo: &str,
+    open: &rows::Paged<rows::OpenPull>,
+) -> ViewSection {
     let rows: Vec<ViewRow> = open
         .items
         .iter()
@@ -243,51 +276,54 @@ async fn pulls(
         open.cut,
         record.web("/pulls"),
     );
-    Ok(listed(PULLS, "Pull requests", rows, note))
+    listed(PULLS, "Pull requests", rows, note)
 }
 
-async fn branches(
+/// When a branch's tip was committed, where Gitea says.
+fn tip_time(branch: &ListedBranch) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    branch
+        .commit
+        .as_ref()
+        .and_then(|c| c.timestamp.as_deref())
+        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+}
+
+/// The branches, the default branch first, then by last commit, newest
+/// first.
+async fn read_branches(
     source: &GiteaSource,
     record: &RepoRecord,
     owner: &str,
     repo: &str,
-) -> Result<ViewSection, SourceError> {
-    let mut all: Vec<ListedBranch> = Vec::new();
-    let mut cut = true;
-    for page in 1..=BRANCH_PAGES {
-        let batch = source.client.branches(owner, repo, page).await?;
-        if batch.is_empty() {
-            cut = false;
-            break;
-        }
-        for raw in batch {
-            let branch: ListedBranch = serde_json::from_value(raw).map_err(|error| {
-                SourceError::protocol(format!("gitea: an unreadable branch record: {error}"))
-            })?;
-            all.push(branch);
-        }
-    }
+) -> Result<rows::Paged<ListedBranch>, SourceError> {
+    let mut listing = rows::all_branches(source, owner, repo).await?;
     let default = record.default_branch();
-    let when = |b: &ListedBranch| {
-        b.commit
-            .as_ref()
-            .and_then(|c| c.timestamp.as_deref())
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-    };
-    all.sort_by(|a, b| {
+    listing.items.sort_by(|a, b| {
         (b.name == default)
             .cmp(&(a.name == default))
-            .then_with(|| when(b).cmp(&when(a)))
+            .then_with(|| tip_time(b).cmp(&tip_time(a)))
             .then_with(|| a.name.cmp(&b.name))
     });
+    Ok(listing)
+}
+
+fn branches(
+    source: &GiteaSource,
+    record: &RepoRecord,
+    owner: &str,
+    repo: &str,
+    listing: &rows::Paged<ListedBranch>,
+) -> ViewSection {
+    let default = record.default_branch();
     let now = chrono::Utc::now();
-    let rows: Vec<ViewRow> = all
+    let rows: Vec<ViewRow> = listing
+        .items
         .iter()
         .map(|b| {
             let tip = b.commit.as_ref();
             // How long ago its tip was committed, as a commit row says it.
             // Go's zero time is no time, as on a commit row (`map::real_time`).
-            let age = crate::map::real_time(when(b).map(|t| t.with_timezone(&chrono::Utc)))
+            let age = crate::map::real_time(tip_time(b).map(|t| t.with_timezone(&chrono::Utc)))
                 .map(|t| super::ago(t, now));
             let short = tip.map(|c| super::short(&c.id));
             let is_default = b.name == default;
@@ -306,8 +342,104 @@ async fn branches(
             }
         })
         .collect();
-    let note = rows::left_out("branches", rows.len(), None, cut, record.web("/branches"));
-    Ok(listed(BRANCHES, "Branches", rows, note))
+    let note = rows::left_out(
+        "branches",
+        rows.len(),
+        None,
+        listing.cut,
+        record.web("/branches"),
+    );
+    listed(BRANCHES, "Branches", rows, note)
+}
+
+/// The repository's toolbar (#707): *New branch…*, then *New pull
+/// request…* where the repository can have pull requests.
+///
+/// A head is a branch other than the default one, whose tip is not the
+/// default's, from which no pull request is open, and which has a commit the
+/// default branch has not -- asked of the [`AHEAD_CHECKS`] newest such
+/// candidates, side by side.
+async fn toolbar(
+    source: &GiteaSource,
+    record: &RepoRecord,
+    owner: &str,
+    repo: &str,
+    open: &rows::Paged<rows::OpenPull>,
+    listing: &rows::Paged<ListedBranch>,
+) -> Result<Vec<ViewAction>, SourceError> {
+    let default = record.default_branch();
+    let names = || listing.items.iter().map(|b| b.name.as_str());
+    let empty = record
+        .repo
+        .empty
+        .then(|| "The repository is empty".to_owned());
+    let mut actions = vec![act::new_branch(
+        None,
+        act::default_first(default, names(), None),
+        empty
+            .clone()
+            .or_else(|| record.repo.mirror.then(|| act::MIRRORED.to_owned())),
+    )];
+    if !record.repo.can_have_pulls() {
+        return Ok(actions);
+    }
+    let tip = |name: &str| {
+        listing
+            .items
+            .iter()
+            .find(|b| b.name == name)
+            .and_then(|b| b.commit.as_ref())
+            .map(|c| c.id.as_str())
+    };
+    let default_tip = tip(default);
+    let mut candidates: Vec<&str> = names()
+        .filter(|name| *name != default)
+        .filter(|name| tip(name).is_none() || tip(name) != default_tip)
+        .filter(|name| !open.items.iter().any(|p| p.is_from(owner, repo, name)))
+        .collect();
+    let cut = candidates.len() > AHEAD_CHECKS;
+    candidates.truncate(AHEAD_CHECKS);
+    // A branch deleted since the listing answers 404: it is not offered, and
+    // the view still opens.
+    let checks = candidates
+        .iter()
+        .map(|name| async move {
+            match source
+                .client
+                .has_commits_not_in(owner, repo, name, default)
+                .await
+            {
+                Err(error) if error.status() == Some(404) => Ok(false),
+                answer => answer,
+            }
+        })
+        .collect();
+    let answers = rows::all_of(checks).await?;
+    let heads: Vec<_> = candidates
+        .iter()
+        .zip(answers)
+        .filter(|(_, is_ahead)| *is_ahead)
+        .map(|(name, _)| act::branch_option(name))
+        .collect();
+    let disabled = empty.or_else(|| {
+        heads
+            .is_empty()
+            .then(|| format!("No branch is ahead of {default} without a pull request"))
+    });
+    let mut new_pull = act::pull_request(
+        "New pull request…",
+        None,
+        act::Proposal::default(),
+        heads,
+        act::default_first(default, names(), None),
+        disabled,
+    );
+    // Where the asking stopped short, the field says among what it chose.
+    if cut && let Some(head) = new_pull.fields.iter_mut().find(|f| f.name == "head") {
+        head.label = format!("Head, among the {AHEAD_CHECKS} most recent branches");
+    }
+    actions.push(new_pull);
+    Ok(actions)
 }
 
 async fn commits(

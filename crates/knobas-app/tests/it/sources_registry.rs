@@ -174,7 +174,8 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // `merge_pull_request` is the source views' growth (#667), offered
             // from a pull request's view while Gitea says it can be merged;
             // `submit_review` the git workstation's (#705), a review written
-            // from the pull request's toolbar.
+            // from the pull request's toolbar; `delete_branch` the git
+            // workstation's too (#707), on a branch's.
             vec![
                 "create_branch",
                 "create_pull_request",
@@ -182,6 +183,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "approve",
                 "merge_pull_request",
                 "submit_review",
+                "delete_branch",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,

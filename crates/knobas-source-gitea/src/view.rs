@@ -1,7 +1,8 @@
 //! The source views this adapter draws (ADR-0020, issue #661).
 //!
 //! A **commit** opens on its overview (who, when, its parents, its whole
-//! message) and has its diff as a second tab. A **pull request** is
+//! message) and has its diff as a second tab; its toolbar offers *New
+//! branch…* from it ([`act`], #707). A **pull request** is
 //! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
 //! [`repo`]'s (#663).
 //!
@@ -16,6 +17,7 @@ use crate::keys::{self, GiteaKey};
 use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
+mod act;
 mod branch;
 mod pr;
 mod repo;
@@ -79,10 +81,22 @@ async fn commit(
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
     let sections = match section {
-        None => vec![
-            commit_overview(source, owner, repo, sha).await?,
-            commit_diff(source, owner, repo, sha).await?,
-        ],
+        None => {
+            // The whole view's toolbar (#707): a branch from this commit, in
+            // its repository.
+            let new_branch = act::new_branch(
+                Some(act::repo_id(source, owner, repo)),
+                vec![knobas_source::view::ChoiceOption::new(sha, short(sha))],
+                None,
+            );
+            return Ok(SourceView {
+                sections: vec![
+                    commit_overview(source, owner, repo, sha).await?,
+                    commit_diff(source, owner, repo, sha).await?,
+                ],
+                actions: vec![new_branch],
+            });
+        }
         Some(OVERVIEW) => vec![commit_overview(source, owner, repo, sha).await?],
         Some(DIFF) => vec![commit_diff(source, owner, repo, sha).await?],
         Some(other) => {

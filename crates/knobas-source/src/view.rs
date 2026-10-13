@@ -174,6 +174,15 @@ pub struct ViewAction {
     /// never also a field's.
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, String>,
+    /// The entity the write targets where it is not the view's own, as an
+    /// entity id (issue #707): a branch's *New branch…* and *Open pull
+    /// request…* are created in the branch's **repository**, the container
+    /// those ops target. `None` targets the entity the view is of, as every
+    /// action did before. The shell never derives it from the view's id; it
+    /// takes this one as given, as it takes a [`Block::Settings`]' `entity`.
+    /// Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub entity: Option<String>,
 }
 
 impl ViewAction {
@@ -191,6 +200,7 @@ impl ViewAction {
             disabled: None,
             with_settings: false,
             values: std::collections::BTreeMap::new(),
+            entity: None,
         }
     }
 }
@@ -626,7 +636,8 @@ mod tests {
             "danger": false,
             "disabled": "Not mergeable",
             "with_settings": false,
-            "values": {}
+            "values": {},
+            "entity": null
         });
         let action = ViewAction {
             fields: vec![
@@ -704,6 +715,16 @@ mod tests {
             FieldKind::Text {
                 suggestions: vec![]
             }
+        );
+        // A write whose target is not the view's entity names it (#707): a
+        // branch's *New branch…* is created in the branch's repository.
+        assert_eq!(
+            serde_json::to_value(ViewAction {
+                entity: Some("gitea:o/r".into()),
+                ..ViewAction::new("create_branch", "New branch…")
+            })
+            .unwrap()["entity"],
+            "gitea:o/r"
         );
         let view: SourceView =
             serde_json::from_value(serde_json::json!({ "sections": [] })).unwrap();

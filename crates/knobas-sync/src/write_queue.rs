@@ -204,7 +204,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::MergePullRequest { entity, .. }
         | WriteOp::SetParameter { entity, .. }
         | WriteOp::RunBuild { entity, .. }
-        | WriteOp::SubmitReview { entity, .. } => entity,
+        | WriteOp::SubmitReview { entity, .. }
+        | WriteOp::DeleteBranch { entity } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -911,6 +912,13 @@ mod tests {
                     comments: vec![],
                 },
                 "gitea:tidewater/ledger#143",
+            ),
+            (
+                WriteOp::DeleteBranch {
+                    entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
+                        .to_owned(),
+                },
+                "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

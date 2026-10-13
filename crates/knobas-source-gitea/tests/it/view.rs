@@ -236,3 +236,33 @@ async fn a_foreign_id_is_refused() {
     );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// *New branch…* on a commit (#707): created in its repository, from this
+/// commit, its full sha the ref and its short one the label. A section read
+/// carries no toolbar.
+#[tokio::test]
+async fn a_commit_offers_a_new_branch_from_itself() {
+    let server = gitea(200).await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    let ops: Vec<_> = view.actions.iter().map(|a| a.write_op.as_str()).collect();
+    assert_eq!(ops, ["create_branch"]);
+    let new = &view.actions[0];
+    assert_eq!(new.label, "New branch…");
+    assert_eq!(
+        new.entity.as_deref(),
+        Some("gitea:tidewater/payout-service")
+    );
+    let from = new.fields.iter().find(|f| f.name == "from_ref").unwrap();
+    assert_eq!(
+        from.kind,
+        knobas_source::view::FieldKind::Choice {
+            options: vec![knobas_source::view::ChoiceOption::new(SHA, "c90d11a3f5")]
+        }
+    );
+    let one = source(&server)
+        .view(COMMIT, Some("diff"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(one.actions.is_empty());
+}

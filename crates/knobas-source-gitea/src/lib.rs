@@ -172,6 +172,9 @@ pub const WRITE_OP_MERGE_PULL_REQUEST: &str = "merge_pull_request";
 /// See [`WRITE_OP_CREATE_BRANCH`]. A review written from a pull request's
 /// toolbar: *Approve…* and *Request changes…* (issue #705).
 pub const WRITE_OP_SUBMIT_REVIEW: &str = "submit_review";
+/// See [`WRITE_OP_CREATE_BRANCH`]. Offered on a branch's view: absent on the
+/// default branch, disabled on a protected one (issue #707).
+pub const WRITE_OP_DELETE_BRANCH: &str = "delete_branch";
 
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
@@ -203,6 +206,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_APPROVE.to_owned(),
             WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
             WRITE_OP_SUBMIT_REVIEW.to_owned(),
+            WRITE_OP_DELETE_BRANCH.to_owned(),
         ],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
@@ -356,7 +360,8 @@ mod tests {
                 "comment",
                 "approve",
                 "merge_pull_request",
-                "submit_review"
+                "submit_review",
+                "delete_branch"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );
